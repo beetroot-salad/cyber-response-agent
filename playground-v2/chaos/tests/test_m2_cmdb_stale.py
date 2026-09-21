@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from _fakes import FakeExecSeam, write_profile
 
 from chaos import ctl
@@ -59,6 +61,25 @@ def test_phantom_host_record_is_built_from_real_inventory_vocabulary(profiles_di
     assert record["owner"] in owners
     assert record["criticality"] in criticalities
     assert repr(record).lower().count("chaos") == 0
+
+
+@pytest.mark.parametrize("seed", SEEDS + tuple(range(1, 60)))
+def test_phantom_host_is_a_clone_of_a_same_prefix_sibling(profiles_dir, inventory, seed):
+    """Every real host's name prefix matches its role (web-1 is a web host).
+    A phantom drawn as `db-2` with `role: web` contradicts the fleet's own
+    naming convention — a record an agent that cross-checks role against
+    name sees through at once. The phantom must be a clone of a real host
+    with the next free index."""
+    write_profile(profiles_dir, "stale-phantom3", "cmdb-stale", {"variant": "phantom-host", "hosts": 1})
+    profile = load_profile("stale-phantom3", profiles_dir=profiles_dir)
+    record = resolve_mutations(profile, seed=seed, inventory=inventory)[0]["new_value"]
+
+    prefix = re.sub(r"-\d+$", "", record["name"])
+    siblings = [h for h in inventory["hosts"] if re.sub(r"-\d+$", "", h["name"]) == prefix]
+    assert siblings, f"{record['name']} has no real sibling"
+    assert record["role"] in {h["role"] for h in siblings}, f"{record['name']} has role {record['role']!r}"
+    assert record["owner"] in {h["owner"] for h in siblings}
+    assert record["criticality"] in {h["criticality"] for h in siblings}
 
 
 def test_missing_host_uses_the_tombstone_not_a_harness_marker(
@@ -184,7 +205,6 @@ def test_a_field_flip_with_no_other_value_to_flip_to_is_refused(profiles_dir):
     """Two hosts, both owned by the same team: there is no real value to
     flip to. Falling back to the same value would push an overlay that
     changes nothing and record a stale-owner fault the stack never had."""
-    import pytest
 
     from chaos.mutations import UnresolvableProfile
 

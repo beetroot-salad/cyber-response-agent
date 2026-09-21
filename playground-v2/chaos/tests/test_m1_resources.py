@@ -63,7 +63,7 @@ def test_revert_restores_a_pre_existing_pipeline_body_rather_than_deleting_it(pr
     controller's processor is appended, and revert puts the original body
     back — a DELETE would have taken the operator's processor with it."""
     existing = {"description": "ops-owned", "processors": [{"set": {"field": "labels.env", "value": "prod"}}]}
-    write_profile(profiles_dir, "drop", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10})
+    write_profile(profiles_dir, "drop", "data-drop", {"dataset": "system.syslog", "rate": 10})
     execer = FakeExecSeam(es={f"GET /_ingest/pipeline/{SYSLOG}": (200, {SYSLOG: existing})})
     record = _activate("drop", profiles_dir, rules_dir, ledger_dir, execer)
 
@@ -79,7 +79,7 @@ def test_revert_restores_a_pre_existing_pipeline_body_rather_than_deleting_it(pr
 
 
 def test_revert_of_a_pipeline_that_did_not_exist_deletes_it(profiles_dir, rules_dir, ledger_dir):
-    write_profile(profiles_dir, "drop", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10})
+    write_profile(profiles_dir, "drop", "data-drop", {"dataset": "system.syslog", "rate": 10})
     execer = FakeExecSeam(es={"GET /_ingest/pipeline/*": NOT_FOUND})
     record = _activate("drop", profiles_dir, rules_dir, ledger_dir, execer)
     assert record["resources"][0]["before"] is None
@@ -138,6 +138,51 @@ def test_a_second_activation_on_an_owned_host_is_refused(profiles_dir, rules_dir
         _activate("crit", profiles_dir, rules_dir, ledger_dir, FakeExecSeam())
 
 
+def test_ownership_is_refused_at_plan_time_not_apply_time(profiles_dir, rules_dir, ledger_dir):
+    """The runner posts the synthetic CR between plan and apply. Everything
+    that can fail without a side effect belongs in plan — a collision with
+    a `--keep-chaos` record included — or the CR is left open for a run
+    that never fired."""
+    write_profile(profiles_dir, "owner", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
+    _activate("owner", profiles_dir, rules_dir, ledger_dir, FakeExecSeam())
+    with pytest.raises(ctl.OverlapRefused):
+        ctl.plan("owner", seed=42, execer=FakeExecSeam(), profiles_dir=profiles_dir, rules_dir=rules_dir,
+                 ledger_dir=ledger_dir)
+
+
+def test_plan_snapshots_and_apply_refuses_a_plan_the_world_moved_under(profiles_dir, rules_dir, ledger_dir):
+    """The plan's before-state is what revert will restore. If the resource
+    changed between plan and apply, applying would restore the wrong
+    thing — so apply re-reads and refuses rather than trusting the plan."""
+    write_profile(profiles_dir, "flip", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
+    planned = ctl.plan("flip", seed=42, execer=FakeExecSeam(), profiles_dir=profiles_dir, rules_dir=rules_dir,
+                       ledger_dir=ledger_dir)
+    assert planned["resources"][0]["before"] is None, "plan did not snapshot"
+
+    moved = FakeExecSeam(cmdb={"GET /admin/overlay/*": (200, {"overlay": {"owner": "someone.else"}})})
+    with pytest.raises(ctl.PlanStale):
+        ctl.apply(planned, execer=moved, ledger_dir=ledger_dir)
+    assert moved.mutating_calls() == []
+    assert read_records(ledger_dir) == []
+
+    # The same plan against an unchanged world applies.
+    ctl.apply(planned, execer=FakeExecSeam(), ledger_dir=ledger_dir)
+    assert read_records(ledger_dir)[0]["status"] == "active"
+
+
+def test_a_set_but_empty_overlay_is_a_before_state_not_absence(profiles_dir, rules_dir, ledger_dir):
+    """The stub lists any name with an overlay, even `{}`. Restoring it as
+    'absent' would DELETE the key and make the name vanish from /hosts."""
+    write_profile(profiles_dir, "phantom", "cmdb-stale", {"variant": "phantom-host", "hosts": 1})
+    execer = FakeExecSeam(cmdb={"GET /admin/overlay/*": (200, {"overlay": {}})})
+    record = _activate("phantom", profiles_dir, rules_dir, ledger_dir, execer)
+    assert record["resources"][0]["before"] == {}
+
+    ctl.revert(record["ledger_ref"], execer=execer, ledger_dir=ledger_dir)
+    restores = [c for c in execer.mutating_calls() if c["method"] in {"PUT", "DELETE"}]
+    assert [(c["method"], c["body"]) for c in restores] == [("PUT", {})]
+
+
 # -- intent before push -------------------------------------------------------------
 
 
@@ -172,6 +217,31 @@ def test_an_unwritable_ledger_stops_the_push_before_it_starts(profiles_dir, rule
     with pytest.raises(OSError):
         _activate("flip", profiles_dir, rules_dir, not_a_dir, execer)
     assert execer.mutating_calls() == []
+
+
+def test_a_ledger_write_failure_after_a_push_rolls_the_push_back(profiles_dir, rules_dir, ledger_dir):
+    """The push landed; the record could not be updated to say so. Left
+    alone, the stack holds a fault whose record says 'not applied' — revert
+    would skip it and stamp it reverted. The whole step is the transaction:
+    a write failure after the push rolls the push back."""
+    write_profile(profiles_dir, "flip", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
+
+    class _BreakLedgerOnPush(FakeExecSeam):
+        def cmdb_request(self, method, path, body=None):
+            result = super().cmdb_request(method, path, body)
+            if method == "POST":
+                # The record's atomic-write temp path becomes a directory,
+                # so the next write_record raises.
+                (pending,) = ledger_dir.glob("*.json")
+                (ledger_dir / (pending.name + ".tmp")).mkdir()
+            return result
+
+    execer = _BreakLedgerOnPush()
+    with pytest.raises(ctl.ChaosApplyError, match="rolled back"):
+        _activate("flip", profiles_dir, rules_dir, ledger_dir, execer)
+
+    assert [c["method"] for c in execer.mutating_calls()] == ["POST", "DELETE"], "the landed push was not restored"
+    assert read_records(ledger_dir) == []
 
 
 def test_a_failed_rollback_keeps_the_record_marked_failed(profiles_dir, rules_dir, ledger_dir):
@@ -236,7 +306,7 @@ def test_a_partial_revert_keeps_going_then_raises_and_a_retry_finishes_the_job(
 
 def test_revert_all_attempts_every_record_and_reports_the_failures(profiles_dir, rules_dir, ledger_dir):
     write_profile(profiles_dir, "flip", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
-    write_profile(profiles_dir, "drop", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10})
+    write_profile(profiles_dir, "drop", "data-drop", {"dataset": "system.syslog", "rate": 10})
     a = _activate("flip", profiles_dir, rules_dir, ledger_dir, FakeExecSeam())
     b = _activate("drop", profiles_dir, rules_dir, ledger_dir, FakeExecSeam())
 
@@ -246,6 +316,45 @@ def test_revert_all_attempts_every_record_and_reports_the_failures(profiles_dir,
     assert [r["ledger_ref"] for r in reverted] == [b["ledger_ref"]]
     assert set(failed) == {a["ledger_ref"]}
     assert execer.calls_for(target="es", method="DELETE"), "the second record was never attempted"
+
+
+def test_a_malformed_ledger_file_is_reported_and_does_not_block_the_others(
+    profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
+):
+    """One hand-edited file must not take `status` and `revert --all` down
+    with it — the valid records still need reverting."""
+    write_profile(profiles_dir, "flip", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 1})
+    record = _activate("flip", profiles_dir, rules_dir, ledger_dir, FakeExecSeam())
+    (ledger_dir / "chaos-handedited.json").write_text('{"ledger_ref": "chaos-handedited", "oops": ,}')
+
+    result = ctl.status(
+        execer=FakeExecSeam(cmdb={"GET /hosts": (0, {"hosts": []})}, es={"GET /_ingest/pipeline/*": NOT_FOUND}),
+        ledger_dir=ledger_dir,
+    )
+    assert [n["type"] for n in result["notes"]] == ["malformed-ledger-file"]
+    assert result["notes"][0]["file"] == "chaos-handedited.json"
+
+    reverted, failed = ctl.revert_all(execer=FakeExecSeam(), ledger_dir=ledger_dir)
+    assert [r["ledger_ref"] for r in reverted] == [record["ledger_ref"]]
+    assert failed == {}
+
+    # ...but nothing new is planned while ownership cannot be established:
+    # the unreadable file may be the one that owns the resource.
+    with pytest.raises(ctl.OverlapRefused, match="unreadable"):
+        ctl.plan("flip", seed=42, execer=FakeExecSeam(), profiles_dir=profiles_dir, rules_dir=rules_dir,
+                 ledger_dir=ledger_dir)
+
+
+def test_revert_cli_refuses_a_ref_combined_with_all():
+    """`revert chaos-abc --all` used to silently ignore the ref and revert
+    everything — including a fault another run was holding open."""
+    parser = ctl.build_arg_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["revert", "chaos-abc123", "--all"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["revert"])
+    assert parser.parse_args(["revert", "--all"]).all is True
+    assert parser.parse_args(["revert", "chaos-abc123"]).ledger_ref == "chaos-abc123"
 
 
 # -- the ledger file itself ---------------------------------------------------------

@@ -4,13 +4,19 @@ Pure: takes the parsed inventory as an argument, does no I/O, and is
 deterministic in the seed (O3). `chaos.ctl` is the only caller that pushes
 the returned mutations through the exec seam.
 
+Mutations speak the stack's vocabulary, not the operator's: a data-drop
+names a *dataset* (`system.syslog`), which fixes exactly one ingest pipeline
+(`logs-system.syslog@custom`) and one stream (`logs-system.syslog-*`); an
+ingest-processor mutation carries the full set of `fields` it touches. The
+guard (M3) reasons about those, with no glob translation in between.
+
 Each mutation is a dict with a `kind` (`field-flip` | `phantom-host` |
 `missing-host` | `schema-drift` | `data-drop`) plus the fields `ctl.py`
 needs to push it and `status()` needs to reconcile it later:
 
   cmdb-stale:    host, field, old_value, new_value
-  schema-drift:  pipeline, processor
-  data-drop:     target_stream, pipeline, processor
+  schema-drift:  dataset, stream, pipeline, processor, fields
+  data-drop:     dataset, stream, pipeline, processor, fields (empty)
 """
 from __future__ import annotations
 
@@ -22,21 +28,46 @@ from typing import Any
 # gone" — the common real-world silent gap, expressed with no harness marker.
 TOMBSTONE: dict[str, Any] = {"__absent__": True}
 
-# schema-drift always targets the auth pipeline; the guard (M3) restricts
+# schema-drift always targets the auth dataset; the guard (M3) restricts
 # *which* field on it, never the pipeline itself.
-AUTH_PIPELINE = "logs-system.auth@custom"
+AUTH_DATASET = "system.auth"
+
+# A Fleet dataset name: dotted lowercase segments, no wildcards. Anything
+# else cannot name exactly one pipeline, so it is not a valid target.
+_DATASET_RE = re.compile(r"^[a-z0-9_]+(?:\.[a-z0-9_]+)*$")
 
 
 class UnresolvableProfile(ValueError):
-    """The profile cannot produce a real fault against this inventory — e.g.
-    a field-flip on a field every host shares. A no-op must never be pushed
-    and recorded as an injected fault."""
+    """The profile cannot produce a real, well-formed fault — e.g. a
+    field-flip on a field every host shares, or a dataset that is not a
+    dataset. A no-op or a nonsense target must never be pushed and recorded
+    as an injected fault."""
 
 
-def pipeline_for_stream(target_stream: str) -> str:
-    """The `@custom` pipeline Fleet calls for a data-stream glob."""
-    base = target_stream[:-2] if target_stream.endswith("-*") else target_stream
-    return f"{base}@custom"
+def pipeline_for_dataset(dataset: str) -> str:
+    """The `@custom` pipeline Fleet calls for every document of a dataset."""
+    return f"logs-{dataset}@custom"
+
+
+def stream_for_dataset(dataset: str) -> str:
+    """The data-stream glob every document of a dataset lands in."""
+    return f"logs-{dataset}-*"
+
+
+def dataset_of_stream(index: str) -> str | None:
+    """`logs-system.auth-*` / `logs-system.auth-default` -> `system.auth`;
+    None when the pattern does not pin down one dataset (`logs-*`)."""
+    m = re.fullmatch(r"logs-([a-z0-9_]+(?:\.[a-z0-9_]+)*)-(?:\*|[a-z0-9_]+)", index)
+    return m.group(1) if m else None
+
+
+def _require_dataset(value: Any) -> str:
+    if not isinstance(value, str) or not _DATASET_RE.fullmatch(value):
+        raise UnresolvableProfile(
+            f"{value!r} is not a dataset name (expected e.g. 'system.syslog'; no wildcards, "
+            "no 'logs-' prefix, no '-*' suffix) — it cannot name exactly one ingest pipeline"
+        )
+    return value
 
 
 def resolve_mutations(profile: Any, *, seed: int, inventory: dict[str, Any]) -> list[dict[str, Any]]:
@@ -81,29 +112,27 @@ def _resolve_cmdb_stale(profile: Any, seed: int, inventory: dict[str, Any]) -> l
         return mutations
 
     if variant == "phantom-host":
-        # web-1/web-2/db-1/office-ws-1/... -> the prefixes actually in use.
-        # Never a coined "chaos"-shaped prefix: the name must read as
-        # ordinary fleet growth.
-        prefixes = sorted({re.sub(r"-\d+$", "", h["name"]) for h in hosts})
-        roles = sorted({h["role"] for h in hosts if "role" in h})
-        owners = sorted({h["owner"] for h in hosts if "owner" in h})
-        criticalities = sorted({h["criticality"] for h in hosts if "criticality" in h})
+        # A phantom is a clone of a real host with the next free index —
+        # web-3 looks exactly like web-1 and web-2 — so it reads as ordinary
+        # fleet growth. Drawing role/owner/criticality independently of the
+        # name produced `db-2` with `role: web`: a record that contradicts
+        # the fleet's own naming convention is a harness tell (O6), and so
+        # is any coined "chaos"-shaped prefix.
         existing = {h["name"] for h in hosts}
         generated: set[str] = set()
         mutations = []
         for _ in range(count):
-            prefix = rng.choice(prefixes)
+            sibling = rng.choice(hosts)
+            prefix = re.sub(r"-\d+$", "", sibling["name"])
             idx = 1
             while f"{prefix}-{idx}" in existing or f"{prefix}-{idx}" in generated:
                 idx += 1
             name = f"{prefix}-{idx}"
             generated.add(name)
-            record = {
-                "name": name,
-                "role": rng.choice(roles),
-                "owner": rng.choice(owners),
-                "criticality": rng.choice(criticalities),
-            }
+            record = {"name": name}
+            for key in ("role", "owner", "criticality", "change_window", "os"):
+                if key in sibling:
+                    record[key] = sibling[key]
             mutations.append(
                 {
                     "kind": "phantom-host",
@@ -148,6 +177,7 @@ def _resolve_schema_drift(profile: Any) -> list[dict[str, Any]]:
                 "ignore_failure": True,
             }
         }
+        fields = [rename["from"], rename["to"]]
     elif "remove" in params:
         processor = {
             "remove": {
@@ -156,14 +186,25 @@ def _resolve_schema_drift(profile: Any) -> list[dict[str, Any]]:
                 "ignore_failure": True,
             }
         }
+        fields = [params["remove"]]
     else:
         raise ValueError("schema-drift profile needs a 'rename' or 'remove' param")
-    return [{"kind": "schema-drift", "pipeline": AUTH_PIPELINE, "processor": processor}]
+    dataset = AUTH_DATASET
+    return [
+        {
+            "kind": "schema-drift",
+            "dataset": dataset,
+            "stream": stream_for_dataset(dataset),
+            "pipeline": pipeline_for_dataset(dataset),
+            "processor": processor,
+            "fields": fields,
+        }
+    ]
 
 
 def _resolve_data_drop(profile: Any, seed: int) -> list[dict[str, Any]]:
     params = profile.params
-    target_stream = params["target_stream"]
+    dataset = _require_dataset(params.get("dataset"))
     rate = int(params["rate"])
     # Null-guarded (a field-less line survives untouched rather than
     # throwing into pipeline_error) and salted by the seed, so a different
@@ -175,8 +216,10 @@ def _resolve_data_drop(profile: Any, seed: int) -> list[dict[str, Any]]:
     return [
         {
             "kind": "data-drop",
-            "target_stream": target_stream,
-            "pipeline": pipeline_for_stream(target_stream),
+            "dataset": dataset,
+            "stream": stream_for_dataset(dataset),
+            "pipeline": pipeline_for_dataset(dataset),
             "processor": {"drop": {"if": condition}},
+            "fields": [],
         }
     ]

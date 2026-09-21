@@ -120,8 +120,12 @@ class FakeExecSeam:
         return list(out)
 
     def mutating_calls(self) -> list[dict[str, Any]]:
-        """Everything that is not a read — what a refused activation must not do."""
-        return [c for c in self.calls if c["method"] in {"PUT", "POST", "DELETE"}]
+        """Everything that is not a read — what a refused activation must not
+        do. An Elasticsearch `_search` is a POST by convention but reads."""
+        return [
+            c for c in self.calls
+            if c["method"] in {"PUT", "POST", "DELETE"} and not c["path"].endswith("/_search")
+        ]
 
 
 class FakeChaosCtl:

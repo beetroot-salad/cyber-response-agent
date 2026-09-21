@@ -166,13 +166,19 @@ def test_a_partial_multi_host_failure_rolls_back_the_hosts_that_did_land(profile
 
     assert read_records(ledger_dir) == []
     deletes = execer.calls_for(target="cmdb", method="DELETE", path_contains="/admin/overlay/")
-    assert [d["path"] for d in deletes] == [first_host_path], "the first host's mutation was never rolled back"
+    failed_host_path = execer.calls_for(target="cmdb", method="POST", path_contains="/admin/overlay/")[-1]["path"]
+    # Reverse order, and the failed host is restored too: a POST can fail
+    # after partially landing, and restoring an absent before-state is a
+    # harmless DELETE of an overlay that was never set.
+    assert [d["path"] for d in deletes] == [failed_host_path, first_host_path], (
+        "the first host's mutation was never rolled back"
+    )
 
 
 def test_a_second_profile_appends_rather_than_overwrites(profiles_dir, rules_dir, ledger_dir):
     _stale_profile(profiles_dir, "stale-a")
     write_profile(
-        profiles_dir, "drop-b", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10}
+        profiles_dir, "drop-b", "data-drop", {"dataset": "system.syslog", "rate": 10}
     )
     execer = FakeExecSeam()
     first = ctl.activate(

@@ -115,6 +115,24 @@ def test_a_2xx_returns_the_parsed_body():
     assert ctl.DockerExecSeam(run=_run_returning("\n200")).cmdb_request("DELETE", "/admin/overlay/x") == {}
 
 
+def test_a_2xx_with_a_non_json_body_is_an_error_not_an_empty_payload():
+    """Anything that pollutes stdout ahead of the JSON (a shell banner)
+    would otherwise parse as `{"raw": ...}`, which a snapshot reads as
+    'pipeline absent' — and the later revert would DELETE a real one."""
+    seam = ctl.DockerExecSeam(run=_run_returning('Welcome to the box\n{"logs-system.auth@custom": {}}\n200'))
+    with pytest.raises(SeamError, match="non-JSON"):
+        seam.es_request("GET", "/_ingest/pipeline/logs-system.auth@custom")
+
+
+def test_es_request_uses_a_plain_shell_not_a_login_shell():
+    """`docker exec` already carries the container's environment; a login
+    profile buys nothing and can print into the body this parses."""
+    calls: list[list[str]] = []
+    ctl.DockerExecSeam(run=_fake_run(calls)).es_request("GET", "/_ingest/pipeline/*@custom")
+    assert "-lc" not in calls[0] and "-l" not in calls[0], calls[0]
+    assert "-c" in calls[0]
+
+
 def test_es_request_asks_curl_for_the_http_status():
     """The status line is what the whole contract rests on; curl only emits
     it when asked."""

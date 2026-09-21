@@ -285,36 +285,34 @@ def test_cli_run_forwards_chaos_and_keep_chaos_to_run_scenario(runner, tmp_path)
         captured.update(kwargs)
         return "run-id", tmp_path, []
 
-    original_run_scenario = runner.run_scenario
-    original_load_catalog = runner.load_catalog
-    runner.run_scenario = fake_run_scenario
-    runner.load_catalog = lambda: {
-        "demo": {
-            "id": "demo",
-            "category": "auth-metadata",
-            "description": "cli-forwarding fixture\n",
-            "target_host": "canary-1",
-            "source_host": "office-ws-1",
-            "steps": [],
+    def fake_load_catalog():
+        return {
+            "demo": {
+                "id": "demo",
+                "category": "auth-metadata",
+                "description": "cli-forwarding fixture\n",
+                "target_host": "canary-1",
+                "source_host": "office-ws-1",
+                "steps": [],
+            }
         }
-    }
-    try:
-        args = argparse.Namespace(
-            scenario="demo",
-            seed=7,
-            user=None,
-            source=None,
-            target=None,
-            intensity=None,
-            cr_mode="none",
-            dry_run=False,
-            chaos="cmdb-stale-owner",
-            keep_chaos=True,
-        )
-        rc = runner.cmd_run(args)
-    finally:
-        runner.run_scenario = original_run_scenario
-        runner.load_catalog = original_load_catalog
+
+    args = argparse.Namespace(
+        scenario="demo",
+        seed=7,
+        user=None,
+        source=None,
+        target=None,
+        intensity=None,
+        cr_mode="none",
+        dry_run=False,
+        chaos="cmdb-stale-owner",
+        keep_chaos=True,
+    )
+    # Through cmd_run's own injection seams — never by reassigning the
+    # module's attributes, which would leak into every later test if the
+    # restore were ever skipped.
+    rc = runner.cmd_run(args, run_scenario_fn=fake_run_scenario, load_catalog_fn=fake_load_catalog)
 
     assert rc == 0
     assert captured.get("chaos") == "cmdb-stale-owner"
@@ -389,8 +387,21 @@ def test_a_revert_failure_on_a_clean_run_is_the_runs_failure(runner, scenario, t
         )
 
     assert len(chaos_ctl.revert_calls) == 1
-    # The run itself completed — its record exists and is not marked aborted.
-    assert _meta(tmp_path)["aborted"] is False
+    # The run itself completed — its record exists, is not marked aborted,
+    # and says the fault outlived it. A meta.json written before the revert
+    # would claim a clean run while the fault is still live.
+    meta = _meta(tmp_path)
+    assert meta["aborted"] is False
+    assert meta["pre_run"]["chaos"]["reverted"] is False
+    assert "vanished" in meta["pre_run"]["chaos"]["revert_error"]
+
+
+def test_the_run_record_carries_a_successful_revert(runner, scenario, tmp_path):
+    runner.run_scenario(
+        scenario, seed=42, overrides={}, dry_run=False, cr_mode="none", runs_dir=tmp_path,
+        chaos=PROFILE, chaos_ctl=FakeChaosCtl(), post_cr=lambda body: (0, {}), exec_fn=_ok_exec,
+    )
+    assert _meta(tmp_path)["pre_run"]["chaos"]["reverted"] is True
 
 
 def test_dry_run_never_activates_a_real_fault(runner, scenario, tmp_path):

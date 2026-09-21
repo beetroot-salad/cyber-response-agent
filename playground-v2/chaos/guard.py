@@ -8,18 +8,22 @@ Reads the real `detection-rules/*.json` at activate time and builds two sets:
     `source.ip` and several `host.name` values live, nowhere in the query
     text) *and* the parsed query/EQL string (where `process.name`,
     `event.outcome`, `falco.rule` live).
-  * rule-read streams — each rule's `index` array.
+  * rule-read datasets — the dataset behind each rule's `index` pattern
+    (`logs-system.auth-*` -> `system.auth`).
 
-The checks reason about what a mutation would *touch*, not about the literal
-string in the profile:
+Both sides speak the stack's vocabulary, so every check is exact set
+membership:
 
-  * a field target covers itself and every field under it — removing `event`
-    removes `event.outcome`;
-  * a stream target is a glob matched against the rules' index globs in both
-    directions — `logs-*` reaches `logs-system.auth-*`;
-  * a drop processor's resolved pipeline is refused when it is one of the
-    parent `@custom` pipelines every Fleet-managed pipeline calls, since a
-    drop there runs for every stream regardless of the target glob.
+  * a mutation's `fields` (everything its processor reads, writes or
+    removes) may not include a rule-key field or an ancestor of one —
+    removing `event` removes `event.outcome`;
+  * a mutation's `dataset` may not be one a rule reads. A dataset names
+    exactly one pipeline, so there is no glob to widen and no parent
+    pipeline to reach — a profile that tries to name one is refused as
+    malformed before it gets here (chaos.mutations).
+
+A rule whose index pattern does not pin down one dataset (`logs-*`) reads
+every dataset, and every data-drop is refused while it exists.
 
 `check_profile` applies these to a profile's parameters (cheap, before any
 resolution); `check_mutations` applies the same tests to the resolved
@@ -28,13 +32,12 @@ so they cannot disagree.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
 
-from chaos.mutations import pipeline_for_stream
+from chaos.mutations import dataset_of_stream
 
 # Every field name in these rules is written dotted (process.name, source.ip,
 # falco.output_fields.container.name, ...); nothing else in the query/EQL
@@ -42,9 +45,7 @@ from chaos.mutations import pipeline_for_stream
 # enough without a real lucene/EQL/kuery parser.
 _FIELD_RE = re.compile(r"\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b")
 
-# Fleet-managed ingest pipelines call these on every document, whatever the
-# dataset; a processor installed here is not scoped to any stream.
-FLEET_PARENT_PIPELINES = frozenset({"global@custom", "logs@custom"})
+READS_EVERY_DATASET = "*"
 
 
 class GuardRefused(Exception):
@@ -66,64 +67,54 @@ def rule_key_fields(rules_dir: Path) -> set[str]:
     return fields
 
 
-def rule_read_streams(rules_dir: Path) -> set[str]:
-    """Every data stream any rule's `index` reads."""
-    streams: set[str] = set()
+def rule_read_datasets(rules_dir: Path) -> set[str]:
+    """Every dataset any rule's `index` reads; `*` if any pattern is too
+    wide to name one dataset."""
+    datasets: set[str] = set()
     for rule in _load_rules(rules_dir):
         for index in rule.get("index") or []:
-            streams.add(index)
-    return streams
+            datasets.add(dataset_of_stream(index) or READS_EVERY_DATASET)
+    return datasets
 
 
 # -- predicates ---------------------------------------------------------------
 
 
 def field_reaches(target: str, fields: Iterable[str]) -> set[str]:
-    """The rule-key fields a rename/remove of `target` would take with it:
+    """The rule-key fields a processor touching `target` would take with it:
     the field itself and every field nested under it."""
     return {f for f in fields if f == target or f.startswith(target + ".")}
 
 
-def stream_reaches(target: str, streams: Iterable[str]) -> set[str]:
-    """The rule-read stream globs that overlap the target glob, in either
-    direction (`logs-*` covers `logs-system.auth-*`; the exact pattern
-    matches itself)."""
-    return {s for s in streams if fnmatch.fnmatchcase(s, target) or fnmatch.fnmatchcase(target, s)}
-
-
-def pipeline_is_unscoped(pipeline: str) -> bool:
-    """A `@custom` pipeline Fleet invokes for more than one dataset."""
-    return pipeline in FLEET_PARENT_PIPELINES or pipeline.endswith(".integration@custom")
+def dataset_is_rule_read(dataset: str, datasets: Iterable[str]) -> bool:
+    datasets = set(datasets)
+    return dataset in datasets or READS_EVERY_DATASET in datasets
 
 
 # -- checks -------------------------------------------------------------------
 
 
-def _check_field(target: str, rules_dir: Path) -> None:
-    hit = field_reaches(target, rule_key_fields(rules_dir))
-    if hit:
-        raise GuardRefused(
-            f"schema-drift target {target!r} keys a detection rule via {sorted(hit)} (O4) — "
-            "renaming or removing it can silence that rule's alert"
-        )
+def _check_fields(fields: Iterable[str], rules_dir: Path) -> None:
+    key_fields = rule_key_fields(rules_dir)
+    for target in fields:
+        hit = field_reaches(target, key_fields)
+        if hit:
+            raise GuardRefused(
+                f"schema-drift touches {target!r}, which keys a detection rule via {sorted(hit)} (O4) — "
+                "renaming, removing or writing it can silence or pollute that rule's alert"
+            )
 
 
-def _check_stream(target: str, pipeline: str, rules_dir: Path) -> None:
-    if pipeline_is_unscoped(pipeline):
+def _check_dataset(dataset: str, rules_dir: Path) -> None:
+    if dataset_is_rule_read(dataset, rule_read_datasets(rules_dir)):
         raise GuardRefused(
-            f"data-drop target {target!r} resolves to {pipeline!r}, which Fleet runs for every "
-            "dataset (O4) — a drop there is not scoped to the target stream"
-        )
-    hit = stream_reaches(target, rule_read_streams(rules_dir))
-    if hit:
-        raise GuardRefused(
-            f"data-drop target stream {target!r} reaches rule-read stream(s) {sorted(hit)} (O4) — "
+            f"data-drop dataset {dataset!r} is read by a detection rule (O4) — "
             "any drop rate on it can break a sequence rule's evidence chain"
         )
 
 
 def check_profile(profile: Any, *, rules_dir: Path) -> None:
-    """Raise GuardRefused if `profile` would touch a rule-protected field or stream.
+    """Raise GuardRefused if `profile` would touch a rule-protected field or dataset.
 
     Runs on the profile's own parameters, before any resolution or any read
     of the stack. `check_mutations` repeats the same tests on what was
@@ -131,25 +122,23 @@ def check_profile(profile: Any, *, rules_dir: Path) -> None:
     """
     if profile.mode == "schema-drift":
         rename = profile.params.get("rename")
-        target = rename["from"] if rename else profile.params.get("remove")
-        if target:
-            _check_field(target, rules_dir)
+        fields = [rename["from"], rename["to"]] if rename else [profile.params.get("remove")]
+        # The processor lives in the auth dataset's pipeline by design (that
+        # is where the investigation-read fields are); only its fields are
+        # guarded, never the pipeline itself.
+        _check_fields([f for f in fields if f], rules_dir)
     elif profile.mode == "data-drop":
-        target = profile.params.get("target_stream")
-        if target:
-            _check_stream(target, pipeline_for_stream(target), rules_dir)
+        dataset = profile.params.get("dataset")
+        if isinstance(dataset, str):
+            _check_dataset(dataset, rules_dir)
     # cmdb-stale carries no O4 exposure: no detection rule reads CMDB fields.
 
 
 def check_mutations(mutations: list[dict[str, Any]], *, rules_dir: Path) -> None:
     """Raise GuardRefused if any resolved mutation would touch a rule-protected
-    field, stream or pipeline. This is the check that gates the push."""
+    field or dataset. This is the check that gates the push."""
     for m in mutations:
         if m["kind"] == "schema-drift":
-            processor = m["processor"]
-            body = processor.get("rename") or processor.get("remove") or {}
-            _check_field(body["field"], rules_dir)
-            if pipeline_is_unscoped(m["pipeline"]):
-                raise GuardRefused(f"schema-drift pipeline {m['pipeline']!r} is not scoped to one dataset")
+            _check_fields(m["fields"], rules_dir)
         elif m["kind"] == "data-drop":
-            _check_stream(m["target_stream"], m["pipeline"], rules_dir)
+            _check_dataset(m["dataset"], rules_dir)

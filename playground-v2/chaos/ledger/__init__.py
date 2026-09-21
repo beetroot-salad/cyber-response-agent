@@ -19,11 +19,28 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-def read_records(ledger_dir: Path) -> list[dict[str, Any]]:
+def read_ledger(ledger_dir: Path) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Every parseable record, plus {filename: error} for the ones that are
+    not. One hand-edited file must not take `status` and `revert --all`
+    down with it — the valid records still need reverting."""
     ledger_dir = Path(ledger_dir)
     if not ledger_dir.is_dir():
-        return []
-    return [json.loads(p.read_text()) for p in sorted(ledger_dir.glob("*.json"))]
+        return [], {}
+    records: list[dict[str, Any]] = []
+    malformed: dict[str, str] = {}
+    for path in sorted(ledger_dir.glob("*.json")):
+        try:
+            record = json.loads(path.read_text())
+            if not isinstance(record, dict) or "ledger_ref" not in record:
+                raise ValueError("not a ledger record (no ledger_ref)")
+            records.append(record)
+        except (ValueError, OSError) as exc:
+            malformed[path.name] = str(exc)
+    return records, malformed
+
+
+def read_records(ledger_dir: Path) -> list[dict[str, Any]]:
+    return read_ledger(ledger_dir)[0]
 
 
 def find_record(ledger_dir: Path, ledger_ref: str) -> Optional[dict[str, Any]]:

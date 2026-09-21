@@ -98,7 +98,7 @@ def test_schema_drift_remove_carries_the_profiles_field(profiles_dir, rules_dir,
 
 def test_data_drop_condition_is_null_guarded_and_salted(profiles_dir, rules_dir, ledger_dir):
     write_profile(
-        profiles_dir, "drop-syslog", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 30}
+        profiles_dir, "drop-syslog", "data-drop", {"dataset": "system.syslog", "rate": 30}
     )
     execer = FakeExecSeam()
     _activate("drop-syslog", profiles_dir, rules_dir, ledger_dir, execer, seed=7)
@@ -119,7 +119,7 @@ def test_data_drop_condition_is_null_guarded_and_salted(profiles_dir, rules_dir,
 
 def test_data_drop_never_touches_the_auth_pipeline(profiles_dir, rules_dir, ledger_dir):
     write_profile(
-        profiles_dir, "drop-syslog2", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 30}
+        profiles_dir, "drop-syslog2", "data-drop", {"dataset": "system.syslog", "rate": 30}
     )
     execer = FakeExecSeam()
     _activate("drop-syslog2", profiles_dir, rules_dir, ledger_dir, execer)
@@ -130,7 +130,7 @@ def test_data_drop_never_touches_the_auth_pipeline(profiles_dir, rules_dir, ledg
     ("profile_id", "mode", "params"),
     [
         ("drift-rename3", "schema-drift", {"rename": {"from": "user.name", "to": "user.id"}}),
-        ("drop-marker-sweep", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 25}),
+        ("drop-marker-sweep", "data-drop", {"dataset": "system.syslog", "rate": 25}),
     ],
 )
 def test_no_captured_payload_names_the_harness(profiles_dir, rules_dir, ledger_dir, profile_id, mode, params):

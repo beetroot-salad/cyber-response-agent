@@ -94,25 +94,48 @@ def test_status_flags_a_stray_overlay_no_ledger_record_explains(
 def test_status_flags_a_pipeline_that_outlived_its_revert(
     profiles_dir, rules_dir, ledger_dir, inventory, inventory_text
 ):
-    """Ledger says nothing is active; a drop processor is still in cluster state."""
-    stray = {
-        "logs-system.syslog@custom": {
-            "processors": [
-                {"drop": {"if": "ctx.message != null && ((ctx.message + '42').hashCode() & 0x7fffffff) % 100 < 25"}}
-            ]
-        }
-    }
+    """The record says reverted; its drop processor is still in cluster
+    state (the revert's DELETE was acknowledged and then lost, or the
+    ledger was stamped by hand). Attributable, so it is drift."""
+    write_profile(profiles_dir, "drop-syslog", "data-drop", {"dataset": "system.syslog", "rate": 25})
+    execer = FakeExecSeam()
+    record = ctl.activate(
+        "drop-syslog", seed=42, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
+    )
+    ctl.revert(record["ledger_ref"], execer=execer, ledger_dir=ledger_dir)
+    pipeline = record["resources"][0]["name"]
+    still_there = {pipeline: record["resources"][0]["after"]}
     live = FakeExecSeam(
         cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
-        es={"GET /_ingest/pipeline/*": (0, stray)},
+        es={"GET /_ingest/pipeline/*": (0, still_there)},
         files={BAKED_INVENTORY: inventory_text},
     )
 
     result = ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)
 
-    drift = result["drift"]
-    assert drift, "a stray @custom pipeline was not reported"
-    assert "logs-system.syslog@custom" in json.dumps(drift, default=str)
+    assert [d["type"] for d in result["drift"]] == ["pipeline-outlived-revert"]
+    assert result["drift"][0]["pipeline"] == pipeline
+    assert result["drift"][0]["ledger_ref"] == record["ledger_ref"]
+
+
+def test_an_unowned_pipeline_is_a_note_not_drift(profiles_dir, rules_dir, ledger_dir, inventory, inventory_text):
+    """An operator's own `@custom` pipeline, which no record ever touched.
+    The controller has no pipeline baseline to judge it by, so it is
+    reported for a human to look at, and does not fail the status check —
+    otherwise the operator's pipeline would be 'drift' forever, with no
+    record to revert."""
+    ops = {"logs-system.syslog@custom": {"processors": [{"set": {"field": "labels.env", "value": "prod"}}]}}
+    live = FakeExecSeam(
+        cmdb={"GET /hosts": (0, _hosts_payload(inventory))},
+        es={"GET /_ingest/pipeline/*": (0, ops)},
+        files={BAKED_INVENTORY: inventory_text},
+    )
+
+    result = ctl.status(execer=live, profiles_dir=profiles_dir, ledger_dir=ledger_dir)
+
+    assert result["drift"] == []
+    assert [n["type"] for n in result["notes"]] == ["unowned-pipeline"]
+    assert result["notes"][0]["pipeline"] == "logs-system.syslog@custom"
 
 
 def test_status_is_quiet_when_live_state_matches_the_ledger(
@@ -190,7 +213,7 @@ def test_status_flags_a_pipeline_whose_body_no_longer_matches_the_record(
     upgrade, a hand edit) replaced its processors. The record's after-state
     is what the stack must still hold."""
     write_profile(
-        profiles_dir, "drop-syslog", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 25}
+        profiles_dir, "drop-syslog", "data-drop", {"dataset": "system.syslog", "rate": 25}
     )
     record = ctl.activate(
         "drop-syslog", seed=42, execer=FakeExecSeam(), profiles_dir=profiles_dir,

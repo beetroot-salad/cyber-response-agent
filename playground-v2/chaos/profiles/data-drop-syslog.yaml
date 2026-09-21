@@ -6,13 +6,14 @@ description: >
 mode: data-drop
 seed: 42
 params:
-  target_stream: logs-system.syslog-*
+  dataset: system.syslog
   rate: 25
 cover: >
-  Day-one drop targets stay off any rule-read stream (logs-system.auth-*,
-  logs-falco.alerts-*) — dropping even one event on those breaks the two EQL
-  sequence rules at any nonzero rate (O4). Selective auth-stream drops are
-  deferred (see issue #401's non-obligations) until the guard can reason
-  about a rule's evidence window. The drop condition is null-guarded and
-  salted by the seed (O3), so a field-less line never throws into
-  pipeline_error (O6).
+  A dataset names exactly one ingest pipeline (logs-system.syslog@custom)
+  and one stream (logs-system.syslog-*). Day-one drop targets stay off any
+  rule-read dataset (system.auth, falco.alerts) — dropping even one event
+  on those breaks the two EQL sequence rules at any nonzero rate (O4).
+  Selective auth-stream drops are deferred (see issue #401's
+  non-obligations) until the guard can reason about a rule's evidence
+  window. The drop condition is null-guarded and salted by the seed (O3),
+  so a field-less line never throws into pipeline_error (O6).

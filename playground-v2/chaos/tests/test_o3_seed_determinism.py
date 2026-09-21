@@ -116,7 +116,7 @@ def test_data_drop_salt_is_the_seed_and_every_seed_gives_a_distinct_hash(profile
         profiles_dir,
         "drop-syslog",
         "data-drop",
-        {"target_stream": "logs-system.syslog-*", "rate": 25},
+        {"dataset": "system.syslog", "rate": 25},
     )
     profile = load_profile("drop-syslog", profiles_dir=profiles_dir)
 
@@ -146,7 +146,7 @@ def test_the_emitted_condition_really_selects_a_seed_dependent_subset(profiles_d
         profiles_dir,
         "drop-syslog-rate",
         "data-drop",
-        {"target_stream": "logs-system.syslog-*", "rate": 50},
+        {"dataset": "system.syslog", "rate": 50},
     )
     profile = load_profile("drop-syslog-rate", profiles_dir=profiles_dir)
     messages = [

@@ -7,11 +7,14 @@ two sets:
     parsed query/EQL string. Reading only the query string is the design's own
     stated near-miss: `source.ip` is keyed on by v2-bulk-ssh-success and appears
     **nowhere** in any rule's query text.
-  * rule-read streams — from each rule's `index` array.
+  * rule-read datasets — the dataset behind each rule's `index` pattern.
 
-Schema-drift is refused if its target field is in the first set; data-drop is
-refused if its target stream is in the second. Every case below is grounded in
-the committed rules, not in invented field names.
+Both sides speak the stack's vocabulary — a dataset names exactly one
+pipeline, a mutation carries every field its processor touches — so every
+check is exact set membership. There is no glob to translate at check time,
+which is where the previous bypasses lived (a wider stream glob, a bare
+dataset name, a rename's untouched `to` field). Every case below is grounded
+in the committed rules, not in invented field names.
 """
 from __future__ import annotations
 
@@ -20,7 +23,8 @@ import json
 import pytest
 from _fakes import FakeExecSeam, write_profile
 
-from chaos.guard import GuardRefused, check_profile, rule_key_fields, rule_read_streams
+from chaos.guard import GuardRefused, check_mutations, check_profile, rule_key_fields, rule_read_datasets
+from chaos.mutations import UnresolvableProfile, resolve_mutations
 from chaos.profiles import load_profile
 
 # Keyed on only via `threshold.field` — a query-string-only parser misses these.
@@ -48,8 +52,11 @@ def test_rule_key_fields_covers_threshold_array_and_query_text(rules_dir):
         assert field not in fields, f"{field} wrongly treated as a rule-key field"
 
 
-def test_rule_read_streams_is_every_rule_index(rules_dir):
-    assert rule_read_streams(rules_dir) == {"logs-system.auth-*", "logs-falco.alerts-*"}
+def test_rule_read_datasets_is_every_rule_index_dataset(rules_dir):
+    assert rule_read_datasets(rules_dir) == {"system.auth", "falco.alerts"}
+
+
+# -- schema-drift: fields ------------------------------------------------------------
 
 
 @pytest.mark.parametrize("field", THRESHOLD_ONLY_FIELDS + QUERY_ONLY_FIELDS)
@@ -86,22 +93,6 @@ def test_schema_drift_remove_variant_is_guarded_too(profiles_dir, rules_dir):
     check_profile(load_profile("drift-remove-ok", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
-@pytest.mark.parametrize("stream", ["logs-system.auth-*", "logs-falco.alerts-*"])
-def test_data_drop_on_a_rule_read_stream_is_refused(profiles_dir, rules_dir, stream):
-    """Any drop on a rule-read stream breaks the two EQL sequence rules at any
-    nonzero rate — the reason selective auth drops were deferred."""
-    write_profile(profiles_dir, "drop-bad", "data-drop", {"target_stream": stream, "rate": 25})
-    with pytest.raises(GuardRefused):
-        check_profile(load_profile("drop-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
-
-
-def test_data_drop_on_the_day_one_safe_stream_is_accepted(profiles_dir, rules_dir):
-    write_profile(
-        profiles_dir, "drop-ok", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 25}
-    )
-    check_profile(load_profile("drop-ok", profiles_dir=profiles_dir), rules_dir=rules_dir)
-
-
 @pytest.mark.parametrize(
     "params",
     [
@@ -129,76 +120,112 @@ def test_schema_drift_on_a_sibling_with_a_shared_prefix_is_not_refused(profiles_
     check_profile(load_profile("drift-sibling", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
-@pytest.mark.parametrize("stream", ["logs-*", "logs-system.*", "*", "logs-system.auth-default"])
-def test_data_drop_on_a_glob_that_reaches_a_rule_read_stream_is_refused(profiles_dir, rules_dir, stream):
-    """The rules read `logs-system.auth-*`; a wider target glob reaches the
-    same documents, and a concrete stream name under the rule's glob is the
-    same stream. A literal string compare accepted every one of these."""
-    write_profile(profiles_dir, "drop-wide", "data-drop", {"target_stream": stream, "rate": 25})
+@pytest.mark.parametrize("to", ["event.outcome", "source.ip", "event", "process"])
+def test_schema_drift_renaming_onto_a_rule_key_field_is_refused(profiles_dir, rules_dir, to):
+    """A rename touches two fields. Renaming an innocent field *onto* a
+    rule-key field (or an ancestor of one) writes foreign values into what
+    the rule keys on — polluting evidence rather than silencing it, which
+    is still the rule being degraded."""
+    write_profile(profiles_dir, "drift-onto", "schema-drift", {"rename": {"from": "user.name", "to": to}})
     with pytest.raises(GuardRefused):
-        check_profile(load_profile("drop-wide", profiles_dir=profiles_dir), rules_dir=rules_dir)
+        check_profile(load_profile("drift-onto", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
-def test_data_drop_that_resolves_to_a_fleet_parent_pipeline_is_refused(tmp_path, profiles_dir):
-    """Even with no rule reading any stream, `logs-*` resolves to the
-    `logs@custom` pipeline, which every Fleet-managed integration pipeline
-    calls — a drop there is not scoped to any stream at all."""
-    empty_rules = tmp_path / "rules"
-    empty_rules.mkdir()
-    write_profile(profiles_dir, "drop-parent", "data-drop", {"target_stream": "logs-*", "rate": 5})
-    with pytest.raises(GuardRefused, match="logs@custom"):
-        check_profile(load_profile("drop-parent", profiles_dir=profiles_dir), rules_dir=empty_rules)
+# -- data-drop: datasets --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dataset", ["system.auth", "falco.alerts"])
+def test_data_drop_on_a_rule_read_dataset_is_refused(profiles_dir, rules_dir, dataset):
+    """Any drop on a rule-read dataset breaks the two EQL sequence rules at
+    any nonzero rate — the reason selective auth drops were deferred."""
+    write_profile(profiles_dir, "drop-bad", "data-drop", {"dataset": dataset, "rate": 25})
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
+def test_data_drop_on_the_day_one_safe_dataset_is_accepted(profiles_dir, rules_dir):
+    write_profile(profiles_dir, "drop-ok", "data-drop", {"dataset": "system.syslog", "rate": 25})
+    check_profile(load_profile("drop-ok", profiles_dir=profiles_dir), rules_dir=rules_dir)
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    ["logs-*", "logs-system.*", "*", "system.*", "logs-system.auth-*", "logs-system.auth", "system.auth-default", ""],
+)
+def test_a_data_drop_target_that_is_not_a_dataset_is_refused_as_malformed(profiles_dir, dataset, inventory):
+    """Every previous bypass was a spelling: a wider glob, a bare stream
+    name, a parent pipeline. None of these names exactly one ingest
+    pipeline, so none is a valid target — refused before the guard, with
+    nothing to translate."""
+    write_profile(profiles_dir, "drop-spelling", "data-drop", {"dataset": dataset, "rate": 25})
+    profile = load_profile("drop-spelling", profiles_dir=profiles_dir)
+    with pytest.raises(UnresolvableProfile):
+        resolve_mutations(profile, seed=42, inventory=inventory)
+
+
+def test_a_rule_reading_a_wide_index_pattern_refuses_every_data_drop(tmp_path, profiles_dir):
+    """A rule over `logs-*` reads every dataset; while it exists no drop is
+    safe, whatever dataset the profile names."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "wide.json").write_text(json.dumps({"rule_id": "wide", "query": "", "index": ["logs-*"]}))
+    write_profile(profiles_dir, "drop-any", "data-drop", {"dataset": "system.syslog", "rate": 5})
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-any", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
 
 def test_check_mutations_gates_on_what_was_actually_resolved(rules_dir):
     """The push is gated on the resolved mutations, not on the profile text:
-    a mutation whose processor targets a rule-key ancestor is refused even
-    if some future resolver produced it from an innocent-looking profile."""
-    from chaos.guard import check_mutations
-
+    a mutation whose processor touches a rule-key ancestor, or whose
+    dataset a rule reads, is refused even if some future resolver produced
+    it from an innocent-looking profile."""
     with pytest.raises(GuardRefused):
         check_mutations(
             [
                 {
                     "kind": "schema-drift",
+                    "dataset": "system.auth",
                     "pipeline": "logs-system.auth@custom",
                     "processor": {"remove": {"field": "event", "ignore_missing": True, "ignore_failure": True}},
+                    "fields": ["event"],
                 }
             ],
             rules_dir=rules_dir,
         )
     with pytest.raises(GuardRefused):
         check_mutations(
-            [{"kind": "data-drop", "target_stream": "logs-*", "pipeline": "logs@custom", "processor": {}}],
+            [{"kind": "data-drop", "dataset": "system.auth", "pipeline": "logs-system.auth@custom",
+              "processor": {}, "fields": []}],
             rules_dir=rules_dir,
         )
     check_mutations(
         [
             {
                 "kind": "data-drop",
-                "target_stream": "logs-system.syslog-*",
+                "dataset": "system.syslog",
                 "pipeline": "logs-system.syslog@custom",
                 "processor": {"drop": {"if": "true"}},
+                "fields": [],
             }
         ],
         rules_dir=rules_dir,
     )
 
 
-def test_rule_key_fields_and_streams_are_empty_for_an_empty_rules_dir(tmp_path):
+def test_rule_key_fields_and_datasets_are_empty_for_an_empty_rules_dir(tmp_path):
     """The guard must actually read `rules_dir`, not answer from a fixed
     table hand-transcribed from today's committed rules — a hardcoded set
     would return the same fields regardless of what's on disk."""
     empty = tmp_path / "no-rules"
     empty.mkdir()
     assert rule_key_fields(empty) == set()
-    assert rule_read_streams(empty) == set()
+    assert rule_read_datasets(empty) == set()
 
 
 def test_guard_reacts_to_a_rule_not_in_the_committed_set(tmp_path, profiles_dir):
     """A synthetic rule the committed detection-rules/ doesn't have, keying on
-    a field this suite otherwise treats as safe (user.name) over a stream
-    this suite otherwise treats as safe (logs-system.syslog-*). If the guard
+    a field this suite otherwise treats as safe (user.name) over a dataset
+    this suite otherwise treats as safe (system.syslog). If the guard
     answers from the real committed rules alone rather than `rules_dir`, both
     profiles below wrongly activate."""
     rules_dir = tmp_path / "rules"
@@ -220,9 +247,7 @@ def test_guard_reacts_to_a_rule_not_in_the_committed_set(tmp_path, profiles_dir)
     with pytest.raises(GuardRefused):
         check_profile(load_profile("drift-newly-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
 
-    write_profile(
-        profiles_dir, "drop-newly-bad", "data-drop", {"target_stream": "logs-system.syslog-*", "rate": 10}
-    )
+    write_profile(profiles_dir, "drop-newly-bad", "data-drop", {"dataset": "system.syslog", "rate": 10})
     with pytest.raises(GuardRefused):
         check_profile(load_profile("drop-newly-bad", profiles_dir=profiles_dir), rules_dir=rules_dir)
 

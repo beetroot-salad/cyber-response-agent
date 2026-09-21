@@ -290,6 +290,7 @@ def run_scenario(
     step_log: list[dict] = []
     started_at = now_iso()
     run_failed = False
+    aborted = False
 
     try:
         for step_index, step in enumerate(scenario["steps"]):
@@ -331,39 +332,46 @@ def run_scenario(
                     }
                 )
                 if rc != 0 and not allow_fail and not dry_run:
-                    finished_at = now_iso()
-                    _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=True)
+                    aborted = True
                     raise SystemExit(
                         f"step {step_index}.{iteration} failed rc={rc} (allow_fail=false); "
                         f"aborted; meta → {run_dir / 'meta.json'}"
                     )
                 if delay_s_between and iteration + 1 < repeats and not dry_run:
                     time.sleep(delay_s_between)
-
-        finished_at = now_iso()
-        _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=False)
     except BaseException:
         run_failed = True
         raise
     finally:
         # The fault never outlives the run — normal exit, abort, or any
-        # exception — unless the operator explicitly asked to keep it. When
-        # a real failure (a step abort, a Ctrl-C) is already propagating, a
-        # revert failure is reported rather than raised, so the original
-        # reason the run stopped survives. On a clean run there is nothing
-        # to mask: a fault left live on the stack *is* the failure, and the
-        # run exits non-zero for it.
+        # exception — unless the operator explicitly asked to keep it. The
+        # run's record is written *after* the revert so it carries the
+        # outcome: a meta.json that says "clean" while the fault is still
+        # live would be the wrong ground truth for the scorer.
+        revert_exc: Exception | None = None
         if active_chaos is not None and not keep_chaos:
             try:
                 ctl_mod.revert(active_chaos["ledger_ref"])
-            except Exception as revert_exc:
-                if not run_failed:
-                    raise
-                print(
-                    f"WARNING: chaos revert failed for {active_chaos['ledger_ref']} "
-                    f"(profile={chaos}): {revert_exc}",
-                    file=sys.stderr,
-                )
+                pre_run["chaos"]["reverted"] = True
+            except Exception as exc:
+                revert_exc = exc
+                pre_run["chaos"]["reverted"] = False
+                pre_run["chaos"]["revert_error"] = str(exc)
+        finished_at = now_iso()
+        _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=aborted)
+        if revert_exc is not None:
+            # When a real failure (a step abort, a Ctrl-C) is already
+            # propagating, the revert failure is reported rather than raised,
+            # so the original reason the run stopped survives. On a clean
+            # run there is nothing to mask: a fault left live on the stack
+            # *is* the failure, and the run exits non-zero for it.
+            if not run_failed:
+                raise revert_exc
+            print(
+                f"WARNING: chaos revert failed for {active_chaos['ledger_ref']} "
+                f"(profile={chaos}): {revert_exc}",
+                file=sys.stderr,
+            )
 
     return run_id, run_dir, step_log
 
@@ -413,8 +421,16 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    catalog = load_catalog()
+def cmd_run(
+    args: argparse.Namespace,
+    *,
+    run_scenario_fn: Any = run_scenario,
+    load_catalog_fn: Any = load_catalog,
+) -> int:
+    # Injection seams, same shape as run_scenario's `post_cr=`/`exec_fn=`:
+    # fakes enter through the entry point's parameters, never by
+    # reassigning module attributes.
+    catalog = load_catalog_fn()
     if args.scenario not in catalog:
         print(f"unknown scenario: {args.scenario}", file=sys.stderr)
         print(f"available: {', '.join(sorted(catalog))}", file=sys.stderr)
@@ -427,7 +443,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "intensity": args.intensity,
     }
     print(f"running {scenario['id']} (seed={args.seed}, cr_mode={args.cr_mode}, chaos={args.chaos}) ...")
-    run_id, run_dir, step_log = run_scenario(
+    run_id, run_dir, step_log = run_scenario_fn(
         scenario, args.seed, overrides, args.dry_run, args.cr_mode,
         chaos=args.chaos, keep_chaos=args.keep_chaos,
     )
