@@ -19,8 +19,8 @@ WORKDIR /defender
 # UV_PROJECT_ENVIRONMENT points the sync at the SYSTEM site-packages (bare `python3` on the
 # box's fixed PATH is what every granted shim and the entrypoint runs — see `_docker._BOX_PATH`
 # — there is no venv to activate inside the box). `--inexact`: a plain sync PRUNES the base
-# image's own site-packages (it removed `packaging`, which the sync then has to re-add by
-# name below) — inexact keeps what the base already carries. `--frozen`: never rewrites
+# image's own site-packages (it removed `packaging`) — `--inexact` keeps what the base
+# already carries instead. `--frozen`: never rewrites
 # `uv.lock`, a build over a divergent lockfile fails loudly instead of silently relocking.
 # `--no-dev`: the box needs the `box` extra, never the dev toolchain. `UV_COMPILE_BYTECODE=1`:
 # compiles `.pyc`s at build time — the box's mount is read-only, so nothing could compile them

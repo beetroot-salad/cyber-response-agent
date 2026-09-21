@@ -54,10 +54,13 @@ only have made the narrow claim look like the wide one.
 `dirty is False` IS ONLY A CLAIM ABOUT TRACKED AND UNTRACKED PATHS, never about IGNORED ones —
 `git status` does not report them at any `--untracked-files` setting, and that is the one place
 this record genuinely under-reports. It matters here rather than in the abstract: `defender/`
-is bind-mounted into the box whole and `.venv/` is gitignored, so the interpreter and every
-installed dependency the box runs against are outside what a clean bit can speak for. Read
-`dirty is False` as "no TRACKED source moved", and pin the dependency set with the lockfile,
-which is tracked and therefore is covered.
+is bind-mounted into the box whole, and the box's own interpreter and installed dependencies
+come from the owned image (#1092) — built once, outside any single run, from `uv.lock` and
+`pyproject.toml` — so a clean bit at run time says nothing about when that image was built.
+Read `dirty is False` as "no TRACKED source moved", and pin the dependency set with the
+lockfile, which is tracked and therefore is covered — and which the image's own name is a
+hash over (`runtime/box/_image.py::image_tag`), so a stale image is a wrong-named one, not
+a silently-stale one.
 
 THE RUN DIR IS THE BOX'S RW BIND, so a model can overwrite this file the same way it can
 overwrite any run-dir artifact. The stamp is written by the host BEFORE the box is created and

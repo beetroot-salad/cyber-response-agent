@@ -17,8 +17,9 @@ def reexec_into_venv(script: str) -> None:
     importing this helper is itself such an import.
 
     M6/O5 (#1092): inside a box the image's own `python3` already carries what this script
-    needs — the mounted `.venv` is never on the box's resolution path, so re-execing into it
-    would defeat the boundary. `DEFENDER_BOX` (set only inside a box) skips the re-exec.
+    needs, so re-execing into the mounted `.venv` would undercut the boundary for a
+    gate-admitted call. `DEFENDER_BOX` (set only inside a box) skips the re-exec — see
+    `bin/README.md`'s Conventions section for what that guarantee does and does not cover.
     """
     if os.environ.get("DEFENDER_BOX"):
         return

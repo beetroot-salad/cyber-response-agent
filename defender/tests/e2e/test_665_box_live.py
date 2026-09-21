@@ -180,14 +180,14 @@ def test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec(tmp_path):
      "python3 -c 'import defender.runtime.bash_exec'",
      "the granted interpreter/repertoire did not run clean at startup", None, None),
 
-    # the .venv python3 must resolve to the IMAGE interpreter (c12: .venv python3 resolves to
-    # image /usr/local/bin python3, minor matched)
+    # superseded by #1092: there is no `.venv` inside the box to resolve — `python3` IS the
+    # owned image's own /usr/local interpreter (c12: minor matched)
     ("venv-interpreter-matches-the-image",
      "python3 --version", "the interpreter probe exec failed",
      b"3.11", "the box interpreter did not match the image minor"),
 
-    # the probe also catches a broken NATIVE dependency inside the venv — a non-clean exit of a
-    # granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
+    # the probe also catches a broken NATIVE dependency inside the owned image — a non-clean
+    # exit of a granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
     ("native-dependency-inside-the-venv-imports",
      "python3 -c 'import duckdb'",
      "a native dependency the granted repertoire needs did not import", None, None),
