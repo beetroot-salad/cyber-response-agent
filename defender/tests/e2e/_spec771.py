@@ -328,7 +328,9 @@ print(json.dumps(out))
 """
 
 
-def run_probe_under_profile(script: str, profile: Path | None) -> dict[str, str]:
+def run_probe_under_profile(
+    script: str, profile: Path | None, *, run: Callable[..., Any] = subprocess.run,
+) -> dict[str, str]:
     """Run `script` in the box rootfs and return its verdict map, under `profile` or — when
     `profile` is None — under whatever the daemon applies by ITSELF.
 
@@ -340,18 +342,31 @@ def run_probe_under_profile(script: str, profile: Path | None) -> dict[str, str]
     under the vendored copy, which no digest check can see.
 
     The script arrives on STDIN rather than through a bind mount so the comparison also runs
-    under docker-outside-of-Docker, where a host path need not exist on the daemon's side."""
+    under docker-outside-of-Docker, where a host path need not exist on the daemon's side.
+
+    #1092: this is the FOURTH `docker run <rootfs>` site — it takes the same resolver
+    (`image_tag(DEFENDER)`, the running package's own tree) and the same `--pull=never` the
+    two argv builders carry (JF5); a missing image's failure names the same build remedy,
+    against DEFENDER's own tree. `run=` is an injectable seam, keyword-only, defaulting to
+    `subprocess.run`, so a test can observe the argv without a daemon.
+    """
+    rootfs = box_mod.image_tag(DEFENDER)
     argv = ["docker", "run", "--rm", "-i"]
     if profile is not None:
         argv += ["--security-opt", f"seccomp={profile}"]
-    argv += [box_mod.BoxSpec.from_env(os.environ).rootfs, "python3", "-"]
-    probe = subprocess.run(
+    argv += ["--pull=never", rootfs, "python3", "-"]
+    probe = run(
         argv, input=script, capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
-    assert probe.returncode == 0, (
-        f"the probe container failed under "
-        f"{'the daemon default' if profile is None else profile}: {probe.stderr.strip()}"
-    )
+    if probe.returncode != 0:
+        remedy = box_mod.missing_image_remedy(probe.stderr or "", rootfs, DEFENDER.parent)
+        detail = (probe.stderr or "").strip()
+        if remedy is not None:
+            detail = f"{detail} — {remedy}"
+        raise AssertionError(
+            f"the probe container failed under "
+            f"{'the daemon default' if profile is None else profile}: {detail}"
+        )
     return json.loads(probe.stdout)
 
 #: The six shapes `alias_profile.domain.distinguished` names. Each must be individually

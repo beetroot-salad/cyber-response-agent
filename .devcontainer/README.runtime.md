@@ -7,7 +7,7 @@ Two images, on purpose:
 | Role | the "coding machine" — editing, this session, infra tooling | where an investigation actually executes (`defender/run.py`) |
 | Carries | terraform, hcloud, codex, docker CLI, ssh, uv, node | **only** python 3.11 + the defender `.[runtime]` deps + defender code |
 | Privilege | none special | gets the privilege runsc needs later (the dev container never does) |
-| Maps to the sandbox design | the trusted orchestration/dev host | the untrusted **"hands"** whose rootfs should stay minimal |
+| Maps to the sandbox design | the trusted orchestration/dev host | (superseded — see "The box image" below) |
 
 The dev container now mounts the host Docker socket (Docker-outside-of-Docker), so
 it can build and run the runtime image as a **sibling** container on the host —
@@ -29,6 +29,24 @@ docker run --rm defender-runtime defender/.venv/bin/python -m pytest defender -m
 # live investigation — needs the LLM key
 docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json>
 ```
+
+## The box image (the sandbox itself)
+
+The untrusted **"hands"** — the per-run sandbox `start_box` creates (#1092) — is a THIRD
+image, `defender/box.Dockerfile`, distinct from both of the above: it is what `defender-sql`
+and the other granted shims actually run inside, and it is what the "hands" row used to
+describe. Its name is derived from the tree (`defender/runtime/box/_image.py::image_tag`), so
+there is nothing to tag by hand — only to build:
+
+```bash
+# build (from the dev container, over the socket onto the HOST daemon — the daemon a box
+# actually starts on — with no pull: the image is built locally, never fetched)
+python3 defender/scripts/box_image.py build
+```
+
+Build it once; it persists on the host daemon until `box.Dockerfile`, `uv.lock` or
+`pyproject.toml` changes. The next `start_box` after such a change faults with a
+missing-image error naming this same command — `start_box` itself never builds.
 
 ## Two caveats
 

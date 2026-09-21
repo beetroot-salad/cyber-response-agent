@@ -5,6 +5,13 @@
 # NON_ADAPTER_SHIMS). The script resolves the lessons dir from its own path, so
 # cwd does not matter.
 DEFENDER="${DEFENDER_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-PY="${DEFENDER}/.venv/bin/python3"
-[ -x "$PY" ] || PY=python3
+# M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs (the
+# mounted `.venv` is never on the box's resolution path) — nothing in the box may fall back to
+# the host venv, so DEFENDER_BOX (set only inside a box) skips the venv lookup entirely.
+if [ -n "${DEFENDER_BOX:-}" ]; then
+    PY=python3
+else
+    PY="${DEFENDER}/.venv/bin/python3"
+    [ -x "$PY" ] || PY=python3
+fi
 exec "$PY" "${DEFENDER}/scripts/lessons/lessons_fm.py" "$@"

@@ -332,7 +332,7 @@ def fake_docker_on_path(tmp_path: Path, *, rc: int = 0) -> tuple[dict[str, str],
     """A real `docker` executable first on PATH that appends its argv (NUL-separated) to a log
     and exits `rc` — the seam a stdlib script that spawns `docker` has. Returns (env, log)."""
     bin_dir = tmp_path / "fakebin"
-    bin_dir.mkdir(exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "docker-argv.log"
     exe = bin_dir / "docker"
     exe.write_text(

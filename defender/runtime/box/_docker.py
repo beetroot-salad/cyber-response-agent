@@ -11,6 +11,8 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+import shlex
+
 from defender._io import read_text_soft
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime.box_codec import (
@@ -25,10 +27,52 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     verdict_path,
     write_did_not_run,
 )
-from ._spec import BOX_ENV_ALLOWLIST
+from ._image import ImageInputError, image_tag
+from ._spec import BOX_ENV_ALLOWLIST, _BOX_MARK_ENV
 
 
 _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
+
+#: M5 amended — the tail of the remedy command every missing-image fault names, relative to
+#: the tree it is run from.
+_BUILD_SCRIPT_TAIL = "defender/scripts/box_image.py"
+
+#: JF5 — the daemon's own one-line shape for a create that named an image it does not hold,
+#: under `--pull=never` (N1, rg4). The CLI's pull-path phrasing no longer occurs on the create
+#: path at all, so it is not matched here.
+_NO_SUCH_IMAGE_RE = re.compile(r"No such image: (\S+)")
+
+
+def resolve_rootfs(rootfs: str | None, tree: Path) -> str:
+    """M3 revised: an explicit `rootfs` is honoured verbatim and reads nothing; unset resolves
+    to `image_tag(tree)`. Raises `BoxFault` (naming the tree and the first unreadable input)
+    rather than the bare `ImageInputError` — this is the ONE seam every `docker run` site
+    funnels the resolver's fault through."""
+    if rootfs is not None:
+        return rootfs
+    try:
+        return image_tag(tree)
+    except ImageInputError as e:
+        raise BoxFault(str(e)) from e
+
+
+def missing_image_remedy(stderr: str, resolved_image: str, tree: Path) -> str | None:
+    """O4/JF5 — the remedy a `No such image:` create fault names, or `None` when the fault is
+    any other shape, or names some OTHER image than the one THIS start resolved (silent #35:
+    the classifier compares against the name the builder itself computed)."""
+    m = _NO_SUCH_IMAGE_RE.search(stderr or "")
+    if not m or m.group(1) != resolved_image:
+        return None
+    quoted_tree = shlex.quote(str(Path(tree).resolve()))
+    return f"build it first: `python3 {quoted_tree}/{_BUILD_SCRIPT_TAIL} build`"
+
+
+def create_fault_message(name: str, stderr: str, resolved_image: str, tree: Path) -> str:
+    """The ONE composition every create-fault site uses: the daemon's own text, plus the
+    missing-image remedy when (and only when) the fault is that shape."""
+    base = f"could not create the box {name}: {(stderr or '').strip()}"
+    remedy = missing_image_remedy(stderr, resolved_image, tree)
+    return base if remedy is None else f"{base} — {remedy}"
 # The full container id as docker writes it into every container's own mount table.
 _CONTAINER_ID_RE = re.compile(r"/containers/([0-9a-f]{64})")
 _HOSTNAME_PATH = Path("/etc/hostname")
@@ -77,10 +121,12 @@ def _render_env(request_env: Mapping[str, str], workdir: Path) -> dict[str, str]
     (DEFENDER_DIR/PATH/PYTHONPATH, derived off the request's workdir) the derived value wins;
     any other allowlisted key the caller supplies passes through unexamined (value-blind).
     `LANG`/`TZ` keep the two-arg tier's encoding/clock contract, supplied as DEFAULTS so a
-    caller that names them still wins."""
+    caller that names them still wins. `DEFENDER_BOX` (M6/JF3) is spread LAST, unconditionally
+    — no request env can switch the in-box mark back off."""
     merged = dict(_LOCALE_ENV)
     merged.update({k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST})
     merged.update(_derived_infra_env(workdir))
+    merged.update(_BOX_MARK_ENV)
     return merged
 
 

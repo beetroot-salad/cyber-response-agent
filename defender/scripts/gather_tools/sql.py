@@ -172,11 +172,20 @@ def _run(sql: str) -> int:
     try:
         import duckdb
     except ImportError:
-        print(
-            "defender-sql: duckdb is not installed "
-            "(cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').",
-            file=sys.stderr,
-        )
+        if os.environ.get("DEFENDER_BOX"):
+            # M6/O5/O1 (#1092): inside a box `duckdb` comes from the OWNED image, never a
+            # `pip install` into the read-only mount — the remedy is rebuilding the image.
+            print(
+                "defender-sql: duckdb is not installed in this box image "
+                "(run `python3 defender/scripts/box_image.py build` to rebuild it).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "defender-sql: duckdb is not installed "
+                "(cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').",
+                file=sys.stderr,
+            )
         return EXIT_NO_RUNTIME
 
     raw = sys.stdin.buffer.read()

@@ -40,6 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # #1092: the owned box image every real-box test in this job now requires (O3 — a
+      # missing image faults, never skips). Runners are cold every run, so this pays a full
+      # build each time; bounded separately from the gVisor step below, which it precedes.
+      - name: Build the box image
+        timeout-minutes: 4
+        run: python3 defender/scripts/box_image.py build
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
@@ -50,10 +57,13 @@ jobs:
       # dependencies into defender/.venv without trying to build defender itself
       # as an installable package. The runtime extra (pydantic-ai) is synced so
       # the runtime/ package import-checks during collection and the hermetic
-      # e2e replay suite can run.
+      # e2e replay suite can run. `--locked` (#1092 M4 amended): a plain sync silently
+      # RELOCKS a `pyproject.toml` edited without a matching `uv.lock` update, which —
+      # under the box image's content-addressed name — would surface as a missing image
+      # with a misleading remedy instead of a sync-step failure.
       - name: Sync defender venv
         working-directory: defender
-        run: uv sync --extra dev --extra runtime
+        run: uv sync --extra dev --extra runtime --locked
 
       # The #540 boundary suite drives a REAL container: the mounts and --network=none are the
       # boundary, so a fake cannot pin them. gVisor is the default runtime behind the knob, and
@@ -129,9 +139,6 @@ jobs:
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
-      - name: Pre-pull the box rootfs
-        run: docker pull python:3.11-slim
-
       - name: Run unit tests
         working-directory: defender
         # ONE collection root. This used to read `tests/ learning/`, because test
@@ -202,6 +209,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # #1092: same reason as the `test` job — every real-box test in this job now requires
+      # the owned image (O3).
+      - name: Build the box image
+        timeout-minutes: 4
+        run: python3 defender/scripts/box_image.py build
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
@@ -210,7 +223,7 @@ jobs:
 
       - name: Sync defender venv
         working-directory: defender
-        run: uv sync --extra dev --extra runtime
+        run: uv sync --extra dev --extra runtime --locked
 
       # Byte-identical to the `test` job's install, and deliberately so: the boxes here are
       # the same boxes, and #771's alias ban faults every box on arrival unless the daemon
@@ -285,9 +298,6 @@ jobs:
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
-      - name: Pre-pull the box rootfs
-        run: docker pull python:3.11-slim
-
       - name: "Run the #540 boundary suite natively"
         working-directory: defender
         # Same enforcing posture as every other pytest step over tests/ (#631 D11) — and
@@ -311,6 +321,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+
+      # #1092: the box is created by the HOST daemon (same reason the gVisor install below
+      # runs out here and not in the DooD container) — so the image has to be built on the
+      # RUNNER too, never inside `.dood-inner.sh`.
+      - name: Build the box image
+        timeout-minutes: 4
+        run: python3 defender/scripts/box_image.py build
 
       # Same install as the `test` job: the boxes are created by the HOST daemon, so the
       # runtime has to be registered out here, not in the container running pytest.
@@ -411,7 +428,7 @@ jobs:
             | tar -xz -C /usr/local/bin --strip-components=1 docker/docker
           pip install --quiet uv
           cd /repo/defender
-          uv sync --extra dev --extra runtime
+          uv sync --extra dev --extra runtime --locked
           uv run pytest tests/e2e/test_540_box_boundary.py -v -rs
           INNER
           # -v "$PWD:/repo": the mount destination MUST differ from the source, or the bind is

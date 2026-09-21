@@ -4,6 +4,13 @@
 # types` with no path/run-dir argument. Runs from REPO_ROOT because
 # skills/invlang/cli.py uses package-relative imports (`from .advisory ...`).
 cd "${DEFENDER_DIR:?DEFENDER_DIR is not set}/.." || exit 1
-PY="${DEFENDER_DIR}/.venv/bin/python3"
-[ -x "$PY" ] || PY=python3
+# M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs (the
+# mounted `.venv` is never on the box's resolution path) — nothing in the box may fall back to
+# the host venv, so DEFENDER_BOX (set only inside a box) skips the venv lookup entirely.
+if [ -n "${DEFENDER_BOX:-}" ]; then
+    PY=python3
+else
+    PY="${DEFENDER_DIR}/.venv/bin/python3"
+    [ -x "$PY" ] || PY=python3
+fi
 exec "$PY" -m defender.skills.invlang.cli "${DEFENDER_RUNS_BASE:?DEFENDER_RUNS_BASE is not set}" "$@"

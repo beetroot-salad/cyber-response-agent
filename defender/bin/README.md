@@ -32,7 +32,10 @@ shims resolve from any cwd.
 
 - Each shim `exec`s the venv python (`$DEFENDER_DIR/.venv/bin/python3`),
   falling back to `python3` on PATH when no venv is present (a sandbox that
-  points `DEFENDER_DIR` at a tree with no `.venv` still runs).
+  points `DEFENDER_DIR` at a tree with no `.venv` still runs) — EXCEPT inside
+  the box (#1092): `DEFENDER_BOX` set skips the venv lookup entirely and runs
+  bare `python3`, which is the owned box image's own interpreter. Nothing
+  inside the box ever resolves the mounted `.venv`.
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
   root, so the agent never passes a path.

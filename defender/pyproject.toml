@@ -60,6 +60,15 @@ runtime = [
     # human inspection only — nothing shells out to it — and is installed in
     # .devcontainer/Dockerfile.dev for that purpose.
 ]
+# The owned box image's package set (#1092 D1) — what the sandbox's granted, non-adapter shims
+# actually import: `duckdb` for `defender-sql` (the rest of the closure — pydantic,
+# typing-extensions — is already core, see `dependencies` above). Deliberately narrower than
+# `runtime`: the LLM/MCP stack never enters the boundary the box image ships. Synced with
+# `--extra box` into the image's `/usr/local` (see `box.Dockerfile`), from the SAME lock as
+# the host venv (O1).
+box = [
+    "duckdb>=1.5,<2",
+]
 dev = [
     "pytest>=8.0",
     # CI runs the suite under `-n auto --dist loadfile`. `loadfile`, not the default

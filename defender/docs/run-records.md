@@ -538,6 +538,7 @@ themselves, attributed at their callers.
 | `runtime/bash_policy.py:21` | NOT:corpus | read | `_load_policy` | n-a | reads bash_policy.json deny-list corpus file |
 | `runtime/box/_docker.py:250` | NOT:sysfile | read | `_own_container_ids` | host | NOT: reads host /etc/hostname to identify this container |
 | `runtime/box/_docker.py:253` | NOT:sysfile | read | `_own_container_ids` | host | NOT: reads host /proc/self/mountinfo for the container's full id |
+| `runtime/box/_image.py:49` | NOT:repo | read | `image_tag` | host | NOT: hashes box.Dockerfile/uv.lock/pyproject.toml to derive the owned box image's name |
 | `runtime/box/_lifecycle.py:73` | box_sentinel | write | `_plant` | host | writes .box-sentinel token host-side before the box starts |
 | `runtime/box/_lifecycle.py:100` | box_sentinel | unlink | `_probe_sentinel` | host | removes a per-mount sentinel after a failed readback probe |
 | `runtime/box/_lifecycle.py:102` | box_sentinel | unlink | `_probe_sentinel` | host | removes the sentinel after a successful readback probe |
