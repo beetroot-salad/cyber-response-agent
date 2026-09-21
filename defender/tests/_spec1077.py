@@ -263,10 +263,21 @@ LEAD_ID = "l-abc123"
 SEQ = 7
 TURN = 3
 ROLE = "support"
-LABEL = "overlay-a"
+#: Delimiter-free, as every production label is: `confinement._nameable_world` refuses `-`
+#: (the view name's own delimiter) and `_family.world_token_for` refuses `.` (the world
+#: token's), and the sibling run id `<episode>-<label>` is recoverable only because of it.
+LABEL = "overlay_a"
 EPISODE_ID = "ep-2026-09-21"
 LINEAGE_ID = "case-0011223344556677"
 WORLD_TOKEN = f"{EPISODE_ID}.{LABEL}"
+
+
+def report_text(body: str) -> str:
+    """A `report.md` that MEETS its schema (`_artifact_schema.validate_report`: a frontmatter
+    fence carrying a `disposition`), for the tests that write one through the handle — the
+    handle holds the two model-authored documents to their schema at the write, so a
+    fence-less sample is refused there exactly as `permission.decide_write` refuses it."""
+    return f"---\ndisposition: inconclusive\n---\n{body}"
 STAGE = "questioner"
 PREFIX, STEM, CHECK_INDEX = "forward", "a-lesson", 2
 
@@ -322,6 +333,14 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
 #: runs base (claims C10/C15).
 SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "accounting_failures")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, "sessions_dir", "session_db")
+
+
+def upward_root(attr: str, runs_base: Path) -> Path:
+    """The root an UPWARD accessor is confined to: the three sidecars sit directly in the runs
+    base; the sessions directory is its SIBLING (`<runs_base>/../sessions`, claims C10/C15),
+    so the session db's root is the runs base's parent — one table, so no test carries its
+    own guess."""
+    return runs_base.parent if attr in ("sessions_dir", "session_db") else runs_base
 
 #: Every accessor that builds a path from a caller-supplied component, with an ordinary value
 #: and the component index decision 2's one rule must check. g10's census subjects.
@@ -576,10 +595,14 @@ def mutation_census(root: Path) -> dict[str, tuple[str, str | None]]:
     return out
 
 
-#: Decision 21 keeps decision 14's rule 4, scoped to the narrowed content check plus the
-#: structural name-set: the baseline is captured on the SAME COMMIT as the comparison and
-#: re-captured whenever that commit moves — so it carries the commit it was taken on, and a
-#: baseline from another commit is REPORTED rather than compared. D7(1) is where it is first
+#: Decision 21 narrowed decision 14 to the structural name set plus the two documents' bytes,
+#: and that narrowing is what retires rule 4's "re-capture on every commit": the byte-level
+#: golden aged into false findings on unrelated commits (timestamps, salts, uuids); a NAME
+#: SET does not, and a commit that changes it has changed the tree — which is the finding.
+#: So the baseline is a GOLDEN like `tests/e2e/test_replay_skeleton.py`'s: re-captured when
+#: the tree is meant to change, and the re-capture reviewed as the diff it is. It records the
+#: commit it was captured on for the reader (a committed file cannot carry the sha of the
+#: commit that contains it, so nothing keys on that field). D7(1) is where it is first
 #: captured: the observer must ship green on `main`, with no implementation behind it, before
 #: step 3.
 TREE_BASELINE = Path(__file__).with_name("_tree_baseline_1077.json")
@@ -597,8 +620,9 @@ def head_commit() -> str:
 
 
 def load_baseline(path: Path = TREE_BASELINE) -> dict[str, Any]:
-    """The captured baseline document: `commit`, the structural `entries`, the two `content`
-    digests. Three keys, and the third is two names long — that IS the contract."""
+    """The captured baseline document: `commit` (where it was captured — informational), the
+    structural `entries`, the two `content` digests. Three keys, and the third is two names
+    long — that IS the contract."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -631,12 +655,9 @@ def content_findings(run_dir: Path, doc: dict[str, Any]) -> list[str]:
 
 
 def compare_to_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> list[str]:
-    """O3's findings for `run_dir` — structural first, then content — or the one finding a
-    stale baseline is (decision 21, keeping decision 14's rule 4)."""
+    """O3's findings for `run_dir` — structural first, then content. The golden is compared
+    on every commit; a tree that moved is the finding, whichever commit moved it."""
     doc = load_baseline(path)
-    if doc["commit"] != head_commit():
-        return [f"baseline captured on {doc['commit']}, comparison on {head_commit()} — "
-                "re-capture it rather than compare across commits"]
     return structural_findings(run_dir, doc) + content_findings(run_dir, doc)
 
 

@@ -137,6 +137,42 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     # wedge the caller forever rather than be refused. Non-blocking makes the open return at
     # once; `fstat` then refuses it like any other non-regular entry. On a regular file the
     # flag does nothing at all, so the ordinary path is unchanged.
+    fd = _open_plain_fd(path)
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
+            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
+            return fh.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def read_plain_bytes(path: Path) -> bytes:
+    """:func:`read_plain` for a record whose BYTES are the value — the alert's content hash is
+    taken over exactly what the operator supplied, and a text read's newline translation would
+    hash a different document. Same open, same screens, same exceptions."""
+    fd = _open_plain_fd(path)
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            return fh.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def read_bytes_guarded(path: Path) -> tuple[bytes | None, str | None]:
+    """:func:`read_guarded`'s bytes twin — ``(data, None)`` or ``(None, reason)``."""
+    try:
+        return read_plain_bytes(path), None
+    except TEXT_READ_ERRORS as e:
+        return None, str(e)
+
+
+def _open_plain_fd(path: Path) -> int:
+    """The guarded OPEN both plain readers share: the descriptor of the plain, single-linked
+    regular file at ``path``, or the exception :func:`read_plain` documents. The caller owns
+    the returned fd."""
     try:
         fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
     except OSError as e:
@@ -164,12 +200,10 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
                 errno.EMLINK if is_hard_linked(st) else errno.ELOOP, ALIAS_READ_REFUSAL,
                 str(path),
             )
-        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
-            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
-            return fh.read()
-    finally:
-        if fd >= 0:
-            os.close(fd)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _leaf_is_link(path: Path) -> bool:
@@ -800,9 +834,14 @@ def write_guarded(
 
     `mode` names the idiom the caller had: `replace` (the truncating/atomic lane — D1: stages
     under an unpredictable name, then `os.replace`s into place, which replaces a planted
-    symlink rather than following it and never opens the existing target at all), `append`
-    (the JSONL lane — `O_NOFOLLOW` at open) and `update` (the locked read-modify-write lane —
-    `O_NOFOLLOW` at open, before the lock is taken). `text` may be `bytes` (the drain lane's
+    symlink rather than following it and never opens the existing target at all), `create`
+    (the EXCLUSIVE lane — stages the same way, then `os.link`s the staged file into place, so
+    the target goes from absent to fully written in one step and an occupied name raises
+    `FileExistsError` instead of being replaced: the write-once records — a tenant record, a
+    lead claim, a priming lock — are created through this and never through `replace`, whose
+    whole point is to overwrite), `append` (the JSONL lane — `O_NOFOLLOW` at open) and `update`
+    (the locked read-modify-write lane — `O_NOFOLLOW` at open, before the lock is taken).
+    `text` may be `bytes` (the drain lane's
     corpus restore); the fd is opened binary or text to match. `stage_name` is the name-source
     seam. `**kw` absorbs a mode-irrelevant `encoding` (every mode already pins utf-8) rather
     than raising `TypeError` on it — and NOTHING ELSE: a swallowed unknown keyword is how a
@@ -815,7 +854,7 @@ def write_guarded(
             f"did you mean mode={mode!r}?"
         )
     path = Path(path)
-    if mode == "replace":
+    if mode in ("replace", "create"):
         _refuse_unless_plain(path)
         staged = Path(stage_name(path))
         try:
@@ -829,11 +868,18 @@ def write_guarded(
             else:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(text)
-            os.replace(staged, path)
-        except BaseException:
+            if mode == "replace":
+                os.replace(staged, path)
+            else:
+                # `link` is the one atomic primitive that both refuses an occupied name and
+                # lands the whole staged content at once; an `O_EXCL` open of the target itself
+                # would let a reader see the record half-written. The EEXIST here is the
+                # ORDINARY create race (someone else won), not an alias plant — unmarked, so a
+                # caller can tell "lost the race, read the winner" from "refused".
+                os.link(staged, path)
+        finally:
             with contextlib.suppress(OSError):
                 os.remove(staged)
-            raise
     elif mode == "append":
         _refuse_unless_plain(path)
         fd = open_nofollow_fd(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)

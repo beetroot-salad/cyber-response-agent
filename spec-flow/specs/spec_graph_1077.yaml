@@ -1438,18 +1438,22 @@ demands:
     form: test
     source: "45-dispositions.md settled (escalated, 2/2 converged); brief red flag R4 / F8"
     binds: ["interacts(lint_ungated_artifact_write->owner_constants)", "RunPaths"]
-    discharged_by: test_a_new_accessor_that_the_write_lint_does_not_know_by_name
+    discharged_by: test_the_artifact_gate_is_name_keyed_on_the_two_documents_accessors
     seed_docstring: >-
-      Every accessor D1 adds is invisible to `lint_ungated_artifact_write` until its hand-kept
-      bare-attribute list grows, and D6's rewrite names only `_astlib` and
+      `lint_ungated_artifact_write` is keyed on the owner's accessors for the two
+      model-authored documents and nothing else, and D6's rewrite names only `_astlib` and
       `lint_hand_rolled_name_resolution.py`.
     note: >-
       OUTCOME TRANSCRIBED (both copies agree the new accessors are invisible) and THE COUPLING
-      IS NOW OWNED: §7 decision 19 gives this issue the edit — grow the hand-kept two-name list
-      to all ~20 owner methods, with a test that keeps the list and the owner's actual method
-      set in step automatically, matching the pattern `_spec771` already uses for the sibling
-      write-safety lint (demand h50). Brief red flag R4, flagged fact F8 and dispositions red
-      flag 7 all close on it. `lint_ungated_artifact_write` stays modelled as an UNMOVED reader
+      IS NOW OWNED — CORRECTED at finalize (PR #1094 review): decision 19 as first written grew
+      this gate's two-name list to all ~20 owner methods, which made a guarded write of a
+      trace or a budget through its accessor an "ungated ARTIFACT write" (six false positives
+      on the real tree) — this gate asks for a CONTENT SCHEMA, and only the two model-authored
+      documents have one. The list is instead DERIVED from the owner and the schema (every
+      accessor whose name resolves to one of `_artifact_schema.ARTIFACT_NAMES`), which is the
+      in-step property decision 19 wanted (demand h50). Brief red flag R4, flagged fact F8 and
+      dispositions red flag 7 all close on it. `lint_ungated_artifact_write` stays modelled as
+      an UNMOVED reader
       of `owner_constants` so R7 keeps asking the question at the gate.
   - id: s38_gate_suppression_comment_missing_reason
     kind: domain-outcome
@@ -2431,16 +2435,19 @@ demands:
     binds:
       - "run_dir.identity"
       - "interacts(model_bash->run_dir)"
-    discharged_by: test_the_baseline_is_captured_on_the_same_commit_as_the_comparison
+    discharged_by: test_the_baseline_is_a_golden_compared_on_every_commit
     seed_docstring: >-
-      The baseline is captured on the same commit as the comparison, and is re-captured whenever
-      that commit moves.
+      The baseline is a golden: it records the commit it was captured on for the reader, and
+      the comparison never keys on that field.
     note: >-
-      Decision 14 rule 4, KEPT by decision 21 and scoped to the narrowed content check plus the
-      structural name-set — it is what keeps an unrelated commit on the base from ageing the
-      golden into a false finding. The baseline document's SHAPE changed with the contract:
-      `{commit, entries, content}`, where `entries` is the whole name set and `content` is two
-      digests, rather than every file's bytes minus two exemptions.
+      Decision 14 rule 4, RETIRED at finalize (PR #1094 review): a committed baseline cannot
+      carry the sha of the commit that contains it, so "captured on the comparison's own
+      commit" was red on every commit after the capture, or vacuous (re-captured inside CI).
+      Rule 4 existed to keep an unrelated commit from ageing a BYTE-level golden into a false
+      finding; decision 21's narrowing to the name set plus two digests is what removes that
+      hazard, and a commit that changes the name set has changed the tree — the finding. The
+      baseline document's SHAPE is unchanged: `{commit, entries, content}`, `commit` now
+      informational.
 
   # ---- Decision 15 — world-token rule gaps (cluster H) -------------------------------------
   - id: h45_a_resume_is_not_a_fork
@@ -2543,14 +2550,17 @@ demands:
       - "interacts(lint_ungated_artifact_write->owner_constants)"
       - "lint_unguarded_tree_write"
       - "RunPaths"
-    discharged_by: test_the_write_lints_accessor_list_is_held_in_step_with_the_owners_method_set
+    discharged_by: test_the_artifact_gates_accessor_list_is_derived_from_the_owner_and_the_schema
     seed_docstring: >-
-      The second lint's accessor list covers every one of the owner's methods, and a test keeps
-      that list and the owner's actual method set in step automatically.
+      The artifact gate's accessor list is exactly the owner's accessors for the artifacts
+      `_artifact_schema` has a schema for — derived, so it can neither miss a renamed accessor
+      nor swallow every other record.
     note: >-
       Decision 19 OWNS the edit this issue had left unowned (brief red flag R4, flagged fact F8,
-      dispositions red flag 7, settled premise s37). The automatic in-step test matches the
-      pattern `_spec771` already uses for the sibling write-safety lint.
+      dispositions red flag 7, settled premise s37). CORRECTED at finalize (PR #1094 review):
+      "every one of the owner's methods" was the wrong set for THIS gate — see s37. The
+      in-step property is kept by derivation from the owner and the schema rather than by a
+      hand-kept copy held in step by a test.
 
   # ---- Non-material auto-resolutions carried forward (70-resolutions.md, 'Non-material') ---
   - id: h51_tool_seam_owns_no_accessor
@@ -4149,15 +4159,15 @@ claims:
   - id: G6
     kind: behavior
     claim: "`observe.stage_trace_path` MKDIRS as a side effect of being asked for a path — it is not a pure name resolver"
-    probe: "read runtime/observe.py:272-282"
-    probe_kind: read
-    observed: "`guarded_mkdir(root / WIRE_LOG_DIR, base=root)` runs before the return"
+    probe: "executed (finalize, PR #1094): `observe.stage_trace_path(<empty tmp dir>, 'probe.trace.jsonl')` — list the root before and after, check the returned path's own existence"
+    probe_kind: executed
+    observed: "root listing [] -> ['wire_logs']; `wire_logs` is a directory; the returned trace path itself does not exist — the accessor call alone created the holding directory"
     verdict: holds
     note: >-
-      INSTRUMENT MISMATCH LEFT STANDING ON PURPOSE: a `behavior` claim closed on a `read`.
-      `spec-graph claims` will report it and should. Reading the `guarded_mkdir` line is not
-      seeing that an ordinary accessor call reaches it, and cluster K's accessor-purity decision
-      rests on this claim. Routed in `handoff.deferred` as a probe obligation for phase E.
+      Closed on `read` at write-tests and routed to phase E as a probe obligation; EXECUTED at
+      finalize. An ordinary accessor call reaches `guarded_mkdir`, which is what cluster K's
+      accessor-purity decision (decision 9) rests on: the handle moves that side effect into
+      the write verb that needs it.
   - id: G7
     kind: census
     claim: "`specGraph.resources` declares 11 roots and already contains the correction C16 misses"

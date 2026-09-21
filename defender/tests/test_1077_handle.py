@@ -203,14 +203,27 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
     NEGATIVE. Positive control inline: `Run.for_tenant` IS reached and resolves the same
     directory `under` would have.
     """
-    from defender.tests._by_path import DEFENDER
+    import ast
+    from defender.tests._by_path import DEFENDER, import_lint_lib
+    astlib = import_lint_lib("_astlib")
+    # RESOLVED, not grepped: `.under(` is also `_io.Bound.under`, an unrelated method five
+    # modules reach — a spelling match reports them and says nothing about `Run.under`.
+    handle_origin = f"defender.{S.HANDLE_MODULE}.Run.under"
     hits = []
-    for py in DEFENDER.rglob("*.py"):
+    for py in sorted(DEFENDER.rglob("*.py")):
         rel = py.relative_to(DEFENDER).as_posix()
         if rel.startswith("tests/") or rel == f"{S.HANDLE_MODULE}.py":
             continue
-        if ".under(" in py.read_text(encoding="utf-8", errors="replace"):
-            hits.append(rel)
+        try:
+            _text, tree = astlib.read_and_parse(py, rel)
+        except astlib.ScanBlind:
+            hits.append(f"{rel} (unparseable)")
+            continue
+        env = astlib.module_env(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and astlib.callee(node, env) == handle_origin:
+                hits.append(rel)
+                break
     assert hits == [], f"Run.under is reached outside the owner module: {hits}"
     assert _tenanted(base).run_dir == run_dir, (
         "positive control: for_tenant, which under is the helper of, resolves the same directory")
@@ -413,16 +426,22 @@ def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path
 
 def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     """Every writer method on a record wrapper reaches the same seam the call site reached
-    before — the guarded write, the appended jsonl, the locked rewrite, the request logger,
-    the session store."""
+    before — the guarded write (replace for a document, append for a table: what
+    `record_query.append_query_row` and `challenge_gate._write_trace_row` reach today, NOT the
+    pre-#771 `append_jsonl`, whose `open("a")` follows a planted link), the locked rewrite, the
+    request logger, the session store."""
     recorder = S.RecordingIo()
     run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base, io=recorder)
 
-    S.member(run, "documents", "report").write("# a report\n")
+    S.member(run, "documents", "report").write(S.report_text("# a report\n"))
     assert "write_guarded" in recorder.ops, f"the document write reached {recorder.ops}"
 
+    before = len(recorder.ops)
     S.member(run, "tables", "queries").append([{"q": 1}])
-    assert "append_jsonl" in recorder.ops, f"the table append reached {recorder.ops}"
+    assert "write_guarded" in recorder.ops[before:], f"the table append reached {recorder.ops}"
+    assert "append_jsonl" not in recorder.ops, (
+        "`_io.append_jsonl` is the unguarded pre-#771 primitive `lint_unguarded_tree_write` "
+        "flags — a table append through the handle lands through the guarded append lane")
 
     S.member(run, "observability", "budget").update({"spent": 1})
     assert "locked_for_rewrite" in recorder.ops, f"the locked state reached {recorder.ops}"
@@ -521,8 +540,8 @@ def test_two_handles_for_one_run_directory(base, run_dir):
     assert a.run_dir == b.run_dir
     assert S.member(a, "documents", "report") is not S.member(b, "documents", "report")
     # A write through one is observable through the other because the FILE is shared, not state.
-    S.member(a, "documents", "report").write("# from a\n")
-    assert S.member(b, "documents", "report").read() == "# from a\n"
+    S.member(a, "documents", "report").write(S.report_text("# from a\n"))
+    assert S.member(b, "documents", "report").read() == S.report_text("# from a\n")
     # And a record read through one is not cached into the other.
     S.plant_stamp(run_dir, commit="c1", dirty=False, tenant_id="t1", world_id="w1")
     assert a.record.tenant_id == "t1"

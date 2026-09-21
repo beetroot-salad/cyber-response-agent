@@ -82,8 +82,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="which world of --resume's manifest this process is")
     p.add_argument("--run-id", default=None,
                    help="Pin the run id for a named A/B or live run (learning-loop "
-                        "commits reference it) instead of the auto timestamp id; a "
-                        "collision with an existing run dir is rejected by materialize_run_dir")
+                        "commits reference it) instead of the auto timestamp id. Lower case "
+                        "only. An existing run dir under this id is RESUMED (setup finishes "
+                        "what an interrupted attempt left undone and re-stamps) — for the same "
+                        "alert; a different alert under a used id is refused")
     p.add_argument("--no-learn", action="store_true",
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")

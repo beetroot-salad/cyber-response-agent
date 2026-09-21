@@ -186,7 +186,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run_dir(alert, "20260101T000000Z-a1")
+    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-a1")
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -517,7 +517,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
     # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
-    run_id = "20260101T000000Z-wedge"
+    run_id = "20260101t000000z-wedge"
     (runs / run_id).mkdir()
     (runs / run_id / PROVENANCE).mkdir()
 
@@ -543,7 +543,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run_dir(alert, "20260101T000000Z-solo")
+    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-solo")
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -552,8 +552,8 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     with pytest.raises(TypeError):
-        run_common.materialize_run_dir(alert, "20260101T000000Z-handed", provenance=handed)
-    assert not (runs / "20260101T000000Z-handed").exists()
+        run_common.materialize_run_dir(alert, "20260101t000000z-handed", provenance=handed)
+    assert not (runs / "20260101t000000z-handed").exists()
 
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.

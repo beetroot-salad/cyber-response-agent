@@ -291,35 +291,32 @@ def test_directories_and_symlinks_compare_by_name_and_link_target(tmp_path: Path
                for f in S.content_findings(run_dir, S.load_baseline()))
 
 
-def test_the_baseline_is_captured_on_the_same_commit_as_the_comparison(tmp_path: Path):
-    """The baseline is captured on the same commit as the comparison, and is re-captured
-    whenever that commit moves."""
+def test_the_baseline_is_a_golden_compared_on_every_commit(tmp_path: Path):
+    """The baseline is a golden: it records the commit it was captured on for the reader, and
+    the comparison never keys on that field — a committed file cannot carry the sha of the
+    commit that contains it, so a comparison that did would be red on every commit after the
+    capture (or vacuous, re-captured inside CI). A tree that moved is the finding, on
+    whichever commit moved it."""
     _baseline_exists()
     doc = S.load_baseline()
     assert doc.get("commit"), "the baseline does not record the commit it was captured on"
-    head = S.head_commit()
-    assert doc["commit"] == head, (
-        f"the baseline was captured on {doc['commit']} and the comparison runs on {head}; "
-        "decision 14 rule 4, kept by decision 21, re-captures it when the commit moves, so an "
-        "unrelated commit on the base cannot age the golden into a false finding")
     assert set(doc) == {"commit", "entries", "content"}, (
         f"the baseline's shape is the commit, the structural name set and the two documents' "
         f"digests — decision 21 changed it from 'every file's bytes minus two exemptions': "
         f"{sorted(doc)}")
 
-    # Driven: a baseline from another commit is REPORTED as stale, never compared.
-    stale = tmp_path / "stale-baseline.json"
-    stale.write_text(json.dumps({**doc, "commit": "0" * 40}), encoding="utf-8")
+    # Driven: a baseline captured elsewhere is COMPARED, not reported as stale.
+    elsewhere = tmp_path / "elsewhere-baseline.json"
+    elsewhere.write_text(json.dumps({**doc, "commit": "0" * 40}), encoding="utf-8")
     run_dir = _replay(tmp_path)
-    findings = S.compare_to_baseline(run_dir, path=stale)
-    assert findings, "a baseline from another commit was compared rather than reported"
-    assert "re-capture" in findings[0], findings
-    # And re-capture covers BOTH halves: the fresh document carries the name set and the two
-    # digests, so a moved commit never leaves the content check running off an old golden.
-    fresh = S.capture_baseline(run_dir, path=stale)
+    assert S.compare_to_baseline(run_dir, path=elsewhere) == S.compare_to_baseline(run_dir), (
+        "the commit field changed the comparison's answer")
+    # And a re-capture covers BOTH halves: the fresh document carries the name set and the two
+    # digests, and compares clean against the run it was taken from.
+    fresh = S.capture_baseline(run_dir, path=elsewhere)
     assert set(fresh) == {"commit", "entries", "content"}
-    assert fresh["commit"] == head
-    assert S.compare_to_baseline(run_dir, path=stale) == []
+    assert fresh["commit"] == S.head_commit()
+    assert S.compare_to_baseline(run_dir, path=elsewhere) == []
 
 
 # ---------------------------------------------------------------------------------------

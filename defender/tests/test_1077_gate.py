@@ -539,7 +539,8 @@ def test_one_package_migrated_while_another_still_spells_the_name(tmp_path: Path
             f'def read(run_dir):\n    return (run_dir / "{NAME_LITERAL}").read_text()\n')
     found = gate.scan(tmp_path)
     displays = S.displays(found)
-    assert "migrated.py" not in displays, "the migrated route is not a finding"
+    # `runtime/` qualified: bare `migrated.py` is a substring of `unmigrated.py`.
+    assert "runtime/migrated.py" not in displays, "the migrated route is not a finding"
     assert "learning/unmigrated.py" in displays, (
         f"the unmigrated literal is what the allow-list admits at steps 2-3, and it is what "
         f"shrinks as each package migrates:\n{displays}")
@@ -719,9 +720,9 @@ def test_the_tenant_writer_is_hard_gated_by_the_unguarded_write_lint(tmp_path: P
     assert found, f"an unguarded write in the hard-gated {module} produced no finding"
 
 
-def test_a_new_accessor_that_the_write_lint_does_not_know_by_name(tmp_path: Path):
-    """Every accessor D1 adds is invisible to `lint_ungated_artifact_write` until its hand-kept
-    bare-attribute list grows, and D6's rewrite names only `_astlib` and
+def test_the_artifact_gate_is_name_keyed_on_the_two_documents_accessors(tmp_path: Path):
+    """`lint_ungated_artifact_write` is keyed on the owner's accessors for the two
+    model-authored documents and nothing else, and D6's rewrite names only `_astlib` and
     `lint_hand_rolled_name_resolution.py`."""
     lint = load_lint_gate("lint_ungated_artifact_write")
     accessors = frozenset(lint.ARTIFACT_ACCESSORS)
@@ -739,7 +740,7 @@ def test_a_new_accessor_that_the_write_lint_does_not_know_by_name(tmp_path: Path
     assert "runtime/known.py" in displays, f"the known accessor was not reported:\n{displays}"
     assert "runtime/unknown.py" not in displays, (
         "the lint is name-keyed — an attribute it does not know by name is invisible, which is "
-        f"why decision 19 gives this issue the list edit:\n{displays}")
+        f"why decision 19 holds the list in step with the owner:\n{displays}")
 
     # D6's rewrite names only the two coupled consumers; a third would be an unowned coupling.
     gate_src = (DEFENDER.parent / "scripts" / "lint" / "lint_run_records.py").read_text(
@@ -750,26 +751,35 @@ def test_a_new_accessor_that_the_write_lint_does_not_know_by_name(tmp_path: Path
         f"D6(b) names exactly these two as the pass's home and its second consumer: {named_lints}")
 
 
-def test_the_write_lints_accessor_list_is_held_in_step_with_the_owners_method_set(tmp_path: Path):
-    """The second lint's accessor list covers every one of the owner's methods, and a test keeps
-    that list and the owner's actual method set in step automatically."""
+def test_the_artifact_gates_accessor_list_is_derived_from_the_owner_and_the_schema(
+        tmp_path: Path):
+    """The artifact gate's accessor list is exactly the owner's accessors for the artifacts
+    `_artifact_schema` has a schema for — derived, so it can neither miss a renamed accessor
+    nor swallow every other record (decision 19, corrected: this gate asks for a CONTENT
+    SCHEMA, and only the two model-authored documents have one; a guarded write of a trace or
+    a budget through its accessor is not an ungated artifact write)."""
+    from defender import _artifact_schema
     lint = load_lint_gate("lint_ungated_artifact_write")
-    owner_methods = {
-        name for name in dir(S.run_paths_mod().RunPaths)
-        if not name.startswith("_")}
     listed = frozenset(lint.ARTIFACT_ACCESSORS)
-    assert owner_methods <= listed, (
-        f"these owner accessors are invisible to the write lint: {sorted(owner_methods - listed)}"
-        " — decision 19 grows the hand-kept two-name list to ALL of them, held in step "
-        "automatically the way `_spec771` holds the sibling write-safety lint's copy")
-    assert listed <= owner_methods | frozenset(
-        n for n in dir(S.episode_paths().EpisodePaths) if not n.startswith("_")), (
-        f"the list names something no owner method answers: {sorted(listed - owner_methods)}")
-    # Driven: an accessor the list gained is now reported where it was invisible before.
-    for gained in ("budget", "tool_trace", "lessons_loaded"):
-        if gained not in owner_methods:
-            continue
-        root = tmp_path / gained
+    owner = S.RunPaths(tmp_path)
+    expected = frozenset(
+        name for name in dir(S.run_paths_mod().RunPaths)
+        if not name.startswith("_")
+        and isinstance(getattr(S.run_paths_mod().RunPaths, name), property)
+        and getattr(owner, name).name in _artifact_schema.ARTIFACT_NAMES)
+    assert listed == expected, (
+        f"the gate's list {sorted(listed)} is not the owner's accessors for "
+        f"{_artifact_schema.ARTIFACT_NAMES}: {sorted(expected)}")
+    assert listed == frozenset({"investigation", "report"}), "today's two"
+    # Driven both ways: an ungated write through a document accessor IS reported; the same
+    # write through any other record's accessor is NOT this gate's finding.
+    S.plant(tmp_path / "doc", "runtime/w.py",
+            "def w(paths, text):\n    paths.report.write_text(text)\n")
+    assert lint._scan(tmp_path / "doc"), "an ungated write through .report is invisible"
+    for other in ("budget", "tool_trace", "lessons_loaded"):
+        root = tmp_path / other
         S.plant(root, "runtime/w.py",
-                f"def w(paths, text):\n    paths.{gained}.write_text(text)\n")
-        assert lint._scan(root), f"an ungated write through .{gained} is still invisible"
+                f"def w(paths, text):\n    paths.{other}.write_text(text)\n")
+        assert lint._scan(root) == [], (
+            f"a write through .{other} was reported as an ungated ARTIFACT write — that "
+            "record has no content schema to apply; the unguarded-write lint owns that write")

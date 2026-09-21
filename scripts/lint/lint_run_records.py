@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,14 +104,14 @@ def _composed_parts() -> tuple[str, ...]:
 #: suffixes (`.json`, `.db`, ...) match ~1065 non-target literals and are deliberately excluded.
 COMPOSED_PARTS: tuple[str, ...] = _composed_parts()
 
-#: Owner constants equal to one of these are too generic to enter the WHOLE-NAME match set —
-#: the same reading decision 6 applies to `COMPOSED_PARTS`, extended to whole-constant values.
-_GENERIC_WHOLE = frozenset({".json", ".db", ".jsonl", ".md", ".yaml", "json"})
-
-#: Owner constants that are NOT record names at all (a wire-body metadata key, not a filename)
-#: — named by their own constant NAME so a short, generic value like `"json"` cannot leak into
-#: the match set through them.
-_NON_RECORD_CONSTANT_NAMES = frozenset({"GATE_METADATA_KEY"})
+#: A path segment of the kinds registry enters the WHOLE-NAME match set only when it is
+#: DISCRIMINATING — `name.ext`, or a multi-word `wire_logs` / `gather_raw` / `.box-sentinel`.
+#: A bare English word a segment happens to be (`runs`, `worlds`, `judge`, `served`) is
+#: substring-matched by decision 6's rule, and as a whole name it would report every docstring
+#: and log line that uses the word — the same reading that keeps `.json`/`.db` out of
+#: `COMPOSED_PARTS` (fork D-F5). `served/` and the other directory names are reached as
+#: composed parts, or not at all.
+_SEGMENT_PLACEHOLDER = re.compile(r"<[^>]*>")
 
 #: The inline escape — the ONLY one D6(a) admits, and only with a non-empty reason after the
 #: em dash.
@@ -136,23 +137,41 @@ def sweep_files(root: Path = DEFENDER) -> list[Path]:
     return sorted(files)
 
 
-def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
-    """`(whole_names, composed_parts)` — the owners' own string constants, split the way
-    decision 6 splits them: every UPPERCASE module-level string EXCEPT the too-generic bare
-    suffixes, and the five curated fragments."""
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-    from defender import _episode_paths, _run_paths, _tenant  # noqa: PLC0415
+def _discriminating(segment: str) -> bool:
+    stem, dot, ext = segment.rpartition(".")
+    if dot and stem and ext:
+        return True  # `alert.json`, `family.yaml`
+    return any(c in segment for c in "_-")  # `wire_logs`, `gather_raw`, `.box-sentinel`
 
-    whole: set[str] = set()
-    for mod in (_run_paths, _episode_paths, _tenant):
-        for k, v in vars(mod).items():
-            if (
-                k.isupper() and isinstance(v, str) and v not in _GENERIC_WHOLE
-                and k not in _NON_RECORD_CONSTANT_NAMES
-            ):
-                whole.add(v)
-    return frozenset(whole), frozenset(COMPOSED_PARTS)
+
+def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
+    """The whole record names the gate bans, READ FROM THE KINDS REGISTRY (`run-records-kinds.
+    tsv`, the same table O2 holds one accessor per row of) rather than scraped from the owner
+    modules' namespaces: every WHOLE segment of every kind's `path` cell — a segment carrying
+    a placeholder (`<lead>.lead.json`, `<run>.run-end.json`) is a composition, whose
+    discriminating fragment is one of `COMPOSED_PARTS` — and only the DISCRIMINATING whole
+    segments admitted."""
+    kinds = kinds if kinds is not None else load_kinds()
+    names: set[str] = set()
+    for row in kinds:
+        for spelled in row.get("path", "").split(","):
+            spelled = spelled.strip()
+            if not spelled or spelled.startswith("("):
+                continue  # `(the role's declared read/write targets)` — not a path
+            for segment in spelled.split("/"):
+                if _SEGMENT_PLACEHOLDER.search(segment):
+                    # A COMPOSED segment (`<lead>.lead.json`, `<run>.run-end.json`) is not a
+                    # whole name; what is discriminating in it is one of the curated parts.
+                    continue
+                if _discriminating(segment):
+                    names.add(segment)
+    return frozenset(names)
+
+
+def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
+    """`(whole_names, composed_parts)` — the registry's whole names and decision 6's five
+    curated fragments."""
+    return registry_names(), frozenset(COMPOSED_PARTS)
 
 
 def _accessor_names() -> frozenset[str]:
@@ -212,8 +231,16 @@ def _scan_literal_pass(
                      "spell a run or episode record's name",
         ))
 
+    docstrings = _docstring_nodes(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # A docstring DESCRIBES a record; it cannot be joined onto a root or handed to a
+            # glob. The gate is about names reaching the filesystem from outside the owner —
+            # prose that mentions one is not that, and reporting it would only teach every
+            # docstring to spell the name in pieces. A name quoted in a MESSAGE (an argument,
+            # not a statement) is still reported, and admitted only under the suppression.
+            if node in docstrings:
+                continue
             if _record_shaped(node.value, whole, parts):
                 report(node, f"record-name literal {node.value!r}")
         elif isinstance(node, ast.JoinedStr):
@@ -257,6 +284,18 @@ def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
             if not owner_derived(node, env):
                 report(node, f"unresolvable accessor use (.{node.attr})")
     return findings
+
+
+def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
+    """The `ast.Constant` node of every docstring — a module's, a class's, a function's, and
+    the bare-string statement after an assignment that documents an attribute. A string that
+    is a whole STATEMENT is prose: no expression consumes it, so it reaches no path."""
+    out: set[ast.AST] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            out.add(node.value)
+    return out
 
 
 def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:

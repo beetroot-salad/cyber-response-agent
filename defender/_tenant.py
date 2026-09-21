@@ -1,8 +1,9 @@
 """D2 — the tenant record: `<runs_base>/_tenant.json`, the sole authority for the tenant a run
 stamps.
 
-Created ONCE, when absent, through `_io.write_guarded` — the same alias-refusing staged create
-every other shared-tree writer routes through, never a raw `os.open`. A record that fails to
+Created ONCE, when absent, through `_io.write_guarded(mode="create")` — the alias-refusing
+EXCLUSIVE lane, never a raw `os.open` and never the `replace` lane (which would let the loser of
+a create race overwrite the winner's identity with its own). A record that fails to
 parse REFUSES THE RUN rather than degrading: decision 4 makes every other record's field read
 `None` on corruption, and the tenant record is the sole, deliberate exception — a run with a
 forged tenant is worse than no run.
@@ -54,7 +55,7 @@ def record_path(runs_base: Path) -> Path:
     return Path(runs_base) / TENANT_RECORD_NAME
 
 
-def _parse(text: str, *, source: Path) -> TenantRecord:
+def _parse_record(text: str, *, source: Path) -> TenantRecord:
     try:
         obj = json.loads(text)
     except ValueError as bad:
@@ -81,46 +82,50 @@ def _doc(record: TenantRecord) -> dict[str, Any]:
     }
 
 
-def read_tenant(runs_base: Path, *, io: Any = None) -> TenantRecord:
+def read_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord:
     """The tenant record at `runs_base`, or the refusal — never `None`: an absent or corrupt
     tenant record refuses the caller rather than degrading (decision 4's sole exception)."""
-    io = io if io is not None else _real_io
     path = record_path(runs_base)
     text, reason = io.read_guarded(path)
     if text is None:
         raise TenantRecordCorrupt(f"{path} could not be read: {reason}")
-    return _parse(text, source=path)
+    return _parse_record(text, source=path)
 
 
-def ensure_tenant(runs_base: Path, *, io: Any = None) -> TenantRecord:
+def ensure_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord:
     """Create the tenant record once, when absent, and hand it back — reading it back when it
     is already there.
 
-    On a CREATE RACE (another process wins between the absence check and this call's own
-    create), the loser discards the value it was about to write and RE-READS the winner's
-    record — no retry, no error surfaced (decision 13). An identity-bearing write that fails
-    for any other reason (an alias planted at the name, a directory squatting it) FAILS LOUDLY
-    and is NEVER silently retried (decision 7) — exactly one `write_guarded` attempt.
+    The create is EXCLUSIVE (`write_guarded(mode="create")`): an occupied name raises
+    `FileExistsError` and is never overwritten. That is what makes the CREATE RACE resolve the
+    only way O4 can hold for both racers — the loser discards the value it was about to write
+    and RE-READS the winner's record; no retry, no error surfaced (decision 13). It is also
+    what keeps a record this process could not READ (permissions, an undecodable byte) from
+    being treated as absent and clobbered: the create collides on it, and the re-read then
+    names why it cannot be read. An identity-bearing write that fails for any other reason (an
+    alias planted at the name, a directory squatting it) FAILS LOUDLY and is NEVER silently
+    retried (decision 7) — exactly one `write_guarded` attempt.
     """
-    io = io if io is not None else _real_io
     path = record_path(runs_base)
     existing_text, _reason = io.read_guarded(path)
     if existing_text is not None:
-        return _parse(existing_text, source=path)
+        return _parse_record(existing_text, source=path)
     record = TenantRecord(
         tenant_id=DEFAULT_TENANT_ID, base_world_id=uuid.uuid4().hex,
         created_at=datetime.now(UTC).isoformat())
-    # ONE attempt, never retried (decision 7 — an identity-bearing write fails loudly). A
-    # `FileExistsError` here is the staged-create collision `_io.write_guarded` itself raises
-    # (claim C19); it is not swallowed, it propagates.
-    io.write_guarded(path, json.dumps(_doc(record), indent=2, sort_keys=True) + "\n")
-    # RE-READ rather than trust the value just staged — the loser of a create race that opens
-    # between this call's own absence check and its own write discards what it was about to
-    # write and reads back whatever is actually there now (decision 13).
-    winner_text, _reason = io.read_guarded(path)
-    if winner_text is None:
-        raise TenantRecordCorrupt(f"{path} could not be read back after being written")
-    return _parse(winner_text, source=path)
+    try:
+        io.write_guarded(
+            path, json.dumps(_doc(record), indent=2, sort_keys=True) + "\n", mode="create")
+    except FileExistsError as taken:
+        # Lost the create race (or the name was occupied by something this process could not
+        # read): the winner's record is the tenant's identity, ours is discarded unwritten.
+        winner_text, reason = io.read_guarded(path)
+        if winner_text is None:
+            raise FileExistsError(
+                f"{path} is occupied but could not be read back ({reason}) — refusing the run "
+                "rather than minting a second identity over it") from taken
+        return _parse_record(winner_text, source=path)
+    return record
 
 
 def refuse_colliding_run_id(run_id: str) -> Exception | None:

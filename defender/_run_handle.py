@@ -8,26 +8,33 @@ existing directory, no runs base in hand. `Run.under(runs_base, run_id)` is the 
 
 Every record accessor answers a `RecordHandle` (`.path`, `.read`, and the group's own write
 verb) rather than a bare `pathlib.Path` (decision 1c) — never parsed contents, never validation
-beyond what today's seam already does. Asking for `.path` creates nothing on disk (decision
-9); only a write/append/update call creates the holding directory, through the SAME `io=`
-seam every accessor routes through, so a fake injected at construction sees every operation.
+beyond what today's seam for that record already does. Asking for `.path` creates nothing on
+disk (decision 9); only a write/append/update call creates the holding directory, through the
+SAME `io=` seam every accessor routes through, so a fake injected at construction sees every
+operation — the reads `run.record` makes included.
+
+THE VERBS ARE TODAY'S SEAMS, NOT A SECOND SET. Every write lands through `_io.write_guarded`
+(`create` for the write-once facts, `replace` for a document, `append` for a table or a trace)
+or `_io.locked_for_rewrite` (the two locked states), anchored by `guarded_mkdir` on the trust
+root the record actually sits under — the run dir for everything inside it, the runs base for
+the three sidecars, its parent for the session db (claim C15). The two model-authored
+documents are held to `_artifact_schema` at the write, because that schema is what "a
+committed investigation parses" rests on and a writer outside the gate is the #961/#964
+class. Nothing here reaches the pre-#771 `append_jsonl`.
 """
 from __future__ import annotations
 
 import dataclasses
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from defender import _artifact_schema
 from defender import _io as _real_io
 from defender import _provenance, _report, _tenant
-from defender._run_id import (
-    CASE_STABLE_REQUIRED,
-    RUN_ID_ALLOWED,
-    is_case_stable_id,
-    is_valid_run_id,
-)
+from defender._run_id import refuse_bad_run_id
 from defender._run_paths import RunPaths
 
 #: Decision 1a — the five group cells, group-then-kind addressed.
@@ -68,6 +75,13 @@ GROUP_WRITE_VERB: dict[str, str] = {
 LOCKED_STATE_MEMBERS = ("budget", "circuit_breaker")
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
+#: The three sidecars sit DIRECTLY in the runs base; the session db under `<runs_base>/../
+#: sessions` — so their holding directories are anchored there, not on the run dir (claim
+#: C15: `session_store` anchors its own mkdir at `runs_base.parent`).
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
+#: The two model-authored documents, held to their content schema at every write.
+_SCHEMA_GATED_MEMBERS = {"investigation": _artifact_schema.INVESTIGATION_NAME,
+                         "report": _artifact_schema.REPORT_NAME}
 
 RUN_RECORD_FIELDS = (
     "tenant_id", "world_id", "commit", "dirty", "model", "run_id", "alert_ref",
@@ -90,11 +104,15 @@ class RecordHandle:
     contents beyond what the seam it wraps already returns."""
 
     def __init__(
-        self, resolve: Any, *, io: Any, root: Path, group: str, member: str,
-        on_partial_failure: Any = None, session_args: tuple[Any, ...] | None = None,
+        self, resolve: Callable[[], Path], *, io: Any, root: Callable[[], Path], group: str,
+        member: str, on_partial_failure: Any = None,
+        session_args: tuple[Any, ...] | None = None,
     ) -> None:
         self._resolve = resolve
         self._io = io
+        # The trust root the holding directory is created under — a thunk, like `resolve`, so
+        # asking for a handle over a bare directory (`Run.at`) does not raise until a write
+        # actually needs the runs base (decision 10: a missing precondition, at use).
         self._root = root
         self._group = group
         self._member = member
@@ -133,22 +151,40 @@ class RecordHandle:
         return text
 
     def _mkdir(self, p: Path) -> None:
-        self._io.guarded_mkdir(p.parent, base=self._root)
+        self._io.guarded_mkdir(p.parent, base=self._root())
 
     def _do_write(self, text: str) -> None:
         p = self.path
-        if self._group == "facts" and p.is_file():
-            raise ValueError(
-                f"{p} already exists — run.facts.{self._member} is write-once, outside the "
-                "model's reach")
+        schema_name = _SCHEMA_GATED_MEMBERS.get(self._member)
+        if schema_name is not None:
+            current, _reason = self._io.read_guarded(p)
+            reason = _artifact_schema.validate_artifact(schema_name, text, current)
+            if reason is not None:
+                raise ValueError(f"run.{self._group}.{self._member}: {reason}")
         self._mkdir(p)
-        self._io.write_guarded(p, text)
+        if self._group == "facts":
+            # Write-once, outside the model's reach: the exclusive lane refuses an occupied
+            # name instead of replacing it, so a fact is never rewritten by any writer.
+            try:
+                self._io.write_guarded(p, text, mode="create")
+            except FileExistsError as taken:
+                raise ValueError(
+                    f"{p} already exists — run.facts.{self._member} is write-once, outside "
+                    "the model's reach") from taken
+            return
+        self._io.write_guarded(p, text, mode="replace")
 
     def _do_append(self, rows: list[dict]) -> None:
+        if not rows:
+            return
         p = self.path
         self._mkdir(p)
+        # One guarded append for the batch (the same seam `record_query.append_query_row` and
+        # `challenge_gate._write_trace_row` reach), never the pre-#771 `append_jsonl`, whose
+        # `open("a")` follows a link the model planted at the table's name.
+        text = "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — the rows are handed whole to the guarded append seam, not to a line loop over an open handle  # noqa: E501
         try:
-            self._io.append_jsonl(p, rows)
+            self._io.write_guarded(p, text, mode="append")
         except OSError:
             if self._group != "observability" or self._on_partial_failure is None:
                 raise
@@ -215,7 +251,7 @@ class Run:
     """The file-backed run handle, addressed by `(tenant_id, run_id)`."""
 
     def __init__(
-        self, run_dir: Path, *, runs_base: Path | None, io: Any = None,
+        self, run_dir: Path, *, runs_base: Path | None, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> None:
         self.run_dir = Path(run_dir)
@@ -223,7 +259,7 @@ class Run:
         # NOT a public attribute (decision 1b/fork D-F2): the twelve descriptive fields,
         # tenant_id included, live only on `run.record`, never as a property of `Run` itself.
         self._for_tenant_id = tenant_id
-        self._io = io if io is not None else _real_io
+        self._io = io
         self.partial_failures: tuple[str, ...] = ()
         for group in GROUPS:
             setattr(self, group, _RecordHandleGroup(self, group))
@@ -235,42 +271,55 @@ class Run:
     def _record_partial_failure(self, note: str) -> None:
         self.partial_failures = (*self.partial_failures, note)
 
+    def _runs_base_for(self, group: str, name: str) -> Path:
+        if self.runs_base is None:
+            raise ValueError(
+                f"run.{group}.{name} needs the runs base, which this handle does not hold — "
+                "it was built from a bare directory (Run.at)")
+        return self.runs_base
+
     def _member_accessor(self, group: str, name: str) -> Any:
         attr = MEMBER_ACCESSOR[name]
+        composing = name in _COMPOSING_MEMBERS
+        upward = attr in UPWARD_ACCESSORS
 
         def build(*args: Any) -> RecordHandle:
             def resolve() -> Path:
                 target = getattr(RunPaths(self.run_dir), attr)
-                if attr in UPWARD_ACCESSORS:
-                    if self.runs_base is None:
-                        raise ValueError(
-                            f"run.{group}.{name} needs the runs base, which this handle does "
-                            "not hold — it was built from a bare directory (Run.at)")
-                    return target(self.runs_base, *args)
-                return target(*args) if args else target
+                if upward:
+                    return target(self._runs_base_for(group, name), *args)
+                # Whether the owner's accessor is CALLED is a fact of the member table, never
+                # of how many arguments arrived: a composing accessor with every component
+                # defaulted (`review_record()` → turn 1) is still a call.
+                return target(*args) if composing else target
+
+            def trust_root() -> Path:
+                if name in _SIDECAR_MEMBERS:
+                    return self._runs_base_for(group, name)
+                if name == "session_db":
+                    return self._runs_base_for(group, name).parent
+                return self.run_dir
 
             session_args = (args[0], self.runs_base) if name == "session_db" and args else None
             return RecordHandle(
-                resolve, io=self._io, root=self.run_dir, group=group, member=name,
+                resolve, io=self._io, root=trust_root, group=group, member=name,
                 on_partial_failure=self._record_partial_failure, session_args=session_args)
 
-        if name in _COMPOSING_MEMBERS:
-            return build
-        return build()
+        return build if composing else build()
 
     # -- constructors --------------------------------------------------------------------------
 
     @classmethod
-    def for_tenant(cls, tenant_id: str, run_id: str, *, runs_base: Path, io: Any = None) -> Run:
+    def for_tenant(
+        cls, tenant_id: str, run_id: str, *, runs_base: Path, io: Any = _real_io,
+    ) -> Run:
         """The constructor real APPLICATION code uses — the host process that creates and
         operates on one specific run. Refuses when `tenant_id` disagrees with the tenant
         record actually stored at `runs_base` (decision 22): neither argument is trusted over
         the other, because trusting either makes a mismatch silent."""
-        real_io = io if io is not None else _real_io
         runs_base = Path(runs_base)
-        record_path = _tenant.record_path(runs_base)
-        if record_path.is_file():
-            record = _tenant.read_tenant(runs_base, io=real_io)
+        if io.entry_present(_tenant.record_path(runs_base)):
+            record = _tenant.read_tenant(runs_base, io=io)
             if record.tenant_id != tenant_id:
                 raise ValueError(
                     f"tenant_id {tenant_id!r} disagrees with the tenant record at "
@@ -281,10 +330,10 @@ class Run:
 
     @classmethod
     def under(
-        cls, runs_base: Path, run_id: str, *, io: Any = None, tenant_id: str | None = None,
+        cls, runs_base: Path, run_id: str, *, io: Any = _real_io, tenant_id: str | None = None,
     ) -> Run:
         """The internal helper `for_tenant` is built on — not a public front door."""
-        _refuse_bad_run_id(run_id)
+        refuse_bad_run_id(run_id)
         runs_base = Path(runs_base)
         return cls(runs_base / run_id, runs_base=runs_base, io=io, tenant_id=tenant_id)
 
@@ -307,76 +356,14 @@ class Run:
     def record(self) -> RunRecord:
         owner = RunPaths(self.run_dir)
         faults: list[str] = []
-
-        prov_obj: dict[str, Any] | None = None
-        raw, _reason = self._io.read_guarded(owner.provenance)
-        if raw is not None:
-            try:
-                parsed = json.loads(raw)
-            except ValueError:
-                faults.append("provenance: unparseable")
-                parsed = None
-            if isinstance(parsed, dict):
-                prov_obj = parsed
-            elif parsed is not None:
-                faults.append("provenance: wrong shape")
-
-        prov = _provenance.RunProvenance.from_obj(prov_obj) if prov_obj is not None else None
-        if prov_obj is not None and prov is None:
-            faults.append("provenance: wrong shape")
-        if prov_obj is not None:
-            for field in ("tenant_id", "world_id"):
-                v = prov_obj.get(field)
-                if v is not None and not isinstance(v, str):
-                    faults.append(f"provenance: {field} is wrong-shaped")
-
-        alert_ref = None
-        if owner.alert.is_file():
-            alert_ref = f"case-{hashlib.sha256(owner.alert.read_bytes()).hexdigest()[:16]}"
-
-        exit_class = None
-        if self.runs_base is not None:
-            from defender.runtime import run_end as run_end_mod
-
-            sidecar = owner.run_end_sidecar(self.runs_base)
-            if sidecar.is_file():
-                try:
-                    doc = json.loads(sidecar.read_text(encoding="utf-8"))
-                except ValueError:
-                    doc = None
-                    faults.append("run_end: unparseable")
-                if doc is not None:
-                    rec = run_end_mod.parse_record(doc)
-                    if rec is None:
-                        faults.append("run_end: wrong shape")
-                    else:
-                        exit_class = rec.truncated_by
-
-        disposition = None
-        review_outcome = None
-        if owner.report.is_file():
-            read = _report.read_report(owner.report)
-            disposition = read.disposition
-            fm = read.frontmatter
-            if isinstance(fm, dict):
-                outcome = fm.get("outcome")
-                review_outcome = outcome if isinstance(outcome, str) else None
-
-        parent_run_id = None
-        fork_turn = None
-        if self.runs_base is not None:
-            family_path = self.runs_base.parent / "family.yaml"
-            if family_path.is_file():
-                from defender.runtime.branch import _family
-
-                try:
-                    fam = _family.load_family(family_path)
-                except _family.FamilyError:
-                    fam = None
-                if fam is not None:
-                    parent_run_id = fam.source_run_id
-                    fork_turn = fam.branch_message_id
-
+        # Every read below goes through the injected `io` and refuses an alias the box planted
+        # at the record's name — a symlinked `alert.json` would otherwise make `alert_ref` (the
+        # curation key) the hash of bytes outside the run.
+        prov = self._provenance(owner, faults)
+        exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
+        disposition, review_outcome = self._report_fields(owner)
+        parent_run_id, fork_turn = self._family_fields()
+        alert_bytes, _reason = self._io.read_bytes_guarded(owner.alert)
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
             world_id=prov.world_id if prov is not None else None,
@@ -384,7 +371,8 @@ class Run:
             dirty=prov.dirty if prov is not None else None,
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
-            alert_ref=alert_ref,
+            alert_ref=(f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
+                       if alert_bytes is not None else None),
             parent_run_id=parent_run_id,
             fork_turn=fork_turn,
             exit_class=exit_class,
@@ -393,14 +381,69 @@ class Run:
             faults=tuple(faults),
         )
 
+    def _provenance(
+        self, owner: RunPaths, faults: list[str],
+    ) -> _provenance.RunProvenance | None:
+        raw, _reason = self._io.read_guarded(owner.provenance)
+        if raw is None:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            faults.append("provenance: unparseable")
+            return None
+        if not isinstance(parsed, dict):
+            faults.append("provenance: wrong shape")
+            return None
+        prov = _provenance.RunProvenance.from_obj(parsed)
+        if prov is None:
+            faults.append("provenance: wrong shape")
+        for field in ("tenant_id", "world_id"):
+            v = parsed.get(field)
+            if v is not None and not isinstance(v, str):
+                faults.append(f"provenance: {field} is wrong-shaped")
+        return prov
 
-def _refuse_bad_run_id(run_id: str) -> None:
-    if not is_valid_run_id(run_id):
-        raise ValueError(f"{run_id!r} is not a valid run id (allowed: {RUN_ID_ALLOWED})")
-    if not is_case_stable_id(run_id):
-        raise ValueError(
-            f"{run_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
-            f"{run_id.casefold()!r}")
+    def _exit_class(self, owner: RunPaths, faults: list[str]) -> str | None:
+        from defender.runtime import run_end as run_end_mod
+
+        assert self.runs_base is not None
+        sidecar_text, _reason = self._io.read_guarded(owner.run_end_sidecar(self.runs_base))
+        if sidecar_text is None:
+            return None
+        try:
+            doc = json.loads(sidecar_text)
+        except ValueError:
+            faults.append("run_end: unparseable")
+            return None
+        rec = run_end_mod.parse_record(doc)
+        if rec is None:
+            faults.append("run_end: wrong shape")
+            return None
+        return rec.truncated_by
+
+    def _report_fields(self, owner: RunPaths) -> tuple[str | None, str | None]:
+        report_text, _reason = self._io.read_guarded(owner.report)
+        if report_text is None:
+            return None, None
+        read = _report.parse_report_text(report_text)
+        fm = read.frontmatter
+        outcome = fm.get("outcome") if isinstance(fm, dict) else None
+        return read.disposition, (outcome if isinstance(outcome, str) else None)
+
+    def _family_fields(self) -> tuple[str | None, int | None]:
+        if self.runs_base is None:
+            return None, None
+        family_path = self.runs_base.parent / "family.yaml"
+        if not family_path.is_file():
+            return None, None
+        from defender.runtime.branch import _family
+
+        try:
+            fam = _family.load_family(family_path)
+        except _family.FamilyError:
+            return None, None
+        return fam.source_run_id, fam.branch_message_id
 
 
 # ---------------------------------------------------------------------------------------
@@ -435,9 +478,9 @@ class ArchivedWorld:
     set (page §5, D5/N5). Not a `Run`: it has no `.record` and is not addressed by
     `(tenant_id, run_id)`."""
 
-    def __init__(self, world_dir: Path, *, io: Any = None) -> None:
+    def __init__(self, world_dir: Path, *, io: Any = _real_io) -> None:
         self.world_dir = Path(world_dir)
-        self._io = io if io is not None else _real_io
+        self._io = io
 
     @classmethod
     def at(cls, world_dir: Path) -> ArchivedWorld:

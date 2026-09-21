@@ -1080,7 +1080,9 @@ def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -
     sibling with no readable stamp at all is SKIPPED here (its own fault is
     `_member_faults`'s "carries no readable provenance stamp"), and the comparison records how
     many it skipped rather than blocking on them."""
-    readable = {label: stamps[label] for label in labels if isinstance(stamps.get(label), dict)}
+    readable: dict[str, dict] = {
+        label: stamp for label in labels
+        if isinstance(stamp := stamps.get(label), dict)}
     skipped = len(labels) - len(readable)
     no_field = sorted(label for label, s in readable.items() if s.get("tenant_id") is None)
     # A family where EVERY readable sibling is silent on tenant (a pre-#1077 stamp, or one an

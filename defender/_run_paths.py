@@ -213,6 +213,7 @@ class RunPaths:
     def payload(self, lead_id: str, seq: int) -> Path:
         """`gather_raw/<lead_id>/<seq>.json` — the by-ref gather payload (O8's absolute form)."""
         lead_id = _check_component(lead_id, what="lead_id")
+        seq = _check_index(seq, what="seq")
         target = self.run_dir / RAW_MARKER / lead_id / f"{seq}{PAYLOAD_SUFFIX}"
         return _confine(target, self.run_dir, what="payload")
 
@@ -238,6 +239,7 @@ class RunPaths:
     def ticket_read(self, seq: int) -> Path:
         """`ticket_reads/<seq>.json` — the retired pipeline judge's closed-ticket capture; the
         payload read cap keys on this name (D1's stated reason for keeping the accessor)."""
+        seq = _check_index(seq, what="seq")
         target = self.run_dir / TICKET_READS_MARKER / f"{seq}{PAYLOAD_SUFFIX}"
         return _confine(target, self.run_dir, what="ticket_read")
 
@@ -262,7 +264,9 @@ class RunPaths:
 
     def review_record(self, turn: int = 1) -> Path:
         """`review_record.<turn>.json`, re-homed from `challenge_gate` (#1077 D1)."""
-        return self.run_dir / f"{REVIEW_RECORD_PREFIX}{turn}.json"
+        turn = _check_index(turn, what="turn")
+        target = self.run_dir / f"{REVIEW_RECORD_PREFIX}{turn}.json"
+        return _confine(target, self.run_dir, what="review_record")
 
     @property
     def tool_trace(self) -> Path:
@@ -421,6 +425,14 @@ def _check_component(value: object, *, what: str) -> str:
         or _UNSAFE_COMPONENT_CHARS.search(value)
     ):
         raise ValueError(f"{what} {value!r} is not a valid path component")
+    return value
+
+
+def _check_index(value: object, *, what: str) -> int:
+    """The shape half for a NUMBERED component (`<seq>.json`, `review_record.<turn>.json`): a
+    non-negative `int`, never a string that merely formats into the name — `"../x"` would."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{what} {value!r} is not a non-negative integer")
     return value
 
 

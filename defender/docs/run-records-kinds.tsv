@@ -4,7 +4,7 @@ report	1	report.md	confined	report.md	run.documents.report	the close tool is its
 investigation	1	investigation.md	confined	investigation.md	run.documents.investigation	seeds (lead-0, branch resume) write it before the first turn; the document tool during	
 queries	1	executed_queries.jsonl	confined	staged as a table	run.tables.queries	append-only; the gather lane's denial rows land here too	
 source_refs	1	source_refs.yaml	confined (`_run_paths.py:202-204`)	—	run.documents.source_refs	no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone	
-gather_raw	1	gather_raw/<lead>/<seq>.json	shape	staged as a table	run.tables.payloads	by-ref payloads; read through the bash `cat` lane only	
+gather_raw	1	gather_raw/<lead>/<seq>.json	shape	staged as a table	run.tables.payloads	by-ref payloads; the model reaches them by the bash `cat` lane only	
 lead_claim	1	gather_raw/<lead>.lead.json	shape (same dir)	with gather_raw	run.tables.leads	per-lead claim sidecar, exclusive create	
 gather_summaries	1	gather_summaries/<lead>.md	—	gather_summaries/	run.documents.gather_summaries		
 lead_author	1	lead_author/	—	—	run.documents.lead_author	learning-stage outputs under a run dir; learning-internal	

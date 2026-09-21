@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import os
 import shutil
@@ -16,8 +15,8 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _provenance, _tenant  # noqa: E402
-from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id  # noqa: E402
+from defender import _io, _provenance, _tenant  # noqa: E402
+from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
 
@@ -59,10 +58,11 @@ def _forked_world_id(runs_base: Path, run_id: str) -> str | None:
     the episode id (`episode_dir_for` names the directory for exactly that id), read off the
     path rather than re-parsed from the manifest's own copy of the field.
     """
+    from defender._run_paths import artifact_file
     from defender.runtime.branch import _family
 
     episode_dir = runs_base.parent
-    if not (episode_dir / _family.MANIFEST_NAME).is_file():
+    if not artifact_file(episode_dir / _family.MANIFEST_NAME):
         return None
     episode_id = episode_dir.name
     prefix = f"{episode_id}-"
@@ -77,11 +77,15 @@ def materialize_run_dir(
 ) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
-    if run_id is None:
-        ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-        run_id = f"{ts}-{_alert_label(alert)}"
-    if not is_valid_run_id(run_id):
-        sys.exit(f"invalid run id {run_id!r} (allowed: {RUN_ID_ALLOWED})")
+    # ONE admission rule for a run id, shared with the handle's constructors — the id minted
+    # here is one `Run.for_tenant` admits, and an operator-pinned `--run-id` is held to the
+    # same rule (case-stable, so two spellings cannot become one directory).
+    try:
+        if run_id is None:
+            run_id = mint_run_id(_alert_label(alert))
+        refuse_bad_run_id(run_id)
+    except ValueError as bad:
+        sys.exit(f"invalid run id: {bad}")
     collision = _tenant.refuse_colliding_run_id(run_id)
     if collision is not None:
         sys.exit(str(collision))
@@ -107,8 +111,16 @@ def materialize_run_dir(
         except OSError as e:
             sys.exit(f"cannot clear a stale sidecar at {sidecar}: {e!r}")
     paths.gather_raw.mkdir(parents=True, exist_ok=True)
-    if not paths.alert.is_file():
+    # A resumed id resumes THE SAME CASE: an alert already there must be the alert given now,
+    # byte for byte — otherwise this is a different investigation reusing a finished run's
+    # name (and its tables, and its documents), not a retry of an interrupted setup.
+    existing_alert, _reason = _io.read_bytes_guarded(paths.alert)
+    if existing_alert is None:
         shutil.copy(alert, paths.alert)
+    elif existing_alert != alert.read_bytes():
+        sys.exit(
+            f"run dir {run_dir} already holds a different alert than {alert} — a run id names "
+            "one case; pick a fresh id for a different alert")
     # THE TENANT RECORD, created once when absent (#1077 D2) — BEFORE the provenance stamp,
     # which must equal its values, and BEFORE the box exists. A tenant record that fails to
     # parse, or a write that fails (an alias planted at its name, a directory squatting it),
@@ -146,9 +158,9 @@ def _stamp(
     `capture_tree` goes to some length never to raise; a write that raised beside it would
     hand that promise straight back. The failure is real and unexceptional — ENOSPC on the runs
     base, a read-only remount, an alias planted where a previous run left one — and it arrives
-    AFTER the run dir exists, so an escaping `OSError` both kills the run and burns the run id:
-    `materialize_run_dir` `sys.exit`s on a dir that already exists, so the retry the operator
-    reaches for is refused forever.
+    AFTER the run dir exists. (Before #1077 an escaping `OSError` also burned the run id —
+    `materialize_run_dir` refused a dir that already existed; decision 3 made setup resumable,
+    so a retry now finishes what the first call left undone and re-stamps.)
 
     The asymmetry with `shutil.copy(alert, ...)` three lines up is the point, not an
     oversight. A run without its alert has no case to investigate and must die. A run without

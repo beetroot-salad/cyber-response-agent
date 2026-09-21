@@ -9,6 +9,7 @@ from defender._run_paths import (
     TRACE_SUFFIX,
     WIRE_LOG_DIR,
     _check_component,
+    _check_index,
     _confine,
 )
 
@@ -107,12 +108,13 @@ class EpisodePaths:
     # -- composing accessors — decision 2's shape+containment rule applies to every one --------
 
     def served_world(self, token: str) -> Path:
-        """`served/<episode>.<label>.jsonl`. Decision 12: the label half of the token must not
-        carry the composition's own delimiter (`.`), and must be case-stable."""
+        """`served/<episode token>.<label>.jsonl`. The token is `_family.world_token_for`'s
+        composition, which is where decision 12's delimiter refusal lives: the LABEL may not
+        carry `.`, so the label is always the text after the token's last dot — the episode
+        token before it legitimately holds dots (`episode_token_for` folds every `-` of the
+        episode id onto `.`). Here only the case-stability rule is re-asked of that label."""
         token = _check_component(token, what="token")
-        head, sep, label = token.rpartition(".")
-        if sep and ("." in label):
-            raise ValueError(f"{token!r} carries the composition's own delimiter '.'")
+        _head, sep, label = token.rpartition(".")
         if sep and not is_case_stable_id(label):
             raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
         target = self.served / f"{token}.jsonl"
@@ -121,6 +123,7 @@ class EpisodePaths:
     def judge_draw(self, label: str, n: int) -> Path:
         """`worlds/<label>/judge/<n>.yaml`."""
         label = _check_component(label, what="label")
+        n = _check_index(n, what="n")
         target = self.episode_dir / WORLDS_DIRNAME / label / JUDGE_DRAWS_DIRNAME / f"{n}.yaml"
         return _confine(target, self.episode_dir, what="judge_draw")
 
@@ -134,9 +137,16 @@ class EpisodePaths:
 
     def sibling_run_dir(self, episode_id: str, label: str) -> Path:
         """`runs/<episode_id>-<label>` — byte for byte as today (O3). Decision 20's
-        case-stability refusal applies to the freshly-authored `label`."""
+        case-stability refusal applies to the freshly-authored `label`, and so does decision
+        12's delimiter refusal: an episode id ALWAYS carries `-` (`episode_id_for` derives it
+        as `<source run>-n<turn>`), so it is the label being `-`-free that keeps the pair
+        recoverable from the composed id — `ep-a-b` is `(ep-a, b)`, never `(ep, a-b)`."""
         episode_id = _check_component(episode_id, what="episode_id")
         label = _check_component(label, what="label")
+        if "-" in label:
+            raise ValueError(
+                f"label {label!r} carries '-', the sibling run id's own delimiter — two "
+                "distinct (episode, label) pairs would compose to one run directory")
         if not is_case_stable_id(label):
             raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
         target = self.runs / f"{episode_id}-{label}"

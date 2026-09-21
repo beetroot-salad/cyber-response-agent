@@ -63,16 +63,16 @@ def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
     prov = S.provenance_mod()
     record = prov.RunProvenance(
         commit="c0ffee", dirty=False, scope="defender", model="m-1",
-        tenant_id="acme", world_id="ep-1.overlay-a")
+        tenant_id="acme", world_id="ep.1.overlay_a")
     on_the_wire = json.loads(record.as_json())
     assert on_the_wire["tenant_id"] == "acme"
-    assert on_the_wire["world_id"] == "ep-1.overlay-a", (
+    assert on_the_wire["world_id"] == "ep.1.overlay_a", (
         f"`as_json` hand-spells its keys, so a new field is silent unless it is added there: "
         f"{sorted(on_the_wire)}")
     back = prov.RunProvenance.from_obj(on_the_wire)
     assert back is not None
     assert back.tenant_id == "acme"
-    assert back.world_id == "ep-1.overlay-a"
+    assert back.world_id == "ep.1.overlay_a"
     # Read the way `scope` is read: a wrong-typed value folds to None rather than refusing.
     folded = prov.RunProvenance.from_obj({**on_the_wire, "tenant_id": 17, "world_id": []})
     assert folded is not None

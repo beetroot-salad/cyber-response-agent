@@ -65,6 +65,53 @@ unreachable by root containment rather than by a named deny.
 
 <!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->
 
+| kind | table | path | denied to | archived as | sub-collection | note |
+|---|---|---|---|---|---|---|
+| alert | 1 | `alert.json` | — (deliberately not in the answer key, `_run_paths.py:197-198`) | alert.json | run.facts.alert | input copied by the host |
+| report | 1 | `report.md` | confined | report.md | run.documents.report | the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`) |
+| investigation | 1 | `investigation.md` | confined | investigation.md | run.documents.investigation | seeds (lead-0, branch resume) write it before the first turn; the document tool during |
+| queries | 1 | `executed_queries.jsonl` | confined | staged as a table | run.tables.queries | append-only; the gather lane's denial rows land here too |
+| source_refs | 1 | `source_refs.yaml` | confined (`_run_paths.py:202-204`) | — | run.documents.source_refs | no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone |
+| gather_raw | 1 | `gather_raw/<lead>/<seq>.json` | shape | staged as a table | run.tables.payloads | by-ref payloads; the model reaches them by the bash `cat` lane only |
+| lead_claim | 1 | `gather_raw/<lead>.lead.json` | shape (same dir) | with gather_raw | run.tables.leads | per-lead claim sidecar, exclusive create |
+| gather_summaries | 1 | `gather_summaries/<lead>.md` | — | gather_summaries/ | run.documents.gather_summaries |  |
+| lead_author | 1 | `lead_author/` | — | — | run.documents.lead_author | learning-stage outputs under a run dir; learning-internal |
+| wire_log | 1 | `wire_logs/llm_requests.jsonl` | outright | — (dropped) | run.observability.wire_log | `review_roles` is a second writer into the same log |
+| forward_check_trace | 1 | `wire_logs/<prefix>.<stem>.<n>.trace.jsonl` | outright (dir) | — | run.observability.forward_check_trace | the learning verifier writes into the CITED run's dir after the fact |
+| review_trace | 1 | `wire_logs/review_<role>_trace.jsonl` | outright (dir) | — | run.observability.review_trace |  |
+| review_record | 1 | `review_record.<turn>.json` | — | — | run.observability.review_record | one per close attempt |
+| tool_trace | 1 | `tool_trace.jsonl` | — | — | run.observability.tool_trace | a whole-file rebuild from the session store, written once after the agent returns |
+| policy_denials | 1 | `policy_denials.jsonl` | — | — | run.tables.policy_denials |  |
+| budget | 1 | `budget.json` | — | — | run.observability.budget | counter, locked json |
+| circuit_breaker | 1 | `circuit_breaker.json` | — | — | run.observability.circuit_breaker | counter |
+| lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
+| ticket_write | 1 | `ticket_write.json` | — | — | run.observability.ticket_write |  |
+| ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive |
+| session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | copied to `run-visualizations/` (`visualize_run.py:80`) |
+| box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
+| provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
+| run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
+| scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
+| accounting | 2 | `<run>.accounting_failures.json` | — | — | run.facts.accounting |  |
+| session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
+| family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
+| family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |
+| review_yaml | 4 | `review.yaml` | — | — | episode.review | written at `Step.REVIEW`, before the siblings run; the outcome is merged in at the end (`cli.py:1120`) |
+| samples | 4 | `samples.yaml` | — | — | episode.samples | written at `Step.QUESTIONER`, before the model call |
+| judge_yaml | 4 | `judge.yaml` | — | — | episode.judge |  |
+| judge_draw | 4 | `worlds/<label>/judge/<n>.yaml, worlds/family/judge/<n>.yaml` | — | — | episode.judge_draw |  |
+| timing | 4 | `timing.json` | — | — | episode.timing | per launcher step |
+| staged | 4 | `staged.yaml` | — | — | episode.staged | the sole record that a cluster write happened |
+| served | 4 | `served/base.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling |
+| priming_lock | 4 | `served/.priming` | — | — | episode.priming_lock | `O_CREAT\|O_EXCL`; never unlinked, so a crashed priming leaves the episode permanently claimed |
+| stage_trace | 4 | `wire_logs/<stage>.trace.jsonl, wire_logs/<agent>_framed_trace.jsonl` | — | — | episode.stage_trace | episode-root wire traces of the learning stages |
+| learning_html | 4 | `learning.html` | — | — | episode.learning_html |  |
+| episode_runs | 4 | `runs/<episode_id>-<label>/` | — | — | episode.episode_runs | a sibling's real run dir; its files take their table-1 kinds |
+| archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
+| tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
+| tenant | 2 | `_tenant.json` | — | — | tenant | D2: created once when absent |
+
 <!-- end generated -->
 
 ## 5. The archive projection (`<episode>/worlds/<label>/`)

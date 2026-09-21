@@ -296,14 +296,18 @@ def test_every_composed_accessor_shape_checks_then_confines_against_its_own_root
     anchored shape check on the value, then a containment check of the resolved path against
     that method's own root — and refuses on either."""
     for acc in S.COMPOSING:
-        owner_root = base if acc.attr in S.UPWARD_ACCESSORS else (
+        owner_root = S.upward_root(acc.attr, base) if acc.attr in S.UPWARD_ACCESSORS else (
             run_dir if acc.owner == "run" else episode_dir)
         # Positive control, per accessor: an ordinary component resolves, inside its own root.
         ok = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir)
         assert Path(ok).is_absolute() is False or Path(ok).is_relative_to(owner_root), (
             f"{acc.owner}.{acc.attr} does not resolve inside its own root for an ordinary value")
         for hostile in S.HOSTILE_COMPONENTS:
-            args = tuple(hostile if isinstance(a, str) else a for a in acc.args)
+            # EVERY component slot takes the hostile value, the numbered ones included: a
+            # `turn`/`seq`/`n` slot handed `'../x'` formats straight into the name unless the
+            # shape rule refuses a non-integer there, and an accessor whose only component is
+            # numbered (`review_record(turn)`) would otherwise never be probed at all.
+            args = tuple(hostile for _ in acc.args)
             with pytest.raises(Exception) as excinfo:  # noqa: PT011
                 S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
                           args=args)
@@ -337,7 +341,11 @@ def test_every_composed_accessor_applies_the_shape_then_containment_pair_or_a_re
     escaped = []
     for acc in S.COMPOSING:
         for hostile in S.HOSTILE_COMPONENTS:
-            args = tuple(hostile if isinstance(a, str) else a for a in acc.args)
+            # EVERY component slot takes the hostile value, the numbered ones included: a
+            # `turn`/`seq`/`n` slot handed `'../x'` formats straight into the name unless the
+            # shape rule refuses a non-integer there, and an accessor whose only component is
+            # numbered (`review_record(turn)`) would otherwise never be probed at all.
+            args = tuple(hostile for _ in acc.args)
             try:
                 got = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
                                 args=args)
@@ -373,7 +381,7 @@ def test_no_composed_accessor_resolves_outside_its_root(base, run_dir, episode_d
     roots = {"run": run_dir, "episode": episode_dir}
 
     for acc in S.COMPOSING:
-        root = base if acc.attr in S.UPWARD_ACCESSORS else roots[acc.owner]
+        root = S.upward_root(acc.attr, base) if acc.attr in S.UPWARD_ACCESSORS else roots[acc.owner]
         ordinary = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir)
         ordinary_abs = Path(ordinary) if Path(ordinary).is_absolute() else root / ordinary
         assert ordinary_abs.resolve().is_relative_to(root.resolve()), (
@@ -449,6 +457,10 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
         "assert plain_file(pathlib.Path(sys.argv[1])) is True\n"
         "assert plain_file(pathlib.Path('/dev/null')) is False\n"
         "print('OK')\n")
+    # `real` acquired a second name above (`hard`), so it is no longer plain — by the screen's
+    # own rule. The closure probe gets it back as ONE name.
+    hard.unlink()
+    assert plain_file(real), "with the second name gone, the file is plain again"
     done = subprocess.run([sys.executable, "-c", code, str(real)], cwd=PATHS.repo_root,
                           capture_output=True, text=True, timeout=120)
     unreachable = (
@@ -560,22 +572,34 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
 # ---------------------------------------------------------------------------------------
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
-    """A component carrying the composition's own delimiter is refused at mint time, for
-    `<episode_id>-<label>` and `<episode>.<label>` alike."""
+    """The LABEL carrying the composition's own delimiter is refused at mint time, for
+    `<episode_id>-<label>` and `<episode token>.<label>` alike.
+
+    The label is the component held delimiter-free, and that alone makes both compositions
+    recoverable: every real episode id carries `-` (`cli.episode_id_for` derives
+    `<source run>-n<turn>`) and every real episode token carries `.` (`_family.
+    episode_token_for` folds each `-` onto one), so refusing the delimiter in the LEFT half
+    would refuse every production id — the positive control below is itself a dashed episode
+    id. With the label delimiter-free, `ep-a-b` is `(ep-a, b)` and never `(ep, a-b)`.
+    """
     owner = S.EpisodePaths(episode_dir)
     assert owner.sibling_run_dir(S.EPISODE_ID, "plain").name == f"{S.EPISODE_ID}-plain", (
-        "positive control: a delimiter-free pair composes, byte for byte as today (O3)")
+        "positive control: a delimiter-free label composes, byte for byte as today (O3)")
     for label in ("has-dash", "a-b"):
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            owner.sibling_run_dir("ep", label)
+            owner.sibling_run_dir(S.EPISODE_ID, label)
         assert "-" in str(excinfo.value), (
             "the refusal names the delimiter the component carries; two distinct pairs "
             "composing to one sibling run id is what decision 12 closes")
+    # The world token is minted by `_family.world_token_for`; the owner's `served_world` takes
+    # the minted token, so the `.` refusal is asked of the label THERE.
+    from defender.runtime.branch import _family
+    assert owner.served_world(_family.world_token_for("ep.2026", "plain")).name == (
+        "ep.2026.plain.jsonl"), "positive control: a dotted episode TOKEN is the normal case"
     for label in ("has.dot", "a.b"):
-        with pytest.raises(Exception):  # noqa: B017,PT011
-            owner.served_world(f"{S.EPISODE_ID}.{label}")
-    with pytest.raises(Exception):  # noqa: B017,PT011
-        owner.sibling_run_dir("ep-with-dash", "label")
+        with pytest.raises(_family.FamilyError) as excinfo:
+            _family.world_token_for("ep.2026", label)
+        assert "." in str(excinfo.value)
 
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(

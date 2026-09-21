@@ -105,18 +105,28 @@ ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
 ARTIFACT_CONSTS = frozenset({"INVESTIGATION_NAME", "REPORT_NAME"})
 
 def _artifact_accessors() -> frozenset[str]:
-    """#1077 decision 19: every public accessor `RunPaths`/`EpisodePaths` own — computed, not
-    typed out, so a name D1 adds is never silently invisible to this gate the way the old
-    two-name list was. Matched as bare attribute names because the receiver is a VALUE —
-    `RunPaths(run_dir).investigation` and `rp.investigation` are the same write and only one
-    of them has a resolvable origin."""
+    """`RunPaths`' accessors for the two schema'd artifacts — DERIVED from the owner: every
+    public accessor whose resolved name is one of `ARTIFACT_LITERALS`, so a third artifact
+    that joins `_artifact_schema.ARTIFACT_NAMES` (and this set) is gated the day the owner
+    names it, and an accessor for any OTHER record (`budget`, `tool_trace`, a trace) never
+    is — this gate asks for a CONTENT SCHEMA, and only the two model-authored documents have
+    one (#1077 decision 19, corrected: the list held in step with the owner is this gate's
+    two, not the owner's whole method set). Matched as bare attribute names because the
+    receiver is a VALUE — `RunPaths(run_dir).investigation` and `rp.investigation` are the
+    same write and only one of them has a resolvable origin."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender._run_paths import RunPaths  # noqa: PLC0415
 
-    return frozenset(
-        n for n in (*dir(RunPaths), *dir(EpisodePaths)) if not n.startswith("_"))
+    probe = RunPaths(Path("/probe"))
+    names: set[str] = set()
+    for attr in dir(RunPaths):
+        if attr.startswith("_") or not isinstance(getattr(RunPaths, attr), property):
+            continue
+        resolved = getattr(probe, attr)
+        if isinstance(resolved, Path) and resolved.name in ARTIFACT_LITERALS:
+            names.add(attr)
+    return frozenset(names)
 
 
 ARTIFACT_ACCESSORS = _artifact_accessors()

@@ -879,7 +879,16 @@ def world_token_for(episode_token: str, world_label: str) -> str:
     Four sites compare a world — the staged alias name's head, the world ledger's filename, the
     ledger rows a sibling writes, and the applier's staging decision — and every one of them
     reads this. Two spellings would be the join-breaker the registry of names exists to prevent.
+
+    The label may not carry the composition's own `.` (#1077 decision 12, refused at MINT
+    time): the episode token holds dots by construction (every `-` of the episode id folds
+    onto one), so the label is the text after the token's last dot only while the label
+    itself has none — a dotted label would make two distinct (episode, label) pairs one token.
     """
+    if "." in world_label:
+        raise FamilyError(
+            f"world label {world_label!r} carries '.', the world token's own delimiter — "
+            "two distinct (episode, label) pairs would compose to one world token")
     return f"{episode_token}.{world_label}"
 
 
