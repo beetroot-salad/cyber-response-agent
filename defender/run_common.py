@@ -16,7 +16,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _provenance  # noqa: E402
+from defender import _provenance, _tenant  # noqa: E402
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
@@ -48,6 +48,30 @@ def _alert_label(alert: Path) -> str:
     return alert.parent.name if alert.stem in _GENERIC_ALERT_STEMS else alert.stem
 
 
+def _forked_world_id(runs_base: Path, run_id: str) -> str | None:
+    """The `ResumeWorld` token `<episode>.<label>` for a forked sibling, or `None`.
+
+    #1077 decision 15(1): "forked" means "has a family record", stated explicitly — a resume
+    that is not an episode fork has none and stamps the tenant's base world like an unforked
+    run. The family manifest, when this run is a sibling, sits beside the sibling RUNS BASE
+    (`learning/branch/cli.sibling_runs_base` hands each sibling `<episode_dir>/runs` as its
+    own `DEFENDER_RUNS_BASE`), so `runs_base.parent` is the episode dir — and its OWN NAME is
+    the episode id (`episode_dir_for` names the directory for exactly that id), read off the
+    path rather than re-parsed from the manifest's own copy of the field.
+    """
+    from defender.runtime.branch import _family
+
+    episode_dir = runs_base.parent
+    if not (episode_dir / _family.MANIFEST_NAME).is_file():
+        return None
+    episode_id = episode_dir.name
+    prefix = f"{episode_id}-"
+    if not run_id.startswith(prefix):
+        return None
+    label = run_id[len(prefix):]
+    return f"{episode_id}.{label}"
+
+
 def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
 ) -> Path:
@@ -58,26 +82,40 @@ def materialize_run_dir(
         run_id = f"{ts}-{_alert_label(alert)}"
     if not is_valid_run_id(run_id):
         sys.exit(f"invalid run id {run_id!r} (allowed: {RUN_ID_ALLOWED})")
+    collision = _tenant.refuse_colliding_run_id(run_id)
+    if collision is not None:
+        sys.exit(str(collision))
     runs_base = resolve_runs_base()
     run_dir = runs_base / run_id
-    if run_dir.exists():
-        sys.exit(f"run dir already exists: {run_dir}")
-    # A previous attempt under this run id (its dir removed, its id reused) may have left its
-    # run-end record beside the dir it no longer has (#1047). Cleared HERE, host-side and
-    # before the box exists, for the same reason the provenance stamp is written here: a
-    # record that outlived its run would be copied into the archive as THIS run's own exit
-    # class the moment this attempt ended before writing one. The scrub verdict has no such
-    # window because `stop_and_scrub` rewrites it on every exit.
-    stale = run_end.sidecar_path(run_dir)
-    try:
-        stale.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError as e:
-        sys.exit(f"cannot clear a stale run-end record at {stale}: {e!r}")
     paths = RunPaths(run_dir)
-    paths.gather_raw.mkdir(parents=True)
-    shutil.copy(alert, paths.alert)
+    # RESUMABLE (#1077 decision 3): a second call for this run id finishes whatever the first
+    # left undone and re-stamps, rather than refusing or duplicating — `mkdir(exist_ok=True)`
+    # admits a partially-populated dir from an interrupted first attempt.
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # A previous attempt under this run id (its dir removed, its id reused) may have left its
+    # sidecars beside the dir it no longer has (#1047). Cleared HERE, host-side and before the
+    # box exists, for the same reason the provenance stamp is written here — ALL THREE
+    # sidecars, exact-run-id-keyed, never a glob over the runs base (#1077 decision 3).
+    for sidecar in (
+        run_end.sidecar_path(run_dir), paths.scrub_verdict(runs_base),
+        paths.accounting_failures(runs_base),
+    ):
+        try:
+            sidecar.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            sys.exit(f"cannot clear a stale sidecar at {sidecar}: {e!r}")
+    paths.gather_raw.mkdir(parents=True, exist_ok=True)
+    if not paths.alert.is_file():
+        shutil.copy(alert, paths.alert)
+    # THE TENANT RECORD, created once when absent (#1077 D2) — BEFORE the provenance stamp,
+    # which must equal its values, and BEFORE the box exists. A tenant record that fails to
+    # parse, or a write that fails (an alias planted at its name, a directory squatting it),
+    # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
+    # run — a run with a forged tenant is worse than no run (decision 4/7).
+    tenant_record = _tenant.ensure_tenant(runs_base)
+    world_id = _forked_world_id(runs_base, run_id) or tenant_record.base_world_id
     # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
     # caller can forget — a branched family's siblings are `run.py --resume` PROCESSES, each of
     # which reaches this call and stamps itself, and `learning/branch/cli.verify_family` is
@@ -95,11 +133,14 @@ def materialize_run_dir(
     # launcher does NOT take one capture for all N worlds — a launcher-moment record could only
     # ever describe the launcher's process, and the family stamp is a conclusion about the
     # siblings' own per-process records, anchored to the source's.
-    _stamp(paths.provenance, model=model)
+    _stamp(paths.provenance, model=model, tenant_id=tenant_record.tenant_id, world_id=world_id)
     return run_dir
 
 
-def _stamp(path: Path, *, model: str | None = None) -> None:
+def _stamp(
+    path: Path, *, model: str | None = None,
+    tenant_id: str | None = None, world_id: str | None = None,
+) -> None:
     """Write the run's stamp, and NEVER take the run down doing it.
 
     `capture_tree` goes to some length never to raise; a write that raised beside it would
@@ -123,6 +164,9 @@ def _stamp(path: Path, *, model: str | None = None) -> None:
         # is what every non-branched caller means.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
+        # #1077 O4 — both stamp fields equal the tenant record's values, never `None`, for
+        # every run the host materialises.
+        record = _dataclasses.replace(record, tenant_id=tenant_id, world_id=world_id)
         _provenance.write(path, record)
     except OSError as e:
         print(f"[run_common] could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "

@@ -157,6 +157,13 @@ class RunProvenance:
     #: because the stamp is the only artifact a later reader has, and `None` reads as "this
     #: record does not say" exactly as an absent `scope` does.
     model: str | None = None
+    #: #1077 D3 — the tenant that owns this run, and the world it was stamped into (a bare
+    #: world id for an unforked run, `<episode>.<label>` for a forked sibling). Both optional
+    #: for an OLD stamp on read; `run_common.materialize_run_dir` always supplies both. Read
+    #: the same tolerant way `scope`/`model` are: a wrong-typed value folds to `None` on
+    #: `from_obj` rather than refusing the whole record.
+    tenant_id: str | None = None
+    world_id: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced — HERE, so nothing can build one.
@@ -228,6 +235,8 @@ class RunProvenance:
                 "unavailable": self.unavailable,
                 "scope": self.scope,
                 "model": self.model,
+                "tenant_id": self.tenant_id,
+                "world_id": self.world_id,
             },
             indent=2,
             sort_keys=True,
@@ -271,6 +280,8 @@ class RunProvenance:
         # question about a field it never carried. `None` reads as "this record does not say".
         scope = obj.get("scope")
         model = obj.get("model")
+        tenant_id = obj.get("tenant_id")
+        world_id = obj.get("world_id")
         # WHAT MAKES A RECORD COHERENT IS NOT ASKED HERE. `__post_init__` holds those rules, so
         # this seam only has to decide what each FIELD is, and a well-typed object that no
         # capture could have produced is refused by the construction itself. The parser and the
@@ -286,6 +297,8 @@ class RunProvenance:
                 unavailable=unavailable,
                 scope=scope if isinstance(scope, str) else None,
                 model=(model if isinstance(model, str) else None),
+                tenant_id=(tenant_id if isinstance(tenant_id, str) else None),
+                world_id=(world_id if isinstance(world_id, str) else None),
             )
         except ValueError:
             return None

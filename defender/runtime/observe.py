@@ -133,6 +133,11 @@ class RequestLogger:
         rec = {
             "event_type": "message",
             "agent_id": agent_id,
+            # #1077 decision 18 — every wire-log record carries a writer id, so the main
+            # process and every concurrent gather sub-agent sharing this ONE file stay
+            # individually attributable. MAIN's own `agent_id` is "main"; its writer id is
+            # the upper-cased form, "MAIN", which is what every reader checks for.
+            "writer_id": "MAIN" if agent_id == "main" else agent_id,
             "seq": seq,
             "id": f"{agent_id}#{seq}",
             "kind": kind,

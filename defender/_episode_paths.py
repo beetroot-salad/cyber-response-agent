@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import dataclasses
+from pathlib import Path
+
+from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
+from defender._run_paths import (
+    SERVED_PREFIX,
+    TRACE_SUFFIX,
+    WIRE_LOG_DIR,
+    _check_component,
+    _confine,
+)
+
+#: The episode-layout names (#1077 D1), re-homed here from `learning/branch/archive.py`,
+#: `ledger.py`, `timing.py`, `staging.py`, `runtime/branch/_family.py` and
+#: `scripts/visualize/visualize_episode.py` — every module that used to spell one of these now
+#: imports the constant from this module instead.
+FAMILY_NAME = "family.yaml"
+REVIEW_NAME = "review.yaml"
+SAMPLES_NAME = "samples.yaml"
+JUDGE_NAME = "judge.yaml"
+TIMING_NAME = "timing.json"
+STAGED_NAME = "staged.yaml"
+LEARNING_HTML_NAME = "learning.html"
+
+WORLDS_DIRNAME = "worlds"
+RUNS_DIRNAME = "runs"
+SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
+JUDGE_DRAWS_DIRNAME = "judge"
+BASE_FILENAME = "base.jsonl"
+PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
+RUN_DIR_POINTER_NAME = "run_dir"
+
+#: The archive projection's own flat spellings (D5/N5) — a property of `ArchivedWorld`, not
+#: composed here, but re-homed onto this module beside their siblings (claim C17, extended).
+GATHER_SUMMARIES_DIRNAME = "gather_summaries"
+LESSONS_LOADED_NAME = "lessons_loaded.jsonl"
+ALERT_NAME = "alert.json"
+
+
+@dataclasses.dataclass(frozen=True)
+class EpisodePaths:
+    """One episode's directories and its accessors — the episode-layout owner (#1077 D1).
+
+    Every accessor resolves relative to ``episode_dir``. The layout NAMES live here; the
+    episodes ROOT's resolution stays in `learning/branch/cli.episodes_root` — a configured
+    location this module deliberately does not know how to find.
+    """
+
+    episode_dir: Path
+
+    # -- episode-root records -----------------------------------------------------------------
+
+    @property
+    def family(self) -> Path:
+        return self.episode_dir / FAMILY_NAME
+
+    @property
+    def family_stamp(self) -> Path:
+        """The family stamp shares `_run_paths.PROVENANCE`'s spelling at the episode root — a
+        DIFFERENT shape at the same file name (#1025 fk-8/J12)."""
+        from defender._run_paths import PROVENANCE
+
+        return self.episode_dir / PROVENANCE
+
+    @property
+    def review(self) -> Path:
+        return self.episode_dir / REVIEW_NAME
+
+    @property
+    def samples(self) -> Path:
+        return self.episode_dir / SAMPLES_NAME
+
+    @property
+    def judge(self) -> Path:
+        return self.episode_dir / JUDGE_NAME
+
+    @property
+    def timing(self) -> Path:
+        return self.episode_dir / TIMING_NAME
+
+    @property
+    def staged(self) -> Path:
+        return self.episode_dir / STAGED_NAME
+
+    @property
+    def learning_html(self) -> Path:
+        return self.episode_dir / LEARNING_HTML_NAME
+
+    @property
+    def served(self) -> Path:
+        return self.episode_dir / SERVED_DIRNAME
+
+    @property
+    def served_base(self) -> Path:
+        return self.served / BASE_FILENAME
+
+    @property
+    def priming_lock(self) -> Path:
+        return self.episode_dir / PRIMING_LOCK_NAME
+
+    @property
+    def runs(self) -> Path:
+        return self.episode_dir / RUNS_DIRNAME
+
+    # -- composing accessors — decision 2's shape+containment rule applies to every one --------
+
+    def served_world(self, token: str) -> Path:
+        """`served/<episode>.<label>.jsonl`. Decision 12: the label half of the token must not
+        carry the composition's own delimiter (`.`), and must be case-stable."""
+        token = _check_component(token, what="token")
+        head, sep, label = token.rpartition(".")
+        if sep and ("." in label):
+            raise ValueError(f"{token!r} carries the composition's own delimiter '.'")
+        if sep and not is_case_stable_id(label):
+            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+        target = self.served / f"{token}.jsonl"
+        return _confine(target, self.episode_dir, what="served_world")
+
+    def judge_draw(self, label: str, n: int) -> Path:
+        """`worlds/<label>/judge/<n>.yaml`."""
+        label = _check_component(label, what="label")
+        target = self.episode_dir / WORLDS_DIRNAME / label / JUDGE_DRAWS_DIRNAME / f"{n}.yaml"
+        return _confine(target, self.episode_dir, what="judge_draw")
+
+    def stage_trace(self, stage: str) -> Path:
+        """`wire_logs/<stage>.trace.jsonl` — the episode-root wire trace of one learning stage.
+        Shares `_run_paths.TRACE_SUFFIX` rather than re-spelling it (claim: one reused
+        constant, not two)."""
+        stage = _check_component(stage, what="stage")
+        target = self.episode_dir / WIRE_LOG_DIR / f"{stage}{TRACE_SUFFIX}"
+        return _confine(target, self.episode_dir, what="stage_trace")
+
+    def sibling_run_dir(self, episode_id: str, label: str) -> Path:
+        """`runs/<episode_id>-<label>` — byte for byte as today (O3). Decision 20's
+        case-stability refusal applies to the freshly-authored `label`."""
+        episode_id = _check_component(episode_id, what="episode_id")
+        label = _check_component(label, what="label")
+        if not is_case_stable_id(label):
+            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+        target = self.runs / f"{episode_id}-{label}"
+        return _confine(target, self.episode_dir, what="sibling_run_dir")
+
+    def world_dir(self, label: str) -> Path:
+        """`worlds/<label>`."""
+        label = _check_component(label, what="label")
+        if not is_case_stable_id(label):
+            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+        target = self.episode_dir / WORLDS_DIRNAME / label
+        return _confine(target, self.episode_dir, what="world_dir")
+
+    def run_dir_pointer(self, label: str) -> Path:
+        """`worlds/<label>/run_dir` — a TEXT pointer, never a link (archive.py's own docstring
+        on why)."""
+        label = _check_component(label, what="label")
+        target = self.episode_dir / WORLDS_DIRNAME / label / RUN_DIR_POINTER_NAME
+        return _confine(target, self.episode_dir, what="run_dir_pointer")
+
+    # -- the archive projection's flat spellings, per label ------------------------------------
+
+    def gather_summaries(self, label: str) -> Path:
+        return self.world_dir(label) / GATHER_SUMMARIES_DIRNAME
+
+    def lessons_loaded(self, label: str) -> Path:
+        return self.world_dir(label) / LESSONS_LOADED_NAME
+
+    def alert(self, label: str) -> Path:
+        return self.world_dir(label) / ALERT_NAME
+
+    def draws(self, label: str) -> Path:
+        return self.world_dir(label) / JUDGE_DRAWS_DIRNAME

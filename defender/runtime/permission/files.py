@@ -14,7 +14,13 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
-from defender._run_paths import CASE_ANSWER_KEY_NAMES, PROVENANCE, WIRE_LOG_DIR
+from defender._run_paths import (
+    CASE_ANSWER_KEY_NAMES,
+    PROVENANCE,
+    RAW_MARKER,
+    TICKET_READS_MARKER,
+    WIRE_LOG_DIR,
+)
 from defender.runtime import bash_policy
 
 from .decision import Decision
@@ -254,11 +260,10 @@ def decide_read(
     return Decision(True)
 
 
-# The `gather_raw/` path component, and the reason a read of one earns. Deliberately NOT paired
-# with a `RAW_MARKER in <command text>` substring clamp (see `bash.py`: containment is positive
-# grant enumeration, and a substring scan wrongly denies `… | grep gather_raw`, where the word is
-# a search PATTERN, not a path).
-RAW_MARKER = "gather_raw"
+# The `gather_raw/` path component (imported from the owner, #1077 D1 — claim C20), and the
+# reason a read of one earns. Deliberately NOT paired with a `RAW_MARKER in <command text>`
+# substring clamp (see `bash.py`: containment is positive grant enumeration, and a substring
+# scan wrongly denies `… | grep gather_raw`, where the word is a search PATTERN, not a path).
 RAW_DENY_REASON = (
     "Blocked: the main loop must not read gather_raw/. Gather's returned "
     "summary is the authoritative record (defender SKILL §Principles). If an "
@@ -392,11 +397,10 @@ def _names_query_draft(p: Path) -> bool:
 
 
 # The judge's ticket-read capture writes `ticket_reads/{seq}.json` instead of `gather_raw/`
-# (the retired pipeline judge's closed-ticket tool). Both are by-ref payload families
-# (`_run_paths._PAYLOAD_SHAPES`); a cap that knew only the first would leave the judge (which
-# holds `read=True`) able to re-read at the authored ceiling exactly what the capture view
-# withheld.
-TICKET_READS_MARKER = "ticket_reads"
+# (the retired pipeline judge's closed-ticket tool), imported from the owner (#1077 D1). Both
+# are by-ref payload families (`_run_paths._PAYLOAD_SHAPES`); a cap that knew only the first
+# would leave the judge (which holds `read=True`) able to re-read at the authored ceiling
+# exactly what the capture view withheld.
 
 
 def is_untrusted_read(path: Path) -> bool:

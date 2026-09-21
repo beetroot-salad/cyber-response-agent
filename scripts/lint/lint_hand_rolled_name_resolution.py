@@ -45,6 +45,12 @@ The three spellings it looks for, each a shape that has shipped a live miss:
   - import-module     a comparison against ``<...>.module`` where the module mentions
                       ``ast.ImportFrom``. Same question at the import site.
 
+A fourth legitimate entry point joined the resolver at #1077 D6(b): ``_astlib.owner_derived``
+answers "is this value derived from a name owner (``RunPaths``/``EpisodePaths``)?" the same
+scope-aware way ``callee``/``origin`` answer their questions, and ``lint_run_records.py`` uses
+it rather than re-deriving owner-instance tracking by hand — the same shared-infrastructure
+move this gate exists to enforce.
+
 WHY THE "DOES NOT REACH THE RESOLVER" HALF IS THE GATE, rather than flagging every site. The
 resolver answers for names ROOTED AT AN IMPORT and returns ``None`` for a duck-typed method on
 a value — ``registry.verbs(system)``, ``p.open()``. Several gates here legitimately match such

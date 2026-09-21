@@ -104,10 +104,22 @@ CANONICAL_MODULE = "_artifact_schema.py"
 ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
 ARTIFACT_CONSTS = frozenset({"INVESTIGATION_NAME", "REPORT_NAME"})
 
-#: `RunPaths`' accessors for the same two files. Matched as bare attribute names because the
-#: receiver is a VALUE — `RunPaths(run_dir).investigation` and `rp.investigation` are the same
-#: write and only one of them has a resolvable origin.
-ARTIFACT_ACCESSORS = frozenset({"investigation", "report"})
+def _artifact_accessors() -> frozenset[str]:
+    """#1077 decision 19: every public accessor `RunPaths`/`EpisodePaths` own — computed, not
+    typed out, so a name D1 adds is never silently invisible to this gate the way the old
+    two-name list was. Matched as bare attribute names because the receiver is a VALUE —
+    `RunPaths(run_dir).investigation` and `rp.investigation` are the same write and only one
+    of them has a resolvable origin."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from defender._episode_paths import EpisodePaths  # noqa: PLC0415
+    from defender._run_paths import RunPaths  # noqa: PLC0415
+
+    return frozenset(
+        n for n in (*dir(RunPaths), *dir(EpisodePaths)) if not n.startswith("_"))
+
+
+ARTIFACT_ACCESSORS = _artifact_accessors()
 
 #: Resolved by ORIGIN through `_astlib.callee`, so `from defender._io import write_guarded as w`
 #: is the same finding as the dotted spelling. This is the same primitive set
