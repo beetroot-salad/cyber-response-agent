@@ -569,22 +569,41 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(hoste
 # D3 / decision 15 — the world token, and the family's view of the two new fields
 # ---------------------------------------------------------------------------------------
 
+def _resume_world(episode_dir: Path, label: str):
+    """The `ResumeWorld` a sibling process holds — resolved from the manifest exactly as
+    `run.py --resume <manifest> --world <label>` resolves it, and handed to the builder the
+    way `run.py` hands it. The world token is `_family.world_token_for`'s ESCAPED spelling
+    (`-` of the episode id folded onto `.`), the one the ledger filename and every staged
+    alias are keyed on; the builder never re-composes it from a path."""
+    from defender.runtime.branch import _family
+    family = _family.load_family(S.EpisodePaths(episode_dir).family)
+    return _family.resume_world_from(family, label, episode_dir)
+
+
 def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_world(
         hosted, base, alert, tmp_path: Path, monkeypatch):
-    """A forked sibling stamps its `ResumeWorld` token `<episode>.<label>` and an unforked run
-    stamps the tenant's `base_world_id`."""
+    """A forked sibling stamps its `ResumeWorld.world_id` — the escaped `<episode token>.
+    <label>` the ledger and the staged aliases key on — and its lineage (the source run, the
+    branch turn); an unforked run stamps the tenant's `base_world_id` and no lineage."""
     unforked = hosted(alert, "run-unforked")
     assert _stamp(unforked)["world_id"] == _record(base)["base_world_id"]
     assert "." not in _stamp(unforked)["world_id"], "an unforked run stamps a bare world id"
+    assert _stamp(unforked)["parent_run_id"] is None
+    assert _stamp(unforked)["fork_turn"] is None
 
-    episode_dir = T.episode(tmp_path, episode_id=S.EPISODE_ID)
+    episode_dir = T.episode(tmp_path)
     sibling_base = S.make_runs_base(episode_dir, "runs")
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(sibling_base))
-    T.write_family(episode_dir) if hasattr(T, "write_family") else None
-    sibling = S.run_common().materialize_run_dir(alert, f"{S.EPISODE_ID}-{S.LABEL}")
-    assert _stamp(sibling)["world_id"] == f"{S.EPISODE_ID}.{S.LABEL}", (
-        "a forked sibling stamps the EPISODE-QUALIFIED token, which is what "
-        "`served/<token>.jsonl` keys on and what D3 writes into provenance")
+    world = _resume_world(episode_dir, "b")
+    sibling = S.run_common().materialize_run_dir(alert, world.run_id, world=world)
+    assert _stamp(sibling)["world_id"] == world.world_id, (
+        "a forked sibling stamps its ResumeWorld token, which is what `served/<token>.jsonl` "
+        "keys on and what D3 writes into provenance")
+    assert "-" not in _stamp(sibling)["world_id"], (
+        "the token is the ESCAPED spelling (`episode_token_for`), never `<episode_id>.<label>` "
+        "re-composed from the run id — that spelling joins to nothing")
+    assert _stamp(sibling)["parent_run_id"] == world.family.source_run_id
+    assert _stamp(sibling)["fork_turn"] == world.family.branch_message_id
 
 
 def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(hosted, base, alert):
@@ -604,14 +623,16 @@ def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(hosted, 
 def test_the_base_role_sibling_of_a_family(tmp_path: Path, alert, monkeypatch):
     """D3's token rule keys only on forked-or-not, never on sibling role: the base-role sibling
     gets the same `<episode>.<label>` token as any other forked sibling, with no special case."""
-    episode_dir = T.episode(tmp_path, episode_id=S.EPISODE_ID)
+    episode_dir = T.episode(tmp_path)
     sibling_base = S.make_runs_base(episode_dir, "runs")
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(sibling_base))
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role (`_family.py:59`)
-        run = S.run_common().materialize_run_dir(alert, f"{S.EPISODE_ID}-{label}")
+        world = _resume_world(episode_dir, label)
+        run = S.run_common().materialize_run_dir(alert, world.run_id, world=world)
         tokens[label] = _stamp(run)["world_id"]
-    assert tokens == {"a": f"{S.EPISODE_ID}.a", "b": f"{S.EPISODE_ID}.b"}, (
+    expected = {label: _resume_world(episode_dir, label).world_id for label in ("a", "b")}
+    assert tokens == expected, (
         "the base-role sibling is still a forked sibling and gets the episode-qualified token, "
         "with no role-based special case — which is why no family member ever carries the "
         "tenant's base_world_id, and why decision 15(4) puts it in the family record instead")

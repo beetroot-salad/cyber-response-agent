@@ -5,6 +5,9 @@ from pathlib import Path
 
 from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
 from defender._run_paths import (
+    ALERT,
+    GATHER_SUMMARIES_DIRNAME,
+    LESSONS_LOADED,
     SERVED_PREFIX,
     TRACE_SUFFIX,
     WIRE_LOG_DIR,
@@ -33,11 +36,12 @@ BASE_FILENAME = "base.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 RUN_DIR_POINTER_NAME = "run_dir"
 
-#: The archive projection's own flat spellings (D5/N5) — a property of `ArchivedWorld`, not
-#: composed here, but re-homed onto this module beside their siblings (claim C17, extended).
-GATHER_SUMMARIES_DIRNAME = "gather_summaries"
-LESSONS_LOADED_NAME = "lessons_loaded.jsonl"
-ALERT_NAME = "alert.json"
+#: The archive projection's own flat spellings (D5/N5): the two sidecars, which live beside a
+#: run dir keyed by run id (`<run>.scrub-verdict.json`) and are re-homed under the world as a
+#: bare `<kind>.json` — names the archive OWNS because no run dir carries them. Every other
+#: archived name is the run dir's own and is imported from `_run_paths`, not re-spelled.
+ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
+ARCHIVED_RUN_END_NAME = "run_end.json"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,10 +177,10 @@ class EpisodePaths:
         return self.world_dir(label) / GATHER_SUMMARIES_DIRNAME
 
     def lessons_loaded(self, label: str) -> Path:
-        return self.world_dir(label) / LESSONS_LOADED_NAME
+        return self.world_dir(label) / LESSONS_LOADED
 
     def alert(self, label: str) -> Path:
-        return self.world_dir(label) / ALERT_NAME
+        return self.world_dir(label) / ALERT
 
     def draws(self, label: str) -> Path:
         return self.world_dir(label) / JUDGE_DRAWS_DIRNAME

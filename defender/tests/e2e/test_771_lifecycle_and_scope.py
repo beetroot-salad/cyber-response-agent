@@ -558,7 +558,11 @@ def test_artifacts_still_land_at_their_current_paths_in_the_shared_tree(tmp_path
         writer.invoke(fresh)
         landed = fresh / writer.artifact
         assert landed.is_file(), f"{writer.id} no longer lands at {writer.artifact}"
-        assert landed.resolve().is_relative_to(fresh.resolve()), (
+        # A row whose artifact is spelled `../<name>` lands in the RUNS BASE tier — beside the
+        # run dir, keyed by it, at the sidecars' trust level (#1077 D2, page table 2: the
+        # tenant record) — and that tier is its shared tree; every other row's is the run dir.
+        tree = fresh.parent if writer.artifact.startswith("../") else fresh
+        assert landed.resolve().is_relative_to(tree.resolve()), (
             f"{writer.id}'s artifact was re-sited out of the shared tree (NO3)"
         )
 
@@ -608,7 +612,12 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
 
-    # ARM 1 — the mint refuses an id whose directory is still on disk, and touches nothing.
+    # ARM 1 — the mint refuses an id whose directory a RUN has been in, and touches nothing.
+    # "Has been in" is judged by contents: setup writes exactly the alert, `gather_raw/` and
+    # the stamp, so anything else under the id (here the model's own report) is a run's trace,
+    # and a container from that run may still be mounted on the tree. (#1077 decision 3 makes
+    # a directory holding NOTHING BUT setup's own writes resumable — an interrupted setup
+    # never started a box, so that premise does not reach it.)
     first = run_common.materialize_run_dir(alert, "stale-771")
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
@@ -617,7 +626,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         run_common.materialize_run_dir(alert, "stale-771")
 
     assert "already exists" in str(exit_.value), (
-        f"the second mint on a live run id did not refuse on the directory's existence: "
+        f"the second mint on a live run id did not refuse on the directory's contents: "
         f"{exit_.value} — the refusal is what keeps a later run out of a tree a container from "
         f"an earlier run may still be mounted on"
     )

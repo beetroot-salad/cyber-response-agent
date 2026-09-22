@@ -81,6 +81,14 @@ def test_the_handle_exposes_a_named_run_record_rather_than_twelve_properties(bas
     assert type(record) is S.RunRecord()
     for field in S.RUN_RECORD_FIELDS:
         assert hasattr(record, field), f"RunRecord does not hold D4's {field}"
+        if field == "tenant_id":
+            # THE ADDRESS shares a name with a descriptive field. `run.tenant_id` is the tenant
+            # the handle was asked for (N4: addressed by `(tenant_id, run_id)`, as `run_dir` is
+            # the directory it was asked for); `run.record.tenant_id` is what the STAMP says.
+            # `for_tenant` refuses when they disagree; `Run.at` has no address and no attribute.
+            assert run.tenant_id == S.DEFAULT_TENANT_ID
+            assert not hasattr(S.Run().at(run_dir), "tenant_id")
+            continue
         assert not hasattr(run, field), (
             f"Run exposes {field} as a property of its own — fork D-F2 closed AGAINST that pin; "
             "the twelve fields live on RunRecord, a placeholder for #1081/#1082's job record")
@@ -658,18 +666,22 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
 
 def test_every_sub_collection_reads_everywhere_and_writes_only_where_the_runtime_produces(
         base, run_dir):
-    """Every sub-collection reads everywhere and exposes append or write only where the runtime
-    is the record's producer — including `documents`, writable in place by the investigation
+    """Every record reads everywhere and exposes exactly ITS producer's verb — `append` for a
+    table or trace, `write` for a document or a write-once fact, `update` for a locked state,
+    `open` for the session store — and no other; a record nothing in the host writes through
+    the handle exposes none. Including `documents`, writable in place by the investigation
     process during its own run."""
     run = _tenanted(base)
     for group, names in S.GROUP_MEMBERS.items():
-        verb = S.GROUP_WRITE_VERB[group]
         for name in names:
             rec = S.member(run, group, name, *S.member_args(name))
             assert callable(getattr(rec, "read", None)), f"run.{group}.{name} is not readable"
-            assert callable(getattr(rec, verb, None)), (
-                f"run.{group}.{name} exposes no `{verb}` — decision 11 applies the issue's own "
-                "general rule uniformly, so the producer's verb is present on every group")
+            verb = S.MEMBER_VERB[name]
+            exposed = {v for v in S.VERBS if callable(getattr(rec, v, None))}
+            assert exposed == ({verb} if verb else set()), (
+                f"run.{group}.{name} exposes {sorted(exposed)}; its producer's verb is {verb!r} "
+                "— a verb that does not fit the record's shape corrupts it (JSONL appended into "
+                "a SQLite store, a whole JSON document appended to)")
     # Driven, not merely present: one member per group actually produces its record.
     S.member(run, "documents", "investigation").write("# in place\n")
     assert S.member(run, "documents", "investigation").read() == "# in place\n", (
@@ -720,9 +732,14 @@ def test_run_documents_group_write_contract_matches_the_design_tables_rewritten_
         "by applying the issue's general rule rather than by picking the table over the structure")
     for name in S.GROUP_MEMBERS["documents"]:
         rec = S.member(run, "documents", name, *S.member_args(name))
-        assert callable(rec.write)
         assert callable(rec.read)
         assert not hasattr(rec, "append"), f"run.documents.{name} is rewritten, not appended"
+        if S.MEMBER_VERB[name] is None:
+            # `lead_author/` is a DIRECTORY of documents the learning drain lands; the handle
+            # names it and reads it, and there is no whole-record write of a directory.
+            assert not hasattr(rec, "write"), f"run.documents.{name} is a directory"
+            continue
+        assert callable(rec.write)
 
 
 def test_run_observability_group_stays_append_only_through_the_handle(base, run_dir):
@@ -751,8 +768,15 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
             assert json.loads(rec.read()) == {"a": 1, "b": 2}, (
                 f"run.observability.{name}'s update discarded the existing entry")
             continue
-        assert not hasattr(rec, "write"), (
-            f"run.observability.{name} exposes a whole-record rewrite of an existing entry")
+        if S.MEMBER_VERB[name] == "append":
+            assert not hasattr(rec, "write"), (
+                f"run.observability.{name} exposes a whole-record rewrite of an existing entry")
+        else:
+            # A whole JSON/HTML document the host writes once per run (the ticket write, the
+            # session pointer, the rendered page, the review record) is not a log: it has no
+            # entries to append to, and appending JSONL to it would corrupt it.
+            assert not hasattr(rec, "append"), (
+                f"run.observability.{name} is a whole document; an append would corrupt it")
 
 
 # ---------------------------------------------------------------------------------------

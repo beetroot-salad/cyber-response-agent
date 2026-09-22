@@ -835,11 +835,15 @@ def write_guarded(
     `mode` names the idiom the caller had: `replace` (the truncating/atomic lane — D1: stages
     under an unpredictable name, then `os.replace`s into place, which replaces a planted
     symlink rather than following it and never opens the existing target at all), `create`
-    (the EXCLUSIVE lane — stages the same way, then `os.link`s the staged file into place, so
-    the target goes from absent to fully written in one step and an occupied name raises
-    `FileExistsError` instead of being replaced: the write-once records — a tenant record, a
-    lead claim, a priming lock — are created through this and never through `replace`, whose
-    whole point is to overwrite), `append` (the JSONL lane — `O_NOFOLLOW` at open) and `update`
+    (the EXCLUSIVE lane — ONE `O_CREAT|O_EXCL|O_NOFOLLOW` open of the target itself, so the
+    exclusivity is the kernel's and no second name ever exists: an occupied name raises
+    `FileExistsError` instead of being replaced, which is how the write-once records — a
+    tenant record, a fact of a run — are created, never through `replace`, whose whole point
+    is to overwrite. A staged-then-linked create was tried and rejected: for the instant the
+    stage still exists the target has two names, and every guarded reader in this tree refuses
+    a two-named file as an alias. The residue is a reader that opens between the create and
+    the single `write()` and sees an empty record — which reads as corrupt and refuses, the
+    honest answer for a record mid-write), `append` (the JSONL lane — `O_NOFOLLOW` at open) and `update`
     (the locked read-modify-write lane — `O_NOFOLLOW` at open, before the lock is taken).
     `text` may be `bytes` (the drain lane's
     corpus restore); the fd is opened binary or text to match. `stage_name` is the name-source
@@ -854,7 +858,7 @@ def write_guarded(
             f"did you mean mode={mode!r}?"
         )
     path = Path(path)
-    if mode in ("replace", "create"):
+    if mode == "replace":
         _refuse_unless_plain(path)
         staged = Path(stage_name(path))
         try:
@@ -862,24 +866,26 @@ def write_guarded(
         except OSError as e:
             raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
         try:
-            if isinstance(text, (bytes, bytearray)):
-                with os.fdopen(fd, "wb") as fb:
-                    fb.write(text)
-            else:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(text)
-            if mode == "replace":
-                os.replace(staged, path)
-            else:
-                # `link` is the one atomic primitive that both refuses an occupied name and
-                # lands the whole staged content at once; an `O_EXCL` open of the target itself
-                # would let a reader see the record half-written. The EEXIST here is the
-                # ORDINARY create race (someone else won), not an alias plant — unmarked, so a
-                # caller can tell "lost the race, read the winner" from "refused".
-                os.link(staged, path)
-        finally:
+            _write_all(fd, text)
+            os.replace(staged, path)
+        except BaseException:
             with contextlib.suppress(OSError):
                 os.remove(staged)
+            raise
+    elif mode == "create":
+        # The alias precheck first, so a planted symlink/hard link/directory at the name is
+        # the same marked refusal every lane raises; the EEXIST from the open itself is then
+        # the ORDINARY create race (a plain file someone else just made) — unmarked, so a
+        # caller can tell "lost the race, read the winner" from "refused".
+        _refuse_unless_plain(path)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        try:
+            _write_all(fd, text)
+        except BaseException:
+            # Ours to remove: the create succeeded, so the half-written entry is this call's.
+            with contextlib.suppress(OSError):
+                os.remove(path)
+            raise
     elif mode == "append":
         _refuse_unless_plain(path)
         fd = open_nofollow_fd(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
@@ -896,6 +902,16 @@ def write_guarded(
             f.write(text)
     else:
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
+
+
+def _write_all(fd: int, text: str | bytes) -> None:
+    """Write `text` to a fresh descriptor and close it (text or bytes to match)."""
+    if isinstance(text, (bytes, bytearray)):
+        with os.fdopen(fd, "wb") as fb:
+            fb.write(text)
+    else:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
 
 
 def open_guarded(path: Path, mode: str = "a"):

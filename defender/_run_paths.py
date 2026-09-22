@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import dataclasses
+import errno
 import re
 import stat
 from pathlib import Path
 
-from defender._io import is_plain_entry
+from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
 
 # STDLIB `@dataclass`, not `defender._model.model` (#1077 D1): the box entrypoint's import
 # closure needs this module with no third-party package installed — `runtime/box/__init__.py`
@@ -178,6 +179,12 @@ class RunPaths:
 
     run_dir: Path
 
+    def __post_init__(self) -> None:
+        # The pydantic model this class used to be coerced a `str` here; a stdlib dataclass
+        # does not, and `"…" / ALERT` is a `TypeError` at the first accessor. Coerced, so a
+        # caller holding the directory as text (an env var, an argv) constructs as before.
+        object.__setattr__(self, "run_dir", Path(self.run_dir))
+
     # -- content the run produced -----------------------------------------------------------
 
     @property
@@ -252,6 +259,7 @@ class RunPaths:
         trace, written into the CITED run's own dir while reading it as evidence."""
         prefix = _check_component(prefix, what="prefix")
         stem = _check_component(stem, what="stem")
+        n = _check_index(n, what="n")
         target = self.run_dir / WIRE_LOG_DIR / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
         return _confine(target, self.run_dir, what="forward_check_trace")
 
@@ -437,14 +445,29 @@ def _check_index(value: object, *, what: str) -> int:
 
 
 def _confine(candidate: Path, root: Path, *, what: str) -> Path:
-    """Decision 2's containment half: refuse a composed path that resolves outside `root`."""
+    """Decision 2's containment half: refuse a composed path that resolves outside `root`.
+
+    ONE REFUSAL TYPE with the write seam. A composed name that resolves outside its root is
+    the same fact `_io.write_guarded` refuses at the open — an entry under the record's name
+    that is not the plain file it should be (here: a planted link whose target leaves the
+    tree) — so it raises the same alias-marked `OSError`, and every caller whose `except
+    OSError` arm already records the write refusal handles this one identically instead of
+    aborting on a `ValueError` it never expected (`close_tool._commit`'s record-first-report-
+    second contract). A malformed ARGUMENT (`_check_component`/`_check_index`) stays a
+    `ValueError`: that is the caller's bug, not the tree's state."""
     try:
         resolved_root = Path(root).resolve()
         resolved = Path(candidate).resolve()
     except _RESOLVE_ERRORS as e:
-        raise ValueError(f"{what}: {candidate} could not be resolved: {e}") from e
+        raise _mark_alias(
+            OSError(errno.ELOOP, f"{what}: {candidate} could not be resolved: {e}",
+                    str(candidate)),
+            is_alias=True) from e
     if resolved != resolved_root and resolved_root not in resolved.parents:
-        raise ValueError(f"{what}: {candidate} resolves outside {root}")
+        raise _mark_alias(
+            OSError(errno.ELOOP, f"{what}: {ALIAS_READ_REFUSAL} — {candidate} resolves "
+                    f"outside {root}", str(candidate)),
+            is_alias=True)
     return candidate
 
 

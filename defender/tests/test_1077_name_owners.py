@@ -303,10 +303,17 @@ def test_every_composed_accessor_shape_checks_then_confines_against_its_own_root
         assert Path(ok).is_absolute() is False or Path(ok).is_relative_to(owner_root), (
             f"{acc.owner}.{acc.attr} does not resolve inside its own root for an ordinary value")
         for hostile in S.HOSTILE_COMPONENTS:
-            # EVERY component slot takes the hostile value, the numbered ones included: a
-            # `turn`/`seq`/`n` slot handed `'../x'` formats straight into the name unless the
-            # shape rule refuses a non-integer there, and an accessor whose only component is
-            # numbered (`review_record(turn)`) would otherwise never be probed at all.
+            # ONE slot at a time, the numbered ones included: a `turn`/`seq`/`n` slot handed
+            # `'../x'` formats straight into the name unless the shape rule refuses a
+            # non-integer there, and probing every slot at once lets the FIRST slot's refusal
+            # hide an unchecked later one (`forward_check_trace(prefix, stem, n)`).
+            for slot in range(len(acc.args)):
+                args = tuple(hostile if i == slot else a for i, a in enumerate(acc.args))
+                with pytest.raises(Exception) as excinfo:  # noqa: PT011
+                    S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
+                              args=args)
+                assert excinfo.value is not None, f"{acc.attr}({hostile!r} in slot {slot})"
+            continue
             args = tuple(hostile for _ in acc.args)
             with pytest.raises(Exception) as excinfo:  # noqa: PT011
                 S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
@@ -339,13 +346,12 @@ def test_every_composed_accessor_applies_the_shape_then_containment_pair_or_a_re
     assert absent == [], f"these composing accessors do not exist to be censused: {absent}"
 
     escaped = []
-    for acc in S.COMPOSING:
-        for hostile in S.HOSTILE_COMPONENTS:
-            # EVERY component slot takes the hostile value, the numbered ones included: a
-            # `turn`/`seq`/`n` slot handed `'../x'` formats straight into the name unless the
-            # shape rule refuses a non-integer there, and an accessor whose only component is
-            # numbered (`review_record(turn)`) would otherwise never be probed at all.
-            args = tuple(hostile for _ in acc.args)
+    probes = [
+        (acc, hostile, tuple(hostile if i == slot else a for i, a in enumerate(acc.args)))
+        for acc in S.COMPOSING for hostile in S.HOSTILE_COMPONENTS
+        for slot in range(len(acc.args))]  # one slot at a time — the sibling test says why
+    for acc, hostile, args in probes:
+        if True:
             try:
                 got = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
                                 args=args)

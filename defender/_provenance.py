@@ -164,6 +164,13 @@ class RunProvenance:
     #: `from_obj` rather than refusing the whole record.
     tenant_id: str | None = None
     world_id: str | None = None
+    #: #1077 D3/D4 — a forked sibling's lineage, stamped by the host from the manifest the
+    #: launcher already holds (`ResumeWorld.family`): the source run and the branch point.
+    #: `None` for an unforked run. Stamped rather than re-read from `family.yaml` later, so a
+    #: run's record is answerable from the run's own files and nothing has to guess where the
+    #: episode directory is from the runs base's parent.
+    parent_run_id: str | None = None
+    fork_turn: int | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced — HERE, so nothing can build one.
@@ -237,6 +244,8 @@ class RunProvenance:
                 "model": self.model,
                 "tenant_id": self.tenant_id,
                 "world_id": self.world_id,
+                "parent_run_id": self.parent_run_id,
+                "fork_turn": self.fork_turn,
             },
             indent=2,
             sort_keys=True,
@@ -282,6 +291,8 @@ class RunProvenance:
         model = obj.get("model")
         tenant_id = obj.get("tenant_id")
         world_id = obj.get("world_id")
+        parent_run_id = obj.get("parent_run_id")
+        fork_turn = obj.get("fork_turn")
         # WHAT MAKES A RECORD COHERENT IS NOT ASKED HERE. `__post_init__` holds those rules, so
         # this seam only has to decide what each FIELD is, and a well-typed object that no
         # capture could have produced is refused by the construction itself. The parser and the
@@ -299,6 +310,10 @@ class RunProvenance:
                 model=(model if isinstance(model, str) else None),
                 tenant_id=(tenant_id if isinstance(tenant_id, str) else None),
                 world_id=(world_id if isinstance(world_id, str) else None),
+                parent_run_id=(parent_run_id if isinstance(parent_run_id, str) else None),
+                fork_turn=(
+                    fork_turn if isinstance(fork_turn, int) and not isinstance(fork_turn, bool)
+                    else None),
             )
         except ValueError:
             return None

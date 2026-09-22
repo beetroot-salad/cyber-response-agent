@@ -74,7 +74,13 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
     queries.append([{"seq": 0, "system": "elastic"}])
-    leads.append([{"lead_id": S.LEAD_ID, "goal": "first"}])
+    # A lead claim is an EXCLUSIVE-CREATE sidecar (the design's own words for `tables`:
+    # "append-only; exclusive-create claims"): written once, and a second claim on the same
+    # lead id collides — which is what keeps two dispatches of one lead from being one row.
+    leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "first"}))
+    with pytest.raises(Exception, match="write-once"):
+        leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "second"}))
+    assert json.loads(leads.read())["goal"] == "first", "the second claim overwrote the first"
 
     # A SECOND PROCESS reads the tables while the run is still going — the property O5 names.
     reader = subprocess.run(
@@ -118,7 +124,7 @@ def test_the_session_store_still_forks_at_turn_n_through_the_handle(tmp_path: Pa
         prefix = SS.sql(
             store, "SELECT COUNT(*) FROM message WHERE session_id = ?", (session_id,))[0][0]
         assert prefix >= n_complete
-        head = SS.sql(store, "SELECT head_message_id FROM session WHERE id = ?",
+        head = SS.sql(store, "SELECT head_message_id FROM session WHERE session_id = ?",
                       (forked,))[0][0]
     assert head == at, (
         "the fork's head is not the branch point; O5's 'forkable at turn N' is the property "
@@ -462,9 +468,11 @@ def test_runs_written_records_are_all_slots_bound_and_role_disjoint(tmp_path: Pa
     handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
 
     S.member(handle, "tables", "queries").append([{"seq": 0, "lead_id": S.LEAD_ID}])
-    S.member(handle, "tables", "leads", S.LEAD_ID).append([{"lead_id": S.LEAD_ID, "goal": "g"}])
+    S.member(handle, "tables", "leads", S.LEAD_ID).write(
+        json.dumps({"lead_id": S.LEAD_ID, "goal": "g"}))
     S.member(handle, "tables", "payloads", S.LEAD_ID, S.SEQ).write('{"rows": []}')
-    S.member(handle, "observability", "review_record", S.TURN).append([{"turn": S.TURN}])
+    S.member(handle, "observability", "review_record", S.TURN).write(
+        json.dumps({"turn": S.TURN}))
     S.member(handle, "observability", "wire_log").append(
         [{"event_type": "message", "agent_id": "main", "seq": 0}])
 
@@ -523,6 +531,10 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     # sibling's docstring says "most artifact readers are deliberately tolerant" (:650). Handed
     # a log whose every record carries the new key, it must return those records unchanged —
     # neither dropping them nor validating a key set.
+    # `visualize_data` re-exports names from `visualize_messages` at its foot while the latter
+    # imports `visualize_data` at its head: imported in THIS order the cycle resolves, in the
+    # other it does not (a pre-existing cycle outside #1077's scope).
+    import defender.scripts.visualize.visualize_data  # noqa: F401
     from defender.scripts.visualize.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (
         "the shipped wire-log viewer no longer round-trips the records it is handed once every "

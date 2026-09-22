@@ -404,10 +404,15 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     judge's prompt and the ticket bridge's egress."""
     state = challenge_gate.ReviewState.of(deps)
     turn_for_record = state.turns + 1
-    record_path = RunPaths(deps.run_dir).review_record(turn_for_record)
 
+    # Resolving the record's name is part of writing it: the owner refuses a planted alias
+    # under that name with the same `OSError` the write seam raises, and it is recorded here
+    # the same way — the report is still attempted (RS19: record FIRST, report SECOND, both
+    # attempted regardless).
+    record_path: Path | None = None
     record_error: BaseException | None = None
     try:
+        record_path = RunPaths(deps.run_dir).review_record(turn_for_record)
         challenge_gate.write_review_record(deps.run_dir, turn_for_record, record)
     except OSError as e:
         record_error = e

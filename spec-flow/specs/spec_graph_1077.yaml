@@ -511,6 +511,7 @@ demands:
       is closed here rather than left for the lessons-attribution issue to discover: the
       family's base world is kept in the FAMILY RECORD (demand h48). Decision 15(1) also states
       what "forked" means — has a family record — so a resume stamps the base world (h45).
+      CORRECTED at finalize (PR #1094 review): the sibling's world id is `ResumeWorld.world_id` — `world_token_for(episode_token_for(episode_id), label)`, the ESCAPED spelling the ledger filename and every staged alias key on — HANDED to `materialize_run_dir(world=)` by the launcher that already resolved it (`run.py`), never re-composed from the run id and the runs base's parent (`_forked_world_id`, retired: it produced `<episode_id>.<label>`, a second spelling that joined to nothing). The test drives a real `ResumeWorld` off the fixture manifest. D3/D4: the stamp also carries `parent_run_id`/`fork_turn` from the same manifest, so `run.record` reads a fork's lineage off the run's own files.
   - id: family_stamp_drops_world_id
     kind: behavior
     form: test
@@ -1639,6 +1640,7 @@ demands:
       way as g06/g07 (decision 11, DISSOLVED). §7 decision 7 adds the failure half — an
       observability write that fails is recorded as a partial failure and does not fail the run
       (demand h25).
+      CORRECTED at finalize (PR #1094 review): the verb is the RECORD's, not the group's (`_run_handle.MEMBER_VERB`, mirrored by `_spec1077.MEMBER_VERB`). The traces and logs stay append-only; the whole JSON/HTML documents in this group (`ticket_write`, `session_pointer`, `runtime_html`, `review_record`) are written whole — an `append` onto them corrupts them — and the two locked states expose `update` alone.
   - id: g09_plain_name_screen
     kind: domain-outcome
     form: test
@@ -1730,6 +1732,7 @@ demands:
       Fork D-F2 closed AGAINST the pin. `RunRecord` is deliberately thin — a named holder for
       twelve fields read through today's readers, no new parsing — and is flagged in the PR
       description as a placeholder for #1081/#1082's real job-record type.
+      CORRECTED at finalize (PR #1094 review): `tenant_id` is also THE ADDRESS (N4: a `Run` is addressed by `(tenant_id, run_id)`), so a `for_tenant`/`under` handle carries `run.tenant_id` — the tenant it was asked for, as `run_dir` is the directory it was asked for — while `run.record.tenant_id` is what the stamp says; `Run.at` has no address and no attribute. The other eleven fields live on `RunRecord` alone, as before.
   - id: h02_record_accessor_returns_a_wrapper_not_a_path
     kind: behavior
     form: test
@@ -1911,6 +1914,7 @@ demands:
       The alternative — refuse on an existing directory — would make every transient failure
       permanently burn a run id, and the handle already tolerates stampless run-dir-shaped
       directories (N8).
+      CORRECTED at finalize (PR #1094 review): 'resumable' is a directory holding NOTHING BUT what setup writes (the alert, `gather_raw/`, the stamp — the owner's own names); a directory a run has been in (any other entry, or a run-end sidecar beside it) is REFUSED, which is #771's stale-mount premise stated over contents. The alert is write-once through the handle (`run.facts.alert.write`), so a reused id with a different alert is refused by the lane; the stamp is re-written on a resumed setup (no box has been in the directory); the three sidecars are cleared only when the directory is ABSENT (#1047's case).
   - id: h13_run_id_reuse_clears_all_three_sidecars
     kind: behavior
     form: test
@@ -1928,6 +1932,7 @@ demands:
       Leaving two stale sidecars attributes a previous occupant's scrub verdict and accounting
       failures to a new run. Decision 12's case-stability refusal is what keeps two case-variant
       spellings from being two runs sharing one sidecar set.
+      CORRECTED at finalize (PR #1094 review): cleared only when the run DIRECTORY is absent — a present directory with a sidecar beside it is a run that ended, and is refused rather than having its records destroyed ahead of a check that then refuses it.
   - id: h14_forking_or_archiving_a_running_run_is_supported
     kind: behavior
     form: test
@@ -2261,10 +2266,16 @@ demands:
       - "Run.access[session]"
     discharged_by: test_every_sub_collection_reads_everywhere_and_writes_only_where_the_runtime_produces
     seed_docstring: >-
-      Every sub-collection reads everywhere and exposes append or write only where the runtime is
-      the record's producer — including `documents`, writable in place by the investigation
+      Every record reads everywhere and exposes exactly ITS producer's verb — `append` for a
+      table or trace, `write` for a document or a write-once fact, `update` for a locked state,
+      `open` for the session store — and no other; a record nothing in the host writes through
+      the handle exposes none. Including `documents`, writable in place by the investigation
       process during its own run.
     note: >-
+      CORRECTED at finalize (PR #1094 review): the rule is applied uniformly PER RECORD, not per
+      group — a group-wide verb handed the session db an `append` that would have written JSONL
+      into SQLite, and the whole JSON/HTML observability documents an `append` that would have
+      corrupted them (`_run_handle.MEMBER_VERB`, mirrored by `_spec1077.MEMBER_VERB`).
       Decision 11 DISSOLVED the "table wins vs structure wins" framing: the issue body already
       states the general rule, and applying it uniformly closes the contradiction without picking
       a side. PARITY across all five group cells; g06/g07/g08 are the per-cell demands it states

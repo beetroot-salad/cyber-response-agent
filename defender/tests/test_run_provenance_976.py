@@ -506,8 +506,9 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
 
 def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
     """`capture_tree` goes to some length never to raise; a write that raised beside it would
-    hand that promise back. Worse, it arrives AFTER the run dir exists, so an escaping OSError
-    burns the run id — the retry an operator reaches for is refused forever."""
+    hand that promise back — and it arrives AFTER the run dir exists. (Before #1077 an escaping
+    OSError also burned the run id; setup is resumable now, so this drives the whole
+    materialisation over the wedged directory rather than `_stamp` alone.)"""
     from defender import run_common
 
     runs = tmp_path / "runs"
@@ -521,13 +522,12 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     (runs / run_id).mkdir()
     (runs / run_id / PROVENANCE).mkdir()
 
-    def _materialize():
-        # `materialize_run_dir` refuses an existing dir, so drive `_stamp` directly — it is the
-        # seam that owns the promise, and the arm is about the promise rather than the caller.
-        run_common._stamp(runs / run_id / PROVENANCE)
-
-    _materialize()
+    # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
+    # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
+    # run continue unstamped.
+    assert run_common.materialize_run_dir(alert, run_id) == runs / run_id
     assert "could not stamp" in capsys.readouterr().err
+    assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
 
 
 def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):

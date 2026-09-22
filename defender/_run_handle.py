@@ -31,9 +31,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender import _artifact_schema
+from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
-from defender import _provenance, _report, _tenant
+from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
 from defender._run_paths import RunPaths
 
@@ -52,7 +52,6 @@ GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
         "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
-GROUP_OF: dict[str, str] = {n: g for g, ns in GROUP_MEMBERS.items() for n in ns}
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
@@ -69,24 +68,39 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
     "session_db": "session_db",
 }
-GROUP_WRITE_VERB: dict[str, str] = {
-    "tables": "append", "facts": "write", "documents": "write",
-    "observability": "append", "session": "append"}
-LOCKED_STATE_MEMBERS = ("budget", "circuit_breaker")
+#: THE VERB BELONGS TO THE RECORD, NOT THE GROUP: the group says how a record is READ and by
+#: whom (decision 1a); what a writer may do to it is a fact of the record's own shape. One
+#: table, one verb per member — `append` for a JSONL table or trace, `write` for a whole
+#: document or a write-once fact, `update` for the two `flock`ed JSON states, `open` for the
+#: session store, none for what nothing in the host writes through the handle. A group-wide
+#: verb handed the session db an `append` that would have written JSONL into SQLite.
+MEMBER_VERB: dict[str, str | None] = {
+    "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
+    "ticket_reads": "write",
+    "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
+    "accounting": "write",
+    "investigation": "write", "report": "write", "gather_summaries": "write",
+    "lead_author": None, "source_refs": "write",
+    "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
+    "tool_trace": "append", "review_record": "write", "budget": "update",
+    "circuit_breaker": "update", "lessons_loaded": "append", "ticket_write": "write",
+    "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
+    "session_db": "open",
+}
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
 #: The three sidecars sit DIRECTLY in the runs base; the session db under `<runs_base>/../
 #: sessions` — so their holding directories are anchored there, not on the run dir (claim
 #: C15: `session_store` anchors its own mkdir at `runs_base.parent`).
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
+#: Written ONCE, through the exclusive lane: the five facts the host records outside the
+#: model's reach, and the lead claim — an exclusive-create sidecar whose whole point is that a
+#: second claim on the same lead id collides (`hooks/record_lead.py`). Every other `write` is
+#: a whole-document replace.
+_WRITE_ONCE_MEMBERS = frozenset({*GROUP_MEMBERS["facts"], "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": _artifact_schema.INVESTIGATION_NAME,
                          "report": _artifact_schema.REPORT_NAME}
-
-RUN_RECORD_FIELDS = (
-    "tenant_id", "world_id", "commit", "dirty", "model", "run_id", "alert_ref",
-    "parent_run_id", "fork_turn", "exit_class", "disposition", "review_outcome")
-
 
 #: Sub-collection members whose owner accessor takes a caller-supplied component — `run.
 #: <group>.<name>` answers a CALLABLE for these, taking the same positional args the owner
@@ -116,8 +130,7 @@ class RecordHandle:
         self._root = root
         self._group = group
         self._member = member
-        self._verb = GROUP_WRITE_VERB[group]
-        self._locked = member in LOCKED_STATE_MEMBERS
+        self._verb = MEMBER_VERB[member]
         self._on_partial_failure = on_partial_failure
         if member == "wire_log":
             from defender.runtime import observe
@@ -128,19 +141,18 @@ class RecordHandle:
 
             self.open_store = session_store.open_store
             self._lineage_id, self._sessions_runs_base = session_args or (None, None)
-        # ONLY the group's own write verb is exposed as a PUBLIC attribute — `hasattr(rec,
+        # ONLY the record's own verb is exposed as a PUBLIC attribute — `hasattr(rec,
         # "append")`/`"write"`/`"update"` is how the suite asserts a member does NOT carry a
-        # verb it should not (a `facts`/`documents` record exposes no `append`; the ordinary
-        # `observability` members expose no `update`; the two locked states expose no `write`).
-        if self._locked:
-            self.update = self._do_update
-            # The group's own verb is still present, uniformly, on every member (decision 11)
-            # — for the two locked states it is an alias of `update`'s read-modify-write.
-            setattr(self, self._verb, self._do_update)
-        elif self._verb == "write":
+        # verb it should not (a fact or a document exposes no `append`; a trace exposes no
+        # `write`; the two locked states expose `update` alone).
+        if self._verb == "write":
             self.write = self._do_write
         elif self._verb == "append":
             self.append = self._do_append
+        elif self._verb == "update":
+            self.update = self._do_update
+        elif self._verb == "open":
+            self.open = self._do_open
 
     @property
     def path(self) -> Path:
@@ -153,24 +165,25 @@ class RecordHandle:
     def _mkdir(self, p: Path) -> None:
         self._io.guarded_mkdir(p.parent, base=self._root())
 
-    def _do_write(self, text: str) -> None:
+    def _do_write(self, text: str | bytes) -> None:
         p = self.path
         schema_name = _SCHEMA_GATED_MEMBERS.get(self._member)
         if schema_name is not None:
             current, _reason = self._io.read_guarded(p)
-            reason = _artifact_schema.validate_artifact(schema_name, text, current)
+            proposed = text.decode("utf-8") if isinstance(text, bytes) else text
+            reason = _artifact_schema.validate_artifact(schema_name, proposed, current)
             if reason is not None:
                 raise ValueError(f"run.{self._group}.{self._member}: {reason}")
         self._mkdir(p)
-        if self._group == "facts":
-            # Write-once, outside the model's reach: the exclusive lane refuses an occupied
-            # name instead of replacing it, so a fact is never rewritten by any writer.
+        if self._member in _WRITE_ONCE_MEMBERS:
+            # Write-once: the exclusive lane refuses an occupied name instead of replacing it,
+            # so a fact is never rewritten by any writer and a lead is never claimed twice.
             try:
                 self._io.write_guarded(p, text, mode="create")
             except FileExistsError as taken:
                 raise ValueError(
-                    f"{p} already exists — run.facts.{self._member} is write-once, outside "
-                    "the model's reach") from taken
+                    f"{p} already exists — run.{self._group}.{self._member} is write-once") \
+                    from taken
             return
         self._io.write_guarded(p, text, mode="replace")
 
@@ -207,7 +220,7 @@ class RecordHandle:
             f.truncate()
             f.write(json.dumps(current))
 
-    def open(self):
+    def _do_open(self):
         return self.open_store(case_id=self._lineage_id, runs_base=self._sessions_runs_base)
 
 
@@ -250,15 +263,29 @@ class RunRecord:
 class Run:
     """The file-backed run handle, addressed by `(tenant_id, run_id)`."""
 
+    #: The five sub-collections (decision 1a), bound per instance in `__init__`.
+    tables: _RecordHandleGroup
+    facts: _RecordHandleGroup
+    documents: _RecordHandleGroup
+    observability: _RecordHandleGroup
+    session: _RecordHandleGroup
+    #: The address's tenant half — present on a `for_tenant`/`under` handle, absent on `at`.
+    tenant_id: str
+
     def __init__(
         self, run_dir: Path, *, runs_base: Path | None, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> None:
         self.run_dir = Path(run_dir)
         self.runs_base = Path(runs_base) if runs_base is not None else None
-        # NOT a public attribute (decision 1b/fork D-F2): the twelve descriptive fields,
-        # tenant_id included, live only on `run.record`, never as a property of `Run` itself.
-        self._for_tenant_id = tenant_id
+        # THE ADDRESS, not a descriptive field. A `Run` is addressed by `(tenant_id, run_id)`
+        # (N4): a handle built by `for_tenant` carries the tenant it was asked for, exactly as
+        # it carries `run_dir`; what the STAMP says the tenant is lives on `run.record` (the
+        # twelve descriptive fields, decision 1b/fork D-F2). `for_tenant` refuses when the two
+        # disagree, so on such a handle they agree; a handle built from a bare directory
+        # (`Run.at`) has no address and no attribute — `hasattr(run, "tenant_id")` is False.
+        if tenant_id is not None:
+            self.tenant_id = tenant_id
         self._io = io
         self.partial_failures: tuple[str, ...] = ()
         for group in GROUPS:
@@ -362,7 +389,6 @@ class Run:
         prov = self._provenance(owner, faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
         disposition, review_outcome = self._report_fields(owner)
-        parent_run_id, fork_turn = self._family_fields()
         alert_bytes, _reason = self._io.read_bytes_guarded(owner.alert)
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
@@ -371,10 +397,12 @@ class Run:
             dirty=prov.dirty if prov is not None else None,
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
-            alert_ref=(f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
-                       if alert_bytes is not None else None),
-            parent_run_id=parent_run_id,
-            fork_turn=fork_turn,
+            alert_ref=case_ref(alert_bytes) if alert_bytes is not None else None,
+            # The fork's lineage is STAMPED (D3/D4) — read off the run's own record, never off
+            # a `family.yaml` guessed at from the runs base's parent (which, under the default
+            # base, is `/tmp`).
+            parent_run_id=prov.parent_run_id if prov is not None else None,
+            fork_turn=prov.fork_turn if prov is not None else None,
             exit_class=exit_class,
             disposition=disposition,
             review_outcome=review_outcome,
@@ -431,31 +459,29 @@ class Run:
         outcome = fm.get("outcome") if isinstance(fm, dict) else None
         return read.disposition, (outcome if isinstance(outcome, str) else None)
 
-    def _family_fields(self) -> tuple[str | None, int | None]:
-        if self.runs_base is None:
-            return None, None
-        family_path = self.runs_base.parent / "family.yaml"
-        if not family_path.is_file():
-            return None, None
-        from defender.runtime.branch import _family
-
-        try:
-            fam = _family.load_family(family_path)
-        except _family.FamilyError:
-            return None, None
-        return fam.source_run_id, fam.branch_message_id
+def case_ref(alert_bytes: bytes) -> str:
+    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]` — ONE
+    derivation, read by `run.record.alert_ref` and by the curation lane alike."""
+    return f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
 
 
 # ---------------------------------------------------------------------------------------
 # ArchivedWorld — the archive projection's read-only handle (D5/N5); not a `Run`.
 # ---------------------------------------------------------------------------------------
 
+#: The copied set, each name READ FROM ITS OWNER: the run-dir names from `_run_paths`, the
+#: two flat sidecar spellings and the pointer from `_episode_paths` (they are the archive's
+#: own — a sidecar lives beside the run dir keyed by run id, and the archive re-homes it
+#: under the world as a bare `<kind>.json`).
 _ARCHIVED_WORLD_NAMES: dict[str, str] = {
-    "report": "report.md", "investigation": "investigation.md", "provenance": "provenance.json",
-    "scrub_verdict": "scrub_verdict.json", "run_end": "run_end.json",
-    "lessons_loaded": "lessons_loaded.jsonl", "alert": "alert.json",
-    "gather_summaries": "gather_summaries", "executed_queries": "executed_queries.jsonl",
-    "gather_raw": "gather_raw", "run_dir_pointer": "run_dir",
+    "report": _run_paths.REPORT, "investigation": _run_paths.INVESTIGATION,
+    "provenance": _run_paths.PROVENANCE,
+    "scrub_verdict": _episode_paths.ARCHIVED_SCRUB_VERDICT_NAME,
+    "run_end": _episode_paths.ARCHIVED_RUN_END_NAME,
+    "lessons_loaded": _run_paths.LESSONS_LOADED, "alert": _run_paths.ALERT,
+    "gather_summaries": _run_paths.GATHER_SUMMARIES_DIRNAME,
+    "executed_queries": _run_paths.EXECUTED_QUERIES,
+    "gather_raw": _run_paths.RAW_MARKER, "run_dir_pointer": _episode_paths.RUN_DIR_POINTER_NAME,
 }
 
 

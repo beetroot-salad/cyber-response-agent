@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -38,15 +39,28 @@ def worktree(tmp_path: Path) -> Path:
     """
     tree = tmp_path / "worktree" / "defender"
     (tree / "skills").mkdir(parents=True)
+    # The verb registry reads the adapters directory of the tree it compiles for (a role's
+    # declared systems); a tree with none is `RegistryError` before any policy exists. The
+    # real adapters, under the fake tree.
+    from defender._paths import PATHS
+    shutil.copytree(PATHS.defender_dir / "scripts" / "adapters", tree / "scripts" / "adapters")
+    # The corpus-author role binds to a per-spawn corpus under the tree; give it one to name.
+    (tree / "lessons").mkdir()
     return tree
 
 
 def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     """Every registered role's compiled policy — the enumeration picks the subjects."""
     from defender.agents import AGENTS
-    from defender.runtime.agent_definition import compile_policy_for
-    return {role.name: compile_policy_for(defn, run_dir=run_dir, defender_dir=defender_dir)
-            for role, defn in AGENTS.items()}
+    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    # A role that requires a per-spawn corpus (`requires_corpus`) refuses the default scope by
+    # design; the enumeration hands it one so every role is reached.
+    return {
+        role.name: compile_policy_for(
+            defn, run_dir=run_dir, defender_dir=defender_dir,
+            scope=(RunScope(corpus_name="lessons", read_confine=(defender_dir / "lessons",))
+                   if defn.requires_corpus else RunScope()))
+        for role, defn in AGENTS.items()}
 
 
 def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):

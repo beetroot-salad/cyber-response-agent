@@ -381,13 +381,20 @@ def test_the_written_obligation_names_the_three_trees_the_checker_does_not_scan(
         assert tree in statement, (
             f"{tree} holds live record-name use today (claims S10/G1/G3) and the sweep never "
             f"enters it; O1's wording must say so. It says: {statement!r}")
-    # Driven: a literal in each unscanned tree produces no finding; the same literal inside the
-    # swept set does.
-    for rel in ("defender/skills/invlang/corpus.py", "scripts/testing/tool.py",
-                "experiments/probe.py"):
-        quiet = S.gate_findings(tmp_path / rel.replace("/", "_"), rel,
-                                f'def f(d):\n    return d / "{NAME_LITERAL}"\n')
-        assert quiet == [], f"{rel} is outside the sweep, and the gate reported {S.displays(quiet)}"
+    # Driven: a literal in the one unscanned tree UNDER `defender/` produces no finding; the
+    # same literal inside the swept set does. The sweep root IS `defender/` (`scan(root)` is
+    # driven over a tmp tree standing for it), so the two REPO-level trees — top-level
+    # `scripts/` and `experiments/` — are outside it by construction: every swept directory
+    # is a name relative to that root, none climbs out of it. (`scripts` in `SWEEP_DIRS` is
+    # `defender/scripts`, which IS swept; the unscanned `scripts` is the repo's.)
+    gate = S.gate()
+    for swept in gate.SWEEP_DIRS:
+        assert "/" not in swept, f"a swept directory reaches below the sweep root: {swept!r}"
+        assert not swept.startswith("."), f"a swept directory climbs out of the root: {swept!r}"
+    quiet = S.gate_findings(tmp_path / "skills", "skills/invlang/corpus.py",
+                            f'def f(d):\n    return d / "{NAME_LITERAL}"\n')
+    assert quiet == [], (
+        f"defender/skills is outside the sweep, and the gate reported {S.displays(quiet)}")
     assert S.gate_findings(tmp_path / "inside", "runtime/inside.py",
                            f'def f(d):\n    return d / "{NAME_LITERAL}"\n'), (
         "positive control: inside the swept set the same literal IS reported")

@@ -194,12 +194,29 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "session_db": "session_db",
 }
 
-#: Decision 11's uniform rule, per group: read everywhere, append or write only where the
-#: runtime is the record's producer. `tables` and `observability` and `session` grow; `facts`
-#: is written once by the host; `documents` is rewritten in place by the investigation.
-GROUP_WRITE_VERB: dict[str, str] = {
-    "tables": "append", "facts": "write", "documents": "write",
-    "observability": "append", "session": "append"}
+#: Decision 11's rule — read everywhere, a producer's verb only where the runtime is the
+#: record's producer — stated PER RECORD, not per group (corrected at finalize, PR #1094
+#: review): the group says how a record is read and by whom; what a writer may do to it is a
+#: fact of the record's own shape, and a group-wide verb handed the session db an `append`
+#: that would have written JSONL into SQLite. `append` for a JSONL table or trace, `write` for
+#: a whole document or a write-once fact, `update` alone for the two `flock`ed JSON states,
+#: `open` for the session store, `None` for a record nothing in the host writes through the
+#: handle. Mirrors `defender._run_handle.MEMBER_VERB`; that module is the shipped shape, this
+#: is the spec.
+MEMBER_VERB: dict[str, str | None] = {
+    "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
+    "ticket_reads": "write",
+    "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
+    "accounting": "write",
+    "investigation": "write", "report": "write", "gather_summaries": "write",
+    "lead_author": None, "source_refs": "write",
+    "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
+    "tool_trace": "append", "review_record": "write", "budget": "update",
+    "circuit_breaker": "update", "lessons_loaded": "append", "ticket_write": "write",
+    "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
+    "session_db": "open",
+}
+VERBS = ("write", "append", "update", "open")
 
 #: The two `observability` members that are LOCKED JSON STATES rather than logs: their writer
 #: method reaches `_io.locked_for_rewrite` (a read-modify-write under `flock`), never a blind

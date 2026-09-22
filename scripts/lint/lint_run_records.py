@@ -232,7 +232,17 @@ def _scan_literal_pass(
         ))
 
     docstrings = _docstring_nodes(tree)
+    # A constant that is a PIECE of something reported as a whole — an f-string's literal
+    # part, a join's right operand — is reported once, at the whole, never again as itself.
+    covered: set[ast.AST] = set()
     for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            covered.update(node.values)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            covered.add(node.right)
+    for node in ast.walk(tree):
+        if node in covered:
+            continue
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             # A docstring DESCRIBES a record; it cannot be joined onto a root or handed to a
             # glob. The gate is about names reaching the filesystem from outside the owner —
@@ -281,7 +291,14 @@ def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
             if owner_derived(node.left, env):
                 report(node, "literal-free join onto an owner-derived value")
         elif isinstance(node, ast.Attribute) and node.attr in accessor_names:
-            if not owner_derived(node, env):
+            # An accessor-NAMED read on a receiver the pass cannot trace is reported — when
+            # the name is one only an owner answers. `x.wire_log`, `x.gather_raw`,
+            # `x.executed_queries` on an unknown `x` is a record reached around the owner;
+            # `args.alert`, `self.budget`, `resp.payload`, `verdict.review` are ordinary
+            # attributes that happen to share an English word with an accessor, and the
+            # SPELLED name those sites would have to reach is what pass (a) catches. One
+            # predicate for "discriminating", shared with pass (a)'s whole-name set.
+            if not owner_derived(node, env) and _discriminating(node.attr):
                 report(node, f"unresolvable accessor use (.{node.attr})")
     return findings
 
