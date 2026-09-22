@@ -1,12 +1,17 @@
 """#1092 — the missing-image fault names the build command and the tree (M5 amended, O4,
-JF5), `start_box` never builds (D2 C), the `_spec771` rootfs runner takes the same resolver
-and the same `--pull=never` (the fourth `docker run` site), and the learning drain's fault
-handler appends a durable pointer to the worktree it deletes (MF2).
+JF5 amended by #1095), `start_box` never builds (D2 C), the `_spec771` rootfs runner takes the
+same resolver, the same preflight and the same `--pull=never` (the fourth `docker run` site),
+and the learning drain's fault handler appends a durable pointer to the worktree it deletes
+(MF2).
 
-The daemon is `NoSuchImageDocker`: the one-line `No such image: <ref>` rc 125 that N1 and
-rg4 executed under `--pull=never`, echoing the image token the builder itself put on the
-argv. Every "other shape" fixture is a shape the ledger observed on a real daemon (po1's
-absent bind source; N1's pull-path text, which `--pull=never` removes from the create path).
+JF5 AMENDED (#1095): a missing image is found by ASKING the daemon — `docker image inspect`,
+a yes/no by exit code, before the create — never by classifying the create's stderr. The
+create's text is the CLI's to phrase and varied across CLI versions (27.x appends a period
+to `No such image: <ref>`), which made the remedy silently vanish on distro CLIs. The daemon
+is `NoSuchImageDocker`: its inspect answers rc 1 for the image the start asked about, its
+create stays healthy. Every "other shape" fixture is a shape the ledger observed on a real
+daemon (po1's absent bind source; N1's pull-path text, which `--pull=never` removes from the
+create path).
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ from defender.tests._spec1092 import (
     NoSuchImageDocker,
     RecordingDocker,
     image_tag,
-    image_token,
+    inspected_image,
     make_run_dir,
     no_such_image_stderr,
     plant_tree,
@@ -65,28 +70,31 @@ PULL_PATH_STDERR = (
 
 # ---- d42 -------------------------------------------------------------------------------------
 def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_trees_path_on_both_lanes(tmp_path, monkeypatch):
-    """A create whose stderr carries `No such image: defender-box:<tag>` raises a `BoxFault`
-    that keeps the daemon's text and names `python3 <tree>/defender/scripts/box_image.py
-    build`, `<tree>` being the absolute path of the tree the box mounts — `defender_dir.parent`
-    on the run-dir lane, `Path(request.workdir).resolve()` (the drain's worktree) on the
-    request lane — `shlex.quote`d, so a tree path with a space is copy-paste safe.
+    """Before the create, both lanes ask the daemon for the image they resolved (`docker
+    image inspect <image_tag(tree)>`); a `no` (rc 1) raises a `BoxFault` — with NO create
+    attempted — that keeps the daemon's text and names `python3 <tree>/defender/scripts/
+    box_image.py build`, `<tree>` being the absolute path of the tree the box mounts —
+    `defender_dir.parent` on the run-dir lane, `Path(request.workdir).resolve()` (the drain's
+    worktree) on the request lane — `shlex.quote`d, so a tree path with a space is copy-paste
+    safe. The image asked about is the one the tree names, never one read off the argv.
 
-    # rejected: the `write_did_not_run` marker text at the same two sites is NOT required to
-    # carry the remedy — the BoxFault message is the surface O4 names (F6). The CLI pull-path
-    # phrases (`Unable to find image` / `pull access denied`) are not required to match: with
-    # `--pull=never` they no longer occur on the create path (N1). `_lifecycle.py:271` is a
-    # startup-fault marker after a successful create, not a create-fault site; the two sites
-    # are `:156-159` and `:253-255`."""
+    # rejected: the `write_did_not_run` marker text is NOT required to carry the remedy — the
+    # BoxFault message is the surface O4 names (F6). Classifying the create's stderr (JF5 as
+    # first written): the text is the CLI's and varied by version (#1095) — the decision is
+    # the exit code of a question asked before the create."""
     _no_unsandboxed(monkeypatch)
     root = tmp_path / "tree with space"
     defender_dir = plant_tree(root, copy_code=False)
     run_dir = make_run_dir(tmp_path)
+    expected = image_tag(defender_dir)
 
     rec = NoSuchImageDocker()
     with pytest.raises(BoxFault) as e:
         box_mod.start_box(run_dir, defender_dir, docker=rec)
     message = str(e.value)
-    assert f"No such image: {image_token(rec.create_argv or [])}" in message
+    assert inspected_image(rec.calls) == expected, rec.calls
+    assert "run" not in subcommands(rec.calls), rec.calls
+    assert f"No such image: {expected}" in message
     assert remedy_command(message) == [
         "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
     ], message
@@ -95,7 +103,9 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
     with pytest.raises(BoxFault) as e:
         box_mod.start_box(_request(root, run_dir), docker=rec)
     message = str(e.value)
-    assert f"No such image: {image_token(rec.create_argv or [])}" in message
+    assert inspected_image(rec.calls) == expected, rec.calls
+    assert "run" not in subcommands(rec.calls), rec.calls
+    assert f"No such image: {expected}" in message
     assert remedy_command(message) == [
         "python3", f"{root.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
     ], message
@@ -103,30 +113,33 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
 
 # ---- d43 (negative; positive control: d42) ----------------------------------------------------
 @pytest.mark.parametrize("lane", ["run-dir", "request"])
-@pytest.mark.parametrize("shape", ["absent-bind-source", "pull-path-text", "no-such-other-image"])
+@pytest.mark.parametrize("shape", ["absent-bind-source", "pull-path-text", "no-such-image-text"])
 def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_path, monkeypatch, lane, shape):
-    """A create fault whose stderr has any other shape — a bind source that does not exist
-    (po1), the CLI's pull-path text (N1, without `--pull=never`), or a `No such image:` line
-    about SOME OTHER image than the one this start resolved (silent #35) — raises a
-    `BoxFault` that keeps the daemon's text and does not mention the build command, on both
-    lanes.
+    """A create that fails AFTER the daemon confirmed the image — a bind source that does not
+    exist (po1), the CLI's pull-path text (N1, without `--pull=never`), or even a create
+    stderr that happens to carry `No such image: <the resolved name>` — raises a `BoxFault`
+    that keeps the daemon's text and does not mention the build command, on both lanes: the
+    remedy rides the preflight's `no`, and nothing reads the create's text for it.
 
     # rejected: disk exhaustion and every other daemon error are generic — O4 names the
     # missing-image shape "that shape only", and no command the fault could name fixes them
-    # (M5-MATCH #70); non-UTF-8 stderr is pre-existing (#36)."""
+    # (M5-MATCH #70); non-UTF-8 stderr is pre-existing (#36). The former `no-such-other-image`
+    # row (silent #35: a `No such image:` line about SOME OTHER image) is impossible by
+    # construction now — no text is classified — and was deleted rather than rewritten."""
     _no_unsandboxed(monkeypatch)
     root = tmp_path / "tree"
     defender_dir = plant_tree(root, copy_code=False)
     run_dir = make_run_dir(tmp_path)
     if shape == "absent-bind-source":
         stderr = "docker: Error response from daemon: bind source path does not exist\n"
-        rec: RecordingDocker = RecordingDocker(create=DockerFault(rc=125, stderr=stderr, cite="po1"))
+        cite = "po1"
     elif shape == "pull-path-text":
         stderr = PULL_PATH_STDERR
-        rec = RecordingDocker(create=DockerFault(rc=125, stderr=stderr, cite="N1"))
+        cite = "N1"
     else:
-        stderr = no_such_image_stderr("defender-box:v0-ffffffffffff")
-        rec = NoSuchImageDocker(ref="defender-box:v0-ffffffffffff")
+        stderr = f"docker: Error response from daemon: No such image: {image_tag(defender_dir)}.\n"
+        cite = "N1 (27.x spelling, #1095)"
+    rec = RecordingDocker(create=DockerFault(rc=125, stderr=stderr, cite=cite))
     start = (
         (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d)) if lane == "run-dir"
         else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
@@ -134,15 +147,14 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
     with pytest.raises(BoxFault) as e:
         start(rec)
     message = str(e.value)
+    assert inspected_image(rec.calls) == image_tag(defender_dir), rec.calls
     assert stderr.strip().splitlines()[-1] in message, message
     assert remedy_command(message) is None, message
     assert "box_image.py" not in message, message
-    if shape == "no-such-other-image":
-        assert image_token(rec.create_argv or []) != "defender-box:v0-ffffffffffff"
 
-    # The positive control, same lane, same tree: the missing-image shape for the name this
-    # start resolved DOES name the build command — so the silence above is a classification,
-    # not an absent mechanism.
+    # The positive control, same lane, same tree: the daemon answering `no` to the preflight
+    # DOES name the build command — so the silence above is the preflight's verdict, not an
+    # absent mechanism.
     with pytest.raises(BoxFault) as e:
         start(NoSuchImageDocker())
     assert remedy_command(str(e.value)) is not None, str(e.value)
@@ -152,9 +164,10 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
 @pytest.mark.parametrize("opt_out", [None, "0", "yes"])
 def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, monkeypatch, opt_out):
     """With no `DEFENDER_ALLOW_UNSANDBOXED` — or with it set to anything but `"1"`, which is
-    not an opt-out (#37) — a missing image makes `start_box` raise `BoxFault`, the create argv
-    carries `--pull=never` (a create never reaches the network — JF5), and the recorded docker
-    calls contain no `build` and no `pull`.
+    not an opt-out (#37) — a missing image makes `start_box` raise `BoxFault` with no create
+    attempted, and the recorded docker calls contain no `build` and no `pull`; when the daemon
+    does hold the image, the create argv carries `--pull=never` (a create never reaches the
+    network — JF5).
 
     # rejected: a real opt-out (`DEFENDER_ALLOW_UNSANDBOXED=1`) is NOT this test's case — it
     # is demanded by `opt_out_warning_carries_the_swallowed_fault` (ENV #78, phase F): the
@@ -172,9 +185,16 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     subs = subcommands(rec.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
+    assert "run" not in subs, subs
+
+    held = RecordingDocker()
+    box_mod.start_box(run_dir, defender_dir, docker=held)
+    subs = subcommands(held.calls)
+    assert "build" not in subs, subs
+    assert "pull" not in subs, subs
     assert subs.count("run") == 1, subs
-    assert (rec.create_argv or []).count("--pull=never") == 1, rec.create_argv
-    assert "--pull" not in (rec.create_argv or []), "the two-token spelling"
+    assert (held.create_argv or []).count("--pull=never") == 1, held.create_argv
+    assert "--pull" not in (held.create_argv or []), "the two-token spelling"
 
 
 # ---- phase F (F2, human): the opt-out lane still surfaces the remedy -----------------------------
@@ -195,7 +215,7 @@ def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fau
     warnings = [ln for ln in err.splitlines() if ln.startswith("[box] WARNING")]
     assert warnings, err
     warning = "\n".join(err.splitlines()[err.splitlines().index(warnings[0]):])
-    assert f"No such image: {image_token(rec.create_argv or [])}" in warning, err
+    assert f"No such image: {image_tag(defender_dir)}" in warning, err
     assert remedy_command(warning) == [
         "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
     ], err
@@ -204,9 +224,10 @@ def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fau
 # ---- the seam d46 needs -----------------------------------------------------------------------
 def test_the_rootfs_runner_spawns_docker_through_an_injectable_run_seam_defaulting_to_subprocess_run():
     """`_spec771.run_probe_under_profile(script, profile, *, run=subprocess.run)` spawns its
-    `docker run` through the `run` parameter — a keyword-only seam whose default is
-    `subprocess.run` — so a test can observe the argv without a daemon: a fake `run` receives
-    the argv, no real process is spawned, and the fake's stdout is what the runner decodes."""
+    docker calls — the image preflight and then the `docker run` — through the `run`
+    parameter, a keyword-only seam whose default is `subprocess.run`, so a test can observe
+    the argv without a daemon: a fake `run` receives each argv, no real process is spawned,
+    and the fake's stdout on the run is what the runner decodes."""
     from defender.tests.e2e._spec771 import run_probe_under_profile
 
     runner: Callable[..., Any] = run_probe_under_profile
@@ -221,16 +242,17 @@ def test_the_rootfs_runner_spawns_docker_through_an_injectable_run_seam_defaulti
         return subprocess.CompletedProcess(argv, 0, stdout='{"seam": "ok"}', stderr="")
 
     assert runner("print(1)", None, run=fake_run) == {"seam": "ok"}
-    assert len(seen) == 1, seen
-    assert seen[0][:2] == ["docker", "run"], seen
+    assert [a[1:3] for a in seen] == [["image", "inspect"], ["run", "--rm"]], seen
 
 
 # ---- d46 -------------------------------------------------------------------------------------
 def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failure_carries_the_remedy(tmp_path):
-    """`_spec771.run_probe_under_profile` runs `docker run --rm -i [--security-opt
-    seccomp=<profile>] --pull=never <image_tag(DEFENDER)> python3 -` — the script on stdin,
-    the profile only when one is given — and when that container fails with the daemon's
-    `No such image` line its assertion message carries the build remedy naming the test tree.
+    """`_spec771.run_probe_under_profile` asks the daemon for `image_tag(DEFENDER)` (`docker
+    image inspect`) and then runs `docker run --rm -i [--security-opt seccomp=<profile>]
+    --pull=never <image_tag(DEFENDER)> python3 -` — the script on stdin, the profile only
+    when one is given; when the daemon answers `no` to the preflight, the runner's assertion
+    message carries the daemon's line and the build remedy naming the test tree, and no
+    `docker run` is attempted.
 
     # rejected: the live suite (`test_665_box_live.py`) reads no `rootfs` of its own — its
     # two-arg starts reach the resolver through `start_box` (N7); its two tmp-workdir requests
@@ -248,6 +270,9 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
         return subprocess.CompletedProcess(argv, 0, stdout='{"ran": true}', stderr="")
 
     assert runner("print('{\"ran\": true}')", profile, run=healthy) == {"ran": True}
+    asked, _ = seen[-2]
+    assert asked[1:3] == ["image", "inspect"], asked
+    assert asked[-1] == image_tag(DEFENDER), asked
     argv, kw = seen[-1]
     assert argv[:2] == ["docker", "run"]
     assert "--rm" in argv
@@ -263,12 +288,18 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
     assert "--security-opt" not in argv
     assert argv[-3:] == [image_tag(DEFENDER), "python3", "-"]
 
+    runs: list[list[str]] = []
+
     def missing(argv, **kw):
-        return subprocess.CompletedProcess(argv, 125, stdout="", stderr=no_such_image_stderr(argv[-3]))
+        if argv[1:3] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr=no_such_image_stderr(argv[-1]))
+        runs.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
 
     with pytest.raises(AssertionError) as e:
         runner("print(1)", None, run=missing)
     message = str(e.value)
+    assert runs == [], "a `docker run` was attempted after the daemon said no"
     assert f"No such image: {image_tag(DEFENDER)}" in message
     assert remedy_command(message) == [
         "python3", f"{REPO_ROOT.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
@@ -277,10 +308,11 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
 
 # ---- MF2: the drain lane's fault names the commit the deleted worktree was cut from --------------
 def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout_instruction_after_cleanup(tmp_path, monkeypatch):
-    """When the learning drain's `start_box` faults on a missing image, `_run_worktree_batch`
-    still removes the worktree (the pre-existing unwind — its did-not-run markers go with
-    it, an accepted cost) and re-raises the `BoxFault` with the shared fault text unchanged
-    (the daemon's line, the build command naming the now-deleted `<wt>`) PLUS a durable
+    """When the learning drain's `start_box` faults on a missing image (the preflight's
+    `no`), `_run_worktree_batch` still removes the worktree (the pre-existing unwind — its
+    did-not-run markers go with it, an accepted cost) and re-raises the `BoxFault` with the
+    shared fault text unchanged (the daemon's line, the build command naming the now-deleted
+    `<wt>`) PLUS a durable
     pointer appended: `origin/main @ <sha>` — the commit the worktree was cut from, its HEAD,
     read before the tree is gone — and the instruction to check out that commit and run the
     build from it. The pointer rides EVERY drain-lane start `BoxFault` (phase F, human): a

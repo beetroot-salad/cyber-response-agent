@@ -6,8 +6,12 @@ Demand #0 and its neighbourhood in `spec-flow/specs/spec_graph_1092.yaml`: the r
 (MF1, resolved at §7: any read error → `BoxFault` naming the folder and the first file, raised
 in the argv builder before docker; the C46 refusal keeps running FIRST; no run-dir marker).
 
-Hermetic: the trees are planted by the tests, the daemon is `RecordingDocker`, and file reads
-are observed through a `sys.addaudithook` on `open` (`_spec1092.watch_opens`).
+Hermetic: the trees are planted by the tests and the daemon is `RecordingDocker`. Whether
+the three inputs were read is observed tier-1 (`_spec1092`'s hierarchy): over a tree that
+HOLDS none of them a read faults, so a lane that completes — or refuses for another reason —
+read nothing; and a name that equals the digest of the planted bytes was read from them
+(one byte's edit renames it, d3). No process-wide audit hook is installed for it — the one
+in-process hook a spec test needs (d5) lives in a child interpreter.
 """
 from __future__ import annotations
 
@@ -37,12 +41,10 @@ from defender.tests._spec1092 import (
     RecordingDocker,
     image_tag,
     image_token,
-    input_reads,
     make_run_dir,
     plant_tree,
     recipe_version,
     subcommands,
-    watch_opens,
 )
 
 #: The devcontainer-shaped mount table `test_box_dood_c46.py` uses: `/workspace` is shared
@@ -78,9 +80,10 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
     `image_tag(DEFENDER)` — `defender-box:<RECIPE_VERSION>-` followed by 12 hex of a sha256
     over the bytes of `box.Dockerfile`, `uv.lock` and `pyproject.toml` in that directory
     (MF3: the running package's `_image.RECIPE_VERSION` prefixes the digest) — resolved on
-    the host when the argv is built, never earlier: constructing the spec and the request
-    reads none of the three files, building the argv reads all three. Every slot of the
-    create payload is bound (no `{`-template token survives on the argv).
+    the host when the argv is built, never earlier: the spec and the request are constructed
+    over a root that does not yet hold the three files (a read there would fault), and the
+    name on the argv is the digest of bytes planted only afterwards. Every slot of the create
+    payload is bound (no `{`-template token survives on the argv).
 
     # rejected: no checked-in tag constant, no "constant equals recomputed hash" test, no
     # "bump the tag" step, no stale-constant loop (M3 revised). The run record gains NO
@@ -95,22 +98,20 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
     assert BoxSpec.from_env({}).rootfs is None
     assert box_mod.DEFAULT_SPEC.rootfs is None
     root = tmp_path / "tree"
-    defender_dir = plant_tree(root)
     run_dir = make_run_dir(tmp_path)
+    # Constructed BEFORE the tree holds any input: an eager resolver would fault here.
+    spec = BoxSpec()
+    request = _request(root, run_dir)
+    assert not (root / "defender" / HASH_INPUTS[0]).exists()
+
+    defender_dir = plant_tree(root)
     expected = image_tag(defender_dir)
     shape = TAG_RE.match(expected)
     assert shape is not None, expected
     assert shape.group("version") == recipe_version()
 
-    with watch_opens() as opened:
-        spec = BoxSpec()
-        request = _request(root, run_dir)
-    assert input_reads(opened) == [], "constructing the spec/request read a hash input"
-
     rec = RecordingDocker()
-    with watch_opens() as opened:
-        box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
-    assert {Path(p).name for p in input_reads(opened)} == set(HASH_INPUTS)
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
     assert image_token(rec.create_argv or []) == expected
     assert not any("{" in t or "}" in t for t in rec.create_argv or []), rec.create_argv
 
@@ -125,43 +126,39 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
         return subprocess.CompletedProcess(argv, 0, stdout='{"ok": true}', stderr="")
 
     runner("print('{}')", None, run=fake_run)
-    assert len(seen) == 1
-    assert seen[0][:2] == ["docker", "run"]
-    assert seen[0][-3:] == [image_tag(DEFENDER), "python3", "-"]
-    assert seen[0].count("--pull=never") == 1
+    runs = [a for a in seen if a[:2] == ["docker", "run"]]
+    assert len(runs) == 1, seen
+    assert runs[0][-3:] == [image_tag(DEFENDER), "python3", "-"]
+    assert runs[0].count("--pull=never") == 1
 
 
 # ---- d1 --------------------------------------------------------------------------------------
 def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     """With `rootfs` set explicitly (`BoxSpec(rootfs="python:3.11-slim")` on either lane) the
-    argv appends that token verbatim and no input file is read — over a tree holding NONE of
-    the three inputs — so a test that needs the stock image pins one (fake-docker tests; a
-    real-daemon test pins `image_tag(DEFENDER)` instead — #94)."""
+    argv appends that token verbatim and no input file is read — the tree holds NONE of the
+    three inputs, so a read would have faulted and the start would not have completed — so a
+    test that needs the stock image pins one (fake-docker tests; a real-daemon test pins
+    `image_tag(DEFENDER)` instead — #94)."""
     root = tmp_path / "bare"
     defender_dir = plant_tree(root, missing=HASH_INPUTS, copy_code=False)
     run_dir = make_run_dir(tmp_path)
     spec = BoxSpec(rootfs=STOCK_ROOTFS)
 
     rec = RecordingDocker()
-    with watch_opens() as opened:
-        box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
     assert image_token(rec.create_argv or []) == STOCK_ROOTFS
-    assert input_reads(opened) == []
 
     rec2 = RecordingDocker()
-    with watch_opens() as opened:
-        box_mod._start_boxed_request(_request(root, run_dir, spec=spec), rec2, lambda _d: ())
+    box_mod._start_boxed_request(_request(root, run_dir, spec=spec), rec2, lambda _d: ())
     assert image_token(rec2.create_argv or []) == STOCK_ROOTFS
-    assert input_reads(opened) == []
 
 
 # ---- d2 --------------------------------------------------------------------------------------
 def test_no_runtime_path_names_or_falls_back_to_the_stock_image(tmp_path, monkeypatch):
     """No module under `defender/runtime` names `python:3.11-slim` in code (a comment may
-    recall it), and a create
-    fault on a missing owned image raises rather than retrying with any other image: the one
-    `docker run` names the derived image, no second `run` and no `pull` follows, and the
-    `BoxFault` propagates out of `start_box`."""
+    recall it), and a missing owned image raises rather than retrying with any other image:
+    the one image the daemon is asked for is the derived one, no `run` and no `pull` follows
+    the daemon's `no`, and the `BoxFault` propagates out of `start_box`."""
     naming = sorted(
         str(p.relative_to(DEFENDER)) for p in (DEFENDER / "runtime").rglob("*.py")
         if any(
@@ -178,10 +175,10 @@ def test_no_runtime_path_names_or_falls_back_to_the_stock_image(tmp_path, monkey
     with pytest.raises(BoxFault):
         box_mod.start_box(run_dir, defender_dir, docker=rec)
     subs = subcommands(rec.calls)
-    assert subs.count("run") == 1, subs
+    assert "run" not in subs, subs
     assert "pull" not in subs, subs
-    assert image_token(rec.create_argv or []) == image_tag(defender_dir)
-    assert STOCK_ROOTFS not in (rec.create_argv or [])
+    assert rec.inspected_images == [image_tag(defender_dir)], rec.inspected_images
+    assert rec.create_argv is None
 
 
 # ---- d3 --------------------------------------------------------------------------------------
@@ -313,28 +310,29 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
 def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes(tmp_path):
     """Over a tree that lacks the three inputs AND sits on no path this container shares with
     the daemon, both argv builders raise the pre-existing C46 uncovered-mount refusal — not the
-    resolver's missing-input fault — and read none of the three inputs; the same lacking tree
-    on a native daemon (no mount table) raises the resolver's fault naming `box.Dockerfile`.
-    The six existing `match="C46"` sites keep their assertion unchanged."""
+    resolver's missing-input fault, which is what a read of the lacking tree would have raised
+    first — and no daemon call is made; the same lacking tree on a native daemon (no mount
+    table) raises the resolver's fault naming `box.Dockerfile`. The six existing `match="C46"`
+    sites keep their assertion unchanged."""
     root = tmp_path / "lacking"
     defender_dir = plant_tree(root, missing=HASH_INPUTS, copy_code=False)
     run_dir = tmp_path / "runs" / "r1"
     run_dir.mkdir(parents=True)
 
     rec = RecordingDocker()
-    with watch_opens() as opened, pytest.raises(BoxFault) as e:
+    with pytest.raises(BoxFault) as e:
         box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert input_reads(opened) == []
+    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls   # the stale-name check only
     assert rec.create_argv is None
 
     rec = RecordingDocker()
-    with watch_opens() as opened, pytest.raises(BoxFault) as e:
+    with pytest.raises(BoxFault) as e:
         box_mod._start_boxed_request(_request(root, run_dir), rec, lambda _d: MOUNTS)
     assert "C46" in str(e.value)
     assert "box.Dockerfile" not in str(e.value)
-    assert input_reads(opened) == []
+    assert not {"image", "run"} & set(subcommands(rec.calls)), rec.calls
     assert rec.create_argv is None
 
     with pytest.raises(BoxFault) as e:

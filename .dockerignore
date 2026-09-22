@@ -22,6 +22,7 @@
 # Transient / large local state — never needed to build the agent
 defender/learning/runs
 defender/run-transcripts
+.defender-runs
 /tmp
 
 # Playground stack data + local infra state

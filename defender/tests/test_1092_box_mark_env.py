@@ -63,7 +63,7 @@ def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
     run_dir = make_run_dir(tmp_path)
     argv = box_mod._create_argv(
         "defender-run-1092", run_dir, tmp_path / "srv" / "defender", BoxSpec(rootfs=STOCK_ROOTFS), (),
-    )
+    ).argv
     pairs = env_pairs(argv)
     assert pairs.count(("DEFENDER_BOX", "1")) == 1, pairs
     assert {k for k, _ in pairs} == set(BOX_ENV_ALLOWLIST), pairs
@@ -89,7 +89,7 @@ def test_the_request_lane_argv_carries_env_defender_box_1_whatever_the_request_e
     # docker call and other bytes pass verbatim — pre-existing plumbing (ENV #32, PJ-r2-2)."""
     run_dir = make_run_dir(tmp_path)
     request = _request(tmp_path / "wt", run_dir, request_env)
-    argv = box_mod._render_argv(request, ())
+    argv = box_mod._render_argv(request, ()).argv
     pairs = env_pairs(argv)
     assert pairs.count(("DEFENDER_BOX", "1")) == 1, pairs
     assert [k for k, _ in pairs if k.strip().upper() == "DEFENDER_BOX"] == ["DEFENDER_BOX"], pairs
@@ -248,7 +248,7 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
         today_run_dir += ["--env", f"{key}={infra[key]}"]
     today_run_dir += [image_tag(defender_dir), "sleep", "infinity"]
 
-    argv = box_mod._create_argv(name, run_dir, defender_dir, spec, (), token)
+    argv = box_mod._create_argv(name, run_dir, defender_dir, spec, (), token).argv
     assert argv.count("--pull=never") == 1, argv
     assert "--pull" not in argv, argv
     assert env_pairs(argv).count(("DEFENDER_BOX", "1")) == 1, env_pairs(argv)
@@ -272,7 +272,7 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
         today_request += ["--env", f"{key}={derived[key]}"]
     today_request += [image_tag(root / "defender"), "sleep", "infinity"]
 
-    argv = box_mod._render_argv(request, (), token)
+    argv = box_mod._render_argv(request, (), token).argv
     assert argv.count("--pull=never") == 1, argv
     assert "--pull" not in argv, argv
     assert env_pairs(argv).count(("DEFENDER_BOX", "1")) == 1, env_pairs(argv)

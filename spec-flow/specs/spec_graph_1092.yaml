@@ -28,13 +28,25 @@ base: b016749cb48a79949579d48b45ee63a7d90b30e3   # main — the base every ancho
 # `BoxSpec.rootfs` defaults to None so each `docker run` builder resolves it on the host when
 # the argv is built (no checked-in constant, no file read at import); M4-AMENDED each of the
 # three box-starting CI jobs builds the image in a 4-minute step immediately after checkout and
-# syncs `--locked`; M5-AMENDED the `No such image: <name>` create fault names `python3 <tree>/
-# defender/scripts/box_image.py build` with the mounted tree's path; M6 `DEFENDER_BOX=1` is
+# syncs `--locked`; M5-AMENDED a missing image faults naming `python3 <tree>/defender/scripts/
+# box_image.py build` with the mounted tree's path; M6 `DEFENDER_BOX=1` is
 # lane-derived on every box lane (spread AFTER the caller's keys) and STRIPPED by both host
 # lanes (JF3), the three granted shims and `reexec_into_venv` take the image's python when it
 # is set; JF5 `--pull=never` on every `docker run` of a box; M7 the stdlib-only rule's text and
 # its pin test go, `BoxSpec` becomes a `@model` dataclass. O7 is NARROWED to "no uv, no
 # pip-installable path" (F1).
+#
+# JF5 AMENDED AT FINALIZE (#1095, review finding 1 — premise #34 REFUTED): "a missing image is
+# the create's one-line `No such image: <name>` stderr" held only for CLI >= 28 — docker-cli
+# 27.5.1 (Ubuntu 24.04 `docker.io`, Debian bookworm) appends a period, so the exact-name match
+# silently dropped O4's remedy on every distro CLI. The mechanism is replaced, not patched:
+# every `docker run` site ASKS the daemon first (`require_image`: `docker image inspect
+# --format {{.Id}} <name>`, a yes/no by exit code) and a `no` raises the remedy BEFORE any
+# create; no create stderr is classified by anyone. `resolve_rootfs` returns the name AND
+# the remedy it earns (`Rootfs(image, remedy)` — an explicit rootfs earns none), the builders
+# hand both back BY NAME (`Create(argv, rootfs)`), never read off an argv position. Silent #35
+# (a `No such image:` line about some other image) is impossible by construction and its row
+# was deleted. Ledger rows R1/R2 below; demands d42/d43/d44/d46 re-pinned.
 #
 # WHAT A COLD READER MUST NOT RE-DERIVE FROM THE DOC:
 #   1. RUN 1 OF THIS FLOW HALTED DESIGN-REFUTED at §7: four material forks shared one root —
@@ -633,13 +645,13 @@ demands:
     binds:
       - create_fault_remedy
       - "create_fault_remedy.domain.distinguished[missing_image]"
-      - "interacts(_start_boxed->docker_run).response"
-      - "interacts(_start_boxed_request->docker_run).response"
       - "interacts(_start_boxed->box_image_on_daemon)"
       - "interacts(_start_boxed_request->box_image_on_daemon)"
     assembly_note: >-
-      +the two lanes' reads of the daemon's image store (`--pull=never` is what makes the
-      daemon's one-line `No such image` the whole response, N1/rg4). The sibling cell
+      +the two lanes' reads of the daemon's image store — RE-PINNED at finalize (#1095): the
+      read is the preflight `docker image inspect` (R1), answered by exit code before the
+      create; the two `docker_run.response` binds are gone because no create's response is
+      read for this. The sibling cell
       `create_fault_remedy.domain.distinguished[missing_image_on_drain_lane]` was unbound at
       assembly (MF2: on the drain lane the tree the remedy names is deleted by
       drains.py:776-780 before the fault is reported, F22/S14); §7 took the recommendation
@@ -652,7 +664,7 @@ demands:
       neighbouring tags never consulted; #44 — an older commit checked out: the same, for that
       commit's name; #53 — on both lanes only the last step's text changes (marker-write, reap,
       raise unchanged).
-    forks: "MF2 (#75, #54 — material, cell `create_fault_remedy.domain.distinguished[missing_image_on_drain_lane]`; #76, #23 follow the root); F6 (auto: only the BoxFault message carries the remedy, not the marker); M5-TEXT #42 (auto: shlex.quote the tree path), #83 (auto: the remedy names `Path(request.workdir).resolve()`); silent #35 (auto: match `No such image: <the name this start resolved>` exactly); silent #24 (auto: an uncommitted edit renames the wanted image — indistinguishable at the fault; the stamp's dirty_paths is the signal); SETTLED-BY-DOC #74 (auto: the shipped runtime container is out of scope), #86 (auto: trust the tag)"
+    forks: "MF2 (#75, #54 — material, cell `create_fault_remedy.domain.distinguished[missing_image_on_drain_lane]`; #76, #23 follow the root); F6 (auto: only the BoxFault message carries the remedy, not the marker); M5-TEXT #42 (auto: shlex.quote the tree path), #83 (auto: the remedy names `Path(request.workdir).resolve()`); silent #35 (SUPERSEDED by #1095: no text is matched — the preflight asks about the name it resolved); silent #24 (auto: an uncommitted edit renames the wanted image — indistinguishable at the fault; the stamp's dirty_paths is the signal); SETTLED-BY-DOC #74 (auto: the shipped runtime container is out of scope), #86 (auto: trust the tag)"
   - id: other_create_faults_keep_their_remedy
     kind: negative      # positive control: missing_image_fault_names_the_build_command_and_the_tree
     form: test
@@ -663,14 +675,14 @@ demands:
       - "interacts(_start_boxed->docker_run).response"
       - "interacts(_start_boxed_request->docker_run).response"
     premises: [34]
-    rows: "#34 — stderr wording across the CLI/daemon versions this repo runs is the identical `No such image: <ref>` (P15/P39 closed; G19 names the 28.0.1 static CLI as unexecuted); any other wording lands in this 'other' bucket by design."
+    rows: "#34 — REFUTED at finalize (#1095, R2): stderr wording is NOT identical across CLIs (27.5.1 appends a period). The demand survives with its meaning inverted: a create's response of ANY wording — the 27.x spelling of `No such image: <the resolved name>` included, as the third row now pins — keeps the daemon's text and never names the build command, because the remedy rides the preflight's `no` and nothing reads the create's text. The former `no-such-other-image` row (silent #35) is deleted: impossible by construction."
     forks: "M5-MATCH #70 (auto: disk exhaustion is generic — no command fixes it), #36 (auto: non-UTF-8 stderr is pre-existing)"
   - id: start_box_never_builds
     kind: negative      # positive control: box_image_build_tags_the_derived_name (the script DOES build)
     form: test
     discharged_by: test_a_missing_image_raises_and_no_docker_build_is_ever_attempted
-    binds: [start_box, "interacts(_start_boxed->docker_run).response", _opt_out_or_raise, "docker_run.domain.distinguished[pull_never]"]
-    assembly_note: "+`docker_run.domain.distinguished[pull_never]` — the seed's `no pull` half is JF5's flag (a create never reaches the network)."
+    binds: [start_box, "interacts(_start_boxed->box_image_on_daemon)", _opt_out_or_raise, "docker_run.domain.distinguished[pull_never]"]
+    assembly_note: "+`docker_run.domain.distinguished[pull_never]` — the seed's `no pull` half is JF5's flag (a create never reaches the network). RE-PINNED (#1095): a missing image is the preflight's `no` and no create runs at all; the `--pull=never` half is pinned on the held-image control in the same test."
     premises: [37, 57]
     rows: "#37 — the opt-out set to a value other than \"1\" is not an opt-out (C8): the loud fault and the remedy fire; #57 — a host daemon reset: the missing-image fault with the remedy; `--pull=never` closes the old silent re-pull of the public tag."
     forks: "ENV #78 (phase F F2, human: minted as `opt_out_warning_carries_the_swallowed_fault`); silent #77 (auto: the investigation driver meets a missing image through the BoxFault text and the run-dir marker — run.py has no handler (P45), so it surfaces as a traceback with a non-zero exit; no wrapper, no run-record field)"
@@ -707,9 +719,9 @@ demands:
       - create_fault_remedy
       - "interacts(run_probe_under_profile->BoxSpec)"
       - "interacts(run_probe_under_profile->box_image_on_daemon)"
-    assembly_note: "+the runner's read of `BoxSpec.from_env(os.environ).rootfs` (C18/N7: the one test-side `.rootfs` reader) and its `--pull=never` read of the image store."
+    assembly_note: "+the runner's read of `BoxSpec.from_env(os.environ).rootfs` (C18/N7: the one test-side `.rootfs` reader) and its `--pull=never` read of the image store. RE-PINNED (#1095): the runner takes the same preflight (`require_image` through its `run=` seam) — a missing image is the preflight's `no`, with no `docker run` attempted."
     premises: [22]
-    rows: "#22 — `_spec771`'s runner meets a missing image: its own assertion message carries the remedy (the fourth `docker run` site, outside M5's helper — F8)."
+    rows: "#22 — `_spec771`'s runner meets a missing image: its own assertion message carries the remedy (the fourth `docker run` site, INSIDE M5's helper since #1095 — the F8 exception is gone)."
     forks: "O7-SHAPE #69 (auto: no --read-only added to the runner — it mounts nothing)"
   - id: spec771_runner_takes_an_injectable_run
     kind: seam
@@ -1028,8 +1040,8 @@ structure:
       # infinity` (_lifecycle.py:50-64, :179-203) and _spec771's `docker run --rm -i
       # [--security-opt] <image> python3 -`. The delta adds exactly `--env DEFENDER_BOX=1`,
       # `--pull=never` and the derived image token (JF5/O7). The response is the daemon's
-      # stderr: with `--pull=never` a missing image is the one line `docker: Error response from
-      # daemon: No such image: defender-box:<tag>` rc 125 (N1/rg4).
+      # stderr, kept verbatim and CLASSIFIED BY NOBODY (#1095): a missing image never reaches
+      # the create — `require_image` asks the daemon first (`docker image inspect`, R1).
       # R6 walk (for the gate leaf): image token — chooser: the three files' bytes via sha256
       # hex (sanitized by construction) or the explicit `rootfs` (chooser: the test/operator);
       # env VALUES — chooser: the caller's request env, value-blind (pre-existing, PJ-r2-2:
@@ -1066,22 +1078,22 @@ structure:
     # ===== the fault surfaces ====================================================================
     - id: create_fault_remedy
       provenance: design
-      # M5's one helper behind both create-fault sites (:157-159, :253-255 — N11; :271 is a
-      # startup marker, not a create fault) and the _spec771 runner's assertion message: when
-      # the daemon's stderr carries `No such image: <the name this start resolved>` (silent
-      # #35), the BoxFault message ends with `python3 <tree>/defender/scripts/box_image.py
-      # build`, `<tree>` = the mounted tree's absolute path (`defender_dir.parent` /
-      # `Path(request.workdir).resolve()`, #83). Any other shape keeps its own remedy (d43).
-      # `missing_image_on_drain_lane` is UNBOUND (MF2): on that lane the named tree is deleted
-      # by drains.py:776-780 before the fault is reported (F22/S14).
+      # M5's one helper — `require_image(docker, Rootfs)` since #1095 — behind both start
+      # sites (before their create) and the _spec771 runner: the daemon is asked for the name
+      # this start resolved (`docker image inspect --format {{.Id}} <name>`); a non-zero answer
+      # raises a BoxFault carrying the daemon's words and, for a DERIVED name, ending with
+      # `python3 <tree>/defender/scripts/box_image.py build`, `<tree>` = the mounted tree's
+      # absolute path (`defender_dir.parent` / `Path(request.workdir).resolve()`, #83). The
+      # remedy is decided by the resolver (`Rootfs.remedy`: an explicit rootfs earns none —
+      # no script of ours builds it). A create that fails AFTER the daemon said yes keeps its
+      # own text and no remedy (d43). `missing_image_on_drain_lane`: MF2.
       # R6 walk: `<tree>` — chooser: the operator's checkout / the drain's worktree base
       # (`<worktree_base>/<slug>-<batch_id>`); sanitizer: shlex.quote (#42, auto); the
-      # `No such image:` match — chooser: the daemon; the classifier compares against the
-      # name it computed, so a coincidental substring cannot select the remedy.
+      # daemon's answer — chooser: the daemon, by EXIT CODE; no text of its is read to decide.
       facets:
         domain:
           type: str
-          refinement: {nl: "The daemon's create stderr, classified: the one-line missing-image shape for the name this start resolved; the same shape on the drain lane where the tree is transient; anything else."}
+          refinement: {nl: "The daemon's answer to the preflight, by exit code: no image for the name this start resolved; the same on the drain lane where the tree is transient; anything else (a create that failed after a yes, kept verbatim)."}
           default: other
           distinguished: [missing_image, other, missing_image_on_drain_lane]
           falsy_valid: false
@@ -1090,7 +1102,7 @@ structure:
           parts:
             - {role: remedy, source: "template:create_fault_remedy", slots: {tree: drain_worktree, name: image_tag}}
           invariants: [all-slots-bound]
-          nl: "The BoxFault sentence an operator copies: the daemon's text, then the build command with the mounted tree's path."
+          nl: "The BoxFault sentence an operator copies: the daemon's own words on the preflight, then the build command with the mounted tree's path."
     - id: did_not_run_marker
       provenance: design
       # `write_did_not_run` — the §7 D2 "nobody judged this run" marker: run-dir lane writes
@@ -1320,12 +1332,12 @@ structure:
     - {from: _start_boxed,            to: docker_run,          mode: invoke, via: subprocess,     provenance: design}   # `_call(docker, _create_argv(...))` :139-144; response = stderr (:152-159)
     - {from: _start_boxed_request,    to: docker_run,          mode: invoke, via: subprocess,     provenance: design}   # :239-241; response :248-255
     - {from: run_probe_under_profile, to: docker_run,          mode: invoke, via: subprocess,     provenance: design, sends: payload, transport: subprocess}   # `docker run --rm -i [--security-opt] --pull=never <image> python3 -`
-    - {from: _start_boxed,            to: box_image_on_daemon, mode: read,   via: docker-run,     provenance: design}   # `--pull=never`: the daemon resolves the name locally or answers `No such image`
-    - {from: _start_boxed_request,    to: box_image_on_daemon, mode: read,   via: docker-run,     provenance: design}
-    - {from: run_probe_under_profile, to: box_image_on_daemon, mode: read,   via: docker-run,     provenance: design}
-    - {from: _start_boxed,            to: create_fault_remedy, mode: invoke, via: api,            provenance: design}   # M5's helper at the create-fault site :157-159
-    - {from: _start_boxed_request,    to: create_fault_remedy, mode: invoke, via: api,            provenance: design}   # :253-255
-    - {from: run_probe_under_profile, to: create_fault_remedy, mode: invoke, via: api,            provenance: design}   # its own assertion message (F8)
+    - {from: _start_boxed,            to: box_image_on_daemon, mode: read,   via: docker-image-inspect, provenance: design}   # #1095: the preflight asks by name, before the create; `--pull=never` on the create then only forbids a fetch
+    - {from: _start_boxed_request,    to: box_image_on_daemon, mode: read,   via: docker-image-inspect, provenance: design}
+    - {from: run_probe_under_profile, to: box_image_on_daemon, mode: read,   via: docker-image-inspect, provenance: design}
+    - {from: _start_boxed,            to: create_fault_remedy, mode: invoke, via: api,            provenance: design}   # `require_image` before the create (#1095)
+    - {from: _start_boxed_request,    to: create_fault_remedy, mode: invoke, via: api,            provenance: design}
+    - {from: run_probe_under_profile, to: create_fault_remedy, mode: invoke, via: api,            provenance: design}   # the same helper through its `run=` seam (F8's exception closed, #1095)
     - {from: learning_drain,          to: create_fault_remedy, mode: read,   via: api,            provenance: code}     # re-raises the BoxFault after cleanup (drains.py:776-780); MF2 recommends it append the commit
     - {from: _start_boxed,            to: did_not_run_marker,  mode: write,  via: fs,             provenance: code}     # :136, :152, :168 — into run_dir
     - {from: _start_boxed_request,    to: did_not_run_marker,  mode: write,  via: fs,             provenance: code}     # :236, :248, :269 — into every writable mount source
@@ -1517,6 +1529,9 @@ claims:
   - {id: G27, kind: referential, claim: "test_box_request_workdir_not_among_its_own_mounts (test_665_box_geography.py:112-123) starts a request box with workdir=tmp_path/'nowhere' through the fake daemon and asserts `--workdir` is rendered — its docstring states 'box.py renders geography, it does not validate it'", probe: "read test_665_box_geography.py:112-123", probe_kind: read, observed: "a resolver refusing on `<workdir>/defender/box.Dockerfile` absent turns this test red and contradicts its stated principle (F21 → MF1 part 4: it pins a rootfs)", verdict: holds}
 
   # ---- raised by the extraction leaf (20-demands) --------------------------------------------
+  # ---- raised at finalize (#1095 review) ----------------------------------------------------
+  - {id: R1, kind: behavior, claim: "`docker image inspect --format {{.Id}} <name>` answers rc 0 (the id on stdout) when the daemon holds `<name>` and rc 1 otherwise, with `Error response from daemon: No such image: <name>` on stderr; the exit code alone decides", probe: "CLI 29.6.1 / daemon 29.5.3: inspect of the just-built `defender-box:v1-…` and of `defender-box:v1-000000000000`; `require_image` driven against the real daemon for a held derived name, a missing derived name (remedy named) and a missing explicit name (no remedy)", probe_kind: executed, observed: "rc 0 / rc 1 as stated; the three messages as stated", verdict: holds}
+  - {id: R2, kind: behavior, claim: "premise #34 is FALSE: the create's `No such image:` line is CLI-phrased — docker-cli 27.5.1 emits `No such image: <name>.` (its reportError does TrimSuffix+'.'), 28.0.1 and 29.6.1 emit it without the period — so `_NO_SUCH_IMAGE_RE`'s `(\\S+)` captured `<name>.` on 27.x and the exact-name compare dropped the remedy", probe: "#1095 review: three static CLIs (27.5.1, 28.0.1, 29.6.1) against the local daemon, the builders' exact create shape", probe_kind: executed, observed: "as stated; distro CLIs (Ubuntu 24.04 docker.io, Debian bookworm) are <= 27", verdict: refuted, note: "the root cause is reading the CLI's text at all — closed by R1's preflight, not by widening the pattern"}
   - {id: N1, kind: behavior, claim: "the exact create shape (`docker run --detach --name … --network none --read-only --pull=never <missing> sleep infinity`) fails with the daemon's one line `docker: Error response from daemon: No such image: defender-box:<tag>`, rc=125, and leaves no container behind; without --pull=never the same shape emits the two-line pull-path text", probe: "docker run --detach --name spec1092-probe-missing --network none --read-only --pull=never defender-box:0123456789ab sleep infinity; docker ps -a --filter name=…; the same without --pull=never (CLI 29.6.1, daemon 29.5.3); containers removed", probe_kind: executed, observed: "rc=125 both; --pull=never: `No such image: defender-box:0123456789ab`; without: `Unable to find image … locally` + `pull access denied for defender-box …`; ps -a empty", verdict: holds}
   - {id: N2, kind: behavior, claim: "a stdlib-only module shaped like runtime/box/_image.py loads by file path on the stock image's bare 3.11 with pydantic blocked and never imports the box package; hashing the real uv.lock + pyproject.toml + a one-line Dockerfile costs ~2 ms; a tree without the inputs raises FileNotFoundError; one byte in the Dockerfile moves the tag", probe: "scratch _image.py (sha256 over the three files' bytes, 12 hex) + probe.py under /workspace/.spec1092-probe-p2 (daemon-visible; removed after), run in python:3.11-slim with a meta_path block on pydantic; spec_from_file_location + exec_module; time.perf_counter around image_tag; image_tag(Path('/srv/defender')); host-side one-byte mutation of a copied tree", probe_kind: executed, observed: "defender.* in sys.modules: []; tag defender-box:d1210108f469 in 2.33 ms; deterministic on re-call; FileNotFoundError filename=/srv/defender/box.Dockerfile; dockerfile byte moves tag: True. NOTE (§7 MF3, phase E): the probed scratch module had no recipe version; the settled shape is `defender-box:<RECIPE_VERSION>-<12 hex>` — the tests read `RECIPE_VERSION` off the module and match the shape, never this literal", verdict: holds}
   - {id: N3, kind: behavior, claim: "an amended-M1 Dockerfile — digest-pinned base, uv 0.11.21 binary copy, UV_PROJECT_ENVIRONMENT=/usr/local UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --inexact, then `uv pip uninstall --python /usr/local/bin/python3 pip setuptools wheel`, then rm /bin/uv — builds, keeps packaging, leaves no installer and compiles every site-packages module", probe: "throwaway build spec1092-probe-p3 over the committed pyproject+uv.lock (no --extra box: the lock lacks the extra, G23); docker run --rm -i --network none --read-only … python3 - inspecting imports, `python3 -m pip --version`, `command -v uv`, .py vs __pycache__/*.pyc counts, dist-info list, `-X importtime`; image removed", probe_kind: executed, observed: "packaging/pydantic/yaml/typing_extensions import from /usr/local/lib/python3.11/site-packages; pip/setuptools/wheel ModuleNotFoundError; python3 -m pip rc=1; uv rc=127; py 151 / pyc 151 (pydantic 105/105); dists = annotated_types, packaging 26.2, pydantic 2.13.4, pydantic_core 2.46.4, pyyaml 6.0.3, typing_extensions 4.15.0, typing_inspection 0.4.2; size 75.0 MB (no duckdb); import pydantic 635–850 ms on this loaded shared host — unpaired, NOT comparable to run 1's 155 ms compiled", verdict: holds}
@@ -1869,7 +1884,7 @@ handoff:
     - "silent #24 — an uncommitted edit renames the wanted image: indistinguishable at the fault; the run stamp's `dirty_paths` (P46) is the signal; the remedy (build from this tree) is correct either way. `resolved_by: auto`"
     - "silent #26 — box-dood's pre-pull warms a different image: out of scope: the outer container is not a box and is untouched (non-obligation). `resolved_by: auto`"
     - "silent #33 — the allowlist gains a key with no env_pairs entry: settled by C17 — the request lane passes only keys present in `request.env` (no KeyError); DEFENDER_BOX is wired into both builders (M6); a general guard is out of scope. `resolved_by: auto`"
-    - "silent #35 — unrelated stderr containing `No such image:`: match `No such image: <the name this start just resolved>` exactly — the classifier knows the name it computed, so a coincidence is impossible; d42's fixture uses that line (d43's `no-such-other-image` row pins the other side). `resolved_by: auto`"
+    - "silent #35 — unrelated stderr containing `No such image:`: SUPERSEDED at finalize (#1095) — no stderr is matched; the preflight asks the daemon about the name it resolved and reads the exit code. d43's `no-such-other-image` row is deleted (impossible by construction). `resolved_by: auto`"
     - "silent #72 — the suite runs from a worktree on the main checkout's package: routes to MF3 (copy1's answer is true of the INPUTS and silent on the RECIPE — the hole MF3 names, resolved by the human there). `resolved_by: auto`"
     - "silent #77 — the investigation driver meets a missing image: the BoxFault text (exception) and the did-not-run marker (daemon stderr only, F6); `run.py` has no handler (P45) so it surfaces as a traceback with a non-zero exit — no wrapper demanded; the run record gains no field (JF6). `resolved_by: auto`"
     - "silent #94 — a real-daemon test pins the stock rootfs on a job with no pre-pull: carried as the amendment correction (45-dispositions R2): real-daemon tests pin `image_tag(DEFENDER)`, never the stock image; the amendment's 'tests that need a stock image pin one' holds for fake-docker tests only. `resolved_by: auto`"
@@ -1881,7 +1896,7 @@ handoff:
     - "G12's `replace` clause — `dataclasses.replace` IS applied to a BoxSpec at test_540_box_boundary.py:975 (`tmpfs_size='4m'`). No consequence: run 1's R6 executed `replace` on the pydantic clone and it works; the census is corrected (10-brief R5)."
     - "The amendment's 'tests that need a stock image pin one' holds for FAKE-DOCKER tests only (45-dispositions R2, silent #94): with the test/box-native pre-pulls dropped (M4-amended) and `--pull=never` on every create (JF5), a real-daemon test pinning `python:3.11-slim` faults on a cold runner (box-dood's kept pre-pull masks it there only). Rule for phase E: real-daemon tests pin `image_tag(DEFENDER)`; the stock name is for fake-docker sites. Zero such tests exist at base (P51) — a rule, not a migration."
     - "The design comment's data-model line '`BoxSpec.rootfs: str` keeps its type' is superseded by the amendment's unset default: `rootfs: str | None = None` (20-demands red flag 3, d25)."
-    - "F15 (run 1) — the two-line pull-path stderr no longer occurs on the create path once JF5's `--pull=never` lands; the daemon's one-line `No such image: <ref>` is the shape M5 matches (N1/rg4)."
+    - "F15 (run 1) — the two-line pull-path stderr no longer occurs on the create path once JF5's `--pull=never` lands; the daemon's one-line `No such image: <ref>` WAS the shape M5 matched (N1/rg4) until #1095 replaced the match with the preflight (R1/R2)."
     - "70-resolutions, carried by phase E: R2 `box_image_on_daemon.identity` is pre-discharged at UNIT grain only (d9 drives one fake `docker build`); the two-real-builds composition form (two builds into ONE daemon, a positive control that both land as distinct real content) is untested — handoff.deviations names it for the implementer and the adversary."
     - "N2's observed tag `defender-box:d1210108f469` is the probed scratch module's shape, not the settled one: §7 MF3 moved the name to `defender-box:<RECIPE_VERSION>-<12 hex>`; every test reads `RECIPE_VERSION` off `_image.py` and matches the shape (`_spec1092.TAG_RE`), never the probed literal."
   deferred:

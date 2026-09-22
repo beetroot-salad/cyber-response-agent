@@ -17,15 +17,16 @@ THE FAULT-INJECTION HIERARCHY, applied (phases/author.md):
 
   tier 2 — a declarative fake whose fault CONTENT cites the ledger claim that observed it on
   the real daemon. `RecordingDocker` (from `_box665`) is reused; `NoSuchImageDocker` below
-  answers a create with the daemon's one-line `No such image: <ref>` rc 125 — the shape N1
-  and rg4 executed under `--pull=never` — echoing the image token OFF THE CAPTURED ARGV so a
-  fixture can never name an image the builder did not resolve.
+  answers the preflight `docker image inspect` with the daemon's `No such image: <ref>` rc 1
+  (`NO_SUCH_IMAGE_CITE`), echoing the image token OFF THE ASKED ARGV so a fixture can never
+  name an image the builder did not resolve — and leaves the create healthy, so a preflight
+  that did not fire is caught by the create it lets through.
 
   tier 3 — an author-imagined fault is banned; none is used here.
 
 RED AGAINST HEAD is the expected state of a spec. `runtime/box/_image.py`,
 `defender/scripts/box_image.py`, `defender/box.Dockerfile`, `_BOX_MARK_ENV`, the `box` extra,
-the create-fault remedy and the CI build step do not exist at b016749c. Every reference to a
+the missing-image preflight and the CI build step do not exist at b016749c. Every reference to a
 future symbol is LAZY — reached inside a call site a test invokes (`box_mod.image_tag`, a path
 that is stat'd in the body) — so every module still COLLECTS at HEAD and each test fails on
 its own missing piece rather than taking the suite's collection down with it.
@@ -42,8 +43,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -142,70 +141,36 @@ def make_run_dir(tmp_path: Path, name: str = "run-1092") -> Path:
     return run
 
 
-# ---- observing file reads (d1, d5) ------------------------------------------------------------
-_OPENED: list[str] = []
-_WATCHING = False
-
-
-def _audit(event: str, args: tuple) -> None:
-    if _WATCHING and event == "open":
-        target = args[0]
-        if isinstance(target, bytes):
-            target = os.fsdecode(target)
-        if isinstance(target, (str, os.PathLike)):
-            _OPENED.append(str(target))
-
-
-sys.addaudithook(_audit)
-
-
-@contextlib.contextmanager
-def watch_opens() -> Iterator[list[str]]:
-    """Every path `open`ed (the audit event `open` — `Path.read_bytes`, `open()`, `io.open`)
-    while the block runs, appended to the yielded list."""
-    global _WATCHING
-    del _OPENED[:]
-    _WATCHING = True
-    try:
-        yield _OPENED
-    finally:
-        _WATCHING = False
-
-
-def input_reads(opened: list[str]) -> list[str]:
-    """The opens that touched one of the three hash inputs, by basename."""
-    return [p for p in opened if Path(p).name in HASH_INPUTS]
-
-
 # ---- the fake daemon: a missing image, in the daemon's own words --------------------------------
-#: The one-line shape N1 executed for the builders' exact `--detach ... --pull=never` create
-#: and rg4 executed on two CLIs against daemon 29.5.3: `No such image: <ref>`, rc 125, no
-#: container left behind. The text is the daemon's, not the CLI's pull-path phrasing.
-NO_SUCH_IMAGE_CITE = "N1, rg4"
+#: `docker image inspect --format {{.Id}} <absent>` answers rc 1 with the daemon's one line
+#: `Error response from daemon: No such image: <ref>` (CLI 29.6.1 / daemon 29.5.3, the
+#: #1095 review-fix probe). The TEXT is never read by production — the preflight decides by
+#: exit code, which is the whole point (#1095: the create's text differed across CLIs).
+NO_SUCH_IMAGE_CITE = "#1095 image-inspect probe"
 
 
 def no_such_image_stderr(ref: str) -> str:
-    return f"docker: Error response from daemon: No such image: {ref}\n"
+    return f"Error response from daemon: No such image: {ref}\n"
 
 
 class NoSuchImageDocker(RecordingDocker):
-    """`RecordingDocker` whose create answers with the daemon's missing-image line for THE
-    IMAGE TOKEN THE BUILDER PUT ON THE ARGV (`<image> sleep infinity` — the last three tokens
-    of both builders' create), rc 125 (`NO_SUCH_IMAGE_CITE`). `ref` overrides the echoed name
-    to model a `No such image:` line about SOME OTHER image than the one this start resolved
-    (silent #35: the classifier compares against the name it computed)."""
+    """`RecordingDocker` whose preflight `docker image inspect` answers rc 1 with the daemon's
+    missing-image line for THE IMAGE THE START ASKED ABOUT (the last token of the inspect
+    argv — `NO_SUCH_IMAGE_CITE`), recorded in `inspected_images`. The create is left HEALTHY:
+    a start that reaches it did not preflight, and the test's `"run" not in subcommands`
+    catches that."""
 
-    def __init__(self, *, ref: str | None = None, **kw):
+    def __init__(self, **kw):
         super().__init__(**kw)
-        self.ref = ref
         self.cite = NO_SUCH_IMAGE_CITE
+        self.inspected_images: list[str] = []
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
         argv = list(argv)
-        if len(argv) > 1 and argv[1] == "run":
+        if argv[1:3] == ["image", "inspect"]:
             self.calls.append(argv)
-            self.create_argv = argv
-            return _cp(125, "", no_such_image_stderr(self.ref or argv[-3]))
+            self.inspected_images.append(argv[-1])
+            return _cp(1, "", no_such_image_stderr(argv[-1]))
         return super().__call__(argv, **_kw)
 
 
@@ -213,6 +178,14 @@ def image_token(argv: list[str]) -> str:
     """The image a create argv names: the token before `sleep infinity` on both builders."""
     assert argv[-2:] == ["sleep", "infinity"], argv[-3:]
     return argv[-3]
+
+
+def inspected_image(calls: list[list[str]]) -> str | None:
+    """The image the ONE preflight `docker image inspect` asked the daemon about, or None
+    when no preflight ran; more than one is a failure."""
+    asked = [c[-1] for c in calls if c[1:3] == ["image", "inspect"]]
+    assert len(asked) <= 1, asked
+    return asked[0] if asked else None
 
 
 def subcommands(calls: list[list[str]]) -> list[str]:
@@ -330,7 +303,9 @@ print(json.dumps({"files": sorted(names), "dirs": sorted(dirs)}))
 # ---- the build script's docker, on PATH (d9) --------------------------------------------------
 def fake_docker_on_path(tmp_path: Path, *, rc: int = 0) -> tuple[dict[str, str], Path]:
     """A real `docker` executable first on PATH that appends its argv (NUL-separated) to a log
-    and exits `rc` — the seam a stdlib script that spawns `docker` has. Returns (env, log)."""
+    and exits `rc` — the seam a stdlib script that spawns `docker` has. Returns (env, log).
+    The builder it was asked for is logged beside the argv (`builder_log(log)`): the value
+    of `DOCKER_BUILDKIT` in the environment the script gave it."""
     bin_dir = tmp_path / "fakebin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "docker-argv.log"
@@ -339,6 +314,7 @@ def fake_docker_on_path(tmp_path: Path, *, rc: int = 0) -> tuple[dict[str, str],
         "#!/bin/sh\n"
         f"for a in \"$@\"; do printf '%s\\0' \"$a\" >> {log}; done\n"
         f"printf '\\1' >> {log}\n"
+        f"printf '%s\\n' \"${{DOCKER_BUILDKIT-unset}}\" >> {log}.builder\n"
         f"exit {rc}\n",
         encoding="utf-8",
     )
@@ -346,6 +322,12 @@ def fake_docker_on_path(tmp_path: Path, *, rc: int = 0) -> tuple[dict[str, str],
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     return env, log
+
+
+def builder_log(log: Path) -> list[str]:
+    """`DOCKER_BUILDKIT` as each recorded `docker` invocation saw it (`unset` when absent)."""
+    side = Path(f"{log}.builder")
+    return side.read_text(encoding="utf-8").splitlines() if side.exists() else []
 
 
 def recorded_docker_calls(log: Path) -> list[list[str]]:

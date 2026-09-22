@@ -14,8 +14,10 @@ from pathlib import Path
 from defender.tests._spec1092 import DEFENDER, DOCKERFILE
 
 _FROM_DIGEST = re.compile(r"^FROM\s+python:3\.11-slim@sha256:[0-9a-f]{64}(\s+AS\s+\S+)?\s*$")
-_UV_COPY = re.compile(
-    r"^COPY\s+--from=ghcr\.io/astral-sh/uv:(?P<version>\S+?)(@sha256:[0-9a-f]{64})?\s+/uv\s+/bin/uv\s*$"
+#: The one way uv reaches the recipe: lent to the sync's RUN as a bind mount from its pinned
+#: image (a version AND a digest), never COPYed into a layer of the image (#1095).
+_UV_MOUNT = re.compile(
+    r"--mount=type=bind,from=ghcr\.io/astral-sh/uv:(?P<version>[^@,\s]+)(@sha256:[0-9a-f]{64})?,source=/uv,target=/bin/uv\b"
 )
 _EXPLICIT_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -57,19 +59,28 @@ def test_the_dockerfile_pins_its_base_by_sha256_digest():
         assert "@sha256:" in ins, ins
 
 
-# ---- d12 -------------------------------------------------------------------------------------
+# ---- d12 (amended by #1095: mounted, never copied) ---------------------------------------------
 def test_the_dockerfile_copies_a_version_pinned_uv_binary_and_never_pip_installs():
-    """The Dockerfile obtains uv only by `COPY --from=ghcr.io/astral-sh/uv:<explicit
-    version>` (a digest on that COPY too — UVPIN #88), never `latest`, and contains no
-    `pip install` of anything."""
+    """The Dockerfile obtains uv only as a bind MOUNT on the sync's `RUN` — `--mount=type=bind,
+    from=ghcr.io/astral-sh/uv:<explicit version>@sha256:<digest>,source=/uv,target=/bin/uv`
+    (a version and a digest — UVPIN #88), never `latest` — so the binary is on the path of
+    that one step and enters no layer: no `COPY --from` of uv anywhere, nothing to remove
+    afterwards, and no `pip install` of anything.
+
+    # rejected: `COPY --from … /uv /bin/uv` plus a final `RUN rm -f /bin/uv` (the recipe as
+    # first written): the copy is a 45 MB layer every daemon stores and `docker save` still
+    # yields; the `rm` only masks it in the merged view (#1095 finding 4)."""
     instructions = _instructions()
-    uv_copies = [ins for ins in instructions if "astral-sh/uv" in ins]
-    assert len(uv_copies) == 1, uv_copies
-    m = _UV_COPY.match(uv_copies[0])
-    assert m, uv_copies[0]
+    uv_sites = [ins for ins in instructions if "astral-sh/uv" in ins]
+    assert len(uv_sites) == 1, uv_sites
+    assert uv_sites[0].startswith("RUN "), uv_sites[0]
+    m = _UV_MOUNT.search(uv_sites[0])
+    assert m, uv_sites[0]
     assert _EXPLICIT_VERSION.match(m.group("version")), m.group("version")
-    assert "@sha256:" in uv_copies[0], "the uv COPY is not digest-pinned (UVPIN #88)"
+    assert "@sha256:" in m.group(0), "the uv mount is not digest-pinned (UVPIN #88)"
+    assert "uv sync" in uv_sites[0], "uv is mounted on some step other than the sync"
     for ins in instructions:
+        assert not (ins.startswith("COPY ") and "--from=" in ins), f"a binary copied into a layer: {ins}"
         assert not re.search(r"\bpip3?\s+install\b", ins), ins
         assert "get-pip" not in ins, ins
 
@@ -95,33 +106,30 @@ def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
 def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra():
     """The sync instruction sets `UV_PROJECT_ENVIRONMENT=/usr/local` and
     `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--frozen`, `--no-dev`, `--inexact` and
-    `--extra box`, and the uv binary is removed afterwards (`rm … /bin/uv` after the sync);
-    no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE #60)."""
+    `--extra box`; no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE
+    #60). (uv itself is mounted onto that step and never removed, because it was never
+    added — d12.)"""
     instructions = _instructions()
     sync = instructions[_index_of(instructions, "uv sync")]
     for flag in ("--frozen", "--no-dev", "--inexact", "--extra box"):
         assert flag in sync, (flag, sync)
     assert "UV_PROJECT_ENVIRONMENT=/usr/local" in sync, sync
     assert "UV_COMPILE_BYTECODE=1" in sync, sync
-    removal = [i for i, ins in enumerate(instructions) if "/bin/uv" in ins and "rm" in ins]
-    assert removal, "uv is never removed"
-    assert removal[-1] > instructions.index(sync), "uv is not removed after the sync"
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
 
 
 # ---- d15 -------------------------------------------------------------------------------------
 def test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_sync_and_names_packaging_as_kept():
-    """After the sync and before `/bin/uv` is removed, the Dockerfile uninstalls `pip`,
-    `setuptools` and `wheel` from `/usr/local` and names `packaging` as the base package it
-    keeps (the reason `--inexact` was chosen)."""
+    """After the sync, the Dockerfile uninstalls `pip`, `setuptools` and `wheel` from
+    `/usr/local` and names `packaging` as the base package it keeps (the reason `--inexact`
+    was chosen)."""
     instructions = _instructions()
     sync_at = _index_of(instructions, "uv sync")
     uninstall_at = _index_of(instructions, "uninstall")
     uninstall = instructions[uninstall_at]
     for dist in ("pip", "setuptools", "wheel"):
         assert re.search(rf"\b{dist}\b", uninstall), (dist, uninstall)
-    rm_uv = [i for i, ins in enumerate(instructions) if "/bin/uv" in ins and "rm" in ins]
-    assert sync_at < uninstall_at < rm_uv[-1], (sync_at, uninstall_at, rm_uv)
+    assert sync_at < uninstall_at, (sync_at, uninstall_at)
     assert "packaging" in DOCKERFILE.read_text(encoding="utf-8"), "packaging is not named as kept"
 
 

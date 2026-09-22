@@ -10,6 +10,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 import shlex
 
@@ -37,42 +38,66 @@ _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
 #: the tree it is run from.
 _BUILD_SCRIPT_TAIL = "defender/scripts/box_image.py"
 
-#: JF5 — the daemon's own one-line shape for a create that named an image it does not hold,
-#: under `--pull=never` (N1, rg4). The CLI's pull-path phrasing no longer occurs on the create
-#: path at all, so it is not matched here.
-_NO_SUCH_IMAGE_RE = re.compile(r"No such image: (\S+)")
+
+class Rootfs(NamedTuple):
+    """What a `docker run` site puts on its argv as the box's root filesystem — and, decided
+    at the same moment by the same resolver, what to tell an operator whose daemon does not
+    hold it."""
+
+    image: str
+    #: O4 — the build command, when `image` is the one derived from the tree; `None` for an
+    #: explicit rootfs, which no script of ours builds (the daemon's own words are the whole
+    #: message then).
+    remedy: str | None
 
 
-def resolve_rootfs(rootfs: str | None, tree: Path) -> str:
-    """M3 revised: an explicit `rootfs` is honoured verbatim and reads nothing; unset resolves
-    to `image_tag(tree)`. Raises `BoxFault` (naming the tree and the first unreadable input)
-    rather than the bare `ImageInputError` — this is the ONE seam every `docker run` site
-    funnels the resolver's fault through."""
-    if rootfs is not None:
-        return rootfs
-    try:
-        return image_tag(tree)
-    except ImageInputError as e:
-        raise BoxFault(str(e)) from e
+class Create(NamedTuple):
+    """A rendered `docker run`: the argv, and BY NAME the rootfs it names — never read back
+    off a position of the argv, so the builders' tail layout is theirs to change."""
+
+    argv: list[str]
+    rootfs: Rootfs
 
 
-def missing_image_remedy(stderr: str, resolved_image: str, tree: Path) -> str | None:
-    """O4/JF5 — the remedy a `No such image:` create fault names, or `None` when the fault is
-    any other shape, or names some OTHER image than the one THIS start resolved (silent #35:
-    the classifier compares against the name the builder itself computed)."""
-    m = _NO_SUCH_IMAGE_RE.search(stderr or "")
-    if not m or m.group(1) != resolved_image:
-        return None
+def build_remedy(tree: Path) -> str:
+    """M5 amended / O4 — the one sentence every missing-image fault ends with, naming the
+    build command against the tree the box mounts (absolute, `shlex.quote`d — #42/#83)."""
     quoted_tree = shlex.quote(str(Path(tree).resolve()))
     return f"build it first: `python3 {quoted_tree}/{_BUILD_SCRIPT_TAIL} build`"
 
 
-def create_fault_message(name: str, stderr: str, resolved_image: str, tree: Path) -> str:
-    """The ONE composition every create-fault site uses: the daemon's own text, plus the
-    missing-image remedy when (and only when) the fault is that shape."""
-    base = f"could not create the box {name}: {(stderr or '').strip()}"
-    remedy = missing_image_remedy(stderr, resolved_image, tree)
-    return base if remedy is None else f"{base} — {remedy}"
+def resolve_rootfs(rootfs: str | None, tree: Path) -> Rootfs:
+    """M3 revised: an explicit `rootfs` is honoured verbatim, reads nothing and earns no
+    remedy; unset resolves to `image_tag(tree)` with the build remedy for the tree that
+    `tree` (the defender dir) sits in. Raises `BoxFault` (naming the tree and the first
+    unreadable input) rather than the bare `ImageInputError` — this is the ONE seam every
+    `docker run` site funnels the resolver's fault through."""
+    if rootfs is not None:
+        return Rootfs(rootfs, None)
+    try:
+        return Rootfs(image_tag(tree), build_remedy(tree.parent))
+    except ImageInputError as e:
+        raise BoxFault(str(e)) from e
+
+
+def require_image(docker: DockerFn, rootfs: Rootfs) -> None:
+    """O4 (JF5 amended): the daemon is ASKED whether it holds the image — `docker image
+    inspect`, a yes/no by exit code — before any create names it. A `no` is a `BoxFault`
+    carrying the daemon's own words and, for a derived image, the build remedy.
+
+    Nothing here reads the daemon's error TEXT to decide anything. The text a create fails
+    with is the CLI's to phrase and varies by its version (27.x ends the `No such image:`
+    line with a period, 28+ does not — #1095), so classifying a create's stderr after the
+    fact is exactly what this preflight replaces: one question, answered by exit code, on
+    the daemon that will run the create."""
+    probe = _call(docker, ["docker", "image", "inspect", "--format", "{{.Id}}", rootfs.image])
+    if probe.returncode == 0:
+        return
+    detail = (probe.stderr or "").strip()
+    message = f"the daemon holds no image {rootfs.image}: {detail}"
+    raise BoxFault(message if rootfs.remedy is None else f"{message} — {rootfs.remedy}")
+
+
 # The full container id as docker writes it into every container's own mount table.
 _CONTAINER_ID_RE = re.compile(r"/containers/([0-9a-f]{64})")
 _HOSTNAME_PATH = Path("/etc/hostname")

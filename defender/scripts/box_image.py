@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +53,12 @@ def _cmd_build(image: ModuleType) -> int:
         "-t", tag,
         str(_TREE_ROOT),
     ]
-    proc = subprocess.run(argv)  # noqa: S603 — the whole point of this command
+    # This is the ONE place the recipe is built, so the builder it needs is pinned here: the
+    # recipe's `RUN --mount` (uv lent to the sync step, never a layer) is BuildKit syntax,
+    # which the legacy builder rejects. Docker >= 23 defaults to BuildKit; the variable makes
+    # an older daemon's CLI use it too instead of failing on the first `--mount`.
+    env = dict(os.environ, DOCKER_BUILDKIT="1")
+    proc = subprocess.run(argv, env=env)  # noqa: S603 — the whole point of this command
     return proc.returncode
 
 
@@ -65,12 +71,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         image = _load_image_module()
+    except Exception as e:  # noqa: BLE001 — anything importlib raises is this script's fault
+        print(f"box_image.py: {e}", file=sys.stderr)
+        return 1
+    try:
         if args.command == "tag":
             return _cmd_tag(image)
         return _cmd_build(image)
-    except Exception as e:  # noqa: BLE001 — ImageInputError and anything importlib raises
-        input_error = type(e).__name__ == "ImageInputError"
-        print(str(e) if input_error else f"box_image.py: {e}", file=sys.stderr)
+    except image.ImageInputError as e:
+        # The tree's fault, in the resolver's own words — the class is the loaded module's,
+        # so no name-matching stands between the raise and this arm.
+        print(str(e), file=sys.stderr)
         return 1
 
 

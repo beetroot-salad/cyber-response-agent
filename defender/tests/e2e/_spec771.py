@@ -345,27 +345,33 @@ def run_probe_under_profile(
     under docker-outside-of-Docker, where a host path need not exist on the daemon's side.
 
     #1092: this is the FOURTH `docker run <rootfs>` site — it takes the same resolver
-    (`image_tag(DEFENDER)`, the running package's own tree) and the same `--pull=never` the
-    two argv builders carry (JF5); a missing image's failure names the same build remedy,
-    against DEFENDER's own tree. `run=` is an injectable seam, keyword-only, defaulting to
-    `subprocess.run`, so a test can observe the argv without a daemon.
+    (`resolve_rootfs` over DEFENDER, the running package's own tree), the same `--pull=never`
+    the two argv builders carry (JF5), and the same preflight (`require_image`: the daemon is
+    asked for the image before the run names it, so a missing image raises with the build
+    remedy against DEFENDER's own tree). `run=` is an injectable seam, keyword-only,
+    defaulting to `subprocess.run`, so a test can observe the argv without a daemon; the
+    preflight and the run both go through it.
     """
-    rootfs = box_mod.image_tag(DEFENDER)
+    rootfs = box_mod.resolve_rootfs(None, DEFENDER)
+    try:
+        box_mod.require_image(
+            lambda argv: run(argv, capture_output=True, text=True, encoding="utf-8", timeout=300),
+            rootfs,
+        )
+    except box_mod.BoxFault as e:
+        raise AssertionError(str(e)) from e
     argv = ["docker", "run", "--rm", "-i"]
     if profile is not None:
         argv += ["--security-opt", f"seccomp={profile}"]
-    argv += ["--pull=never", rootfs, "python3", "-"]
+    argv += ["--pull=never", rootfs.image, "python3", "-"]
     probe = run(
         argv, input=script, capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
     if probe.returncode != 0:
-        remedy = box_mod.missing_image_remedy(probe.stderr or "", rootfs, DEFENDER.parent)
-        detail = (probe.stderr or "").strip()
-        if remedy is not None:
-            detail = f"{detail} — {remedy}"
         raise AssertionError(
             f"the probe container failed under "
-            f"{'the daemon default' if profile is None else profile}: {detail}"
+            f"{'the daemon default' if profile is None else profile}: "
+            f"{(probe.stderr or '').strip()}"
         )
     return json.loads(probe.stdout)
 

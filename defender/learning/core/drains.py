@@ -749,10 +749,12 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
     from, read while it still exists, plus a checkout instruction. Every drain-lane start
     `BoxFault` gets the pointer, whatever shape the fault is; only a missing-image fault also
     carries a build command (O4). Raises the amended fault when it can build one; otherwise
-    returns, and the caller's own `raise` re-raises `e` unmodified."""
+    returns, and the caller's own `raise` re-raises `e` unmodified. The sha is read only for
+    a `BoxFault` — every other unwind (a KeyboardInterrupt included) spawns no git."""
     cut_sha: str | None = None
-    with contextlib.suppress(Exception):
-        cut_sha = _git.git_head_sha(wt)
+    if isinstance(e, box_mod.BoxFault):
+        with contextlib.suppress(Exception):
+            cut_sha = _git.git_head_sha(wt)
     with contextlib.suppress(Exception):
         branch.cleanup(wt)
     if isinstance(e, box_mod.BoxFault) and cut_sha:

@@ -101,7 +101,7 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
     argv = _create_argv(
         "defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
         PINNED, MOUNTS,
-    )
+    ).argv
     joined = " ".join(argv)
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
@@ -119,7 +119,7 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
     argv = _create_argv(
         "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (),
-    )
+    ).argv
     joined = " ".join(argv)
     assert "type=bind,source=/tmp/defender-runs/r1,target=/tmp/defender-runs/r1" in joined
     assert "type=bind,source=/srv/defender,target=/srv/defender,readonly" in joined
@@ -152,7 +152,7 @@ def test_render_argv_translates_request_mounts_too():
         workdir=Path("/workspace"),
         spec=PINNED,
     )
-    joined = " ".join(_render_argv(request, MOUNTS))
+    joined = " ".join(_render_argv(request, MOUNTS).argv)
     assert (
         "type=bind,source=/home/dev/projects/repo/defender/learning,"
         "target=/workspace/defender/learning" in joined

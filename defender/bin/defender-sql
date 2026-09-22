@@ -16,4 +16,4 @@ else
     PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
     [ -x "$PY" ] || PY=python3
 fi
-exec "$PY" "${DEFENDER_DIR}/scripts/gather_tools/sql.py" "$@"
+exec "$PY" "${DEFENDER_DIR:?DEFENDER_DIR is not set}/scripts/gather_tools/sql.py" "$@"

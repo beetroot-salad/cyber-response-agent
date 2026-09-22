@@ -22,6 +22,7 @@ from defender.tests._spec1092 import (
     DEFENDER,
     HASH_INPUTS,
     IMAGE_PY,
+    builder_log,
     fake_docker_on_path,
     image_tag,
     plant_tree,
@@ -165,9 +166,11 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>` — an argv list,
     never a shell string (a tree path with a space arrives as ONE argument; no `{`-template
     token survives on the argv), the context is the tree root so the root `.dockerignore`
-    applies — and propagates a non-zero build exit as its own non-zero exit. The daemon-side
-    failures settled at phase C (a base pull, a hash mismatch, a full daemon, no `docker` on
-    PATH) are all the same observable: the build's non-zero exit, no fallback, no retry.
+    applies, the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
+    the recipe's `RUN --mount` is BuildKit syntax, #1095) — and propagates a non-zero build
+    exit as its own non-zero exit. The daemon-side failures settled at phase C (a base pull,
+    a hash mismatch, a full daemon, no `docker` on PATH) are all the same observable: the
+    build's non-zero exit, no fallback, no retry.
 
     # rejected: `start_box` does NOT auto-build (D2 C: a sandbox start that reaches the
     # network to build its own boundary inverts fail-loud). A registry pull path is not added."""
@@ -185,6 +188,7 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     assert argv[argv.index("-t") + 1] == expected_tag, argv
     assert argv[-1] == str(root), argv
     assert not any("{" in t or "}" in t for t in argv), argv
+    assert builder_log(log) == ["1"], builder_log(log)
 
     env, log = fake_docker_on_path(tmp_path / "failing", rc=7)
     out = _run_script(script, "build", cwd=Path("/"), env=env)
