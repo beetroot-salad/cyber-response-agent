@@ -6,6 +6,7 @@ from pathlib import Path
 from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
 from defender._run_paths import (
     ALERT,
+    PROVENANCE,
     GATHER_SUMMARIES_DIRNAME,
     LESSONS_LOADED,
     SERVED_PREFIX,
@@ -16,10 +17,11 @@ from defender._run_paths import (
     _confine,
 )
 
-#: The episode-layout names (#1077 D1), re-homed here from `learning/branch/archive.py`,
+#: The episode-layout names (#1077 D1) — the OWNER's spellings. `learning/branch/archive.py`,
 #: `ledger.py`, `timing.py`, `staging.py`, `runtime/branch/_family.py` and
-#: `scripts/visualize/visualize_episode.py` — every module that used to spell one of these now
-#: imports the constant from this module instead.
+#: `scripts/visualize/visualize_episode.py` still carry their own; D7 step 3 migrates them
+#: onto these, and `test_no_episode_layout_constant_survives_outside_the_owner` is red until
+#: it does.
 FAMILY_NAME = "family.yaml"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"
@@ -65,8 +67,6 @@ class EpisodePaths:
     def family_stamp(self) -> Path:
         """The family stamp shares `_run_paths.PROVENANCE`'s spelling at the episode root — a
         DIFFERENT shape at the same file name (#1025 fk-8/J12)."""
-        from defender._run_paths import PROVENANCE
-
         return self.episode_dir / PROVENANCE
 
     @property

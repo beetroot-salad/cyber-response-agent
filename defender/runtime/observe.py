@@ -146,15 +146,15 @@ class RequestLogger:
 
     def _write_record(self, rec: dict) -> None:
         """THE ONE WRITE onto the wire log every record kind goes through — a message, a
-        policy denial, a budget refusal — so #1077 decision 18's `writer_id` is stamped once
-        here and no record kind can be added without it.
+        policy denial, a budget refusal. Each kind spells its own row (#1077 decision 18's
+        `writer_id` rides on the records an AGENT produces — messages and budget refusals; a
+        policy denial is the host's own bounded projection of a call, keyed by `role`, whose
+        exact key set #632 pins and which names its writer already).
 
         `encode_wire_record` pins ensure_ascii=True deliberately: a lone UTF-16 surrogate
         (reachable from a provider response body via a backslash-u escape) survives this
         encode but raises UnicodeEncodeError where a raw str would be utf-8-encoded. Flipping
         it reopens a content-triggered availability halt."""
-        if "writer_id" not in rec:
-            rec = {**rec, "writer_id": writer_id(rec.get("agent_id") or rec.get("role"))}
         self._fh.write(encode_wire_record(rec) + "\n")
         self._fh.flush()
 
@@ -209,7 +209,7 @@ class RequestLogger:
 
     def log_budget_refusal(self, *, tool_name: str, agent_id: str = "main") -> None:
         rec = {"event_type": "budget_refusal", "kind": "budget_refusal",
-               "tool_name": tool_name, "agent_id": agent_id}
+               "tool_name": tool_name, "agent_id": agent_id, "writer_id": writer_id(agent_id)}
         with contextlib.suppress(Exception):
             self._write_record(rec)
 
@@ -290,15 +290,12 @@ def stage_trace_path(root: Path, trace_name: str) -> Path:
     return root / WIRE_LOG_DIR / trace_name
 
 
-def writer_id(agent_id: Any) -> str:
-    """#1077 decision 18 — every wire-log record carries a writer id, so the main process and
-    every concurrent gather sub-agent sharing ONE file stay individually attributable. MAIN's
-    own `agent_id` is "main"; its writer id is the upper-cased form, "MAIN", which is what
-    every reader checks for. A record with no agent at all (a denial keyed by role) is the
-    host's own: MAIN."""
-    if agent_id is None or agent_id == "main":
-        return "MAIN"
-    return str(agent_id)
+def writer_id(agent_id: str) -> str:
+    """#1077 decision 18 — every agent-produced wire-log record carries a writer id, so the
+    main process and every concurrent gather sub-agent sharing ONE file stay individually
+    attributable. MAIN's own `agent_id` is "main"; its writer id is the upper-cased form,
+    "MAIN", which is what every reader checks for."""
+    return "MAIN" if agent_id == "main" else agent_id
 
 
 def _tool_args(value: Any) -> dict:

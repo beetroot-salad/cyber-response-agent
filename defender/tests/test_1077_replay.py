@@ -514,8 +514,13 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     run_dir = materialize(tmp_path, GOLDEN)
     drive(run_dir, run_id="writerid-1077", main=ReplayFn(_closing_turns()))
 
+    from defender.runtime.observe import POLICY_DENIAL_EVENT_TYPE
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
+    # Every AGENT-produced record: a message, a budget refusal. A policy denial is the host's
+    # bounded projection of a call, keyed by `role`, whose exact key set #632 pins
+    # (`test_denial_audit_632`) — it names its writer already and gains no second field.
+    rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]
     assert missing == [], (
         f"records {missing[:5]} carry no writer id — decision 18 adds one to EVERY record, "

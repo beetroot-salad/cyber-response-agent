@@ -161,7 +161,15 @@ def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
             for segment in spelled.split("/"):
                 if _SEGMENT_PLACEHOLDER.search(segment):
                     # A COMPOSED segment (`<lead>.lead.json`, `<run>.run-end.json`) is not a
-                    # whole name; what is discriminating in it is one of the curated parts.
+                    # whole name. Its literal head and tail are the fragments a spelling
+                    # outside the owner would carry — admitted when they are file-name-shaped
+                    # and discriminating (`.run-end.json`, `review_record.`; never `.json`).
+                    # The five curated `COMPOSED_PARTS` are a subset of what this yields.
+                    head = segment[:segment.index("<")]
+                    tail = segment[segment.rindex(">") + 1:]
+                    for fragment in (head, tail):
+                        if "." in fragment and _discriminating(fragment):
+                            names.add(fragment)
                     continue
                 if _discriminating(segment):
                     names.add(segment)
@@ -239,7 +247,11 @@ def _scan_literal_pass(
         if isinstance(node, ast.JoinedStr):
             covered.update(node.values)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            covered.add(node.right)
+            # Only a CONSTANT right operand is the join's to report; an f-string there is the
+            # f-string's own (`d / f"{lead}.lead.json"` is reported as the f-string piece),
+            # so it must not be covered twice into silence.
+            if isinstance(node.right, ast.Constant):
+                covered.add(node.right)
     for node in ast.walk(tree):
         if node in covered:
             continue

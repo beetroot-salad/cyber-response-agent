@@ -1100,6 +1100,11 @@ def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -
         if len(set(values.values())) > 1:
             parts.append(f"siblings disagree on tenant: {values}")
     if skipped:
+        # RECORDED in the family's reason (the spec's demand: an unstamped sibling cannot
+        # silently shrink the comparison), and only ever beside a fault that is already
+        # there — a sibling with no readable stamp is `_member_faults`'s own fault, so this
+        # note never turns an otherwise-accepted family INCOMPLETE on its own. Should that
+        # fault ever be relaxed, this line is the one to move onto it.
         parts.append(
             f"the cross-tenant comparison ran over the {len(readable)} sibling(s) already "
             f"stamped and skipped {skipped} unstamped one(s)")

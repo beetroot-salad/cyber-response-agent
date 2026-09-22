@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
-from defender._run_handle import Run  # noqa: E402
+from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
 
@@ -75,7 +75,11 @@ def _setup_state(run: Run) -> str:
     paths = RunPaths(run_dir)
     setup_names = {paths.alert.name, paths.gather_raw.name, paths.provenance.name}
     extra = sorted(set(listing.entries or {}) - setup_names)
-    if extra or _io.entry_present(run.facts.run_end.path):
+    # ANY sidecar beside the directory is a run's trace: the scrub verdict is written at box
+    # START (`scrub.write_did_not_run`), so a box that started and died before its first write
+    # into the tree still left one — and the box sentinel does not survive a successful probe.
+    sidecars = (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path)
+    if extra or any(_io.entry_present(p) for p in sidecars):
         return "ran"
     return "setup"
 
@@ -407,7 +411,7 @@ def enqueue_curation(
     # off disk, and an alert the operator moved mid-run would otherwise take the
     # investigation's exit status down with it — for a lane already declared cheap to lose.
     try:
-        case_id = f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
+        case_id = case_ref(alert.read_bytes())
         _markers.enqueue_case_for_curation(case_id, run_dir, paths)
     except OSError as e:
         print(f"[run.py] NOT enqueuing for curation: could not write the request: {e!r}",

@@ -93,11 +93,14 @@ UPWARD_ACCESSORS = (
 #: sessions` — so their holding directories are anchored there, not on the run dir (claim
 #: C15: `session_store` anchors its own mkdir at `runs_base.parent`).
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
-#: Written ONCE, through the exclusive lane: the five facts the host records outside the
-#: model's reach, and the lead claim — an exclusive-create sidecar whose whole point is that a
-#: second claim on the same lead id collides (`hooks/record_lead.py`). Every other `write` is
-#: a whole-document replace.
-_WRITE_ONCE_MEMBERS = frozenset({*GROUP_MEMBERS["facts"], "leads"})
+#: Written ONCE, through the exclusive lane: the alert, the stamp and the run-end record —
+#: the facts today's host writes once and never again — and the lead claim, an
+#: exclusive-create sidecar whose whole point is that a second claim on the same lead id
+#: collides (`hooks/record_lead.py`). NOT the other two facts: the scrub verdict is written at
+#: box start ("did not run") and REWRITTEN at exit (`scrub._write_verdict`), and the
+#: accounting counter is rewritten on every failure and reset (`budget_enforcer`) — today's
+#: seams replace them, so the handle does. Every other `write` is a whole-document replace.
+_WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": _artifact_schema.INVESTIGATION_NAME,
                          "report": _artifact_schema.REPORT_NAME}
@@ -178,10 +181,13 @@ class RecordHandle:
         if self._member in _WRITE_ONCE_MEMBERS:
             # Write-once: the exclusive lane refuses an occupied name instead of replacing it,
             # so a fact is never rewritten by any writer and a lead is never claimed twice.
+            # The collision stays the `OSError` it is (`FileExistsError`), so a caller's
+            # "never take the run down" arm (`run_common._stamp`) sees it as the write
+            # refusal it is, not as a `ValueError` it never expected.
             try:
                 self._io.write_guarded(p, text, mode="create")
             except FileExistsError as taken:
-                raise ValueError(
+                raise FileExistsError(
                     f"{p} already exists — run.{self._group}.{self._member} is write-once") \
                     from taken
             return
@@ -221,6 +227,9 @@ class RecordHandle:
             f.write(json.dumps(current))
 
     def _do_open(self):
+        # Resolve first: the owner's refusals (a lineage id that is not case-stable, a handle
+        # with no runs base) hold for `.open()` exactly as they hold for `.path`.
+        _ = self.path
         return self.open_store(case_id=self._lineage_id, runs_base=self._sessions_runs_base)
 
 

@@ -1588,7 +1588,10 @@ demands:
       handoff.deviations note asking this to be asked by hand, and ANSWERED at §7 (decision 18) —
       a writer id on every wire-log record, which demand h49 pins as a payload shape. It forced
       O3's second exemption under decision 14; §7 decision 21 then removed the exemption
-      mechanism entirely, so the field costs the observer nothing (d13/d14).
+      mechanism entirely, so the field costs the observer nothing (d13/d14). SCOPED at finalize
+      (PR #1094 review): "every record" is every AGENT-produced record (messages, budget
+      refusals) — a policy denial is the host's bounded projection of a call, keyed by `role`,
+      whose exact key set #632 pins and which names its writer already.
   - id: g06_run_facts_read_only
     kind: negative
     form: test
