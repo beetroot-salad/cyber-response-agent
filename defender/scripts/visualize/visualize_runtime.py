@@ -11,7 +11,7 @@ from typing import NamedTuple
 from defender import _git
 from defender._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
-from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG
+from defender._run_paths import ALERT, INVESTIGATION, REVIEW_RECORD_PREFIX, WIRE_LOG_DIR, WIRE_LOG, RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
@@ -57,9 +57,9 @@ def render_runtime_investigation(
 ) -> tuple[str, list[dict]]:
     if phases is None:
         phases = normalize_phase_names(split_investigation_phases(run_dir))
-    subtitle = "— investigation.md split by phase"
+    subtitle = f"— {INVESTIGATION} split by phase"
     if not phases:
-        body = '<div class="empty">no investigation.md or empty</div>'
+        body = f'<div class="empty">no {INVESTIGATION} or empty</div>'
         return (section("sec-investigation", "defender", "Investigation", subtitle, body), [])
     blocks: list[str] = []
     # The stats line belongs to the BUCKET, and `phases` is a render list that may name one
@@ -393,8 +393,8 @@ def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
     from defender._io import read_text_soft
 
     out: list[tuple[int, dict]] = []
-    for p in run_dir.glob("review_record.*.json"):
-        m = re.fullmatch(r"review_record\.(\d+)\.json", p.name)
+    for p in run_dir.glob(f"{REVIEW_RECORD_PREFIX}*.json"):
+        m = re.fullmatch(rf"{re.escape(REVIEW_RECORD_PREFIX)}(\d+)\.json", p.name)
         if m is None:
             continue
         # `read_text_soft` rather than a locally restated `(OSError, UnicodeDecodeError)`:
@@ -764,7 +764,7 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
     <li class="section">Sections</li>
     <li class="item"><a href="#top">↑ top</a></li>
     <li class="item"><a href="#sec-metrics">metrics</a></li>
-    <li class="item"><a href="#sec-alert">alert.json</a></li>
+    <li class="item"><a href="#sec-alert">{ALERT}</a></li>
     {investigation_item}
     {review_item}
     {leads_item}
@@ -778,9 +778,9 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
 
 
 def _lesson_changes(run_dir: Path, run_id: str) -> dict:
-    trace = run_dir / "tool_trace.jsonl"
+    trace = RunPaths(run_dir).tool_trace
     if not trace.is_file():
-        return {"available": False, "reason": "no tool_trace.jsonl"}
+        return {"available": False, "reason": f"no {trace.name}"}
     since_iso = (
         _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.UTC).isoformat()
     )

@@ -19,6 +19,8 @@ from defender._io import (
     read_text_utf8,
 )
 from defender._run_paths import (
+    ALERT,
+    LEAD_CLAIM_SUFFIX,
     LEAD_ID_RE as _LEAD_ID_RE,
     RunPaths,
     artifact_dir,
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
 
 
-_LEAD_SUFFIX = ".lead.json"
+_LEAD_SUFFIX = LEAD_CLAIM_SUFFIX
 
 
 def _as_int(value, default: int = 0) -> int:
@@ -520,7 +522,7 @@ def actor_view(run_dir: Path) -> dict:
         entries.append({"query_id": q.query_id, "params": q.params})
     return {
         "case_id": run_dir.name,
-        "alert_ref": "alert.json",
+        "alert_ref": ALERT,
         "leads": [
             {"lead_id": lid, "queries": qs} for lid, qs in grouped.items()
         ],
@@ -676,7 +678,7 @@ def render_joined_yaml(run_dir: Path) -> str:
         lead_fields=("lead_id", "goal", "what_to_summarize"),
         query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
     )
-    doc = {"case_id": run_dir.name, "alert_ref": "alert.json", "leads": leads}
+    doc = {"case_id": run_dir.name, "alert_ref": ALERT, "leads": leads}
     return yaml.safe_dump(doc, sort_keys=False)
 
 

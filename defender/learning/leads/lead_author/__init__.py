@@ -17,6 +17,7 @@ import functools
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
+from defender._run_paths import EXECUTED_QUERIES, LEAD_AUTHOR_DIRNAME, RAW_MARKER, RunPaths
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -118,7 +119,7 @@ from defender.learning.leads._lead_spine import (
 
 
 def _state_dir(run_dir: Path) -> Path:
-    return run_dir / "lead_author"
+    return RunPaths(run_dir).lead_author
 
 
 def _done_sentinel(run_dir: Path) -> Path:
@@ -407,6 +408,8 @@ def _prepare_handoffs(
 
 
 
+#: `str.format`ed at the parser with the owner's record names (#1077 D1) — a template, not a
+#: module-level f-string, so the prompt-frame lint does not read it as a prompt boundary.
 _HELP_EPILOG = """\
 The agent runs no git; the loop commits. Invoked directly this commits onto the
 current branch/worktree's HEAD — in production the lead-author drain
@@ -419,11 +422,11 @@ Preconditions
     serve, pitfalls curation, scrub, push, PR). Violating it is not silent: this
     returns rc=3 without serving, and a drain tick that finds the lock held skips
     before claiming any request rather than counting the skip as a serve.
-  * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
+  * ``<run_dir>/{EXECUTED_QUERIES}`` and ``<run_dir>/{RAW_MARKER}/``
     (the two tables) must exist — written live during the run by
     record_query.py + record_lead.py.
 
-State files written under ``<run_dir>/lead_author/``
+State files written under ``<run_dir>/{LEAD_AUTHOR_DIRNAME}/``
   done           sentinel on successful completion; makes the run a no-op. Written
                  here at once when invoked by hand; under the drain, only once the
                  batch's tree has passed the scrub (its commit is then on a local
@@ -449,14 +452,16 @@ Environment
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
-        prog="lead_author",
+        prog="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         description="Fold lessons from one defender run into the executed-side "
                     "query template catalog.",
-        epilog=_HELP_EPILOG,
+        epilog=_HELP_EPILOG.format(
+            EXECUTED_QUERIES=EXECUTED_QUERIES, RAW_MARKER=RAW_MARKER,
+            LEAD_AUTHOR_DIRNAME=LEAD_AUTHOR_DIRNAME),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("run_dir", type=Path,
-                   help="defender run dir containing executed_queries.jsonl + gather_raw/")
+                   help=f"defender run dir containing {EXECUTED_QUERIES} + {RAW_MARKER}/")
     args = p.parse_args(argv)
     return run(args.run_dir)
 
@@ -546,7 +551,7 @@ __all__ = [
     "answered_identities",
     "argparse",
     "build_handoff",
-    "build_lead_author_deps",
+    "build_lead_author_deps",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "build_system_draft_handoffs",
     "collect_general_failures",
     "dataclass",

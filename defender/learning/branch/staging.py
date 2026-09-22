@@ -44,6 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
+from defender._episode_paths import STAGED_NAME
 from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
@@ -69,7 +70,7 @@ INJECT_SUFFIX = ".inject"
 
 #: The staging record's filename under the episode dir. (The review record a teardown failure
 #: is reported into is the caller's `review_path=`, never a name this module spells.)
-STAGED_FILENAME = "staged.yaml"
+STAGED_FILENAME = STAGED_NAME
 
 #: The two kinds of thing staging creates. Recorded per row because teardown deletes them
 #: through different cluster APIs and a row that cannot say which is a row teardown has to

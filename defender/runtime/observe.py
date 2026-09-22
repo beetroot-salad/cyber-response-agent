@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths
+from defender._run_paths import POLICY_DENIALS, WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: F401 — POLICY_DENIALS re-exported: the stream's writer binds it off this module
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
@@ -32,7 +32,7 @@ WIRE_LOG_ENSURE_ASCII = True
 #: The fixed policy-denial stream, ONE per site (§7 R1). Kept SEPARATE from the request stream
 #: (whose append-and-flush-per-record discipline it shares): folded in, "no denial happened"
 #: would be indistinguishable from "this file predates the denial record".
-POLICY_DENIALS = "policy_denials.jsonl"
+# `POLICY_DENIALS` — the owner's (`_run_paths`, #1077 D1), imported above.
 POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 
 #: The bounded, normalized projection §7 R12 demands: the policy FACT, never the raw
@@ -251,7 +251,7 @@ def _denial_logger_or_null(path: Path) -> RequestLogger:
 
 
 def denial_logger(run_dir: Path) -> RequestLogger:
-    path = Path(run_dir) / POLICY_DENIALS
+    path = RunPaths(run_dir).policy_denials
     key = str(path.resolve())
     logger = _DENIAL_LOGGERS.get(key)
     if logger is None:
@@ -405,4 +405,4 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
         "num_turns": len(responses),
         "usage": totals,
     })
-    write_guarded(run_dir / "tool_trace.jsonl", "".join(json.dumps(e) + "\n" for e in events))
+    write_guarded(RunPaths(run_dir).tool_trace, "".join(json.dumps(e) + "\n" for e in events))

@@ -8,7 +8,7 @@ class AgentRole(Enum):
     MAIN = "main"
     GATHER = "gather"
     VERIFIER = "verifier"
-    LEAD_AUTHOR = "lead_author"
+    LEAD_AUTHOR = "lead_author"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     CORPUS_AUTHOR = "corpus_author"
     # #773 M4: the drain's ONE bounded repair spawn for a BAD-verdict lesson. A SEPARATE
     # role, never a per-spawn override of CORPUS_AUTHOR's own definition (§7 F8) — its

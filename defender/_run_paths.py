@@ -123,6 +123,9 @@ LEAD_CLAIM_SUFFIX = ".lead.json"
 REVIEW_RECORD_PREFIX = "review_record."
 TRACE_SUFFIX = ".trace.jsonl"
 REVIEW_TRACE_SUFFIX = "_trace.jsonl"
+#: The judge's FRAMED companion to a `<agent>_trace.jsonl` — `<agent>_framed_trace.jsonl`,
+#: the prompt/reply pair the stage seam does not itself produce (`judge._write_wire_log`).
+FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` directory prefix — an EPISODE-level fragment, kept here
 #: (rather than only on `_episode_paths.py`) because D6's part set is read off this module;
 #: `_episode_paths.py` imports it rather than re-spelling it.
@@ -212,6 +215,12 @@ class RunPaths:
     @property
     def gather_raw(self) -> Path:
         return self.run_dir / RAW_MARKER
+
+    @property
+    def gather_summaries(self) -> Path:
+        """The directory `gather_summary` composes into — the judge's directory-of-summaries
+        role, walked whole by the driver's pointer builder and the archive."""
+        return self.run_dir / GATHER_SUMMARIES_DIRNAME
 
     @property
     def lead_author(self) -> Path:

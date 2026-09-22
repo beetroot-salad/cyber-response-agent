@@ -234,7 +234,7 @@ def _record_manual_row(
 
 
 def _breaker_failures(run_dir: Path) -> int:
-    path = Path(run_dir) / "circuit_breaker.json"
+    path = RunPaths(run_dir).circuit_breaker
     if not path.is_file():
         return 0
     try:
@@ -381,11 +381,11 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         reason = validate_artifact(INVESTIGATION_NAME, proposed, existing)
         if reason is not None:
             print(
-                f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "
+                f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                 f"would not pass validation, so nothing was written and the id stays "
                 f"undeclared: {reason}"
             )
             return
         write_guarded(path, proposed)
     except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
-        print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")
+        print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path

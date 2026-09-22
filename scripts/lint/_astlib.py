@@ -238,6 +238,10 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
 _OWNER_CLASS_ORIGINS = frozenset({
     "defender._run_paths.RunPaths",
     "defender._episode_paths.EpisodePaths",
+    # The file-backed handle (#1077 D5) is the fourth owner module's class: a value reached
+    # through `run.facts.<record>` / `run.tables.<table>` is owner-derived the same way a
+    # `RunPaths(x).<record>` is — every name on that chain is the owner's own.
+    "defender._run_handle.Run",
 })
 
 
@@ -295,6 +299,12 @@ def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool
         return callee(node, env) in _OWNER_CLASS_ORIGINS
     if isinstance(node, ast.Name):
         return node.id in owners
+    if isinstance(node, ast.Attribute):
+        # An attribute CHAIN rooted at an owner (`run.facts.scrub_verdict`, where `run` is a
+        # `Run`-annotated parameter) stays owner-derived at every link: the handle's
+        # sub-collections are the owner's own values, not a container the pass cannot see
+        # into.
+        return _owner_instance_in(node.value, owners, env)
     return False
 
 

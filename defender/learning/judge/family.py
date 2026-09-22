@@ -977,7 +977,7 @@ def _resolution_facts(
     scan = scan_fences(text)
     if scan.open_tail is not None:
         raise JudgeRefused(
-            f"world {world!r}: investigation.md has an unclosed invlang fence — a truncated "
+            f"world {world!r}: investigation.md has an unclosed invlang fence — a truncated "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "document cannot be graded")
     companion, warnings = parse_dense_companion(text)
     moved = False
@@ -1051,7 +1051,7 @@ def _read_verdict(report: ReportRead, *, world: str) -> str:
     the judge — the one reader that must not be fooled by it — refuses on."""
     if report.disposition is None:
         raise JudgeRefused(
-            f"world {world!r}: {report.reason or 'report.md carries no usable disposition'}")
+            f"world {world!r}: {report.reason or 'report.md carries no usable disposition'}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     return report.disposition
 
 
@@ -1074,7 +1074,7 @@ def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: froze
         if names_one_file(lead) and not summaries.has_file(f"{lead}.md"))
     if missing:
         raise JudgeRefused(
-            f"world {label!r}: gather_summaries/ is short {missing} — the archive left this "
+            f"world {label!r}: gather_summaries/ is short {missing} — the archive left this "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "world's supporting directory short of a lead its own investigation.md references; "
             "refusing rather than grading on a thinner view than it appears to have")
 
@@ -1299,13 +1299,13 @@ def _archive_notes(world: Bound, *, facts: WorldFacts) -> list[str]:
     if facts.unlanded_document_rows:
         first = facts.unlanded_document_rows[0].strip()
         notes.append(
-            f"investigation.md has {len(facts.unlanded_document_rows)} row(s) or block(s) this "
+            f"investigation.md has {len(facts.unlanded_document_rows)} row(s) or block(s) this "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"pass could not read ({first[:120]!r}…) — they are outside every invlang fence, "
             "unreadable to the parser, or carry no lead id, so this world's resolution facts "
             "are read from what landed alone")
     if facts.referenced_leads and world.under(GATHER_SUMMARIES_DIRNAME).entries().entries is None:
         notes.append(
-            f"gather_summaries/ is absent while investigation.md names "
+            f"gather_summaries/ is absent while investigation.md names "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(facts.referenced_leads)} — this world is graded on a thinner view than "
             "its own document claims")
     return notes

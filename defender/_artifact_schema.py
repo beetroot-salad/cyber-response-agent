@@ -128,11 +128,11 @@ def validate_report(proposed_text: str) -> str | None:
     try:
         fm, raw, _body = split_frontmatter(proposed_text)
     except FrontmatterError as e:
-        return f"report.md frontmatter is malformed — fix and rewrite: {e}"
+        return f"report.md frontmatter is malformed — fix and rewrite: {e}"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     problems: list[str] = []
     if _has_duplicate_top_level_key(raw):
         problems.append(
-            "report.md frontmatter declares a top-level key more than once — remove the "
+            "report.md frontmatter declares a top-level key more than once — remove the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "duplicate and rewrite."
         )
     disposition = fm.get("disposition")
@@ -145,22 +145,22 @@ def validate_report(proposed_text: str) -> str | None:
     # silently ACCEPT it and write a document no reader can tell from a clean one.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         problems.append(
-            "report.md frontmatter must carry a top-level `disposition` in "
+            "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
         )
     if _utf8_len(raw) > REPORT_FRONTMATTER_MAX:
         problems.append(
-            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "
+            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
         )
     if _utf8_len(proposed_text) > REPORT_FILE_MAX:
         problems.append(
-            f"report.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"report.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
         )
     if REPORT_CLOSE_DELIMITER in proposed_text:
         problems.append(
-            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "
+            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "break out of the judge's report block — remove it and rewrite."
         )
     if not problems:
@@ -257,7 +257,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         else:
             remedy = "Trim it and re-send."
         return (
-            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error — same as invlang_validate's
@@ -271,13 +271,13 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         found = diagnose(proposed_text, current)
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
         return (
-            f"investigation.md validation errored — failing closed: {e!r}. "
+            f"investigation.md validation errored — failing closed: {e!r}. "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{UNCHANGED_NOTICE} Simplify the invlang and re-send."
         )
     rendered = _rendered_errors(found)
     if rendered is not None:
         return (
-            f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"
+            f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             + rendered
             + "\n\nRe-send the block with those rows corrected."
         )
@@ -346,7 +346,7 @@ def committed_investigation_reason(text: str) -> str | None:
         found = diagnose(text, text)
     except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
         print(
-            f"[artifact_schema] investigation.md could not be validated for the close, "
+            f"[artifact_schema] investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"treating it as publishable: {e!r}",
             file=sys.stderr,
         )
@@ -355,7 +355,7 @@ def committed_investigation_reason(text: str) -> str | None:
     if rendered is None:
         return None
     return (
-        "close blocked: `investigation.md` does not pass invlang validation, and the close is "
+        "close blocked: `investigation.md` does not pass invlang validation, and the close is "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         "what publishes it — the report commits against this document and the review gate "
         "reads it.\n\n"
         + rendered

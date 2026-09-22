@@ -11,7 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._run_paths import PROVENANCE, WIRE_LOG_DIR  # noqa: E402
+from defender._run_paths import BUDGET, PROVENANCE, RAW_MARKER, WIRE_LOG_DIR  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -30,7 +30,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: shape and no deny names either of these. Suppressing the name keeps it out of the model's
 #: directory view; it does not put the file out of reach. `gather_raw`/`wire_logs` are the two
 #: that are actually refused (`permission.files`).
-_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json", PROVENANCE})
+_UNLISTED = frozenset({RAW_MARKER, WIRE_LOG_DIR, BUDGET, PROVENANCE})
 
 
 def _safe_name(name: str) -> str:

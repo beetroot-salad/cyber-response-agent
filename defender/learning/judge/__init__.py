@@ -37,6 +37,7 @@ from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
+from defender._run_paths import FRAMED_TRACE_SUFFIX, REVIEW_TRACE_SUFFIX  # noqa: E402
 from defender.learning.branch.archive import (  # noqa: E402
     DRAWS_DIRNAME,
     JUDGE_NAME,
@@ -342,7 +343,7 @@ def _run_world_draws(
         agent_id = f"judge:{label}:{n}"
         wiring = StageWiring(
             prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
-            trace_name=f"{agent_id.replace(':', '_')}_trace.jsonl", label=agent_id)
+            trace_name=f"{agent_id.replace(':', '_')}{REVIEW_TRACE_SUFFIX}", label=agent_id)
         reply_text: str | None = None
         doc: dict[str, Any]
         try:
@@ -421,7 +422,7 @@ def _write_wire_log(
     # `agent_id.replace(':', '_')`). `agent_id` is `judge:<label>:<n>`, and a trace file called
     # `judge:b:0_framed_trace.jsonl` is a name that seam deliberately does not produce.
     path = stage_trace_path(
-        Path(episode_dir), f"{agent_id.replace(':', '_')}_framed_trace.jsonl")
+        Path(episode_dir), f"{agent_id.replace(':', '_')}{FRAMED_TRACE_SUFFIX}")
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
            "wire_log_written_at": path.name}
     # BEST-EFFORT, like every other observability writer in this repo (`_deps._record_lesson_load`

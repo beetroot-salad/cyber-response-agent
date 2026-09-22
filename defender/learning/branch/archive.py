@@ -53,7 +53,28 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import Bound, entry_present, guarded_mkdir, write_guarded
-from defender._run_paths import PROVENANCE, RunPaths, artifact_dir, artifact_file, plain_file
+from defender._episode_paths import (
+    ARCHIVED_RUN_END_NAME,
+    ARCHIVED_SCRUB_VERDICT_NAME,
+    JUDGE_DRAWS_DIRNAME,
+    JUDGE_NAME,
+    REVIEW_NAME,
+    RUN_DIR_POINTER_NAME,
+    SAMPLES_NAME,
+    WORLDS_DIRNAME,
+)
+from defender._run_paths import (
+    ALERT,
+    GATHER_SUMMARIES_DIRNAME,
+    INVESTIGATION,
+    LESSONS_LOADED,
+    PROVENANCE,
+    REPORT,
+    RunPaths,
+    artifact_dir,
+    artifact_file,
+    plain_file,
+)
 from defender.learning.lead_repository import (
     refuse_non_artifacts,
     refusing_copy2,
@@ -65,7 +86,7 @@ from defender.runtime.scrub import verdict_path
 #: The archived world's directory, under the episode. One level, keyed by the SHORT label X —
 #: the manifest's `world_id`, not the composed world token: the token is what the estate and
 #: the ledger compare on, and the archive is what a human opens.
-WORLDS_DIRNAME = "worlds"
+# `WORLDS_DIRNAME` — the owner's (`_episode_paths`, #1077 D1), imported above.
 
 #: Where a sibling's run dir lives, relative to its episode. The child process is handed this as
 #: its own `DEFENDER_RUNS_BASE`, so the run dir it materialises is inside the episode rather than
@@ -76,10 +97,10 @@ RUNS_SUBDIR = "runs"
 #: The scrub verdict's name INSIDE the archive. Deliberately not the sidecar's own spelling
 #: (`<run>.scrub-verdict.json`): inside `worlds/<X>/` the world is the directory, so the name
 #: that carried the run id outside it would carry a run id here that nothing may resolve.
-SCRUB_VERDICT_NAME = "scrub_verdict.json"
+SCRUB_VERDICT_NAME = ARCHIVED_SCRUB_VERDICT_NAME
 
 #: The run-dir pointer's name. A TEXT file, never a link — see the module docstring.
-RUN_DIR_POINTER = "run_dir"
+RUN_DIR_POINTER = RUN_DIR_POINTER_NAME
 
 #: The three episode-level records, spelled ONCE (#1025 O8). The review's own record, beside
 #: the manifest it reviewed (kept on a rejection too — the measurement of a family that did not
@@ -87,21 +108,21 @@ RUN_DIR_POINTER = "run_dir"
 #: staged pattern, moved into the archive at step 2 so it survives a pruned source run; and the
 #: judge's family record, written last. Every writer and reader imports these — a second
 #: spelling is a reader that opens a file nobody writes the day one of them is renamed.
-REVIEW_NAME = "review.yaml"
-SAMPLES_NAME = "samples.yaml"
-JUDGE_NAME = "judge.yaml"
+# `REVIEW_NAME`/`SAMPLES_NAME`/`JUDGE_NAME` — the owner's (`_episode_paths`, #1077 D1),
+# imported above and re-exported here for the writers and readers that bind them off this
+# module.
 
 #: The judge's per-draw documents, `worlds/<X>/judge/<n>.yaml` (and `worlds/family/judge/` for
 #: the family-level call) — the directory the pass creates under each archived world, spelled
 #: once for the same reason as the three records above: the writer (`judge/__init__.py`), the
 #: enqueue's re-read and the episode page all address it.
-DRAWS_DIRNAME = "judge"
+DRAWS_DIRNAME = JUDGE_DRAWS_DIRNAME
 
 #: The episode-root family stamp's name — same spelling as a WORLD's own flat run stamp
 #: (`_run_paths.PROVENANCE`), a DIFFERENT shape at the same file name (#1025 fk-8/J12). Moved
 #: here from `branch/cli.py` (its previous sole owner) so the reader below and the writer share
 #: one spelling; bound nowhere else.
-FAMILY_STAMP_NAME = "provenance.json"
+FAMILY_STAMP_NAME = PROVENANCE
 
 
 def read_family_stamp(bound: Bound) -> dict[str, Any] | None:
@@ -145,13 +166,13 @@ class ArchiveRefused(ValueError):
 #: The run-end record's archived name (#1047). Its SOURCE is the host-side sidecar beside the
 #: run dir (`run_end.sidecar_path`, outside every box's rw bind), exactly the scrub verdict's
 #: shape — a file wearing this name INSIDE the run dir is never an input to anything.
-RUN_END_NAME = "run_end.json"
+RUN_END_NAME = ARCHIVED_RUN_END_NAME
 
 #: The judge's directory-of-summaries role's name, both in a sibling's run dir and archived.
-GATHER_SUMMARIES_DIRNAME = "gather_summaries"
+# `GATHER_SUMMARIES_DIRNAME` — the owner's (`_run_paths`), imported above.
 #: The judge's two single-file additions' archived names — the same as their run-dir names.
-LESSONS_LOADED_NAME = "lessons_loaded.jsonl"
-ALERT_NAME = "alert.json"
+LESSONS_LOADED_NAME = LESSONS_LOADED
+ALERT_NAME = ALERT
 
 
 def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
@@ -173,8 +194,8 @@ def _single_files(run_dir: Path) -> tuple[tuple[Path, str], ...]:
     """
     paths = RunPaths(run_dir)
     return (
-        (paths.report, "report.md"),
-        (paths.investigation, "investigation.md"),
+        (paths.report, REPORT),
+        (paths.investigation, INVESTIGATION),
         (paths.provenance, PROVENANCE),
         # The two SIDECARS beside the run dir, not paths inside it (G17).
         (verdict_path(run_dir), SCRUB_VERDICT_NAME),

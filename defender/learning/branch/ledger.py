@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import append_jsonl, read_jsonl_rows
+from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
 
@@ -94,12 +95,12 @@ class LedgerError(Exception):
 
 
 #: The directory, under an episode, that holds the family's base and every world's own rows.
-SERVED_DIRNAME = "served"
+# `SERVED_DIRNAME`/`BASE_FILENAME` are the owner's (`_episode_paths`, #1077 D1); `base_file`
+# below reaches the join through `EpisodePaths.served_base`.
 #: The family's capture, inside `SERVED_DIRNAME`. Named here because the primer writes it and
 #: every `Ledger` reads it, and a second spelling is how one starts writing where the other is
 #: not looking — with the run still green, because a missing base is indistinguishable from a
 #: key nobody asked.
-BASE_FILENAME = "base.jsonl"
 
 
 def base_file(episode_dir: Path) -> Path:
@@ -111,7 +112,7 @@ def base_file(episode_dir: Path) -> Path:
     `episode / SERVED_DIRNAME / BASE_FILENAME` across the primer's caller and this module. One
     home for the path the primer writes and every `Ledger` reads.
     """
-    return Path(episode_dir) / SERVED_DIRNAME / BASE_FILENAME
+    return EpisodePaths(Path(episode_dir)).served_base
 
 
 def payload_text(payload: Any) -> str:

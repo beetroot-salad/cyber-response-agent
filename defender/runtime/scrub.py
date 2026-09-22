@@ -10,6 +10,7 @@ from dataclasses import dataclass  # stdlib, deliberately — see the note below
 from pathlib import Path
 
 from defender._io import write_guarded
+from defender._run_paths import RunPaths
 
 
 @dataclass(frozen=True)
@@ -121,12 +122,12 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
 #: §7 D8 — the scan's verdict lives BESIDE the tree it judges, keyed by the tree's own name.
 #: In-tree it would be both PLANTABLE (an alias at the verdict's own name) and FORGEABLE (the
 #: box is root on that mount, and the consumer rule below fails closed on absence alone).
-_VERDICT_SUFFIX = ".scrub-verdict.json"
+# (the suffix is the owner's: `_run_paths.SCRUB_VERDICT_SUFFIX`, reached through `RunPaths.scrub_verdict`)
 
 
 def verdict_path(tree: Path) -> Path:
     tree = Path(tree)
-    return tree.parent / f"{tree.name}{_VERDICT_SUFFIX}"
+    return RunPaths(tree).scrub_verdict(tree.parent)
 
 
 def _write_verdict(tree: Path, doc: dict) -> None:

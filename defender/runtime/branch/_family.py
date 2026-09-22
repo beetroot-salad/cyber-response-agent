@@ -35,6 +35,7 @@ from typing import Any
 import yaml
 
 from defender import _yaml
+from defender._episode_paths import FAMILY_NAME
 from defender._io import guarded_mkdir, read_guarded, write_guarded
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
@@ -52,7 +53,7 @@ from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameab
 
 #: The manifest's filename inside an episode directory. Named once: the launcher writes it, the
 #: sibling reads it, and the archive keeps it.
-MANIFEST_NAME = "family.yaml"
+MANIFEST_NAME = FAMILY_NAME
 
 #: The base world's role. `A` is the control every other world is compared against, and the
 #: loader enforces that exactly one world claims it.

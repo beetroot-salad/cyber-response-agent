@@ -43,7 +43,7 @@ import yaml
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, bind, read_jsonl_rows
-from defender._run_paths import artifact_file
+from defender._run_paths import REPORT, artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
@@ -201,7 +201,7 @@ def _verdicts(bound: Bound) -> dict[str, str]:
     _refuse_incomplete(bound)
     out: dict[str, str] = {}
     for label in _archived_labels(bound):
-        name = f"{WORLDS_DIRNAME}/{label}/report.md"
+        name = f"{WORLDS_DIRNAME}/{label}/{REPORT}"
         # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
         # split: "a path that is simply not there is skipped and reported (a sibling that died
         # before writing its report has no report)". A world archived without one is therefore

@@ -43,7 +43,7 @@ from defender.learning.core.validate import (  # noqa: E402
 #: reaching into `core/`.
 __all__ = [
     "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
-    "author_drain", "lead_author_drain",
+    "author_drain", "lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "main",
     "normalize_disposition", "reply_document_text", "MalformedReply",
     "derive_alert_rule_key",

@@ -27,7 +27,7 @@ from typing import Any
 import contextlib
 
 from defender._io import Bound, bind
-from defender._run_paths import PROVENANCE
+from defender._run_paths import PROVENANCE, REPORT
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -249,7 +249,7 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
                    f"{union_notes['runs_base_unreadable']} — so the sibling union was never "
                    "attempted — this is not a statement that no sibling trial exists)")
     if union_notes.get("alert_unidentified"):
-        out.append("(this episode's own alert.json carries no alert id, so the sibling union "
+        out.append("(this episode's own alert.json carries no alert id, so the sibling union "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                    "had nothing to match trials against and was never attempted — this is not "
                    "a statement that no sibling trial exists)")
     for key, what in (("skipped_unreadable", "could not be read"),
@@ -381,7 +381,7 @@ def _sibling_row(
         return None, "skipped_unreadable"
     if alert_doc.get("alert_id") != alert_id:
         return None, None
-    read = read_archived_report(run, "report.md")
+    read = read_archived_report(run, REPORT)
     if read.absent:
         return None, "skipped_unclosed"
     if not read.text:

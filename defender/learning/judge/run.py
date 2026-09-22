@@ -246,8 +246,8 @@ SECTION_TITLES: dict[str, str] = {
                "read, or pushed as a description only — and the body at its recorded commit "
                "for you to grade against, whether or not the model read it)",
     "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
-    "document": "THE GRADED WORLD'S OWN investigation.md",
-    "report": "THE GRADED WORLD'S OWN report.md",
+    "document": "THE GRADED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    "report": "THE GRADED WORLD'S OWN report.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "sample": "THE QUESTIONER'S OWN SAMPLE (the real document, per staged pattern, this "
               "world's overlay was authored from)",
     "review": "THIS WORLD'S OWN REVIEW RECORD (what the capture's own vocabulary could and "
@@ -574,7 +574,7 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     optional input once at the boundary, never re-coalesce it in the body)."""
     label = judge_input.world_label
     task = (
-        f"World {label} has run; grade it.\n\n"
+        f"World {label} has run; grade it.\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
         "payload, refused, summary, resolutions), its coverage of the family's "
         "discriminator, the sibling trials of this same alert, and the lessons it loaded — "

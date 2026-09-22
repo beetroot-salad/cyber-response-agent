@@ -32,7 +32,7 @@ from defender._io import (
     read_jsonl_rows,
     write_guarded,
 )
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._run_paths import EXECUTED_QUERIES, RunPaths, artifact_dir, artifact_file
 
 from ._spec import BranchError, BranchSpec
 from ._frontier import _LEAD_DIRS, fence_count_at, leads_at, source_session
@@ -49,7 +49,7 @@ from ._frontier import _lead_of
 #: artifact added HERE is then refused in a fresh sibling's run dir and never copied into it, so
 #: the prefix names a path the sibling does not hold and `decide_read` denies the model its own
 #: history — the exact failure this tuple exists to prevent, arriving through the tuple.
-_INHERITED = ("executed_queries.jsonl", *_LEAD_DIRS)
+_INHERITED = (EXECUTED_QUERIES, *_LEAD_DIRS)
 
 
 def refuse_seeded_run_dir(run_dir: Path) -> None:
@@ -347,7 +347,7 @@ def _not_a_plain_file(path: Path) -> str:
             "outside the run into the sibling under that name")
     if artifact_dir(path):
         return (
-            "a directory where a run writes only files (`gather_raw/{lead}/{seq}.json`, "
+            "a directory where a run writes only files (`gather_raw/{lead}/{seq}.json`, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "`{lead}.lead.json`, `{lead}.md`) — a sibling's evidence is what the source "
             "actually wrote, and nothing this system writes puts a directory here")
     return (

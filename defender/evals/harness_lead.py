@@ -82,7 +82,7 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
     return _run(
-        [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],
+        [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         cwd=tmp, env=env, check=False,
     )
 
@@ -127,8 +127,8 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = RESULTS_DIR / f"{ts}-{scenario_name}"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "lead_author.stdout").write_text(proc.stdout, encoding="utf-8")
-    (out / "lead_author.stderr").write_text(proc.stderr, encoding="utf-8")
+    (out / "lead_author.stdout").write_text(proc.stdout, encoding="utf-8")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+    (out / "lead_author.stderr").write_text(proc.stderr, encoding="utf-8")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     (out / "rc.txt").write_text(str(proc.returncode), encoding="utf-8")
     log = _git.git(["log", "--format=%H %s%n%b%n----", "-n", "5"], cwd=tmp, check=False)
     (out / "git_log.txt").write_text(log, encoding="utf-8")

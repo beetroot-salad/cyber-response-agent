@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import write_guarded
+from defender._run_paths import RunPaths
 
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
@@ -110,7 +111,7 @@ def sidecar_path(run_dir: Path) -> Path:
     whole security argument is that no box-writable content is an input to this path.
     """
     run_dir = Path(run_dir)
-    return run_dir.parent / f"{run_dir.name}.run-end.json"
+    return RunPaths(run_dir).run_end_sidecar(run_dir.parent)
 
 
 def write_sidecar(run_dir: Path, record: RunEnd) -> None:

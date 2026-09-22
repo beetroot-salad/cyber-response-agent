@@ -9,6 +9,7 @@ from pathlib import Path
 
 from defender._clock import parse_iso_utc
 from defender._io import write_atomic
+from defender._run_paths import RunPaths
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
 
@@ -32,7 +33,7 @@ TAIL_ALLOWANCE = 10
 BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
-    "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
+    "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "run (the {limb} cap is reached and will not reset). Appending to investigation.md — "
     "append_block — repairing a flagged row — fix_row — and closing the investigation are "
     "still available. "
@@ -69,7 +70,7 @@ def open_budget(run_dir: Path, run_id: str) -> dict:
         state.setdefault("created_at", now)
         state.setdefault("started_at", now)
 
-    return update_json_locked(run_dir / "budget.json", _mutate, default=dict)
+    return update_json_locked(RunPaths(run_dir).budget, _mutate, default=dict)
 
 
 def read_budget(run_dir: Path) -> dict:
@@ -90,7 +91,7 @@ def read_budget(run_dir: Path) -> dict:
     The named writer is the boxed adapter subprocess: it bind-mounts the run root rw while the
     defender tree is readonly, and it handles attacker-influenced payloads. This is the DoS
     lever `docs/runtime-sandbox-design.md` §7 D3 exists to deny."""
-    return read_json_locked(run_dir / "budget.json")
+    return read_json_locked(RunPaths(run_dir).budget)
 
 
 
@@ -109,7 +110,7 @@ def update_budget_locked(
             state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
 
     return update_json_locked(
-        run_dir / "budget.json", _mutate, default=lambda: make_budget_state(run_id)
+        RunPaths(run_dir).budget, _mutate, default=lambda: make_budget_state(run_id)
     )
 
 
@@ -117,7 +118,7 @@ _ACCOUNT_LOCK = threading.Lock()
 
 
 def _write_budget_atomic(run_dir: Path, state: dict) -> None:
-    write_atomic(run_dir / "budget.json", json.dumps(state, indent=2))  # lint-unguarded-tree-write: ok — delegates to write_guarded
+    write_atomic(RunPaths(run_dir).budget, json.dumps(state, indent=2))  # lint-unguarded-tree-write: ok — delegates to write_guarded
 
 
 def account_call(
@@ -141,7 +142,7 @@ def account_call(
             # never end a run — otherwise the box holds a DoS lever. An ORDINARY write failure
             # (a squatted directory, a full disk) still escalates.
             if getattr(e, "write_guarded_alias", False):
-                _record_alias_refusal(run_dir, run_dir / "budget.json")
+                _record_alias_refusal(run_dir, RunPaths(run_dir).budget)
                 return read_budget(run_dir) or state
             _record_accounting_failure(run_dir, limits)
             return read_budget(run_dir) or state
@@ -152,7 +153,7 @@ def account_call(
 
 def _accounting_failure_path(run_dir: Path) -> Path:
     run_dir = Path(run_dir)
-    return run_dir.parent / f"{run_dir.name}.accounting_failures.json"
+    return RunPaths(run_dir).accounting_failures(run_dir.parent)
 
 
 def accounting_failure_state(run_dir: Path) -> dict:

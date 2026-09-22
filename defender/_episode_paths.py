@@ -19,9 +19,9 @@ from defender._run_paths import (
 
 #: The episode-layout names (#1077 D1) — the OWNER's spellings. `learning/branch/archive.py`,
 #: `ledger.py`, `timing.py`, `staging.py`, `runtime/branch/_family.py` and
-#: `scripts/visualize/visualize_episode.py` still carry their own; D7 step 3 migrates them
-#: onto these, and `test_no_episode_layout_constant_survives_outside_the_owner` is red until
-#: it does.
+#: `scripts/visualize/visualize_episode.py` bind their own names OFF these (D7 step 3) — a
+#: local alias is not a second spelling, and
+#: `test_no_episode_layout_constant_survives_outside_the_owner` holds it.
 FAMILY_NAME = "family.yaml"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"

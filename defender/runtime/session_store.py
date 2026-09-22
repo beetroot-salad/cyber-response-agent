@@ -28,6 +28,7 @@ from pydantic_ai.messages import (
 )
 
 from defender._io import guarded_mkdir, write_guarded
+from defender._run_paths import SESSION_POINTER, RunPaths
 # THE `truncated_by` vocabulary — every value any writer of that column may put in it — and
 # its one normalizer are OWNED by `runtime/run_end.py` (which also says why `dead-end` is the
 # only lead-only member). Re-exported here so the column's own writers keep importing them
@@ -47,7 +48,7 @@ from defender.runtime.run_end import (  # noqa: F401 — re-exports
 SCHEMA_VERSION = 2
 PAYLOAD_ENSURE_ASCII = True
 ROLES = ("send", "analysis", "actor")
-POINTER_FILENAME = "session_store_pointer.json"
+POINTER_FILENAME = SESSION_POINTER
 #: The closed set `append`'s `reason` keyword is validated against — a Python constant, not
 #: a SQL CHECK (`reason_is_a_python_closed_set_not_a_sql_check`). `fork` has no legitimate
 #: caller through `append` at all: `fork()` writes its own entry directly.
@@ -756,11 +757,11 @@ def write_case_pointer(
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
     if session_id is not None:
         body["session_id"] = session_id
-    write_guarded(run_dir / POINTER_FILENAME, json.dumps(body))
+    write_guarded(RunPaths(run_dir).session_pointer, json.dumps(body))
 
 
 def resolve_store_path(run_dir: Path) -> Path:
-    data = json.loads((Path(run_dir) / POINTER_FILENAME).read_text(encoding="utf-8"))
+    data = json.loads(RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
     return Path(data["store_path"])
 
 
@@ -771,7 +772,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     fresh run, where the run's session is the store's only root — so a caller falls back to
     `main_session_id` rather than being handed a guess.
     """
-    data = json.loads((Path(run_dir) / POINTER_FILENAME).read_text(encoding="utf-8"))
+    data = json.loads(RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

@@ -40,7 +40,15 @@ from defender._clock import parse_iso_utc
 from defender._io import Bound, bind, write_guarded
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
-from defender._run_paths import PROVENANCE, WIRE_LOG_DIR
+from defender._episode_paths import LEARNING_HTML_NAME, EpisodePaths
+from defender._run_paths import (
+    FRAMED_TRACE_SUFFIX,
+    PROVENANCE,
+    REVIEW_TRACE_SUFFIX,
+    RUNTIME_HTML,
+    TOOL_TRACE,
+    WIRE_LOG_DIR,
+)
 from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
@@ -82,10 +90,10 @@ from defender.scripts.visualize.visualize_primitives import (
 #: two in step (#1025).
 EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")
 
-PAGE_NAME = "learning.html"
+PAGE_NAME = LEARNING_HTML_NAME
 
 #: The run's own event stream, at the run dir's root (`_run_paths` names why it stays there).
-_TOOL_TRACE_NAME = "tool_trace.jsonl"
+_TOOL_TRACE_NAME = TOOL_TRACE
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"
 
@@ -1058,15 +1066,15 @@ def _load_wire_logs(wire: Bound) -> _WireLogs:
         if not name.endswith(".jsonl"):
             continue
         if "_framed_trace" in name:
-            if not name.endswith("_framed_trace.jsonl"):
+            if not name.endswith(FRAMED_TRACE_SUFFIX):
                 continue
-            stem = name[: -len("_framed_trace.jsonl")] + "_trace"
+            stem = name[: -len(FRAMED_TRACE_SUFFIX)] + "_trace"
             trace = logs.traces.setdefault(stem, _Trace(stem))
             frows, _bad, _rec = wire.read_jsonl(name)
             if frows:
                 trace.framed = frows[0]
             continue
-        if not name.endswith("_trace.jsonl"):
+        if not name.endswith(REVIEW_TRACE_SUFFIX):
             continue
         stem = name[: -len(".jsonl")]
         trace = logs.traces.setdefault(stem, _Trace(stem))
@@ -1386,7 +1394,7 @@ def _encode_page(html_text: str) -> bytes:
 
 
 def _write_page(episode_dir: Path, html_text: str) -> Path:
-    page_path = Path(episode_dir) / PAGE_NAME
+    page_path = EpisodePaths(Path(episode_dir)).learning_html
     write_guarded(page_path, _encode_page(html_text), mode="replace")
     return page_path
 
@@ -1777,7 +1785,7 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
         # A `runs/` directory whose name did not decompose into `<episode_id>-<label>` (J7
         # iv) — it is not a world at all, so it gets a minimal section keyed on its own full
         # name rather than the normal record-driven rendering.
-        link = f"{RUNS_SUBDIR}/{item.label}/runtime.html"
+        link = f"{RUNS_SUBDIR}/{item.label}/{RUNTIME_HTML}"
         return (f'<div id="world-{esc(item.label)}" class="w-section">'
                f'<span class="w-name">{_uv(item.label)}</span>'
                f'<div class="w-state">not declared in the manifest</div>'
@@ -1830,7 +1838,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
 
     result = entry.result
     if result is not None:
-        link = f"{RUNS_SUBDIR}/{entry.run_dir_name}/runtime.html"
+        link = f"{RUNS_SUBDIR}/{entry.run_dir_name}/{RUNTIME_HTML}"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
         if result.cost is not None and result.costed:
             bits.append(f'<span class="w-cost">{_money(result.cost)}</span>')

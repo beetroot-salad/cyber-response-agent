@@ -34,7 +34,7 @@ from defender._io import (
     read_jsonl_rows,
     read_text_soft,
 )
-from defender._run_paths import RunPaths, artifact_dir
+from defender._run_paths import GATHER_SUMMARIES_DIRNAME, RAW_MARKER, RunPaths, artifact_dir
 
 from .. import session_store
 from ._spec import BranchError, BranchSpec
@@ -432,7 +432,7 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path)
 #: The per-lead evidence directories, in ONE place. `_known_leads` reads them for the census,
 #: `_inherit_evidence` walks them for the copy, and `_INHERITED` below is derived from them for
 #: the refusal — three readers of one fact, which is two too many to keep in step by hand.
-_LEAD_DIRS = ("gather_raw", "gather_summaries")
+_LEAD_DIRS = (RAW_MARKER, GATHER_SUMMARIES_DIRNAME)
 
 
 def _known_leads(run_dir: Path) -> set[str]:

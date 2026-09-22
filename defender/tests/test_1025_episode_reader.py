@@ -152,6 +152,11 @@ def _refused_row(label: str, *, system: str = J.HOLDING_SYSTEM) -> dict:
 _CODE_ROOTS = tuple(
     Path(root).relative_to("defender").as_posix()
     for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["specGraph"]["codeRoots"])
+#: The ONE home of the three names — `_episode_paths.py`, the episode-layout owner (#1077 D1
+#: re-homed them off `learning/branch/archive.py`, which now binds them by import). The
+#: run-level owner is censused beside it: the family stamp's name is its `PROVENANCE`.
+_OWNER_MODULE = "_episode_paths.py"
+_OWNER_MODULES = (_OWNER_MODULE, "_run_paths.py")
 _ARCHIVE_MODULE = "learning/branch/archive.py"
 #: The three names and the three files, one mapping.
 _RECORD_NAMES = {"REVIEW_NAME": "review.yaml", "SAMPLES_NAME": "samples.yaml",
@@ -182,12 +187,13 @@ def _shipped_modules() -> dict[str, str]:
     package = Path(_archive().__file__).resolve().parents[2]
     assert package.name == "defender", f"the census root is not the package: {package}"
     out: dict[str, str] = {}
-    for root in _CODE_ROOTS:
+    for root in (*_CODE_ROOTS, *_OWNER_MODULES):
         base = package / root
         files = [base] if base.is_file() else sorted(base.rglob("*.py"))
         for path in files:
             out[path.relative_to(package).as_posix()] = path.read_text(encoding="utf-8")
     assert _ARCHIVE_MODULE in out, f"the census never saw {_ARCHIVE_MODULE}: {sorted(out)[:5]}"
+    assert _OWNER_MODULE in out, f"the census never saw {_OWNER_MODULE}"
     return out
 
 
@@ -263,8 +269,10 @@ def test_archive_is_the_one_home_for_the_three_episode_record_names():
 def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
     """O8's census, run over the tree's SYNTAX: across the shipped code roots the strings
     `review.yaml`, `samples.yaml` and `judge.yaml` each occur INSIDE a code string in ONE
-    module — `archive.py` — and a BINDING of `REVIEW_NAME` / `SAMPLES_NAME` / `JUDGE_NAME`
-    occurs only there. Every other module imports the name; an import is not a binding.
+    module — `_episode_paths.py`, the episode-layout owner (#1077 D1; it was `archive.py`
+    before, which now imports them) — and a BINDING of `REVIEW_NAME` / `SAMPLES_NAME` /
+    `JUDGE_NAME` occurs only there. Every other module imports the name; an import is not a
+    binding.
 
     Through `ast`, not a regex over the text: a regex sees `"review.yaml"` and misses
     `"review" ".yaml"` (folded by the parser into one constant), `"review" + ".yaml"` and
@@ -276,8 +284,8 @@ def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
     Bindings off the same AST, in Store context, so `NAME: str = ...`, a tuple target and a
     walrus all count and a docstring line that merely looks like an assignment does not.
 
-    Observably true: the set of modules whose code strings contain each name is `{archive.py}`,
-    and so is the set of modules binding any of the three constants.
+    Observably true: the set of modules whose code strings contain each name is
+    `{_episode_paths.py}`, and so is the set of modules binding any of the three constants.
 
     What failure looks like: before the change, `family.py`, `branch/episode.py`,
     `branch/review.py`, `branch/cli.py` and `branch/staging.py` (as `REVIEW_FILENAME`) each
@@ -291,16 +299,16 @@ def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
     for file_name in _RECORD_NAMES.values():
         spelled_in = sorted(
             m for m, (strings, _bound) in census.items() if any(file_name in s for s in strings))
-        assert spelled_in == [_ARCHIVE_MODULE], (
+        assert spelled_in == [_OWNER_MODULE], (
             f"{file_name!r} is spelled inside a code string in {spelled_in}; O8 wants exactly "
-            f"one home, {_ARCHIVE_MODULE}, with every other module importing the name — a "
+            f"one home, {_OWNER_MODULE}, with every other module importing the name — a "
             "pointer, a prompt example or a message spells it as f\"...{REVIEW_NAME}...\"")
 
     bound_in = sorted(
         m for m, (_strings, bound) in census.items() if bound & _RECORD_NAMES.keys())
-    assert bound_in == [_ARCHIVE_MODULE], (
+    assert bound_in == [_OWNER_MODULE], (
         f"REVIEW_NAME / SAMPLES_NAME / JUDGE_NAME are BOUND in {bound_in}; only "
-        f"{_ARCHIVE_MODULE} may define them — a re-export is an import, not a binding")
+        f"{_OWNER_MODULE} may define them — a re-export is an import, not a binding")
 
 
 def test_every_reader_of_a_record_name_holds_the_archives_own_object():

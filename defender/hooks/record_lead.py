@@ -22,6 +22,26 @@ NOT_CLAIMED = 0
 ALREADY_CLAIMED = 2
 
 
+def _claim_path(run_dir: Path, lead_id: str) -> Path | int:
+    """The claim sidecar's path under a `gather_raw/` this call could create — or the code the
+    hook answers with when it could not."""
+    paths = RunPaths(run_dir)
+    try:
+        guarded_mkdir(paths.gather_raw, base=run_dir)
+    except (OSError, ValueError):
+        # ValueError as well as OSError: `guarded_mkdir` raises it for a target outside the
+        # tree the anchor names. This hook's whole contract is "return a code, never raise".
+        return NOT_CLAIMED
+    try:
+        return paths.lead_claim(lead_id)
+    except OSError:
+        # The owner's composition carries decision 2's containment check: an entry planted at
+        # the claim's name that resolves outside the run dir. SOMETHING holds the name, which
+        # is what the `O_EXCL` create would have said of it (EEXIST) — so the posture is the
+        # same one, #771 D3: an alias refusal is exempt from every failure circuit.
+        return ALREADY_CLAIMED
+
+
 def claim_lead(dispatch: dict) -> int:
     """Write this lead's leads-table row and claim its id, atomically. Returns `CLAIMED` only
     when the sidecar was created BY THIS CALL; `ALREADY_CLAIMED` when the id was already taken
@@ -42,15 +62,9 @@ def claim_lead(dispatch: dict) -> int:
     if not LEAD_ID_RE.match(str(lead_id)):
         return NOT_CLAIMED
 
-    sidecar_dir = RunPaths(Path(run_dir)).gather_raw
-    try:
-        guarded_mkdir(sidecar_dir, base=Path(run_dir))
-    except (OSError, ValueError):
-        # ValueError as well as OSError: `guarded_mkdir` raises it for a target outside the
-        # tree the anchor names. This hook's whole contract is "return a code, never raise".
-        return NOT_CLAIMED
-
-    sidecar_path = sidecar_dir / f"{lead_id}.lead.json"
+    sidecar_path = _claim_path(Path(run_dir), lead_id)
+    if isinstance(sidecar_path, int):
+        return sidecar_path
     body: dict = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
     provenance = dispatch.get("provenance")
     if provenance:

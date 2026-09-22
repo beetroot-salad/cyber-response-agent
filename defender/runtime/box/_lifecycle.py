@@ -120,7 +120,7 @@ def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
     the wrong or empty tree."""
     _probe_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
-        f".box-sentinel-{uuid.uuid4().hex}", unlink_on_fault=True,
+        f"{BOX_SENTINEL}-{uuid.uuid4().hex}", unlink_on_fault=True,
     )
 
 

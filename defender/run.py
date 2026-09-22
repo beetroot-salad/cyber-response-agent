@@ -75,9 +75,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     """
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, nargs="?", default=None,
-                   help="Path to alert.json fixture (illegal with --resume)")
+                   help="Path to alert.json fixture (illegal with --resume)")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     p.add_argument("--resume", type=Path, default=None,
-                   help="a family manifest (episodes/<id>/family.yaml) to resume a world of")
+                   help="a family manifest (episodes/<id>/family.yaml) to resume a world of")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     p.add_argument("--world", default=None,
                    help="which world of --resume's manifest this process is")
     p.add_argument("--run-id", default=None,

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from defender import _artifact_schema
 from defender._run_paths import (
+    ALERT,
     CASE_ANSWER_KEY_NAMES,
     PROVENANCE,
     RAW_MARKER,
@@ -265,7 +266,7 @@ def decide_read(
 # substring clamp (see `bash.py`: containment is positive grant enumeration, and a substring
 # scan wrongly denies `… | grep gather_raw`, where the word is a search PATTERN, not a path).
 RAW_DENY_REASON = (
-    "Blocked: the main loop must not read gather_raw/. Gather's returned "
+    "Blocked: the main loop must not read gather_raw/. Gather's returned "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "summary is the authoritative record (defender SKILL §Principles). If an "
     "obligation came back unaddressed, re-dispatch gather naming that "
     "obligation more sharply — never a field list or a filter — and do not "
@@ -297,7 +298,7 @@ RAW_DENY_REASON = (
 # wire logs that has nothing to do with the file.
 WIRE_LOG_MARKER = WIRE_LOG_DIR
 WIRE_LOG_DENY_REASON = (
-    "Blocked: wire_logs/ holds this run's wire logs — the verbatim request/response stream of "
+    "Blocked: wire_logs/ holds this run's wire logs — the verbatim request/response stream of "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "every agent that shares this root, including payload bytes and transcripts this agent is "
     "deliberately not shown. It is host-side observability, readable by no agent. Work from "
     "the artifacts your own role is given."
@@ -321,7 +322,7 @@ WIRE_LOG_DENY_REASON = (
 # system has business reading the host's working-tree state. The JUDGE's `cat` scope is
 # `under(run, TREE)` and would otherwise admit it.
 PROVENANCE_DENY_REASON = (
-    "Blocked: provenance.json records the host checkout this run was launched from — a commit "
+    "Blocked: provenance.json records the host checkout this run was launched from — a commit "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "and the paths of uncommitted work in the defender's own source tree. It is host-side "
     "bookkeeping about the run, readable by no agent, and it says nothing about the case. Work "
     "from the artifacts your own role is given."
@@ -432,7 +433,7 @@ def is_untrusted_read(path: Path) -> bool:
     narrower predicate makes the containment structural."""
     p = Path(path)
     return (
-        p.name == "alert.json"
+        p.name == ALERT
         or is_captured_payload(p)
         or _names_query_draft(p)
     )

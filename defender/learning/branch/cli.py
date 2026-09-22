@@ -69,6 +69,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
+from defender._episode_paths import EpisodePaths
 from defender._io import guarded_mkdir, load_json_artifact, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
@@ -300,7 +301,7 @@ def prepare_episode(
     # base and the checkout — while everything BELOW it is reachable from a sibling box's
     # rw bind, which is exactly the split `guarded_mkdir`'s anchor is for.
     guarded_mkdir(served, base=episode)
-    claim = served / ".priming"
+    claim = EpisodePaths(episode).priming_lock
     try:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     except FileExistsError as taken:

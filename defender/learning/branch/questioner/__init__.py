@@ -68,7 +68,7 @@ from defender import _yaml
 from defender._env import env_str
 from defender._io import read_guarded
 from defender._report import REPORT_NAME, read_report
-from defender._run_paths import artifact_file
+from defender._run_paths import RunPaths, artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
 from defender.learning.core.validate import MalformedReply, reply_document_text
@@ -503,7 +503,7 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     rendering of the open slots would be a second projection of invlang that could disagree with
     `skills/invlang` about what the document says.
     """
-    document = Path(source_run_dir) / "investigation.md"
+    document = RunPaths(source_run_dir).investigation
     # `read_guarded`, not `artifact_file` then `read_text`. The lstat-then-read pair is a
     # check-then-act window on a path in a prior box's rw bind: the entry can be replaced
     # between the two, and the bytes that then reach this prompt are the link target's.
@@ -513,7 +513,7 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     text, refusal = read_guarded(document)
     if text is None:
         raise BranchError(
-            f"{document}: investigation.md is not a regular file ({refusal}) — the source run "
+            f"{document}: {document.name} is not a regular file ({refusal}) — the source run "
             "dir is a box's rw bind, so an entry there that is not what it claims to be was "
             "planted; refusing to read it into a prompt"
         )

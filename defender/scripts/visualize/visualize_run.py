@@ -11,6 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
+from defender._run_paths import RUNTIME_HTML, RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
@@ -52,7 +53,7 @@ from defender.scripts.visualize.visualize_runtime import (
 )
 
 
-RUNTIME_FILENAME = "runtime.html"
+RUNTIME_FILENAME = RUNTIME_HTML
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -70,8 +71,8 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
-    src = run_dir / RUNTIME_FILENAME
+    src = RunPaths(run_dir).runtime_html
+    src.write_text(render_runtime_page(run_dir), encoding="utf-8")
     if not src.is_file():
         return []
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
@@ -331,7 +332,7 @@ def _render_policy_denials_section(run_dir: Path) -> str:
 
 def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
-    events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
+    events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
     _, n_tool_calls, result_total = _stats(events)
     report = parse_report(run_dir)

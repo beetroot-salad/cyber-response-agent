@@ -42,11 +42,12 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
+from defender._episode_paths import TIMING_NAME
 from defender._io import Bound, write_guarded
 from defender.learning.branch.steps import STEPS, Step
 
-#: The record's name at the episode root — sibling of `provenance.json`, the family stamp.
-TIMING_NAME = "timing.json"
+# `TIMING_NAME` — the record's name at the episode root, the owner's (`_episode_paths`,
+# #1077 D1), imported above.
 
 
 def timing_path(episode_dir: Path) -> Path:

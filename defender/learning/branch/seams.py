@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from defender._model import model
+from defender._run_paths import REVIEW_TRACE_SUFFIX
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ def model_seam(episode_dir: Path) -> Any:
                 prompt_path=_ROLE_PROMPT,
                 model=questioner_model(),
                 effort=questioner_effort(),
-                trace_name=f"{agent_id.replace(':', '_')}_trace.jsonl",
+                trace_name=f"{agent_id.replace(':', '_')}{REVIEW_TRACE_SUFFIX}",
                 label=agent_id,
             ),
             ctx=StageContext(
