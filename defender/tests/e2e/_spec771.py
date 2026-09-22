@@ -328,7 +328,9 @@ print(json.dumps(out))
 """
 
 
-def run_probe_under_profile(script: str, profile: Path | None) -> dict[str, str]:
+def run_probe_under_profile(
+    script: str, profile: Path | None, *, run: Callable[..., Any] = subprocess.run,
+) -> dict[str, str]:
     """Run `script` in the box rootfs and return its verdict map, under `profile` or — when
     `profile` is None — under whatever the daemon applies by ITSELF.
 
@@ -340,18 +342,37 @@ def run_probe_under_profile(script: str, profile: Path | None) -> dict[str, str]
     under the vendored copy, which no digest check can see.
 
     The script arrives on STDIN rather than through a bind mount so the comparison also runs
-    under docker-outside-of-Docker, where a host path need not exist on the daemon's side."""
+    under docker-outside-of-Docker, where a host path need not exist on the daemon's side.
+
+    #1092: this is the FOURTH `docker run <rootfs>` site — it takes the same resolver
+    (`resolve_rootfs` over DEFENDER, the running package's own tree), the same `--pull=never`
+    the two argv builders carry (JF5), and the same preflight (`require_image`: the daemon is
+    asked for the image before the run names it, so a missing image raises with the build
+    remedy against DEFENDER's own tree). `run=` is an injectable seam, keyword-only,
+    defaulting to `subprocess.run`, so a test can observe the argv without a daemon; the
+    preflight and the run both go through it.
+    """
+    try:
+        rootfs = box_mod.resolve_rootfs(None, DEFENDER)
+        box_mod.require_image(
+            lambda argv: run(argv, capture_output=True, text=True, encoding="utf-8", timeout=300),
+            rootfs,
+        )
+    except box_mod.BoxFault as e:
+        raise AssertionError(str(e)) from e
     argv = ["docker", "run", "--rm", "-i"]
     if profile is not None:
         argv += ["--security-opt", f"seccomp={profile}"]
-    argv += [box_mod.BoxSpec.from_env(os.environ).rootfs, "python3", "-"]
-    probe = subprocess.run(
+    argv += ["--pull=never", rootfs.image, "python3", "-"]
+    probe = run(
         argv, input=script, capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
-    assert probe.returncode == 0, (
-        f"the probe container failed under "
-        f"{'the daemon default' if profile is None else profile}: {probe.stderr.strip()}"
-    )
+    if probe.returncode != 0:
+        raise AssertionError(
+            f"the probe container failed under "
+            f"{'the daemon default' if profile is None else profile}: "
+            f"{(probe.stderr or '').strip()}"
+        )
     return json.loads(probe.stdout)
 
 #: The six shapes `alias_profile.domain.distinguished` names. Each must be individually

@@ -157,7 +157,7 @@ Move fewer than three and the validator/executor differential reopens **at the s
 
 **M12 — Fail-closed capability check + `DEFENDER_ALLOW_UNSANDBOXED`.** At startup, *attempt* a probe (not merely detect a binary) and refuse to process untrusted input un-boxed on failure; `DEFENDER_ALLOW_UNSANDBOXED=1` is the only opt-out and it is loud. *Discharges:* O10. *Source:* `RSD §Open questions`. **[INFERRED]** the corpus states this only for the *runsc capability* probe; generalizing it to "the box could not be started at all" is reconstruction — fork F6, which C42/C43/C46 have now given concrete failure modes to enumerate.
 
-**M13 — Rootfs build-time requirements.** Rootfs pinned to `python:3.11-slim`. `jq` must be **baked in at build time** — it is absent from the base (C14) and the box is `--network=none`, so runtime install is impossible. The `.venv` must be on `PATH` so `defender-sql` and the `defender-*` shims resolve. **Plus the two substitutions probe 7 surfaced (C38): `awk` is mawk and `/bin/sh` is dash.** If any grant shape depends on gawk extensions or reaches bash through `sh -c`, the rootfs must also bake in gawk / repoint `sh`, or the shape must be corrected. Failures are loud (`command not found`, or a silently different awk dialect — that second one is *not* loud, and is the one to test).
+**M13 — Rootfs build-time requirements.** Rootfs pinned to `python:3.11-slim`. `jq` must be **baked in at build time** — it is absent from the base (C14) and the box is `--network=none`, so runtime install is impossible. Superseded by #1092: `defender-sql` and the `defender-*` shims resolve the box image's own `python3` from `/usr/local`, never a `.venv` on `PATH`. **Plus the two substitutions probe 7 surfaced (C38): `awk` is mawk and `/bin/sh` is dash.** If any grant shape depends on gawk extensions or reaches bash through `sh -c`, the rootfs must also bake in gawk / repoint `sh`, or the shape must be corrected. Failures are loud (`command not found`, or a silently different awk dialect — that second one is *not* loud, and is the one to test).
 
 **A build-time trap from probe 8 (C55):** `apt-get update` **exits 0** with no network; only `install` fails, at rc=100. So a rootfs build step that checks `apt-get update`'s exit code as a network sanity gate will pass in a network-less environment and fail later. *Discharges:* O12. *Source:* `issue-comment §1`; `RSG §Compatibility`; probes 7, 8.
 
@@ -297,8 +297,8 @@ claims:
     kind: behavior
     claim: "`defender-sql` runs end-to-end from a read-only-bound `.venv` inside the real box."
     source: "RSG §Compatibility ('Still wanting the real box (not blocking)'); issue-comment §1"
-    status: asserted
-    note: "STILL the one O12 leg with no probe behind it, after two rounds of probing. Now cheaper to close than ever — O14 puts a real box in CI. Should be an acceptance test, not a claim."
+    status: superseded
+    note: "Superseded by #1092: the box no longer resolves a `.venv` at all (O5) — `defender-sql` runs end-to-end against the owned image's own `duckdb` instead, closed by `test_665_box_live.py`. Historical claim kept for record; do not read as current."
 
   # --- The boundary's exec seam ---
   - id: C33

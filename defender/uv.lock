@@ -503,6 +503,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+box = [
+    { name = "duckdb" },
+]
 dev = [
     { name = "coverage" },
     { name = "markdown-it-py" },
@@ -523,6 +526,7 @@ runtime = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", marker = "extra == 'dev'" },
+    { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
     { name = "markdown-it-py", marker = "extra == 'dev'" },
     { name = "mypy", marker = "extra == 'dev'" },
@@ -538,7 +542,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
-provides-extras = ["runtime", "dev"]
+provides-extras = ["runtime", "box", "dev"]
 
 [[package]]
 name = "dnspython"

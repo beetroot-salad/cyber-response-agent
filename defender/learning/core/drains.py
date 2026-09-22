@@ -742,6 +742,29 @@ def _open_batch(
         return None
 
 
+def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranch) -> None:
+    """MF2 (#1092): the worktree is destroyed here, before the caller's bare `raise` — so a
+    `BoxFault`'s remedy (which may name a build command relative to THIS worktree's about-to-
+    be-deleted path) needs a durable pointer appended first: the commit the worktree was cut
+    from, read while it still exists, plus a checkout instruction. Every drain-lane start
+    `BoxFault` gets the pointer, whatever shape the fault is; only a fault that carries the
+    build command (O4: the missing-image shape) also gets the "run the build from it" clause —
+    a name collision or an unreachable daemon is not fixed by a build. Raises the amended
+    fault when it can build one; otherwise returns, and the caller's own `raise` re-raises `e`
+    unmodified. The sha is read only for a `BoxFault` — every other unwind (a
+    KeyboardInterrupt included) spawns no git."""
+    cut_sha: str | None = None
+    if isinstance(e, box_mod.BoxFault):
+        with contextlib.suppress(Exception):
+            cut_sha = _git.git_head_sha(wt)
+    with contextlib.suppress(Exception):
+        branch.cleanup(wt)
+    if isinstance(e, box_mod.BoxFault) and cut_sha:
+        pointer = f"origin/main @ {cut_sha} — check out that commit"
+        pointer += " and run the build from it." if box_mod.carries_build_remedy(e) else "."
+        raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
+
+
 def _run_worktree_batch(
     paths: LoopPaths,
     branch: AuthorBranch,
@@ -774,9 +797,8 @@ def _run_worktree_batch(
     # the worktree/branch resources already minted.
     try:
         box = start_box(_drain_box_request(wt, batch_id, label, paths))
-    except BaseException:
-        with contextlib.suppress(Exception):
-            branch.cleanup(wt)
+    except BaseException as e:
+        _unwind_worktree_start_fault(e, wt, branch)
         raise
 
     wt_paths = paths.with_repo_root(wt)

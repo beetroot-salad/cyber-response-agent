@@ -160,7 +160,7 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     from defender.runtime.box._lifecycle import _create_argv
     from defender.runtime.box._spec import BoxSpec
 
-    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ())
+    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ()).argv
     joined = " ".join(argv)
     assert argv[argv.index("--network") + 1] == "none", (
         "N7: the box's network stays `none`; a future store's client is the driver process")
@@ -188,8 +188,13 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
 
 
 def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
-    """The box entrypoint closure, including the name owner it now imports the sentinel from,
-    imports with no third-party package installed."""
+    """The name owner the box entrypoint imports the sentinel from (`defender._run_paths`)
+    imports with no third-party package installed, and `RunPaths` is a stdlib dataclass (D1).
+
+    The `defender.runtime.box` package itself is NOT held to this any more: #1092 (O2/M7)
+    retired the stdlib-only rule for the package door — `BoxSpec` is a `@model` dataclass and
+    the owned box image carries pydantic. What the entrypoint's per-exec import then costs is
+    #1096. This test pins the owner, which is #1077's."""
     from defender._paths import PATHS
     code = (
         "import sys\n"
@@ -199,20 +204,17 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
         "            raise ModuleNotFoundError(name)\n"
         "        return None\n"
         "sys.meta_path.insert(0, Blocker())\n"
-        "import defender.runtime.box as box\n"
         "import defender._run_paths as rp\n"
         "assert rp.BOX_SENTINEL, 'the owner does not name the sentinel'\n"
         "import dataclasses\n"
         "assert dataclasses.is_dataclass(rp.RunPaths), 'RunPaths is not a stdlib dataclass'\n"
         "assert 'pydantic' not in sys.modules, sorted(m for m in sys.modules if 'pyd' in m)\n"
-        "assert box is not None\n"
         "print('OK')\n")
     done = subprocess.run([sys.executable, "-c", code], cwd=PATHS.repo_root,
                           capture_output=True, text=True, timeout=180)
     assert done.returncode == 0, (
-        f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` and `box/_spec.py` "
-        f"use stdlib dataclass, so D1's conversion is a real constraint, not a formality "
-        f"(#1092 lands before the sentinel moves into the handle):\n{done.stderr}")
+        f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` uses a stdlib "
+        f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr}")
     assert "OK" in done.stdout
 
 
@@ -227,7 +229,7 @@ def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
     assert record.tenant_id
     assert record_path.parent == runs_base
 
-    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ())
+    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ()).argv
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     for m in mounts:
         source = Path(m.split("source=")[1].split(",")[0])

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol, runtime_checkable
 
+from defender._model import model
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
@@ -34,13 +35,16 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 
 
-# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
-# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
-@dataclass(frozen=True)
+# `@model(frozen=True)` (#1067, M7): the box entrypoint's import closure is free to pull
+# pydantic now that the image installs it (O2) — this port is the live pin. `rootfs` is
+# `str | None`, defaulting to unset: an unset value is resolved to `_image.image_tag(tree)` by
+# each `docker run` argv builder, never read here (M3 revised) — `DEFAULT_SPEC = BoxSpec()`
+# below runs at import inside every box and must read nothing off the mounted tree (#1092 d5).
+@model(frozen=True)
 class BoxSpec:
 
     runtime: str = "runsc"
-    rootfs: str = "python:3.11-slim"
+    rootfs: str | None = None
     lifecycle: str = "per_run"
     tmpfs_size: str = "64m"
 
@@ -157,7 +161,14 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "PYTHONPATH",
     "LANG",
     "TZ",
+    "DEFENDER_BOX",
 )
+
+#: M6/JF3 — the in-box mark. Spread into both `docker run` argv builders AFTER every other
+#: source of env (a caller's `request.env`, the run-dir lane's derived infra env), so nothing a
+#: caller supplies can switch it back off inside a box; both host lanes (`_host_fallback_env`,
+#: `run_common.run_env`) strip the key instead of ever setting it.
+_BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
 
 DEFAULT_SPEC = BoxSpec()
 

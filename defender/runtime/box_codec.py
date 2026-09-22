@@ -7,9 +7,6 @@ from dataclasses import dataclass  # stdlib, deliberately — see the note below
 
 from defender.runtime import bash_exec
 
-# STDLIB `@dataclass`, not `defender._model.model`: this module is in the box entrypoint's
-# import closure — see `bash_exec._run_box_entrypoint` for the one note on why (#1067).
-
 
 class BoxFault(Exception):
     pass

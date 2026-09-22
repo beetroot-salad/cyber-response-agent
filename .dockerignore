@@ -1,7 +1,8 @@
 # Keep docker build contexts lean. Applies to any build whose context is the repo
-# root — both the dev image (.devcontainer/Dockerfile.dev) and the runtime image
-# (.devcontainer/Dockerfile.runtime) build with `context: ../`. Exclude-list, not
-# an allowlist, so adding a COPY later doesn't silently lose files.
+# root — the dev image (.devcontainer/Dockerfile.dev), the runtime image
+# (.devcontainer/Dockerfile.runtime), and the box image (defender/box.Dockerfile,
+# #1092) all build with `context: ../` (or the repo root directly). Exclude-list,
+# not an allowlist, so adding a COPY later doesn't silently lose files.
 
 # VCS + worktrees
 .git
@@ -21,6 +22,7 @@
 # Transient / large local state — never needed to build the agent
 defender/learning/runs
 defender/run-transcripts
+.defender-runs
 /tmp
 
 # Playground stack data + local infra state

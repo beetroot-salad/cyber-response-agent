@@ -14,6 +14,8 @@ containment (S6). They are authored here as the live obligation, not discharged 
 """
 from __future__ import annotations
 
+import dataclasses
+import os
 from pathlib import Path
 
 import pytest
@@ -128,6 +130,10 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
         name="defender-nested-live", workdir=outer, env={},
         mounts=(Mount(source=outer, target=outer, writable=False),
                 Mount(source=inner, target=inner, writable=True)),
+        # `outer` is a tmp tree with none of the three hash inputs; a real-daemon request
+        # pins the name of THIS checkout's image, never the stock one (#1092, #94) — on the
+        # env-derived spec, so the DEFENDER_BOX_RUNTIME lever still holds (test_540:973).
+        spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs=box_mod.image_tag(DEFENDER)),
     )
     box = start_box_request(req, docker=box_mod._docker)
     try:
@@ -177,14 +183,14 @@ def test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec(tmp_path):
      "python3 -c 'import defender.runtime.bash_exec'",
      "the granted interpreter/repertoire did not run clean at startup", None, None),
 
-    # the .venv python3 must resolve to the IMAGE interpreter (c12: .venv python3 resolves to
-    # image /usr/local/bin python3, minor matched)
+    # superseded by #1092: there is no `.venv` inside the box to resolve — `python3` IS the
+    # owned image's own /usr/local interpreter (c12: minor matched)
     ("venv-interpreter-matches-the-image",
      "python3 --version", "the interpreter probe exec failed",
      b"3.11", "the box interpreter did not match the image minor"),
 
-    # the probe also catches a broken NATIVE dependency inside the venv — a non-clean exit of a
-    # granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
+    # the probe also catches a broken NATIVE dependency inside the owned image — a non-clean
+    # exit of a granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
     ("native-dependency-inside-the-venv-imports",
      "python3 -c 'import duckdb'",
      "a native dependency the granted repertoire needs did not import", None, None),
@@ -279,6 +285,8 @@ def test_mount_source_symlink_target_resolves_outside_worktree_leaf(tmp_path):
         mounts=(Mount(source=run_dir, target=run_dir, writable=False),
                 Mount(source=DEFENDER, target=DEFENDER, writable=False),
                 Mount(source=link, target=link, writable=False)),
+        # `run_dir` is a tmp tree with none of the three hash inputs (#1092, #94 — see above).
+        spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs=box_mod.image_tag(DEFENDER)),
     )
     box = start_box_request(req, docker=box_mod._docker)
     try:

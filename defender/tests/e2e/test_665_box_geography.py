@@ -75,12 +75,14 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
         (source / "entry.txt").write_text("x", encoding="utf-8")
 
 
-def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None):
+def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None,
+             spec=None):
     return BoxRequest(
         name=name,
         mounts=mounts if mounts is not None else _run_cycle_mounts(run_dir),
         workdir=workdir if workdir is not None else REPO_ROOT,
         env=env if env is not None else {},
+        spec=spec,
     )
 
 
@@ -119,7 +121,11 @@ def test_box_request_workdir_not_among_its_own_mounts(tmp_path):
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     uncovered = tmp_path / "nowhere"
-    start_box_request(_request(run_dir, workdir=uncovered), docker=rec)
+    # An explicit rootfs: with it unset the builder resolves the image from
+    # `workdir / "defender"`, which this deliberately uncovered workdir lacks (#1092) — the
+    # principle above is about geography, so the image is pinned out of the way.
+    pinned = box_mod.BoxSpec(rootfs="python:3.11-slim")
+    start_box_request(_request(run_dir, workdir=uncovered, spec=pinned), docker=rec)
     assert rec.flag_value("--workdir") == str(uncovered)
 
 

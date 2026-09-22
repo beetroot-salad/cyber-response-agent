@@ -271,6 +271,10 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     # subprocesses, which inherit whatever PYTHONPATH the operator's shell set; clobbering it
     # would silently drop those entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
+    # JF3: this is a HOST lane — it never carries the in-box mark, whatever the shell it
+    # inherited from set. Popped rather than never-copied: `dict(os.environ)` above already
+    # took it if the operator's own shell had it set.
+    env.pop("DEFENDER_BOX", None)
     return env
 
 

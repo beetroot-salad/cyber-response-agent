@@ -6,6 +6,14 @@
 # `sql_adapter.py`: `*_adapter.py` is the structural marker for a data-source
 # adapter — `_cmd_segments.ADAPTER_RE` — and defender-sql is a non-adapter.)
 # See defender/bin/README.md.
-PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
-[ -x "$PY" ] || PY=python3
-exec "$PY" "${DEFENDER_DIR}/scripts/gather_tools/sql.py" "$@"
+# M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs. A
+# command the permission gate admits into the box can never clear DEFENDER_BOX for itself
+# (the gate refuses both a leading VAR= and an env/unset wrapper — README.md has the full
+# argument), so a gate-admitted call to this shim never falls back to the mounted host venv.
+if [ -n "${DEFENDER_BOX:-}" ]; then
+    PY=python3
+else
+    PY="${DEFENDER_DIR:?DEFENDER_DIR is not set}/.venv/bin/python3"
+    [ -x "$PY" ] || PY=python3
+fi
+exec "$PY" "${DEFENDER_DIR:?DEFENDER_DIR is not set}/scripts/gather_tools/sql.py" "$@"

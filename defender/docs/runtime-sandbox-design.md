@@ -196,7 +196,7 @@ review. Read "the isolate is the boundary" as bounding the run, not the loop.
 
 | Path | Mode | What |
 |---|---|---|
-| rootfs | **ro** | minimal base image (python + `.venv` + defender code + the broker CA cert) |
+| rootfs | **ro** | the owned box image (#1092): python + its own pinned packages (`box` extra) + the broker CA cert — no `.venv`, no defender code (that's the `defender_dir` bind below) |
 | `defender_dir` | **ro** bind | corpus: skills / lessons / SKILL.md / scripts — ro so a hijacked agent can't poison its own lessons *directly* (the sanctioned learning-loop channel remains; honest limit 2) |
 | `run_dir` | **rw** bind | per-alert scratch **and the artifact exit** (below) |
 | `/tmp` | **tmpfs**, size-capped | writable scratch SIEM CLIs expect |
@@ -630,16 +630,17 @@ stateless.
     is swapped to busybox/alpine, which re-pinning `gnu_flags` catches.
   - **`jq` is absent from the base image and must be baked into the rootfs at build
     time** (the box is `--network=none`; it cannot `apt` at runtime — confirmed).
-    The `.venv` must be on `PATH` for `defender-sql` / the `defender-*` shims. Both
-    are build-time requirements whose failures are loud (`command not found`).
+    Superseded by #1092: `defender-sql` / the `defender-*` shims run the box
+    image's own `python3` from `/usr/local`, never a `.venv` on `PATH`. This
+    is a build-time requirement whose failure is loud (`command not found`).
   - **`__pycache__` under a read-only `defender_dir` is a non-issue** — CPython
     imports fine and silently skips the `.pyc` write on EROFS.
   - **The guest runs as uid 0 with `dac_override`**, so inside the box permission
     bits and uid confine *nothing* — the mount list is the only boundary; no in-box
     logic may lean on chmod/uid.
 
-  Still wanting the real box (not blocking): `defender-sql` end-to-end from a
-  ro-bound `.venv`.
+  Superseded by #1092: `defender-sql` end-to-end now runs against the owned box
+  image's own `duckdb`, not a ro-bound `.venv` — closed by `test_665_box_live.py`.
 - **Fail-closed on capability.** The startup check must *attempt* a runsc probe
   (not just detect the binary) and refuse to process untrusted input unsandboxed
   on failure — only `DEFENDER_ALLOW_UNSANDBOXED=1` opts out, loudly.

@@ -478,7 +478,7 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
     merely a different string. Both halves matter: the source alone could be right by
     accident on a pass-through mount, and the target alone was never broken."""
     mounts = box_mod._shared_mounts(box_mod._docker)
-    argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts)
+    argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts).argv
     binds = [
         dict(part.split("=", 1) for part in spec.split(",") if "=" in part)
         for spec in argv if spec.startswith("type=bind,")

@@ -26,9 +26,9 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     verdict_path,
     write_did_not_run,
 )
-from ._spec import ALIAS_PROFILE_PATH, BOX_ENV_ALLOWLIST, BoxExecutor, BoxRequest, BoxSpec, Mount
+from ._spec import ALIAS_PROFILE_PATH, BOX_ENV_ALLOWLIST, BoxExecutor, BoxRequest, BoxSpec, Mount, _BOX_MARK_ENV
 from ._alias import _probe_alias_ban
-from ._docker import DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -36,16 +36,21 @@ from ._spec import _DockerTransport
 def _create_argv(
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
-) -> list[str]:
-    env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV}
-    # The remedy is per-subject: DEFENDER_RUNS_BASE relocates the RUN dir and nothing else,
-    # so naming it for an uncovered defender_dir would send the operator at the wrong knob.
+) -> Create:
+    # C46's uncovered-mount refusal runs BEFORE the image resolver (MF1 part 2): a tree that
+    # sits on no shared path is a topology fault the resolver's file reads cannot fix, and
+    # reading them first would surface the wrong refusal on a tree that is ALSO missing its
+    # three inputs.
     for subject, path, remedy in (
         ("run dir", run_dir, "Set DEFENDER_RUNS_BASE to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
     ):
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
+    # M3 revised: resolved on the host, here — never earlier (BoxSpec's construction reads
+    # nothing off the mounted tree, #1092 d5).
+    rootfs = resolve_rootfs(spec.rootfs, defender_dir)
+    env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
     run_src = _daemon_source(run_dir, mounts)
     defender_src = _daemon_source(defender_dir, mounts)
     argv = [
@@ -54,6 +59,7 @@ def _create_argv(
         "--runtime", spec.runtime,
         "--network", "none",
         "--read-only",
+        "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
@@ -62,8 +68,8 @@ def _create_argv(
     ]
     for key in BOX_ENV_ALLOWLIST:
         argv += ["--env", f"{key}={env_pairs[key]}"]
-    argv += [spec.rootfs, "sleep", "infinity"]
-    return argv
+    argv += [rootfs.image, "sleep", "infinity"]
+    return Create(argv, rootfs)
 
 
 def _plant(sentinel: Path, token: str) -> None:
@@ -137,12 +143,19 @@ def _start_boxed(
         write_did_not_run(run_dir, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex
-    created = _call(
-        docker,
-        _create_argv(
-            name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
-        ),
+    create = _create_argv(
+        name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
     )
+    try:
+        # O4: the image is confirmed on the daemon BEFORE the create names it, so a missing
+        # image is its own refusal (with the build remedy) and never a create fault to be
+        # told apart from the others by its text. Marked like the reap arm above: the run
+        # could have happened, and the tree must not read as unjudged.
+        require_image(docker, create.rootfs)
+    except BoxFault as e:
+        write_did_not_run(run_dir, f"box start refused before create: {e}")
+        raise
+    created = _call(docker, create.argv)
     if created.returncode != 0:
         # `docker run --detach` is create-THEN-start, so a non-zero rc does not prove no
         # container exists: a failure at task start (a profile the runtime rejects, a missing
@@ -176,13 +189,14 @@ def _start_boxed(
 def _render_argv(
     request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
     start_token: str = "",
-) -> list[str]:
+) -> Create:
     argv = [
         "docker", "run", "--detach", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         "--runtime", request.spec.runtime,
         "--network", "none",
         "--read-only",
+        "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
     ]
     for m in request.mounts:
@@ -201,8 +215,10 @@ def _render_argv(
     env = _render_env(request.env, Path(request.workdir))
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
-    argv += [request.spec.rootfs, "sleep", "infinity"]
-    return argv
+    # M3 revised: resolved here — never at BoxRequest construction (#1092 d5).
+    rootfs = resolve_rootfs(request.spec.rootfs, Path(request.workdir) / "defender")
+    argv += [rootfs.image, "sleep", "infinity"]
+    return Create(argv, rootfs)
 
 
 def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
@@ -237,9 +253,14 @@ def _start_boxed_request(
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex
-    created = _call(
-        docker, _render_argv(request, shared_mounts(docker), start_token),
-    )
+    create = _render_argv(request, shared_mounts(docker), start_token)
+    try:
+        # `_start_boxed`'s preflight, on this lane's geography (a marker per writable mount).
+        require_image(docker, create.rootfs)
+    except BoxFault as e:
+        _did_not_run_for_request(request, f"box start refused before create: {e}")
+        raise
+    created = _call(docker, create.argv)
     if created.returncode != 0:
         # `_start_boxed`'s reason, verbatim: create-then-start means a non-zero rc can still
         # leave a `created` container, and this lane's names are no more revisited than that
@@ -289,12 +310,15 @@ def _probe_cwd_for_request(request: BoxRequest) -> Path:
 
 def _opt_out_or_raise(fault: BoxFault) -> None:
     """M9: the ONE loud host lane. Without the env var a startup fault aborts; with it, the
-    caller degrades to `unboxed_executor` after a greppable warning."""
+    caller degrades to `unboxed_executor` after a greppable warning that carries the swallowed
+    fault verbatim (O4's remedy — a missing-image build command included — must still reach
+    the operator under the opt-out, phase F)."""
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
     print(
         f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
-        "executes on the host with no filesystem or network boundary.",
+        f"executes on the host with no filesystem or network boundary. The swallowed startup "
+        f"fault: {fault}",
         file=sys.stderr,
     )
 
@@ -318,6 +342,9 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     env["PYTHONPATH"] = (
         f"{request.workdir}{os.pathsep}{inherited}" if inherited else str(request.workdir)
     )
+    # JF3: this is a HOST lane — it never carries the in-box mark, whatever the operator's
+    # shell or the request's own env named.
+    env.pop("DEFENDER_BOX", None)
     return env
 
 

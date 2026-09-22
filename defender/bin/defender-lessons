@@ -5,6 +5,14 @@
 # NON_ADAPTER_SHIMS). The script resolves the lessons dir from its own path, so
 # cwd does not matter.
 DEFENDER="${DEFENDER_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-PY="${DEFENDER}/.venv/bin/python3"
-[ -x "$PY" ] || PY=python3
+# M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs. A
+# command the permission gate admits into the box can never clear DEFENDER_BOX for itself
+# (the gate refuses both a leading VAR= and an env/unset wrapper — README.md has the full
+# argument), so a gate-admitted call to this shim never falls back to the mounted host venv.
+if [ -n "${DEFENDER_BOX:-}" ]; then
+    PY=python3
+else
+    PY="${DEFENDER}/.venv/bin/python3"
+    [ -x "$PY" ] || PY=python3
+fi
 exec "$PY" "${DEFENDER}/scripts/lessons/lessons_fm.py" "$@"

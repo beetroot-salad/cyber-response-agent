@@ -32,7 +32,20 @@ shims resolve from any cwd.
 
 - Each shim `exec`s the venv python (`$DEFENDER_DIR/.venv/bin/python3`),
   falling back to `python3` on PATH when no venv is present (a sandbox that
-  points `DEFENDER_DIR` at a tree with no `.venv` still runs).
+  points `DEFENDER_DIR` at a tree with no `.venv` still runs) — EXCEPT inside
+  the box (#1092): `DEFENDER_BOX` set skips the venv lookup entirely and runs
+  bare `python3`, which is the owned box image's own interpreter. No command
+  the permission gate admits into the box can resolve the mounted `.venv` —
+  the gate itself refuses both ways of clearing `DEFENDER_BOX` for a single
+  command (a leading `VAR=` assignment, or routing through `env`/`unset`,
+  `runtime/permission/bash.py::_stage_unsafe`/`_claim`), and every command's
+  environment is derived fresh from the container's own start-time mark, never
+  carried over from a prior command. This is a property of the gate, not of
+  `DEFENDER_BOX` alone — a process with shell access inside the box but NOT
+  going through the gate (there is no such agent-reachable path today) could
+  still clear it for its own children. `defender-policy`, the one OPERATOR
+  tool no agent lane ever admits (above), was not part of this fix and keeps
+  its venv-first lookup unconditionally, by design (#1092 non-obligation).
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
   root, so the agent never passes a path.

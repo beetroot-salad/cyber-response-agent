@@ -4,6 +4,14 @@
 # types` with no path/run-dir argument. Runs from REPO_ROOT because
 # skills/invlang/cli.py uses package-relative imports (`from .advisory ...`).
 cd "${DEFENDER_DIR:?DEFENDER_DIR is not set}/.." || exit 1
-PY="${DEFENDER_DIR}/.venv/bin/python3"
-[ -x "$PY" ] || PY=python3
+# M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs. A
+# command the permission gate admits into the box can never clear DEFENDER_BOX for itself
+# (the gate refuses both a leading VAR= and an env/unset wrapper — README.md has the full
+# argument), so a gate-admitted call to this shim never falls back to the mounted host venv.
+if [ -n "${DEFENDER_BOX:-}" ]; then
+    PY=python3
+else
+    PY="${DEFENDER_DIR}/.venv/bin/python3"
+    [ -x "$PY" ] || PY=python3
+fi
 exec "$PY" -m defender.skills.invlang.cli "${DEFENDER_RUNS_BASE:?DEFENDER_RUNS_BASE is not set}" "$@"
