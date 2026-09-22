@@ -24,14 +24,15 @@ WORKDIR /defender
 # box's fixed PATH is what every granted shim and the entrypoint runs — see `_docker._BOX_PATH`
 # — there is no venv to activate inside the box). `--inexact`: a plain sync PRUNES the base
 # image's own site-packages (it removed `packaging`) — `--inexact` keeps what the base
-# already carries instead. `--frozen`: never rewrites
-# `uv.lock`, a build over a divergent lockfile fails loudly instead of silently relocking.
+# already carries instead. `--locked`: asserts `uv.lock` already agrees with `pyproject.toml`
+# and never rewrites it, so a build over a divergent lockfile fails loudly instead of silently
+# installing the stale set under a fresh image name (`--frozen` would skip that check — #1095).
 # `--no-dev`: the box needs the `box` extra, never the dev toolchain. `UV_COMPILE_BYTECODE=1`:
 # compiles `.pyc`s at build time — the box's mount is read-only, so nothing could compile them
 # at import time inside a run.
 RUN --mount=type=bind,from=ghcr.io/astral-sh/uv:0.8.14@sha256:f3660c56d5b08d6c516360981bedc439f499b9bf37f46a216018da3777a74011,source=/uv,target=/bin/uv \
     UV_PROJECT_ENVIRONMENT=/usr/local UV_COMPILE_BYTECODE=1 \
-    uv sync --frozen --no-dev --inexact --extra box
+    uv sync --locked --no-dev --inexact --extra box
 
 # No installer stays reachable inside the sandbox (O7): pip/setuptools/wheel are the base's
 # own (`--inexact` above keeps them installed until here), `packaging` is the one base

@@ -747,10 +747,12 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
     `BoxFault`'s remedy (which may name a build command relative to THIS worktree's about-to-
     be-deleted path) needs a durable pointer appended first: the commit the worktree was cut
     from, read while it still exists, plus a checkout instruction. Every drain-lane start
-    `BoxFault` gets the pointer, whatever shape the fault is; only a missing-image fault also
-    carries a build command (O4). Raises the amended fault when it can build one; otherwise
-    returns, and the caller's own `raise` re-raises `e` unmodified. The sha is read only for
-    a `BoxFault` — every other unwind (a KeyboardInterrupt included) spawns no git."""
+    `BoxFault` gets the pointer, whatever shape the fault is; only a fault that carries the
+    build command (O4: the missing-image shape) also gets the "run the build from it" clause —
+    a name collision or an unreachable daemon is not fixed by a build. Raises the amended
+    fault when it can build one; otherwise returns, and the caller's own `raise` re-raises `e`
+    unmodified. The sha is read only for a `BoxFault` — every other unwind (a
+    KeyboardInterrupt included) spawns no git."""
     cut_sha: str | None = None
     if isinstance(e, box_mod.BoxFault):
         with contextlib.suppress(Exception):
@@ -758,9 +760,9 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
     with contextlib.suppress(Exception):
         branch.cleanup(wt)
     if isinstance(e, box_mod.BoxFault) and cut_sha:
-        raise box_mod.BoxFault(
-            f"{e}\n\norigin/main @ {cut_sha} — check out that commit and run the build from it."
-        ) from e
+        pointer = f"origin/main @ {cut_sha} — check out that commit"
+        pointer += " and run the build from it." if box_mod.carries_build_remedy(e) else "."
+        raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
 
 
 def _run_worktree_batch(

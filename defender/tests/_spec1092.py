@@ -153,16 +153,28 @@ def no_such_image_stderr(ref: str) -> str:
     return f"Error response from daemon: No such image: {ref}\n"
 
 
+#: What the CLI says when the daemon is not there — `docker image inspect` and `docker
+#: version` both exit 1 with it (DOCKER_HOST pointed at an absent socket, CLI 29.6.1, the
+#: #1095 round-2 probe). Same rc as a missing image; only the liveness probe tells them apart.
+DAEMON_DOWN_STDERR = (
+    "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is "
+    "correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such "
+    "file or directory\n"
+)
+
+
 class NoSuchImageDocker(RecordingDocker):
     """`RecordingDocker` whose preflight `docker image inspect` answers rc 1 with the daemon's
     missing-image line for THE IMAGE THE START ASKED ABOUT (the last token of the inspect
     argv — `NO_SUCH_IMAGE_CITE`), recorded in `inspected_images`. The create is left HEALTHY:
     a start that reaches it did not preflight, and the test's `"run" not in subcommands`
-    catches that."""
+    catches that. With `daemon_down`, the inspect AND the liveness probe (`docker version`)
+    both fail with `DAEMON_DOWN_STDERR` — the other reading of the same rc."""
 
-    def __init__(self, **kw):
+    def __init__(self, *, daemon_down: bool = False, **kw):
         super().__init__(**kw)
         self.cite = NO_SUCH_IMAGE_CITE
+        self.daemon_down = daemon_down
         self.inspected_images: list[str] = []
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
@@ -170,7 +182,12 @@ class NoSuchImageDocker(RecordingDocker):
         if argv[1:3] == ["image", "inspect"]:
             self.calls.append(argv)
             self.inspected_images.append(argv[-1])
+            if self.daemon_down:
+                return _cp(1, "", DAEMON_DOWN_STDERR)
             return _cp(1, "", no_such_image_stderr(argv[-1]))
+        if self.daemon_down and argv[1:2] == ["version"]:
+            self.calls.append(argv)
+            return _cp(1, "", DAEMON_DOWN_STDERR)
         return super().__call__(argv, **_kw)
 
 

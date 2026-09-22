@@ -160,6 +160,37 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
     assert remedy_command(str(e.value)) is not None, str(e.value)
 
 
+# ---- #1095 round 2: the other reading of a non-zero inspect --------------------------------------
+@pytest.mark.parametrize("lane", ["run-dir", "request"])
+def test_a_daemon_that_stopped_answering_is_reported_as_that_and_never_told_to_build(tmp_path, monkeypatch, lane):
+    """`docker image inspect` exits 1 both for "no such image" and for "cannot reach the
+    daemon". When the preflight's `no` is followed by a `docker version` that also fails, the
+    `BoxFault` says the daemon could not be asked (its own words kept) and names NO build
+    command; no create is attempted. Positive control: the same start with the daemon
+    answering names the remedy (d42)."""
+    _no_unsandboxed(monkeypatch)
+    root = tmp_path / "tree"
+    defender_dir = plant_tree(root, copy_code=False)
+    run_dir = make_run_dir(tmp_path)
+    start = (
+        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d)) if lane == "run-dir"
+        else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
+    )
+    rec = NoSuchImageDocker(daemon_down=True)
+    with pytest.raises(BoxFault) as e:
+        start(rec)
+    message = str(e.value)
+    assert "run" not in subcommands(rec.calls), rec.calls
+    assert "daemon" in message, message
+    assert "failed to connect" in message, message
+    assert remedy_command(message) is None, message
+    assert "box_image.py" not in message, message
+
+    with pytest.raises(BoxFault) as e:
+        start(NoSuchImageDocker())
+    assert remedy_command(str(e.value)) is not None, str(e.value)
+
+
 # ---- d44 (negative; positive control: d9 — the script DOES build) -----------------------------
 @pytest.mark.parametrize("opt_out", [None, "0", "yes"])
 def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, monkeypatch, opt_out):
@@ -293,6 +324,8 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
     def missing(argv, **kw):
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr=no_such_image_stderr(argv[-1]))
+        if argv[1:2] == ["version"]:      # the liveness probe: the daemon IS answering
+            return subprocess.CompletedProcess(argv, 0, stdout="29.5.3\n", stderr="")
         runs.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
 
@@ -317,8 +350,9 @@ def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout
     read before the tree is gone — and the instruction to check out that commit and run the
     build from it. The pointer rides EVERY drain-lane start `BoxFault` (phase F, human): a
     create fault of any OTHER shape is unwound and re-raised with the same commit and
-    checkout instruction appended but NO build command (O4: the command rides the
-    missing-image shape only).
+    checkout instruction appended but NO build command and no "run the build" clause (O4:
+    the command rides the missing-image shape only — a name collision or a bind fault is not
+    fixed by a build, #1095 round 2).
 
     # rejected: keeping the message literal (a dead-end command on every re-lock, on a lane
     # that runs unattended); not deleting the copy on this fault (changes the drain's unwind
@@ -367,6 +401,8 @@ def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout
     assert pointer, message
     assert branch.cut_commit is not None
     assert branch.cut_commit.startswith(pointer.group(1)), (pointer.group(1), branch.cut_commit)
-    assert "check out" in message[pointer.end():].lower(), message
+    tail = message[pointer.end():].lower()
+    assert "check out" in tail, message
+    assert "build" not in tail, message
     assert remedy_command(message) is None, message
     assert "box_image.py" not in message, message

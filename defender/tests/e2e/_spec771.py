@@ -352,8 +352,8 @@ def run_probe_under_profile(
     defaulting to `subprocess.run`, so a test can observe the argv without a daemon; the
     preflight and the run both go through it.
     """
-    rootfs = box_mod.resolve_rootfs(None, DEFENDER)
     try:
+        rootfs = box_mod.resolve_rootfs(None, DEFENDER)
         box_mod.require_image(
             lambda argv: run(argv, capture_output=True, text=True, encoding="utf-8", timeout=300),
             rootfs,

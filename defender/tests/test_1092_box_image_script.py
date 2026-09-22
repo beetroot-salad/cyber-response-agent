@@ -196,6 +196,21 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     assert len(recorded_docker_calls(log)) == 1, "the build was retried"
 
 
+# ---- #1095 round 2: no docker to run ---------------------------------------------------------------
+def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_path):
+    """`build` on a machine with no `docker` on PATH prints `box_image.py: could not run
+    docker: …` on stderr, nothing on stdout, and exits 1 — the CLI's own surface, not a
+    `FileNotFoundError` traceback (d9's "no docker on PATH is the build's non-zero exit")."""
+    _, script = _planted_script(tmp_path)
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    out = _run_script(script, "build", cwd=Path("/"), env={"PATH": str(empty)})
+    assert out.returncode == 1, (out.returncode, out.stderr)
+    assert out.stdout == "", out.stdout
+    assert out.stderr.startswith("box_image.py: could not run docker:"), out.stderr
+    assert "Traceback" not in out.stderr, out.stderr
+
+
 # ---- MF1's script side (CLI #18) ----------------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):

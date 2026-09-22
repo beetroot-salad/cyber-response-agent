@@ -105,14 +105,17 @@ def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
 # ---- d14 -------------------------------------------------------------------------------------
 def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra():
     """The sync instruction sets `UV_PROJECT_ENVIRONMENT=/usr/local` and
-    `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--frozen`, `--no-dev`, `--inexact` and
+    `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--locked` (not `--frozen`, which skips
+    the lock-freshness check and would install a stale set under a FRESH image name — #1095),
+    `--no-dev`, `--inexact` and
     `--extra box`; no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE
     #60). (uv itself is mounted onto that step and never removed, because it was never
     added — d12.)"""
     instructions = _instructions()
     sync = instructions[_index_of(instructions, "uv sync")]
-    for flag in ("--frozen", "--no-dev", "--inexact", "--extra box"):
+    for flag in ("--locked", "--no-dev", "--inexact", "--extra box"):
         assert flag in sync, (flag, sync)
+    assert "--frozen" not in sync, sync
     assert "UV_PROJECT_ENVIRONMENT=/usr/local" in sync, sync
     assert "UV_COMPILE_BYTECODE=1" in sync, sync
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
@@ -160,7 +163,7 @@ def test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it():
     """`pyproject.toml` declares an optional-dependency extra `box` whose only entry is
     `duckdb`, and `uv.lock` provides that extra (its `defender` package lists
     `optional-dependencies.box = [duckdb]` and `provides-extras` names `box`), so
-    `--frozen` resolves it instead of erroring.
+    `--locked` resolves it instead of erroring.
 
     # rejected: `--extra runtime` (byte-for-byte the host venv): ships anthropic/openai/mcp/
     # fastmcp into the boundary for no consumer (D1)."""

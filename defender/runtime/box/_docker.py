@@ -80,6 +80,12 @@ def resolve_rootfs(rootfs: str | None, tree: Path) -> Rootfs:
         raise BoxFault(str(e)) from e
 
 
+def carries_build_remedy(fault: BaseException) -> bool:
+    """Whether a fault's message ends with the build command `build_remedy` composes — the
+    one thing a caller that appends its own instruction (the drain's unwind) may key on."""
+    return f"/{_BUILD_SCRIPT_TAIL} build" in str(fault)
+
+
 def require_image(docker: DockerFn, rootfs: Rootfs) -> None:
     """O4 (JF5 amended): the daemon is ASKED whether it holds the image — `docker image
     inspect`, a yes/no by exit code — before any create names it. A `no` is a `BoxFault`
@@ -89,11 +95,22 @@ def require_image(docker: DockerFn, rootfs: Rootfs) -> None:
     with is the CLI's to phrase and varies by its version (27.x ends the `No such image:`
     line with a period, 28+ does not — #1095), so classifying a create's stderr after the
     fact is exactly what this preflight replaces: one question, answered by exit code, on
-    the daemon that will run the create."""
+    the daemon that will run the create.
+
+    A non-zero rc is two answers (`_container_status` has the full argument): "no such
+    image" and "cannot reach the daemon". Only the first earns the build remedy, so on a `no`
+    the daemon is asked whether it is answering at all — probed, never text-matched — and an
+    unreachable daemon is reported as that, with no build to run."""
     probe = _call(docker, ["docker", "image", "inspect", "--format", "{{.Id}}", rootfs.image])
     if probe.returncode == 0:
         return
     detail = (probe.stderr or "").strip()
+    alive = _call(docker, ["docker", "version", "-f", "{{.Server.Version}}"])
+    if alive.returncode != 0:
+        raise BoxFault(
+            f"docker could not say whether the daemon holds {rootfs.image}, and could not "
+            f"answer for the daemon either ({(alive.stderr or '').strip()[:200]!r})"
+        )
     message = f"the daemon holds no image {rootfs.image}: {detail}"
     raise BoxFault(message if rootfs.remedy is None else f"{message} — {rootfs.remedy}")
 

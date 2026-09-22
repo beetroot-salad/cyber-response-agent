@@ -21,7 +21,7 @@ base: b016749cb48a79949579d48b45ee63a7d90b30e3   # main — the base every ancho
 # THE CHANGE. The sandbox stops being the unmodified `python:3.11-slim` pulled by the daemon
 # and becomes an image THIS TREE BUILDS: M1 `defender/box.Dockerfile` (digest-pinned base, a
 # version-pinned uv binary copied in and removed after, ONLY pyproject+uv.lock copied, `uv sync
-# --frozen --no-dev --inexact --extra box` into /usr/local with bytecode compiled, then pip/
+# --locked --no-dev --inexact --extra box` into /usr/local with bytecode compiled, then pip/
 # setuptools/wheel uninstalled — F1); M2 a `box` extra (= duckdb); M3-REVISED a content-
 # addressed name DERIVED AT BOX START — `runtime/box/_image.py::image_tag(tree)` hashes the
 # bytes of `box.Dockerfile`+`uv.lock`+`pyproject.toml` in the defender dir the box MOUNTS, and
@@ -399,7 +399,7 @@ demands:
     discharged_by: test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it
     binds: ["pyproject.domain.distinguished[box]", uv_lock]
     premises: [17]
-    rows: "#17 — a lock lacking the `box` extra: `uv sync --frozen --extra box` fails and the build step is red (`--locked` refuses drift); G23: the extra must land WITH its relock (F11: three lock hunks, no version moves)."
+    rows: "#17 — a lock lacking the `box` extra: `uv sync --locked --extra box` fails and the build step is red (`--locked` refuses drift — `--frozen`, as first written, did NOT: it skips the freshness check, #1095 finalize round 2); G23: the extra must land WITH its relock (F11: three lock hunks, no version moves)."
 
   # ---- O1 / O2 / O7 / O8: what the built image is (live, box lanes) -------------------------
   - id: model_imports_in_the_box

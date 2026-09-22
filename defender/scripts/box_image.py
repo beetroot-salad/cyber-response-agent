@@ -58,7 +58,13 @@ def _cmd_build(image: ModuleType) -> int:
     # which the legacy builder rejects. Docker >= 23 defaults to BuildKit; the variable makes
     # an older daemon's CLI use it too instead of failing on the first `--mount`.
     env = dict(os.environ, DOCKER_BUILDKIT="1")
-    proc = subprocess.run(argv, env=env)  # noqa: S603 — the whole point of this command
+    try:
+        proc = subprocess.run(argv, env=env)  # noqa: S603 — the whole point of this command
+    except OSError as e:
+        # No `docker` on PATH (or one that cannot be exec'd): this CLI's own one line and
+        # exit 1, the same surface as every other failure of the build, not a traceback.
+        print(f"box_image.py: could not run docker: {e}", file=sys.stderr)
+        return 1
     return proc.returncode
 
 
