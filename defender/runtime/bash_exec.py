@@ -627,18 +627,20 @@ def run_parsed(
 
 def _run_box_entrypoint() -> int:
     """The process that runs INSIDE the sandbox: only the mounted tree on its `PYTHONPATH`, no
-    venv, and — since #1092's owned image — the image's own `/usr/local` site-packages, which
-    is where `defender.runtime.box`'s import of `defender._model` (pydantic) now resolves."""
-    from defender.runtime import box
+    venv. One of these per `docker exec`, so it imports `box_codec` — the wire codec and the
+    env allowlist, stdlib — and NOT the `box` package door, which has pulled `defender._model`
+    (pydantic, ~300 ms per process) since #1092 (#1096). Function-local because `box_codec`
+    imports this module at its top."""
+    from defender.runtime import box_codec
 
     frame = sys.stdin.buffer.read()
     try:
-        pipelines = box.decode_request(frame)
+        pipelines = box_codec.decode_request(frame)
     except ValueError as e:
         print(f"box entrypoint: undecodable request frame: {e}", file=sys.stderr)
         return 2
 
-    box_env = {k: v for k, v in os.environ.items() if k in box.BOX_ENV_ALLOWLIST}
+    box_env = {k: v for k, v in os.environ.items() if k in box_codec.BOX_ENV_ALLOWLIST}
 
     try:
         rc, out, err = run_parsed(
@@ -652,7 +654,7 @@ def _run_box_entrypoint() -> int:
         print("box entrypoint: the pipeline exceeded its wall-clock deadline", file=sys.stderr)
         return 3
 
-    sys.stdout.buffer.write(box.encode_response(box.BoxResult(
+    sys.stdout.buffer.write(box_codec.encode_response(box_codec.BoxResult(
         rc=rc, out=out.encode("utf-8"), err=err.encode("utf-8"),
     )))
     sys.stdout.buffer.flush()

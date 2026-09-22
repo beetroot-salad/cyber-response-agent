@@ -16,8 +16,10 @@ from typing import ClassVar, Protocol, runtime_checkable
 from defender._model import model
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
+    BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: owned by box_codec since #1096 (the entrypoint reads it there)
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
+    _BOX_MARK_ENV,  # noqa: F401 — re-exported: owned by box_codec since #1096, beside the allowlist it is a member of
     BoxFault,
     BoxResult,
     RawExec,
@@ -152,23 +154,6 @@ def _text(raw: bytes) -> str:
     return raw.decode("utf-8", "replace")
 
 
-
-BOX_ENV_ALLOWLIST: tuple[str, ...] = (
-    "DEFENDER_DIR",
-    "DEFENDER_RUN_DIR",
-    "DEFENDER_RUNS_BASE",
-    "PATH",
-    "PYTHONPATH",
-    "LANG",
-    "TZ",
-    "DEFENDER_BOX",
-)
-
-#: M6/JF3 — the in-box mark. Spread into both `docker run` argv builders AFTER every other
-#: source of env (a caller's `request.env`, the run-dir lane's derived infra env), so nothing a
-#: caller supplies can switch it back off inside a box; both host lanes (`_host_fallback_env`,
-#: `run_common.run_env`) strip the key instead of ever setting it.
-_BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
 
 DEFAULT_SPEC = BoxSpec()
 

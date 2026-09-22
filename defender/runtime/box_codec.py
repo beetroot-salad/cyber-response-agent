@@ -7,6 +7,34 @@ from dataclasses import dataclass  # stdlib, deliberately — see the note below
 
 from defender.runtime import bash_exec
 
+# STDLIB ONLY (#1096). This module is what the box entrypoint imports on EVERY `docker exec`
+# — one process per agent command, plus the alias-ban probe at every start. Everything the
+# entrypoint needs lives here: the wire codec and the env allowlist below. The `box` package
+# door pulls `defender._model` (pydantic) since #1092 and costs ~300 ms per import; this
+# module stays at the stdlib closure's ~80 ms. A third-party import added here is paid on the
+# hot path, per command.
+
+
+#: F7 — the positive env allowlist: the keys a box's environment may carry, whether merged
+#: from a caller's request env by the `docker run` builders or filtered from the entrypoint's
+#: own environment before the pipeline runs. Owned here because the entrypoint reads it.
+BOX_ENV_ALLOWLIST: tuple[str, ...] = (
+    "DEFENDER_DIR",
+    "DEFENDER_RUN_DIR",
+    "DEFENDER_RUNS_BASE",
+    "PATH",
+    "PYTHONPATH",
+    "LANG",
+    "TZ",
+    "DEFENDER_BOX",
+)
+
+#: M6/JF3 — the in-box mark. Spread into both `docker run` argv builders AFTER every other
+#: source of env (a caller's `request.env`, the run-dir lane's derived infra env), so nothing a
+#: caller supplies can switch it back off inside a box; both host lanes (`_host_fallback_env`,
+#: `run_common.run_env`) strip the key instead of ever setting it.
+_BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
+
 
 class BoxFault(Exception):
     pass
