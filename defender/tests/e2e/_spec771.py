@@ -933,6 +933,16 @@ def _invoke_write_guarded(run_dir: Path) -> None:
     write_guarded(run_dir / "report.md", "guarded body\n")
 
 
+def _invoke_tenant_writer(run_dir: Path) -> None:
+    """#1077 decision 16: the tenant record's writer, beside the runs base (`run_dir.parent`)
+    rather than inside the run dir — `Writer.artifact` names it `../_tenant.json`, which the
+    generic `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
+    stat/open time."""
+    from defender import _tenant
+
+    _tenant.ensure_tenant(run_dir.parent)
+
+
 #: The census, one row per `no_write_through_planted_leaf` bind. It is a FLOOR, not a closed
 #: list: C1 counted twelve writers in three idioms and was refuted twice (C3-fix, X1/G15), and
 #: `writer_the_census_instrument_cannot_see` is the demand that a grep is not a census
@@ -989,6 +999,11 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_write_atomic, "_io.py", cite="B4,C3-fix"),
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py", cite="F1"),
+    # §7 decision 16: a census row for the tenant record's writer, beside the runs base rather
+    # than inside the run dir — the module joins the census-derived hard-gate set for exactly
+    # that reason (its own artifact is outside every box mount, X6-shaped).
+    Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
+           _invoke_tenant_writer, "_tenant.py", cite="§7 decision 16"),
 )
 
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture

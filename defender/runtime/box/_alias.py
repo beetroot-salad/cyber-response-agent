@@ -5,6 +5,7 @@ This gate fails CLOSED — an inconclusive probe is a refusal, not a pass.
 """
 from __future__ import annotations
 
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -20,7 +21,10 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     write_did_not_run,
 )
 from ._spec import _OCI_SECCOMP_FLAG, _RUNSC_INSTALL_CMD
-from ._docker import DockerFn, _call
+from ._docker import (  # noqa: F401 — `_call` re-exported: runtime/box/__init__.py imports it from here
+    DockerFn,
+    _call,
+)
 
 
 class AliasBanNotInForce(Exception):
@@ -159,8 +163,18 @@ def _probe_alias_ban(docker: DockerFn, name: str, cwd: Path, runtime: str) -> No
     A probe that could not run its own controls still raises `AliasBanNotInForce`: "could not
     be observed" and "is not in force" carry the same obligation to refuse, and softening the
     first into a `BoxFault` would let the box buy a degraded start by breaking the probe's
-    writable mount. Only the MESSAGE differs."""
-    proc = _call(docker, _alias_probe_argv(name, cwd))
+    writable mount. Only the MESSAGE differs.
+
+    NEVER `_call` — that helper converts a `TimeoutExpired`/`OSError` into `BoxFault`, which
+    the generic `except BoxFault: degrade` startup handler can swallow (h26). This is a
+    security gate: the docker invocation is driven directly, and any fault talking to the
+    daemon is `AliasBanNotInForce` too, exactly like a found alias would be."""
+    argv = _alias_probe_argv(name, cwd)
+    try:
+        proc = docker(argv)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise AliasBanNotInForce(
+            _alias_probe_inconclusive_message(cwd, f"docker invocation failed: {e!r}")) from e
     if proc.returncode == 0:
         return
     detail = proc.stderr or proc.stdout or ""

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from defender._io import sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender._run_paths import BOX_SENTINEL
 from defender.runtime.box_codec import (
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
@@ -103,7 +104,7 @@ def _probe_sentinel(
 
 
 def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
-    _probe_sentinel(run_dir, run_dir, docker, name, ".box-sentinel", unlink_on_fault=False)
+    _probe_sentinel(run_dir, run_dir, docker, name, BOX_SENTINEL, unlink_on_fault=False)
 
 
 def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:

@@ -19,7 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from defender.runtime.challenge_gate import REVIEW_ROLES, review_record_path, review_trace_path
+from defender._run_paths import RunPaths
+from defender.runtime.challenge_gate import REVIEW_ROLES
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_primitives import parse_report
 from defender.scripts.visualize.visualize_runtime import render_review_gate
@@ -60,12 +61,12 @@ def _challenged_then_stands(tmp_path: Path) -> Path:
         run, disposition="malicious", outcome="stands",
         cause="the challenge review ran and left nothing about the finding unsettled",
     )
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "challenged", "reviewed_disposition": "malicious",
         "detail": _framed("the pivot rests on one edge nothing independently measured"),
         "failure_kind": None,
     }), encoding="utf-8")
-    (run / review_record_path(run, 2).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(2).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "malicious",
         "detail": _framed("the second lead settles it"), "failure_kind": None,
     }), encoding="utf-8")
@@ -118,7 +119,7 @@ def test_prose_reply_survives_the_row_reader(tmp_path):
     from defender._io import read_jsonl_rows
 
     run = _challenged_then_stands(tmp_path)
-    rows = read_jsonl_rows(review_trace_path(run, "support"))
+    rows = read_jsonl_rows(RunPaths(run).review_trace("support"))
     assert rows, "fixture wrote no metadata rows at all"
     assert all("support reading" not in json.dumps(r) for r in rows), (
         "fixture no longer exercises the skipped-line path"
@@ -134,7 +135,7 @@ def test_forced_inconclusive_shows_the_disposition_the_gate_moved(tmp_path):
         run, disposition="inconclusive", outcome="forced-inconclusive",
         cause="the forced-turn budget was spent without settling what the challenge review raised",
     )
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "forced-inconclusive", "reviewed_disposition": "malicious",
         "detail": _framed("the authz edge is still unmeasured"), "failure_kind": None,
     }), encoding="utf-8")
@@ -155,7 +156,7 @@ def test_failed_review_is_named_as_machinery_not_a_finding(tmp_path):
         run, disposition="inconclusive", outcome="forced-inconclusive",
         cause="the challenge review did not complete", failure_kind="timeout",
     )
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "forced-inconclusive", "reviewed_disposition": "benign",
         "detail": _framed("support: support timed out after 450s"), "failure_kind": "timeout",
     }), encoding="utf-8")
@@ -176,7 +177,7 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands",
                   cause="the challenge review ran and left nothing about the finding unsettled")
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "benign", "detail": "", "failure_kind": None,
     }), encoding="utf-8")
     _trace_row(run, "ablation", 0, {"skipped": "no strong belief movement cites an edge to withhold"})
@@ -197,7 +198,7 @@ def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
                   cause="the disposition was recorded without a challenge review")
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "inconclusive", "detail": "",
         "failure_kind": None,
     }), encoding="utf-8")
@@ -240,11 +241,11 @@ def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
                   cause="the disposition was recorded without a challenge review")
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "challenged", "reviewed_disposition": "malicious", "detail": "",
         "failure_kind": None,
     }), encoding="utf-8")
-    (run / review_record_path(run, 2).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(2).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "inconclusive", "detail": "",
         "failure_kind": None,
     }), encoding="utf-8")
@@ -285,7 +286,7 @@ def test_a_framed_reply_keeps_its_paragraph_breaks(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands", cause="x")
-    (run / review_record_path(run, 1).name).write_text(json.dumps({
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
         "verdict": "stands", "reviewed_disposition": "benign", "detail": "", "failure_kind": None,
     }), encoding="utf-8")
     _trace_row(run, "support", 0, {"ok": True}, _framed("para one\n\npara two"))

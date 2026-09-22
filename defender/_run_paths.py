@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import dataclasses
+import errno
 import re
 import stat
 from pathlib import Path
 
-from defender._io import is_plain_entry
-from defender._model import model
+from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
+
+# STDLIB `@dataclass`, not `defender._model.model` (#1077 D1): the box entrypoint's import
+# closure needs this module with no third-party package installed — `runtime/box/__init__.py`
+# now imports the sentinel name from here, and `_io.py`/`box/_spec.py` already made the same
+# switch for the same reason (#1067).
 
 
 #: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
@@ -57,8 +63,9 @@ from defender._model import model
 #: `review_{role}_trace.jsonl` IS in the class and lives here too. `_write_trace_row` appends
 #: each review stage's RAW wrapped reply, while MAIN is handed only the composer's
 #: `target: ask` lines (`close_tool._render_challenged_message`) and never the two blind
-#: lenses' replies — the blindness the gate is built on. `challenge_gate.review_trace_path`
-#: owns the filename.
+#: lenses' replies — the blindness the gate is built on. `review_trace`/`review_record` moved
+#: onto this module from `challenge_gate.py` (#1077 D1): the owner of a run's names owns these
+#: two too.
 #:
 #: `runtime.html` is the ONE exception, recorded so it is not inferred: it DOES inline
 #: MAIN's transcript verbatim (rendered from this log by `visualize_messages`) and sits at
@@ -86,62 +93,262 @@ PROVENANCE = "provenance.json"
 #: `runtime.toon_gate` re-exports it under its own name, where §7 r1 pins the literal.
 GATE_METADATA_KEY = "json"
 
+# ======================================================================================
+# #1077 D1 — every run-level record name, as a named constant. The gate's literal pass
+# (scripts/lint/lint_run_records.py) reads its "whole name" set and its composed-PART set off
+# these — every module-level UPPERCASE string constant here is a name the gate protects.
+# ======================================================================================
 
-@model(frozen=True)
+ALERT = "alert.json"
+REPORT = "report.md"
+INVESTIGATION = "investigation.md"
+EXECUTED_QUERIES = "executed_queries.jsonl"
+SOURCE_REFS = "source_refs.yaml"
+
+#: The by-ref gather payload family's directory, and the judge's ticket-read capture's sibling.
+#: `RAW_MARKER`/`TICKET_READS_MARKER` are what `runtime/permission/files.py`'s six deny
+#: predicates import rather than spell (#1077 D1 — claim C20).
+RAW_MARKER = "gather_raw"
+GATHER_SUMMARIES_DIRNAME = "gather_summaries"
+LEAD_AUTHOR_DIRNAME = "lead_author"
+TICKET_READS_MARKER = "ticket_reads"
+
+#: The composed-name PARTS decision 6 keeps in the gate's substring-match set — the five
+#: DISCRIMINATING fragments (fork D-F5, reading 1): generic suffixes (`.json`, `.db` alone)
+#: are deliberately NOT constants of this shape, because a bare suffix matches ~1065 non-target
+#: literals (claim R3) and would make the gate unimplementable. `TRACE_SUFFIX` is shared with
+#: `_episode_paths.stage_trace`, imported there rather than re-spelled (claim: one reused
+#: constant, not two).
+LEAD_CLAIM_SUFFIX = ".lead.json"
+REVIEW_RECORD_PREFIX = "review_record."
+TRACE_SUFFIX = ".trace.jsonl"
+REVIEW_TRACE_SUFFIX = "_trace.jsonl"
+#: The episode layout's `served/` directory prefix — an EPISODE-level fragment, kept here
+#: (rather than only on `_episode_paths.py`) because D6's part set is read off this module;
+#: `_episode_paths.py` imports it rather than re-spelling it.
+SERVED_PREFIX = "served/"
+
+#: Generic — composed with a caller-supplied component, but not itself a discriminating part
+#: (decision 6 drops it from the gate's part-matching set; D6(b)'s accessor-derived pass is
+#: what catches a hand-rolled composition of these instead).
+PAYLOAD_SUFFIX = ".json"
+SESSION_DB_SUFFIX = ".db"
+
+TOOL_TRACE = "tool_trace.jsonl"
+POLICY_DENIALS = "policy_denials.jsonl"
+BUDGET = "budget.json"
+CIRCUIT_BREAKER = "circuit_breaker.json"
+LESSONS_LOADED = "lessons_loaded.jsonl"
+TICKET_WRITE = "ticket_write.json"
+SESSION_POINTER = "session_store_pointer.json"
+RUNTIME_HTML = "runtime.html"
+#: The box startup sentinel (#1077 D1). Re-homed here so `runtime/box/_lifecycle.py` imports
+#: it rather than spelling `.box-sentinel` inline — the same D1 move `WIRE_LOG_DIR` made.
+BOX_SENTINEL = ".box-sentinel"
+
+#: The three sidecars beside the runs base, keyed `<run_id><suffix>` — a pure function of a
+#: path the host already holds (`run_end.sidecar_path`, `scrub.verdict_path`, and the
+#: accounting-failure sidecar `hooks/budget_enforcer._accounting_failure_path`).
+RUN_END_SIDECAR_SUFFIX = ".run-end.json"
+SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
+ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
+
+#: The sessions directory is a SIBLING of the runs base (claims C10/C15), never a child.
+SESSIONS_DIRNAME = "sessions"
+
+
+@dataclasses.dataclass(frozen=True)
 class RunPaths:
-    """One run's directories and its seven accessors: the alert, the report, the
-    investigation log, the executed-queries table, the raw-payload dir, the wire log — and the
-    provenance stamp.
+    """One run's directories and its accessors — every name a run reads or writes.
 
     Every accessor resolves relative to ``run_dir``, so construct ``RunPaths(some_dir)`` on
     whichever root you hold. ONE root, deliberately: a caller needing a second (the per-case
     leg-output dir) takes it as its own argument rather than making every single-root
     construction carry an always-`None` `Optional`.
 
-    SIX OF THE SEVEN ARE CONTENT THE RUN PRODUCED; ``provenance`` is not, and the census above
-    keeps them in one list only because the census is about LAYOUT. It is the run's record of
-    what it ran against, captured by the host at ``run_common.materialize_run_dir`` time before
-    any agent exists — see ``defender._provenance`` for why a run needs one and what it does
-    not cover. A second fact of that kind (the branch point's moment, the source-run pointer)
-    belongs beside it rather than as another argument threaded through a call chain.
+    A handful of accessors resolve relative to `run_dir`'s PARENT (the runs base) or its
+    sibling `sessions/` directory instead — the three sidecars, `sessions_dir` and
+    `session_db` — each documented at its own accessor rather than assumed of the class
+    (decision 10 dissolved the idea of one shared root: each accessor answers against its OWN
+    root).
 
-    ``provenance`` IS THE ONE ACCESSOR THAT DOES NOT RESOLVE ON EVERY BUNDLE. ``RunPaths`` is a
-    name resolver, and the learning loop builds a SECOND kind of bundle — the archived episode
-    under ``LoopPaths.runs_dir``, mkdir'd and populated by ``learning/core/persist.py``, not by
-    ``materialize_run_dir`` — which carries no stamp. A caller holding an arbitrary run dir
-    must read the stamp as ``_provenance.read`` returns it (``None`` = no stamp here), never as
-    a file this class promises exists.
+    ``provenance`` IS THE ONE RUN-DIR ACCESSOR THAT DOES NOT RESOLVE ON EVERY BUNDLE. A
+    caller holding an arbitrary run dir must read the stamp as ``_provenance.read`` returns it
+    (``None`` = no stamp here), never as a file this class promises exists.
     """
 
     run_dir: Path
 
+    def __post_init__(self) -> None:
+        # The pydantic model this class used to be coerced a `str` here; a stdlib dataclass
+        # does not, and `"…" / ALERT` is a `TypeError` at the first accessor. Coerced, so a
+        # caller holding the directory as text (an env var, an argv) constructs as before.
+        object.__setattr__(self, "run_dir", Path(self.run_dir))
+
+    # -- content the run produced -----------------------------------------------------------
+
     @property
     def alert(self) -> Path:
-        return self.run_dir / "alert.json"
+        return self.run_dir / ALERT
 
     @property
     def report(self) -> Path:
-        return self.run_dir / "report.md"
+        return self.run_dir / REPORT
 
     @property
     def investigation(self) -> Path:
-        return self.run_dir / "investigation.md"
+        return self.run_dir / INVESTIGATION
 
     @property
     def executed_queries(self) -> Path:
-        return self.run_dir / "executed_queries.jsonl"
+        return self.run_dir / EXECUTED_QUERIES
+
+    @property
+    def source_refs(self) -> Path:
+        """No writer in the repo (claim R9 — test helpers only); the accessor exists because
+        the answer-key set and the case-answer-key deny key on this name."""
+        return self.run_dir / SOURCE_REFS
 
     @property
     def gather_raw(self) -> Path:
-        return self.run_dir / "gather_raw"
+        return self.run_dir / RAW_MARKER
+
+    @property
+    def lead_author(self) -> Path:
+        return self.run_dir / LEAD_AUTHOR_DIRNAME
+
+    def payload(self, lead_id: str, seq: int) -> Path:
+        """`gather_raw/<lead_id>/<seq>.json` — the by-ref gather payload (O8's absolute form)."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        seq = _check_index(seq, what="seq")
+        target = self.run_dir / RAW_MARKER / lead_id / f"{seq}{PAYLOAD_SUFFIX}"
+        return _confine(target, self.run_dir, what="payload")
+
+    def payload_relpath(self, lead_id: str, seq: int) -> str:
+        """O8's run-dir-relative form — the string the queries row records. Composed and
+        returned unconditionally: no shape detection, no refusal for an already-absolute
+        caller assumption (§7 non-material item 8) — choosing the right accessor is the
+        caller's own duty."""
+        return str(self.payload(lead_id, seq).relative_to(self.run_dir))
+
+    def lead_claim(self, lead_id: str) -> Path:
+        """`gather_raw/<lead_id>.lead.json` — the per-lead exclusive-create claim sidecar."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        target = self.run_dir / RAW_MARKER / f"{lead_id}{LEAD_CLAIM_SUFFIX}"
+        return _confine(target, self.run_dir, what="lead_claim")
+
+    def gather_summary(self, lead_id: str) -> Path:
+        """`gather_summaries/<lead_id>.md`."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        target = self.run_dir / GATHER_SUMMARIES_DIRNAME / f"{lead_id}.md"
+        return _confine(target, self.run_dir, what="gather_summary")
+
+    def ticket_read(self, seq: int) -> Path:
+        """`ticket_reads/<seq>.json` — the retired pipeline judge's closed-ticket capture; the
+        payload read cap keys on this name (D1's stated reason for keeping the accessor)."""
+        seq = _check_index(seq, what="seq")
+        target = self.run_dir / TICKET_READS_MARKER / f"{seq}{PAYLOAD_SUFFIX}"
+        return _confine(target, self.run_dir, what="ticket_read")
 
     @property
     def wire_log(self) -> Path:
         return self.run_dir / WIRE_LOG_DIR / WIRE_LOG
 
+    def forward_check_trace(self, prefix: str, stem: str, n: int) -> Path:
+        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl` — the learning forward-check verifier's
+        trace, written into the CITED run's own dir while reading it as evidence."""
+        prefix = _check_component(prefix, what="prefix")
+        stem = _check_component(stem, what="stem")
+        n = _check_index(n, what="n")
+        target = self.run_dir / WIRE_LOG_DIR / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
+        return _confine(target, self.run_dir, what="forward_check_trace")
+
+    def review_trace(self, role: str) -> Path:
+        """`wire_logs/review_<role>_trace.jsonl` — one review stage's raw wrapped reply,
+        re-homed from `challenge_gate` (#1077 D1)."""
+        role = _check_component(role, what="role")
+        target = self.run_dir / WIRE_LOG_DIR / f"review_{role}{REVIEW_TRACE_SUFFIX}"
+        return _confine(target, self.run_dir, what="review_trace")
+
+    def review_record(self, turn: int = 1) -> Path:
+        """`review_record.<turn>.json`, re-homed from `challenge_gate` (#1077 D1)."""
+        turn = _check_index(turn, what="turn")
+        target = self.run_dir / f"{REVIEW_RECORD_PREFIX}{turn}.json"
+        return _confine(target, self.run_dir, what="review_record")
+
+    @property
+    def tool_trace(self) -> Path:
+        return self.run_dir / TOOL_TRACE
+
+    @property
+    def policy_denials(self) -> Path:
+        return self.run_dir / POLICY_DENIALS
+
+    @property
+    def budget(self) -> Path:
+        return self.run_dir / BUDGET
+
+    @property
+    def circuit_breaker(self) -> Path:
+        return self.run_dir / CIRCUIT_BREAKER
+
+    @property
+    def lessons_loaded(self) -> Path:
+        return self.run_dir / LESSONS_LOADED
+
+    @property
+    def ticket_write(self) -> Path:
+        return self.run_dir / TICKET_WRITE
+
+    @property
+    def session_pointer(self) -> Path:
+        return self.run_dir / SESSION_POINTER
+
+    @property
+    def runtime_html(self) -> Path:
+        return self.run_dir / RUNTIME_HTML
+
+    @property
+    def box_sentinel(self) -> Path:
+        return self.run_dir / BOX_SENTINEL
+
     @property
     def provenance(self) -> Path:
         return self.run_dir / PROVENANCE
+
+    # -- upward: the runs base, and the sessions dir beside it -------------------------------
+
+    def run_end_sidecar(self, runs_base: Path) -> Path:
+        return Path(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
+
+    def scrub_verdict(self, runs_base: Path) -> Path:
+        return Path(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
+
+    def accounting_failures(self, runs_base: Path) -> Path:
+        return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
+
+    def sessions_dir(self, runs_base: Path) -> Path:
+        """The sessions directory — a SIBLING of the runs base (claims C10/C15), never a
+        child."""
+        return Path(runs_base).parent / SESSIONS_DIRNAME
+
+    def session_db(self, runs_base: Path, lineage_id: str) -> Path:
+        """`<sessions>/<lineage_id>.db`. Refuses a lineage id the case-id pattern rejects
+        EXACTLY as `session_store.store_path_for` does today — the pattern is pinned BY
+        REFERENCE (RG-4), never re-spelled — and, beside that existing check (decision 20),
+        refuses one that is not case-stable (`_run_id.is_case_stable_id`)."""
+        from defender._run_id import is_case_stable_id
+        from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
+
+        if not isinstance(lineage_id, str) or not CASE_ID_RE.match(lineage_id):
+            raise InvalidCaseId(repr(lineage_id))
+        if not is_case_stable_id(lineage_id):
+            raise InvalidCaseId(
+                f"{lineage_id!r} is not case-stable — two ids differing only by case would "
+                f"become one file wherever the filesystem folds case; use "
+                f"{lineage_id.casefold()!r}"
+            )
+        return self.sessions_dir(runs_base) / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the
@@ -175,7 +382,7 @@ LEAD_ID_RE = re.compile(rf"^l-{LEAD_ID_BODY}\Z")
 
 #: The gather payload family, relative to a run dir. Shared with the runtime read gate rather
 #: than re-spelled there: it is the same set of files, named once.
-GATHER_RAW_SHAPE = rf"gather_raw/l-{LEAD_ID_BODY}/[0-9]+\.json"
+GATHER_RAW_SHAPE = rf"{RAW_MARKER}/l-{LEAD_ID_BODY}/[0-9]+\.json"
 
 # The two by-ref payload families a run writes, as literal shapes: the gather lane's
 # `gather_raw/{lead_id}/{seq}.json` and the judge's ticket-read capture
@@ -187,7 +394,7 @@ GATHER_RAW_SHAPE = rf"gather_raw/l-{LEAD_ID_BODY}/[0-9]+\.json"
 # alphabet beside it. Both seqs are `f"{int}"`, so ASCII is the exact shape.
 _PAYLOAD_SHAPES = (
     re.compile(GATHER_RAW_SHAPE),
-    re.compile(r"ticket_reads/[0-9]+\.json"),
+    re.compile(rf"{TICKET_READS_MARKER}/[0-9]+\.json"),
 )
 
 #: The case's ANSWER KEY: the finished investigation's own reasoning, its disposition, and the
@@ -200,11 +407,68 @@ _PAYLOAD_SHAPES = (
 #: The read gate spends this at `permission.files.names_case_answer_key`; the names live here
 #: because this module already owns what a run dir is called.
 CASE_ANSWER_KEY_NAMES = frozenset(
-    {"investigation.md", "report.md", "source_refs.yaml", "executed_queries.jsonl"}
+    {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
 )
 
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.
 _RESOLVE_ERRORS = (OSError, RuntimeError, ValueError)
+
+#: Decision 2's ANCHORED SHAPE CHECK, applied to every caller-supplied path COMPONENT before it
+#: is composed into a name: a `/`, an embedded NUL or newline, `.`/`..`, the empty string, or
+#: anything past a filename component's practical length is refused outright — one rule every
+#: composing accessor on this class (and `_episode_paths.EpisodePaths`) inherits.
+_UNSAFE_COMPONENT_CHARS = re.compile(r"[/\x00\n]")
+_COMPONENT_MAX_LEN = 255
+
+
+def _check_component(value: object, *, what: str) -> str:
+    """Decision 2's shape half: refuse a caller-supplied path component that is not a plain,
+    single-segment name. Every composing accessor on `RunPaths`/`EpisodePaths` calls this on
+    each string component before joining it — never a second, looser check per accessor."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > _COMPONENT_MAX_LEN
+        or value in (".", "..")
+        or _UNSAFE_COMPONENT_CHARS.search(value)
+    ):
+        raise ValueError(f"{what} {value!r} is not a valid path component")
+    return value
+
+
+def _check_index(value: object, *, what: str) -> int:
+    """The shape half for a NUMBERED component (`<seq>.json`, `review_record.<turn>.json`): a
+    non-negative `int`, never a string that merely formats into the name — `"../x"` would."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{what} {value!r} is not a non-negative integer")
+    return value
+
+
+def _confine(candidate: Path, root: Path, *, what: str) -> Path:
+    """Decision 2's containment half: refuse a composed path that resolves outside `root`.
+
+    ONE REFUSAL TYPE with the write seam. A composed name that resolves outside its root is
+    the same fact `_io.write_guarded` refuses at the open — an entry under the record's name
+    that is not the plain file it should be (here: a planted link whose target leaves the
+    tree) — so it raises the same alias-marked `OSError`, and every caller whose `except
+    OSError` arm already records the write refusal handles this one identically instead of
+    aborting on a `ValueError` it never expected (`close_tool._commit`'s record-first-report-
+    second contract). A malformed ARGUMENT (`_check_component`/`_check_index`) stays a
+    `ValueError`: that is the caller's bug, not the tree's state."""
+    try:
+        resolved_root = Path(root).resolve()
+        resolved = Path(candidate).resolve()
+    except _RESOLVE_ERRORS as e:
+        raise _mark_alias(
+            OSError(errno.ELOOP, f"{what}: {candidate} could not be resolved: {e}",
+                    str(candidate)),
+            is_alias=True) from e
+    if resolved != resolved_root and resolved_root not in resolved.parents:
+        raise _mark_alias(
+            OSError(errno.ELOOP, f"{what}: {ALIAS_READ_REFUSAL} — {candidate} resolves "
+                    f"outside {root}", str(candidate)),
+            is_alias=True)
+    return candidate
 
 
 def _lstat_is(path: Path, kind) -> bool:

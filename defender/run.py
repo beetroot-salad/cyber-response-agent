@@ -82,8 +82,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="which world of --resume's manifest this process is")
     p.add_argument("--run-id", default=None,
                    help="Pin the run id for a named A/B or live run (learning-loop "
-                        "commits reference it) instead of the auto timestamp id; a "
-                        "collision with an existing run dir is rejected by materialize_run_dir")
+                        "commits reference it) instead of the auto timestamp id. Lower case "
+                        "only. An existing run dir under this id is RESUMED (setup finishes "
+                        "what an interrupted attempt left undone and re-stamps) — for the same "
+                        "alert; a different alert under a used id is refused")
     p.add_argument("--no-learn", action="store_true",
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")
@@ -460,15 +462,20 @@ def _resume_target(ns: argparse.Namespace) -> Any:
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run_dir(alert: Path, run_id: str | None, *, model: str | None) -> Path:
-    """Build this run's directory, stamped with the code and the model it will run on.
+def _materialize_run_dir(
+    alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
+) -> Path:
+    """Build this run's directory, stamped with the code and the model it will run on — and,
+    for a forked sibling, with the world and lineage the manifest already declares (`world`,
+    the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
+    path).
 
     A one-line wrapper, and it earns its place twice. It is the seam `main` injects, so a test
     can observe run-dir creation without a real runs base; and it is the ONE site that names the
     builder, which is what keeps "the run dir has a single origin" a property of this file rather
     than of whoever reads it — two call sites are two places for the stamp to be forgotten.
     """
-    run_dir = _run.materialize_run_dir(alert, run_id, model=model)
+    run_dir = _run.materialize_run_dir(alert, run_id, model=model, world=world)
     return run_dir
 
 
@@ -526,7 +533,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, model=model)
+    run_dir = materialize(alert, run_id, model=model, world=world)
 
     if ns.update_ticket:
         ticket_writer.open_case_ticket(run_dir)

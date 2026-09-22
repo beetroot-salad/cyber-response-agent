@@ -137,6 +137,42 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     # wedge the caller forever rather than be refused. Non-blocking makes the open return at
     # once; `fstat` then refuses it like any other non-regular entry. On a regular file the
     # flag does nothing at all, so the ordinary path is unchanged.
+    fd = _open_plain_fd(path)
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
+            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
+            return fh.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def read_plain_bytes(path: Path) -> bytes:
+    """:func:`read_plain` for a record whose BYTES are the value — the alert's content hash is
+    taken over exactly what the operator supplied, and a text read's newline translation would
+    hash a different document. Same open, same screens, same exceptions."""
+    fd = _open_plain_fd(path)
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            return fh.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def read_bytes_guarded(path: Path) -> tuple[bytes | None, str | None]:
+    """:func:`read_guarded`'s bytes twin — ``(data, None)`` or ``(None, reason)``."""
+    try:
+        return read_plain_bytes(path), None
+    except TEXT_READ_ERRORS as e:
+        return None, str(e)
+
+
+def _open_plain_fd(path: Path) -> int:
+    """The guarded OPEN both plain readers share: the descriptor of the plain, single-linked
+    regular file at ``path``, or the exception :func:`read_plain` documents. The caller owns
+    the returned fd."""
     try:
         fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
     except OSError as e:
@@ -164,12 +200,10 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
                 errno.EMLINK if is_hard_linked(st) else errno.ELOOP, ALIAS_READ_REFUSAL,
                 str(path),
             )
-        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
-            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
-            return fh.read()
-    finally:
-        if fd >= 0:
-            os.close(fd)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _leaf_is_link(path: Path) -> bool:
@@ -800,9 +834,18 @@ def write_guarded(
 
     `mode` names the idiom the caller had: `replace` (the truncating/atomic lane — D1: stages
     under an unpredictable name, then `os.replace`s into place, which replaces a planted
-    symlink rather than following it and never opens the existing target at all), `append`
-    (the JSONL lane — `O_NOFOLLOW` at open) and `update` (the locked read-modify-write lane —
-    `O_NOFOLLOW` at open, before the lock is taken). `text` may be `bytes` (the drain lane's
+    symlink rather than following it and never opens the existing target at all), `create`
+    (the EXCLUSIVE lane — ONE `O_CREAT|O_EXCL|O_NOFOLLOW` open of the target itself, so the
+    exclusivity is the kernel's and no second name ever exists: an occupied name raises
+    `FileExistsError` instead of being replaced, which is how the write-once records — a
+    tenant record, a fact of a run — are created, never through `replace`, whose whole point
+    is to overwrite. A staged-then-linked create was tried and rejected: for the instant the
+    stage still exists the target has two names, and every guarded reader in this tree refuses
+    a two-named file as an alias. The residue is a reader that opens between the create and
+    the single `write()` and sees an empty record — which reads as corrupt and refuses, the
+    honest answer for a record mid-write), `append` (the JSONL lane — `O_NOFOLLOW` at open) and `update`
+    (the locked read-modify-write lane — `O_NOFOLLOW` at open, before the lock is taken).
+    `text` may be `bytes` (the drain lane's
     corpus restore); the fd is opened binary or text to match. `stage_name` is the name-source
     seam. `**kw` absorbs a mode-irrelevant `encoding` (every mode already pins utf-8) rather
     than raising `TypeError` on it — and NOTHING ELSE: a swallowed unknown keyword is how a
@@ -823,16 +866,25 @@ def write_guarded(
         except OSError as e:
             raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
         try:
-            if isinstance(text, (bytes, bytearray)):
-                with os.fdopen(fd, "wb") as fb:
-                    fb.write(text)
-            else:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(text)
+            _write_all(fd, text)
             os.replace(staged, path)
         except BaseException:
             with contextlib.suppress(OSError):
                 os.remove(staged)
+            raise
+    elif mode == "create":
+        # The alias precheck first, so a planted symlink/hard link/directory at the name is
+        # the same marked refusal every lane raises; the EEXIST from the open itself is then
+        # the ORDINARY create race (a plain file someone else just made) — unmarked, so a
+        # caller can tell "lost the race, read the winner" from "refused".
+        _refuse_unless_plain(path)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        try:
+            _write_all(fd, text)
+        except BaseException:
+            # Ours to remove: the create succeeded, so the half-written entry is this call's.
+            with contextlib.suppress(OSError):
+                os.remove(path)
             raise
     elif mode == "append":
         _refuse_unless_plain(path)
@@ -850,6 +902,16 @@ def write_guarded(
             f.write(text)
     else:
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
+
+
+def _write_all(fd: int, text: str | bytes) -> None:
+    """Write `text` to a fresh descriptor and close it (text or bytes to match)."""
+    if isinstance(text, (bytes, bytearray)):
+        with os.fdopen(fd, "wb") as fb:
+            fb.write(text)
+    else:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
 
 
 def open_guarded(path: Path, mode: str = "a"):

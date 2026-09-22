@@ -104,10 +104,32 @@ CANONICAL_MODULE = "_artifact_schema.py"
 ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
 ARTIFACT_CONSTS = frozenset({"INVESTIGATION_NAME", "REPORT_NAME"})
 
-#: `RunPaths`' accessors for the same two files. Matched as bare attribute names because the
-#: receiver is a VALUE — `RunPaths(run_dir).investigation` and `rp.investigation` are the same
-#: write and only one of them has a resolvable origin.
-ARTIFACT_ACCESSORS = frozenset({"investigation", "report"})
+def _artifact_accessors() -> frozenset[str]:
+    """`RunPaths`' accessors for the two schema'd artifacts — DERIVED from the owner: every
+    public accessor whose resolved name is one of `ARTIFACT_LITERALS`, so a third artifact
+    that joins `_artifact_schema.ARTIFACT_NAMES` (and this set) is gated the day the owner
+    names it, and an accessor for any OTHER record (`budget`, `tool_trace`, a trace) never
+    is — this gate asks for a CONTENT SCHEMA, and only the two model-authored documents have
+    one (#1077 decision 19, corrected: the list held in step with the owner is this gate's
+    two, not the owner's whole method set). Matched as bare attribute names because the
+    receiver is a VALUE — `RunPaths(run_dir).investigation` and `rp.investigation` are the
+    same write and only one of them has a resolvable origin."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from defender._run_paths import RunPaths  # noqa: PLC0415
+
+    probe = RunPaths(Path("/probe"))
+    names: set[str] = set()
+    for attr in dir(RunPaths):
+        if attr.startswith("_") or not isinstance(getattr(RunPaths, attr), property):
+            continue
+        resolved = getattr(probe, attr)
+        if isinstance(resolved, Path) and resolved.name in ARTIFACT_LITERALS:
+            names.add(attr)
+    return frozenset(names)
+
+
+ARTIFACT_ACCESSORS = _artifact_accessors()
 
 #: Resolved by ORIGIN through `_astlib.callee`, so `from defender._io import write_guarded as w`
 #: is the same finding as the dotted spelling. This is the same primitive set

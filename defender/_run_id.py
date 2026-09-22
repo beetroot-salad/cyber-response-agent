@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as _dt
+from collections.abc import Callable
 
 RUN_ID_ALLOWED = "ASCII alphanumerics, '_', '.', '-', starting alphanumeric"
 
@@ -36,3 +38,32 @@ def is_case_stable_id(run_id: str) -> bool:
     constructed directly, so the fold is what holds when this predicate was never reached.
     """
     return run_id == run_id.casefold()
+
+
+def refuse_bad_run_id(run_id: str) -> None:
+    """THE run-id admission rule, in one place: valid AND case-stable. Asked wherever a run id
+    becomes a directory among siblings — the host's own materialisation and the handle's
+    constructors alike — so the id the host mints is, by construction, one the handle admits.
+    """
+    if not is_valid_run_id(run_id):
+        raise ValueError(f"{run_id!r} is not a valid run id (allowed: {RUN_ID_ALLOWED})")
+    if not is_case_stable_id(run_id):
+        raise ValueError(
+            f"{run_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
+            f"{run_id.casefold()!r}")
+
+
+def _utc_now() -> _dt.datetime:
+    return _dt.datetime.now(_dt.UTC)
+
+
+def mint_run_id(label: str, *, clock: Callable[[], _dt.datetime] = _utc_now) -> str:
+    """The host's own run id: `<utc timestamp>-<label>`, CASE-FOLDED so it passes the same
+    admission every constructor applies (`refuse_bad_run_id`). The timestamp therefore reads
+    `20260921t143000z`, not `…T…Z`: an id the host mints and its own handle then refuses is
+    two rules for one name. The label is the operator's alert stem, folded with the rest —
+    minted, not typed, so folding it is not the silent renaming `is_case_stable_id` refuses.
+    """
+    run_id = f"{clock().strftime('%Y%m%dT%H%M%SZ')}-{label}".casefold()
+    refuse_bad_run_id(run_id)
+    return run_id

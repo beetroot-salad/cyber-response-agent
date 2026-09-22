@@ -234,7 +234,7 @@
           "DEFENDER_RUN_DIR",
           "report.md",
           "review_record.",
-          "review_trace_path",
+          "RunPaths.review_trace",
           "wire_logs/review_",
           "trace.jsonl"
         ],

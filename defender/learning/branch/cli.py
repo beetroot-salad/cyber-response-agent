@@ -1029,6 +1029,9 @@ def verify_family(
         source_who="the source run", allow_dirty=allow_dirty)
     if refusal is not None:
         reasons.append(refusal)
+    cross_tenant = _cross_tenant_fault(stamps, scrub_verified)
+    if cross_tenant is not None:
+        reasons.append(cross_tenant)
 
     outcome = INCOMPLETE if reasons else ACCEPTED
     reason = "; ".join(reasons)
@@ -1059,7 +1062,8 @@ def verify_family(
             reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
         raise
     if outcome == ACCEPTED:
-        _write_family_stamp(episode_dir, stamps, source=source, allow_dirty=allow_dirty)
+        _write_family_stamp(
+            episode_dir, stamps, source=source, allow_dirty=allow_dirty, dirs=dirs)
     _record_episode_outcome(episode_dir, outcome=outcome, reason=reason)
     if door is not None:
         staging_mod.teardown(episode_dir, door=door, review_path=episode_dir / REVIEW_NAME)
@@ -1067,8 +1071,49 @@ def verify_family(
             "worlds": sorted(dirs)}
 
 
+def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -> str | None:
+    """§7 decision 15(2)/(3): every sibling whose stamp carries a DIFFERENT non-null
+    `tenant_id` is a cross-tenant fault; a sibling whose stamp carries NO `tenant_id` field at
+    all is its OWN distinctly-worded fault, never conflated with a disagreement — treating
+    "absent" as "compatible" is exactly how a real cross-tenant family would slip past this
+    check during the migration window. Runs over whichever siblings have ALREADY stamped: a
+    sibling with no readable stamp at all is SKIPPED here (its own fault is
+    `_member_faults`'s "carries no readable provenance stamp"), and the comparison records how
+    many it skipped rather than blocking on them."""
+    readable: dict[str, dict] = {
+        label: stamp for label in labels
+        if isinstance(stamp := stamps.get(label), dict)}
+    skipped = len(labels) - len(readable)
+    no_field = sorted(label for label, s in readable.items() if s.get("tenant_id") is None)
+    # A family where EVERY readable sibling is silent on tenant (a pre-#1077 stamp, or one an
+    # older process wrote) is not this check's business — only a MIX of stamped and unstamped
+    # siblings is the migration-window signal decision 15(2) names.
+    if no_field and len(no_field) == len(readable):
+        no_field = []
+    parts: list[str] = []
+    if no_field:
+        parts.append(
+            f"sibling(s) {no_field} carry no tenant field at all — treated as its own named "
+            "fault, never as agreeing with the rest")
+    else:
+        values = {label: s.get("tenant_id") for label, s in readable.items()}
+        if len(set(values.values())) > 1:
+            parts.append(f"siblings disagree on tenant: {values}")
+    if skipped:
+        # RECORDED in the family's reason (the spec's demand: an unstamped sibling cannot
+        # silently shrink the comparison), and only ever beside a fault that is already
+        # there — a sibling with no readable stamp is `_member_faults`'s own fault, so this
+        # note never turns an otherwise-accepted family INCOMPLETE on its own. Should that
+        # fault ever be relaxed, this line is the one to move onto it.
+        parts.append(
+            f"the cross-tenant comparison ran over the {len(readable)} sibling(s) already "
+            f"stamped and skipped {skipped} unstamped one(s)")
+    return "; ".join(parts) if parts else None
+
+
 def _write_family_stamp(
     episode_dir: Path, stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
+    dirs: dict[str, Path] | None = None,
 ) -> None:
     """The family's one stamp: what every sibling agreed on, what it was anchored to, and
     whether it was waved through.
@@ -1097,11 +1142,34 @@ def _write_family_stamp(
     # AND THE FAMILY IS NOT EMPTY: `verify_family` refuses a family of no siblings before this
     # frame, so the `next` below has a stamp to take — over an empty mapping it would raise
     # `StopIteration` after the archive was written and before the outcome was recorded.
-    agreed = next(stamp for stamp in stamps.values() if stamp is not None)
+    agreed = {k: v for k, v in next(
+        stamp for stamp in stamps.values() if stamp is not None).items() if k != "world_id"}
+    # #1077 decision 15(4): the family record carries the family's OWN base world, read off
+    # the tenant record at the siblings' shared runs base — so a family whose every member is
+    # a forked sibling still has one carrier lessons attribution can key on (no member ever
+    # stamps the tenant's base world itself; decision 15(1)/(4)).
+    base_world_id = _family_base_world_id(dirs)
+    doc: dict[str, object] = {
+        "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)}
+    if base_world_id is not None:
+        doc["base_world_id"] = base_world_id
     write_guarded(
-        Path(episode_dir) / FAMILY_STAMP_NAME,
-        json.dumps({"agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)},
-                   indent=2, sort_keys=True) + "\n")
+        Path(episode_dir) / FAMILY_STAMP_NAME, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+
+
+def _family_base_world_id(dirs: dict[str, Path] | None) -> str | None:
+    """The family's base world, read from the tenant record at the siblings' shared runs
+    base — derived from any one sibling's own run dir (they all share one runs base, per
+    `learning/branch/cli.sibling_runs_base`)."""
+    from defender import _tenant
+
+    if not dirs:
+        return None
+    run_dir = next(iter(dirs.values()))
+    try:
+        return _tenant.read_tenant(Path(run_dir).parent).base_world_id
+    except Exception:  # noqa: BLE001 — best-effort; the family stamp is not blocked on it
+        return None
 
 
 def _record_episode_outcome(

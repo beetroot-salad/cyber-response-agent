@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import sys
 
+from defender import _run_paths
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
 # Imported to be USED, not re-exported: other readers of the vocabulary import `_vocab`
@@ -42,8 +43,10 @@ INVESTIGATION_FILE_MAX = 65536
 # independently of that prompt-layer hardening.
 REPORT_CLOSE_DELIMITER = "</report>"
 
-REPORT_NAME = "report.md"
-INVESTIGATION_NAME = "investigation.md"
+#: The two names are the run-dir owner's (#1077 D1); this module owns what a well-formed one
+#: IS, not what it is called. Re-exported under the names every schema caller imports.
+REPORT_NAME = _run_paths.REPORT
+INVESTIGATION_NAME = _run_paths.INVESTIGATION
 
 # The artifacts this module has a schema for. The gate iterates this to decide whether a
 # resolved write target is a gated artifact at all, so adding a third one is a change HERE
