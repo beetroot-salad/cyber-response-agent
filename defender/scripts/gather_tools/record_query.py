@@ -260,15 +260,18 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
 
     The sidecar must EXIST even when empty: `lead_extraction.extract_from_joined` skips any row
     whose `raw_ref` is not a file (lead_extraction.py:60), so a row written without one is
-    dropped from the offline loop entirely rather than merely arriving thin."""
-    lead_dir = RunPaths(run_dir).gather_raw / lead_id
-    payload_path = lead_dir / f"{seq}.json"
+    dropped from the offline loop entirely rather than merely arriving thin.
+
+    #1077 O8: the returned string is the OWNER's own run-dir-relative form
+    (`RunPaths.payload_relpath`), not a second spelling composed at this call site."""
+    owner = RunPaths(run_dir)
     try:
-        guarded_mkdir(lead_dir, base=run_dir)
+        payload_path = owner.payload(lead_id, seq)
+        guarded_mkdir(payload_path.parent, base=run_dir)
         write_guarded(payload_path, text)
     except (OSError, ValueError):
         return None
-    return str(payload_path.relative_to(run_dir))
+    return owner.payload_relpath(lead_id, seq)
 
 
 #: THE queries row's column set, in writer order — the ONE declaration every writer builds

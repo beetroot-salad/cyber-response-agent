@@ -571,17 +571,17 @@ def test_trace_rows_accumulate_across_multiple_close_attempts(tmp_path):
     `wire_logs/review_{role}_trace.jsonl` holds one row per attempt, each labelled with that
     attempt's `round` (= the turn at gate entry), appended never replaced, so the run page's
     per-round reader can glob and sort them — no torn line, no lost row."""
-    from defender.runtime.challenge_gate import review_trace_path
+    from defender._run_paths import RunPaths
 
     deps, run_dir = _fresh(tmp_path, "accumulate")
     assert close_with(deps, GAP, recording(gap("l-004"))).outcome == CHALLENGED
-    first_pass = {role: review_trace_path(run_dir, role).read_bytes() for role in _ALL_ROLES}
+    first_pass = {role: RunPaths(run_dir).review_trace(role).read_bytes() for role in _ALL_ROLES}
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     for role in _ALL_ROLES:
         rows = trace_rows(run_dir, role)
         assert [row["round"] for row in rows] == [0, 1], (role, rows)
         assert all(row.get("ok") is True for row in rows), (role, rows)
-        after = review_trace_path(run_dir, role).read_bytes()
+        after = RunPaths(run_dir).review_trace(role).read_bytes()
         assert after.startswith(first_pass[role]), f"{role}'s first-pass rows were replaced"
         assert after.endswith(b"\n"), f"{role}'s trace ends on a torn line"
 

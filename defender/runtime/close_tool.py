@@ -22,6 +22,7 @@ import asyncio
 import sys
 from collections.abc import Callable
 from defender._model import model
+from defender._run_paths import RunPaths
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -403,10 +404,15 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     judge's prompt and the ticket bridge's egress."""
     state = challenge_gate.ReviewState.of(deps)
     turn_for_record = state.turns + 1
-    record_path = challenge_gate.review_record_path(deps.run_dir, turn_for_record)
 
+    # Resolving the record's name is part of writing it: the owner refuses a planted alias
+    # under that name with the same `OSError` the write seam raises, and it is recorded here
+    # the same way — the report is still attempted (RS19: record FIRST, report SECOND, both
+    # attempted regardless).
+    record_path: Path | None = None
     record_error: BaseException | None = None
     try:
+        record_path = RunPaths(deps.run_dir).review_record(turn_for_record)
         challenge_gate.write_review_record(deps.run_dir, turn_for_record, record)
     except OSError as e:
         record_error = e
@@ -619,7 +625,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
 
     if verdict.outcome == CHALLENGED:
         turn = state.turns  # already incremented inside challenge_gate for this attempt
-        record_path = challenge_gate.review_record_path(deps.run_dir, turn)
+        record_path = RunPaths(deps.run_dir).review_record(turn)
         challenge_gate.write_review_record(deps.run_dir, turn, record)
         return CloseResult(
             outcome=CHALLENGED, message=_render_challenged_message(material, deps),

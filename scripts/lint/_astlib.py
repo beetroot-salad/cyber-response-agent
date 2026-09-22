@@ -157,6 +157,10 @@ class ModuleEnv:
     scope_of: dict[ast.AST, ModuleEnv] = field(
         default_factory=dict, compare=False, repr=False
     )
+    #: (#1077 D6(b)) Names DIRECTLY bound, in this scope's own statements, to a name-owner
+    #: instance — an `Owner(...)` construction, a chained alias of one, or a parameter
+    #: annotated with an owner class. See `owner_derived`.
+    owner_locals: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
 
 def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
@@ -229,6 +233,71 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
     return consts
 
 
+#: (#1077 D6(b)) The two name-owner classes `owner_derived` tags — `RunPaths`/`EpisodePaths`
+#: construction, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
+_OWNER_CLASS_ORIGINS = frozenset({
+    "defender._run_paths.RunPaths",
+    "defender._episode_paths.EpisodePaths",
+})
+
+
+def _owner_locals(
+    scope: ast.AST, imports: dict[str, str], consts: dict[str, str],
+    defines: frozenset[str], inherited: frozenset[str],
+) -> frozenset[str]:
+    """Names bound, in `scope`'s own statements (never a nested def), to a name-owner
+    instance: an `Owner(...)` construction, a chained alias of one (`x = y` where `y` is
+    already tagged, or `x = owner.attr` — an owner-derived VALUE, tagged the same way so a
+    join onto it is still caught), or — for a function scope — a parameter annotated with an
+    owner class. `inherited` is the enclosing scope's own tagged names this scope has not
+    shadowed."""
+    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={})
+    owners: set[str] = set(inherited)
+
+    def is_owner_expr(node: ast.expr) -> bool:
+        if isinstance(node, ast.Call):
+            return callee(node, probe_env) in _OWNER_CLASS_ORIGINS
+        if isinstance(node, ast.Name):
+            return node.id in owners
+        if isinstance(node, ast.Attribute):
+            return _owner_instance_in(node.value, owners, probe_env)
+        return False
+
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for arg in (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs):
+            ann = arg.annotation
+            if isinstance(ann, (ast.Name, ast.Attribute)) and (
+                _origin(ann, probe_env) in _OWNER_CLASS_ORIGINS
+            ):
+                owners.add(arg.arg)
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if (
+                isinstance(child, ast.Assign) and len(child.targets) == 1
+                and isinstance(child.targets[0], ast.Name)
+            ):
+                target = child.targets[0].id
+                if is_owner_expr(child.value):
+                    owners.add(target)
+                else:
+                    owners.discard(target)  # rebound to something that is not owner-derived
+            walk(child)
+
+    walk(scope)
+    return frozenset(owners)
+
+
+def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool:
+    if isinstance(node, ast.Call):
+        return callee(node, env) in _OWNER_CLASS_ORIGINS
+    if isinstance(node, ast.Name):
+        return node.id in owners
+    return False
+
+
 def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
     """The env INSIDE one function: the enclosing env, with this scope's own bindings
     applied. A local (non-import) binding SHADOWS an inherited import — that is the whole
@@ -236,11 +305,15 @@ def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
     local_imports, bound = _scope_bindings(func)
     imports = {n: o for n, o in parent.imports.items() if n not in bound}
     imports.update(local_imports)
+    defines = frozenset((set(parent.defines) | bound) - set(local_imports))
+    consts = {n: v for n, v in parent.consts.items() if n not in bound}
+    inherited = frozenset(n for n in parent.owner_locals if n not in bound)
     return ModuleEnv(
         imports=imports,
-        consts={n: v for n, v in parent.consts.items() if n not in bound},
-        defines=frozenset((set(parent.defines) | bound) - set(local_imports)),
+        consts=consts,
+        defines=defines,
         scope_of=parent.scope_of,
+        owner_locals=_owner_locals(func, imports, consts, defines, inherited),
     )
 
 
@@ -277,14 +350,38 @@ def module_env(tree: ast.AST) -> ModuleEnv:
     """
     scope_of: dict[ast.AST, ModuleEnv] = {}
     imports, bound = _scope_bindings(tree)
+    defines = frozenset(bound)
+    consts = _module_consts(tree)
     root = ModuleEnv(
         imports=imports,
-        consts=_module_consts(tree),
-        defines=frozenset(bound),
+        consts=consts,
+        defines=defines,
         scope_of=scope_of,
+        owner_locals=_owner_locals(tree, imports, consts, defines, frozenset()),
     )
     _tag(tree, root, scope_of)
     return root
+
+
+def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
+    """(#1077 D6(b)) Is `node`'s value derived from a name owner (`RunPaths`/`EpisodePaths`) —
+    an `Owner(x).attr` chain, a local bound to an owner construction (or an owner-derived
+    value) in the same function, or a parameter annotated with an owner type?
+
+    Resolved against the scope `node` sits in, the same way `callee`/`origin` are. A `Name`
+    is owner-derived when it was tagged by `_owner_locals`; an `Attribute` is owner-derived
+    when its RECEIVER resolves as an owner instance — `RunPaths(x).gather_raw` and
+    `paths.gather_raw` (where `paths` is a tagged local or an annotated parameter) both
+    qualify, so a join `.../ lead_id` onto either is what `lint_run_records`'s D6(b) pass
+    flags."""
+    e = _env_at(node, env)
+    if isinstance(node, ast.Name):
+        return node.id in e.owner_locals
+    if isinstance(node, ast.Attribute):
+        return _owner_instance_in(node.value, set(e.owner_locals), e)
+    if isinstance(node, ast.Call):
+        return callee(node, e) in _OWNER_CLASS_ORIGINS
+    return False
 
 
 def _env_at(node: ast.AST, env: ModuleEnv) -> ModuleEnv:

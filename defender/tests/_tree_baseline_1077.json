@@ -1,0 +1,69 @@
+{
+  "commit": "e39f8945c6c886fa77cf405aebda4d95f8470ef4",
+  "content": {
+    "investigation.md": "e4963b53a0f71467aa3061b8d9d15e2724d2176a8b27f196c006db0bf66d382b",
+    "report.md": "570f1b50d6f17bcf0058fdb08ac50aef56f87652f425e454724bd8a3d926b6a1"
+  },
+  "entries": {
+    "alert.json": [
+      "file",
+      null
+    ],
+    "budget.json": [
+      "file",
+      null
+    ],
+    "gather_raw": [
+      "dir",
+      null
+    ],
+    "investigation.md": [
+      "file",
+      null
+    ],
+    "lessons_loaded.jsonl": [
+      "file",
+      null
+    ],
+    "provenance.json": [
+      "file",
+      null
+    ],
+    "report.md": [
+      "file",
+      null
+    ],
+    "review_record.1.json": [
+      "file",
+      null
+    ],
+    "session_store_pointer.json": [
+      "file",
+      null
+    ],
+    "tool_trace.jsonl": [
+      "file",
+      null
+    ],
+    "wire_logs": [
+      "dir",
+      null
+    ],
+    "wire_logs/llm_requests.jsonl": [
+      "file",
+      null
+    ],
+    "wire_logs/review_ablation_trace.jsonl": [
+      "file",
+      null
+    ],
+    "wire_logs/review_composer_trace.jsonl": [
+      "file",
+      null
+    ],
+    "wire_logs/review_support_trace.jsonl": [
+      "file",
+      null
+    ]
+  }
+}

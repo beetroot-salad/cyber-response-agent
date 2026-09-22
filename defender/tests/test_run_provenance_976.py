@@ -186,7 +186,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run_dir(alert, "20260101T000000Z-a1")
+    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-a1")
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -506,8 +506,9 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
 
 def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
     """`capture_tree` goes to some length never to raise; a write that raised beside it would
-    hand that promise back. Worse, it arrives AFTER the run dir exists, so an escaping OSError
-    burns the run id — the retry an operator reaches for is refused forever."""
+    hand that promise back — and it arrives AFTER the run dir exists. (Before #1077 an escaping
+    OSError also burned the run id; setup is resumable now, so this drives the whole
+    materialisation over the wedged directory rather than `_stamp` alone.)"""
     from defender import run_common
 
     runs = tmp_path / "runs"
@@ -517,17 +518,16 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
     # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
-    run_id = "20260101T000000Z-wedge"
+    run_id = "20260101t000000z-wedge"
     (runs / run_id).mkdir()
     (runs / run_id / PROVENANCE).mkdir()
 
-    def _materialize():
-        # `materialize_run_dir` refuses an existing dir, so drive `_stamp` directly — it is the
-        # seam that owns the promise, and the arm is about the promise rather than the caller.
-        run_common._stamp(runs / run_id / PROVENANCE)
-
-    _materialize()
+    # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
+    # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
+    # run continue unstamped.
+    assert run_common.materialize_run_dir(alert, run_id) == runs / run_id
     assert "could not stamp" in capsys.readouterr().err
+    assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
 
 
 def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
@@ -543,7 +543,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run_dir(alert, "20260101T000000Z-solo")
+    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-solo")
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -552,8 +552,8 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     with pytest.raises(TypeError):
-        run_common.materialize_run_dir(alert, "20260101T000000Z-handed", provenance=handed)
-    assert not (runs / "20260101T000000Z-handed").exists()
+        run_common.materialize_run_dir(alert, "20260101t000000z-handed", provenance=handed)
+    assert not (runs / "20260101t000000z-handed").exists()
 
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.

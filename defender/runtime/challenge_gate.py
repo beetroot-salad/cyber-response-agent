@@ -152,19 +152,17 @@ class ReviewState:
         return box["state"]
 
 
-# The review record — beside the run, temp-plus-rename, keyed by run + turn.
-
-
-def review_record_path(run_dir, turn: int = 1):
-    from pathlib import Path
-
-    return Path(run_dir) / f"review_record.{turn}.json"
+# The review record — beside the run, temp-plus-rename, keyed by run + turn. The PATH is
+# owned by `defender._run_paths.RunPaths.review_record` (#1077 D1); this module keeps only the
+# write.
 
 
 def write_review_record(run_dir, turn: int, record: dict) -> None:
     from defender._io import write_guarded
+    from defender._run_paths import RunPaths
 
-    write_guarded(review_record_path(run_dir, turn), json.dumps(record, indent=2), mode="replace")
+    write_guarded(
+        RunPaths(run_dir).review_record(turn), json.dumps(record, indent=2), mode="replace")
 
 
 # Stage invocation: real wall-clock bound, distinguishable timeout/error.
@@ -217,27 +215,9 @@ def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageR
     return StageRequest(prompt=render(salt), salt=salt, timeout=bounds.stage_timeout)
 
 
-def review_trace_path(run_dir, role: str):
-    """One review role's trace file, under the run's wire-log component. PUBLIC for the same
-    reason `review_record_path` is: the run dir's readers (the runtime visualizer) need the
-    shape, and a second site spelling `review_{role}_trace.jsonl` is a filename with two owners.
-
-    UNDER `WIRE_LOG_DIR` because this file holds each stage's RAW wrapped reply, which makes it
-    the same stream class as the wire log and the learning-stage traces — at the run root it
-    would sit inside MAIN's `under(run, SEG)` shape on both lanes. MAIN is handed only the
-    composer's `target: ask` lines (`close_tool._render_challenged_message`); the two blind
-    lenses' replies are exactly what it must not see, and reading them is how a close is
-    tailored to a gate it is supposed to pass blind. `permission.files.names_wire_log_dir`
-    refuses the component for every role.
-
-    PURE — it joins and returns, and the mkdir belongs to the one WRITER (`_write_trace_row`).
-    A reader that materialised the directory just by asking where the file is would leave an
-    empty `wire_logs/` in any run dir the visualizer merely rendered."""
-    from pathlib import Path
-
-    from defender._run_paths import WIRE_LOG_DIR
-
-    return Path(run_dir) / WIRE_LOG_DIR / f"review_{role}_trace.jsonl"
+# The trace path moved to `defender._run_paths.RunPaths.review_trace` (#1077 D1): the run
+# dir's readers (the runtime visualizer) need the shape, and a second site spelling
+# `review_{role}_trace.jsonl` is a filename with two owners.
 
 
 def _is_row_shaped(raw_reply: str) -> bool:
@@ -283,9 +263,11 @@ def _write_trace_row(
     # ONE guarded append per row, not one per physical line: the two lines are a single trace
     # record, and splitting them across two `write_guarded` calls leaves a window in which the
     # metadata row is on disk without the reply it describes. The component is created HERE, at
-    # the sole writer (see `review_trace_path` on why the path resolver stays pure), anchored on
-    # the run dir — the box's rw bind, and so the first component it could plant a link at.
-    path = review_trace_path(run_dir, role)
+    # the sole writer (the path resolver on `RunPaths` stays pure), anchored on the run dir —
+    # the box's rw bind, and so the first component it could plant a link at.
+    from defender._run_paths import RunPaths
+
+    path = RunPaths(Path(run_dir)).review_trace(role)
     guarded_mkdir(path.parent, base=Path(run_dir))
     write_guarded(path, line, mode="append")
 
@@ -620,8 +602,6 @@ __all__ = [
     "challenge_gate",
     "default_bounds",
     "raised_request_limit",
-    "review_record_path",
-    "review_trace_path",
     "stage_timeout",
     "write_review_record",
 ]

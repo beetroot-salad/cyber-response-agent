@@ -440,6 +440,15 @@ class StoreHandle:
     def close(self) -> None:
         self.connection.close()
 
+    # A handle is also a context manager, so a short-lived open (a reader after the run, the
+    # `Run` handle's `session_db(...).open()`) closes on the way out of its block. The
+    # driver's long-lived open still calls `close()` itself.
+    def __enter__(self) -> StoreHandle:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
 
 def _walk_parents(conn: sqlite3.Connection, tip: int) -> list[int]:
     """Tip-to-root row ids, refusing a cyclic chain. The one PYTHON walk both the reader

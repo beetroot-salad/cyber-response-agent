@@ -1,201 +1,330 @@
 #!/usr/bin/env python3
-"""Run-records inventory gate (#1076) — the page is a RENDER of a checked-in attribution
-table, and the table is held against the tree.
+"""Run-records name gate (#1077 D6) — no code outside the four name-owner modules
+(`defender/_run_paths.py`, `defender/_episode_paths.py`, `defender/_tenant.py`,
+`defender/_run_handle.py`) may spell a run or episode record's name, whole or as a composed
+part, and no code outside them may join a name onto a run or episode root.
 
-Why a gate and not a page. The first version of `defender/docs/run-records.md` was written by
-hand from a grep for filename mentions, and its cold review found a third of the table cells
-wrong: the citation pointed at the constant that spells a name, the docstring that explains it,
-or the message that quotes it, never at the call that reads or writes. The appendix of the same
-page — built by opening every call site — had no drift. Two sources for one fact is where every
-contradiction came from, so this gate keeps ONE source:
+#1076's call-site census (`run-records.tsv`, the old `scan()`/`findings()` over "every file
+access call, attributed to a kind") retired with this rewrite: it proved page == table, never
+table == tree, and could never see a subprocess writing a file or a SQL statement on an open
+connection. This gate proves something narrower and checkable instead — TWO name-keyed checks:
 
-  defender/docs/run-records.tsv        one row per file-access CALL SITE: path, line, kind,
-                                       op, function, when, note
-  defender/docs/run-records-kinds.tsv  one row per record KIND: the static columns a call
-                                       site cannot carry (path pattern, table, deny mode,
-                                       archived-as, sub-collection)
+  (a) NEGATIVE, root-agnostic, literal pass. Outside the owner modules, any `ast.Constant`
+      string, any `ast.JoinedStr` piece, or any `glob`/`rglob` call's string argument that
+      CONTAINS a whole record name or a composed PART from the owners' own constant set is a
+      finding — and any `BinOp(/)` whose RIGHT operand is such a string is a finding whatever
+      the left operand is called (`child`, `dst_dir`, `source`, ... — no identifier list to
+      guess). The composed-part set is deliberately narrow (`COMPOSED_PARTS`, five
+      DISCRIMINATING fragments): a bare generic suffix (`.json`, `.db`) alone matches ~1065
+      non-target literals in this tree and would make the check unimplementable (§7 decision
+      6, fork D-F5). A quoted name inside a message string is still a finding unless the line
+      carries the inline `# lint-run-records: ok — <reason>` suppression.
 
-and derives the page's tables 1–4 and 7 from them (`--render`). Three things are checked:
+  (b) An ACCESSOR-DERIVED pass, using `_astlib.owner_derived` (shared with
+      `lint_hand_rolled_name_resolution.py`): a join `/` onto a value the pass traces back to
+      an owner (`RunPaths(run_dir).gather_raw / lead_id`, which carries no literal and is
+      therefore invisible to (a)) is a finding; an accessor-NAMED attribute read
+      (`.gather_raw`, `.executed_queries`, ...) on a value the pass cannot trace is reported as
+      `unresolvable accessor use` — never a skip.
 
-  1. UNATTRIBUTED SITE — a file-access call in the sweep set with no row. The sites are found
-     by AST, resolved through `_astlib.callee` (so `from shutil import copy2 as cp` still
-     counts and a docstring that says "open(" never does): `builtins.open`, `os.open`,
-     `json.load`/`json.dump`, `shutil.copy*`/`copytree`, every `defender._io` reader/writer,
-     and the duck-typed `.open/.read_text/.write_text/.read_bytes/.write_bytes` on a value.
-     Fingerprint: `path::function::callee` — no line number, so an edit above the call does
-     not churn the baseline.
-  2. STALE ROW — a row whose `path::function` no longer holds any such call. Same fingerprint
-     shape.
-  3. STALE RENDER — the page's generated block differs from what the two tables render to.
-     Never baselined: run `--render` and commit.
+SCOPE_STATEMENT names what this gate does not (and structurally cannot) see: the three trees it
+never enters, and the one composition class — a name assembled so that NO WHOLE PART is ever an
+AST literal — that (a) is blind to regardless of which of the five ordinary composition idioms
+(concatenation, `%`-formatting, `.format`, `os.path.join`, multi-arg `Path()`) does the
+assembling; carrying the name as ONE literal, in any of those five forms, IS still caught.
 
-Line numbers in the TSV are for the reader, not the gate: `--refresh` re-resolves each row's
-line to the call it names (matching by path, function and op class) and rewrites the file, so
-the page can be regenerated after any edit without re-attributing anything.
+A source file the sweep cannot parse is reported as a finding, never skipped and never a crash
+of the whole sweep (`_astlib.ScanBlind` is caught per file, here, not allowed to propagate).
 
-Once #1077's handle owns every path, this gate's job collapses into "no module outside the
-handle builds a run path" and the tables retire with the doc; the TSV is the seed of the file
-backend until then.
-
-Run from repo root:  python scripts/lint/lint_run_records.py [--refresh] [--render]
-Regenerate the baseline:  python scripts/lint/lint_run_records.py --update-baseline
-Exit 0 = clean, 1 = new findings or stale render, 2 = could not run.
+Run from repo root:  python scripts/lint/lint_run_records.py [--render]
+Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run.
 """
 from __future__ import annotations
 
 import ast
 import csv
+import re
 import sys
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from _astlib import ScanBlind, callee, module_env, read_and_parse
-from _baseline import Finding
+from _astlib import ScanBlind, module_env, owner_derived, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
-SITES_TSV = DEFENDER / "docs" / "run-records.tsv"
 KINDS_TSV = DEFENDER / "docs" / "run-records-kinds.tsv"
 PAGE = DEFENDER / "docs" / "run-records.md"
 
-BEGIN_MARK = "<!-- generated: run-records tables — edit run-records.tsv / run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->"
+BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->"  # noqa: E501
 END_MARK = "<!-- end generated -->"
 
-#: The sweep set the issue names, plus the writers that live outside it (hooks and the
-#: top-level entry modules). Tests excluded.
-SWEEP_DIRS = ("runtime", "learning", "scripts", "evals", "hooks")
-EXCLUDED_DIRS = (".venv", "__pycache__", "tests", "run-visualizations", "run-transcripts")
+#: The four owner modules (#1077 D1/D5) — the exempt set every other constant and check below
+#: is defined relative to. Exactly `defender.tests._spec1077.OWNER_MODULE_FILES`.
+OWNER_MODULES: frozenset[str] = frozenset(
+    {"_run_paths.py", "_episode_paths.py", "_tenant.py", "_run_handle.py"})
 
-#: Resolved callees that touch a file, with the op class each implies. `callee()` answers the
-#: ORIGIN, so an alias or a from-import lands on the same key.
-CALLEES: dict[str, str] = {
-    "builtins.open": "open",
-    "os.open": "open",
-    "json.load": "read",
-    "json.dump": "write",
-    "shutil.copy": "copy",
-    "shutil.copy2": "copy",
-    "shutil.copyfile": "copy",
-    "shutil.copytree": "copy",
-    "defender._io.read_text_utf8": "read",
-    "defender._io.read_text_soft": "read",
-    "defender._io.read_guarded": "read",
-    "defender._io.read_plain": "read",
-    "defender._io.read_jsonl_rows": "read",
-    "defender._io.read_jsonl_rows_report": "read",
-    "defender._io.append_jsonl": "write",
-    "defender._io.write_atomic": "write",
-    "defender._io.write_guarded": "write",
-    "defender._io.open_guarded": "open",
-    "defender._io.locked_for_rewrite": "open",
-    "defender._io.open_nofollow_fd": "open",
-    "defender._io.guarded_mkdir": "write",
-    "sqlite3.connect": "open",
-    "os.unlink": "write",
-    "os.remove": "write",
-    "os.replace": "write",
-    "os.link": "write",
-    "os.mkdir": "write",
-    "os.makedirs": "write",
-    "shutil.rmtree": "write",
-    "shutil.move": "write",
-    "tarfile.open": "open",
-}
-#: Duck-typed attribute calls on a value (`p.read_text()`): `callee()` is None there by
-#: design, so the attribute NAME is the key.
-DUCK_ATTRS: dict[str, str] = {
-    "open": "open",
-    "read_text": "read",
-    "write_text": "write",
-    "read_bytes": "read",
-    "write_bytes": "write",
-    # `_io.Bound` — the repo's own guarded read seam (`_io.py:440-535`) — and the plain
-    # directory/unlink calls on a path value. `.read` also matches a stream's `.read()`, which
-    # is attributed `NOT:not_file_io` rather than hidden from the sweep.
-    "read": "read",
-    "read_jsonl": "read",
-    "entries": "read",
-    "mkdir": "write",
-    "unlink": "write",
-    "rmdir": "write",
-    "touch": "write",
-    "rename": "write",
-    # not `.replace`: on a path value it is a rename, but the same attribute on a str is the
-    # tree's commonest call, and `callee()` cannot tell them apart. `os.replace` is resolved.
-}
-#: Row `op` values a site of each op class may carry. `open` is ambiguous at the call (mode is
-#: a runtime value), so any op fits it; a `copy` site is a write on one side and a read on the
-#: other and the row says which record it is attributed to.
-OP_CLASSES: dict[str, frozenset[str]] = {
-    "read": frozenset({"read"}),
-    "write": frozenset({"write", "append", "mkdir", "unlink"}),
-    "copy": frozenset({"copy", "read"}),
-    "open": frozenset({"open", "read", "write", "append"}),
-}
-#: Kinds the appendix may carry that no rendered table lists. Everything else must be a row
-#: of `run-records-kinds.tsv` or a `NOT:<tag>`.
+#: The sweep set — unchanged from #1076, plus the top level of `defender/`. Never shrinks
+#: below this (decision 5's standing check).
+SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks")
+SWEEP_TOP_LEVEL = True
+EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests", "run-visualizations", "run-transcripts")
+
+#: §7 decision 5's carve-out: the three trees this sweep never enters, each holding live
+#: record-name use today (claims S10/G1/G3, brief red flag R3). The written obligation (O1)
+#: names them rather than claiming a coverage it does not have.
+UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
+
+SCOPE_STATEMENT = (
+    "This gate sweeps defender/runtime, defender/learning, defender/scripts, defender/evals, "
+    "defender/hooks and the top level of defender/*.py (tests excluded) — it never enters "
+    "defender/skills, top-level scripts, or top-level experiments (§7 decision 5), and it is "
+    "structurally blind to a record name that never reaches the AST as a whole literal — an "
+    "assembly in which no single part is ever a literal string, whichever of concatenation, "
+    "%-formatting, .format, os.path.join or multi-argument Path() does the assembling (§7 "
+    "decision 6, settled premise s34). The same five forms carrying the name as ONE literal "
+    "are caught."
+)
+
 APPENDIX_ONLY_KINDS = frozenset({"tool_seam"})
-WRITE_OPS = frozenset({"write", "append", "copy", "mkdir", "unlink"})
-#: `names`: not a call — the one line that MINTS a record's filename for a shared writer seam
-#: (a stage's `trace_name`, a ledger's file name). Rendered as evidence, never checked against
-#: the sweep, and never the only row a kind may have if a real call exists.
-NAMES_OP = "names"
-WHEN_ORDER = ("host", "live", "end", "later")
-WHEN_ALIASES = {"host-before-agent": "host", "n-a": ""}
 
+def _composed_parts() -> tuple[str, ...]:
+    """The five DISCRIMINATING composed-name PARTS (§7 decision 6 / fork D-F5, reading 1),
+    READ from the owners' own constants rather than re-spelled here — this gate's own source
+    is not an exempt owner module, and D6(a) protects these five fragments too."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from defender import _run_paths  # noqa: PLC0415
+
+    return (
+        _run_paths.LEAD_CLAIM_SUFFIX, _run_paths.REVIEW_RECORD_PREFIX,
+        _run_paths.TRACE_SUFFIX, _run_paths.REVIEW_TRACE_SUFFIX, _run_paths.SERVED_PREFIX)
+
+
+#: The gate's substring-match set for a composed name, kept narrow on purpose: the generic bare
+#: suffixes (`.json`, `.db`, ...) match ~1065 non-target literals and are deliberately excluded.
+COMPOSED_PARTS: tuple[str, ...] = _composed_parts()
+
+#: A path segment of the kinds registry enters the WHOLE-NAME match set only when it is
+#: DISCRIMINATING — `name.ext`, or a multi-word `wire_logs` / `gather_raw` / `.box-sentinel`.
+#: A bare English word a segment happens to be (`runs`, `worlds`, `judge`, `served`) is
+#: substring-matched by decision 6's rule, and as a whole name it would report every docstring
+#: and log line that uses the word — the same reading that keeps `.json`/`.db` out of
+#: `COMPOSED_PARTS` (fork D-F5). `served/` and the other directory names are reached as
+#: composed parts, or not at all.
+_SEGMENT_PLACEHOLDER = re.compile(r"<[^>]*>")
+
+#: The inline escape — the ONLY one D6(a) admits, and only with a non-empty reason after the
+#: em dash.
+_SUPPRESSION_MARKER = "lint-run-records: ok"
 
 
 @dataclass(frozen=True)
-class Site:
-    path: str        # relative to defender/
-    line: int
-    function: str    # innermost enclosing def, or <module>
-    what: str        # resolved callee or `.attr`
-    opclass: str     # open / read / write / copy
+class Finding:
+    fingerprint: str
+    display: str
 
-    @property
-    def key(self) -> str:
-        return f"{self.path}::{self.function}::{self.what}"
-
-
-@dataclass
-class Row:
-    path: str
-    line: int
-    kind: str      # one kind id, or several comma-separated when one helper touches several
-    op: str
-    function: str
-    callee: str    # the resolved callee (`Site.what`), so the row names the CALL
-    when: str
-    note: str
-
-    @property
-    def key(self) -> str:
-        return f"{self.path}::{self.function}::{self.callee}"
-
-    @property
-    def kinds(self) -> list[str]:
-        return [k.strip() for k in self.kind.split(",") if k.strip()]
-
-    @property
-    def opclass(self) -> str:
-        return "write" if self.op in WRITE_OPS else "read"
-
-
-# ---------------------------------------------------------------------------------------
-# the sweep
-# ---------------------------------------------------------------------------------------
 
 def _in_scope(path: Path) -> bool:
     return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def sweep_files(root: Path = DEFENDER) -> list[Path]:
-    files = [p for p in root.glob("*.py") if _in_scope(p)]
+    files: list[Path] = []
+    if SWEEP_TOP_LEVEL:
+        files.extend(p for p in root.glob("*.py") if _in_scope(p))
     for d in SWEEP_DIRS:
         files.extend(p for p in sorted((root / d).rglob("*.py")) if _in_scope(p))
     return sorted(files)
+
+
+def _discriminating(segment: str) -> bool:
+    stem, dot, ext = segment.rpartition(".")
+    if dot and stem and ext:
+        return True  # `alert.json`, `family.yaml`
+    return any(c in segment for c in "_-")  # `wire_logs`, `gather_raw`, `.box-sentinel`
+
+
+def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
+    """The whole record names the gate bans, READ FROM THE KINDS REGISTRY (`run-records-kinds.
+    tsv`, the same table O2 holds one accessor per row of) rather than scraped from the owner
+    modules' namespaces: every WHOLE segment of every kind's `path` cell — a segment carrying
+    a placeholder (`<lead>.lead.json`, `<run>.run-end.json`) is a composition, whose
+    discriminating fragment is one of `COMPOSED_PARTS` — and only the DISCRIMINATING whole
+    segments admitted."""
+    kinds = kinds if kinds is not None else load_kinds()
+    names: set[str] = set()
+    for row in kinds:
+        for spelled in row.get("path", "").split(","):
+            spelled = spelled.strip()
+            if not spelled or spelled.startswith("("):
+                continue  # `(the role's declared read/write targets)` — not a path
+            for segment in spelled.split("/"):
+                if _SEGMENT_PLACEHOLDER.search(segment):
+                    # A COMPOSED segment (`<lead>.lead.json`, `<run>.run-end.json`) is not a
+                    # whole name. Its literal head and tail are the fragments a spelling
+                    # outside the owner would carry — admitted when they are file-name-shaped
+                    # and discriminating (`.run-end.json`, `review_record.`; never `.json`).
+                    # The five curated `COMPOSED_PARTS` are a subset of what this yields.
+                    head = segment[:segment.index("<")]
+                    tail = segment[segment.rindex(">") + 1:]
+                    for fragment in (head, tail):
+                        if "." in fragment and _discriminating(fragment):
+                            names.add(fragment)
+                    continue
+                if _discriminating(segment):
+                    names.add(segment)
+    return frozenset(names)
+
+
+def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
+    """`(whole_names, composed_parts)` — the registry's whole names and decision 6's five
+    curated fragments."""
+    return registry_names(), frozenset(COMPOSED_PARTS)
+
+
+def _accessor_names() -> frozenset[str]:
+    """Every public accessor name on `RunPaths`/`EpisodePaths` — computed, not typed out, so
+    it never goes stale as D1 grows the owners."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from defender._episode_paths import EpisodePaths  # noqa: PLC0415
+    from defender._run_paths import RunPaths  # noqa: PLC0415
+
+    return frozenset(
+        n for n in (*dir(RunPaths), *dir(EpisodePaths)) if not n.startswith("_"))
+
+
+def _is_owner_module(rel: str) -> bool:
+    return Path(rel).name in OWNER_MODULES
+
+
+def _record_shaped(text: str, whole: frozenset[str], parts: frozenset[str]) -> bool:
+    return any(name in text for name in whole) or any(part in text for part in parts)
+
+
+def _suppressed(lineno: int, lines: list[str]) -> bool:
+    if not (0 < lineno <= len(lines)):
+        return False
+    line = lines[lineno - 1]
+    if _SUPPRESSION_MARKER not in line:
+        return False
+    after = line.split(_SUPPRESSION_MARKER, 1)[1]
+    # The escape requires a REASON after the marker's own `— <reason>` em dash — a bare
+    # marker, or one with nothing following the dash, does not suppress.
+    reason = after.split("—", 1)[1].strip() if "—" in after else ""
+    return bool(reason)
+
+
+def _glob_call_names(node: ast.Call) -> list[str]:
+    if not (isinstance(node.func, ast.Attribute) and node.func.attr in ("glob", "rglob")):
+        return []
+    return [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+
+
+def _scan_literal_pass(
+    rel: str, tree: ast.Module, lines: list[str],
+    whole: frozenset[str], parts: frozenset[str],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    owner = _enclosing(tree)
+
+    def report(node: ast.AST, why: str) -> None:
+        lineno = getattr(node, "lineno", 0)
+        if _suppressed(lineno, lines):
+            return
+        fn = owner.get(node, "<module>")
+        findings.append(Finding(
+            fingerprint=f"{rel}::{fn}::{lineno}::{why}",
+            display=f"{rel}:{lineno} {fn}(): {why} — no code outside the owner modules may "
+                     "spell a run or episode record's name",
+        ))
+
+    docstrings = _docstring_nodes(tree)
+    # A constant that is a PIECE of something reported as a whole — an f-string's literal
+    # part, a join's right operand — is reported once, at the whole, never again as itself.
+    covered: set[ast.AST] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            covered.update(node.values)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            # Only a CONSTANT right operand is the join's to report; an f-string there is the
+            # f-string's own (`d / f"{lead}.lead.json"` is reported as the f-string piece),
+            # so it must not be covered twice into silence.
+            if isinstance(node.right, ast.Constant):
+                covered.add(node.right)
+    for node in ast.walk(tree):
+        if node in covered:
+            continue
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # A docstring DESCRIBES a record; it cannot be joined onto a root or handed to a
+            # glob. The gate is about names reaching the filesystem from outside the owner —
+            # prose that mentions one is not that, and reporting it would only teach every
+            # docstring to spell the name in pieces. A name quoted in a MESSAGE (an argument,
+            # not a statement) is still reported, and admitted only under the suppression.
+            if node in docstrings:
+                continue
+            if _record_shaped(node.value, whole, parts):
+                report(node, f"record-name literal {node.value!r}")
+        elif isinstance(node, ast.JoinedStr):
+            for piece in node.values:
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    if _record_shaped(piece.value, whole, parts):
+                        report(node, f"record-name f-string piece {piece.value!r}")
+        elif isinstance(node, ast.Call):
+            for value in _glob_call_names(node):
+                if _record_shaped(value, whole, parts):
+                    report(node, f"record-name glob argument {value!r}")
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            right = node.right
+            if isinstance(right, ast.Constant) and isinstance(right.value, str):
+                if _record_shaped(right.value, whole, parts):
+                    report(node, f"join onto record name {right.value!r} (right operand)")
+    return findings
+
+
+def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
+                        accessor_names: frozenset[str]) -> list[Finding]:
+    findings: list[Finding] = []
+    owner = _enclosing(tree)
+    env = module_env(tree)
+
+    def report(node: ast.AST, why: str) -> None:
+        lineno = getattr(node, "lineno", 0)
+        if _suppressed(lineno, lines):
+            return
+        fn = owner.get(node, "<module>")
+        findings.append(Finding(
+            fingerprint=f"{rel}::{fn}::{lineno}::{why}",
+            display=f"{rel}:{lineno} {fn}(): {why}",
+        ))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            if owner_derived(node.left, env):
+                report(node, "literal-free join onto an owner-derived value")
+        elif isinstance(node, ast.Attribute) and node.attr in accessor_names:
+            # An accessor-NAMED read on a receiver the pass cannot trace is reported — when
+            # the name is one only an owner answers. `x.wire_log`, `x.gather_raw`,
+            # `x.executed_queries` on an unknown `x` is a record reached around the owner;
+            # `args.alert`, `self.budget`, `resp.payload`, `verdict.review` are ordinary
+            # attributes that happen to share an English word with an accessor, and the
+            # SPELLED name those sites would have to reach is what pass (a) catches. One
+            # predicate for "discriminating", shared with pass (a)'s whole-name set.
+            if not owner_derived(node, env) and _discriminating(node.attr):
+                report(node, f"unresolvable accessor use (.{node.attr})")
+    return findings
+
+
+def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
+    """The `ast.Constant` node of every docstring — a module's, a class's, a function's, and
+    the bare-string statement after an assignment that documents an attribute. A string that
+    is a whole STATEMENT is prose: no expression consumes it, so it reaches no path."""
+    out: set[ast.AST] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            out.add(node.value)
+    return out
 
 
 def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:
@@ -212,294 +341,95 @@ def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:
     return names
 
 
-def scan_file(path: Path, rel: str) -> list[Site]:
-    _text, tree = read_and_parse(path, rel)
-    env = module_env(tree)
-    owner = _enclosing(tree)
-    out: list[Site] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        origin = callee(node, env)
-        what, opclass = None, None
-        if origin in CALLEES:
-            what, opclass = origin, CALLEES[origin]
-        elif origin is None and isinstance(node.func, ast.Attribute) and node.func.attr in DUCK_ATTRS:
-            what, opclass = f".{node.func.attr}", DUCK_ATTRS[node.func.attr]
-        if what is None:
-            continue
-        out.append(Site(rel, node.lineno, owner.get(node, "<module>"), what, opclass))
-    return out
+def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> list[Finding]:
+    """The gate's whole sweep: checks (a) and (b), over every file `sweep_files` names minus
+    the ones an `allow_list` entry admits (D7's migration-in-flight mechanism — a module named
+    there is skipped entirely, however many findings it would otherwise carry).
 
-
-def scan(root: Path = DEFENDER) -> list[Site]:
-    sites: list[Site] = []
+    A file the sweep cannot parse is a FINDING (`unresolvable accessor use` never a skip): the
+    scan continues to the rest of the tree, but this one file is reported, not certified clean.
+    """
+    allow_list = allow_list if allow_list is not None else ALLOW_LIST
+    whole, parts = _owner_constants()
+    accessor_names = _accessor_names()
+    findings: list[Finding] = []
     for path in sweep_files(root):
         rel = path.relative_to(root).as_posix()
-        sites.extend(scan_file(path, rel))
-    return sites
+        if _is_owner_module(rel) or rel in allow_list:
+            continue
+        try:
+            text, tree = read_and_parse(path, rel)
+        except ScanBlind as exc:
+            findings.append(Finding(fingerprint=f"{rel}::<unparseable>",
+                                    display=f"{rel}: {exc}"))
+            continue
+        lines = text.splitlines()
+        findings.extend(_scan_literal_pass(rel, tree, lines, whole, parts))
+        findings.extend(_scan_accessor_pass(rel, tree, lines, accessor_names))
+    return findings
+
+
+#: D7's migration-in-flight mechanism: a module named here (relative to `DEFENDER`, as
+#: `sweep_files` spells it) is skipped by `scan` entirely, however many findings it would
+#: otherwise carry — the observable shape of a mixed-route intermediate state. The terminal
+#: state (D7 step 4) is an EMPTY dict; `test_gate_passes_with_an_empty_allow_list` is the one
+#: demand that cannot be green at any earlier commit (cluster O).
+ALLOW_LIST: dict[str, int] = {}
 
 
 # ---------------------------------------------------------------------------------------
-# the tables
+# the render — the kinds table only (N6: no reader/writer census, no site data)
 # ---------------------------------------------------------------------------------------
-
-def load_rows(path: Path = SITES_TSV) -> list[Row]:
-    with path.open(encoding="utf-8", newline="") as fh:
-        return [
-            Row(r["path"], int(r["line"]), r["kind"], r["op"], r["function"], r["callee"], r["when"], r["note"])
-            for r in csv.DictReader(fh, delimiter="\t")
-        ]
-
-
-def save_rows(rows: list[Row], path: Path = SITES_TSV) -> None:
-    rows = sorted(rows, key=lambda r: (r.path, r.line, r.kind))
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        w = csv.writer(fh, delimiter="\t", lineterminator="\n")
-        w.writerow(["path", "line", "kind", "op", "function", "callee", "when", "note"])
-        for r in rows:
-            w.writerow([r.path, r.line, r.kind, r.op, r.function, r.callee, r.when, r.note])
-
 
 def load_kinds(path: Path = KINDS_TSV) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as fh:
         return list(csv.DictReader(fh, delimiter="\t"))
 
 
-def refresh_lines(rows: list[Row], sites: list[Site]) -> int:
-    """Re-point each row's line at the call it names. Rows in one function with one op
-    class are matched to that function's sites of the same class in line order, so two
-    reads in one function keep their relative order and a moved function moves them all."""
-    by_key: dict[str, list[Site]] = defaultdict(list)
-    for s in sites:
-        by_key[s.key].append(s)
-    grouped: dict[str, list[Row]] = defaultdict(list)
-    for r in rows:
-        if r.op != NAMES_OP:
-            grouped[r.key].append(r)
-    changed = 0
-    for key, rs in grouped.items():
-        cands = sorted(by_key.get(key, ()), key=lambda s: s.line)
-        for r, s in zip(sorted(rs, key=lambda r: r.line), cands):
-            if r.line != s.line:
-                r.line = s.line
-                changed += 1
-    return changed
-
-
-# ---------------------------------------------------------------------------------------
-# the render
-# ---------------------------------------------------------------------------------------
-
-def _pkg(path: str) -> str:
-    head = path.split("/", 1)[0]
-    return head if "/" in path else "top"
-
-
-def _cite(r: Row) -> str:
-    tag = " names it" if r.op == NAMES_OP else ""
-    return f"`{r.function}` (`{r.path}:{r.line}`){tag}"
-
-
-def _cell(rows: list[Row]) -> str:
-    if not rows:
-        return "—"
-    by_pkg: dict[str, list[Row]] = defaultdict(list)
-    for r in sorted(rows, key=lambda r: (r.path, r.line)):
-        by_pkg[_pkg(r.path)].append(r)
-    return "; ".join(f"**{p}**: " + ", ".join(_cite(r) for r in rs) for p, rs in by_pkg.items())
-
-
-def _when(rows: list[Row]) -> str:
-    seen = {WHEN_ALIASES.get(r.when, r.when) for r in rows}
-    return " + ".join(w for w in WHEN_ORDER if w in seen) or "—"
-
-
-def _esc(s: str) -> str:
-    return s.replace("|", "\\|")
-
-
-def render(rows: list[Row], kinds: list[dict[str, str]]) -> str:
-    by_kind: dict[str, list[Row]] = defaultdict(list)
-    for r in rows:
-        for k in r.kinds:
-            by_kind[k].append(r)
-    facts: dict[str, dict[str, object]] = {}
+def render(kinds: list[dict[str, str]]) -> str:
+    out: list[str] = [BEGIN_MARK, "", "| kind | table | path | denied to | archived as | sub-collection | note |",
+                      "|---|---|---|---|---|---|---|"]
     for k in kinds:
-        rs = by_kind.get(k["kind"], [])
-        writers = [r for r in rs if r.op in WRITE_OPS or r.op == NAMES_OP]
-        readers = [r for r in rs if r.op in ("read", "open")]  # an `open` is access either way
-        pkgs = {_pkg(r.path) for r in rs}
-        # The archive copy is a READER of every kind it carries (its call sites are tagged
-        # `archive_proj`, section 5), and a record read only through a top-level helper is
-        # read by that helper's callers: `via` names them, since the sweep sees the innermost
-        # call only.
-        if k["archived_as"] not in ("", "—"):
-            pkgs.add("learning")
-        if k.get("via"):
-            pkgs.add("via")
-        facts[k["kind"]] = {
-            "writers": writers, "readers": readers,
-            "crosses": "yes" if len(pkgs) > 1 else "no",
-            "when": _when(writers),
-        }
-    out: list[str] = [BEGIN_MARK, ""]
-    tables = (
-        ("1", "## 1. Records inside the run dir", True),
-        ("2", "## 2. Records beside the run dir (siblings under `<runs_base>`)", False),
-        ("3", "## 3. Session history", False),
-        ("4", "## 4. Episode-level records (under `<episode>`)", False),
-    )
-    for tid, title, with_deny in tables:
-        ks = [k for k in kinds if k["table"] == tid]
-        out += [title, ""]
-        if k_note := next((k["table_note"] for k in ks if k.get("table_note")), ""):
-            out += [k_note, ""]
-        hdr = ["kind", "path", "writer", "when", "readers"]
-        if with_deny:
-            hdr.append("denied to")
-        hdr += ["crosses boundary", "archived as", "note"]
-        out.append("| " + " | ".join(hdr) + " |")
-        out.append("|" + "---|" * len(hdr))
-        for k in ks:
-            f = facts[k["kind"]]
-            cells = [k["kind"], f"`{k['path']}`", _cell(f["writers"]), f["when"], _cell(f["readers"])]
-            if with_deny:
-                cells.append(k["deny"] or "—")
-            note = k["note"] + (f" Read via: {k['via']}." if k.get("via") else "")
-            cells += [f["crosses"], k["archived_as"] or "—", _esc(note.strip())]
-            out.append("| " + " | ".join(cells) + " |")
-        out.append("")
-    # table 7 — derived
-    out += ["## 7. Sub-collections for the run handle (#1077)", "",
-            "Kinds whose call sites span more than one package (*crosses boundary = yes*), grouped by "
-            "the concept the handle names. Derived from tables 1–3; a kind with `subcollection` empty "
-            "in `run-records-kinds.tsv` is learning-internal or episode-level and is not a sub-collection.", "",
-            "| sub-collection | kinds | write owner(s) | writes when |", "|---|---|---|---|"]
-    subs: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for k in kinds:
-        if k["subcollection"] and facts[k["kind"]]["crosses"] == "yes":
-            subs[k["subcollection"]].append(k)
-    for sub, ks in subs.items():
-        owners = sorted({_pkg(r.path) for k in ks for r in facts[k["kind"]]["writers"]})
-        whens = " / ".join(facts[k["kind"]]["when"] for k in ks)
-        out.append(f"| `{sub}` | {', '.join(k['kind'] for k in ks)} | {', '.join(owners) or '—'} | {whens} |")
+        cells = [k["kind"], k.get("table", ""), f"`{k['path']}`", k.get("deny") or "—",
+                 k.get("archived_as") or "—", k.get("subcollection") or "—",
+                 (k.get("note") or "").replace("|", "\\|")]
+        out.append("| " + " | ".join(cells) + " |")
     out += ["", END_MARK]
     return "\n".join(out)
 
 
-def render_page(rows: list[Row], kinds: list[dict[str, str]], page_text: str) -> str:
+def render_page(kinds: list[dict[str, str]], page_text: str) -> str:
     start = page_text.index(BEGIN_MARK)
     end = page_text.index(END_MARK) + len(END_MARK)
-    return page_text[:start] + render(rows, kinds) + page_text[end:]
-
-
-def render_appendix(rows: list[Row]) -> str:
-    out = ["| call site | kind | op | function | when | note |", "|---|---|---|---|---|---|"]
-    for r in sorted(rows, key=lambda r: (r.path, r.line)):
-        out.append(f"| `{r.path}:{r.line}` | {r.kind} | {r.op} | `{r.function}` | {WHEN_ALIASES.get(r.when, r.when) or 'n-a'} | {_esc(r.note)} |")
-    return "\n".join(out)
-
-
-# ---------------------------------------------------------------------------------------
-# the gate
-# ---------------------------------------------------------------------------------------
-
-def findings(sites: list[Site], rows: list[Row], kinds: list[dict[str, str]] | None = None) -> list[Finding]:
-    """Three checks, all keyed on the CALL (`path::function::callee`), as multisets, so a
-    second call of the same helper in an attributed function is not hidden by the first:
-
-      - a site with more calls than rows      -> unattributed
-      - a row with more entries than calls     -> stale (its call is gone)
-      - a row whose `op` does not fit the callee's op class, or whose kind no table knows
-    """
-    site_n: dict[str, int] = defaultdict(int)
-    site_class: dict[str, str] = {}
-    for s in sites:
-        site_n[s.key] += 1
-        site_class[s.key] = s.opclass
-    row_n: dict[str, int] = defaultdict(int)
-    for r in rows:
-        if r.op != NAMES_OP:
-            row_n[r.key] += 1
-    known = {k["kind"] for k in kinds} if kinds is not None else None
-    out: list[Finding] = []
-    for key, n in site_n.items():
-        if n > row_n.get(key, 0):
-            path, fn, what = key.split("::", 2)
-            out.append(Finding(key, f"{path} {fn}: {what} called {n}x, {row_n.get(key, 0)} row(s) in run-records.tsv"))
-    for key, n in row_n.items():
-        if n > site_n.get(key, 0):
-            path, fn, what = key.split("::", 2)
-            out.append(Finding(f"stale::{key}", f"{path} {fn}: {n} row(s) for {what}, {site_n.get(key, 0)} call(s) in the tree"))
-    for r in rows:
-        if r.op == NAMES_OP:
-            continue
-        cls = site_class.get(r.key)
-        if cls is not None and r.op not in OP_CLASSES[cls]:
-            out.append(Finding(f"op::{r.key}::{r.op}", f"{r.path}:{r.line} {r.function}: op {r.op!r} does not fit a {cls} call ({r.callee})"))
-    if known is not None:
-        for r in rows:
-            for k in r.kinds:
-                if not (k in known or k.startswith("NOT:") or k in APPENDIX_ONLY_KINDS):
-                    out.append(Finding(f"kind::{r.key}::{k}", f"{r.path}:{r.line}: kind {k!r} is in no table"))
-    return out
+    return page_text[:start] + render(kinds) + page_text[end:]
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    try:
-        sites = scan()
-    except ScanBlind as exc:
-        print(f"lint_run_records: {exc}", file=sys.stderr)
-        return 2
-    rows = load_rows()
     kinds = load_kinds()
-    if "--refresh" in args:
-        n = refresh_lines(rows, sites)
-        save_rows(rows)
-        print(f"[lint_run_records] refreshed {n} line number(s) -> {SITES_TSV.name}")
     page = PAGE.read_text(encoding="utf-8")
-    rendered = render_page(rows, kinds, page)
-    appendix_mark = "## Appendix — call-site attribution"
-    if appendix_mark in rendered:
-        head, _, _ = rendered.partition(appendix_mark)
-        rendered = head + appendix_mark + "\n\n" + "".join(_appendix_preamble()) + render_appendix(rows) + "\n"
+    rendered = render_page(kinds, page)
     if "--render" in args:
         PAGE.write_text(rendered, encoding="utf-8")
         print(f"[lint_run_records] rendered -> {PAGE.relative_to(REPO_ROOT)}")
         page = rendered
-    found = findings(sites, rows, kinds)
-    # NO BASELINE and no inline suppression, deliberately: this gate's product is
-    # completeness, and a fingerprint accepted once would cover every future call of that
-    # callee in that function. An unattributed site gets a row — `NOT:<tag>` if it is not a
-    # run record — never a waiver.
+    found = scan()
     if found:
         print(f"\n[lint_run_records] {len(found)} finding(s):")
         for f in found:
             print(f"  {f.display}")
-        print("\nAttribute the site in defender/docs/run-records.tsv (a NOT:<tag> row if it is not a "
-              "run record), then run `python scripts/lint/lint_run_records.py --render`.")
+        print(
+            "\nNo code outside defender/_run_paths.py, _episode_paths.py, _tenant.py and "
+            "_run_handle.py may spell a run or episode record's name — reach it through the "
+            "owner, or mark a deliberate diagnostic with "
+            "`# lint-run-records: ok — <reason>`."
+        )
     if page != rendered:
-        print("\n[lint_run_records] STALE RENDER: docs/run-records.md differs from its tables — "
-              "run `python scripts/lint/lint_run_records.py --render` and commit.")
-    print(f"[lint_run_records] {len(sites)} call site(s) in scope, {len(rows)} row(s), {len(found)} finding(s).")
+        print(
+            "\n[lint_run_records] STALE RENDER: docs/run-records.md differs from its table — "
+            "run `python scripts/lint/lint_run_records.py --render` and commit.")
+    print(f"[lint_run_records] {len(found)} finding(s).")
     return 1 if (found or page != rendered) else 0
-
-
-def _appendix_preamble() -> list[str]:
-    return [
-        "Every file-access call site in `runtime/`, `learning/`, `scripts/`, `evals/`, `hooks/` and the\n",
-        "top-level `defender/*.py` modules (tests excluded), found by AST and resolved through the lint\n",
-        "suite's callee resolver, so a docstring that mentions `open(` is not a site and an aliased\n",
-        "import still is. Rendered from `run-records.tsv` by `scripts/lint/lint_run_records.py`, which\n",
-        "fails CI when a site has no row or a row's call is gone. Column 2 is a kind id from the tables\n",
-        "above, `NOT:<tag>` for a non-record (tags follow section 6), or `archive_proj` for the archive\n",
-        "copy's own call sites (section 5). `tool_seam` marks the model's generic read and write tools:\n",
-        "the file they touch is whichever record the role's grant names, so the kind is decided by the\n",
-        "gate at the call, not by the seam. `NOT:not_file_io` rows are the generic `_io` helpers\n",
-        "themselves, attributed at their callers.\n\n",
-    ]
 
 
 if __name__ == "__main__":
