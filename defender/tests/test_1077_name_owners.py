@@ -446,18 +446,11 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     # D1's own constraint on the cell: the screen lives in the owner module, which drops
     # pydantic for a stdlib dataclass so the box entrypoint closure can import it (claim C4).
     # A screen that pulls in a third-party package would take the sentinel's owner with it.
-    import subprocess
-    import sys
-
     from defender._paths import PATHS
-    code = (
+    from defender.tests._import_blocker import run_blocked
+
+    body = (
         "import sys\n"
-        "class Blocker:\n"
-        "    def find_module(self, name, path=None):\n"
-        "        if name.split('.')[0].startswith('pydantic'):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "        return None\n"
-        "sys.meta_path.insert(0, Blocker())\n"
         "from defender._run_paths import plain_file\n"
         "import pathlib\n"
         "assert plain_file(pathlib.Path(sys.argv[1])) is True\n"
@@ -467,12 +460,13 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     # own rule. The closure probe gets it back as ONE name.
     hard.unlink()
     assert plain_file(real), "with the second name gone, the file is plain again"
-    done = subprocess.run([sys.executable, "-c", code, str(real)], cwd=PATHS.repo_root,
-                          capture_output=True, text=True, timeout=120)
+    # `pydantic*`, not the three names the sibling probes list: five installed distributions
+    # start with it, and the screen must not need any of them.
+    done = run_blocked(body, block=("pydantic*",), argv=(str(real),), cwd=PATHS.repo_root)
     unreachable = (
-        f"the plain-file screen is not reachable without a third-party package:\n{done.stderr}")
+        f"the plain-file screen is not reachable without a third-party package:\n{done.stderr!r}")
     assert done.returncode == 0, unreachable
-    assert "OK" in done.stdout, unreachable
+    assert b"OK" in done.stdout, unreachable
 
 
 # ---------------------------------------------------------------------------------------
@@ -543,18 +537,11 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
     dependency, and D1's pydantic-to-`@dataclass(frozen=True)` conversion applies to the whole
     owner module, so re-homing `store_path_for`'s refusal onto `session_db` leaves the owner
     importable with no third-party package present."""
-    import subprocess
-    import sys
-
     from defender._paths import PATHS
-    code = (
+    from defender.tests._import_blocker import run_blocked
+
+    body = (
         "import sys\n"
-        "class Blocker:\n"
-        "    def find_module(self, name, path=None):\n"
-        "        if name.split('.')[0] in ('pydantic', 'pydantic_ai', 'pydantic_core'):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "        return None\n"
-        "sys.meta_path.insert(0, Blocker())\n"
         "import defender._run_paths as rp\n"
         "import pathlib\n"
         "o = rp.RunPaths(pathlib.Path('/tmp/x'))\n"
@@ -565,10 +552,10 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
         "else:\n"
         "    print('ADMITTED')\n"
         "assert 'pydantic' not in sys.modules, sorted(m for m in sys.modules if 'pyd' in m)\n")
-    done = subprocess.run([sys.executable, "-c", code], cwd=PATHS.repo_root,
-                          capture_output=True, text=True, timeout=120)
+    done = run_blocked(body, block=("pydantic", "pydantic_ai", "pydantic_core"),
+                       cwd=PATHS.repo_root)
     assert done.returncode == 0, done.stderr
-    assert "REFUSED" in done.stdout, (
+    assert b"REFUSED" in done.stdout, (
         "the re-homed refusal did not fire with no third-party package installed — D1's "
         "conversion applies to the whole owner module, as `_io.py:17-19` already did")
 

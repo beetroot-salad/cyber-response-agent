@@ -20,46 +20,33 @@ TWO RULES, and #1092's d26 retired the first one, not this one:
 from __future__ import annotations
 
 import subprocess
-import sys
 
 from defender.runtime import bash_exec, box, box_codec
 from defender.tests._by_path import WORKTREE as REPO_ROOT
+from defender.tests._import_blocker import run_blocked
 
-#: Installed on `sys.meta_path` (through `find_spec`, the hook that survives 3.12) BEFORE the
-#: entrypoint runs, so the closure is held to an ALLOWLIST — the stdlib plus this tree — not to
-#: a denylist of the packages that happen to be expensive today. `pyyaml`, `duckdb` and
+#: The closure is held to an ALLOWLIST — the standard library plus this tree — not to a
+#: denylist of the packages that happen to be expensive today. `pyyaml`, `duckdb` and
 #: `typing-extensions` are in the box image too, and an import of any of them would be paid on
-#: the same hot path. `_virtualenv` is the one exemption: it is a `.pth` hook this repo's venv
-#: runs at interpreter start, before any test code, and no box has one.
-_STDLIB_ONLY_BLOCKER = (
-    "import sys\n"
-    "_ALLOWED = sys.stdlib_module_names | {'defender', '__main__', '_virtualenv'}\n"
-    "class Blocker:\n"
-    "    def find_spec(self, name, path=None, target=None):\n"
-    "        if name.split('.')[0] not in _ALLOWED:\n"
-    "            raise ModuleNotFoundError(\n"
-    "                f'{name!r} is outside the box entrypoint closure (blocked by the test)')\n"
-    "        return None\n"
-    "sys.meta_path.insert(0, Blocker())\n"
-)
+#: the same hot path. `_virtualenv` is the one exemption: a `.pth` hook this repo's venv runs
+#: at interpreter start, before any test code, which no box has.
+_ALLOWED = ("defender", "__main__", "_virtualenv")
 
 # The entrypoint, run exactly as a box runs it: module main, request frame on stdin, response
 # frame on stdout.
-_BLOCKED_ENTRYPOINT = _STDLIB_ONLY_BLOCKER + (
+_ENTRYPOINT_BODY = (
     "import runpy\n"
     "runpy.run_module('defender.runtime.bash_exec', run_name='__main__', alter_sys=True)\n"
 )
 
 
 def _run_entrypoint(frame: bytes, env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
-    """One `docker exec` worth of work, under an interpreter that refuses every non-stdlib
-    import. `env` is the whole environment, as a box's is: the allowlist is what the box's
-    `docker run --env` put there, and the entrypoint filters `os.environ` by it again."""
-    return subprocess.run(
-        [sys.executable, "-c", _BLOCKED_ENTRYPOINT],
-        input=frame, capture_output=True, cwd=REPO_ROOT, timeout=180,
-        env={"PYTHONPATH": str(REPO_ROOT), **env},
-    )
+    """One `docker exec` worth of work, under an interpreter that refuses every import outside
+    the standard library and this tree. `env` is the whole environment, as a box's is: the
+    allowlist is what the box's `docker run --env` put there, and the entrypoint filters
+    `os.environ` by it again."""
+    return run_blocked(_ENTRYPOINT_BODY, allow_only=_ALLOWED, cwd=REPO_ROOT, stdin=frame,
+                       env={"PYTHONPATH": str(REPO_ROOT), **env})
 
 
 def _frame(*argv: str) -> bytes:
@@ -97,6 +84,66 @@ def test_the_entrypoint_hands_the_command_exactly_the_allowlisted_keys():
     assert set(seen) == {"PATH", "PYTHONPATH", "DEFENDER_BOX", "TZ"}, sorted(seen)
     assert seen["DEFENDER_BOX"] == "1", seen
     assert "hunter2" not in done.stdout.decode("utf-8", "replace")
+
+
+#: Runs the entrypoint to completion and then reports what the interpreter has registered
+#: under the module's own import name. A box starts the file as `__main__`, and `box_codec`
+#: imports it by name, so without the alias the two are different module objects.
+_REPORT_SECOND_COPY = (
+    "import runpy, sys\n"
+    "try:\n"
+    "    runpy.run_module('defender.runtime.bash_exec', run_name='__main__', alter_sys=True)\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "m = sys.modules.get('defender.runtime.bash_exec')\n"
+    "sys.stderr.write('UNDER_IMPORT_NAME=' + (m.__name__ if m else '<absent>') + '\\n')\n"
+)
+
+
+def test_the_entrypoint_does_not_load_a_second_copy_of_itself():
+    """The codec imports `bash_exec` by name while `bash_exec` is the running main module, so
+    the entrypoint would execute its own 600-odd lines twice per `docker exec` — and the tree
+    is mounted read-only, so no bytecode cache makes the second pass cheap. The main module
+    registers itself under its import name first, and this is what says so: the object found
+    under that name IS the running main module, not a second copy of it."""
+    done = run_blocked(_REPORT_SECOND_COPY, allow_only=_ALLOWED, cwd=REPO_ROOT,
+                       stdin=_frame("true"),
+                       env={"PYTHONPATH": str(REPO_ROOT), "PATH": "/usr/bin:/bin"})
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    report = done.stderr.decode("utf-8", "replace").strip().splitlines()[-1]
+    assert report == "UNDER_IMPORT_NAME=__main__", (
+        f"{report}: the interpreter holds a SECOND copy of the entrypoint module — the one it "
+        "ran as the main module, and another that `box_codec`'s import built from source, "
+        "paid on every `docker exec`")
+
+
+#: Imports the module the ordinary way FIRST, then runs it as the main module, and reports
+#: whether the ordinary import survived. This is the case `setdefault` exists for: a plain
+#: assignment would replace a module other code already holds references into.
+_REPORT_CLOBBER = (
+    "import runpy, sys\n"
+    "import defender.runtime.bash_exec as real\n"
+    "try:\n"
+    "    runpy.run_module('defender.runtime.bash_exec', run_name='__main__', alter_sys=True)\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "still = sys.modules['defender.runtime.bash_exec'] is real\n"
+    "sys.stderr.write('ORDINARY_IMPORT_SURVIVED=' + str(still) + '\\n')\n"
+)
+
+
+def test_running_as_main_never_displaces_an_ordinary_import_of_itself():
+    """The alias is `setdefault`, not an assignment, and this is the difference: where the
+    module was already imported under its own name, that one stays. An assignment would swap
+    it for the main-module copy under everything already holding a reference to it."""
+    done = run_blocked(_REPORT_CLOBBER, allow_only=_ALLOWED, cwd=REPO_ROOT,
+                       stdin=_frame("true"),
+                       env={"PYTHONPATH": str(REPO_ROOT), "PATH": "/usr/bin:/bin"})
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    report = done.stderr.decode("utf-8", "replace").strip().splitlines()[-1]
+    assert report == "ORDINARY_IMPORT_SURVIVED=True", (
+        f"{report}: running the entrypoint as the main module REPLACED the module object that "
+        "an ordinary import had already put in place")
 
 
 def test_the_allowlist_and_the_mark_have_one_owner():

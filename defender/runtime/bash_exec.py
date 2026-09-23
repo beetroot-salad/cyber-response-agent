@@ -664,4 +664,15 @@ def _run_box_entrypoint() -> int:
 
 
 if __name__ == "__main__":
+    # `python3 -m defender.runtime.bash_exec` is how a box starts this file, so the interpreter
+    # has it registered as `__main__` and NOT under its own import name. `box_codec` imports it
+    # by that name, which without this line parses, compiles and executes all of it a SECOND
+    # time in the same process — and the tree is mounted read-only, so there is no bytecode
+    # cache to make the second pass cheap (#1096). Aliasing the one already running costs
+    # nothing and also keeps `Pipeline`/`Stage` a single pair of classes, rather than two that
+    # only interoperate because nothing here uses `isinstance`.
+    # `setdefault`, not assignment: under any launch that DID import this module normally, the
+    # real one is already registered and must win.
+    if __spec__ is not None:  # `-m`/runpy set it; a bare `python bash_exec.py` does not
+        sys.modules.setdefault(__spec__.name, sys.modules[__name__])
     sys.exit(_run_box_entrypoint())

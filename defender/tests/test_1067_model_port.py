@@ -418,26 +418,16 @@ def test_providers_imports_without_pydantic_ai():
     """`defender.runtime.providers` is on the runtime-free install's import path
     (`run_common.run_env`, `learning.core.config.source_first_party_key`), so no module in
     it may import `pydantic_ai` at module scope."""
-    import subprocess
-    import sys
+    from defender._paths import PATHS
+    from defender.tests._import_blocker import run_blocked
 
-    code = (
-        "import sys\n"
-        "class _Block:\n"
-        "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name == 'pydantic_ai' or name.startswith('pydantic_ai.'):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "sys.meta_path.insert(0, _Block())\n"
+    out = run_blocked(
         "from defender.runtime import providers\n"
         "from defender.runtime.providers.base import BuiltModel\n"
-        "print(BuiltModel(model=object(), settings=None) is not None)\n"
-    )
-    from defender._paths import PATHS
-
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         check=False, cwd=str(PATHS.repo_root))
+        "print(BuiltModel(model=object(), settings=None) is not None)\n",
+        block=("pydantic_ai",), cwd=PATHS.repo_root)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "True"
+    assert out.stdout.strip() == b"True"
 
 
 
