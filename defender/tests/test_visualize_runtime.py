@@ -463,13 +463,13 @@ def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
     The precedence is the other half: when both exist, the current location wins."""
     legacy = tmp_path / "legacy"
     legacy.mkdir()
-    (legacy / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    (legacy / d.RUN_LAYOUT.wire_log.name).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
     assert [r["id"] for r in d.load_messages(legacy)] == ["old#0"]
 
     both = tmp_path / "both"
     wire = RunPaths(both).wire_log
     wire.parent.mkdir(parents=True)
-    (both / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    (both / d.RUN_LAYOUT.wire_log.name).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
     wire.write_text(json.dumps({"id": "new#0", "kind": "response"}) + "\n")
     assert [r["id"] for r in d.load_messages(both)] == ["new#0"]
 

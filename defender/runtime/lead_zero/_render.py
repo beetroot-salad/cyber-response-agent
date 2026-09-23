@@ -32,7 +32,7 @@ def _elide(value: Any, lead_id: str, seq: int) -> str:
     if not isinstance(value, str) or len(value) <= MESSAGE_CHAR_BUDGET:
         return value if isinstance(value, str) else str(value)
     where = (
-        f", full text at gather_raw/{lead_id}/{seq}.json"
+        f", full text at gather_raw/{lead_id}/{seq}.json"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         if seq >= 0 else ", and the call that returned it persisted no payload"
     )
     return f"{value[:MESSAGE_CHAR_BUDGET]}\n{ELIDED} {len(value)} chars{where})"

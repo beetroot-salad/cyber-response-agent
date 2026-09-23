@@ -43,22 +43,27 @@ INVESTIGATION_FILE_MAX = 65536
 # independently of that prompt-layer hardening.
 REPORT_CLOSE_DELIMITER = "</report>"
 
-#: The two names are the run-dir owner's (#1077 D1); this module owns what a well-formed one
-#: IS, not what it is called. Re-exported under the names every schema caller imports.
-REPORT_NAME = _run_paths.REPORT
-INVESTIGATION_NAME = _run_paths.INVESTIGATION
-
-# The artifacts this module has a schema for. The gate iterates this to decide whether a
-# resolved write target is a gated artifact at all, so adding a third one is a change HERE
-# rather than a new branch in `decide_write`.
-ARTIFACT_NAMES = (REPORT_NAME, INVESTIGATION_NAME)
+#: This module owns what a well-formed artifact IS, never what it is called (#1077 D1). It
+#: used to re-export the two names under its own spellings, which made it a second home for
+#: them — D7's rule is that nothing outside the owner HOLDS a record name, and a module-level
+#: `REPORT_NAME = _run_paths.REPORT` is exactly that.
+#:
+#: The artifacts this module has a schema for. The gate iterates this to decide whether a
+#: resolved write target is a gated artifact at all, so adding a third one is a change HERE
+#: rather than a new branch in `decide_write` — a FUNCTION, so the names are the owner's at
+#: the moment they are asked for.
+def artifact_names() -> tuple[str, ...]:
+    """The artifacts this module has a schema for, by name, from the run-dir owner."""
+    return (_run_paths.RUN_LAYOUT.report.name, _run_paths.RUN_LAYOUT.investigation.name)
 
 # Which artifacts need the CURRENT on-disk text as a baseline. Only invlang does (it is
 # append-only, so validation is against the document's history, not the text alone). The
 # gate reads the baseline and passes it in — this module does no filesystem access — and
 # it must read for THESE names only: an unconditional read would put a `read_text` that can
 # raise on the report.md path, where none ran before.
-NEEDS_BASELINE = frozenset({INVESTIGATION_NAME})
+def needs_baseline(name: str) -> bool:
+    """Does validating this artifact need the CURRENT on-disk text?"""
+    return name == _run_paths.RUN_LAYOUT.investigation.name
 
 
 def _utf8_len(text: str) -> int:
@@ -128,11 +133,11 @@ def validate_report(proposed_text: str) -> str | None:
     try:
         fm, raw, _body = split_frontmatter(proposed_text)
     except FrontmatterError as e:
-        return f"report.md frontmatter is malformed — fix and rewrite: {e}"
+        return f"report.md frontmatter is malformed — fix and rewrite: {e}"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     problems: list[str] = []
     if _has_duplicate_top_level_key(raw):
         problems.append(
-            "report.md frontmatter declares a top-level key more than once — remove the "
+            "report.md frontmatter declares a top-level key more than once — remove the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "duplicate and rewrite."
         )
     disposition = fm.get("disposition")
@@ -145,22 +150,22 @@ def validate_report(proposed_text: str) -> str | None:
     # silently ACCEPT it and write a document no reader can tell from a clean one.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         problems.append(
-            "report.md frontmatter must carry a top-level `disposition` in "
+            "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
         )
     if _utf8_len(raw) > REPORT_FRONTMATTER_MAX:
         problems.append(
-            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "
+            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
         )
     if _utf8_len(proposed_text) > REPORT_FILE_MAX:
         problems.append(
-            f"report.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"report.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
         )
     if REPORT_CLOSE_DELIMITER in proposed_text:
         problems.append(
-            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "
+            f"report.md contains the literal {REPORT_CLOSE_DELIMITER!r} delimiter, which would "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "break out of the judge's report block — remove it and rewrite."
         )
     if not problems:
@@ -257,7 +262,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         else:
             remedy = "Trim it and re-send."
         return (
-            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "
+            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error — same as invlang_validate's
@@ -271,13 +276,13 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         found = diagnose(proposed_text, current)
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
         return (
-            f"investigation.md validation errored — failing closed: {e!r}. "
+            f"investigation.md validation errored — failing closed: {e!r}. "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{UNCHANGED_NOTICE} Simplify the invlang and re-send."
         )
     rendered = _rendered_errors(found)
     if rendered is not None:
         return (
-            f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"
+            f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             + rendered
             + "\n\nRe-send the block with those rows corrected."
         )
@@ -346,7 +351,7 @@ def committed_investigation_reason(text: str) -> str | None:
         found = diagnose(text, text)
     except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
         print(
-            f"[artifact_schema] investigation.md could not be validated for the close, "
+            f"[artifact_schema] investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"treating it as publishable: {e!r}",
             file=sys.stderr,
         )
@@ -355,7 +360,7 @@ def committed_investigation_reason(text: str) -> str | None:
     if rendered is None:
         return None
     return (
-        "close blocked: `investigation.md` does not pass invlang validation, and the close is "
+        "close blocked: `investigation.md` does not pass invlang validation, and the close is "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         "what publishes it — the report commits against this document and the review gate "
         "reads it.\n\n"
         + rendered
@@ -365,17 +370,17 @@ def committed_investigation_reason(text: str) -> str | None:
 
 
 def validate_artifact(name: str, proposed_text: str, current: str | None) -> str | None:
-    """Validate `proposed_text` as the artifact `name` (one of `ARTIFACT_NAMES`), returning the
+    """Validate `proposed_text` as the artifact `name` (one of `artifact_names()`), returning the
     deny reason or `None`. The UTF-8-encodability check runs for BOTH artifacts before either
     schema, because both measure bytes. `current` is the on-disk baseline, required for the
-    artifacts in `NEEDS_BASELINE` and ignored for the rest. An unknown `name` raises rather
+    artifacts `needs_baseline` names and ignored for the rest. An unknown `name` raises rather
     than silently accepting, so a third artifact added to the tuple without a schema cannot
     ship as a permanently-allowed write."""
     reason = encodable_or_reason(proposed_text, name)
     if reason is not None:
         return reason
-    if name == REPORT_NAME:
+    if name == _run_paths.RUN_LAYOUT.report.name:
         return validate_report(proposed_text)
-    if name == INVESTIGATION_NAME:
+    if name == _run_paths.RUN_LAYOUT.investigation.name:
         return validate_investigation(proposed_text, current)
     raise ValueError(f"no content schema for artifact {name!r}")

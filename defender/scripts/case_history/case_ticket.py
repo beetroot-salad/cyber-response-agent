@@ -33,7 +33,7 @@ NO_NOTES = "(no notes)"
 #: branch is reached only through `_report.read_report`'s own verdict (`read_case_record`
 #: below), via `ReportNotParsable`.
 UNREADABLE_COMMENT_BODY = (
-    "No disposition could be recorded for this case: report.md was missing or carried no "
+    "No disposition could be recorded for this case: report.md was missing or carried no "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "parsable disposition to record."
 )
 

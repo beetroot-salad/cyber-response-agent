@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from defender._artifact_schema import REPORT_NAME
+from defender._run_paths import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
 from defender._model import model
@@ -106,10 +106,10 @@ def read_report(path: Path) -> ReportRead:
     a whole-corpus walk, one undecodable byte must cost that row and not the walk.
     """
     if not path.is_file():
-        return _no_headline(f"{REPORT_NAME} not found: {path}")
+        return _no_headline(f"{RUN_LAYOUT.report.name} not found: {path}")
     text, error = read_text_soft(path)
     if text is None:
-        return _no_headline(f"{REPORT_NAME} is unreadable: {error}")
+        return _no_headline(f"{RUN_LAYOUT.report.name} is unreadable: {error}")
     return parse_report_text(text)
 
 
@@ -121,13 +121,14 @@ def parse_report_text(text: str) -> ReportRead:
         frontmatter, body = parse_frontmatter(text)
     except FrontmatterError as e:
         # No frontmatter means no headline, but the bytes are still the report a view renders.
-        return _no_headline(f"{REPORT_NAME} {e}", text=text, body=text)
+        return _no_headline(f"{RUN_LAYOUT.report.name} {e}", text=text, body=text)
     raw = frontmatter.get("disposition")
     disposition = normalized_disposition(raw)
     if disposition is None:
         return ReportRead(
             disposition=None,
-            reason=f"{REPORT_NAME} disposition={raw!r} not in {sorted(DISPOSITION_ENUM)}",
+            reason=f"{RUN_LAYOUT.report.name} disposition={raw!r} not in "
+                   f"{sorted(DISPOSITION_ENUM)}",
             frontmatter=frontmatter,
             body=body,
             text=text,

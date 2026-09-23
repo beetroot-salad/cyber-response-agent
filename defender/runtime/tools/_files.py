@@ -11,6 +11,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import read_text_utf8, write_guarded
+from defender._run_paths import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 
@@ -131,7 +132,7 @@ def _closed_for_investigation_write(deps: AgentDeps, p: Path) -> bool:
     certainly not `<run_dir>/investigation.md`, so answering False is honest — and it hands the
     operand to the gate, which denies it with a correctable reason."""
     try:
-        if p.resolve() != (deps.run_dir / "investigation.md").resolve():
+        if p.resolve() != RunPaths(deps.run_dir).investigation.resolve():
             return False
     except RESOLVE_ERRORS:
         return False
@@ -144,7 +145,7 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     p = _resolve_operand(deps, path)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
-            "investigation.md is no longer writable: the close already committed a "
+            "investigation.md is no longer writable: the close already committed a "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "recorded disposition for this run, and a further write could silently "
             "move it. The case is closed."
         )
@@ -163,7 +164,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     p = _resolve_operand(deps, path)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
-            "investigation.md is no longer writable: the close already committed a "
+            "investigation.md is no longer writable: the close already committed a "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "recorded disposition for this run, and a further edit could silently "
             "move it. The case is closed."
         )

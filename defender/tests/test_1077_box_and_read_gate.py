@@ -65,21 +65,20 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     """Each of the six per-name denies — `gather_raw` by shape, `wire_logs/` outright,
     `provenance.json` outright, the case answer key for confined roles, the denylist and the
     payload read cap — refuses for every role."""
+    from defender._run_paths import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
     from defender.runtime import permission
-    from defender.runtime.permission.files import RAW_MARKER, TICKET_READS_MARKER
-    from defender._run_paths import CASE_ANSWER_KEY_NAMES, PROVENANCE, WIRE_LOG_DIR
 
     owner = S.RunPaths(run_dir)
     subjects = {
-        "gather_raw by shape": run_dir / RAW_MARKER / "not-a-lead-shape" / "x.json",
+        "gather_raw by shape": owner.gather_raw / "not-a-lead-shape" / "x.json",
         "wire_logs/ outright": owner.wire_log,
         "provenance.json outright": owner.provenance,
         "case answer key": run_dir / sorted(CASE_ANSWER_KEY_NAMES)[0],
         "denylist": run_dir / ".env",
-        "payload read cap": run_dir / TICKET_READS_MARKER / "0.json",
+        "payload read cap": owner.ticket_read(0),
     }
-    assert PROVENANCE in str(subjects["provenance.json outright"])
-    assert WIRE_LOG_DIR in subjects["wire_logs/ outright"].parts
+    assert subjects["provenance.json outright"].name == RUN_LAYOUT.provenance.name
+    assert str(RUN_LAYOUT.wire_log_dir) in subjects["wire_logs/ outright"].parts
 
     policies = _policies(run_dir, worktree)
     assert len(policies) >= 8, f"the roster is thin: {sorted(policies)}"
@@ -117,21 +116,27 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
         "for the role that must `cat` it (O8), so the shape arm above is not a blanket refusal")
 
 
-def test_every_deny_predicate_reads_its_name_from_the_owner(run_dir, worktree):
-    """All six deny predicates read their names from the owner module, including `RAW_MARKER`
-    and `TICKET_READS_MARKER`, which are no longer spelled in the gate."""
+def test_no_deny_predicate_holds_a_record_name_at_all(run_dir, worktree):
+    """The read gate's six deny predicates hold NO record name — not even the owner's own
+    object.
+
+    THE INVERSE OF WHAT THIS ASSERTED, deliberately (#1077 D7). D1 moved `RAW_MARKER` and
+    `TICKET_READS_MARKER` onto the owner and this test required `files.py` to hold the
+    owner's object, on the reasoning that one shared object cannot drift. It cannot — and it
+    is still a second home: a held name outlives the module it came from, which is how six
+    modules broke at once when an owner stopped exporting two names earlier in this issue.
+    The predicates now ask (`RUN_LAYOUT.gather_raw`, `is_case_answer_key(...)`), so there is
+    nothing left to strand.
+    """
     import defender._run_paths as owner_mod
     from defender.runtime.permission import files
 
     for name in ("RAW_MARKER", "TICKET_READS_MARKER", "CASE_ANSWER_KEY_NAMES", "PROVENANCE",
                  "WIRE_LOG_DIR"):
-        assert hasattr(owner_mod, name), (
-            f"{name} must live on the owner; claim C20 says `files.py` spells RAW_MARKER and "
-            "TICKET_READS_MARKER locally today and imports the other three")
-        assert getattr(files, name, None) is getattr(owner_mod, name) or getattr(
-            files, name, None) == getattr(owner_mod, name), (
-            f"`files.py` holds its own {name} rather than the owner's — the security dive's "
-            "universal (3) is TRUE ONLY AFTER D1 moves these two")
+        assert hasattr(owner_mod, name), f"{name} must live on the owner"
+        assert not hasattr(files, name), (
+            f"`files.py` holds {name} — D7's rule is that nothing outside the owner holds a "
+            "record name; ask for the accessor or the predicate instead")
 
     src = (DEFENDER / "runtime" / "permission" / "files.py").read_text(encoding="utf-8")
     for spelled in ('RAW_MARKER = "gather_raw"', 'TICKET_READS_MARKER = "ticket_reads"'):

@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import argparse
 import functools
+import string
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
+from defender._run_paths import RunPaths
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -118,7 +120,7 @@ from defender.learning.leads._lead_spine import (
 
 
 def _state_dir(run_dir: Path) -> Path:
-    return run_dir / "lead_author"
+    return RunPaths(run_dir).lead_author
 
 
 def _done_sentinel(run_dir: Path) -> Path:
@@ -407,7 +409,16 @@ def _prepare_handoffs(
 
 
 
-_HELP_EPILOG = """\
+#: Substituted at the parser with the owner's record names (#1077 D1) — a template, not a
+#: module-level f-string, so the prompt-frame lint does not read it as a prompt boundary.
+#:
+#: `string.Template`, NOT `str.format`. This is operator prose that names paths, and the two
+#: spellings a path takes in this repo — `defender/skills/{system}/SKILL.md`, `{run_id}` — are
+#: both braces. Under `.format` the first such edit raises `KeyError` at `--help`, i.e. only
+#: once it is in an operator's hands and never in a test. `safe_substitute` cannot raise at
+#: all: an unrecognized `$x` is left as written, so the failure mode is a visibly unsubstituted
+#: word in help text rather than a dead command.
+_HELP_EPILOG = string.Template("""\
 The agent runs no git; the loop commits. Invoked directly this commits onto the
 current branch/worktree's HEAD — in production the lead-author drain
 (``loop.py --lead-author-drain``) runs it inside a fresh ``lead-author/<id>``
@@ -419,11 +430,11 @@ Preconditions
     serve, pitfalls curation, scrub, push, PR). Violating it is not silent: this
     returns rc=3 without serving, and a drain tick that finds the lock held skips
     before claiming any request rather than counting the skip as a serve.
-  * ``<run_dir>/executed_queries.jsonl`` and ``<run_dir>/gather_raw/``
+  * ``<run_dir>/$EXECUTED_QUERIES`` and ``<run_dir>/$RAW_MARKER/``
     (the two tables) must exist — written live during the run by
     record_query.py + record_lead.py.
 
-State files written under ``<run_dir>/lead_author/``
+State files written under ``<run_dir>/$LEAD_AUTHOR_DIRNAME/``
   done           sentinel on successful completion; makes the run a no-op. Written
                  here at once when invoked by hand; under the drain, only once the
                  batch's tree has passed the scrub (its commit is then on a local
@@ -444,19 +455,35 @@ Environment
   LEAD_AUTHOR_REQUEST_LIMIT                   tool-loop request cap (default 250)
   LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
                                              system-skill lift queue (default 5)
-"""
+""")
+
+
+def _record_names() -> dict[str, str]:
+    """The three record names this help text shows an operator, ASKED OF THE OWNER at call
+    time rather than imported (#1077 D7). `.name` off an accessor built on a placeholder root
+    is the only spelling this module ever sees, so a rename through the owner reaches the help
+    text with nothing here to update — and there is no module-level copy for a rename to
+    strand."""
+    names = RunPaths(Path("<run_dir>"))
+    return {
+        "EXECUTED_QUERIES": names.executed_queries.name,
+        "RAW_MARKER": names.gather_raw.name,
+        "LEAD_AUTHOR_DIRNAME": names.lead_author.name,
+    }
 
 
 def main(argv: list[str]) -> int:
+    names = _record_names()
     p = argparse.ArgumentParser(
-        prog="lead_author",
+        prog="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         description="Fold lessons from one defender run into the executed-side "
                     "query template catalog.",
-        epilog=_HELP_EPILOG,
+        epilog=_HELP_EPILOG.safe_substitute(names),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("run_dir", type=Path,
-                   help="defender run dir containing executed_queries.jsonl + gather_raw/")
+                   help=f"defender run dir containing {names['EXECUTED_QUERIES']} "
+                        f"+ {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
     return run(args.run_dir)
 
@@ -546,7 +573,7 @@ __all__ = [
     "answered_identities",
     "argparse",
     "build_handoff",
-    "build_lead_author_deps",
+    "build_lead_author_deps",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "build_system_draft_handoffs",
     "collect_general_failures",
     "dataclass",

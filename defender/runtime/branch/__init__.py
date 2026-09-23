@@ -58,7 +58,7 @@ from ._spec import (
 )
 from ._frontier import (
     _DISPATCH_TOOL,
-    _LEAD_DIRS,
+    _lead_dirs,
     _appended_text,
     _as_of_of,
     _call_args,
@@ -77,7 +77,7 @@ from ._frontier import (
     source_session,
 )
 from ._seed import (
-    _INHERITED,
+    _inherited,
     _copy_artifact,
     _holds_content,
     _inherit_evidence,
@@ -407,8 +407,8 @@ __all__ = [
     "ToolCallPart",
     "ToolReturnPart",
     "_DISPATCH_TOOL",
-    "_INHERITED",
-    "_LEAD_DIRS",
+    "_inherited",
+    "_lead_dirs",
     "_appended_text",
     "_as_of_of",
     "_call_args",

@@ -226,7 +226,7 @@ def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):
 def test_message_zeros_run_dir_listing_names_the_queries_table(tmp_path):
     """R7 `interacts(workspace_map->run_dir_listing)` — message 0's own run-dir listing names
     `executed_queries.jsonl`, because lead-0's rows are appended BEFORE `orientation()` runs
-    and the queries table is not one of the names `workspace_map._UNLISTED` suppresses
+    and the queries table is not one of the names `workspace_map._unlisted()` suppresses
     (`gather_raw`, `wire_logs/`, `budget.json`, and since #976 the provenance stamp — read the
     set there rather than a count from here) (g12/E5, executed).
 

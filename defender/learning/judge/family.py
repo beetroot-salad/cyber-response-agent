@@ -66,41 +66,32 @@ from collections.abc import Callable
 import json
 from dataclasses import field
 from defender._model import model
-from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
+from pathlib import Path, PurePath, PurePosixPath
+
 from defender._io import ALIAS_READ_REFUSAL, Bound, bind
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
+from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     FAULT,
     PASSTHROUGH,
     PATCHED,
     REFUSED,
-    SERVED_DIRNAME,
     STAGED,
     normalized_source,
     request_key,
-)
-from defender.learning.branch.archive import (
-    ALERT_NAME,
-    GATHER_SUMMARIES_DIRNAME,
-    REVIEW_NAME,
-    RUN_END_NAME,
-    SAMPLES_NAME,
-    WORLDS_DIRNAME,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
 from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    MANIFEST_NAME,
     episode_token_for,
     is_reserved_world_label,
     world_token_for,
@@ -130,7 +121,7 @@ WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
 
 
 def screened_yaml_mapping(
-    bound: Bound, name: str, *, what: str, empty_ok: bool = False,
+    bound: Bound, name: str | PurePath, *, what: str, empty_ok: bool = False,
 ) -> dict[str, Any] | None:
     """A YAML mapping at `name` (relative to `bound`) through THE SCREENED READ, or `None`
     only when NOTHING is at the name.
@@ -171,7 +162,7 @@ def screened_yaml_mapping(
     return doc
 
 
-def _default_review_reader(bound: Bound, name: str) -> dict[str, Any] | None:
+def _default_review_reader(bound: Bound, name: str | PurePath) -> dict[str, Any] | None:
     """`review.yaml`, through the same screened read every other episode-dir read in this pass
     makes. ABSENT reads as `None` — the parsing reader's typed absent answer (RF-R1), which the
     episode page renders as "absent" against "present but empty"; a caller with no use for
@@ -201,10 +192,10 @@ def read_review_record(bound: Bound, *, reader: Any = None) -> dict[str, Any] | 
     absence, or when the injected `reader` says so (#1049 D-J7) — the typed absent answer the
     page consumes; a pass that does not consume it coalesces `or {}` once, at its entry."""
     read = reader if reader is not None else _default_review_reader
-    return read(bound, REVIEW_NAME)
+    return read(bound, LAYOUT.review)
 
 
-def _default_samples_reader(bound: Bound, name: str) -> dict[str, Any]:
+def _default_samples_reader(bound: Bound, name: str | PurePath) -> dict[str, Any]:
     """`samples.yaml`, read PERMISSIVELY: absent, unreadable or unparseable all read as `{}`,
     never a `JudgeRefused`. Unlike `_default_review_reader`, this is deliberate (#1007 M4,
     `test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`): the
@@ -230,7 +221,7 @@ def read_samples_record(bound: Bound, *, reader: Any = None) -> dict[str, Any]:
     staged pattern, moved into the episode archive at `Step.QUESTIONER` (`branch/steps.py`) so
     it survives a pruned source run (#1007 O5/M4)."""
     read = reader if reader is not None else _default_samples_reader
-    return read(bound, SAMPLES_NAME)
+    return read(bound, LAYOUT.samples)
 
 
 def world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
@@ -367,7 +358,7 @@ def _mechanical_world_finding(
         "root_cause": "no completed re-ask of a captured query naming this world's staged "
                        "pattern (or, for a patch, its host-side replay) differed from the base",
         "anchor": f"world {label}", "topic": "reachability",
-        "evidence": [f"{REVIEW_NAME}#worlds.{label}.reachability"],
+        "evidence": [f"{LAYOUT.review}#worlds.{label}.reachability"],
         "pattern": pattern, "holding_system": holding_system, "provenance": "mechanical",
     }
 
@@ -429,10 +420,10 @@ def raw_manifest(episode_dir: Path) -> dict[str, Any]:
 
 def read_manifest(bound: Bound) -> dict[str, Any]:
     """`raw_manifest` through the pass's own bound reader."""
-    doc = screened_yaml_mapping(bound, MANIFEST_NAME, what="the manifest")
+    doc = screened_yaml_mapping(bound, LAYOUT.family, what="the manifest")
     if doc is None:
         raise JudgeRefused(
-            f"the manifest ({MANIFEST_NAME}) could not be read: nothing is at that name")
+            f"the manifest ({LAYOUT.family}) could not be read: nothing is at that name")
     return doc
 
 
@@ -611,7 +602,7 @@ def lead_chain(world: Bound, lead_id: str, resolutions_by_lead: dict[str, list[d
         # (review of PR #1042); now the summary IS the refusal, named by the world-relative
         # file so the judge (and the page, which shows the same chain) sees what could not be
         # read and never where the operator keeps episodes.
-        name = f"{GATHER_SUMMARIES_DIRNAME}/{lead_id}.md"
+        name = WORLD_LEAVES.gather_summary(lead_id)
         rec = world.read(name, errors="replace")
         if rec.text is not None:
             summary = rec.text
@@ -625,7 +616,7 @@ def lead_chain(world: Bound, lead_id: str, resolutions_by_lead: dict[str, list[d
     }
 
 
-def json_mapping(bound: Bound, name: str) -> dict[str, Any] | None:
+def json_mapping(bound: Bound, name: str | PurePath) -> dict[str, Any] | None:
     """One JSON artifact at `name` (relative to `bound`) as a mapping, or `None` when it is
     not readable as one.
 
@@ -870,7 +861,7 @@ def summary_lead_ids(world: Bound) -> set[str]:
     """The lead ids `worlds/<label>/gather_summaries/` names — the stem of every regular
     `*.md` file in the world's own listing (a link, a directory or a bare `.md` names none).
     ONE spelling for the judge prompt's roster and the page's."""
-    summaries = world.under(GATHER_SUMMARIES_DIRNAME).entries()
+    summaries = world.under(WORLD_LEAVES.gather_summaries).entries()
     return {name[:-3] for name in summaries.files() if name.endswith(".md") and len(name) > 3}
 
 
@@ -977,7 +968,7 @@ def _resolution_facts(
     scan = scan_fences(text)
     if scan.open_tail is not None:
         raise JudgeRefused(
-            f"world {world!r}: investigation.md has an unclosed invlang fence — a truncated "
+            f"world {world!r}: investigation.md has an unclosed invlang fence — a truncated "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "document cannot be graded")
     companion, warnings = parse_dense_companion(text)
     moved = False
@@ -1020,7 +1011,7 @@ def _resolution_facts(
     return moved, by_lead, (*scan.orphaned_headers, *unlanded)
 
 
-def _read_archived_text(bound: Bound, name: str, *, world: str, role: str) -> Any:
+def _read_archived_text(bound: Bound, name: str | PurePath, *, world: str, role: str) -> Any:
     """One archived document (`worlds/<world>/<role>`) through the world-archive screen
     (#1049): absent is the primitive's own absent STATE, answered as a value (D-J2) — never a
     sentence, never `None` — a caller with a partial archive to render (the episode page)
@@ -1051,7 +1042,7 @@ def _read_verdict(report: ReportRead, *, world: str) -> str:
     the judge — the one reader that must not be fooled by it — refuses on."""
     if report.disposition is None:
         raise JudgeRefused(
-            f"world {world!r}: {report.reason or 'report.md carries no usable disposition'}")
+            f"world {world!r}: {report.reason or 'report.md carries no usable disposition'}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     return report.disposition
 
 
@@ -1062,7 +1053,7 @@ def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: froze
     contained to this world by `_grade_world` (J5 tier 2), so the siblings still grade.
     `world` is the world's own sub-bind; the directory is judged off ITS listing (#1049) —
     absent, or not a real directory, is `_archive_notes`' fact, not this one's."""
-    summaries = world.under(GATHER_SUMMARIES_DIRNAME).entries()
+    summaries = world.under(WORLD_LEAVES.gather_summaries).entries()
     if summaries.entries is None:
         return
     # `names_one_file` FIRST: a lead id off that grammar names a path outside this world's
@@ -1074,7 +1065,7 @@ def _check_gather_summaries(world: Bound, *, label: str, referenced_leads: froze
         if names_one_file(lead) and not summaries.has_file(f"{lead}.md"))
     if missing:
         raise JudgeRefused(
-            f"world {label!r}: gather_summaries/ is short {missing} — the archive left this "
+            f"world {label!r}: gather_summaries/ is short {missing} — the archive left this "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "world's supporting directory short of a lead its own investigation.md references; "
             "refusing rather than grading on a thinner view than it appears to have")
 
@@ -1152,7 +1143,7 @@ class FamilyGrade:
 def world_ledger_name(label: str, *, episode_token: str) -> str:
     """The one RELATIVE spelling of a world's own served ledger — the name every reader walks
     from the episode bind and every refusal says (#1049) — so its readers cannot drift."""
-    return f"{SERVED_DIRNAME}/{world_token_for(episode_token, label)}.jsonl"
+    return str(LAYOUT.served_world(world_token_for(episode_token, label)))
 
 
 def _read_run_end_record(world: Bound) -> RunEnd | None:
@@ -1165,10 +1156,10 @@ def _read_run_end_record(world: Bound) -> RunEnd | None:
     own — what the two fields mean is decided once, by the module that owns them, and the
     ticket lane takes the same answer (the coherence property
     `one_interpreter_for_the_exit_class` pins)."""
-    return parse_record(json_mapping(world, RUN_END_NAME))
+    return parse_record(json_mapping(world, WORLD_LEAVES.run_end))
 
 
-def read_archived_report(bound: Bound, name: str) -> ReportRead:
+def read_archived_report(bound: Bound, name: str | PurePath) -> ReportRead:
     """`report.md` through the world-archive screen (#1049) — a symlink, a hard link or a FIFO
     at the name reads as a report with no headline, never followed and never raised; nothing
     at the name answers the primitive's own ABSENT state (`ReportRead.absent`), never a
@@ -1185,7 +1176,8 @@ def read_archived_report(bound: Bound, name: str) -> ReportRead:
                           absent=True)
     if rec.text is None:
         return ReportRead(
-            disposition=None, reason=f"{REPORT_NAME} could not be read: {rec.refusal}",
+            disposition=None,
+            reason=f"{WORLD_LEAVES.report} could not be read: {rec.refusal}",
             frontmatter={}, body="", text="")
     return parse_report_text(rec.text)
 
@@ -1216,8 +1208,8 @@ def read_investigation_facts(bound: Bound, *, world: str) -> InvestigationFacts:
     """`worlds/<label>/investigation.md` alone: its text and its resolution facts, the
     primitive's absent state passed up as `.absent` (D-J2), or the archived-text refusal
     (`JudgeRefused`) when the document is present but not readable."""
-    name = f"{WORLDS_DIRNAME}/{world}/{INVESTIGATION_NAME}"
-    rec = _read_archived_text(bound, name, world=world, role=INVESTIGATION_NAME)
+    name = LAYOUT.world(world).investigation
+    rec = _read_archived_text(bound, name, world=world, role=str(WORLD_LEAVES.investigation))
     if rec.absent:
         return InvestigationFacts(
             investigation_text="", resolution_moved=False, resolutions_by_lead={}, absent=True)
@@ -1266,12 +1258,12 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str,
     document = read_investigation_facts(bound, world=label)
     if document.absent:
         raise JudgeRefused(
-            f"world {label!r}: {WORLDS_DIRNAME}/{label}/{INVESTIGATION_NAME} could not be read: "
+            f"world {label!r}: {LAYOUT.world(label).investigation} could not be read: "
             "nothing is at that name")
-    report = read_archived_report(bound, f"{WORLDS_DIRNAME}/{label}/{REPORT_NAME}")
+    report = read_archived_report(bound, LAYOUT.world(label).report)
     if report.absent:
         raise JudgeRefused(
-            f"world {label!r}: {WORLDS_DIRNAME}/{label}/{REPORT_NAME} could not be read: "
+            f"world {label!r}: {LAYOUT.world(label).report} could not be read: "
             "nothing is at that name")
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
@@ -1299,13 +1291,13 @@ def _archive_notes(world: Bound, *, facts: WorldFacts) -> list[str]:
     if facts.unlanded_document_rows:
         first = facts.unlanded_document_rows[0].strip()
         notes.append(
-            f"investigation.md has {len(facts.unlanded_document_rows)} row(s) or block(s) this "
+            f"investigation.md has {len(facts.unlanded_document_rows)} row(s) or block(s) this "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"pass could not read ({first[:120]!r}…) — they are outside every invlang fence, "
             "unreadable to the parser, or carry no lead id, so this world's resolution facts "
             "are read from what landed alone")
-    if facts.referenced_leads and world.under(GATHER_SUMMARIES_DIRNAME).entries().entries is None:
+    if facts.referenced_leads and world.under(WORLD_LEAVES.gather_summaries).entries().entries is None:
         notes.append(
-            f"gather_summaries/ is absent while investigation.md names "
+            f"gather_summaries/ is absent while investigation.md names "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(facts.referenced_leads)} — this world is graded on a thinner view than "
             "its own document claims")
     return notes
@@ -1325,18 +1317,21 @@ def _missing_required_input(
     # nothing here: absence is the pre-filter's question, a refused entry is the reader's, and
     # the walk that follows refuses at that component with its own reason — the world is
     # malformed, not missing.
-    served = bound.under(SERVED_DIRNAME).entries()
+    served_dir = LAYOUT.served
+    served = bound.under(served_dir).entries()
     if served.absent or (served.entries is not None
-                         and not served.has_file(ledger_name.removeprefix(f"{SERVED_DIRNAME}/"))):
+                         and not served.has_file(
+                             str(PurePosixPath(ledger_name).relative_to(served_dir)))):
         return f"served ledger ({ledger_name})"
-    world = bound.under(f"{WORLDS_DIRNAME}/{label}").entries()
-    if world.absent or (world.entries is not None and not world.has_file(REPORT_NAME)):
-        return REPORT_NAME
+    world = bound.under(LAYOUT.world(label).dir).entries()
+    if world.absent or (world.entries is not None
+                        and not world.has_file(WORLD_LEAVES.report.name)):
+        return str(WORLD_LEAVES.report)
     if world.entries is not None:
-        if not world.has_file(INVESTIGATION_NAME):
-            return INVESTIGATION_NAME
-        if not world.has_file(ALERT_NAME):
-            return ALERT_NAME
+        if not world.has_file(WORLD_LEAVES.investigation.name):
+            return str(WORLD_LEAVES.investigation)
+        if not world.has_file(WORLD_LEAVES.alert.name):
+            return str(WORLD_LEAVES.alert)
     if not isinstance(declared, str) or not declared:
         return "disposition_declared"
     return None
@@ -1376,7 +1371,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0913, PLR0915 — the bound and the
     # HAD already closed (`closed_before_cut`) keeps its own verdict instead — the exit class
     # is not an unconditional trump. `malformed` is deliberately absent here: this world's
     # inputs are neither missing (tier 1) nor wrong (tier 2), so the two tiers stay separable.
-    end = _read_run_end_record(bound.under(f"{WORLDS_DIRNAME}/{label}"))
+    end = _read_run_end_record(bound.under(LAYOUT.world(label).dir))
     if end is not None and end.truncated_by is not None and not end.closed_before_cut:
         row["ungradable"] = True
         row["cut_short"] = end.truncated_by
@@ -1417,7 +1412,7 @@ def _grade_world(  # noqa: C901, PLR0912, PLR0913, PLR0915 — the bound and the
     # malformed stay DIFFERENT ANSWERS, which is the distinction A8 probed and the tier rule
     # exists for — `malformed` is on the row beside `ungradable`, so a reader can still tell an
     # artifact that is not there from one that is there and wrong.
-    world_bound = bound.under(f"{WORLDS_DIRNAME}/{label}")
+    world_bound = bound.under(LAYOUT.world(label).dir)
     try:
         # THE ONE PATH LEFT ON THIS LANE: `leads_by_id` is `lead_repository`'s surface, shared
         # with the live run dir, and it takes the world's directory. The gate is the bind's
@@ -1635,9 +1630,13 @@ def _repository_leads(world: Bound, episode_dir: Path, label: str) -> dict[str, 
     listing = world.entries()
     if listing.entries is None:
         raise JudgeRefused(
-            f"world {label!r}: {WORLDS_DIRNAME}/{label} could not be listed: "
+            f"world {label!r}: {LAYOUT.world(label).dir} could not be listed: "
             f"{listing.reason or 'nothing is at that name'}")
-    return leads_by_id(episode_dir / WORLDS_DIRNAME / label)
+    # `.at(...)`, not `.world(label)`: this is a READ of a world the manifest declares, and
+    # the minting accessor re-asks decision 20's case-stability rule — which would refuse a
+    # label that names a real directory (#921's collision test loads exactly such a label
+    # as its positive control).
+    return leads_by_id(EpisodePaths(episode_dir).at(LAYOUT.world(label).dir))
 
 
 def is_gradable_row(row: Any) -> bool:

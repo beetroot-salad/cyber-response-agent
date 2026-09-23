@@ -758,7 +758,7 @@ def main(argv: list[str]) -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--investigation", required=True, help="Path to the investigation.md to derive the frontier from")
+    ap.add_argument("--investigation", required=True, help="Path to the investigation.md to derive the frontier from")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     ap.add_argument("--top-k", type=_positive_int, default=DEFAULT_TOP_K, help=f"How many lessons to return (default {DEFAULT_TOP_K})")
     ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}")
     ns = ap.parse_args(argv[1:])

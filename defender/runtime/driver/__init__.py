@@ -706,15 +706,15 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
         try:
-            write_guarded(run_dir / "tool_trace.jsonl", "")
+            write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
             # The fallback runs while an exception is already being handled, and its target is
             # a name the box can plant an alias at — unguarded, one planted entry converts "the
             # trace could not be built" into an uncaught OSError that ends the run at its last
             # step, discarding the summary and every artifact already written. The trace is
             # observability; the run's result is not.
-            print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "
-                  f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)
+            print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                  f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)  # lint-run-records: ok — an operator diagnostic naming the missing record
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(

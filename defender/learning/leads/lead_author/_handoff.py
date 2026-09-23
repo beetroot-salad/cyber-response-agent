@@ -76,7 +76,7 @@ QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 #: done, no dead letter and no retry. Distinct from 2 because it is not a fault: the request
 #: is intact and the next tick serves it.
 QUEUE_LOCK_SKIP_RC = 3
-LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"
+LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
 
 
 def _lift_threshold() -> int:
@@ -311,7 +311,7 @@ def invoke_agent(
     )
     user_prompt = stage_user_message(
         stage_salt,
-        wrap(context, "lead_author_context", stage_salt),
+        wrap(context, "lead_author_context", stage_salt),  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         wrap(structured_json_body(handoffs), "handoffs", stage_salt),
         wrap(
             structured_json_body(pending_drafts),

@@ -35,6 +35,7 @@ from typing import Any
 import yaml
 
 from defender import _yaml
+from defender._episode_paths import EpisodePaths
 from defender._io import guarded_mkdir, read_guarded, write_guarded
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
@@ -52,7 +53,8 @@ from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameab
 
 #: The manifest's filename inside an episode directory. Named once: the launcher writes it, the
 #: sibling reads it, and the archive keeps it.
-MANIFEST_NAME = "family.yaml"
+# `MANIFEST_NAME` was a re-binding of the owner's `FAMILY_NAME` (#1077 D7). The manifest IS
+# the family record; two names for it is what D7 removes.
 
 #: The base world's role. `A` is the control every other world is compared against, and the
 #: loader enforces that exactly one world claims it.
@@ -649,7 +651,7 @@ def write_family(episode_dir: Path, doc: dict) -> Path:
     # episodes root, which is host-controlled, and everything below it is reachable
     # from a sibling box's rw bind.
     guarded_mkdir(episode_dir, base=episode_dir.parent)
-    manifest = episode_dir / MANIFEST_NAME
+    manifest = EpisodePaths(episode_dir).family
     # GUARDED, because the episode dir is reachable from a box's rw bind: a link planted at the
     # manifest's name would send the family's own contract out of the episode, and every sibling
     # reads that document to learn which world it is.
@@ -969,7 +971,6 @@ __all__ = [
     "Family",
     "FamilyError",
     "LABEL_BASES",
-    "MANIFEST_NAME",
     "Overlay",
     "PATCHABLE_SYSTEMS",
     "RESERVED_WORLD_LABELS",

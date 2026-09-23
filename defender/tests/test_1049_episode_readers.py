@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import yaml
@@ -617,13 +617,16 @@ def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_n
     assert len(args) == 2, recording.calls
     assert kwargs == {}, recording.calls
     not_a_root(args[0])
-    assert args[1] == "review.yaml"
+    # THE NAME, not its spelling. The seam is handed the owner's own relative path object
+    # (#1077 D7) rather than a string a caller composed; `_io.Bound` takes `str | PurePath`
+    # and renders either through the same grammar, so what this pins is the record it names.
+    assert str(args[1]) == "review.yaml"
 
     samples = W.RecordingReader(W.read_yaml_record)
     R.write_bytes(ep / "samples.yaml", "logs-*: {}\n")
     assert family.read_samples_record(bound, reader=samples) == {"logs-*": {}}
     not_a_root(samples.calls[0][0][0])
-    assert samples.calls[0][0][1] == "samples.yaml"
+    assert str(samples.calls[0][0][1]) == "samples.yaml"
 
     nothing = W.RecordingReader(lambda _bound, _name: None)
     assert family.read_review_record(bound, reader=nothing) is None, "None must pass through"
@@ -632,7 +635,7 @@ def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_n
     family.grade_family(ep, review_reader=counted)
     assert counted.count == 1, counted.calls
     not_a_root(counted.calls[0][0][0])
-    assert counted.calls[0][0][1] == "review.yaml"
+    assert str(counted.calls[0][0][1]) == "review.yaml"
 
     page = E.page_module()
     (ep / "samples.yaml").unlink()
@@ -1013,6 +1016,16 @@ def test_1049_no_reader_in_the_census_receives_a_root_and_every_sub_bind_is_deri
     a mode-000 root is d-03's row; bind never raises for either, the fault is answered per
     name.
     """
+    # THE GRAMMAR FIRST, because the census below exempts a `PurePath` NAME parameter on the
+    # strength of it (#1077 D7 widened these readers to `str | PurePath` so the owner can hand
+    # them a record's relative path instead of a name they compose). A lexical path cannot
+    # name a root only because the bind refuses one — asserted here, not assumed.
+    with R.mod("_io").bind(tmp_path) as grammar_probe:
+        for escaping in (PurePosixPath("/etc/passwd"), "/etc/passwd", PurePosixPath("../x"),
+                         "..", PurePosixPath("a/../../b")):
+            with pytest.raises(ValueError, match="not a valid relative name"):
+                grammar_probe.read(escaping)
+
     for module, names in ROOTLESS_READERS.items():
         for name in names:
             fn = R.function_def(R.parsed(getattr(R.mod(module), name)), name)

@@ -63,7 +63,7 @@ def _invoke_lead_author(
     # under that lock is deferred to `on_done`, and a by-hand run that took the lock in the
     # gap between this serve and the scrub would otherwise re-serve the run (#952 M5).
     rc = _run_curator_module(
-        "lead_author",
+        "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         lambda mod: mod.run_under_held_queue_lock(
             run_dir, paths=paths, box=box, on_done=on_done,
         ),
@@ -110,7 +110,7 @@ def _maybe_trigger_author(
 
 
 _CURATOR_MODULES = {
-    "lead_author": "defender.learning.leads.lead_author",
+    "lead_author": "defender.learning.leads.lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "pitfalls_curator": "defender.learning.leads.pitfalls_curator",
     "author": "defender.learning.author.lessons.run",
     # #1007 M6/M7/R1: the second curator, one unit with `author` — same tick, same worktree,
@@ -344,10 +344,10 @@ def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
     queue and what is unlinked from `inflight/` are two halves of one hand-back, and a
     caller able to pass a spec belonging to some other claim could split them."""
     if requeue_marker(claim.queued_path, claim.spec):
-        _log(f"lead_author_drain: {note} — left queued for retry")
+        _log(f"lead_author_drain: {note} — left queued for retry")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     else:
         _log(
-            f"lead_author_drain: {note} — a fresher request for the same case landed "
+            f"lead_author_drain: {note} — a fresher request for the same case landed "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             "while it was claimed and supersedes it; dropping this one"
         )
     with contextlib.suppress(OSError):
@@ -438,7 +438,7 @@ def _drain_lead_author_markers(
     # `case_id`: this queue's live writer (`enqueue_case_for_curation`) mints the filename
     # from the case, so that is what an unreadable row's dead letter is keyed on.
     claims = claim_markers(
-        qdir, identity_key="case_id", label="lead_author_drain", noun="lead-author",
+        qdir, identity_key="case_id", label="lead_author_drain", noun="lead-author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     )
     served: list[ServedMarker] = []
     for claim in claims:
@@ -513,7 +513,7 @@ def _invoke_pitfalls(
 def _retire_pitfalls_batch(
     paths: LoopPaths, batch_ids: list[str], lock_wait_seconds: int | None, e: Exception,
 ) -> None:
-    _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")
+    _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     if not batch_ids:
         return
     drain.retire(
@@ -609,7 +609,7 @@ def _drain_box_request(
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
     rw_dirs: tuple[Path, ...]
-    if label == "lead_author_drain":
+    if label == "lead_author_drain":  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         rw_dirs = (wt_paths.skills_dir,)
     elif label == "author_drain":
         rw_dirs = (wt_paths.lessons_dir, wt_paths.lessons_questioner_dir)
@@ -941,7 +941,7 @@ def lead_author_drain(
 
     with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
         if not locked:
-            _log("lead_author_drain: another drainer holds the lock — exiting")
+            _log("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         # The per-author queue lock — the one a by-hand `lead_author.py <run_dir>` takes — is
         # held for the WHOLE tick, not per serve (#952 M5). The `done` sentinel used to be
@@ -951,11 +951,11 @@ def lead_author_drain(
         # Contended, the tick skips before claiming anything.
         queue_lock = acquire_queue_lock(paths)
         if queue_lock is None:
-            _log("lead_author_drain: another lead-author run holds the queue lock — skipping")
+            _log("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         try:
             return _run_worktree_batch(
-                paths, branch, label="lead_author_drain",
+                paths, branch, label="lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, run_lead_author, run_pitfalls, box=box,

@@ -4,7 +4,7 @@ import dataclasses
 import errno
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
 
@@ -122,7 +122,31 @@ TICKET_READS_MARKER = "ticket_reads"
 LEAD_CLAIM_SUFFIX = ".lead.json"
 REVIEW_RECORD_PREFIX = "review_record."
 TRACE_SUFFIX = ".trace.jsonl"
+
+#: The REVIEW GATE's own trace — `wire_logs/review_<role>_trace.jsonl`, one review stage's raw
+#: wrapped reply (`RunPaths.review_trace`). Its own constant, and NOT the stage seam's below,
+#: although the two spell the same eight characters today (#1077 D7).
+#:
+#: THEY ARE TWO RECORDS, not one. The review gate's trace belongs to a RUN and is keyed by the
+#: reviewing role; the stage seam's belongs to an EPISODE and is keyed by an agent id
+#: (`<agent_id>_trace.jsonl`, the questioner's and the judge's draws). Binding both to one
+#: name meant a change made for one silently renamed every file of the other — and the
+#: framed-companion pairing the episode page does would have broken with it, with no error
+#: anywhere, because the page pairs the two by stem.
 REVIEW_TRACE_SUFFIX = "_trace.jsonl"
+
+#: The STAGE SEAM's agent trace, and its FRAMED companion — `<agent_id>_trace.jsonl` and
+#: `<agent_id>_framed_trace.jsonl` under an episode's `wire_logs/`. The framed one carries the
+#: prompt/reply pair the seam does not itself produce (`judge._write_wire_log`); the episode
+#: page pairs them by stem, which is why they are composed by ONE owner (`WIRE_LOG_NAMES`)
+#: rather than two call sites each spelling half the pair.
+#: The line-delimited extension both trace families carry. Generic (decision 6 keeps bare
+#: suffixes out of the gate's part set), spelled here only so `trace_key` can drop it without
+#: a literal at the call site.
+JSONL_EXT = ".jsonl"
+
+AGENT_TRACE_SUFFIX = "_trace.jsonl"
+AGENT_FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` directory prefix — an EPISODE-level fragment, kept here
 #: (rather than only on `_episode_paths.py`) because D6's part set is read off this module;
 #: `_episode_paths.py` imports it rather than re-spelling it.
@@ -157,9 +181,235 @@ ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
 SESSIONS_DIRNAME = "sessions"
 
 
+# ==========================================================================================
+# THE LAYOUT — every run record as a path RELATIVE to the run dir (#1077 D7).
+#
+# One spelling, two views, mirroring `_episode_paths.EpisodeLayout`. The relative form exists
+# because the tree's screened readers (`_io.Bound`) address records by a name relative to the
+# root handle they hold and never by an absolute path; before D7 those callers hand-composed
+# that name out of an imported constant, which is the same drift as a hand-composed absolute
+# path. `payload_relpath` was this idea with one member.
+#
+# The three sidecars, the sessions dir and the session db have NO relative form and are not
+# here: they resolve against the runs BASE or its sibling, not against the run dir, and a
+# relative-to-the-run-dir spelling of them would be a lie a caller could join.
+# ==========================================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class RunLayout:
+    """Every run record, relative to the run dir. Stateless — see `RUN_LAYOUT`."""
+
+    # -- content the run produced -----------------------------------------------------------
+
+    @property
+    def alert(self) -> PurePosixPath:
+        return PurePosixPath(ALERT)
+
+    @property
+    def report(self) -> PurePosixPath:
+        return PurePosixPath(REPORT)
+
+    @property
+    def investigation(self) -> PurePosixPath:
+        return PurePosixPath(INVESTIGATION)
+
+    @property
+    def executed_queries(self) -> PurePosixPath:
+        return PurePosixPath(EXECUTED_QUERIES)
+
+    @property
+    def source_refs(self) -> PurePosixPath:
+        return PurePosixPath(SOURCE_REFS)
+
+    @property
+    def gather_raw(self) -> PurePosixPath:
+        return PurePosixPath(RAW_MARKER)
+
+    @property
+    def gather_summaries(self) -> PurePosixPath:
+        return PurePosixPath(GATHER_SUMMARIES_DIRNAME)
+
+    @property
+    def lead_author(self) -> PurePosixPath:
+        return PurePosixPath(LEAD_AUTHOR_DIRNAME)
+
+    @property
+    def ticket_reads(self) -> PurePosixPath:
+        return PurePosixPath(TICKET_READS_MARKER)
+
+    @property
+    def wire_log_dir(self) -> PurePosixPath:
+        return PurePosixPath(WIRE_LOG_DIR)
+
+    @property
+    def wire_log(self) -> PurePosixPath:
+        return self.wire_log_dir / WIRE_LOG
+
+    @property
+    def tool_trace(self) -> PurePosixPath:
+        return PurePosixPath(TOOL_TRACE)
+
+    @property
+    def policy_denials(self) -> PurePosixPath:
+        return PurePosixPath(POLICY_DENIALS)
+
+    @property
+    def budget(self) -> PurePosixPath:
+        return PurePosixPath(BUDGET)
+
+    @property
+    def circuit_breaker(self) -> PurePosixPath:
+        return PurePosixPath(CIRCUIT_BREAKER)
+
+    @property
+    def lessons_loaded(self) -> PurePosixPath:
+        return PurePosixPath(LESSONS_LOADED)
+
+    @property
+    def ticket_write(self) -> PurePosixPath:
+        return PurePosixPath(TICKET_WRITE)
+
+    @property
+    def session_pointer(self) -> PurePosixPath:
+        return PurePosixPath(SESSION_POINTER)
+
+    @property
+    def runtime_html(self) -> PurePosixPath:
+        return PurePosixPath(RUNTIME_HTML)
+
+    @property
+    def box_sentinel(self) -> PurePosixPath:
+        return PurePosixPath(BOX_SENTINEL)
+
+    @property
+    def provenance(self) -> PurePosixPath:
+        return PurePosixPath(PROVENANCE)
+
+    # -- composing — decision 2's SHAPE half lives here, containment stays on `RunPaths` -----
+
+    def payload(self, lead_id: str, seq: int) -> PurePosixPath:
+        """`gather_raw/<lead_id>/<seq>.json` — the by-ref gather payload (O8's relative form,
+        the string the queries row records)."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        seq = _check_index(seq, what="seq")
+        return self.gather_raw / lead_id / f"{seq}{PAYLOAD_SUFFIX}"
+
+    def lead_claim(self, lead_id: str) -> PurePosixPath:
+        """`gather_raw/<lead_id>.lead.json` — the per-lead exclusive-create claim sidecar."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        return self.gather_raw / f"{lead_id}{LEAD_CLAIM_SUFFIX}"
+
+    def gather_summary(self, lead_id: str) -> PurePosixPath:
+        """`gather_summaries/<lead_id>.md`."""
+        lead_id = _check_component(lead_id, what="lead_id")
+        return self.gather_summaries / f"{lead_id}.md"
+
+    def ticket_read(self, seq: int) -> PurePosixPath:
+        """`ticket_reads/<seq>.json` — the retired pipeline judge's closed-ticket capture."""
+        seq = _check_index(seq, what="seq")
+        return self.ticket_reads / f"{seq}{PAYLOAD_SUFFIX}"
+
+    def forward_check_trace(self, prefix: str, stem: str, n: int) -> PurePosixPath:
+        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl`."""
+        prefix = _check_component(prefix, what="prefix")
+        stem = _check_component(stem, what="stem")
+        n = _check_index(n, what="n")
+        return self.wire_log_dir / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
+
+    def review_trace(self, role: str) -> PurePosixPath:
+        """`wire_logs/review_<role>_trace.jsonl`."""
+        role = _check_component(role, what="role")
+        return self.wire_log_dir / f"review_{role}{REVIEW_TRACE_SUFFIX}"
+
+    def review_record(self, turn: int = 1) -> PurePosixPath:
+        """`review_record.<turn>.json`."""
+        turn = _check_index(turn, what="turn")
+        return PurePosixPath(f"{REVIEW_RECORD_PREFIX}{turn}.json")
+
+
+#: The run layout, as one value. Stateless, so one instance serves every caller.
+RUN_LAYOUT = RunLayout()
+
+
+@dataclasses.dataclass(frozen=True)
+class WireLogNames:
+    """The LEAF names that land under a `wire_logs/` directory (#1077 D7).
+
+    `observe.stage_trace_path(root, name)` joins one of these under whichever root a stage
+    runs against — a run dir, an episode dir, a curator batch's tree — so the leaf is the only
+    part the caller chooses, and it is the part that used to be composed by hand at four
+    unrelated call sites out of two constants shared between three record families.
+
+    `agent_trace` and `agent_framed_trace` are ONE PAIR and are spelled here together: the
+    episode page finds a trace's framed companion by stripping the suffix and matching stems
+    (`visualize_episode._load_wire_logs`), so a change to one that does not reach the other
+    leaves every framed row keyed to a stem no trace holds — no error, just a page that
+    renders no prompt/reply pairs. `stem_of` is the strip half, owned here for the same reason.
+    """
+
+    def agent_trace(self, agent_id: str) -> str:
+        """`<agent_id>_trace.jsonl` — one stage seam's raw wire trace."""
+        return f"{self._agent_stem(agent_id)}{AGENT_TRACE_SUFFIX}"
+
+    def agent_framed_trace(self, agent_id: str) -> str:
+        """`<agent_id>_framed_trace.jsonl` — its framed prompt/reply companion."""
+        return f"{self._agent_stem(agent_id)}{AGENT_FRAMED_TRACE_SUFFIX}"
+
+    def trace_key(self, name: str) -> str:
+        """The key a trace and its FRAMED companion share — what the episode page pairs on.
+
+        Both suffixes, in one function, because the pairing is the whole point: the page used
+        to derive this key by two different hand-spelled arithmetics, one per branch — strip
+        `_framed_trace.jsonl` and append `"_trace"`, or strip `.jsonl`. They agreed only
+        because the two suffixes happened to line up. Either one moving left every framed row
+        keyed to a stem no trace holds, and the page renders no prompt/reply pair, silently.
+
+        Normalise the framed spelling onto the unframed one, then drop the extension — so the
+        two halves cannot disagree whatever the suffixes become.
+        """
+        if name.endswith(AGENT_FRAMED_TRACE_SUFFIX):
+            name = name[: -len(AGENT_FRAMED_TRACE_SUFFIX)] + AGENT_TRACE_SUFFIX
+        return name.removesuffix(JSONL_EXT)
+
+    def is_framed(self, name: str) -> bool:
+        return name.endswith(AGENT_FRAMED_TRACE_SUFFIX)
+
+    def is_agent_trace(self, name: str) -> bool:
+        """An unframed stage-seam trace — the half the page reads rows from."""
+        return name.endswith(AGENT_TRACE_SUFFIX)
+
+    def forward_check(self, prefix: str, stem: str, n: int) -> str:
+        """`<prefix>.<stem>.<n>.trace.jsonl` — the forward-check verifier's own family."""
+        return f"{_check_component(prefix, what='prefix')}." \
+               f"{_check_component(stem, what='stem')}." \
+               f"{_check_index(n, what='n')}{TRACE_SUFFIX}"
+
+    def curator_batch(self, batch_id: str, pid: int) -> str:
+        """`<batch_id>.<pid>.trace.jsonl` — one curator spawn's own family."""
+        return f"{batch_id}.{_check_index(pid, what='pid')}{TRACE_SUFFIX}"
+
+    @staticmethod
+    def _agent_stem(agent_id: str) -> str:
+        """An agent id carries `:` (`judge:world-b`), which is not a filename character this
+        design wants to reason about. Folded HERE rather than at each call site, where three
+        copies of `agent_id.replace(':', '_')` stood."""
+        return _check_component(str(agent_id).replace(":", "_"), what="agent_id")
+
+
+#: The wire-log leaf names, as one value.
+WIRE_LOG_NAMES = WireLogNames()
+
+
 @dataclasses.dataclass(frozen=True)
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
+
+    19 accessors, and the count is stated here on purpose: #647's census test asserts this
+    docstring agrees with the set it pins, so a class that gains or loses a record cannot
+    leave prose describing a different one. The assertion was deleted rather than re-pointed
+    when D1 grew the set from seven, which is the drift it exists to catch, happening to
+    itself.
 
     Every accessor resolves relative to ``run_dir``, so construct ``RunPaths(some_dir)`` on
     whichever root you hold. ONE root, deliberately: a caller needing a second (the per-case
@@ -189,39 +439,43 @@ class RunPaths:
 
     @property
     def alert(self) -> Path:
-        return self.run_dir / ALERT
+        return self.run_dir / RUN_LAYOUT.alert
 
     @property
     def report(self) -> Path:
-        return self.run_dir / REPORT
+        return self.run_dir / RUN_LAYOUT.report
 
     @property
     def investigation(self) -> Path:
-        return self.run_dir / INVESTIGATION
+        return self.run_dir / RUN_LAYOUT.investigation
 
     @property
     def executed_queries(self) -> Path:
-        return self.run_dir / EXECUTED_QUERIES
+        return self.run_dir / RUN_LAYOUT.executed_queries
 
     @property
     def source_refs(self) -> Path:
         """No writer in the repo (claim R9 — test helpers only); the accessor exists because
         the answer-key set and the case-answer-key deny key on this name."""
-        return self.run_dir / SOURCE_REFS
+        return self.run_dir / RUN_LAYOUT.source_refs
 
     @property
     def gather_raw(self) -> Path:
-        return self.run_dir / RAW_MARKER
+        return self.run_dir / RUN_LAYOUT.gather_raw
+
+    @property
+    def gather_summaries(self) -> Path:
+        """The directory `gather_summary` composes into — the judge's directory-of-summaries
+        role, walked whole by the driver's pointer builder and the archive."""
+        return self.run_dir / RUN_LAYOUT.gather_summaries
 
     @property
     def lead_author(self) -> Path:
-        return self.run_dir / LEAD_AUTHOR_DIRNAME
+        return self.run_dir / RUN_LAYOUT.lead_author
 
     def payload(self, lead_id: str, seq: int) -> Path:
         """`gather_raw/<lead_id>/<seq>.json` — the by-ref gather payload (O8's absolute form)."""
-        lead_id = _check_component(lead_id, what="lead_id")
-        seq = _check_index(seq, what="seq")
-        target = self.run_dir / RAW_MARKER / lead_id / f"{seq}{PAYLOAD_SUFFIX}"
+        target = self.run_dir / RUN_LAYOUT.payload(lead_id, seq)
         return _confine(target, self.run_dir, what="payload")
 
     def payload_relpath(self, lead_id: str, seq: int) -> str:
@@ -229,92 +483,84 @@ class RunPaths:
         returned unconditionally: no shape detection, no refusal for an already-absolute
         caller assumption (§7 non-material item 8) — choosing the right accessor is the
         caller's own duty."""
-        return str(self.payload(lead_id, seq).relative_to(self.run_dir))
+        return str(RUN_LAYOUT.payload(lead_id, seq))
 
     def lead_claim(self, lead_id: str) -> Path:
         """`gather_raw/<lead_id>.lead.json` — the per-lead exclusive-create claim sidecar."""
-        lead_id = _check_component(lead_id, what="lead_id")
-        target = self.run_dir / RAW_MARKER / f"{lead_id}{LEAD_CLAIM_SUFFIX}"
+        target = self.run_dir / RUN_LAYOUT.lead_claim(lead_id)
         return _confine(target, self.run_dir, what="lead_claim")
 
     def gather_summary(self, lead_id: str) -> Path:
         """`gather_summaries/<lead_id>.md`."""
-        lead_id = _check_component(lead_id, what="lead_id")
-        target = self.run_dir / GATHER_SUMMARIES_DIRNAME / f"{lead_id}.md"
+        target = self.run_dir / RUN_LAYOUT.gather_summary(lead_id)
         return _confine(target, self.run_dir, what="gather_summary")
 
     def ticket_read(self, seq: int) -> Path:
         """`ticket_reads/<seq>.json` — the retired pipeline judge's closed-ticket capture; the
         payload read cap keys on this name (D1's stated reason for keeping the accessor)."""
-        seq = _check_index(seq, what="seq")
-        target = self.run_dir / TICKET_READS_MARKER / f"{seq}{PAYLOAD_SUFFIX}"
+        target = self.run_dir / RUN_LAYOUT.ticket_read(seq)
         return _confine(target, self.run_dir, what="ticket_read")
 
     @property
     def wire_log(self) -> Path:
-        return self.run_dir / WIRE_LOG_DIR / WIRE_LOG
+        return self.run_dir / RUN_LAYOUT.wire_log
 
     def forward_check_trace(self, prefix: str, stem: str, n: int) -> Path:
         """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl` — the learning forward-check verifier's
         trace, written into the CITED run's own dir while reading it as evidence."""
-        prefix = _check_component(prefix, what="prefix")
-        stem = _check_component(stem, what="stem")
-        n = _check_index(n, what="n")
-        target = self.run_dir / WIRE_LOG_DIR / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
+        target = self.run_dir / RUN_LAYOUT.forward_check_trace(prefix, stem, n)
         return _confine(target, self.run_dir, what="forward_check_trace")
 
     def review_trace(self, role: str) -> Path:
         """`wire_logs/review_<role>_trace.jsonl` — one review stage's raw wrapped reply,
         re-homed from `challenge_gate` (#1077 D1)."""
-        role = _check_component(role, what="role")
-        target = self.run_dir / WIRE_LOG_DIR / f"review_{role}{REVIEW_TRACE_SUFFIX}"
+        target = self.run_dir / RUN_LAYOUT.review_trace(role)
         return _confine(target, self.run_dir, what="review_trace")
 
     def review_record(self, turn: int = 1) -> Path:
         """`review_record.<turn>.json`, re-homed from `challenge_gate` (#1077 D1)."""
-        turn = _check_index(turn, what="turn")
-        target = self.run_dir / f"{REVIEW_RECORD_PREFIX}{turn}.json"
+        target = self.run_dir / RUN_LAYOUT.review_record(turn)
         return _confine(target, self.run_dir, what="review_record")
 
     @property
     def tool_trace(self) -> Path:
-        return self.run_dir / TOOL_TRACE
+        return self.run_dir / RUN_LAYOUT.tool_trace
 
     @property
     def policy_denials(self) -> Path:
-        return self.run_dir / POLICY_DENIALS
+        return self.run_dir / RUN_LAYOUT.policy_denials
 
     @property
     def budget(self) -> Path:
-        return self.run_dir / BUDGET
+        return self.run_dir / RUN_LAYOUT.budget
 
     @property
     def circuit_breaker(self) -> Path:
-        return self.run_dir / CIRCUIT_BREAKER
+        return self.run_dir / RUN_LAYOUT.circuit_breaker
 
     @property
     def lessons_loaded(self) -> Path:
-        return self.run_dir / LESSONS_LOADED
+        return self.run_dir / RUN_LAYOUT.lessons_loaded
 
     @property
     def ticket_write(self) -> Path:
-        return self.run_dir / TICKET_WRITE
+        return self.run_dir / RUN_LAYOUT.ticket_write
 
     @property
     def session_pointer(self) -> Path:
-        return self.run_dir / SESSION_POINTER
+        return self.run_dir / RUN_LAYOUT.session_pointer
 
     @property
     def runtime_html(self) -> Path:
-        return self.run_dir / RUNTIME_HTML
+        return self.run_dir / RUN_LAYOUT.runtime_html
 
     @property
     def box_sentinel(self) -> Path:
-        return self.run_dir / BOX_SENTINEL
+        return self.run_dir / RUN_LAYOUT.box_sentinel
 
     @property
     def provenance(self) -> Path:
-        return self.run_dir / PROVENANCE
+        return self.run_dir / RUN_LAYOUT.provenance
 
     # -- upward: the runs base, and the sessions dir beside it -------------------------------
 
@@ -409,6 +655,29 @@ _PAYLOAD_SHAPES = (
 CASE_ANSWER_KEY_NAMES = frozenset(
     {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
 )
+
+
+def is_case_answer_key(name: str) -> bool:
+    """Is `name` one of the case's answer-key artifacts? (#1077 D7)
+
+    A PREDICATE, so the read gate asks rather than holds. It used to import the frozenset
+    above, which put four record names in the permission layer's namespace — and a set of
+    names is a held copy exactly like a single one is.
+    """
+    return name in CASE_ANSWER_KEY_NAMES
+
+
+def gather_summaries_shape(segment: str) -> str:
+    """`gather_summaries/<segment>` as a REGEX fragment, the directory name ESCAPED.
+
+    The escape is the point (#1077 D7 review). This fragment builds a positive READ GRANT for
+    MAIN and GATHER, and the site that composed it interpolated the bare directory name into
+    an f-string pattern. A constant that ever gained a regex metacharacter would silently
+    widen the grant — a `.` admits `gather_summariesX/foo` — or raise `re.error` at import and
+    take the whole permission module, and every run with it, down. The sibling shape one
+    module over already escaped its own constant; this is the same rule, owned once.
+    """
+    return f"{re.escape(GATHER_SUMMARIES_DIRNAME)}/{segment}"
 
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.
 _RESOLVE_ERRORS = (OSError, RuntimeError, ValueError)

@@ -311,7 +311,7 @@ def cross_check_tables(run_dir: Path) -> None:
         return
     if not xcheck["ok"]:
         print(
-            "[run.py] WARN narration cross-check FAILED — the live tables "
+            "[run.py] WARN narration cross-check FAILED — the live tables "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "disagree with investigation.md's :L rows:",
             file=sys.stderr,
         )

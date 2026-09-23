@@ -137,7 +137,7 @@ def parse_report(run_dir: Path) -> ReportRead:
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:
     p = RunPaths(run_dir).alert
     if not p.is_file():
-        body = '<div class="empty">no alert.json</div>'
+        body = '<div class="empty">no alert.json</div>'  # lint-run-records: ok — page text naming the record for a reader, not a path
     else:
         try:
             body = pretty_json_html(json.loads(p.read_text(encoding="utf-8")))

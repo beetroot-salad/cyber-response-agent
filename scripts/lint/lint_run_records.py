@@ -341,6 +341,126 @@ def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:
     return names
 
 
+#: (c) D7's rule, in its tightened form. The owner exports these NON-RECORD names; a swept
+#: module may import any of them. Everything else an owner module binds at module level is a
+#: record name, and importing one is refused.
+#:
+#: WHY AN ALLOW-LIST RATHER THAN A DENY-LIST. The deny side is the thing that grows: a record
+#: added to an owner is a record the gate must protect the day it lands, and a deny-list is a
+#: second place to remember. The exports below are a closed set — the handles, the two shape
+#: validators the permission layer keys on, and three values that are not records at all — so
+#: a new record is refused by default and a new non-record EXPORT is a deliberate line here.
+_OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
+    # The handles and their layout views — the whole point of D7.
+    "RunPaths", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES",
+    "EpisodePaths", "EpisodeLayout", "LAYOUT", "WorldPaths", "WorldLayout",
+    "ArchivedWorldLeaves", "WORLD_LEAVES", "Run", "RunRecord",
+    # Entry screens, which take a path and answer about the ENTRY, never a name.
+    "artifact_file", "artifact_dir", "plain_file", "contained_payload", "entry_present",
+    # Not record names: an id shape, a regex body, a read-grant shape, a metadata KEY on a
+    # tool-return part, a refusal sentence, and the tenant vocabulary.
+    "LEAD_ID_RE", "LEAD_ID_BODY", "GATHER_RAW_SHAPE", "GATE_METADATA_KEY",
+    "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED", "DEFAULT_TENANT_ID",
+    "TENANT_RECORD_NAME",
+})
+
+_OWNER_MODULE_NAMES: frozenset[str] = frozenset(
+    m.removesuffix(".py") for m in OWNER_MODULES)
+
+
+def _owner_record_names() -> frozenset[str]:
+    """Every NAME an owner module binds to a string at module level, minus the non-record
+    exports above — computed by importing the owners, never typed out here.
+
+    Computed rather than listed for the reason `_accessor_names` is: a record added to an
+    owner must be protected the day it lands, and a hand-kept deny-list is a second place to
+    remember. A binding that is not a string (the handles, the screens, the predicates, the
+    shape builders) is not a record name and needs no entry anywhere.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    import importlib  # noqa: PLC0415
+
+    names: set[str] = set()
+    for mod_name in sorted(_OWNER_MODULE_NAMES):
+        mod = importlib.import_module(f"defender.{mod_name}")
+        names |= {
+            n for n, v in vars(mod).items()
+            if isinstance(v, str) and not n.startswith("_")
+            and n not in _OWNER_NON_RECORD_EXPORTS
+        }
+    return frozenset(names)
+
+
+#: The names the import arm refuses, read off the owners themselves.
+OWNER_RECORD_NAMES: frozenset[str] = _owner_record_names()
+
+
+def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Finding]:
+    """(c) NO MODULE OUTSIDE THE OWNERS MAY HOLD A RECORD NAME (#1077 D7).
+
+    D6 banned SPELLING a record name. That is one word too loose, and the gap is not
+    theoretical: a module that imports `SESSION_POINTER` and writes
+    `run_dir / session_store.POINTER_FILENAME` spells nothing the literal pass can see, and
+    the join carries no owner value the accessor pass can trace — so ~20 such sites sat in a
+    tree the gate certified clean. Worse, the alias OUTLIVES ITS HOME: when `ledger.py`
+    stopped exporting two names it had re-bound, six modules broke at once, at import, with
+    nothing having warned.
+
+    So the rule is HOLD, not spell, and it is checkable without dataflow — three fixed shapes:
+
+      * `from <owner> import NAME` — the name a consumer binds.
+      * `<owner_alias>.NAME` — an attribute read on an owner imported whole.
+      * a re-export of either under `__all__`, which is how one second home becomes six.
+    """
+    findings: list[Finding] = []
+    owner = _enclosing(tree)
+    whole_module_aliases: dict[str, str] = {}
+
+    def report(node: ast.AST, name: str, why: str) -> None:
+        lineno = getattr(node, "lineno", 0)
+        if _suppressed(lineno, lines):
+            return
+        fn = owner.get(node, "<module>")
+        findings.append(Finding(
+            fingerprint=f"{rel}::{fn}::{lineno}::holds record name ({name})",
+            display=f"{rel}:{lineno} {fn}(): {why} — nothing outside the owner modules may "
+                     f"HOLD a record name; ask the owner for the path or its relative form",
+        ))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            # `from defender import _run_paths` binds the MODULE, not a name in it — the
+            # second of the three shapes, and the one `_artifact_schema.py` used to hold two
+            # record names through. Recorded here as well as on `import x.y`, or the
+            # attribute arm below never sees it.
+            for alias in node.names:
+                if alias.name in _OWNER_MODULE_NAMES:
+                    whole_module_aliases[alias.asname or alias.name] = alias.name
+            if node.module.split(".")[-1] not in _OWNER_MODULE_NAMES:
+                continue
+            for alias in node.names:
+                if alias.name not in OWNER_RECORD_NAMES:
+                    continue
+                report(node, alias.name,
+                       f"imports the record name {alias.name!r} from an owner module")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[-1] in _OWNER_MODULE_NAMES:
+                    whole_module_aliases[alias.asname or alias.name.split(".")[-1]] = alias.name
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in whole_module_aliases
+            and node.attr in OWNER_RECORD_NAMES
+        ):
+            report(node, node.attr,
+                   f"reads the record name {node.attr!r} off an owner module")
+    return findings
+
+
 def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> list[Finding]:
     """The gate's whole sweep: checks (a) and (b), over every file `sweep_files` names minus
     the ones an `allow_list` entry admits (D7's migration-in-flight mechanism — a module named
@@ -366,6 +486,7 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
         lines = text.splitlines()
         findings.extend(_scan_literal_pass(rel, tree, lines, whole, parts))
         findings.extend(_scan_accessor_pass(rel, tree, lines, accessor_names))
+        findings.extend(_scan_import_pass(rel, tree, lines))
     return findings
 
 

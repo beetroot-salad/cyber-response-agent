@@ -33,6 +33,8 @@ import json
 import os
 from pathlib import Path
 
+from defender._run_paths import RunPaths
+
 import pytest
 
 from defender.tests._defender_sql import EXIT_OK, assert_query_error, run_sql_py
@@ -401,7 +403,7 @@ def test_run_dir_case_id_and_session_id_deliberately_diverge(tmp_path):
 
     assert len({"case-alpha", session_id, run_dir.name}) == 3, (
         "the fixture must make the three differ, or a wrong reach reads as correct")
-    pointer = json.loads((run_dir / ss.POINTER_FILENAME).read_text())
+    pointer = json.loads(RunPaths(run_dir).session_pointer.read_text())
     assert pointer["case_id"] == "case-alpha" != run_dir.name
     rows = dict(sql(store, "SELECT session_id, case_id FROM session"))
     assert rows[fork] == "case-alpha", "case_id is inherited by the fork"

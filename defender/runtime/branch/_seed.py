@@ -32,10 +32,10 @@ from defender._io import (
     read_jsonl_rows,
     write_guarded,
 )
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._run_paths import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
 
 from ._spec import BranchError, BranchSpec
-from ._frontier import _LEAD_DIRS, fence_count_at, leads_at, source_session
+from ._frontier import _lead_dirs, fence_count_at, leads_at, source_session
 from ._frontier import _lead_of
 
 
@@ -43,13 +43,16 @@ from ._frontier import _lead_of
 #: sibling's evidence IS those rows, and a run dir that dropped them would report a run that
 #: gathered nothing and then reasoned about it.
 #:
-#: DERIVED FROM `_LEAD_DIRS`, not spelled beside it. Three readers ask about the same set — the
+#: DERIVED FROM `_lead_dirs()`, not spelled beside it. Three readers ask about the same set — the
 #: census (`_known_leads`), the copy (`_inherit_evidence`) and this refusal — and while each
 #: wrote its own tuple they could name different ones with nothing red: a fourth per-lead
 #: artifact added HERE is then refused in a fresh sibling's run dir and never copied into it, so
 #: the prefix names a path the sibling does not hold and `decide_read` denies the model its own
 #: history — the exact failure this tuple exists to prevent, arriving through the tuple.
-_INHERITED = ("executed_queries.jsonl", *_LEAD_DIRS)
+def _inherited() -> tuple[str, ...]:
+    """The run-dir entries a sibling inherits from its source, asked of the owner per call
+    (#1077 D7) — the queries table plus the two per-lead directories."""
+    return (RUN_LAYOUT.executed_queries.name, *_lead_dirs())
 
 
 def refuse_seeded_run_dir(run_dir: Path) -> None:
@@ -61,7 +64,7 @@ def refuse_seeded_run_dir(run_dir: Path) -> None:
     retried resume, which is exactly what hits this refusal, adds another every time.
     """
     run_dir = Path(run_dir)
-    present = [name for name in (RunPaths(run_dir).investigation.name, *_INHERITED)
+    present = [name for name in (RunPaths(run_dir).investigation.name, *_inherited())
                if _holds_content(run_dir / name)]
     if present:
         raise BranchError(
@@ -135,7 +138,7 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     """
     if spec is None:
         return 0
-    from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact
+    from defender._artifact_schema import validate_artifact
     from defender.skills.invlang.parser import scan_fences
 
     target = RunPaths(Path(run_dir)).investigation
@@ -189,7 +192,7 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # for exactly the hazard above: a `:V` row whose `:E` row landed in a LATER message leaves
     # the prefix holding an orphan the SOURCE committed, so a baseline-blind reading would
     # refuse a cut of a document that validates as a whole.
-    reason = validate_artifact(INVESTIGATION_NAME, seed, seed)
+    reason = validate_artifact(RUN_LAYOUT.investigation.name, seed, seed)
     if reason is not None:
         raise BranchError(
             f"the {fences}-fence prefix of "
@@ -235,7 +238,7 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
     # few hundred bytes and makes the guarantee the seam's, so `run_investigation(resume=…)`
     # holds it for every caller rather than only for the one CLI that remembers.
     #
-    # NOT in `_INHERITED`: that tuple is what `refuse_seeded_run_dir` reads, and an alert is
+    # NOT in `_inherited()`: that set is what `refuse_seeded_run_dir` reads, and an alert is
     # exactly what a freshly materialised sibling legitimately already holds — listing it there
     # would refuse every sibling a launcher prepared.
     alert = RunPaths(source_run_dir).alert
@@ -271,7 +274,7 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
             # someone converts this seed to an append, which is the one drift the gate exists
             # to catch.
             "".join(json.dumps(row) + "\n" for row in rows))
-    for name in _LEAD_DIRS:
+    for name in _lead_dirs():
         _inherit_lead_dir(source_run_dir / name, run_dir / name, leads, run_dir)
 
 
@@ -347,7 +350,7 @@ def _not_a_plain_file(path: Path) -> str:
             "outside the run into the sibling under that name")
     if artifact_dir(path):
         return (
-            "a directory where a run writes only files (`gather_raw/{lead}/{seq}.json`, "
+            "a directory where a run writes only files (`gather_raw/{lead}/{seq}.json`, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "`{lead}.lead.json`, `{lead}.md`) — a sibling's evidence is what the source "
             "actually wrote, and nothing this system writes puts a directory here")
     return (

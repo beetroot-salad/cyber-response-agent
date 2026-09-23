@@ -231,7 +231,7 @@ def migrate_tree(cases_dir: Path) -> tuple[int, int]:
     Returns `(files_rewritten, payloads_rewritten)`. Idempotent: a second call over an
     already-migrated tree touches no file and returns `(0, 0)`.
     """
-    paths = set(cases_dir.glob("*/hidden/observed/**/*.json"))
+    paths = set(cases_dir.glob("*/hidden/observed/**/*.json"))  # lint-run-records: ok — an eval case's own file under the case tree, never a run record
     paths.update(cases_dir.glob("*/hidden/controls/**/*.json"))
 
     files_rewritten = 0

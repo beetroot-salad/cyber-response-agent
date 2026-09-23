@@ -33,7 +33,8 @@ THREE §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED, not as readings this file pic
   signal from the learning loop.
 
 RED against `59bdea44`: `learning/judge/family.py` has no cut-short check, `WorldFacts` has no
-`cut_short` field, and `archive.RUN_END_NAME` does not exist.
+`cut_short` field, and the archived run-end record has no name anywhere (it is now the
+episode owner's, reached as `WORLD_LEAVES.run_end` — #1077 D7).
 """
 from __future__ import annotations
 

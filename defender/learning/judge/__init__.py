@@ -37,12 +37,8 @@ from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
-from defender.learning.branch.archive import (  # noqa: E402
-    DRAWS_DIRNAME,
-    JUDGE_NAME,
-    REVIEW_NAME,
-    WORLDS_DIRNAME,
-)
+from defender._run_paths import WIRE_LOG_NAMES  # noqa: E402
+from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
@@ -208,7 +204,7 @@ def _known_keys(record: type, doc: dict[Any, Any]) -> dict[Any, Any]:
 
 
 def _judge_yaml_path(episode_dir: Path) -> Path:
-    return Path(episode_dir) / JUDGE_NAME
+    return EpisodePaths(episode_dir).judge
 
 
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
@@ -221,12 +217,12 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     # NOTHING AT THIS NAME (`None`) is an ordinary ungraded episode, while SOMETHING that is not
     # the record is the refusal.
     with bind(Path(episode_dir)) as bound:
-        return family_mod.screened_yaml_mapping(bound, JUDGE_NAME, what="the family grade")
+        return family_mod.screened_yaml_mapping(bound, LAYOUT.judge, what="the family grade")
 
 
 def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
     if not review:
-        return "incomplete", f"no {REVIEW_NAME} on disk"
+        return "incomplete", f"no {LAYOUT.review} on disk"
     episode = review.get("episode")
     outcome = episode.get("outcome") if isinstance(episode, dict) else None
     reason = episode.get("reason") if isinstance(episode, dict) else None
@@ -312,7 +308,7 @@ def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threade
         episode_dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
         lessons_commit=lessons_commit, union=union, manifest=manifest,
         review=review, samples=samples, bound=bound)
-    guarded_mkdir(Path(episode_dir) / WORLDS_DIRNAME / label / DRAWS_DIRNAME, base=episode_dir)
+    guarded_mkdir(EpisodePaths(episode_dir).world(label).draws, base=episode_dir)
     return run_mod._build_prompt(judge_input)
 
 
@@ -331,8 +327,8 @@ def _run_world_draws(
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
-    world_dir = Path(episode_dir) / WORLDS_DIRNAME / label
-    draw_dir = world_dir / DRAWS_DIRNAME
+    world = EpisodePaths(episode_dir).world(label)
+    world_dir = world.dir
 
     completed = 0
     spread: Counter[str] = Counter()
@@ -342,7 +338,7 @@ def _run_world_draws(
         agent_id = f"judge:{label}:{n}"
         wiring = StageWiring(
             prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
-            trace_name=f"{agent_id.replace(':', '_')}_trace.jsonl", label=agent_id)
+            trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
         reply_text: str | None = None
         doc: dict[str, Any]
         try:
@@ -380,7 +376,7 @@ def _run_world_draws(
                 # enqueue, which reads the draw directory back, would queue that older pass's
                 # findings as this one's. Removing it is what makes "this pass wrote nothing at
                 # index n" true on disk as well as in memory.
-                (draw_dir / f"{n}.yaml").unlink(missing_ok=True)
+                world.draw(n).unlink(missing_ok=True)
                 continue
             doc = run_mod._draw_document(reply, world_dir=world_dir, scope=scope)
             completed += 1
@@ -393,8 +389,8 @@ def _run_world_draws(
         # pins that a link planted at this sink REFUSES the pass rather than being written
         # through or noted and passed over. The draw file is the artifact the enqueue reads back,
         # so an aliased one is not an observability fault.
-        write_guarded(draw_dir / f"{n}.yaml", yaml.safe_dump(doc, sort_keys=False),
-                     mode="replace")
+        write_guarded(world.draw(n), yaml.safe_dump(doc, sort_keys=False),
+                      mode="replace")
     return completed, dict(spread), documents, malformed
 
 
@@ -417,11 +413,12 @@ def _write_wire_log(
     so never opens the real logger."""
     from defender.runtime.observe import stage_trace_path
 
-    # THE SAME NAME SANITISATION THE QUESTIONER'S SEAM APPLIES (`seams.model_seam`:
-    # `agent_id.replace(':', '_')`). `agent_id` is `judge:<label>:<n>`, and a trace file called
-    # `judge:b:0_framed_trace.jsonl` is a name that seam deliberately does not produce.
-    path = stage_trace_path(
-        Path(episode_dir), f"{agent_id.replace(':', '_')}_framed_trace.jsonl")
+    # THE SANITISATION AND THE SUFFIX ARE BOTH THE OWNER'S (#1077 D7). `agent_id` is
+    # `judge:<label>:<n>`, and a trace file called `judge:b:0_framed_trace.jsonl` is a name
+    # this design deliberately does not produce — the fold lived at three call sites, and the
+    # framed suffix had to agree with the UNFRAMED one the seam writes or the episode page
+    # pairs them on stems that do not match. One accessor per half, one owner for the pair.
+    path = stage_trace_path(Path(episode_dir), WIRE_LOG_NAMES.agent_framed_trace(agent_id))
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
            "wire_log_written_at": path.name}
     # BEST-EFFORT, like every other observability writer in this repo (`_deps._record_lesson_load`
@@ -555,7 +552,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     review = family_mod.read_review_record(bound) or {}
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
-        reason = reason or f"the episode's {REVIEW_NAME} outcome is {outcome!r}, not 'accepted'"
+        reason = reason or f"the episode's {LAYOUT.review} outcome is {outcome!r}, not 'accepted'"
         # `episode_outcome` says NOT-GRADED, never the `gradable` default: the field is what a
         # reader keys on to tell what happened to an episode, and an episode nothing looked at
         # reporting the same word as one the judge cleared is the one answer it must not give.
@@ -703,8 +700,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     try:
         family_prompt = run_mod._build_family_prompt(manifest=manifest, grade=grade,
                                                       review=review)
-        guarded_mkdir(Path(episode_dir) / WORLDS_DIRNAME / "family" / DRAWS_DIRNAME,
-                      base=episode_dir)
+        guarded_mkdir(EpisodePaths(episode_dir).world("family").draws, base=episode_dir)
         family_completed, _family_spread, family_documents, family_malformed = (
             _run_world_draws(episode_dir, "family", judge=judge, draws=configured_draws,
                              model=model, effort=effort, prompt=family_prompt,
@@ -724,7 +720,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     episode_outcome = "gradable"
     discard_evidence = {
         "review_pointer":
-            f"{episode_dir.name}/{REVIEW_NAME}#worlds.*.consistency.{_DRIFT_KEYS_FIELD}"}
+            f"{episode_dir.name}/{LAYOUT.review}#worlds.*.consistency.{_DRIFT_KEYS_FIELD}"}
     # DISCARD IS MECHANICAL-FIRST, and that has to mean first across the WHOLE family, not
     # first within whichever world the loop reached first. Checking both words per world and
     # breaking on either made the episode's outcome depend on manifest order: one world voting
@@ -810,7 +806,7 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
     what makes the record's value and the rendered value the same value."""
     for label in labels:
         commit = render_mod._read_provenance(
-            bound.under(f"{WORLDS_DIRNAME}/{label}")).get("commit")
+            bound.under(LAYOUT.world(label).dir)).get("commit")
         if commit is not None:
             return str(commit)
     return None
@@ -877,7 +873,7 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
             fields["not_graded"] = NotGradedStamp(**_known_keys(NotGradedStamp, fields["not_graded"]))
         record = EpisodeGrade(**fields, episode_dir=episode_dir)
     except (ValidationError, TypeError) as bad:
-        raise JudgeRefused(f"{JUDGE_NAME} is not a family grade record: {bad}") from bad
+        raise JudgeRefused(f"{LAYOUT.judge} is not a family grade record: {bad}") from bad
     graded = frozenset(r["world"] for r in record.worlds if family_mod.is_gradable_row(r))
     measuring = frozenset(
         r["world"] for r in record.worlds

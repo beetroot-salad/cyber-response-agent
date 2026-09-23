@@ -69,19 +69,13 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
+from defender._episode_paths import EpisodePaths
 from defender._io import guarded_mkdir, load_json_artifact, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
-from defender.learning.branch.archive import (
-    FAMILY_STAMP_NAME,
-    REVIEW_NAME,
-    RUNS_SUBDIR,
-    SAMPLES_NAME,
-    WORLDS_DIRNAME,
-)
 from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
@@ -91,7 +85,6 @@ from defender.run_common import REPO_ROOT, resolve_runs_base
 from defender.runtime import branch, session_store
 from defender.runtime.branch import _family
 from defender.runtime.branch._family import (
-    MANIFEST_NAME,
     Family,
     FamilyError,
     check_identities,
@@ -300,7 +293,7 @@ def prepare_episode(
     # base and the checkout — while everything BELOW it is reachable from a sibling box's
     # rw bind, which is exactly the split `guarded_mkdir`'s anchor is for.
     guarded_mkdir(served, base=episode)
-    claim = served / ".priming"
+    claim = EpisodePaths(episode).priming_lock
     try:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     except FileExistsError as taken:
@@ -471,7 +464,7 @@ def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
     names first. Spelled once so the two cannot come to disagree about what "already claimed"
     is — the second door was added after the first, and the failure it closes is destructive.
     """
-    manifest = Path(episode_dir) / MANIFEST_NAME
+    manifest = EpisodePaths(episode_dir).family
     if manifest.exists() or manifest.is_symlink():
         raise LedgerError(
             f"episode {episode_id!r} already holds a manifest at {manifest} — an episode id "
@@ -599,7 +592,7 @@ def _source_store(source_run_dir: Path) -> Any:
     that IS there propagates as the refusal it is.
     """
     run_dir = Path(source_run_dir)
-    if not artifact_file(run_dir / session_store.POINTER_FILENAME):
+    if not artifact_file(RunPaths(run_dir).session_pointer):
         return None
     return branch.open_source_store(run_dir)
 
@@ -649,7 +642,7 @@ def sibling_runs_base(episode_dir: Path) -> Path:
     sibling from a real run, and the answer this seam took is to keep them out of the tree rather
     than to teach three readers a fourth rule.
     """
-    return Path(episode_dir) / RUNS_SUBDIR
+    return EpisodePaths(episode_dir).runs
 
 
 def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = None) -> list[str]:
@@ -668,7 +661,7 @@ def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = Non
     agreement and the family is archived as comparable on a model nobody asked for.
     """
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
-            "--resume", str(Path(episode_dir) / MANIFEST_NAME), "--world", world_label]
+            "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label]
     if model is not None:
         argv += ["--model", model]
     return argv
@@ -1039,7 +1032,7 @@ def verify_family(
     # and its ABSENCE would be a third spelling of "incomplete" beside the outcome field and the
     # withheld family stamp — which is the exact gap FORK-1 closed. An episode that archived no
     # world has an empty `worlds/`, and the recorded outcome is what says why.
-    guarded_mkdir(episode_dir / WORLDS_DIRNAME, base=episode_dir)
+    guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
     # PER WORLD, and only the individually clean ones: a sibling whose own scrub never ran has a
     # tree nothing certified, so copying out of it is the read the certification exists to gate.
     from defender.learning.branch import archive as archive_mod
@@ -1066,7 +1059,7 @@ def verify_family(
             episode_dir, stamps, source=source, allow_dirty=allow_dirty, dirs=dirs)
     _record_episode_outcome(episode_dir, outcome=outcome, reason=reason)
     if door is not None:
-        staging_mod.teardown(episode_dir, door=door, review_path=episode_dir / REVIEW_NAME)
+        staging_mod.teardown(episode_dir, door=door, review_path=EpisodePaths(episode_dir).review)
     return {"outcome": outcome, "reason": reason, "scrub_verified": scrub_verified,
             "worlds": sorted(dirs)}
 
@@ -1154,7 +1147,8 @@ def _write_family_stamp(
     if base_world_id is not None:
         doc["base_world_id"] = base_world_id
     write_guarded(
-        Path(episode_dir) / FAMILY_STAMP_NAME, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+        EpisodePaths(episode_dir).family_stamp,
+        json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
 def _family_base_world_id(dirs: dict[str, Path] | None) -> str | None:
@@ -1185,7 +1179,7 @@ def _record_episode_outcome(
     block: dict[str, Any] = {"outcome": outcome, "reason": reason}
     if decision is not None:
         block["decision"] = decision
-    staging_mod.merge_review(Path(episode_dir) / REVIEW_NAME, "episode", block)
+    staging_mod.merge_review(EpisodePaths(episode_dir).review, "episode", block)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1432,7 +1426,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
     # then swallowed into an exit 0 with live aliases on the cluster. Only `_launch` knows, and
     # it says so.
     try:
-        staging_mod.teardown(episode_dir, door=door, review_path=episode_dir / REVIEW_NAME)
+        staging_mod.teardown(episode_dir, door=door, review_path=EpisodePaths(episode_dir).review)
     except Exception as cleanup_failed:  # noqa: BLE001 — see the docstring: never mask
         if not aborting:
             raise
@@ -1494,7 +1488,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _record_episode_outcome(episode_dir, outcome=REJECTED, reason=str(
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
-        guarded_mkdir(episode_dir / WORLDS_DIRNAME, base=episode_dir)
+        guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
         print(f"[branch] episode {episode_id}: rejected before any sibling started",
               file=sys.stderr)
         return 1
@@ -1650,7 +1644,7 @@ def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
     import yaml
 
     doc = dict(samples)
-    path = Path(episode_dir) / SAMPLES_NAME
+    path = EpisodePaths(episode_dir).samples
     write_guarded(path, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
                                        default_flow_style=False))
     return path

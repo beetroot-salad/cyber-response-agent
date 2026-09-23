@@ -143,13 +143,15 @@ NO_REPORT_EXITS = ("aborted", "budget", "store")
 
 
 def run_end_name() -> str:
-    """`archive.RUN_END_NAME` — the archived record's leaf name, from the archive module.
+    """The archived run-end record's leaf name, ASKED OF THE OWNER (#1077 D7).
 
-    F6 resolved the spelling to the design doc's own (`run_end.json`), and the constant lives
-    beside the other archive names because the judge reads back every name this module writes:
-    a name spelled in the writer and re-spelled in the reader is a rename that leaves the two
-    looking at different files with no error anywhere."""
-    return sym("learning.branch.archive", "RUN_END_NAME")
+    F6 resolved the spelling to the design doc's own (`run_end.json`). It used to be read off
+    `archive.RUN_END_NAME`, on the reasoning that the judge reads back every name the archive
+    writes and the two must not re-spell it. True, and the re-export was still a second home:
+    archive.py now holds no record name, and both the writer and this helper reach the same
+    accessor on `_episode_paths`.
+    """
+    return str(sym("_episode_paths", "WORLD_LEAVES").run_end)
 
 
 def sidecar_path(run_dir: Path) -> Path:

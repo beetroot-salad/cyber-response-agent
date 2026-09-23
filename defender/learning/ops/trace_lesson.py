@@ -133,7 +133,7 @@ def in_context_cases(
     if not runs_dir.is_dir():
         return hits
     for run_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
-        loaded = run_dir / "lessons_loaded.jsonl"
+        loaded = RunPaths(run_dir).lessons_loaded
         if not loaded.is_file():
             continue
         # THIS lesson's rows only, before the reader classifies anything: `--all` calls this

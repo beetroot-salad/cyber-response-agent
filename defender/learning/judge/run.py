@@ -56,7 +56,7 @@ from typing import Any, ClassVar
 from defender._run_paths import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
-from defender.learning.branch.archive import JUDGE_NAME, REVIEW_NAME, SAMPLES_NAME
+from defender._episode_paths import LAYOUT
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,
     judge_effort,
@@ -246,8 +246,8 @@ SECTION_TITLES: dict[str, str] = {
                "read, or pushed as a description only — and the body at its recorded commit "
                "for you to grade against, whether or not the model read it)",
     "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
-    "document": "THE GRADED WORLD'S OWN investigation.md",
-    "report": "THE GRADED WORLD'S OWN report.md",
+    "document": "THE GRADED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    "report": "THE GRADED WORLD'S OWN report.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "sample": "THE QUESTIONER'S OWN SAMPLE (the real document, per staged pattern, this "
               "world's overlay was authored from)",
     "review": "THIS WORLD'S OWN REVIEW RECORD (what the capture's own vocabulary could and "
@@ -434,18 +434,27 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
     )
 
 
-#: S7: the exactly-three episode-level files a `subject: world` evidence pointer may ALSO name
-#: — an allowlist of resolved TARGETS (bare names only, never a prefix a traversal could dress
-#: up to pass), never a widen of the whole episode dir. The defender arm is unchanged: world-
-#: subtree-only.
-_WORLD_EVIDENCE_FILES = (SAMPLES_NAME, REVIEW_NAME, JUDGE_NAME)
+def _world_evidence_files() -> tuple[str, ...]:
+    """S7: the exactly-three episode-level files a `subject: world` evidence pointer may ALSO
+    name — an allowlist of resolved TARGETS (bare names only, never a prefix a traversal could
+    dress up to pass), never a widen of the whole episode dir. The defender arm is unchanged:
+    world-subtree-only.
 
-#: The subset of the above the FAMILY-level call is actually shown. `_build_family_prompt`
-#: renders the manifest, the review record and every world's mechanical row — and no sample at
-#: all — so advertising `samples.yaml` to that call invited a citation of a document it never
-#: saw, which `enqueue_report`'s family lane then refuses under A1(b). Named here beside the
-#: allowlist it narrows, so the two cannot drift.
-_FAMILY_EVIDENCE_FILES = tuple(n for n in _WORLD_EVIDENCE_FILES if n != SAMPLES_NAME)
+    A FUNCTION, not a module-level tuple (#1077 D7): a tuple built at import holds a COPY of
+    three record names, and a copy is what survives a rename of the record it names. Asked of
+    the owner per call, this allowlist cannot fall out of step with the files it admits.
+    """
+    return tuple(str(name) for name in (LAYOUT.samples, LAYOUT.review, LAYOUT.judge))
+
+
+def _family_evidence_files() -> tuple[str, ...]:
+    """The subset of the above the FAMILY-level call is actually shown. `_build_family_prompt`
+    renders the manifest, the review record and every world's mechanical row — and no sample
+    at all — so advertising the samples document to that call invited a citation of a document
+    it never saw, which `enqueue_report`'s family lane then refuses under A1(b). Derived from
+    the allowlist it narrows, so the two cannot drift."""
+    samples = str(LAYOUT.samples)
+    return tuple(n for n in _world_evidence_files() if n != samples)
 
 
 def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
@@ -484,11 +493,11 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
     # NO EXISTENCE CHECK on the widened branch, deliberately: `judge.yaml` is the pass's OWN
     # output, written only after every world's draws complete, so an evidence pointer citing it
     # from INSIDE the very draw that is producing it can never find it on disk yet — the
-    # allowlist is by NAME (`path_part in _WORLD_EVIDENCE_FILES`, `Path(path_part).name ==
+    # allowlist is by NAME (`path_part in _world_evidence_files()`, `Path(path_part).name ==
     # path_part` already refuses every traversal shape in the negative test, since a hostile
     # operand's `.name` is never equal to the whole pointer), never by a stat this pass cannot
     # honestly perform on its own future output.
-    allowed = _FAMILY_EVIDENCE_FILES if scope == "family" else _WORLD_EVIDENCE_FILES
+    allowed = _family_evidence_files() if scope == "family" else _world_evidence_files()
     return subject == SUBJECT_WORLD and path_part in allowed \
         and Path(path_part).name == path_part
 
@@ -516,7 +525,7 @@ def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -
         if not isinstance(pointer, str):
             continue
         prefix, has_fragment, fragment = pointer.partition("#")
-        if prefix != SAMPLES_NAME:
+        if prefix != str(LAYOUT.samples):
             continue
         if unavailable_patterns is None:
             return True
@@ -574,7 +583,7 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     optional input once at the boundary, never re-coalesce it in the body)."""
     label = judge_input.world_label
     task = (
-        f"World {label} has run; grade it.\n\n"
+        f"World {label} has run; grade it.\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         "Compare it against the four joined views below: its per-lead chain (goal, params, "
         "payload, refused, summary, resolutions), its coverage of the family's "
         "discriminator, the sibling trials of this same alert, and the lessons it loaded — "
@@ -789,16 +798,16 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
         # pointers this call can resolve are the episode-level files S7 allowlists.
         "`evidence` IS A LIST OF POINTERS, never prose and never a quotation. A family-level "
         f"finding may cite ONLY these episode-level files by bare name: "
-        f"{', '.join(f'`{name}`' for name in _FAMILY_EVIDENCE_FILES)}, optionally with a "
+        f"{', '.join(f'`{name}`' for name in _family_evidence_files())}, optionally with a "
         "`#fragment` naming what in the file you mean (for example "
-        f"`{REVIEW_NAME}#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
+        f"`{LAYOUT.review}#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
         "WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED.\n\n"
         f"{_outcome_guidance()}"
     )
     sections = {
         "manifest": _render_family_manifest(manifest),
         "review": yaml.safe_dump(review, sort_keys=False) if review else
-                 f"no {REVIEW_NAME} is recorded for this episode\n",
+                 f"no {LAYOUT.review} is recorded for this episode\n",
         "mechanical": _render_family_mechanical_rows(grade),
     }
     titled = [titled_section(name.upper(), body) for name, body in sections.items()]

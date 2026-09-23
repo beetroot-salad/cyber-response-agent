@@ -11,7 +11,7 @@ from typing import NamedTuple
 from defender import _git
 from defender._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
-from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
@@ -33,7 +33,9 @@ from defender.scripts.visualize.visualize_primitives import (
 #: The wire log AS AN OPERATOR READS IT — run-dir-relative, so the two strings below name a
 #: path someone can actually go and look at. Derived from `_run_paths`, never hand-spelled:
 #: a literal here would send a reader to a file no current run writes.
-_WIRE_LOG_REL = f"{WIRE_LOG_DIR}/{WIRE_LOG}"
+def _wire_log_rel() -> str:
+    """The wire log's run-dir-relative spelling, from the owner (#1077 D7)."""
+    return str(RUN_LAYOUT.wire_log)
 
 
 def _short_phase(name: str | None) -> str:
@@ -57,9 +59,9 @@ def render_runtime_investigation(
 ) -> tuple[str, list[dict]]:
     if phases is None:
         phases = normalize_phase_names(split_investigation_phases(run_dir))
-    subtitle = "— investigation.md split by phase"
+    subtitle = f"— {RUN_LAYOUT.investigation.name} split by phase"
     if not phases:
-        body = '<div class="empty">no investigation.md or empty</div>'
+        body = f'<div class="empty">no {RUN_LAYOUT.investigation.name} or empty</div>'
         return (section("sec-investigation", "defender", "Investigation", subtitle, body), [])
     blocks: list[str] = []
     # The stats line belongs to the BUCKET, and `phases` is a render list that may name one
@@ -131,7 +133,7 @@ def render_runtime_transcript(
 
     if not entries:
         rows_html = (
-            f'<div class="empty">{esc(_WIRE_LOG_REL)} not found — transcript unavailable '
+            f'<div class="empty">{esc(_wire_log_rel())} not found — transcript unavailable '
             '(older run, or the run is still in flight)</div>'
         )
     else:
@@ -154,7 +156,7 @@ def render_runtime_transcript(
     return (
         section(
             "sec-transcript", "defender", "Transcript",
-            f"— main-agent turns, tool calls + results ({_WIRE_LOG_REL})", body,
+            f"— main-agent turns, tool calls + results ({_wire_log_rel()})", body,
         ),
         len(entries),
         anchored,
@@ -393,8 +395,13 @@ def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
     from defender._io import read_text_soft
 
     out: list[tuple[int, dict]] = []
-    for p in run_dir.glob("review_record.*.json"):
-        m = re.fullmatch(r"review_record\.(\d+)\.json", p.name)
+    # ONE SPECIMEN for the glob and the parse, composed by the owner (#1077 D7): the
+    # pattern that finds a review record and the regex that recovers its turn number are
+    # the same fact, and they were two spellings of it.
+    specimen = RUN_LAYOUT.review_record(0).name
+    prefix, _, ext = specimen.partition("0")
+    for p in run_dir.glob(f"{prefix}*{ext}"):
+        m = re.fullmatch(rf"{re.escape(prefix)}(\d+){re.escape(ext)}", p.name)
         if m is None:
             continue
         # `read_text_soft` rather than a locally restated `(OSError, UnicodeDecodeError)`:
@@ -764,7 +771,7 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
     <li class="section">Sections</li>
     <li class="item"><a href="#top">↑ top</a></li>
     <li class="item"><a href="#sec-metrics">metrics</a></li>
-    <li class="item"><a href="#sec-alert">alert.json</a></li>
+    <li class="item"><a href="#sec-alert">{RUN_LAYOUT.alert.name}</a></li>
     {investigation_item}
     {review_item}
     {leads_item}
@@ -778,9 +785,9 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
 
 
 def _lesson_changes(run_dir: Path, run_id: str) -> dict:
-    trace = run_dir / "tool_trace.jsonl"
+    trace = RunPaths(run_dir).tool_trace
     if not trace.is_file():
-        return {"available": False, "reason": "no tool_trace.jsonl"}
+        return {"available": False, "reason": f"no {trace.name}"}
     since_iso = (
         _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.UTC).isoformat()
     )

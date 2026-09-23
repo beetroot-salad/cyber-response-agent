@@ -215,7 +215,7 @@ def render_orient_section(
     )
     if run_dir is not None and not _is_declared(run_dir, L0):
         heading += (
-            f". NOTE: {L0}'s declaring `:L findings` row is NOT in investigation.md — the "
+            f". NOTE: {L0}'s declaring `:L findings` row is NOT in investigation.md — the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"harness could not write it. If you cite {L0}, declare it yourself in a `:L "
             f"findings` block first; that is not reuse"
         )
