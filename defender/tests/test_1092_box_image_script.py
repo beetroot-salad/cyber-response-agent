@@ -140,7 +140,9 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
         assert out.stdout == expected + "\n", (cwd, out.stdout)
         assert out.stderr == "", (cwd, out.stderr)
     assert expected != image_tag(DEFENDER), "the planted tree must name a different image"
-    for argv in ((), ("frobnicate",), ("tag", "extra")):
+    # `export` included: #1097 round 1's exported-list verb is gone with the list (the design
+    # amendment) — the contract is exactly `tag` | `build` again.
+    for argv in ((), ("frobnicate",), ("export",), ("tag", "extra")):
         out = _run_script(script, *argv, cwd=tmp_path)
         assert out.returncode == 2, (argv, out.returncode, out.stderr)
         assert "usage" in out.stderr.lower(), (argv, out.stderr)
@@ -153,8 +155,7 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>/defender` — an argv list,
     never a shell string (a tree path with a space arrives as ONE argument; no `{`-template
     token survives on the argv), the context is the tree's `defender/` — the only directory the
-    recipe reads from (its bind-mounted `box-requirements.txt`, #1097), so no repo-root
-    exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
+    recipe COPYs from, so no repo-root exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
     the recipe's `RUN --mount` is BuildKit syntax, #1095) — and propagates a non-zero build
     exit as its own non-zero exit. The daemon-side failures settled at phase C (a base pull,
     a hash mismatch, a full daemon, no `docker` on PATH) are all the same observable: the
@@ -202,21 +203,43 @@ def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_
 # ---- MF1's script side (CLI #18) ----------------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):
-    """On a tree whose input it cannot read — a directory sitting where `box-requirements.txt`
-    should be (#1097; `uv.lock` and `pyproject.toml` still sit readable beside it) — `tag`
-    and `build` print `<tree>/defender: cannot read box-requirements.txt: <reason>` on stderr
+    """On a tree whose input it cannot read — a directory sitting where `uv.lock` should be —
+    `tag` and `build` print `<tree>/defender: cannot read uv.lock: <reason>` on stderr
     (the same sentence shape as the resolver's `BoxFault`, which the stdlib script cannot
     import), print nothing on stdout, exit 1, and `build` never invokes `docker`."""
     root, script = _planted_script(tmp_path)
     defender_dir = root / "defender"
-    (defender_dir / "box-requirements.txt").unlink()
-    (defender_dir / "box-requirements.txt").mkdir()
+    (defender_dir / "uv.lock").unlink()
+    (defender_dir / "uv.lock").mkdir()
     env, log = fake_docker_on_path(tmp_path, rc=0)
     out = _run_script(script, verb, cwd=tmp_path, env=env)
     assert out.returncode == 1, (out.returncode, out.stderr)
     assert out.stdout == "", out.stdout
     assert str(defender_dir) in out.stderr, out.stderr
     assert "cannot read" in out.stderr, out.stderr
-    assert "box-requirements.txt" in out.stderr, out.stderr
+    assert "uv.lock" in out.stderr, out.stderr
     assert HASH_INPUTS[0] not in out.stderr.split("cannot read", 1)[1], out.stderr
+    assert recorded_docker_calls(log) == []
+
+
+@pytest.mark.parametrize("verb", ["tag", "build"])
+def test_box_image_reports_a_lock_it_cannot_parse_in_the_resolvers_words_and_exits_1(tmp_path, verb):
+    """On a tree whose `uv.lock` reads but is not TOML (#1097: the name is computed from the
+    PARSED lock), `tag` and `build` print one line on stderr naming `<tree>/defender` and
+    `uv.lock` — the resolver's `ImageInputError`, never a traceback — print nothing on stdout,
+    exit 1, and `build` never invokes `docker`. Positive control: the same tree, before the
+    lock is broken, prints its name and exits 0."""
+    root, script = _planted_script(tmp_path)
+    defender_dir = root / "defender"
+    assert _run_script(script, "tag", cwd=tmp_path).returncode == 0
+    lock = defender_dir / "uv.lock"
+    lock.write_bytes(lock.read_bytes() + b"[[package]\n")
+    env, log = fake_docker_on_path(tmp_path, rc=0)
+    out = _run_script(script, verb, cwd=tmp_path, env=env)
+    assert out.returncode == 1, (out.returncode, out.stderr)
+    assert out.stdout == "", out.stdout
+    assert "Traceback" not in out.stderr, out.stderr
+    assert len(out.stderr.strip().splitlines()) == 1, out.stderr
+    assert str(defender_dir) in out.stderr, out.stderr
+    assert "uv.lock" in out.stderr, out.stderr
     assert recorded_docker_calls(log) == []

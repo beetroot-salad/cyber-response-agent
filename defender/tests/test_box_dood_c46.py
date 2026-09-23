@@ -52,7 +52,7 @@ MOUNTS: tuple[tuple[Path, Path], ...] = (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: #1092 (M3 revised): with `rootfs` unset the argv builders RESOLVE the image from the mounted
-#: tree — reading `box.Dockerfile` and `box-requirements.txt` off it (#1097) — and refuse a tree
+#: tree — reading `box.Dockerfile`, `uv.lock` and `pyproject.toml` off it — and refuse a tree
 #: that lacks them. The fake trees below (`/srv/defender`, `/workspace/defender`) carry none,
 #: and these tests are about geography, not the image, so each argv-reading site pins a rootfs
 #: explicitly (the amendment's "tests that need a stock image pin one"; a stock name is for

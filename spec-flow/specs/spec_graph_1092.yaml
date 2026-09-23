@@ -7,11 +7,14 @@ design: "1092"   # gh issue #1092 — own the box image: build it from the host 
                  # `.spec-flow/issue-1092.md`. Two amendment SPELLINGS are corrected, not refuted
                  # (handoff.refuted): `request.defender_dir` does not exist (N5) and box-dood has
                  # no runner-side `uv sync` (N6).
-                 # AMENDED BY #1097 (issuecomment-5793930851): the name's inputs are
-                 # `box.Dockerfile` + `box-requirements.txt` (the lock's `uv export` of core +
-                 # `box`); the Dockerfile copies nothing and mounts that list into
-                 # `uv pip install --require-hashes`. Rows below were re-pointed at
-                 # `box_requirements`; line-number comments predate the amendment.
+                 # AMENDED BY #1097's design amendment ("name the image from the lock's box
+                 # closure, no exported copy"): the three inputs and the recipe stand; what
+                 # `image_tag` digests of them narrows to the Dockerfile's bytes, `[tool.uv]`,
+                 # the root lock entry's core + `box` edges and every lock entry reachable from
+                 # them (`_image.box_closure`, markers ignored — the superset rule), canonically;
+                 # `RECIPE_VERSION` = v2. An unparseable manifest, a lock with no root entry or a
+                 # dangling edge is `ImageInputError` naming the file. The #1097 demands sit at
+                 # the end of the M3 block below; line-number comments predate the amendment.
 tests: defender/tests   # the suite this graph derives (profile `tests.dir`). check_binds scans
                         # docstrings NON-RECURSIVELY over this one directory, so phase E sites
                         # every new #1092 test file here. Three demands bind tests that ALREADY
@@ -138,7 +141,7 @@ demands:
   - id: box_rootfs_resolves_to_the_mounted_trees_image
     kind: behavior
     form: test
-    discharged_by: test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_hash_inputs_on_every_docker_run_site
+    discharged_by: test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_inputs_on_every_docker_run_site
     binds:
       - BoxSpec
       - "BoxSpec.domain.distinguished[rootfs_unset]"
@@ -216,12 +219,13 @@ demands:
   - id: image_tag_is_sensitive_to_each_input
     kind: behavior
     form: test
-    discharged_by: test_a_byte_change_in_the_recipe_or_the_exported_list_moves_the_tag_and_a_manifest_change_does_not
+    discharged_by: test_a_recipe_byte_or_a_box_closure_entry_moves_the_tag_and_an_edit_outside_the_closure_does_not
     binds:
       - image_tag
       - "interacts(image_tag->box_dockerfile)"
-      - "interacts(image_tag->box_requirements)"
-    forks: "F5 (auto: 12 hex); SETTLED-BY-DOC #85 (three whole files, cosmetic churn accepted)"
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
+    forks: "F5 (auto: 12 hex); SETTLED-BY-DOC #85 (three whole files, cosmetic churn accepted) — SUPERSEDED by #1097 O1: only an edit to the recipe, `[tool.uv]` or the lock's core + `box` closure renames"
   - id: image_tag_is_path_independent
     kind: behavior
     form: test
@@ -229,7 +233,8 @@ demands:
     binds:
       - image_tag
       - "interacts(image_tag->box_dockerfile)"
-      - "interacts(image_tag->box_requirements)"
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
     premises: [20, 45]
     rows: >-
       #20 — two checkouts of one commit hash identically: no `.gitattributes` (G23), bytes are
@@ -278,6 +283,78 @@ demands:
       through the script's seam and asserts the exit propagates; the daemon-side rows are
       one fixture each, not one test each.
     forks: "BF #1/#4/#7/#8/#12/#13/#93 (auto: a cold build's failure is the step's own red; no retry, no resume contract, no uv-version parity); DAEMON #46/#63/#64/#90 (auto: always invoke docker build, no presence check, no lock); UVPIN #88 (auto: `COPY --from=ghcr.io/astral-sh/uv:<ver>@sha256:<digest>`)"
+  # ---- #1097 (design amendment): the name is the lock's core + `box` closure ------------------
+  - id: image_tag_holds_under_edits_outside_the_box_closure
+    kind: negative      # positive control in the same test: a closure entry's version and `[tool.uv]` each rename
+    form: test
+    discharged_by: test_an_edit_that_cannot_change_the_image_does_not_rename_it
+    binds:
+      - image_tag
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
+    rows: >-
+      #1097 O1 — `[tool.ruff]`/`[tool.mypy]`, comments, the dev/runtime extras and their lock
+      entries, an entry reached only through extras nobody asks for, a manifest edited without a
+      relock (the key flow: the name holds, `--locked` fails the build), a file outside the inputs.
+  - id: image_tag_holds_under_lock_reformatting
+    kind: negative      # positive control in the same test: one artifact-hash byte renames under every spelling
+    form: test
+    discharged_by: test_reordering_or_reformatting_the_lock_does_not_rename_the_image
+    binds: [image_tag, "interacts(image_tag->uv_lock)"]
+    rows: "#1097 O1 — entries reordered, keys reordered, arrays re-wrapped, comments: a newer uv re-emitting the lock renames nothing (non-obligation: a NEW entry field renames once)."
+  - id: image_tag_moves_with_the_box_closure_its_roots_tool_uv_and_the_recipe
+    kind: behavior
+    form: test
+    discharged_by: test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image
+    binds:
+      - image_tag
+      - box_closure
+      - "interacts(image_tag->box_dockerfile)"
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
+      - "interacts(image_tag->box_closure)"
+    rows: "#1097 O2 — a closure entry's version/source/artifact hash/edges (entries digested whole), the root's core + box edges, `[tool.uv]` (absent reads as {}), one Dockerfile byte."
+  - id: image_tag_names_every_entry_of_a_split_package
+    kind: behavior
+    form: test
+    discharged_by: test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes
+    binds: [image_tag, box_closure, "interacts(image_tag->box_closure)"]
+    rows: "#1097 M1' superset rule (claim a1's shape: two same-named entries, `resolution-markers`, edges with `version` + `marker`) — either entry renames, even the one the 3.11 image never installs."
+  - id: box_closure_walks_edges_by_name_with_their_extras
+    kind: behavior
+    form: test
+    discharged_by: test_box_closure_follows_every_edge_by_name_to_every_entry_ignoring_markers_and_versions_and_takes_each_edges_extras
+    binds: [box_closure, "interacts(box_closure->uv_lock)"]
+  - id: box_closure_of_this_lock_is_core_plus_box
+    kind: parity
+    form: test
+    discharged_by: test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package
+    binds: [box_closure, uv_lock, pyproject, "interacts(box_closure->uv_lock)"]
+  - id: image_tag_on_this_checkouts_manifests
+    kind: behavior
+    form: test
+    discharged_by: test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_closure_relock_moves_it
+    binds: [image_tag, uv_lock, pyproject, "interacts(image_tag->uv_lock)", "interacts(image_tag->pyproject)"]
+    rows: "#1097 key flows over the real manifests: a pytest relock holds the name, a pydantic relock moves it."
+  - id: image_tag_refuses_a_tree_it_cannot_walk
+    kind: behavior
+    form: test
+    discharged_by: test_a_tree_the_resolver_cannot_read_parse_or_walk_raises_image_input_error_naming_the_file
+    binds:
+      - image_tag
+      - "image_tag.domain.distinguished[missing-input]"
+      - "image_tag.domain.distinguished[unwalkable-input]"
+      - "interacts(image_tag->box_closure)"
+    rows: "#1097 M1' faults — each missing input, unparseable TOML, no root entry, a dangling edge: `ImageInputError` naming the file and the reason, never a fallback hash. Also pins HASH_INPUTS and RECIPE_VERSION = v2 exactly."
+  - id: box_image_script_reports_an_unparseable_lock
+    kind: behavior
+    form: test
+    discharged_by: test_box_image_reports_a_lock_it_cannot_parse_in_the_resolvers_words_and_exits_1
+    binds:
+      - "box_image.access[tag]"
+      - "box_image.access[build]"
+      - "image_tag.domain.distinguished[unwalkable-input]"
+      - "interacts(box_image->image_tag)"
   - id: box_image_script_reports_an_unreadable_input
     kind: behavior
     form: test
@@ -297,7 +374,7 @@ demands:
   - id: missing_inputs_fault_before_docker
     kind: behavior
     form: test
-    discharged_by: test_a_mounted_tree_without_its_hash_inputs_raises_boxfault_naming_the_tree_before_any_docker_call
+    discharged_by: test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call
     binds:
       - image_tag
       - "image_tag.domain.distinguished[missing-input]"
@@ -366,19 +443,19 @@ demands:
   - id: dockerfile_copies_only_manifest_and_lock
     kind: negative      # positive control: dockerfile_syncs_frozen_no_dev_inexact_box_compiled_into_usr_local (the two files ARE copied and synced)
     form: test
-    discharged_by: test_the_dockerfile_copies_nothing_from_the_build_context
-    binds: [box_dockerfile, "interacts(box_dockerfile->box_requirements)"]
+    discharged_by: test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code
+    binds: [box_dockerfile, "interacts(box_dockerfile->pyproject)", "interacts(box_dockerfile->uv_lock)"]
     forks: "O7-SHAPE #95 (auto: build context = repo root under the root .dockerignore); silent #96 (auto, discount D1/PJ-r2-1: the COPY list is O7's guarantee under any builder)"
   - id: dockerfile_syncs_frozen_no_dev_inexact_box_compiled_into_usr_local
     kind: shape
     form: test
-    discharged_by: test_the_install_step_installs_exactly_the_mounted_list_hash_checked_unresolved_into_the_system_python
+    discharged_by: test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[sync_flags]"]
     forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
   - id: dockerfile_removes_the_installers_and_keeps_packaging
     kind: shape
     form: test
-    discharged_by: test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_install_and_names_packaging_as_kept
+    discharged_by: test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_sync_and_names_packaging_as_kept
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[installer_removal]"]
     assembly_note: >-
       The sibling cell `box_dockerfile.domain.distinguished[ensurepip_removal]` was unbound at
@@ -389,7 +466,7 @@ demands:
   - id: dockerfile_removes_ensurepip_bundled_wheels
     kind: shape
     form: test
-    discharged_by: test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_install
+    discharged_by: test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_sync
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[ensurepip_removal]"]
     assembly_note: >-
       MINTED BY PHASE E from §7's MF4 (human): one `rm -rf` of a path ending
@@ -428,13 +505,13 @@ demands:
   - id: base_packages_survive_the_sync
     kind: behavior
     form: test
-    discharged_by: test_the_base_images_own_packages_survive_the_install
+    discharged_by: test_the_base_images_own_packages_survive_the_inexact_sync
     binds: [box_image_contents, "box_dockerfile.domain.distinguished[sync_flags]"]
   - id: image_packages_match_the_lock
     kind: parity
     form: test
     discharged_by: test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_package
-    binds: [box_image_contents, uv_lock, box_requirements, "interacts(box_dockerfile->box_requirements)"]
+    binds: [box_image_contents, uv_lock, box_closure, "interacts(box_dockerfile->uv_lock)"]
   - id: image_has_no_uv_and_no_pip_path
     kind: negative      # positive control: base_packages_survive_the_sync / duckdb_imports_in_the_box (python3 and its packages work)
     form: test
@@ -453,7 +530,7 @@ demands:
     kind: negative      # positive control: dockerfile_copies_only_manifest_and_lock (the two files are present)
     form: test
     discharged_by: test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material
-    binds: [box_image_contents, dockerignore, "interacts(box_dockerfile->box_requirements)"]
+    binds: [box_image_contents, dockerignore, "interacts(box_dockerfile->pyproject)"]
     premises: [38]
     rows: "#38 — a nested secret-shaped file in the build context: O7's image guarantee is the COPY list (two files); `.dockerignore` only bounds the transfer (PJ-r2-1 executed the legacy builder: one added layer, the two files)."
   - id: image_site_packages_are_precompiled
@@ -866,13 +943,14 @@ demands:
 structure:
   # THE AXIS REGISTRY — every `key_axes` / `interpolates` / `fn_of` below is one of these.
   #   env_key     — the key of one `--env K=V` pair (S1: the allowlist is the key set)
-  #   hash_inputs — the byte content of box.Dockerfile + box-requirements.txt in the mounted defender dir (S2/S3; #1097)
+  #   hash_inputs — the byte content of the three files in the mounted defender dir (S2/S3)
   #   tag         — the `defender-box:<12 hex>` token, a projection of hash_inputs
   axes: [env_key, hash_inputs, tag]
 
   actors:
     # --- the change's own actors (provenance: design) -----------------------------------------
-    - {id: image_tag,               frame: leg,         provenance: design}   # runtime/box/_image.py::image_tag(tree) — reads box.Dockerfile + box-requirements.txt (#1097); stdlib-only, no sibling import (G22)
+    - {id: image_tag,               frame: leg,         provenance: design}   # runtime/box/_image.py::image_tag(tree) — reads the three files' bytes; stdlib-only, no sibling import (G22)
+    - {id: box_closure,             frame: leg,         provenance: design}   # runtime/box/_image.py::box_closure(lock, root_name) — the lock walk image_tag digests (#1097); dual-listed — see boundaries
     - {id: box_image,               frame: leg,         provenance: design}   # defender/scripts/box_image.py — `tag` | `build`; loads _image.py BY FILE PATH; a subprocess of GitHub's runner / the operator's shell (cross-process edge, brief floor)
     - {id: _create_argv,            frame: leg,         provenance: design}   # _lifecycle.py:35-65 — run-dir lane argv; C46 loop :46-47 BEFORE the image token :64; env_pairs indexed per allowlist key :62-63
     - {id: _render_argv,            frame: leg,         provenance: design}   # _lifecycle.py:175-204 — request lane argv; C46 per mount :188-191 BEFORE the image token :203
@@ -888,7 +966,7 @@ structure:
     - {id: defender_invlang_shim,   frame: leg,         provenance: design}   # bin/defender-invlang:6-9
     - {id: defender_lessons_shim,   frame: leg,         provenance: design}   # bin/defender-lessons:7-10 — its scripts also self-re-exec through reexec_into_venv (C16)
     - {id: reexec_into_venv,        frame: leg,         provenance: design}   # scripts/_venv.py:12-21 — os.execv into defender/.venv/bin/python3 when is_file(); M6: returns early when marked
-    - {id: box_dockerfile,          frame: leg,         provenance: design}   # defender/box.Dockerfile AS THE BUILD-TIME READER: mounts box-requirements.txt, `uv pip install` into /usr/local (#1097) (dual-listed — see boundaries)
+    - {id: box_dockerfile,          frame: leg,         provenance: design}   # defender/box.Dockerfile AS THE BUILD-TIME READER: COPY defender/pyproject.toml + defender/uv.lock, sync into /usr/local (dual-listed — see boundaries)
     - {id: BoxSpec,                 frame: leg,         provenance: design}   # runtime/box/_spec.py:39-60 AS THE IMPORTER of defender._model (M7 port) (dual-listed — see boundaries)
     # --- the grounded neighbourhood (provenance: code) — what reality imposes -----------------
     - {id: run_investigation,       frame: composition, provenance: code}     # run.py:348 `start_box(run_dir, defender_dir)` — production starter #1; hand-rolled venv re-exec :28-31
@@ -914,18 +992,18 @@ structure:
     # ===== the resolver and its inputs ==========================================================
     - id: image_tag
       provenance: design
-      # runtime/box/_image.py::image_tag(tree: Path) -> "defender-box:<sha256[:12] over the
-      # BYTES of tree/box.Dockerfile + tree/uv.lock + tree/pyproject.toml, fixed order,
-      # separated>" — `tree` is the DEFENDER dir (F-D, N5). Called by both argv builders and the
+      # runtime/box/_image.py::image_tag(tree: Path) -> "defender-box:v2-<sha256[:12] over
+      # tree/box.Dockerfile's bytes, pyproject's `[tool.uv]`, the root lock entry's core + `box`
+      # edges and `box_closure`'s entries, canonically — #1097>" — `tree` is the DEFENDER dir (F-D, N5). Called by both argv builders and the
       # _spec771 runner when `rootfs is None`; loaded by file path by the build script. The
       # domain is THE SHAPE OF THE TREE THE RESOLVER MEETS. Three members are UNBOUND on
       # purpose (MF1 ×2, MF3) — the gate names them; §7 decides the root.
       facets:
         domain:
           type: path
-          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
+          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, holding a manifest it cannot parse or a lock it cannot walk (no root entry, a dangling edge — #1097), lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
           default: complete-tree
-          distinguished: [complete-tree, missing-input, unreadable-input, lacking-inputs-and-uncovered, recipe-drift]
+          distinguished: [complete-tree, missing-input, unreadable-input, unwalkable-input, lacking-inputs-and-uncovered, recipe-drift]
           falsy_valid: false
           documented_alternatives: []
     - id: box_dockerfile
@@ -942,15 +1020,23 @@ structure:
           distinguished: [base_digest, uv_pin, sync_flags, installer_removal, ensurepip_removal]
           falsy_valid: false
           documented_alternatives: []
+    - id: box_closure
+      provenance: design
+      # runtime/box/_image.py::box_closure(lock, root_name) (#1097) — the lock entries reachable
+      # from the root's `dependencies` + `optional-dependencies.box`, edges followed BY NAME to
+      # every same-named entry (markers and edge `version` ignored), an edge's `extra` adding the
+      # target's `optional-dependencies[<extra>]`. The one owner of the walk; the live parity
+      # test compares the image against it beside an independent marker-evaluating walk.
+      facets: {}
     - id: uv_lock
       provenance: design
-      # defender/uv.lock — no longer a hash input (#1097: box_requirements is its export); gains the `box` extra's resolution (F11: three
+      # defender/uv.lock — hash input #2 (S3); gains the `box` extra's resolution (F11: three
       # hunks, no version moves; G23: `provides-extras` lacks `box` at base). Readers: the
       # resolver, the Dockerfile's COPY, five CI syncs (three go `--locked`), Dockerfile.runtime.
       facets: {}
     - id: pyproject
       provenance: design
-      # defender/pyproject.toml — no longer a hash input (#1097); M2 adds `[project.optional-dependencies] box =
+      # defender/pyproject.toml — hash input #3; M2 adds `[project.optional-dependencies] box =
       # ["duckdb"]`. `runtime` is the documented alternative D1 REJECTS for the box (ships
       # anthropic/openai/mcp); it stays valid for the host venv, so it crosses nothing.
       facets:
@@ -1297,13 +1383,6 @@ structure:
       provenance: design
       # bin/README.md:33-35 — the shims' venv-first description.
       facets: {}
-    - id: box_requirements
-      provenance: design
-      # defender/box-requirements.txt (#1097) — `uv export --locked --no-dev --extra box
-      # --no-emit-project` of uv_lock: hash input #2 and the install step's only input. Owner:
-      # scripts/box_image.py::export_requirements; the drift test compares the committed file
-      # to a fresh export over parsed entries.
-      facets: {}
     - id: readme_runtime
       provenance: design
       # .devcontainer/README.runtime.md — gains the box image and its build command (M5/d45);
@@ -1313,7 +1392,10 @@ structure:
   interacts:
     # --- the resolver and its inputs ------------------------------------------------------------
     - {from: image_tag,               to: box_dockerfile,      mode: read,   via: fs,             provenance: design}   # bytes, at every box start (accepted cost: ~2 ms, N2)
-    - {from: image_tag,               to: box_requirements,    mode: read,   via: fs,             provenance: design}   # #1097: the list replaces uv.lock + pyproject.toml as hash input #2
+    - {from: image_tag,               to: uv_lock,             mode: read,   via: fs,             provenance: design}
+    - {from: image_tag,               to: pyproject,           mode: read,   via: fs,             provenance: design}   # #1097: `[project].name` (the root) and `[tool.uv]`
+    - {from: image_tag,               to: box_closure,         mode: invoke, via: api,            provenance: design}   # #1097: the entries digested
+    - {from: box_closure,             to: uv_lock,             mode: read,   via: api,            provenance: design}   # the parsed lock, never the bytes
     - {from: image_tag,               to: drain_worktree,      mode: read,   via: fs,             provenance: design}   # the drain lane's tree: `Path(request.workdir)/'defender'` = `<wt>/defender` (S13)
     - {from: _create_argv,            to: image_tag,           mode: invoke, via: api,            provenance: design}   # `spec.rootfs if spec.rootfs is not None else image_tag(defender_dir)` — after the C46 loop (MF1 order: unstated)
     - {from: _render_argv,            to: image_tag,           mode: invoke, via: api,            provenance: design}   # `… else image_tag(Path(request.workdir) / "defender")`
@@ -1323,9 +1405,8 @@ structure:
     - {from: box_image,               to: dockerignore,        mode: read,   via: fs,             provenance: design}   # the context is the repo root, so the root .dockerignore applies (F17)
     - {from: box_image,               to: docker_build,        mode: invoke, via: subprocess,     provenance: design, sends: payload, transport: subprocess}
     - {from: box_image,               to: box_image_on_daemon, mode: write,  via: docker-build,   provenance: design, interpolates: [tag]}   # `-t defender-box:<tag>`; on the daemon that built it only (D2)
-    - {from: box_dockerfile,          to: box_requirements,    mode: read,   via: docker-mount,   provenance: design}   # #1097: bind-mounted into the install step; nothing is COPYed (d13)
-    - {from: box_image,               to: uv_lock,             mode: read,   via: uv-export,      provenance: design}   # #1097: `export` — `uv export --locked` (also reads pyproject to check the lock)
-    - {from: box_image,               to: box_requirements,    mode: write,  via: fs,             provenance: design}   # #1097: `export` writes the list only after uv succeeds
+    - {from: box_dockerfile,          to: pyproject,           mode: read,   via: docker-copy,    provenance: design}   # COPY defender/pyproject.toml — exactly two files (d13)
+    - {from: box_dockerfile,          to: uv_lock,             mode: read,   via: docker-copy,    provenance: design}
     - {from: box_dockerfile,          to: box_image_contents,  mode: write,  via: docker-build,   provenance: design}   # uv sync into /usr/local, uninstall, rm /bin/uv
     # --- the spec -------------------------------------------------------------------------------
     - {from: _create_argv,            to: BoxSpec,             mode: read,   via: api,            provenance: design}   # .runtime, .tmpfs_size, .rootfs (None → resolve)
