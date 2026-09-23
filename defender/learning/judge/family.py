@@ -66,12 +66,11 @@ from collections.abc import Callable
 import json
 from dataclasses import field
 from defender._model import model
-from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 
 from defender._io import ALIAS_READ_REFUSAL, Bound, bind
 from defender._report import ReportRead, parse_report_text
@@ -122,7 +121,7 @@ WITHHELD_EPISODE_INCOMPLETE = "episode_incomplete"
 
 
 def screened_yaml_mapping(
-    bound: Bound, name: str, *, what: str, empty_ok: bool = False,
+    bound: Bound, name: str | PurePath, *, what: str, empty_ok: bool = False,
 ) -> dict[str, Any] | None:
     """A YAML mapping at `name` (relative to `bound`) through THE SCREENED READ, or `None`
     only when NOTHING is at the name.
@@ -163,7 +162,7 @@ def screened_yaml_mapping(
     return doc
 
 
-def _default_review_reader(bound: Bound, name: str) -> dict[str, Any] | None:
+def _default_review_reader(bound: Bound, name: str | PurePath) -> dict[str, Any] | None:
     """`review.yaml`, through the same screened read every other episode-dir read in this pass
     makes. ABSENT reads as `None` — the parsing reader's typed absent answer (RF-R1), which the
     episode page renders as "absent" against "present but empty"; a caller with no use for
@@ -196,7 +195,7 @@ def read_review_record(bound: Bound, *, reader: Any = None) -> dict[str, Any] | 
     return read(bound, LAYOUT.review)
 
 
-def _default_samples_reader(bound: Bound, name: str) -> dict[str, Any]:
+def _default_samples_reader(bound: Bound, name: str | PurePath) -> dict[str, Any]:
     """`samples.yaml`, read PERMISSIVELY: absent, unreadable or unparseable all read as `{}`,
     never a `JudgeRefused`. Unlike `_default_review_reader`, this is deliberate (#1007 M4,
     `test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern`): the
@@ -617,7 +616,7 @@ def lead_chain(world: Bound, lead_id: str, resolutions_by_lead: dict[str, list[d
     }
 
 
-def json_mapping(bound: Bound, name: str) -> dict[str, Any] | None:
+def json_mapping(bound: Bound, name: str | PurePath) -> dict[str, Any] | None:
     """One JSON artifact at `name` (relative to `bound`) as a mapping, or `None` when it is
     not readable as one.
 
@@ -1012,7 +1011,7 @@ def _resolution_facts(
     return moved, by_lead, (*scan.orphaned_headers, *unlanded)
 
 
-def _read_archived_text(bound: Bound, name: str, *, world: str, role: str) -> Any:
+def _read_archived_text(bound: Bound, name: str | PurePath, *, world: str, role: str) -> Any:
     """One archived document (`worlds/<world>/<role>`) through the world-archive screen
     (#1049): absent is the primitive's own absent STATE, answered as a value (D-J2) — never a
     sentence, never `None` — a caller with a partial archive to render (the episode page)
@@ -1160,7 +1159,7 @@ def _read_run_end_record(world: Bound) -> RunEnd | None:
     return parse_record(json_mapping(world, WORLD_LEAVES.run_end))
 
 
-def read_archived_report(bound: Bound, name: str) -> ReportRead:
+def read_archived_report(bound: Bound, name: str | PurePath) -> ReportRead:
     """`report.md` through the world-archive screen (#1049) — a symlink, a hard link or a FIFO
     at the name reads as a report with no headline, never followed and never raised; nothing
     at the name answers the primitive's own ABSENT state (`ReportRead.absent`), never a

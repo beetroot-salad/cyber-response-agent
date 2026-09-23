@@ -928,12 +928,12 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
     return entries, roster, off_roster
 
 
-def _result_event(bound: Bound, run_dir_name: str) -> _ResultEvent:
+def _result_event(bound: Bound, run_rel: PurePosixPath) -> _ResultEvent:
     # THE EPISODE BIND, WALKED THROUGH THE JSONL TWIN (#1049) — absent/refused are the
     # primitive's own states, never an `entry_present` stat ahead of the read; a link or a
     # FIFO at the name is refused at the open itself rather than crashing the page with a
     # bare `PermissionError` (root ignores mode 000; a real non-root run does not, #1025).
-    rows, _bad, rec = bound.read_jsonl(PurePosixPath(run_dir_name) / RUN_LAYOUT.tool_trace)
+    rows, _bad, rec = bound.read_jsonl(run_rel / RUN_LAYOUT.tool_trace)
     if rec.absent:
         return _ResultEvent(None, None, "absent")
     if rec.refusal is not None:
@@ -1827,7 +1827,12 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
             bits.append(f'<div class="w-axis"><q class="verbatim">{_uv(axis)}</q></div>')
 
     result = entry.result
-    if result is not None:
+    # BOTH, not just the result. `run_dir_name` is `str | None` and only a world whose runs/
+    # entry was found has one — the invariant that `result` is set only alongside it is real
+    # but nothing checks it, and the old hand-composed link rendered `runs/None/runtime.html`
+    # when it broke: a dead link, silently. The owner's accessor refuses `None` outright, so
+    # the invariant is now asserted here rather than assumed two hundred lines away.
+    if result is not None and entry.run_dir_name is not None:
         link = f"{LAYOUT.run_page(entry.run_dir_name)}"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
         if result.cost is not None and result.costed:
