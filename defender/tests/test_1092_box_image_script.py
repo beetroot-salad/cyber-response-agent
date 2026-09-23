@@ -163,10 +163,10 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
 # ---- d9 --------------------------------------------------------------------------------------
 def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_the_derived_name(tmp_path):
     """`python3 <tree>/defender/scripts/box_image.py build` runs `docker build -f
-    <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>` — an argv list,
+    <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>/defender` — an argv list,
     never a shell string (a tree path with a space arrives as ONE argument; no `{`-template
-    token survives on the argv), the context is the tree root so the root `.dockerignore`
-    applies, the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
+    token survives on the argv), the context is the tree's `defender/` — the only directory the
+    recipe COPYs from, so no repo-root exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
     the recipe's `RUN --mount` is BuildKit syntax, #1095) — and propagates a non-zero build
     exit as its own non-zero exit. The daemon-side failures settled at phase C (a base pull,
     a hash mismatch, a full daemon, no `docker` on PATH) are all the same observable: the
@@ -186,7 +186,7 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     assert argv[0] == "build", argv
     assert argv[argv.index("-f") + 1] == str(root / "defender" / "box.Dockerfile"), argv
     assert argv[argv.index("-t") + 1] == expected_tag, argv
-    assert argv[-1] == str(root), argv
+    assert argv[-1] == str(root / "defender"), argv
     assert not any("{" in t or "}" in t for t in argv), argv
     assert builder_log(log) == ["1"], builder_log(log)
 

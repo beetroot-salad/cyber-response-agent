@@ -276,8 +276,8 @@ def test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material():
     exactly one of each) beside the installed packages.
 
     # rejected: a nested secret-shaped file in the build context: O7's image guarantee is
-    # the COPY list (two files); `.dockerignore` only bounds the transfer (PJ-r2-1 executed
-    # the legacy builder: one added layer, the two files)."""
+    # the COPY list (two files); the `defender/` context (#1098) only bounds the transfer
+    # (PJ-r2-1 executed the legacy builder: one added layer, the two files)."""
     seen = image_shell(IMAGE_WALK_PROBE)
     files, dirs = seen["files"], seen["dirs"]
     assert [f for f in files if f.endswith("/.env") or f.endswith(".env.bak")] == []
