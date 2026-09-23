@@ -213,6 +213,14 @@ def test_a_byte_change_in_the_recipe_or_the_exported_list_moves_the_tag_and_a_ma
         assert moved.startswith("defender-box:v2-"), f"the version prefix moved: {moved}"
         (defender_dir / name).write_bytes(original)
         assert image_tag(defender_dir) == baseline, f"restoring {name} did not restore the tag"
+    # A byte INSIDE a recorded artifact hash moves it too: a relock can swap an artifact
+    # under an unchanged version, and that is a different image (O2; #1097 adversary H2).
+    listed = PLANTED_INPUT_BYTES["box-requirements.txt"]
+    at = listed.index(b"--hash=sha256:") + len(b"--hash=sha256:") + 10
+    (defender_dir / "box-requirements.txt").write_bytes(listed[:at] + b"1" + listed[at + 1:])
+    assert image_tag(defender_dir) != baseline, "a changed artifact hash did not move the tag"
+    (defender_dir / "box-requirements.txt").write_bytes(listed)
+    assert image_tag(defender_dir) == baseline
     for name in BYSTANDERS:
         original = PLANTED_BYSTANDER_BYTES[name]
         (defender_dir / name).write_bytes(bytes([original[0] ^ 0x01]) + original[1:])

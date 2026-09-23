@@ -261,3 +261,125 @@ def test_box_image_export_over_a_lock_its_manifest_outgrew_exits_1_and_leaves_th
     assert "lock" in out.stderr.lower(), out.stderr
     assert (defender_dir / "box-requirements.txt").read_bytes() == PLANTED_INPUT_BYTES["box-requirements.txt"]
     assert (defender_dir / "uv.lock").read_bytes() == lock_before
+
+
+# ---- the owner runs uv, and hands back what uv said -------------------------------------------
+#: M1's command, word for word: the argv `export_requirements` owns.
+EXPORT_ARGV = [
+    "export", "--locked", "--no-dev", "--extra", "box", "--no-emit-project",
+    "--no-header", "--no-annotate",
+]
+
+_CALL_EXPORT = (
+    "import importlib.util, sys\n"
+    "from pathlib import Path\n"
+    "spec = importlib.util.spec_from_file_location('bi', sys.argv[1])\n"
+    "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+    "try:\n"
+    "    sys.stdout.write(mod.export_requirements(Path(sys.argv[2])))\n"
+    "except Exception as e:\n"
+    "    sys.stdout.write('RAISED ' + type(e).__name__ + ': ' + str(e))\n"
+)
+
+
+def _recording_uv(tmp_path: Path, *, stdout: bytes, stderr: bytes = b"", rc: int = 0):
+    """A real `uv` first on PATH that logs its argv (NUL-separated) and its cwd, then prints
+    `stdout`/`stderr` verbatim and exits `rc`. Returns (env, argv_log, cwd_log)."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    argv_log, cwd_log = tmp_path / "uv-argv.log", tmp_path / "uv-cwd.log"
+    (tmp_path / "uv-out").write_bytes(stdout)
+    (tmp_path / "uv-err").write_bytes(stderr)
+    exe = bin_dir / "uv"
+    exe.write_text(
+        "#!/bin/sh\n"
+        f"for a in \"$@\"; do printf '%s\\0' \"$a\" >> {argv_log}; done\n"
+        f"pwd > {cwd_log}\n"
+        f"cat {tmp_path / 'uv-out'}\n"
+        f"cat {tmp_path / 'uv-err'} >&2\n"
+        f"exit {rc}\n",
+        encoding="utf-8",
+    )
+    exe.chmod(0o755)
+    env = dict(__import__("os").environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    return env, argv_log, cwd_log
+
+
+def _call_export_under(env: dict[str, str], tree: Path):
+    return subprocess.run(
+        [sys.executable, "-c", _CALL_EXPORT, str(DEFENDER / "scripts" / "box_image.py"), str(tree)],
+        capture_output=True, env=env, timeout=60,
+    )
+
+
+def test_export_requirements_runs_uv_export_with_exactly_the_owned_argv_in_the_tree_and_returns_its_output_verbatim(tmp_path):
+    """`export_requirements(tree)` spawns `uv` with exactly M1's argv (`export --locked
+    --no-dev --extra box --no-emit-project --no-header --no-annotate`), in `tree`, and returns
+    uv's stdout byte-for-byte — every hash line included, for every platform uv listed. A
+    re-implementation that parses `uv.lock` itself (never spawning uv), a different flag set,
+    or a post-filter that trims hashes all fail here (#1097 adversary H3/H7).
+
+    # rejected: comparing against a second run of the same function — that compares the owner
+    # with itself (the drift test's blind spot for a function that never runs uv)."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    out = (
+        b"planted==1.0 \\\n"
+        b"    --hash=sha256:" + b"a" * 64 + b" \\\n"
+        b"    --hash=sha256:" + b"b" * 64 + b"\n"
+        b"other==2.0 ; sys_platform == 'win32' \\\n"
+        b"    --hash=sha256:" + b"c" * 64 + b"\n"
+    )
+    env, argv_log, cwd_log = _recording_uv(tmp_path, stdout=out)
+    res = _call_export_under(env, tree)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == out, res.stdout
+    calls = argv_log.read_bytes().split(b"\0")[:-1]
+    assert [a.decode() for a in calls] == EXPORT_ARGV, calls
+    assert Path(cwd_log.read_text(encoding="utf-8").strip()).resolve() == tree.resolve()
+
+
+def test_export_requirements_raises_with_uvs_own_words_and_survives_undecodable_stderr(tmp_path):
+    """When `uv` exits non-zero, `export_requirements` raises and the exception's message
+    carries uv's own stderr — not a fixed sentence that would call every uv failure a lock
+    problem (#1097 adversary H4). A stderr that is not valid UTF-8 still ends in that raise,
+    never a decoding traceback. Positive control: the same fake with rc 0 returns its stdout."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    words = b"error: the resolver said something only uv would say: zq-7731"
+    env, _, _ = _recording_uv(tmp_path / "fail", stdout=b"", stderr=words, rc=2)
+    res = _call_export_under(env, tree)
+    assert res.stdout.startswith(b"RAISED "), (res.stdout, res.stderr)
+    assert b"zq-7731" in res.stdout, res.stdout
+    assert b"lock" not in res.stdout.lower(), "a non-lock uv failure was reported as a lock problem"
+
+    env, _, _ = _recording_uv(tmp_path / "bad", stdout=b"", stderr=b"boom \xff\xfe zq-7732", rc=1)
+    res = _call_export_under(env, tree)
+    assert res.stdout.startswith(b"RAISED "), (res.stdout, res.stderr)
+    assert b"UnicodeDecodeError" not in res.stdout + res.stderr, res.stdout + res.stderr
+    assert b"zq-7732" in res.stdout, res.stdout
+
+    env, _, _ = _recording_uv(tmp_path / "ok", stdout=b"fine==1.0\n")
+    res = _call_export_under(env, tree)
+    assert res.stdout == b"fine==1.0\n", res.stdout
+
+
+def test_export_requirements_refuses_a_version_range_the_lock_does_not_satisfy(tmp_path):
+    """A `pyproject.toml` whose core pin moved (`pydantic>=2` → `pydantic>=2.1`, still satisfied by the locked version) without a relock
+    is refused too — not only an added package (`--frozen` exports it; probed uv 0.11.28): the lock records each requirement's
+    specifier, and `--locked` compares them (#1097 adversary H3's staleness shortcut compared
+    names only). Positive control: the unedited copy exports."""
+    good = plant_real_manifests(plant_tree(tmp_path / "good", copy_code=False))
+    assert parse_pinned(_export(good))
+    stale = plant_real_manifests(plant_tree(tmp_path / "stale", copy_code=False))
+    pyproject = stale / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert text.count('"pydantic>=2"') == 1, "the core pydantic pin moved; update this test"
+    pyproject.write_text(text.replace('"pydantic>=2"', '"pydantic>=2.1"'), encoding="utf-8")
+    lock_before = (stale / "uv.lock").read_bytes()
+    export = load_box_image_script().export_requirements
+    with pytest.raises(Exception, match=r"(?i)lock") as caught:
+        export(stale)
+    assert not isinstance(caught.value, (AttributeError, NameError, TypeError)), caught.value
+    assert (stale / "uv.lock").read_bytes() == lock_before

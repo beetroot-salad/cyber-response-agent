@@ -155,6 +155,15 @@ def test_the_dockerfile_copies_nothing_from_the_build_context():
     target = _context_list_mount(mounts).get("target", _context_list_mount(mounts).get("dst"))
     assert target, mounts
     assert _requirement_files(command) == [target], (target, command)
+    # No OTHER step reaches into the context either: a second `RUN --mount` of the context
+    # (`source=.`) could `cp` the manifests or the source tree into a layer with no COPY at all
+    # (#1097 adversary H6). Every bind without `from=`, in every RUN, is the one list mount.
+    context_binds = [
+        m for ins in instructions if ins.startswith("RUN ")
+        for m in _run_parts(ins)[0]
+        if m.get("type", "bind") == "bind" and "from" not in m
+    ]
+    assert context_binds == [_context_list_mount(mounts)], context_binds
 
 
 # ---- d14 (#1097 O4) -----------------------------------------------------------------------------
@@ -179,10 +188,16 @@ def test_the_install_step_installs_exactly_the_mounted_list_hash_checked_unresol
     target = _context_list_mount(mounts).get("target", _context_list_mount(mounts).get("dst"))
     assert target, mounts
     assert _requirement_files(command) == [target], (target, command)
-    install_args = command[command.index("install") + 1:]
-    for flag in ("--system", "--require-hashes", "--no-deps", "--strict"):
-        assert flag in install_args, (flag, command)
-    assert "UV_COMPILE_BYTECODE=1" in command[:command.index("uv")], command
+    # The step's WHOLE command, not the presence of each wanted flag: uv takes the last of a
+    # flag and its negation, so `--require-hashes … --no-require-hashes` would pass a presence
+    # check while installing unverified downloads (#1097 adversary H1). Flag order is free;
+    # nothing else may ride along — no negation, no second command, no second list.
+    assert command[:4] == ["UV_COMPILE_BYTECODE=1", "uv", "pip", "install"], command
+    install_args = command[4:]
+    r_at = install_args.index("-r")
+    flags = install_args[:r_at] + install_args[r_at + 2:]
+    assert install_args[r_at + 1] == target, (target, command)
+    assert sorted(flags) == sorted(["--system", "--require-hashes", "--no-deps", "--strict"]), command
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
 
 
