@@ -52,12 +52,13 @@ def export_requirements(defender_dir: Path) -> str:
     spelled: the `export` subcommand writes this text, and the drift test compares the
     committed file against it. Raises `ExportError` if uv refuses, `OSError` if there is no uv
     to run; never writes anything itself."""
-    proc = subprocess.run(  # noqa: S603 — a fixed argv
-        list(_EXPORT_ARGV), cwd=defender_dir, capture_output=True, text=True, encoding="utf-8",
-    )
+    proc = subprocess.run(list(_EXPORT_ARGV), cwd=defender_dir, capture_output=True)  # noqa: S603 — a fixed argv
     if proc.returncode != 0:
-        raise ExportError(f"uv export failed: {proc.stderr.strip()}")
-    return proc.stdout
+        # uv's reason, whatever bytes it came in: a refusal must never become a decode error.
+        reason = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise ExportError(f"uv export failed: {reason}")
+    # The list itself is decoded strictly — a mangled pin would be worse than a traceback.
+    return proc.stdout.decode("utf-8")
 
 
 def _load_image_module() -> ModuleType:
