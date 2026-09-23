@@ -627,18 +627,22 @@ def run_parsed(
 
 def _run_box_entrypoint() -> int:
     """The process that runs INSIDE the sandbox: only the mounted tree on its `PYTHONPATH`, no
-    venv, and — since #1092's owned image — the image's own `/usr/local` site-packages, which
-    is where `defender.runtime.box`'s import of `defender._model` (pydantic) now resolves."""
-    from defender.runtime import box
+    venv. One of these per `docker exec`, and one `docker exec` per command an agent issues,
+    so it imports `box_codec` — the wire codec and the env allowlist, stdlib — and NOT the
+    `box` package door, whose import costs roughly seven times as much because it reaches
+    `defender._model` and through it pydantic (#1096; #1092 made that resolvable in-box, which
+    is why this is a cost rule and not an availability one). Function-local because
+    `box_codec` imports this module at its top."""
+    from defender.runtime import box_codec
 
     frame = sys.stdin.buffer.read()
     try:
-        pipelines = box.decode_request(frame)
+        pipelines = box_codec.decode_request(frame)
     except ValueError as e:
         print(f"box entrypoint: undecodable request frame: {e}", file=sys.stderr)
         return 2
 
-    box_env = {k: v for k, v in os.environ.items() if k in box.BOX_ENV_ALLOWLIST}
+    box_env = {k: v for k, v in os.environ.items() if k in box_codec.BOX_ENV_ALLOWLIST}
 
     try:
         rc, out, err = run_parsed(
@@ -652,7 +656,7 @@ def _run_box_entrypoint() -> int:
         print("box entrypoint: the pipeline exceeded its wall-clock deadline", file=sys.stderr)
         return 3
 
-    sys.stdout.buffer.write(box.encode_response(box.BoxResult(
+    sys.stdout.buffer.write(box_codec.encode_response(box_codec.BoxResult(
         rc=rc, out=out.encode("utf-8"), err=err.encode("utf-8"),
     )))
     sys.stdout.buffer.flush()
@@ -660,4 +664,15 @@ def _run_box_entrypoint() -> int:
 
 
 if __name__ == "__main__":
+    # `python3 -m defender.runtime.bash_exec` is how a box starts this file, so the interpreter
+    # has it registered as `__main__` and NOT under its own import name. `box_codec` imports it
+    # by that name, which without this line parses, compiles and executes all of it a SECOND
+    # time in the same process — and the tree is mounted read-only, so there is no bytecode
+    # cache to make the second pass cheap (#1096). Aliasing the one already running costs
+    # nothing and also keeps `Pipeline`/`Stage` a single pair of classes, rather than two that
+    # only interoperate because nothing here uses `isinstance`.
+    # `setdefault`, not assignment: under any launch that DID import this module normally, the
+    # real one is already registered and must win.
+    if __spec__ is not None:  # `-m`/runpy set it; a bare `python bash_exec.py` does not
+        sys.modules.setdefault(__spec__.name, sys.modules[__name__])
     sys.exit(_run_box_entrypoint())

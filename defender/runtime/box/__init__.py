@@ -29,8 +29,10 @@ from defender._io import read_text_soft, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
+    BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: read off the door by test_1092_box_mark_env.py, test_1092_box_image_live.py, tests/e2e/test_540_box_boundary.py and tests/e2e/test_665_box_geography.py
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
+    _BOX_MARK_ENV,  # noqa: F401 — re-exported: read off the door by test_1092_box_mark_env.py (`box_mod._BOX_MARK_ENV`) and test_1096_entrypoint_closure.py
     BoxFault,
     BoxResult,
     RawExec,
@@ -49,7 +51,6 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 from ._spec import (
     ALIAS_PROFILE_PATH,
     BANNED_SHAPES,
-    BOX_ENV_ALLOWLIST,
     BoxExecutor,
     BoxLike,
     BoxRequest,
@@ -57,7 +58,6 @@ from ._spec import (
     DEFAULT_SPEC,
     Mount,
     Transport,
-    _BOX_MARK_ENV,
     _DockerTransport,
     _HostTransport,
     _OCI_SECCOMP_FLAG,

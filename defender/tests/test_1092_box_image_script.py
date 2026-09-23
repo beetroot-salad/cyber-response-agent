@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._import_blocker import run_blocked
 from defender.tests._spec1092 import (
     BOX_IMAGE_PY,
     DEFENDER,
@@ -77,21 +78,14 @@ def test_the_image_module_imports_only_the_stdlib_and_loads_by_file_path_without
     code = (
         "import importlib.util, json, sys\n"
         "from pathlib import Path\n"
-        "class _Block:\n"
-        "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name == 'pydantic' or name.startswith(('pydantic.', 'pydantic_core')):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "sys.meta_path.insert(0, _Block())\n"
         f"spec = importlib.util.spec_from_file_location('_image_by_path', {str(IMAGE_PY)!r})\n"
         "mod = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(mod)\n"
         f"tag = mod.image_tag(Path({str(defender_dir)!r}))\n"
         "print(json.dumps({'tag': tag, 'defender': sorted(m for m in sys.modules if m.startswith('defender'))}))\n"
     )
-    out = subprocess.run(
-        [sys.executable, "-S", "-c", code], capture_output=True, text=True, encoding="utf-8",
-        cwd=str(tmp_path), env={"PATH": os.environ.get("PATH", "")}, timeout=120,
-    )
+    out = run_blocked(code, block=("pydantic", "pydantic_core"), no_site=True, cwd=tmp_path,
+                      env={"PATH": os.environ.get("PATH", "")})
     assert out.returncode == 0, out.stderr
     seen = json.loads(out.stdout)
     assert seen["defender"] == [], seen
@@ -114,11 +108,6 @@ def test_the_box_image_script_imports_only_the_stdlib_and_never_the_defender_pac
     root, script = _planted_script(tmp_path)
     code = (
         "import json, runpy, sys\n"
-        "class _Block:\n"
-        "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name == 'pydantic' or name.startswith(('pydantic.', 'pydantic_core')):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "sys.meta_path.insert(0, _Block())\n"
         f"sys.argv = [{str(script)!r}, 'tag']\n"
         "code = 0\n"
         "try:\n"
@@ -127,15 +116,13 @@ def test_the_box_image_script_imports_only_the_stdlib_and_never_the_defender_pac
         "    code = e.code or 0\n"
         "print(json.dumps({'code': code, 'defender': sorted(m for m in sys.modules if m.startswith('defender'))}), file=sys.stderr)\n"
     )
-    out = subprocess.run(
-        [sys.executable, "-S", "-c", code], capture_output=True, text=True, encoding="utf-8",
-        cwd=str(tmp_path), env={"PATH": os.environ.get("PATH", "")}, timeout=120,
-    )
+    out = run_blocked(code, block=("pydantic", "pydantic_core"), no_site=True, cwd=tmp_path,
+                      env={"PATH": os.environ.get("PATH", "")})
     assert out.returncode == 0, out.stderr
-    report = json.loads(out.stderr.strip().splitlines()[-1])
+    report = json.loads(out.stderr.decode("utf-8").strip().splitlines()[-1])
     assert report["code"] == 0, out.stderr
     assert report["defender"] == [], report
-    assert out.stdout == image_tag(root / "defender") + "\n"
+    assert out.stdout.decode("utf-8") == image_tag(root / "defender") + "\n"
 
 
 # ---- d8 --------------------------------------------------------------------------------------

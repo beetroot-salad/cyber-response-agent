@@ -1,11 +1,48 @@
+"""The box wire: the request/response frames, and the env a box may carry.
 
+STDLIB ONLY (#1096) — and that is a COST rule, not an availability one. Two rules are easy to
+confuse here, so both, in order:
+
+  * #1092 retired the AVAILABILITY rule. The owned box image installs the project's
+    dependencies, so pydantic resolves inside a box and the `box` package door is free to use
+    it — `BoxSpec` is a `@model` dataclass today, which is that retirement's live pin.
+  * #1096 adds the COST rule, which is this module's. One process imports it per `docker
+    exec`, and there is one `docker exec` per command an agent issues. Importing the package
+    door instead costs roughly SEVEN TIMES this module's import (measured both ways in #1096;
+    the absolute figures are host-specific, the ratio is what matters), because the door
+    reaches `defender._model` and through it pydantic.
+
+So: everything the in-box entrypoint needs lives here — the codec below and the env allowlist —
+and a third-party import added to this module is paid once per agent command, forever.
+"""
 from __future__ import annotations
 
 import struct
 from collections.abc import Sequence
-from dataclasses import dataclass  # stdlib, deliberately — see the note below
-
+from dataclasses import dataclass  # stdlib, deliberately — see the module docstring
 from defender.runtime import bash_exec
+
+
+#: F7 — the positive env allowlist: the keys a box's environment may carry, whether merged
+#: from a caller's request env by the `docker run` builders or filtered from the in-box
+#: entrypoint's own environment before a command runs. Owned HERE, beside the wire, because
+#: the in-box reader is the one that must not pay for the package door to reach it (#1096).
+BOX_ENV_ALLOWLIST: tuple[str, ...] = (
+    "DEFENDER_DIR",
+    "DEFENDER_RUN_DIR",
+    "DEFENDER_RUNS_BASE",
+    "PATH",
+    "PYTHONPATH",
+    "LANG",
+    "TZ",
+    "DEFENDER_BOX",
+)
+
+#: M6/JF3 — the in-box mark. Spread into both `docker run` argv builders AFTER every other
+#: source of env (a caller's `request.env`, the run-dir lane's derived infra env), so nothing a
+#: caller supplies can switch it back off inside a box; both host lanes (`_host_fallback_env`,
+#: `run_common.run_env`) strip the key instead of ever setting it.
+_BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
 
 
 class BoxFault(Exception):

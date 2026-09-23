@@ -15,6 +15,8 @@ from defender._io import sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._run_paths import RUN_LAYOUT
 from defender.runtime.box_codec import (
+    BOX_ENV_ALLOWLIST,
+    _BOX_MARK_ENV,
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
@@ -26,7 +28,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     verdict_path,
     write_did_not_run,
 )
-from ._spec import ALIAS_PROFILE_PATH, BOX_ENV_ALLOWLIST, BoxExecutor, BoxRequest, BoxSpec, Mount, _BOX_MARK_ENV
+from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport

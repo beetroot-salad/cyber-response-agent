@@ -13,8 +13,6 @@ content-based check.
 """
 from __future__ import annotations
 
-import subprocess
-import sys
 import shutil
 from pathlib import Path
 
@@ -201,26 +199,21 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
     the owned box image carries pydantic. What the entrypoint's per-exec import then costs is
     #1096. This test pins the owner, which is #1077's."""
     from defender._paths import PATHS
-    code = (
+    from defender.tests._import_blocker import run_blocked
+
+    done = run_blocked(
         "import sys\n"
-        "class Blocker:\n"
-        "    def find_module(self, name, path=None):\n"
-        "        if name.split('.')[0] in ('pydantic', 'pydantic_ai', 'pydantic_core'):\n"
-        "            raise ModuleNotFoundError(name)\n"
-        "        return None\n"
-        "sys.meta_path.insert(0, Blocker())\n"
         "import defender._run_paths as rp\n"
         "assert rp.BOX_SENTINEL, 'the owner does not name the sentinel'\n"
         "import dataclasses\n"
         "assert dataclasses.is_dataclass(rp.RunPaths), 'RunPaths is not a stdlib dataclass'\n"
         "assert 'pydantic' not in sys.modules, sorted(m for m in sys.modules if 'pyd' in m)\n"
-        "print('OK')\n")
-    done = subprocess.run([sys.executable, "-c", code], cwd=PATHS.repo_root,
-                          capture_output=True, text=True, timeout=180)
+        "print('OK')\n",
+        block=("pydantic", "pydantic_ai", "pydantic_core"), cwd=PATHS.repo_root)
     assert done.returncode == 0, (
         f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` uses a stdlib "
-        f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr}")
-    assert "OK" in done.stdout
+        f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr!r}")
+    assert b"OK" in done.stdout
 
 
 def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
