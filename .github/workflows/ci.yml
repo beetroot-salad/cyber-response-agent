@@ -58,9 +58,9 @@ jobs:
       # as an installable package. The runtime extra (pydantic-ai) is synced so
       # the runtime/ package import-checks during collection and the hermetic
       # e2e replay suite can run. `--locked` (#1092 M4 amended): a plain sync silently
-      # RELOCKS a `pyproject.toml` edited without a matching `uv.lock` update, so the suite
-      # would test a lock nobody committed — and the box image's package list, exported from
-      # the COMMITTED lock (#1097), would disagree with it. Fail at the sync step instead.
+      # RELOCKS a `pyproject.toml` edited without a matching `uv.lock` update, which —
+      # under the box image's content-addressed name — would surface as a missing image
+      # with a misleading remedy instead of a sync-step failure.
       - name: Sync defender venv
         working-directory: defender
         run: uv sync --extra dev --extra runtime --locked

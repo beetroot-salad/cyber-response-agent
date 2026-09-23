@@ -42,7 +42,7 @@ def _create_argv(
     # C46's uncovered-mount refusal runs BEFORE the image resolver (MF1 part 2): a tree that
     # sits on no shared path is a topology fault the resolver's file reads cannot fix, and
     # reading them first would surface the wrong refusal on a tree that is ALSO missing its
-    # hash inputs.
+    # three inputs.
     for subject, path, remedy in (
         ("run dir", run_dir, "Set DEFENDER_RUNS_BASE to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
