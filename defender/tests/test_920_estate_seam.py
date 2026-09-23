@@ -66,10 +66,10 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
     WorldRegistry,
 )
+from defender._episode_paths import BASE_FILENAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     APPLIER_DECISIONS,
     BASE,
-    BASE_FILENAME,
     CAPTURED,
     FAMILY_SOURCES,
     FAULT,

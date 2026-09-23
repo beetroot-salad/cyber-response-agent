@@ -76,13 +76,13 @@ from defender._io import ALIAS_READ_REFUSAL, Bound, bind
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
+from defender._episode_paths import SERVED_DIRNAME
 from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     FAULT,
     PASSTHROUGH,
     PATCHED,
     REFUSED,
-    SERVED_DIRNAME,
     STAGED,
     normalized_source,
     request_key,

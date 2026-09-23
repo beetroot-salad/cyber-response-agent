@@ -22,6 +22,20 @@ NOT_CLAIMED = 0
 ALREADY_CLAIMED = 2
 
 
+def _say_already_dispatched(lead_id: object) -> None:
+    """The model's remedy for a taken id, on stderr. ONE spelling, called from both arms that
+    answer `ALREADY_CLAIMED`: the `O_EXCL` EEXIST gate below, and the containment refusal in
+    `_claim_path`. A refusal the model cannot act on is a refusal it repeats — the two arms
+    are indistinguishable to it (the id is held, by a row or by a planted entry), so they owe
+    it the same correctable instruction."""
+    print(
+        f"lead_id {lead_id!r} already dispatched; append a new :L "
+        f"findings row and echo its id (a retry is a new lead, never "
+        f"a reused id).",
+        file=sys.stderr,
+    )
+
+
 def _claim_path(run_dir: Path, lead_id: str) -> Path | int:
     """The claim sidecar's path under a `gather_raw/` this call could create — or the code the
     hook answers with when it could not."""
@@ -34,11 +48,20 @@ def _claim_path(run_dir: Path, lead_id: str) -> Path | int:
         return NOT_CLAIMED
     try:
         return paths.lead_claim(lead_id)
+    except ValueError:
+        # The owner's SHAPE half (`_check_component`): the argument is not a plain single
+        # segment. Nobody holds the name — nothing was refused, the caller handed us one we
+        # cannot compose — so this is `NOT_CLAIMED`, not the taken-id answer below. Caught at
+        # all because the contract is "return a code, never raise" and the owner raises here
+        # where the old hand-composed f-string silently accepted anything.
+        return NOT_CLAIMED
     except OSError:
-        # The owner's composition carries decision 2's containment check: an entry planted at
-        # the claim's name that resolves outside the run dir. SOMETHING holds the name, which
-        # is what the `O_EXCL` create would have said of it (EEXIST) — so the posture is the
-        # same one, #771 D3: an alias refusal is exempt from every failure circuit.
+        # The owner's CONTAINMENT half (`_confine`, an alias-marked `OSError`): an entry
+        # planted at the claim's name that resolves outside the run dir. SOMETHING holds the
+        # name, which is what the `O_EXCL` create would have said of it (EEXIST) — so the
+        # posture is the same one, #771 D3: an alias refusal is exempt from every failure
+        # circuit, and it owes the model the same remedy that arm prints.
+        _say_already_dispatched(lead_id)
         return ALREADY_CLAIMED
 
 
@@ -77,12 +100,7 @@ def claim_lead(dispatch: dict) -> int:
         fd = os.open(sidecar_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except OSError as e:
         if e.errno == errno.EEXIST:
-            print(
-                f"lead_id {lead_id!r} already dispatched; append a new :L "
-                f"findings row and echo its id (a retry is a new lead, never "
-                f"a reused id).",
-                file=sys.stderr,
-            )
+            _say_already_dispatched(lead_id)
             return ALREADY_CLAIMED
         return NOT_CLAIMED
     try:

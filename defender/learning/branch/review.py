@@ -63,9 +63,10 @@ from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
 from .estate.registry import refuse_a_foreign_world_view
 from .estate.stagers.dispatch import STAGERS
+from defender._episode_paths import SERVED_DIRNAME
+
 from .ledger import (
     BASE,
-    SERVED_DIRNAME,
     Ledger,
     ServedCall,
     base_file,
