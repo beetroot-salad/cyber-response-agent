@@ -27,7 +27,8 @@ from typing import Any
 import contextlib
 
 from defender._io import Bound, bind
-from defender._run_paths import PROVENANCE, REPORT
+from defender._episode_paths import LAYOUT, WORLD_LEAVES
+from defender._run_paths import RUN_LAYOUT
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -35,11 +36,6 @@ from defender.hooks.record_lesson_load import (
     EVIDENCE_UNKNOWN,
     LessonExposure,
     exposures,
-)
-from defender.learning.branch.archive import (
-    ALERT_NAME,
-    LESSONS_LOADED_NAME,
-    WORLDS_DIRNAME,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import (
@@ -373,7 +369,7 @@ def _sibling_row(
     byte in one unrelated run under the operator's runs base refuse the whole grade of an
     episode whose own archive reads perfectly. Both reads walk no-follow from the runs base's
     own handle (#1049): a link at either name is never followed."""
-    alert_rec = run.read(ALERT_NAME)
+    alert_rec = run.read(RUN_LAYOUT.alert)
     if alert_rec.absent:
         return None, None
     alert_doc = json_mapping_of(alert_rec.text)
@@ -381,7 +377,7 @@ def _sibling_row(
         return None, "skipped_unreadable"
     if alert_doc.get("alert_id") != alert_id:
         return None, None
-    read = read_archived_report(run, REPORT)
+    read = read_archived_report(run, RUN_LAYOUT.report)
     if read.absent:
         return None, "skipped_unclosed"
     if not read.text:
@@ -460,7 +456,7 @@ def sibling_union(
 
 
 def _world_alert_id(world: Bound) -> str | None:
-    data = json_mapping(world, ALERT_NAME)
+    data = json_mapping(world, WORLD_LEAVES.alert)
     return data.get("alert_id") if data is not None else None
 
 
@@ -480,7 +476,7 @@ def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
         # A label off `judge.yaml` (a box-writable record) that is not a plain path component
         # names no directory and so no alert — skipped, never a `ValueError` out of the walk.
         try:
-            data = json_mapping(bound, f"{WORLDS_DIRNAME}/{label}/{ALERT_NAME}")
+            data = json_mapping(bound, LAYOUT.world(label).alert)
         except ValueError:
             continue
         if data is None:
@@ -619,7 +615,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     episode_token = episode_token_for(episode_id_of(doc))
     world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
     show = git_show if git_show is not None else _git_show_default
-    world = bound.under(f"{WORLDS_DIRNAME}/{world_label}")
+    world = bound.under(LAYOUT.world(world_label).dir)
     # `leads_by_id` is `lead_repository`'s surface, shared with the live run dir, and takes the
     # world's directory — the one path on this lane, behind the same listing gate the
     # mechanical pass keeps (`family._repository_leads`, run by `read_world_facts` once its
@@ -696,7 +692,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     # the one error a provenance record must not make — so `bool(...)` suppressed the caveat for
     # exactly the world whose checkout is least certain to be the tree it ran against.
     dirty = provenance.get("dirty")
-    lessons_loaded, _malformed, _rec = world.read_jsonl(LESSONS_LOADED_NAME)
+    lessons_loaded, _malformed, _rec = world.read_jsonl(WORLD_LEAVES.lessons_loaded)
     lessons: list[dict[str, Any]] = []
     # READ AS A SET through the record's one reader (`hooks.record_lesson_load.exposures`,
     # the same call `learning/ops/trace_lesson.py` makes): the file is an EVENT log — a row per
@@ -844,7 +840,7 @@ def _lesson_paths_for(lesson_name: Any) -> list[str]:
 
 
 def _read_provenance(world: Bound) -> dict[str, Any]:
-    return json_mapping(world, PROVENANCE) or {}
+    return json_mapping(world, WORLD_LEAVES.provenance) or {}
 
 
 #: A commit this pass will spend in a subprocess argv. Nothing else is: `provenance.json` lives

@@ -248,22 +248,27 @@ def _string_constants(source: str, path: str) -> set[str]:
     return _census(source, path)[0]
 
 
-def test_archive_is_the_one_home_for_the_three_episode_record_names():
-    """`archive.py` — which already owns `WORLDS_DIRNAME`, `ALERT_NAME` and the other archived
-    names — owns the three episode-level record names too, with the values every reader today
-    spells for itself.
+def test_the_episode_path_owner_is_the_one_home_for_the_three_episode_record_names():
+    """`_episode_paths.py` owns the three episode-level record names, with the values every
+    reader used to spell for itself.
 
-    Observably true: `archive.REVIEW_NAME == "review.yaml"`, `SAMPLES_NAME == "samples.yaml"`,
-    `JUDGE_NAME == "judge.yaml"`.
+    THE HOME MOVED, and this test's name moved with it (#1077 D7). It used to assert
+    `archive.py` was the home, because archive.py re-bound each name off the owner and every
+    reader bound it off archive.py in turn. That re-export was the disease D7 removes: the day
+    archive.py stopped exporting them, six modules broke at once with no gate having seen
+    anything. archive.py now holds no record name at all.
 
-    What failure looks like: the constants are absent (four modules keep their own), or one is
-    present under a different value than the file the launcher actually writes.
+    Observably true: `_episode_paths.REVIEW_NAME == "review.yaml"`, `SAMPLES_NAME ==
+    "samples.yaml"`, `JUDGE_NAME == "judge.yaml"`, and none of the three is an attribute of
+    `archive.py`.
     """
-    archive = _archive()
+    owner, archive = J.mod("_episode_paths"), _archive()
 
     for name, value in _RECORD_NAMES.items():
-        assert getattr(archive, name) == value, (
-            f"archive.{name} is {getattr(archive, name)!r}, not {value!r}")
+        assert getattr(owner, name) == value, (
+            f"_episode_paths.{name} is {getattr(owner, name)!r}, not {value!r}")
+        assert not hasattr(archive, name), (
+            f"archive.py still re-exports {name} — a second home is what D7 removes")
 
 
 def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
@@ -311,25 +316,28 @@ def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
         f"{_OWNER_MODULE} may define them — a re-export is an import, not a binding")
 
 
-def test_every_reader_of_a_record_name_holds_the_archives_own_object():
-    """Every shipped module that names one of the three records holds `archive`'s OWN string
-    — the attribute `is` the archive's, which only an import produces. A module that
-    re-spelled the value under the same name would compare `==` and not `is`.
+def test_no_reader_of_a_record_name_holds_one_at_all():
+    """No shipped module outside the owner BINDS any of the three record names — not even as
+    an import.
 
-    Observably true: for each `(module, attribute)` in `_IMPORTERS`, the attribute exists and
-    is identical to the archive's constant it stands for.
+    THE INVERSE OF WHAT THIS TEST USED TO ASSERT, deliberately (#1077 D7). It used to require
+    that every reader hold `archive`'s OWN object, on the reasoning that sharing one object
+    is what keeps a rename honest. The object was shared and the rename was still not honest:
+    a held name is a name that outlives its home, and when `archive.py` stopped exporting
+    these, six modules broke at once with nothing having warned. A reader that asks the owner
+    for a path holds nothing, so there is nothing left to strand.
 
-    What failure looks like: `cli.REVIEW_NAME == "review.yaml"` holds while `cli` never
-    imported it — the census above catches the spelling; this catches the object.
+    Observably true: for each `(module, attribute)` in `_IMPORTERS` — the modules that used to
+    hold one — the attribute is simply absent.
+
+    What failure looks like: a module re-acquires one, by import or by re-spelling, and the
+    two-homes shape is back.
     """
-    archive = _archive()
-
     for module_name, attribute in _IMPORTERS:
         module = J.mod(module_name)
-        assert hasattr(module, attribute), f"{module_name}.{attribute} is gone"
-        assert getattr(module, attribute) is getattr(archive, attribute), (
-            f"{module_name}.{attribute} is not archive.{attribute}'s own object — a "
-            "re-spelling, not an import")
+        assert not hasattr(module, attribute), (
+            f"{module_name} holds {attribute} — D7's rule is that nothing outside the owner "
+            "holds a record name; ask for the accessor instead")
 
 
 # ---------------------------------------------------------------------------------------
@@ -991,18 +999,21 @@ def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
     DRAWS_DIRNAME)` answers that world's completed draws keyed by draw index — the reader finds
     the directory the writer wrote.
     """
-    archive, enqueue = _archive(), J.mod("learning.judge.enqueue")
+    owner, enqueue = J.mod("_episode_paths"), J.mod("learning.judge.enqueue")
     assert "draws_on_disk" in enqueue.__all__, "the per-draw reader is not exported"
-    for module_name in ("learning.judge", "learning.judge.enqueue"):
+    # NO MODULE HOLDS THE NAME ANY MORE (#1077 D7). The old form of this check asserted the
+    # writer and the reader held the same OBJECT as `archive.DRAWS_DIRNAME` — which was true,
+    # and was still a second home. Now neither module binds either name at all; both ask the
+    # owner for a path, so there is nothing left for a rename to strand.
+    for module_name in ("learning.judge", "learning.judge.enqueue",
+                        "learning.branch.cli", "learning.branch.archive"):
         module = J.mod(module_name)
-        assert module.DRAWS_DIRNAME is archive.DRAWS_DIRNAME, f"{module_name} re-spells it"
-        assert module.WORLDS_DIRNAME is archive.WORLDS_DIRNAME, f"{module_name} re-spells it"
-    assert not hasattr(J.mod("learning.branch.cli"), "WORLDS_SUBDIR"), (
-        "cli.py still carries a second constant for the worlds directory")
+        for held in ("DRAWS_DIRNAME", "WORLDS_DIRNAME", "WORLDS_SUBDIR"):
+            assert not hasattr(module, held), f"{module_name} still binds {held}"
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
 
     grade = _grade(ep, tmp_path)
-    draws = enqueue.draws_on_disk(ep / archive.WORLDS_DIRNAME / "b" / archive.DRAWS_DIRNAME)
+    draws = enqueue.draws_on_disk(owner.EpisodePaths(ep).world("b").draws)
 
     assert grade.draws["completed"] > 0, "positive control: the pass completed no draw"
     assert sorted(draws) == list(range(grade.draws["completed"])), (

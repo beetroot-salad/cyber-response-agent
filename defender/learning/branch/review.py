@@ -57,13 +57,12 @@ from defender.runtime.branch._family import (
 )
 from defender.runtime.verbs import VerbContext
 
-from .archive import REVIEW_NAME
 from .comparator import Verdict, compare, mechanical
 from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
 from .estate.registry import refuse_a_foreign_world_view
 from .estate.stagers.dispatch import STAGERS
-from defender._episode_paths import SERVED_DIRNAME
+from defender._episode_paths import EpisodePaths
 
 from .ledger import (
     BASE,
@@ -150,10 +149,11 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
     episode_dir = Path(episode_dir)
     if root is None:
         root = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
-    served = Path(root) / SERVED_DIRNAME
+    scratch = EpisodePaths(root)
+    served = scratch.served
     served.mkdir(  # lint-unguarded-tree-write: ok — a fresh host-made scratch tree under the system temp dir, never a box mount and never the episode's own served/  # noqa: E501
         parents=True, exist_ok=True)
-    base = served / base_file(episode_dir).name
+    base = scratch.served_base
     if not base.exists():
         # TOUCHED, not skipped: `Ledger.__post_init__` refuses a missing base, because a world
         # serving without one reads the live estate for every key. An empty file is the honest
@@ -161,7 +161,7 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
         # meaning what it means for a real run.
         base.write_text(  # lint-unguarded-tree-write: ok — the same fresh host-made scratch tree as the mkdir above; no box mounts it and no model can plant a component in it  # noqa: E501
             "", encoding="utf-8")
-    book = ScratchLedger(path=served / f"{world_label}.jsonl", base_path=base)
+    book = ScratchLedger(path=scratch.served_world(world_label), base_path=base)
     if any(book.base_rows()):
         # THE ONE PROPERTY THIS LEDGER EXISTS FOR, checked rather than assumed. A scratch base
         # holding rows is a review pointed at a recording — the episode's own capture, or a
@@ -327,7 +327,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     # file"). A review record is not a queue, and a frame that spells the queue writer's own
     # primitive joins a census it does not belong to.
     write(
-        episode_dir / REVIEW_NAME,
+        EpisodePaths(episode_dir).review,
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
 

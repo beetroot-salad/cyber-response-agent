@@ -11,7 +11,7 @@ from typing import Any
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
 from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
-from defender._run_paths import TRACE_SUFFIX, RunPaths  # noqa: F401 — RunPaths re-exported
+from defender._run_paths import WIRE_LOG_NAMES, RunPaths  # noqa: F401 — RunPaths re-exported
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
 
@@ -279,7 +279,7 @@ class StageWiring:
         for DIFFERENT runs, `pid` separates concurrent drain PROCESSES sharing one run dir."""
         return cls(
             prompt_path=prompt_path, model=model, effort=effort,
-            trace_name=f"{batch_id}.{os.getpid()}{TRACE_SUFFIX}",
+            trace_name=WIRE_LOG_NAMES.curator_batch(batch_id, os.getpid()),
             label=f"{label}:{batch_id}",
             batch_id=batch_id,
         )

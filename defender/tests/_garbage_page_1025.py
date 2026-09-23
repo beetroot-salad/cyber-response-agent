@@ -95,7 +95,7 @@ HEAD_REASONS: tuple[tuple[str, str, str], ...] = (
     ("how_the_operator_learns_where_the_page_is", "", "launcher hook absent on HEAD"),
     ("an_episode_with_no_judge_yaml_still_renders", "the launcher did not write", "launcher hook absent on HEAD"),
     ("a_sibling_process_exited_non_zero", "the launcher did not write", "launcher hook absent on HEAD"),
-    ("the_root_stamp_reader_lives_in_the_record_names_home", "FAMILY_STAMP_NAME", "accessor absent on HEAD"),
+    ("the_root_stamp_reader_lives_in_the_record_names_home", "family_stamp", "accessor absent on HEAD"),
     ("grade_episode_reads_world_archive_through_the_same_screen", "is None", "reader screen absent on HEAD"),
     ("judge_render_reads_world_archive_through_the_same_screen", "DID NOT RAISE", "reader screen absent on HEAD"),
     ("the_four_baseline_entries_naming_this_page", "", "vulture baseline (not a page test)"),

@@ -318,10 +318,12 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
 
 
 def test_1025_the_page_module_does_not_import_the_launcher():
-    """`RUNS_SUBDIR` comes from `branch/archive.py`, where the launcher moved it so writer and
-    reader spell the segment once — importing the page must not pull `branch/cli.py` (the
-    whole launcher: argparse, the estate registry, the review runtime) into a static renderer,
-    nor execute `cli.py` a second time when the launcher itself runs as a script."""
+    """The episode's `runs/` segment comes from `_episode_paths.py`, the layout owner, so the
+    writer and the reader reach it through one accessor (#1077 D7; it was a constant on
+    `branch/archive.py` before, and a second one on the page before that) — importing the page
+    must not pull `branch/cli.py` (the whole launcher: argparse, the estate registry, the
+    review runtime) into a static renderer, nor execute `cli.py` a second time when the
+    launcher itself runs as a script."""
     code = ("import sys; import defender.scripts.visualize.visualize_episode; "
             "print('defender.learning.branch.cli' in sys.modules)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

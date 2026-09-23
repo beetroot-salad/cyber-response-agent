@@ -5,7 +5,7 @@ from defender._model import complete, model
 from pathlib import Path
 
 from uuid import uuid4
-from defender._run_paths import TRACE_SUFFIX
+from defender._run_paths import WIRE_LOG_NAMES
 from defender._untrusted import wrap
 from defender.learning.author.verify_forward import forward
 from defender.learning.author.verify_forward.shared import (
@@ -70,7 +70,7 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
             prompt_path=prompt_path,
             model=config.verifier_model(),
             effort=config.verifier_effort(),
-            trace_name=f"{prefix}.{stem}.{ctx.check_index}{TRACE_SUFFIX}",
+            trace_name=WIRE_LOG_NAMES.forward_check(prefix, stem, ctx.check_index),
             label=f"{prefix}:{stem}",
         ),
         user=user,

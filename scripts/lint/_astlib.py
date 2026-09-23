@@ -242,7 +242,53 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # through `run.facts.<record>` / `run.tables.<table>` is owner-derived the same way a
     # `RunPaths(x).<record>` is — every name on that chain is the owner's own.
     "defender._run_handle.Run",
+    "defender._episode_paths.WorldPaths",
 })
+
+#: (#1077 D7) The owner modules' module-level SINGLETONS — stateless layout values a caller
+#: imports rather than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the
+#: same record's name relative to the run dir, which is the form `_io.Bound`'s readers take.
+#: Both are the owner's own value, so both are owner-derived; only the CONSTRUCTED form was
+#: recognised before, which is the mechanical reason every bound reader hand-composed its
+#: relative name out of an imported constant — the owner had no value it could hand them.
+_OWNER_VALUE_ORIGINS = frozenset({
+    "defender._run_paths.RUN_LAYOUT",
+    "defender._run_paths.WIRE_LOG_NAMES",
+    "defender._episode_paths.LAYOUT",
+    "defender._episode_paths.WORLD_LEAVES",
+})
+
+#: (#1077 D7) The handle sub-collections an owner-rooted attribute chain may pass THROUGH.
+#:
+#: The chain arm exists for `run.facts.<record>` — `Run`'s five declared sub-collections are
+#: the owner's own values. It was written to recurse through ANY attribute, which made every
+#: chain rooted at a tagged name owner-derived: once `paths = RunPaths(d)` was bound anywhere
+#: in a scope, an accessor read on `paths.<anything>.<record>` was accepted, and the gate's
+#: "unresolvable accessor use" arm could not fire again for that name. Named here, so the
+#: escape is the size of the thing it was built for.
+_OWNER_SUBCOLLECTIONS = frozenset({
+    "tables", "facts", "documents", "observability", "session",
+    # `WorldPaths.rel` is the same world's records in relative form — an owner value reached
+    # by attribute, like the handle's five.
+    "rel",
+})
+
+#: (#1077 D7) Owner METHODS that return another owner handle rather than a path.
+#: `EpisodePaths(d).world(label)` is a `WorldPaths`, and `LAYOUT.world(label)` a `WorldLayout`
+#: — the archive's destination handle and the page's reader both come from here. Named, not
+#: inferred: tagging the result of EVERY owner call would make `paths.alert` an owner instance
+#: and silence the join arm on the very values it exists to judge.
+_OWNER_SUBHANDLE_METHODS = frozenset({"world"})
+
+
+def _is_subhandle_call(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool:
+    """`<owner>.world(label)` — a call naming a declared sub-handle method on an owner."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _OWNER_SUBHANDLE_METHODS
+        and _owner_instance_in(node.func.value, owners, env)
+    )
 
 
 def _owner_locals(
@@ -260,9 +306,10 @@ def _owner_locals(
 
     def is_owner_expr(node: ast.expr) -> bool:
         if isinstance(node, ast.Call):
-            return callee(node, probe_env) in _OWNER_CLASS_ORIGINS
+            return (callee(node, probe_env) in _OWNER_CLASS_ORIGINS
+                    or _is_subhandle_call(node, owners, probe_env))
         if isinstance(node, ast.Name):
-            return node.id in owners
+            return node.id in owners or _origin(node, probe_env) in _OWNER_VALUE_ORIGINS
         if isinstance(node, ast.Attribute):
             return _owner_instance_in(node.value, owners, probe_env)
         return False
@@ -296,14 +343,20 @@ def _owner_locals(
 
 def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool:
     if isinstance(node, ast.Call):
-        return callee(node, env) in _OWNER_CLASS_ORIGINS
+        return (callee(node, env) in _OWNER_CLASS_ORIGINS
+                or _is_subhandle_call(node, owners, env))
     if isinstance(node, ast.Name):
-        return node.id in owners
+        return node.id in owners or _origin(node, env) in _OWNER_VALUE_ORIGINS
     if isinstance(node, ast.Attribute):
         # An attribute CHAIN rooted at an owner (`run.facts.scrub_verdict`, where `run` is a
-        # `Run`-annotated parameter) stays owner-derived at every link: the handle's
-        # sub-collections are the owner's own values, not a container the pass cannot see
-        # into.
+        # `Run`-annotated parameter) stays owner-derived — but ONLY through a DECLARED
+        # sub-collection. Recursing through any attribute at all made the escape unbounded:
+        # `paths.whatever.wire_log` passed once `paths` was tagged, so the gate's
+        # "unresolvable accessor use" arm went quiet for the rest of the scope. A member that
+        # is not one of the owner's own sub-collections is a container this pass cannot see
+        # into, which is exactly what that arm is for.
+        if node.attr not in _OWNER_SUBCOLLECTIONS:
+            return False
         return _owner_instance_in(node.value, owners, env)
     return False
 

@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 
 from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
 from defender._run_paths import (
+    RUN_LAYOUT,
     ALERT,
     PROVENANCE,
     GATHER_SUMMARIES_DIRNAME,
@@ -77,12 +78,112 @@ def _check_label(label: object, *, what: str = "label") -> str:
 
 
 @dataclasses.dataclass(frozen=True)
+class ArchivedWorldLeaves:
+    """One archived world's records by their OWN leaf name — relative to the WORLD dir.
+
+    Two views of one world, for the same reason the episode has two: a reader already bound
+    at `worlds/<label>/` addresses `alert.json`, while a reader bound at the episode root
+    addresses `worlds/<label>/alert.json`. Both used to be hand-composed from imported
+    constants at their call sites. `WorldLayout` is the episode-relative view and composes
+    itself out of this one, so the leaf is spelled once and the two can never disagree.
+    """
+
+    @property
+    def report(self) -> PurePosixPath:
+        return PurePosixPath(REPORT)
+
+    @property
+    def investigation(self) -> PurePosixPath:
+        return PurePosixPath(INVESTIGATION)
+
+    @property
+    def provenance(self) -> PurePosixPath:
+        """The world's own flat run stamp — the same spelling as the episode-root FAMILY
+        stamp, a different shape at the same file name (#1025 fk-8/J12)."""
+        return PurePosixPath(PROVENANCE)
+
+    @property
+    def scrub_verdict(self) -> PurePosixPath:
+        """The scrub verdict's name INSIDE the archive. Deliberately not the sidecar's own
+        spelling (`<run>.scrub-verdict.json`): inside `worlds/<X>/` the world IS the
+        directory, so the name that carried the run id outside it would carry a run id here
+        that nothing may resolve."""
+        return PurePosixPath(ARCHIVED_SCRUB_VERDICT_NAME)
+
+    @property
+    def run_end(self) -> PurePosixPath:
+        return PurePosixPath(ARCHIVED_RUN_END_NAME)
+
+    @property
+    def lessons_loaded(self) -> PurePosixPath:
+        return PurePosixPath(LESSONS_LOADED)
+
+    @property
+    def alert(self) -> PurePosixPath:
+        return PurePosixPath(ALERT)
+
+    @property
+    def gather_summaries(self) -> PurePosixPath:
+        return PurePosixPath(GATHER_SUMMARIES_DIRNAME)
+
+    def gather_summary(self, lead_id: str) -> PurePosixPath:
+        """`gather_summaries/<lead_id>.md`.
+
+        NO COMPONENT CHECK, and that is the difference from the run-dir twin
+        (`RunPaths.gather_summary`, which applies `_check_component`). The two address
+        different moments. The run-dir accessor COMPOSES a name this process is about to
+        write, for a lead id the run itself minted (`l-<alnum>`), so the strict shape is the
+        right refusal. This one addresses a name ALREADY ON DISK in an archive the judge reads
+        back — written by a box, under whatever the investigation called its lead — and the
+        lane deliberately admits ids the strict check refuses (` spaced`, `two\\nlines`,
+        `.hidden`), which #1049 pins by name.
+
+        It is not ungated, it is gated ELSEWHERE and twice: `family.names_one_file` refuses a
+        traversal before this is called, and `_io.Bound`'s own name grammar refuses an
+        absolute spelling, a NUL, an empty component and `.`/`..` at the walk. Re-asking the
+        composing check here would refuse to read files that exist.
+        """
+        return self.gather_summaries / f"{lead_id}.md"
+
+    @property
+    def draws(self) -> PurePosixPath:
+        return PurePosixPath(JUDGE_DRAWS_DIRNAME)
+
+    def draw(self, n: int) -> PurePosixPath:
+        return self.draws / f"{_check_index(n, what='n')}.yaml"
+
+    @property
+    def run_dir_pointer(self) -> PurePosixPath:
+        """`run_dir` — a TEXT pointer, never a link (archive.py's docstring on why)."""
+        return PurePosixPath(RUN_DIR_POINTER_NAME)
+
+    @property
+    def review(self) -> PurePosixPath:
+        return PurePosixPath(REVIEW_NAME)
+
+    @property
+    def samples(self) -> PurePosixPath:
+        return PurePosixPath(SAMPLES_NAME)
+
+    @property
+    def judge(self) -> PurePosixPath:
+        return PurePosixPath(JUDGE_NAME)
+
+
+#: The archived world's leaf names, as one value.
+WORLD_LEAVES = ArchivedWorldLeaves()
+
+
+@dataclasses.dataclass(frozen=True)
 class WorldLayout:
     """One archived world's records, relative to the EPISODE dir — `worlds/<label>/...`.
 
     The archive projects a source run dir into this shape, so most of these names are the run
     dir's own (imported from `_run_paths`, never re-spelled); the two sidecars are re-homed
     under names only the archive uses, because no run dir carries them.
+
+    Every record is `dir / WORLD_LEAVES.<name>` — this view never spells a leaf, so the
+    episode-relative and world-relative forms cannot fall out of step.
     """
 
     label: str
@@ -93,65 +194,61 @@ class WorldLayout:
 
     @property
     def report(self) -> PurePosixPath:
-        return self.dir / REPORT
+        return self.dir / WORLD_LEAVES.report
 
     @property
     def investigation(self) -> PurePosixPath:
-        return self.dir / INVESTIGATION
+        return self.dir / WORLD_LEAVES.investigation
 
     @property
     def provenance(self) -> PurePosixPath:
-        """The world's own flat run stamp — the same spelling as the episode-root FAMILY
-        stamp, a different shape at the same file name (#1025 fk-8/J12)."""
-        return self.dir / PROVENANCE
+        return self.dir / WORLD_LEAVES.provenance
 
     @property
     def scrub_verdict(self) -> PurePosixPath:
-        return self.dir / ARCHIVED_SCRUB_VERDICT_NAME
+        return self.dir / WORLD_LEAVES.scrub_verdict
 
     @property
     def run_end(self) -> PurePosixPath:
-        return self.dir / ARCHIVED_RUN_END_NAME
+        return self.dir / WORLD_LEAVES.run_end
 
     @property
     def lessons_loaded(self) -> PurePosixPath:
-        return self.dir / LESSONS_LOADED
+        return self.dir / WORLD_LEAVES.lessons_loaded
 
     @property
     def alert(self) -> PurePosixPath:
-        return self.dir / ALERT
+        return self.dir / WORLD_LEAVES.alert
 
     @property
     def gather_summaries(self) -> PurePosixPath:
-        return self.dir / GATHER_SUMMARIES_DIRNAME
+        return self.dir / WORLD_LEAVES.gather_summaries
 
     def gather_summary(self, lead_id: str) -> PurePosixPath:
-        return self.gather_summaries / f"{_check_component(lead_id, what='lead_id')}.md"
+        return self.dir / WORLD_LEAVES.gather_summary(lead_id)
 
     @property
     def draws(self) -> PurePosixPath:
-        return self.dir / JUDGE_DRAWS_DIRNAME
+        return self.dir / WORLD_LEAVES.draws
 
     def draw(self, n: int) -> PurePosixPath:
-        return self.draws / f"{_check_index(n, what='n')}.yaml"
+        return self.dir / WORLD_LEAVES.draw(n)
 
     @property
     def run_dir_pointer(self) -> PurePosixPath:
-        """`worlds/<label>/run_dir` — a TEXT pointer, never a link (archive.py's docstring on
-        why)."""
-        return self.dir / RUN_DIR_POINTER_NAME
+        return self.dir / WORLD_LEAVES.run_dir_pointer
 
     @property
     def review(self) -> PurePosixPath:
-        return self.dir / REVIEW_NAME
+        return self.dir / WORLD_LEAVES.review
 
     @property
     def samples(self) -> PurePosixPath:
-        return self.dir / SAMPLES_NAME
+        return self.dir / WORLD_LEAVES.samples
 
     @property
     def judge(self) -> PurePosixPath:
-        return self.dir / JUDGE_NAME
+        return self.dir / WORLD_LEAVES.judge
 
 
 @dataclasses.dataclass(frozen=True)
@@ -213,6 +310,26 @@ class EpisodeLayout:
         return PurePosixPath(WORLDS_DIRNAME)
 
     # -- composing ------------------------------------------------------------------------------
+
+    def run(self, run_dir_name: str) -> PurePosixPath:
+        """`runs/<run dir name>` — one sibling's run dir, addressed by the name it already
+        has on disk rather than recomposed from `(episode_id, label)`.
+
+        Distinct from `sibling_run_dir`, which MINTS the name and so applies decision 12's and
+        20's refusals to a freshly-authored label. This one is handed a directory the tree
+        already holds — the page walks `runs/` and reads back what is there — so the shape
+        check is all that applies; re-asking the minting rules of an existing entry would
+        refuse to render a directory that exists.
+        """
+        return self.runs / _check_component(run_dir_name, what="run_dir_name")
+
+    def run_page(self, run_dir_name: str) -> PurePosixPath:
+        """`runs/<run dir name>/runtime.html` — the episode page's link to one sibling's own
+        page. Composed HERE because it spans the two layouts: the episode owns the `runs/`
+        segment and the run owns the page's name, and a link built by joining one module's
+        constant onto the other's is the drift D7 removes, in the one direction that produces
+        a dead link rather than a crash."""
+        return self.run(run_dir_name) / RUN_LAYOUT.runtime_html
 
     def world(self, label: str) -> WorldLayout:
         """One archived world's records. The label is checked HERE, once, so every record

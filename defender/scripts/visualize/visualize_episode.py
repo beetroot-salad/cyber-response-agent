@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -40,23 +40,11 @@ from defender._clock import parse_iso_utc
 from defender._io import Bound, bind, write_guarded
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
-from defender._episode_paths import LEARNING_HTML_NAME, EpisodePaths
-from defender._run_paths import (
-    FRAMED_TRACE_SUFFIX,
-    PROVENANCE,
-    REVIEW_TRACE_SUFFIX,
-    RUNTIME_HTML,
-    TOOL_TRACE,
-    WIRE_LOG_DIR,
-)
+from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender._run_paths import RUN_LAYOUT, WIRE_LOG_NAMES
 from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod
-# `archive`, where the launcher moved it so the writer of the tree and this reader spell the
-# segment once — NOT `branch.cli`, which is the launcher itself (argparse, the estate
-# registry, the review runtime): imported for one constant it dragged the whole graph into a
-# static renderer and, with the launcher running as a script, executed `cli.py` twice.
-from defender.learning.branch.archive import RUNS_SUBDIR
 from defender.learning.branch.steps import STEPS, Step
 from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
@@ -90,10 +78,9 @@ from defender.scripts.visualize.visualize_primitives import (
 #: two in step (#1025).
 EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")
 
-PAGE_NAME = LEARNING_HTML_NAME
-
-#: The run's own event stream, at the run dir's root (`_run_paths` names why it stays there).
-_TOOL_TRACE_NAME = TOOL_TRACE
+# `PAGE_NAME` and `_TOOL_TRACE_NAME` were two more re-bindings of an owner name (#1077 D7).
+# The page's own file is `EpisodePaths(...).learning_html` and the run's event stream is
+# `RUN_LAYOUT.tool_trace`; neither is spelled here any more.
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"
 
@@ -785,7 +772,7 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
                   if isinstance(r, dict) and isinstance(r.get("world"), str)]
     ep.archived_world_dirs = [
-        name for name in bound.under(archive.WORLDS_DIRNAME).entries().dirs()
+        name for name in bound.under(LAYOUT.worlds).entries().dirs()
         if name != _FAMILY_LABEL]
     ep.entries, ep.roster, ep.off_roster = _build_roster(
         ep, bound, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present)
@@ -811,14 +798,14 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
         if not w.nameable:
             continue
         if w.run_dir_name is not None:
-            w.result = _result_event(bound, f"{RUNS_SUBDIR}/{w.run_dir_name}")
+            w.result = _result_event(bound, LAYOUT.run(w.run_dir_name))
         w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
         ep.leads[item.label] = (_load_world_leads(ep, bound, item.label)
                                 if entry is None or entry.nameable else _WorldLeads())
 
-    ep.wire = _load_wire_logs(bound.under(WIRE_LOG_DIR))
+    ep.wire = _load_wire_logs(bound.under(RUN_LAYOUT.wire_log_dir))
     ep.findings = _walk_findings(ep)
     ep.total_cost, ep.runs_costed, ep.costed, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
     return ep
@@ -828,10 +815,10 @@ def _load_draws(ep: _Episode, bound: Bound, label: str) -> tuple[dict[int, dict[
     """The draws under `worlds/<label>/judge/` through the enqueue's own reader — which takes
     a path — reached ONLY when the bind's listing of `worlds/<label>` says the draw directory
     is a real one (never a link the page would otherwise hand the reader to follow)."""
-    world = bound.under(f"{archive.WORLDS_DIRNAME}/{label}").entries()
-    if not world.has_dir(archive.DRAWS_DIRNAME):
+    world = bound.under(LAYOUT.world(label).dir).entries()
+    if not world.has_dir(WORLD_LEAVES.draws.name):
         return {}, DrawsSkipReport()
-    return draws_on_disk_report(ep.dir / archive.WORLDS_DIRNAME / label / archive.DRAWS_DIRNAME)
+    return draws_on_disk_report(EpisodePaths(ep.dir).world(label).draws)
 
 
 def _duration(value: Any) -> float | None:
@@ -875,7 +862,7 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
     (reported on one templated line, never rendered)."""
     entries: dict[str, WorldEntry] = {}
     order: list[str] = []
-    runs = bound.under(RUNS_SUBDIR).entries()
+    runs = bound.under(LAYOUT.runs).entries()
     run_dirs = runs.dirs()
 
     def entry(label: str) -> WorldEntry:
@@ -947,7 +934,7 @@ def _result_event(bound: Bound, run_dir_name: str) -> _ResultEvent:
     # primitive's own states, never an `entry_present` stat ahead of the read; a link or a
     # FIFO at the name is refused at the open itself rather than crashing the page with a
     # bare `PermissionError` (root ignores mode 000; a real non-root run does not, #1025).
-    rows, _bad, rec = bound.read_jsonl(f"{run_dir_name}/{_TOOL_TRACE_NAME}")
+    rows, _bad, rec = bound.read_jsonl(PurePosixPath(run_dir_name) / RUN_LAYOUT.tool_trace)
     if rec.absent:
         return _ResultEvent(None, None, "absent")
     if rec.refusal is not None:
@@ -968,19 +955,19 @@ def _load_world_archive(bound: Bound, label: str) -> _WorldArchive:
     # `worlds/<label>` directory at all reads every leaf absent exactly as one with the
     # directory but no file at a leaf does, because the walk's own ENOENT does not care which
     # component was missing; a LINK at `worlds/<label>` is every leaf's own refusal.
-    name = f"{archive.WORLDS_DIRNAME}/{label}"
+    name = LAYOUT.world(label).dir
     report = family.read_archived_report(bound, f"{name}/{REPORT_NAME}")
     investigation = bound.read(f"{name}/{INVESTIGATION_NAME}")
     return _WorldArchive(
         report=report,
         investigation_present=not investigation.absent,
-        provenance=family.json_mapping(bound, f"{name}/{PROVENANCE}"),
-        scrub=family.json_mapping(bound, f"{name}/{archive.SCRUB_VERDICT_NAME}"))
+        provenance=family.json_mapping(bound, LAYOUT.world(label).provenance),
+        scrub=family.json_mapping(bound, LAYOUT.world(label).scrub_verdict))
 
 
 def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
     leads = _WorldLeads()
-    world = bound.under(f"{archive.WORLDS_DIRNAME}/{label}")
+    world = bound.under(LAYOUT.world(label).dir)
 
     # The served ledger is read ONCE, through the judge's own reader (`read_world_ledger`) —
     # its `malformed_rows` is the judge's own count (a torn line AND a row whose `source` is
@@ -1021,7 +1008,7 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
     except JudgeRefused as bad:
         leads.facts_error = str(bad)
     except Exception as bad:  # noqa: BLE001 — a model-written document is parsed here; whatever the parser raises is this slot's, never the page's
-        leads.facts_error = f"{archive.WORLDS_DIRNAME}/{label}/{INVESTIGATION_NAME}: {bad!r}"
+        leads.facts_error = f"{LAYOUT.world(label).investigation}: {bad!r}"
     else:
         if not read_facts.absent:
             facts = read_facts
@@ -1030,7 +1017,7 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
     # one path this block hands anyone, and only now that the listing above judged
     # `worlds/<label>` a real directory.
     try:
-        all_leads = family.leads_by_id(ep.dir / archive.WORLDS_DIRNAME / label)
+        all_leads = family.leads_by_id(EpisodePaths(ep.dir).world(label).dir)
     except Exception:  # noqa: BLE001
         all_leads = {}
 
@@ -1065,18 +1052,22 @@ def _load_wire_logs(wire: Bound) -> _WireLogs:
     for name in sorted(listing.entries):
         if not name.endswith(".jsonl"):
             continue
-        if "_framed_trace" in name:
-            if not name.endswith(FRAMED_TRACE_SUFFIX):
-                continue
-            stem = name[: -len(FRAMED_TRACE_SUFFIX)] + "_trace"
+        # THE STEM IS THE OWNER'S, for both halves (#1077 D7). A trace and its framed
+        # companion are paired on this key, and the two branches used to derive it by
+        # different hand-spelled arithmetic — one stripping `_framed_trace.jsonl` and adding
+        # back `"_trace"`, the other stripping `.jsonl`. They agreed only by coincidence of
+        # the two suffixes; either one changing left every framed row keyed to a stem no
+        # trace holds, which renders a page with no prompt/reply pairs and no error.
+        if WIRE_LOG_NAMES.is_framed(name):
+            stem = WIRE_LOG_NAMES.trace_key(name)
             trace = logs.traces.setdefault(stem, _Trace(stem))
             frows, _bad, _rec = wire.read_jsonl(name)
             if frows:
                 trace.framed = frows[0]
             continue
-        if not name.endswith(REVIEW_TRACE_SUFFIX):
+        if not WIRE_LOG_NAMES.is_agent_trace(name):
             continue
-        stem = name[: -len(".jsonl")]
+        stem = WIRE_LOG_NAMES.trace_key(name)
         trace = logs.traces.setdefault(stem, _Trace(stem))
         # `wire_logs/` sits under the episode dir, a tree a sibling box has an rw bind on
         # (`judge.__init__._write_wire_log`'s own docstring names it): the bound reader
@@ -1785,7 +1776,7 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
         # A `runs/` directory whose name did not decompose into `<episode_id>-<label>` (J7
         # iv) — it is not a world at all, so it gets a minimal section keyed on its own full
         # name rather than the normal record-driven rendering.
-        link = f"{RUNS_SUBDIR}/{item.label}/{RUNTIME_HTML}"
+        link = f"{LAYOUT.run_page(item.label)}"
         return (f'<div id="world-{esc(item.label)}" class="w-section">'
                f'<span class="w-name">{_uv(item.label)}</span>'
                f'<div class="w-state">not declared in the manifest</div>'
@@ -1838,7 +1829,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
 
     result = entry.result
     if result is not None:
-        link = f"{RUNS_SUBDIR}/{entry.run_dir_name}/{RUNTIME_HTML}"
+        link = f"{LAYOUT.run_page(entry.run_dir_name)}"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
         if result.cost is not None and result.costed:
             bits.append(f'<span class="w-cost">{_money(result.cost)}</span>')
@@ -2031,7 +2022,7 @@ def _render_findings_section(ep: _Episode) -> str:
                 f'the record</div>')
     if ep.shadowed_run_dirs:
         body += (f'<div class="fr-shadowed-runs">{len(ep.shadowed_run_dirs)} entries under '
-                f'{esc(RUNS_SUBDIR)}/ wear a world\'s own label and are not sectioned twice: '
+                f'{esc(str(LAYOUT.runs))}/ wear a world\'s own label and are not sectioned twice: '
                 f'{", ".join(_uv(n) for n in ep.shadowed_run_dirs)}</div>')
     n = len(ep.findings.rows)
     return _page_section("sec-findings", f"Findings ({n})", body)

@@ -617,13 +617,16 @@ def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_n
     assert len(args) == 2, recording.calls
     assert kwargs == {}, recording.calls
     not_a_root(args[0])
-    assert args[1] == "review.yaml"
+    # THE NAME, not its spelling. The seam is handed the owner's own relative path object
+    # (#1077 D7) rather than a string a caller composed; `_io.Bound` takes `str | PurePath`
+    # and renders either through the same grammar, so what this pins is the record it names.
+    assert str(args[1]) == "review.yaml"
 
     samples = W.RecordingReader(W.read_yaml_record)
     R.write_bytes(ep / "samples.yaml", "logs-*: {}\n")
     assert family.read_samples_record(bound, reader=samples) == {"logs-*": {}}
     not_a_root(samples.calls[0][0][0])
-    assert samples.calls[0][0][1] == "samples.yaml"
+    assert str(samples.calls[0][0][1]) == "samples.yaml"
 
     nothing = W.RecordingReader(lambda _bound, _name: None)
     assert family.read_review_record(bound, reader=nothing) is None, "None must pass through"
@@ -632,7 +635,7 @@ def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_n
     family.grade_family(ep, review_reader=counted)
     assert counted.count == 1, counted.calls
     not_a_root(counted.calls[0][0][0])
-    assert counted.calls[0][0][1] == "review.yaml"
+    assert str(counted.calls[0][0][1]) == "review.yaml"
 
     page = E.page_module()
     (ep / "samples.yaml").unlink()

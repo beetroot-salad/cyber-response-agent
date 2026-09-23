@@ -48,8 +48,10 @@ SO THE RECORD IS THE HOST'S, ON A PATH THE BOX HAS NO BIND ON, END TO END:
   for its other six artifacts (only ENOENT/ENOTDIR/EBADF/ELOOP fold into "absent"), and the new
   leaf is consistent with that rather than an outlier.
 
-RED against `59bdea44`: `runtime/run_end.py` does not exist, `archive.RUN_END_NAME` does not
-exist, and `archive_episode` writes six single files and knows nothing about a run-end record.
+RED against `59bdea44`: `runtime/run_end.py` does not exist, the archived run-end record has
+no name anywhere, and `archive_episode` writes six single files and knows nothing about it.
+(That name now lives on `_episode_paths`, reached as `WORLD_LEAVES.run_end` — #1077 D7 —
+rather than as a constant re-exported from the archive module.)
 """
 from __future__ import annotations
 
