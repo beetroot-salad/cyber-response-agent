@@ -16,6 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import TEXT_READ_ERRORS, read_plain, write_guarded
+from defender._run_paths import RunPaths
 from .. import compaction, permission
 
 # The SAME byte ruler the artifact bounds are measured with — a write tool that reports
@@ -36,7 +37,7 @@ from ._files import _closed_for_investigation_write
 # --------------------------------------------------------------------------------------
 
 def _investigation_path(deps: AgentDeps) -> Path:
-    return deps.run_dir / "investigation.md"
+    return RunPaths(deps.run_dir).investigation
 
 
 @model(frozen=True)
@@ -111,9 +112,9 @@ def unreadable_write_refusal(verb: str, read: CompanionRead) -> str:
     follow a symlink the guarded read had refused and could see different bytes: the gate
     judged one reading and the write was built from another."""
     if read.retryable:
-        return f"{verb} blocked: investigation.md could not be read ({read.refusal}); retry."
+        return f"{verb} blocked: investigation.md could not be read ({read.refusal}); retry."  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     return (
-        f"{verb} blocked: investigation.md cannot be read ({read.refusal}) and no write can "
+        f"{verb} blocked: investigation.md cannot be read ({read.refusal}) and no write can "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"repair that — close the investigation and the host will record what happened."
     )
 
@@ -281,7 +282,7 @@ def flagged_write_refusal(
         else f"{UNCHANGED_LEAD} — no disposition was recorded for this run."
     )
     return (
-        f"{opening} `{verb}` is blocked while investigation.md carries a flagged "
+        f"{opening} `{verb}` is blocked while investigation.md carries a flagged "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"row. The row LANDED and is committed, so re-sending the block cannot help; repair "
         f"it in place with `fix_row(old_row, new_row)`, or delete it with "
         f'`fix_row(old_row, "")`.\n\n'
@@ -321,7 +322,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
-            "investigation.md is no longer writable: the close already committed a "
+            "investigation.md is no longer writable: the close already committed a "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "recorded disposition for this run, and a further append could silently "
             "move it. The case is closed."
         )
@@ -360,7 +361,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # the 65536-byte cap it must stay under is measured the same way. invlang rows carry
     # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
     lead = (
-        f"appended {_utf8_len(text)} bytes to investigation.md "
+        f"appended {_utf8_len(text)} bytes to investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"({_utf8_len(new_text)} total)"
     )
     # The gate ACCEPTED a warn-only document and returned no text to reuse, so the warning can
@@ -629,7 +630,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
-            f"{UNCHANGED_LEAD} — investigation.md is no longer writable: the close already "
+            f"{UNCHANGED_LEAD} — investigation.md is no longer writable: the close already "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "committed a recorded disposition for this run, and a further repair could "
             "silently move it. The case is closed."
         )
@@ -644,7 +645,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         # emptied: a repeated identical repair is idempotent-safe by construction, and a
         # "you already did this" branch would need stored state this design avoids.
         raise ModelRetry(
-            f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "
+            f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"is no row to repair."
         )
     if old_row not in flagged:
@@ -652,7 +653,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         # set is `:R attr_updates`-only. A verb that refused only when the text was ABSENT
         # would happily rewrite a committed vertex row that is present.
         raise ModelRetry(
-            f"{UNCHANGED_NOTICE} `old_row` must be one of the rows currently flagged in "
+            f"{UNCHANGED_NOTICE} `old_row` must be one of the rows currently flagged in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"investigation.md, quoted exactly as the warning printed it."
             "\n\nCurrently flagged:\n"
             + "\n".join(f"  {row}" for row in flagged)
@@ -666,7 +667,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     whole = [i for i, line in enumerate(lines) if line.strip() == old_row]
     if not whole:
         raise ModelRetry(
-            f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."
+            f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         )
     # The repair applies to EVERY flagged occurrence — a flagged row whose text is not unique
     # would otherwise be neither repairable nor deletable, and with the write gate the run
@@ -730,7 +731,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     deps.authored_paths.add(_resolved(p))
     verb = "deleted" if not new_row else "repaired"
     lead = (
-        f"{verb} {len(whole)} flagged row(s) in investigation.md "
+        f"{verb} {len(whole)} flagged row(s) in investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"({_utf8_len(new_text)} bytes total) — the change LANDED."
     )
     # `fix_row` is a first-class FRONTIER MUTATOR, not a cosmetic repair: the window is

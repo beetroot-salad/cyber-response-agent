@@ -39,10 +39,9 @@ import pytest
 from defender._io import append_jsonl, read_jsonl_rows
 from defender._run_paths import RunPaths
 from defender.runtime.verbs import read_roster
+from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
-    BASE_FILENAME,
     CAPTURED,
-    SERVED_DIRNAME,
     Ledger,
     LedgerError,
     payload_text,

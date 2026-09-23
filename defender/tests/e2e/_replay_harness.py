@@ -373,7 +373,7 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976). What that buys is FILE-SET
     parity with `run_common.materialize_run_dir` — `test_salt_origin_647`'s parity arm, the
     same trap #647's was built to catch pointing the other way. It is NOT message 0's listing:
-    `workspace_map._UNLISTED` suppresses the stamp, so a replayed message 0 is byte-identical
+    `workspace_map._unlisted()` suppresses the stamp, so a replayed message 0 is byte-identical
     either way, and a reader deciding whether the other hand-built run-dir fixtures need one
     should weigh the parity arm rather than the prompt.
 

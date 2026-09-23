@@ -149,6 +149,8 @@ audit record and breaker outcome asserted downstream is production code's work.
 from __future__ import annotations
 
 import json
+
+from defender._run_paths import RunPaths
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -159,7 +161,6 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime import observe  # noqa: E402
 from defender.runtime.verb_grant import (  # noqa: E402
     DENY_ALL,
     VERB_CLASSES,
@@ -468,7 +469,7 @@ class _Run:
 
     @property
     def denials(self) -> list[dict]:
-        p = self.run_dir / observe.POLICY_DENIALS
+        p = RunPaths(self.run_dir).policy_denials
         return read_jsonl_rows(p) if p.is_file() else []
 
     @property

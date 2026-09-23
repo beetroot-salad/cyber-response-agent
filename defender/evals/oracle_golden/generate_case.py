@@ -491,7 +491,7 @@ def _recruit(argv: list[str] | None = None) -> int:
     meta = json.loads((run_record / "meta.json").read_text(encoding="utf-8"))
     print(f"  runner record: {run_record.name}")
 
-    alert = work / "alert.json"
+    alert = work / "alert.json"  # lint-run-records: ok — an eval case's own file under the case tree, never a run record
     fired = wait_for_alert(ns.rule, started, alert,
                            target_host=(meta.get("resolved") or {}).get("target_host"))
     if fired is None:

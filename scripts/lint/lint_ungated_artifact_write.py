@@ -64,7 +64,7 @@ WHAT IT DOES *NOT* SEE — read this before treating a green run as proof:
 
 So a clean run means "no writer of these two artifacts is missing their schema in its own
 frame", not "every path that publishes them is gated". The second is what the census in
-``ARTIFACT_NAMES`` and the suite are for.
+``artifact_names()`` and the suite are for.
 
 THE BASELINE SHIPS EMPTY. Both known sites were fixed in the change that added this gate, so
 an entry appearing here is a regression someone chose. Mark a deliberate site with
@@ -98,16 +98,22 @@ SUPPRESS_MARKERS = ("lint-artifact-gate: ok",)
 CANONICAL_MODULE = "_artifact_schema.py"
 
 #: The two artifacts, as they are spelled in code. The bare filenames are what most call sites
-#: write; the constants are what `_artifact_schema` exports for the ones that would rather not
-#: repeat a literal. Both spellings count — a writer that imports the constant is no less a
-#: writer than one that types the string.
+#: write; the constant spellings are the ones a writer would use rather than repeat a literal.
+#: Both count — a writer that holds the constant is no less a writer than one that types the
+#: string.
+#:
+#: `_artifact_schema` no longer EXPORTS those two constants (#1077 D7: nothing outside the
+#: owner holds a record name, and a module-level `REPORT_NAME = _run_paths.REPORT` was exactly
+#: that). The names stay in this set anyway — this gate watches for a writer that reaches for
+#: one, and a name nobody may export is still a name someone may re-introduce.
 ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
-ARTIFACT_CONSTS = frozenset({"INVESTIGATION_NAME", "REPORT_NAME"})
+ARTIFACT_CONSTS = frozenset({  # lint-stale-ref: ok — spellings this gate WATCHES FOR, not ones it resolves
+    "INVESTIGATION_NAME", "REPORT_NAME"})
 
 def _artifact_accessors() -> frozenset[str]:
     """`RunPaths`' accessors for the two schema'd artifacts — DERIVED from the owner: every
     public accessor whose resolved name is one of `ARTIFACT_LITERALS`, so a third artifact
-    that joins `_artifact_schema.ARTIFACT_NAMES` (and this set) is gated the day the owner
+    that joins `_artifact_schema.artifact_names()` (and this set) is gated the day the owner
     names it, and an accessor for any OTHER record (`budget`, `tool_trace`, a trace) never
     is — this gate asks for a CONTENT SCHEMA, and only the two model-authored documents have
     one (#1077 decision 19, corrected: the list held in step with the owner is this gate's

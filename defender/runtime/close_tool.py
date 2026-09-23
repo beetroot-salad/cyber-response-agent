@@ -22,7 +22,7 @@ import asyncio
 import sys
 from collections.abc import Callable
 from defender._model import model
-from defender._run_paths import RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -425,12 +425,12 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     # EVERY commit is validated — never only the ones carrying evidence. The verdict is
     # obeyed, not merely computed: a refusal returns the validator's own reason and leaves
     # nothing on disk.
-    schema_reason = validator("report.md", body, None)
+    schema_reason = validator(RUN_LAYOUT.report.name, body, None)
     report_error: BaseException | None = None
     if schema_reason is not None:
         report_error = ModelRetry(schema_reason)
     else:
-        report_path = deps.run_dir / "report.md"
+        report_path = RunPaths(deps.run_dir).report
         try:
             from defender._io import guarded_mkdir, write_guarded
 
@@ -550,7 +550,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     if read.text is None and not forced:
         if read.retryable:
             raise ModelRetry(
-                f"close blocked: `investigation.md` could not be read ({read.refusal}). A "
+                f"close blocked: `investigation.md` could not be read ({read.refusal}). A "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                 f"close is not permitted while the gate cannot look — retry."
             )
         return _overrule_unreadable_companion(
@@ -686,7 +686,7 @@ def _document_or_empty(read: CompanionRead) -> str:
     request and says nothing."""
     if read.text is None:
         print(
-            f"[close] forced close: `investigation.md` could not be read ({read.refusal}); "
+            f"[close] forced close: `investigation.md` could not be read ({read.refusal}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"closing the host's own verdict off an empty document rather than dead-lettering "
             f"the run",
             file=sys.stderr,
@@ -706,7 +706,7 @@ def _overrule_unreadable_companion(
     reviewed site makes for a projector that cannot project, minus the companion-derived
     fields: there is no body to carry receipts or baseline rows from."""
     verdict = challenge_gate.review_cannot_run(
-        deps, read.refusal or "investigation.md could not be read",
+        deps, read.refusal or "investigation.md could not be read",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     )
     return _commit(
         deps, verdict.disposition, _fields_from(verdict),
@@ -800,12 +800,12 @@ def _refuse_if_entry_price_is_owed(
     except Exception as exc:
         if not forced:
             raise ModelRetry(
-                f"close blocked: `investigation.md` could not be parsed to check the entry "
+                f"close blocked: `investigation.md` could not be parsed to check the entry "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                 f"price your disposition may owe ({type(exc).__name__}: {exc}). Repair the "
                 f"document — a close is not permitted while the gate cannot look."
             ) from exc
         print(
-            f"[close] forced close: `investigation.md` could not be parsed "
+            f"[close] forced close: `investigation.md` could not be parsed "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"({type(exc).__name__}: {exc}); pricing the host's own verdict off an empty "
             f"document rather than dead-lettering the run",
             file=sys.stderr,
@@ -817,7 +817,7 @@ def _refuse_if_entry_price_is_owed(
         raise
     except Exception as exc:
         raise ModelRetry(
-            f"close blocked: `investigation.md` could not be priced for the entry price your "
+            f"close blocked: `investigation.md` could not be priced for the entry price your "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"disposition may owe ({type(exc).__name__}: {exc}). Repair the document — a "
             f"close is not permitted while the gate cannot look."
         ) from exc

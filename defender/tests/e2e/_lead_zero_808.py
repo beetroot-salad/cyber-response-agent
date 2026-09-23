@@ -65,7 +65,6 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.runtime import observe  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.scripts.adapters.elastic_adapter import search_envelope  # noqa: E402
 from defender.tests._verb_authorization_632 import breaker_doc  # noqa: E402
@@ -443,7 +442,7 @@ class Res:
 
     @property
     def denials(self) -> list[dict]:
-        return read_jsonl_rows(self.run_dir / observe.POLICY_DENIALS)
+        return read_jsonl_rows(RunPaths(self.run_dir).policy_denials)
 
     @property
     def investigation(self) -> str:

@@ -20,7 +20,7 @@ from defender.runtime.tools import AgentDeps
 VERIFY_REQUEST_LIMIT = 1
 
 _VERIFY_DENY_REASON = (
-    "Blocked: the forward-check is a pure prediction — its entire input (the transcript or story, "
+    "Blocked: the forward-check is a pure prediction — its entire input (the transcript or story, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "the lesson, the disposition) is inlined in the user prompt and its entire output is two short "
     "paragraphs plus a "
     "single `VERDICT: GOOD|BAD` line. It runs no tools: no data-source adapters, no gather_raw reads, "

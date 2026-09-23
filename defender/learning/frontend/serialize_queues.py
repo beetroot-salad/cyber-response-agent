@@ -224,7 +224,7 @@ def _markers(paths: LoopPaths) -> dict:
     rows: list[dict] = []
     unreadable = 0
     for queue, directory in (
-        ("lead_author", paths.author_queue_dir / FAILED_MARKER_DIRNAME),
+        ("lead_author", paths.author_queue_dir / FAILED_MARKER_DIRNAME),  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         ("delivery", paths.pending_delivery_dir / FAILED_MARKER_DIRNAME),
     ):
         found, bad = _json_files(directory)

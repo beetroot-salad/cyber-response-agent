@@ -19,12 +19,13 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     verdict cannot be read (retry once, then BAD), instead of a process exit escaping the
     fan-out and leaving the row stuck forever."""
     run_dir = runs_dir / run_id
-    investigation = RunPaths(run_dir).investigation
-    refs = run_dir / "source_refs.yaml"
+    paths = RunPaths(run_dir)
+    investigation = paths.investigation
+    refs = paths.source_refs
     if not investigation.is_file():
-        raise VerdictError(f"verify_forward: missing investigation.md at {investigation}")
+        raise VerdictError(f"verify_forward: missing {investigation.name} at {investigation}")
     if not refs.is_file():
-        raise VerdictError(f"verify_forward: missing source_refs.yaml at {refs}")
+        raise VerdictError(f"verify_forward: missing {refs.name} at {refs}")
     m = re.search(
         r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
         refs.read_text(encoding="utf-8"),
@@ -32,7 +33,7 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     )
     if not m:
         raise VerdictError(
-            f"verify_forward: source_refs.yaml missing normalized_disposition: {refs}"
+            f"verify_forward: {refs.name} missing normalized_disposition: {refs}"
         )
     return investigation.read_text(encoding="utf-8"), m.group(1).strip()
 

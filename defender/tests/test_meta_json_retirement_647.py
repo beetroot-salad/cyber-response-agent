@@ -441,19 +441,33 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     UNCHANGED AND IT STILL BINDS: what retired `meta.json` was inertness, a file written by one
     thing and read by NOTHING, and the arm below is what keeps that from being re-earned
     quietly. `run.py` reads this one back at run start to announce the commit, so it has a
-    consumer on the day it lands rather than an intention to have one."""
+    consumer on the day it lands rather than an intention to have one.
+
+    #1077 D1 grew the set from those seven to every run-level record name the owner holds —
+    the streams at the run root, the box sentinel, the session pointer, the ticket receipt —
+    because the name gate (`scripts/lint/lint_run_records.py`) is what now keeps a name from
+    being spelled anywhere else, and a name the owner does not hold cannot be reached at all.
+    The set is still pinned EXACTLY, so an accessor can only appear here on purpose."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
+        # #1077 D1
+        "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
+        "budget", "circuit_breaker", "lessons_loaded", "ticket_write", "session_pointer",
+        "runtime_html", "box_sentinel",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())
-    assert "seven accessors" in doc, (
-        "the class docstring's count disagrees with the accessors it has"
-    )
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
+    # THE COUNT, restored (#1077 D7 review). This arm read `"seven accessors" in doc` and was
+    # DELETED rather than re-pointed when D1 grew the set past seven — so the one check that
+    # this class's prose still describes this class went away, in the same change that made it
+    # wrong. Asserted against the pinned set above, so the two cannot drift apart again.
+    assert f"{len(accessors)} accessors" in doc, (
+        f"the class docstring does not state its own accessor count ({len(accessors)}) — it "
+        "describes a class this is not")
 
 
 #: Calls that make an accessor's path a WRITE TARGET rather than something read back.
@@ -562,7 +576,13 @@ def test_no_accessor_names_a_file_nothing_reads():
     A WRITE IS NOT A READ, and the distinction is the whole test: `meta.json`'s writer was
     `materialize_run_dir`, which named the accessor, so a census that accepts any mention
     passes the very accessor #647 deleted. `provenance` (#976) has exactly one real reader —
-    `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it."""
+    `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it.
+
+    Two accessors (#1077 D1) name a file whose READER this census structurally cannot see,
+    and each says which: the box sentinel is read back INSIDE the box (`docker exec cat`,
+    `runtime/box/_lifecycle._probe_sentinel`), and the ticket receipt is the operator's
+    (#767: the host's record of the case comment it posted, read by a person)."""
+    read_outside_the_census = {"box_sentinel", "ticket_write"}
     consumers = [
         h.split(":", 1)[0]
         for h in live_hits(repo_grep(r"RunPaths\(", "*.py"),
@@ -576,6 +596,18 @@ def test_no_accessor_names_a_file_nothing_reads():
         except SyntaxError:  # pragma: no cover — a tracked .py that does not parse
             continue
         unread -= _run_paths_reads(tree, accessors)
+    # SELF-RETIRING, in both directions (#1077 D7 review). The subtraction used to be
+    # unconditional, which made the exemption permanent: once a real in-tree reader for the
+    # ticket receipt lands, the exemption swallows it and nothing says the carve-out is dead;
+    # and if the box's `docker exec` reader for the sentinel is deleted, the accessor stays
+    # green forever. Asserting the exemption is still NEEDED before spending it turns both
+    # into failures. The census exists to catch "an accessor naming a file nothing reads" —
+    # an exemption that cannot expire is a hole in exactly that.
+    assert read_outside_the_census <= unread, (
+        "these accessors are exempted from the census as unreadable by it, but it CAN see a "
+        f"reader for them now: {sorted(read_outside_the_census - unread)} — drop them from "
+        "`read_outside_the_census`")
+    unread -= read_outside_the_census
     assert not unread, f"accessors nothing outside the tests reads: {sorted(unread)}"
 
 

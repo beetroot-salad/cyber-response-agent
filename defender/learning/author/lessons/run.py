@@ -6,6 +6,8 @@ import uuid
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
+
+from defender._run_paths import RunPaths
 from typing import Any
 
 import yaml
@@ -104,7 +106,7 @@ def build_author_config(
 
 
 def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
-    refs = cfg.runs_dir / run_id / "source_refs.yaml"
+    refs = RunPaths(cfg.runs_dir / run_id).source_refs
     if not refs.is_file():
         return None
     try:

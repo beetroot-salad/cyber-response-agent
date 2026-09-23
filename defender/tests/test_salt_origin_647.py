@@ -43,7 +43,7 @@ import pytest
 
 from defender import run_common
 from defender._run_paths import PROVENANCE, RunPaths
-from defender.scripts.workspace_map import _UNLISTED
+from defender.scripts.workspace_map import _unlisted
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,
@@ -316,7 +316,7 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
 ):
     """MAIN's first model request enumerates the run dir's REAL children, and the removed file
     is not among them. The orientation inlines a workspace map whose run-dir section lists one
-    line per child, skipping the names `workspace_map._UNLISTED` suppresses — the subagent-only
+    line per child, skipping the names `workspace_map._unlisted()` suppresses — the subagent-only
     raw-payload subdir, and since #976 the run's own provenance stamp; every name it lists
     exists on disk, and every artifact the builder materialized appears. This listing was
     unpinned before this change, which is precisely why removing a file that gets listed —
@@ -341,14 +341,14 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     assert set(listed) <= on_disk, (
         f"message 0 lists names that do not exist in the run dir: {set(listed) - on_disk}"
     )
-    # `workspace_map._UNLISTED` ITSELF, not a subset re-typed here: the suppression and the
+    # `workspace_map._unlisted()` ITSELF, not a subset re-typed here: the suppression and the
     # expectation must be one value, or a name added to (or dropped from) the real set leaves
     # this arm asserting about a set nobody maintains. `provenance.json` joins `gather_raw` in
     # it for the reason the comment there gives — the map IS the model's directory view, and
     # the run's record of the commit it was built from is infrastructure the OPERATOR reads.
-    assert (materialized - _UNLISTED) <= set(listed), (
+    assert (materialized - _unlisted()) <= set(listed), (
         f"a materialized artifact is missing from message 0: "
-        f"{(materialized - _UNLISTED) - set(listed)}"
+        f"{(materialized - _unlisted()) - set(listed)}"
     )
     assert PROVENANCE not in listed, (
         "the run's own provenance stamp leaked into MAIN's directory view"

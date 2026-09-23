@@ -396,16 +396,28 @@ def attribute_names(tree: ast.AST) -> set[str]:
 
 
 def path_typed_parameters(fn: ast.FunctionDef) -> list[str]:
-    """The parameters of `fn` annotated as a path (`Path`, `PurePath`, `PathLike`, a `str |
-    PurePath` union naming one) OR named like a root (`path`, `root`, `episode_dir`,
-    `world_dir`, `run_dir`, `*_path`)."""
+    """The parameters of `fn` that could carry a ROOT: annotated `Path` or `PathLike`, or
+    named like a root (`path`, `root`, `episode_dir`, `world_dir`, `run_dir`, `*_path`).
+
+    `PurePath` ALONE IS NOT A ROOT, and the distinction is #1077 D7's (it used to be flagged
+    with the other two). A `Path` resolves against the filesystem and can be opened; a
+    `PurePath` is lexical only, and the owner hands the episode tree's readers their record
+    names in that form (`LAYOUT.world(label).report`) precisely so no caller composes one.
+    What makes the exemption safe is not the type but the bind's own grammar: `_io._parse_name`
+    refuses an absolute spelling, a NUL and any `.`/`..` component before a single walk
+    happens, so a name — of either type — cannot name a root. `test_1049_...components` asserts
+    that refusal directly, so this carve-out rests on a checked fact rather than on a promise.
+
+    A `PurePath` parameter that is ALSO named like a root is still reported: the name is what
+    says the caller meant a tree, whatever type it arrived as.
+    """
     rooty = {"path", "root", "episode_dir", "world_dir", "run_dir"}
     out = []
     a = fn.args
     for p in (*a.posonlyargs, *a.args, *a.kwonlyargs):
         names = {n.id for n in ast.walk(p.annotation) if isinstance(n, ast.Name)} if p.annotation else set()
         attrs = {n.attr for n in ast.walk(p.annotation) if isinstance(n, ast.Attribute)} if p.annotation else set()
-        typed = bool({"Path", "PurePath", "PathLike"} & (names | attrs))
+        typed = bool({"Path", "PathLike"} & (names | attrs))
         if typed or p.arg in rooty or p.arg.endswith("_path"):
             out.append(p.arg)
     return out

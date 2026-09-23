@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from defender._model import model
+from defender._run_paths import RUN_LAYOUT
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
@@ -157,7 +158,7 @@ RESUME_FROM_TAIL = "Resume the CURRENT loop from the messages after this one."
 #: The store-backed fold is restart-shaped — the frontier is the LAST row on the path, so
 #: there are no messages after it and pointing the model at a tail would point it at nothing.
 RESUME_RESTART_SHAPED = (
-    "The turns that produced this record are no longer in the history — it is all "
+    "The turns that produced this record are no longer in the history — it is all "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "that remains of them. Work the CURRENT loop from it and from investigation.md "
     'on disk: `read_file("investigation.md", tail=2000)` for the end of the document '
     "without paying for the whole of it."
@@ -295,7 +296,7 @@ def apply_writes(current: str, response: Message) -> str:
             sep = "\n" if current and text and not current.endswith("\n") else ""
             current = current + sep + text
             continue
-        if not str(args.get("path", "")).endswith("investigation.md"):
+        if not str(args.get("path", "")).endswith(RUN_LAYOUT.investigation.name):
             continue
         if name == "write_file":
             current = args.get("content", current)

@@ -666,7 +666,7 @@ def test_a_denied_verb_after_a_dead_end_still_leaves_its_denial_record(tmp_path)
                     verbs=_withheld_verb(rec))
     assert lead.model.calls == 5
     assert split(lead.out)[1] == SUMMARY
-    denials = read_jsonl_rows(lead.run_dir / observe.POLICY_DENIALS)
+    denials = read_jsonl_rows(RunPaths(lead.run_dir).policy_denials)
     assert [(d["system"], d["verb"]) for d in denials] == [("elastic", "withheld")]
     assert len(lead.rows) == 3, "a denied call wrote an evidence row"
     assert [c.verb for c in rec.calls] == ["query", "query"]

@@ -707,3 +707,35 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
             model="gpt-4-turbo",
             source_key=config.source_first_party_key,
             run_author=lambda *a, **kw: "x")
+
+
+def test_help_text_survives_a_brace_and_names_the_records_the_owner_spells(capsys):
+    """#1077 D7 review: the epilog became a `str.format` template holding operator prose about
+    paths. Every brace a later edit adds — `defender/skills/{system}/SKILL.md` is spelled
+    verbatim elsewhere in this package — would then raise `KeyError` inside `--help`, which is
+    a failure only an operator ever sees. `string.Template.safe_substitute` cannot raise.
+
+    Second half of the same test: the three names are the OWNER's, fetched at call time, so
+    the help text tracks a rename with nothing here to edit."""
+    import string
+
+    from defender import _run_paths
+    from defender.learning.leads import lead_author
+
+    with pytest.raises(SystemExit) as exc:
+        lead_author.main(["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    for name in (_run_paths.EXECUTED_QUERIES, _run_paths.RAW_MARKER,
+                 _run_paths.LEAD_AUTHOR_DIRNAME):
+        assert name in out, f"--help never showed the owner's {name!r}"
+    assert "$EXECUTED_QUERIES" not in out, "a placeholder reached the operator unsubstituted"
+
+    # The brace half, driven through the REAL epilog object and the REAL name source rather
+    # than a patched-in global: this is the edit a later author makes — one more line of
+    # operator prose that happens to spell a braced path — and it must render, not raise.
+    extended = string.Template(
+        lead_author._HELP_EPILOG.template + "\n  edits defender/skills/{system}/SKILL.md")
+    rendered = extended.safe_substitute(lead_author._record_names())
+    assert "{system}" in rendered, "the brace was eaten rather than shown"
+    assert _run_paths.EXECUTED_QUERIES in rendered

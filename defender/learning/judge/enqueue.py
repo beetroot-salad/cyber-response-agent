@@ -28,7 +28,7 @@ from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
-from defender.learning.branch.archive import DRAWS_DIRNAME, SAMPLES_NAME, WORLDS_DIRNAME
+from defender._episode_paths import LAYOUT, EpisodePaths
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,
     learning_state_root,
@@ -810,7 +810,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
     # below: an EMPTY map is a pass that produced no family draw, and folding it back onto disk
     # would queue an earlier, wider attempt's leftovers as this pass's own findings.
     family_documents = (
-        draws_on_disk(episode_dir / WORLDS_DIRNAME / "family" / DRAWS_DIRNAME)
+        draws_on_disk(EpisodePaths(episode_dir).world("family").draws)
         if family_drawn is None else family_drawn)
     for draw, draw_doc in family_documents.items():
         findings = draw_doc.get("findings") or []
@@ -850,7 +850,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
         # world's draw directory as its own findings (P4: a retry clobbers, it cleans nothing
         # up), under THIS pass's `verdict_word`.
         documents = (drawn.get(label) or {}) if drawn is not None else draws_on_disk(
-            episode_dir / WORLDS_DIRNAME / label / DRAWS_DIRNAME)
+            EpisodePaths(episode_dir).world(label).draws)
         for draw, draw_doc in documents.items():
             findings = draw_doc.get("findings") or []
             for index, finding in enumerate(findings):
@@ -893,7 +893,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — the two-channel partitio
                         unavailable_patterns=world_row.get("sample_unavailable_patterns"),
                     ):
                         _drop(f"{run_id}/{label}/{draw}/{index}",
-                              f"cites `{SAMPLES_NAME}` for a pattern this world had no sample "
+                              f"cites `{LAYOUT.samples}` for a pattern this world had no sample "
                               "for (A1(b))")
                         continue
                     row = build_finding_row(

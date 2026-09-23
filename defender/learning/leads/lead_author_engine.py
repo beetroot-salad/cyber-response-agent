@@ -20,7 +20,7 @@ from defender.runtime.permission.grant import SEG, Grant
 from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
-    "Blocked: the lead author curates the gather query catalog and the per-SYSTEM skill docs. "
+    "Blocked: the lead author curates the gather query catalog and the per-SYSTEM skill docs. "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "Its write scope is the catalog under defender/skills/gather/queries/{system}/, plus "
     "defender/skills/{system}/SKILL.md and defender/skills/{system}/_draft/ — where {system} is "
     "a system this tree declares an adapter for. Every OTHER directory under defender/skills/ "
@@ -236,7 +236,7 @@ def _run_lead_author_pydantic(
         defender_dir=repo_root / "defender", box=ctx.box,
     )
     return run_stage(
-        stage="lead_author",
+        stage="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         wiring=wiring, ctx=ctx, deps=deps,
         make_model=make_model, require_output=False,
     )

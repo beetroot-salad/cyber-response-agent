@@ -555,17 +555,22 @@ def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp
 
 
 def test_1025_the_root_stamp_reader_lives_in_the_record_names_home_beside_family_stamp_name(tmp_path):
-    """The episode-root `provenance.json` has a reader of its own (fk-8/J12): a public accessor
-    in the record-names home, `archive.read_family_stamp(bound)`, distinct from the
-    per-world run-stamp reader — `None` when nothing is at the name, the `{agreed, allow_dirty}`
-    mapping when the stamp is there, a `ValueError` refusal for a directory or a document that
-    is not the stamp — and `FAMILY_STAMP_NAME` lives beside the other record names in
-    `learning/branch/archive.py`, bound nowhere else.
+    """The episode-root `provenance.json` has a reader of its own (fk-8/J12):
+    `archive.read_family_stamp(bound)`, distinct from the per-world run-stamp reader — `None`
+    when nothing is at the name, the `{agreed, allow_dirty}` mapping when the stamp is there,
+    a `ValueError` refusal for a directory or a document that is not the stamp.
+
+    THE NAME'S HOME IS THE OWNER, not this reader's module (#1077 D7). `FAMILY_STAMP_NAME` was
+    moved to `archive.py` so the reader and the writer would share one spelling; it is now
+    `EpisodePaths(...).family_stamp`, which both reach, and `archive.py` binds nothing.
     """
     archive = E.mod("learning.branch.archive")
-    assert archive.FAMILY_STAMP_NAME == "provenance.json"
-    cli_source = (Path(E.mod("learning.branch.cli").__file__)).read_text(encoding="utf-8")
-    assert "FAMILY_STAMP_NAME =" not in cli_source, "the constant is still bound in cli.py"
+    owner = E.mod("_episode_paths")
+    assert str(owner.LAYOUT.family_stamp) == "provenance.json"
+    assert not hasattr(archive, "FAMILY_STAMP_NAME"), "archive.py still re-binds the name"
+    for module_name in ("learning.branch.cli", "learning.branch.archive"):
+        source = (Path(E.mod(module_name).__file__)).read_text(encoding="utf-8")
+        assert "FAMILY_STAMP_NAME =" not in source, f"still bound in {module_name}"
     ep = E.sample_episode(tmp_path, stamp=False)
     bound = E.mod("_io").bind(ep.dir)
     assert archive.read_family_stamp(bound) is None

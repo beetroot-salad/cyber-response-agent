@@ -34,7 +34,7 @@ from defender._io import (
     read_jsonl_rows,
     read_text_soft,
 )
-from defender._run_paths import RunPaths, artifact_dir
+from defender._run_paths import RUN_LAYOUT, RunPaths, artifact_dir
 
 from .. import session_store
 from ._spec import BranchError, BranchSpec
@@ -430,9 +430,12 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path)
 
 
 #: The per-lead evidence directories, in ONE place. `_known_leads` reads them for the census,
-#: `_inherit_evidence` walks them for the copy, and `_INHERITED` below is derived from them for
+#: `_inherit_evidence` walks them for the copy, and `_inherited()` is derived from them for
 #: the refusal — three readers of one fact, which is two too many to keep in step by hand.
-_LEAD_DIRS = ("gather_raw", "gather_summaries")
+def _lead_dirs() -> tuple[str, ...]:
+    """The two per-lead directories a sibling inherits, ASKED OF THE OWNER per call
+    (#1077 D7) rather than held as a module-level tuple of two record names."""
+    return (RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.gather_summaries.name)
 
 
 def _known_leads(run_dir: Path) -> set[str]:
@@ -454,7 +457,7 @@ def _known_leads(run_dir: Path) -> set[str]:
         str(row.get("lead_id")) for row in read_jsonl_rows(paths.executed_queries)
         if row.get("lead_id")
     }
-    for directory in (run_dir / name for name in _LEAD_DIRS):
+    for directory in (run_dir / name for name in _lead_dirs()):
         # `artifact_dir`, not `is_dir()`: this run dir is the box's rw bind, and a link planted
         # at a lead directory would otherwise contribute its TARGET's entry names to the set
         # that decides which leads a sibling inherits.

@@ -44,6 +44,7 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
+from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
@@ -69,7 +70,9 @@ INJECT_SUFFIX = ".inject"
 
 #: The staging record's filename under the episode dir. (The review record a teardown failure
 #: is reported into is the caller's `review_path=`, never a name this module spells.)
-STAGED_FILENAME = "staged.yaml"
+# `STAGED_FILENAME` was a re-binding of the owner's `STAGED_NAME` (#1077 D7) — removed with
+# the other seventeen. The path is `EpisodePaths(d).staged`; the bound reader takes
+# `LAYOUT.staged`, the owner's own relative form.
 
 #: The two kinds of thing staging creates. Recorded per row because teardown deletes them
 #: through different cluster APIs and a row that cannot say which is a row teardown has to
@@ -354,7 +357,7 @@ def _check_bool(body: Mapping, where: str) -> None:
 
 def staged_path(episode_dir: Path) -> Path:
     """`episodes/<id>/staged.yaml` — one spelling, because four callers open it."""
-    return Path(episode_dir) / STAGED_FILENAME
+    return EpisodePaths(episode_dir).staged
 
 
 def read_staged(bound: Bound) -> list[dict] | None:
@@ -373,22 +376,22 @@ def read_staged(bound: Bound) -> list[dict] | None:
     link planted at the name) is refused rather than read as empty, which would have teardown
     sweep nothing while a live alias sits right there under the name meant to account for it.
     """
-    rec = bound.read(STAGED_FILENAME)
+    rec = bound.read(LAYOUT.staged)
     if rec.absent:
         return None
     if rec.text is None:
-        raise StagingRefused(f"{STAGED_FILENAME} is refused: {rec.reason}")
+        raise StagingRefused(f"{LAYOUT.staged} is refused: {rec.reason}")
     try:
         rows = _yaml.safe_load(rec.text)
     except yaml.YAMLError as bad:
         raise StagingRefused(
-            f"{STAGED_FILENAME} does not parse ({bad}) — acting on a staging record this code "
+            f"{LAYOUT.staged} does not parse ({bad}) — acting on a staging record this code "
             "cannot read means deleting a name it did not write, or leaving one it did") from bad
     if rows is None:
         return []
     if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
         raise StagingRefused(
-            f"{STAGED_FILENAME} is not a list of rows — the record is append-only and every "
+            f"{LAYOUT.staged} is not a list of rows — the record is append-only and every "
             "row names one created thing")
     return list(rows)
 
@@ -1018,7 +1021,6 @@ __all__ = [
     "INJECT_SUFFIX",
     "KIND_ALIAS",
     "KIND_INDEX",
-    "STAGED_FILENAME",
     "StagingRefused",
     "check_configured_patterns",
     "check_exclusion_predicate",

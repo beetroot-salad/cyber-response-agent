@@ -96,7 +96,7 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
             return
         alert_path = RunPaths(run_dir).alert
         if not alert_path.is_file():
-            _warn(f"alert.json not found in {run_dir}; skipping open")
+            _warn(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             return
         alert = json.loads(alert_path.read_text(encoding="utf-8"))
         case_id = run_dir.name
@@ -277,6 +277,6 @@ def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: 
         # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam
         # like every other host write into it, so a link planted at its name is refused, not
         # followed.
-        write_guarded(run_dir / "ticket_write.json", json.dumps(receipt, indent=2) + "\n")
+        write_guarded(RunPaths(run_dir).ticket_write, json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _warn(f"could not write receipt: {e}")

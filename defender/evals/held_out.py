@@ -155,7 +155,7 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path) -> Scored:
         pred = predicted_disposition(run_dir)
         verdict = "ok" if pred == true_disp else "wrong"
         if pred is None:
-            failures.append((fx.slug, "no parseable report.md"))
+            failures.append((fx.slug, "no parseable report.md"))  # lint-run-records: ok — an eval case's own file under the case tree, never a run record
         by_class[true_disp].append((fx.slug, pred, verdict))
     return Scored(by_class, failures, not_run)
 

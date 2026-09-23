@@ -45,7 +45,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, bind, read_jsonl_rows
 from defender._run_paths import artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
-from defender.learning.branch.archive import REVIEW_NAME, WORLDS_DIRNAME
+from defender._episode_paths import LAYOUT, EpisodePaths
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
     Ledger,
@@ -54,7 +54,6 @@ from defender.learning.branch.ledger import (
 )
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    MANIFEST_NAME,
     episode_token_for,
     is_reserved_world_label,
     load_family,
@@ -99,7 +98,7 @@ def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
     written episode must not be gated on a document that does not exist yet — the refusal
     below fires on a recorded `incomplete`, which is a positive statement someone made.
     """
-    text = bound.read(REVIEW_NAME).text
+    text = bound.read(LAYOUT.review).text
     if text is None:
         return None, ""
     try:
@@ -149,7 +148,7 @@ def _archived_labels(bound: Bound) -> list[str]:
     through the owner's own normalizer, never a local `!= "family"`, so the two gates cannot
     come to disagree about what the reservation covers.
     """
-    return [label for label in bound.under(WORLDS_DIRNAME).entries().dirs()
+    return [label for label in bound.under(LAYOUT.worlds).entries().dirs()
             if not is_reserved_world_label(label)]
 
 
@@ -201,7 +200,7 @@ def _verdicts(bound: Bound) -> dict[str, str]:
     _refuse_incomplete(bound)
     out: dict[str, str] = {}
     for label in _archived_labels(bound):
-        name = f"{WORLDS_DIRNAME}/{label}/report.md"
+        name = LAYOUT.world(label).report
         # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
         # split: "a path that is simply not there is skipped and reported (a sibling that died
         # before writing its report has no report)". A world archived without one is therefore
@@ -379,7 +378,7 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
         labels = _archived_labels(bound)
     if not labels:
         return {}
-    family = load_family(episode_dir / MANIFEST_NAME)
+    family = load_family(EpisodePaths(episode_dir).family)
     token = episode_token_for(family.episode_id)
     control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
 

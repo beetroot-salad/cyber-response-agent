@@ -11,6 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
+from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
@@ -52,7 +53,7 @@ from defender.scripts.visualize.visualize_runtime import (
 )
 
 
-RUNTIME_FILENAME = "runtime.html"
+# `RUNTIME_FILENAME` was a re-binding of the owner's `RUNTIME_HTML` (#1077 D7).
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -70,13 +71,13 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    (run_dir / RUNTIME_FILENAME).write_text(render_runtime_page(run_dir), encoding="utf-8")
-    src = run_dir / RUNTIME_FILENAME
+    src = RunPaths(run_dir).runtime_html
+    src.write_text(render_runtime_page(run_dir), encoding="utf-8")
     if not src.is_file():
         return []
     dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / RUNTIME_FILENAME
+    dest = RunPaths(dest_dir).runtime_html
     shutil.copyfile(src, dest)
     return [dest]
 
@@ -305,13 +306,13 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
 
 
 def _render_policy_denials_section(run_dir: Path) -> str:
-    """A denial is durable on disk (`observe.POLICY_DENIALS`) and unrelated to every other
+    """A denial is durable on disk (`RunPaths(...).policy_denials`) and unrelated to every other
     record kind this page filters on — folding it into an existing filtered stream is exactly
     how a denial goes silently unrendered. Its own section inside the document element, never
     an HTML comment, so it survives `_visible_html`-shaped scraping as well as human eyes."""
     from defender.runtime import observe
 
-    path = run_dir / observe.POLICY_DENIALS
+    path = RunPaths(run_dir).policy_denials
     if not path.is_file():
         return ""
     rows = [r for r in read_jsonl_rows(path) if r.get("event_type") == observe.POLICY_DENIAL_EVENT_TYPE]
@@ -331,7 +332,7 @@ def _render_policy_denials_section(run_dir: Path) -> str:
 
 def render_runtime_page(run_dir: Path) -> str:
     case_id = run_dir.name
-    events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
+    events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
     _, n_tool_calls, result_total = _stats(events)
     report = parse_report(run_dir)
@@ -468,7 +469,7 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
     mirrored = render_and_mirror(run_dir)
-    print(f"wrote {run_dir / RUNTIME_FILENAME}")
+    print(f"wrote {RunPaths(run_dir).runtime_html}")
     for dest in mirrored:
         print(f"mirrored {dest.relative_to(_REPO_ROOT)}")
     return 0

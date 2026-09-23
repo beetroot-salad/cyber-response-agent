@@ -276,3 +276,35 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
     assert not sidecar.exists(), "a 0-byte sidecar survived the failed write"
     assert claim_lead(dispatch) == CLAIMED, "the id was not left takeable"
     assert json.loads(sidecar.read_text())["goal"] == "g"
+
+
+def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_path, capsys):
+    """#1077 D7 review: the owner's containment check moved the alias refusal ahead of the
+    `O_EXCL` create, and the new arm answered `ALREADY_CLAIMED` in SILENCE. Both arms tell the
+    model the same thing — the id is held — so both owe it the same correctable instruction.
+    A refusal carrying only a code is one the model can do nothing with but repeat."""
+    run_dir = tmp_path / "run-alias"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text("{}")
+    (run_dir / "gather_raw" / "l-001.lead.json").symlink_to(outside)
+
+    assert claim_lead(_dispatch(run_dir, "l-001", "g", ["d"])) == ALREADY_CLAIMED
+    err = capsys.readouterr().err
+    assert "l-001" in err, "the alias refusal named no id"
+    assert "append a new :L" in err, \
+        "the alias refusal handed the model a bare code with no way to correct it"
+    assert outside.read_text() == "{}", "the claim wrote through the planted alias"
+
+
+def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(tmp_path):
+    """`claim_lead`'s contract is "never raises: the contract is a code". The shape half of
+    the owner's check (`_check_component`) raises `ValueError` for a component that is not a
+    plain string, and the id regex runs on `str(lead_id)` — so an object whose `str()` looks
+    like an id reaches the owner as itself. The old hand-composed f-string accepted it.
+
+    NOT_CLAIMED, not ALREADY_CLAIMED: nothing holds the name. This is the caller handing us an
+    id we cannot compose, which is a refusal, not a taken id."""
+    run_dir = tmp_path / "run-shape"
+    assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"])) == NOT_CLAIMED
+    assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"

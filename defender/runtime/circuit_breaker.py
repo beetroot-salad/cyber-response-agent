@@ -8,6 +8,7 @@ from pathlib import Path
 
 from defender._clock import now_iso
 from defender._io import TEXT_READ_ERRORS
+from defender._run_paths import RunPaths
 from defender.hooks._run_dir import update_json_locked
 
 PER_SYSTEM_FAIL_LIMIT = 2
@@ -60,7 +61,7 @@ class RunAborted(Exception):
 
 
 def _path(run_dir: Path) -> Path:
-    return Path(run_dir) / "circuit_breaker.json"
+    return RunPaths(run_dir).circuit_breaker
 
 
 def _blank() -> dict:

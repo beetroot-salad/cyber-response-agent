@@ -31,17 +31,16 @@ import pytest
 from pydantic import ValidationError
 
 from defender._io import append_jsonl, read_jsonl_rows
+from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
     APPLIER_DECISIONS,
     BASE,
-    BASE_FILENAME,
     CAPTURED,
     FAMILY_SOURCES,
     FAULT,
     PASSTHROUGH,
     PATCHED,
     REFUSED,
-    SERVED_DIRNAME,
     SOURCES,
     STAGED,
     Ledger,

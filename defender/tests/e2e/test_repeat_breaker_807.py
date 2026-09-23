@@ -128,7 +128,7 @@ from defender._io import append_jsonl, read_jsonl_rows, write_guarded  # noqa: E
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
-from defender.runtime import circuit_breaker, observe  # noqa: E402
+from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.query_tool import _json_safe_params  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
@@ -237,7 +237,7 @@ class _Res:
 
     @property
     def denials(self) -> list[dict]:
-        return read_jsonl_rows(self.run_dir / observe.POLICY_DENIALS)
+        return read_jsonl_rows(RunPaths(self.run_dir).policy_denials)
 
 
 def _dispatch(lead: str, system: str) -> tuple[str, dict]:

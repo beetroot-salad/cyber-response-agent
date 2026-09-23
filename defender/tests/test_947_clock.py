@@ -52,10 +52,9 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.registry import EstateError, WorldRegistry  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
+from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
-    BASE_FILENAME,
     PASSTHROUGH,
-    SERVED_DIRNAME,
     STAGED,
     Ledger,
 )

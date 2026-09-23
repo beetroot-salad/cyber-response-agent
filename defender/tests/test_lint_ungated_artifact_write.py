@@ -35,7 +35,7 @@ _UNGATED_SEED = (
 )
 #: The same write with the schema applied and its verdict obeyed.
 _GATED_SEED = (
-    "from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact\n"
+    "from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact\n"  # lint-stale-ref: ok — FIXTURE source this gate is run against, not a live import
     "from defender._io import write_guarded\n"
     "from defender._run_paths import RunPaths\n"
     "\n"
@@ -43,7 +43,7 @@ _GATED_SEED = (
     "    path = RunPaths(run_dir).investigation\n"
     "    current = path.read_text()\n"
     "    proposed = current + block\n"
-    "    if validate_artifact(INVESTIGATION_NAME, proposed, current) is not None:\n"
+    "    if validate_artifact(INVESTIGATION_NAME, proposed, current) is not None:\n"  # lint-stale-ref: ok — fixture source, as above
     "        return\n"
     "    write_guarded(path, proposed)\n"
 )

@@ -26,6 +26,8 @@ Two authoring hazards this file is written around rather than into:
 from __future__ import annotations
 
 import json
+
+from defender._run_paths import RunPaths
 import re
 from pathlib import Path
 
@@ -86,7 +88,7 @@ def _visible_html(html: str) -> str:
 def _denials(run) -> list[dict]:
     """The judge run dir's policy-denial stream, or [] when it was never written — so an
     absent stream fails a count assertion on its own message rather than raising."""
-    p = run.lrd / observe.POLICY_DENIALS
+    p = RunPaths(run.lrd).policy_denials
     return read_jsonl_rows(p) if p.is_file() else []
 
 
@@ -102,7 +104,7 @@ def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path:
     r = run_gather(tmp_path, verbs=_gather_registry(rec),
                    turns=[q(*DENIED_PAIR), q(*GRANTED_PAIR), q(*DENIED_PAIR), DONE], run_id="d6")
 
-    stream = r.run_dir / observe.POLICY_DENIALS
+    stream = RunPaths(r.run_dir).policy_denials
     assert stream.is_file(), "no durable policy-denial stream was written at all"
     records = read_jsonl_rows(stream)
     assert [rec_["event_type"] for rec_ in records] == [observe.POLICY_DENIAL_EVENT_TYPE] * 2
@@ -131,7 +133,7 @@ def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_
     here rather than left silent, because the sibling demands at this boundary are the ones
     that had to be driven per-site — a judge-side assertion written against the runtime's
     names passes vacuously, and d7/d4/d32 each drive the judge leg for exactly that reason."""
-    path = tmp_path / observe.POLICY_DENIALS
+    path = RunPaths(tmp_path).policy_denials
     logger = observe.RequestLogger(path)
     written = logger.log_policy_denial(
         role="gather", system="elastic", verb="esql", call_id="elastic.ad-hoc", params={"q": "x"},
@@ -186,7 +188,7 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
         "nan": float("nan"),
         "object": Unserializable(),
     }
-    path = tmp_path / observe.POLICY_DENIALS
+    path = RunPaths(tmp_path).policy_denials
     logger = observe.RequestLogger(path)
     logger.log_policy_denial(role="gather", system="elastic", verb="esql",
                              call_id="elastic.ad-hoc", params=hostile)
@@ -283,7 +285,7 @@ def test_a_stream_written_before_the_denial_record_existed_still_renders(tmp_pat
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_gather_registry(rec), turns=[q(*GRANTED_PAIR), DONE],
                    run_id="d54")
-    assert not (r.run_dir / observe.POLICY_DENIALS).exists(), \
+    assert not (RunPaths(r.run_dir).policy_denials).exists(), \
         "a run with no denial still wrote a denial stream"
 
     html = render_runtime_page(r.run_dir)
@@ -291,7 +293,7 @@ def test_a_stream_written_before_the_denial_record_existed_still_renders(tmp_pat
     assert observe.POLICY_DENIAL_EVENT_TYPE not in html, \
         "the page claims a policy denial in a run that had none"
 
-    legacy = r.run_dir / observe.POLICY_DENIALS
+    legacy = RunPaths(r.run_dir).policy_denials
     legacy.write_text(json.dumps({"event_type": "budget_refusal", "tool_name": "query"}) + "\n",
                       encoding="utf-8")
     assert render_runtime_page(r.run_dir), "an older refusal record in the stream broke the page"
