@@ -204,7 +204,7 @@ def test_the_stamp_is_not_named_in_the_model_facing_map(tmp_path):
     # `PROVENANCE`, not the literal, on BOTH sides: a test that spells the filename itself
     # agrees with a stale suppression rather than with the accessor, which is the one way this
     # assertion could pass while the stamp was back in the model's view under its new name.
-    assert PROVENANCE in workspace_map._UNLISTED
+    assert PROVENANCE in workspace_map._unlisted()
     run_dir = tmp_path / "run"
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)

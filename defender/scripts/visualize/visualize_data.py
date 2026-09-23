@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._run_paths import INVESTIGATION, RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
 
@@ -168,7 +168,7 @@ class _PhaseTagger:
         # path filter below cannot speak for them — the name already did.
         if name not in ("append_block", "fix_row"):
             fp = str(inp.get("file_path") or inp.get("path") or "")
-            if not fp.endswith(INVESTIGATION):
+            if not fp.endswith(RUN_LAYOUT.investigation.name):
                 return
         if tu_id:
             self.consumed_tool_use_ids.add(tu_id)
@@ -394,7 +394,6 @@ def phase_wall_times(
 
 
 from defender.scripts.visualize.visualize_messages import (  # noqa: F401
-    LEGACY_WIRE_LOG,
     build_transcript,
     deduped_main_records,
     gather_calls_by_phase,

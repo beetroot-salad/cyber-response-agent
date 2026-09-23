@@ -650,6 +650,29 @@ CASE_ANSWER_KEY_NAMES = frozenset(
     {INVESTIGATION, REPORT, SOURCE_REFS, EXECUTED_QUERIES}
 )
 
+
+def is_case_answer_key(name: str) -> bool:
+    """Is `name` one of the case's answer-key artifacts? (#1077 D7)
+
+    A PREDICATE, so the read gate asks rather than holds. It used to import the frozenset
+    above, which put four record names in the permission layer's namespace — and a set of
+    names is a held copy exactly like a single one is.
+    """
+    return name in CASE_ANSWER_KEY_NAMES
+
+
+def gather_summaries_shape(segment: str) -> str:
+    """`gather_summaries/<segment>` as a REGEX fragment, the directory name ESCAPED.
+
+    The escape is the point (#1077 D7 review). This fragment builds a positive READ GRANT for
+    MAIN and GATHER, and the site that composed it interpolated the bare directory name into
+    an f-string pattern. A constant that ever gained a regex metacharacter would silently
+    widen the grant — a `.` admits `gather_summariesX/foo` — or raise `re.error` at import and
+    take the whole permission module, and every run with it, down. The sibling shape one
+    module over already escaped its own constant; this is the same rule, owned once.
+    """
+    return f"{re.escape(GATHER_SUMMARIES_DIRNAME)}/{segment}"
+
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.
 _RESOLVE_ERRORS = (OSError, RuntimeError, ValueError)
 

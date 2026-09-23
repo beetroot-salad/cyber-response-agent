@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._episode_paths import TIMING_NAME
+from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._io import Bound, write_guarded
 from defender.learning.branch.steps import STEPS, Step
 
@@ -51,7 +51,7 @@ from defender.learning.branch.steps import STEPS, Step
 
 
 def timing_path(episode_dir: Path) -> Path:
-    return Path(episode_dir) / TIMING_NAME
+    return EpisodePaths(episode_dir).timing
 
 
 class StageClock:
@@ -147,20 +147,20 @@ def read_stage_timings(bound: Bound) -> list[dict[str, Any]] | None:
     an entry with the wrong keys, a step outside `Step`, a moment `parse_iso_utc` cannot read
     — is not something this writer left, because it replaces the whole document atomically.
     """
-    rec = bound.read(TIMING_NAME)
+    rec = bound.read(LAYOUT.timing)
     if rec.absent:
         return None
     if rec.text is None:
-        raise ValueError(f"{TIMING_NAME} could not be read: {rec.reason}")
+        raise ValueError(f"{LAYOUT.timing} could not be read: {rec.reason}")
     try:
         document = json.loads(rec.text)
     # `RecursionError` too: the record sits in a tree a sibling's box can write into, and a
     # deeply nested planted document leaves `json.loads` through that class, not `ValueError`.
     except (ValueError, RecursionError) as malformed:
-        raise ValueError(f"{TIMING_NAME} is not a JSON document: {malformed}") from malformed
+        raise ValueError(f"{LAYOUT.timing} is not a JSON document: {malformed}") from malformed
     rows = document.get("steps") if isinstance(document, dict) else None
     if not isinstance(rows, list) or not all(_is_entry(row) for row in rows):
-        raise ValueError(f'{TIMING_NAME} is not the timing record: expected {{"steps": [...]}} '
+        raise ValueError(f'{LAYOUT.timing} is not the timing record: expected {{"steps": [...]}} '
                          "with one {step, started_at, ended_at} entry per completed step, the "
                          f"step one of {', '.join(STEPS)} and both moments ISO-8601")
     return rows

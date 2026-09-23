@@ -93,7 +93,6 @@ from defender.learning.lead_repository import JoinedLead, QueryRow, joined
 from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    MANIFEST_NAME,
     episode_token_for,
     is_reserved_world_label,
     world_token_for,
@@ -422,10 +421,10 @@ def raw_manifest(episode_dir: Path) -> dict[str, Any]:
 
 def read_manifest(bound: Bound) -> dict[str, Any]:
     """`raw_manifest` through the pass's own bound reader."""
-    doc = screened_yaml_mapping(bound, MANIFEST_NAME, what="the manifest")
+    doc = screened_yaml_mapping(bound, LAYOUT.family, what="the manifest")
     if doc is None:
         raise JudgeRefused(
-            f"the manifest ({MANIFEST_NAME}) could not be read: nothing is at that name")
+            f"the manifest ({LAYOUT.family}) could not be read: nothing is at that name")
     return doc
 
 

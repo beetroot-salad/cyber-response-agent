@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from defender._model import model
-from defender._run_paths import INVESTIGATION
+from defender._run_paths import RUN_LAYOUT
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
@@ -296,7 +296,7 @@ def apply_writes(current: str, response: Message) -> str:
             sep = "\n" if current and text and not current.endswith("\n") else ""
             current = current + sep + text
             continue
-        if not str(args.get("path", "")).endswith(INVESTIGATION):
+        if not str(args.get("path", "")).endswith(RUN_LAYOUT.investigation.name):
             continue
         if name == "write_file":
             current = args.get("content", current)

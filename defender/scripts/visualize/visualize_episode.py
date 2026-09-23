@@ -35,7 +35,6 @@ from typing import Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._artifact_schema import INVESTIGATION_NAME, REPORT_NAME
 from defender._clock import parse_iso_utc
 from defender._io import Bound, bind, write_guarded
 from defender._report import ReportRead
@@ -955,14 +954,14 @@ def _load_world_archive(bound: Bound, label: str) -> _WorldArchive:
     # `worlds/<label>` directory at all reads every leaf absent exactly as one with the
     # directory but no file at a leaf does, because the walk's own ENOENT does not care which
     # component was missing; a LINK at `worlds/<label>` is every leaf's own refusal.
-    name = LAYOUT.world(label).dir
-    report = family.read_archived_report(bound, f"{name}/{REPORT_NAME}")
-    investigation = bound.read(f"{name}/{INVESTIGATION_NAME}")
+    world_rel = LAYOUT.world(label)
+    report = family.read_archived_report(bound, world_rel.report)
+    investigation = bound.read(world_rel.investigation)
     return _WorldArchive(
         report=report,
         investigation_present=not investigation.absent,
-        provenance=family.json_mapping(bound, LAYOUT.world(label).provenance),
-        scrub=family.json_mapping(bound, LAYOUT.world(label).scrub_verdict))
+        provenance=family.json_mapping(bound, world_rel.provenance),
+        scrub=family.json_mapping(bound, world_rel.scrub_verdict))
 
 
 def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
@@ -1848,7 +1847,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
         bits.append('<div class="w-archive">not archived</div>')
     else:
         if archived.report.absent:
-            bits.append(f'<div class="w-archive">{esc(REPORT_NAME)}: not archived</div>')
+            bits.append(
+                f'<div class="w-archive">{esc(str(WORLD_LEAVES.report))}: not archived</div>')
         else:
             headline = archived.report.disposition_or_unknown
             if archived.report.disposition is None and archived.report.reason:
@@ -1858,7 +1858,9 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                 headline += f" — {archived.report.reason}"
             bits.append(f'<div class="w-report">{_uv(headline)}</div>')
         if not archived.investigation_present:
-            bits.append(f'<div class="w-archive">{esc(INVESTIGATION_NAME)}: not archived</div>')
+            bits.append(
+                f'<div class="w-archive">{esc(str(WORLD_LEAVES.investigation))}: '
+                'not archived</div>')
         if archived.provenance is not None:
             bits.append(f'<div class="w-prov">{_uv(archived.provenance.get("commit"))}</div>')
         else:

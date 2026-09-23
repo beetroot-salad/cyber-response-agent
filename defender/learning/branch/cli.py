@@ -85,7 +85,6 @@ from defender.run_common import REPO_ROOT, resolve_runs_base
 from defender.runtime import branch, session_store
 from defender.runtime.branch import _family
 from defender.runtime.branch._family import (
-    MANIFEST_NAME,
     Family,
     FamilyError,
     check_identities,
@@ -465,7 +464,7 @@ def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
     names first. Spelled once so the two cannot come to disagree about what "already claimed"
     is — the second door was added after the first, and the failure it closes is destructive.
     """
-    manifest = Path(episode_dir) / MANIFEST_NAME
+    manifest = EpisodePaths(episode_dir).family
     if manifest.exists() or manifest.is_symlink():
         raise LedgerError(
             f"episode {episode_id!r} already holds a manifest at {manifest} — an episode id "
@@ -662,7 +661,7 @@ def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = Non
     agreement and the family is archived as comparable on a model nobody asked for.
     """
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
-            "--resume", str(Path(episode_dir) / MANIFEST_NAME), "--world", world_label]
+            "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label]
     if model is not None:
         argv += ["--model", model]
     return argv

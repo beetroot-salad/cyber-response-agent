@@ -355,7 +355,6 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     the same call over an intact run dir returns normally and writes both pages."""
     from defender import run_common
 
-    ss = store_mod()
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
 
     # positive control — intact, the wrapper renders both pages and does not raise
@@ -364,7 +363,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
 
-    pointer = run_dir / ss.POINTER_FILENAME
+    pointer = RunPaths(run_dir).session_pointer
     if breakage == "missing-pointer":
         pointer.unlink()
     else:

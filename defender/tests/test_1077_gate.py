@@ -773,10 +773,10 @@ def test_the_artifact_gates_accessor_list_is_derived_from_the_owner_and_the_sche
         name for name in dir(S.run_paths_mod().RunPaths)
         if not name.startswith("_")
         and isinstance(getattr(S.run_paths_mod().RunPaths, name), property)
-        and getattr(owner, name).name in _artifact_schema.ARTIFACT_NAMES)
+        and getattr(owner, name).name in _artifact_schema.artifact_names())
     assert listed == expected, (
         f"the gate's list {sorted(listed)} is not the owner's accessors for "
-        f"{_artifact_schema.ARTIFACT_NAMES}: {sorted(expected)}")
+        f"{_artifact_schema.artifact_names()}: {sorted(expected)}")
     assert listed == frozenset({"investigation", "report"}), "today's two"
     # Driven both ways: an ungated write through a document accessor IS reported; the same
     # write through any other record's accessor is NOT this gate's finding.

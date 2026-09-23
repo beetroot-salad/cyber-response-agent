@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._run_paths import GATHER_RAW_SHAPE, GATHER_SUMMARIES_DIRNAME
+from defender._run_paths import GATHER_RAW_SHAPE, gather_summaries_shape
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime.permission.grant import (
     SEG,
@@ -33,7 +33,7 @@ def read_shapes(
         # under `<run>/wire_logs/` for exactly this reason — see `_run_paths.WIRE_LOG_DIR`, and
         # `tests/test_wire_log_read_gate.py`, which pins both agents denied.
         under(run, SEG),
-        under(run, rf"{GATHER_SUMMARIES_DIRNAME}/{SEG}"),
+        under(run, gather_summaries_shape(SEG)),
     ]
     if raw:
         # `_run_paths.GATHER_RAW_SHAPE`, not a second spelling of it. This shape and the lead-id

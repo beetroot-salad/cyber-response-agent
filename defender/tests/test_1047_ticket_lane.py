@@ -483,7 +483,7 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
     reading an attacker-chosen value. Three forgeries: a pointer naming another case, a pointer
     that is not JSON at all, and a pointer that is a dangling symlink. None of them may move
     the lane, and none of them may make it raise."""
-    pointer_name = S.sym("runtime.session_store", "POINTER_FILENAME")
+    pointer_name = S.sym("_run_paths", "RUN_LAYOUT").session_pointer.name
     forgeries = {
         "other-case": json.dumps({"case_id": "someone-elses-case", "session_id": "sid"}),
         "not-json": "{{{ not json at all",

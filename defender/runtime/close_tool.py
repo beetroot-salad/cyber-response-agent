@@ -22,7 +22,7 @@ import asyncio
 import sys
 from collections.abc import Callable
 from defender._model import model
-from defender._run_paths import REPORT, RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -425,7 +425,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     # EVERY commit is validated — never only the ones carrying evidence. The verdict is
     # obeyed, not merely computed: a refusal returns the validator's own reason and leaves
     # nothing on disk.
-    schema_reason = validator(REPORT, body, None)
+    schema_reason = validator(RUN_LAYOUT.report.name, body, None)
     report_error: BaseException | None = None
     if schema_reason is not None:
         report_error = ModelRetry(schema_reason)

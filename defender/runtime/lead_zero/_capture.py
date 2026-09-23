@@ -362,7 +362,8 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
 
     Best-effort is preserved in both directions: a refusal prints and returns, and never
     raises into a run that has not started."""
-    from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact
+    from defender._artifact_schema import validate_artifact
+    from defender._run_paths import RUN_LAYOUT
     from defender._io import write_guarded
 
     path = RunPaths(run_dir).investigation
@@ -378,7 +379,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         # append-only baseline — `""` would claim an empty document was committed.
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         proposed = block if existing is None else existing + block
-        reason = validate_artifact(INVESTIGATION_NAME, proposed, existing)
+        reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:
             print(
                 f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path

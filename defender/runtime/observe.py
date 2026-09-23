@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import POLICY_DENIALS, WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: F401 — POLICY_DENIALS re-exported: the stream's writer binds it off this module
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
@@ -32,7 +32,10 @@ WIRE_LOG_ENSURE_ASCII = True
 #: The fixed policy-denial stream, ONE per site (§7 R1). Kept SEPARATE from the request stream
 #: (whose append-and-flush-per-record discipline it shares): folded in, "no denial happened"
 #: would be indistinguishable from "this file predates the denial record".
-# `POLICY_DENIALS` — the owner's (`_run_paths`, #1077 D1), imported above.
+# `POLICY_DENIALS` was RE-EXPORTED from here so the stream's writer could bind it off this
+# module (#1077 D1). D7 removes that: a re-export is a second home, and the readers that
+# bound it here now resolve `RunPaths(d).policy_denials` like every other reader of the
+# stream.
 POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 
 #: The bounded, normalized projection §7 R12 demands: the policy FACT, never the raw
@@ -270,7 +273,7 @@ def wire_log_path(run_dir: Path) -> Path:
     not tidiness. Callers ask here instead of joining the name onto a run dir, so the location
     cannot drift. The `RunPaths` assertion keeps the delegation honest: the accessor every
     READER resolves through must name the file this WRITER opens."""
-    path = stage_trace_path(run_dir, WIRE_LOG)
+    path = stage_trace_path(run_dir, RUN_LAYOUT.wire_log.name)
     assert path == RunPaths(Path(run_dir)).wire_log, (
         "the wire log's writer and its RunPaths accessor have drifted apart"
     )
@@ -286,8 +289,9 @@ def stage_trace_path(root: Path, trace_name: str) -> Path:
     is NOT what denies (see `files.WIRE_LOG_DENY_REASON`) — it is what makes the deny
     addressable: a rule keyed on a directory covers a trace name nobody has invented yet."""
     root = Path(root)
-    guarded_mkdir(root / WIRE_LOG_DIR, base=root)
-    return root / WIRE_LOG_DIR / trace_name
+    wire_logs = root / RUN_LAYOUT.wire_log_dir
+    guarded_mkdir(wire_logs, base=root)
+    return wire_logs / trace_name
 
 
 def writer_id(agent_id: str) -> str:

@@ -28,7 +28,7 @@ from pydantic_ai.messages import (
 )
 
 from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import SESSION_POINTER, RunPaths
+from defender._run_paths import RunPaths
 # THE `truncated_by` vocabulary — every value any writer of that column may put in it — and
 # its one normalizer are OWNED by `runtime/run_end.py` (which also says why `dead-end` is the
 # only lead-only member). Re-exported here so the column's own writers keep importing them
@@ -48,7 +48,10 @@ from defender.runtime.run_end import (  # noqa: F401 — re-exports
 SCHEMA_VERSION = 2
 PAYLOAD_ENSURE_ASCII = True
 ROLES = ("send", "analysis", "actor")
-POINTER_FILENAME = SESSION_POINTER
+# `POINTER_FILENAME` was a re-binding of the owner's `SESSION_POINTER` (#1077 D7), and the
+# one the review named: two modules joined `run_dir / session_store.POINTER_FILENAME` while
+# this module's own readers had already moved to the accessor, so a rename through the owner
+# would have left them opening a file nobody writes. The path is `RunPaths(d).session_pointer`.
 #: The closed set `append`'s `reason` keyword is validated against — a Python constant, not
 #: a SQL CHECK (`reason_is_a_python_closed_set_not_a_sql_check`). `fork` has no legitimate
 #: caller through `append` at all: `fork()` writes its own entry directly.

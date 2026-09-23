@@ -35,7 +35,7 @@ from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
-from defender._run_paths import RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 
 #: Decision 1a — the five group cells, group-then-kind addressed.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
@@ -102,8 +102,8 @@ _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
 #: seams replace them, so the handle does. Every other `write` is a whole-document replace.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
-_SCHEMA_GATED_MEMBERS = {"investigation": _artifact_schema.INVESTIGATION_NAME,
-                         "report": _artifact_schema.REPORT_NAME}
+_SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
+                         "report": RUN_LAYOUT.report.name}
 
 #: Sub-collection members whose owner accessor takes a caller-supplied component — `run.
 #: <group>.<name>` answers a CALLABLE for these, taking the same positional args the owner

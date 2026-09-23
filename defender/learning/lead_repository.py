@@ -19,8 +19,7 @@ from defender._io import (
     read_text_utf8,
 )
 from defender._run_paths import (
-    ALERT,
-    LEAD_CLAIM_SUFFIX,
+    RUN_LAYOUT,
     LEAD_ID_RE as _LEAD_ID_RE,
     RunPaths,
     artifact_dir,
@@ -36,7 +35,15 @@ if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
 
 
-_LEAD_SUFFIX = LEAD_CLAIM_SUFFIX
+# `_LEAD_SUFFIX` was a re-binding of the owner's `LEAD_CLAIM_SUFFIX` (#1077 D7). The glob
+# and the stem below now derive from one owner-composed SPECIMEN name, so the pattern that
+# finds a claim and the strip that recovers its id cannot disagree — they were two spellings
+# of one fact, and a glob matching what the strip cannot undo yields a lead id with the
+# suffix still attached.
+#
+# The specimen id is a valid one by construction (`LEAD_ID_RE`'s own shape) so the owner's
+# composing check admits it; nothing is read or written at the composed path.
+_SPECIMEN_LEAD_ID = "l-0"
 
 
 def _as_int(value, default: int = 0) -> int:
@@ -189,8 +196,13 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
     if not artifact_dir(gather):
         return {}
     leads: dict[str, dict] = {}
-    for path in sorted(gather.glob(f"*{_LEAD_SUFFIX}")):
-        lead_id = path.name[: -len(_LEAD_SUFFIX)]
+    # ONE SPECIMEN, for both halves: the glob that finds a claim and the strip that recovers
+    # its id are the same fact, and a pattern that matches what the strip cannot undo yields
+    # a lead id with the suffix still on it.
+    specimen = RunPaths(gather.parent).lead_claim(_SPECIMEN_LEAD_ID).name
+    suffix = specimen[len(_SPECIMEN_LEAD_ID):]
+    for path in sorted(gather.glob(f"*{suffix}")):
+        lead_id = path.name[: -len(suffix)]
         if not lead_id:
             continue
         # `read_guarded` on the ENTRY, not only `artifact_dir` on the directory: the glob
@@ -522,7 +534,7 @@ def actor_view(run_dir: Path) -> dict:
         entries.append({"query_id": q.query_id, "params": q.params})
     return {
         "case_id": run_dir.name,
-        "alert_ref": ALERT,
+        "alert_ref": RUN_LAYOUT.alert.name,
         "leads": [
             {"lead_id": lid, "queries": qs} for lid, qs in grouped.items()
         ],
@@ -678,7 +690,7 @@ def render_joined_yaml(run_dir: Path) -> str:
         lead_fields=("lead_id", "goal", "what_to_summarize"),
         query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
     )
-    doc = {"case_id": run_dir.name, "alert_ref": ALERT, "leads": leads}
+    doc = {"case_id": run_dir.name, "alert_ref": RUN_LAYOUT.alert.name, "leads": leads}
     return yaml.safe_dump(doc, sort_keys=False)
 
 

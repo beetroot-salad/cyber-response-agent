@@ -15,12 +15,10 @@ from pathlib import Path
 
 from defender import _artifact_schema
 from defender._run_paths import (
-    ALERT,
-    CASE_ANSWER_KEY_NAMES,
-    PROVENANCE,
-    RAW_MARKER,
-    TICKET_READS_MARKER,
-    WIRE_LOG_DIR,
+    RUN_LAYOUT,
+    RunPaths,
+    gather_summaries_shape,  # noqa: F401 — re-export for the policy builder
+    is_case_answer_key,
 )
 from defender.runtime import bash_policy
 
@@ -296,7 +294,7 @@ RAW_DENY_REASON = (
 # span the whole `defender/` tree — so an ordinary word here would be a trap: a system skill or
 # query-catalog dir named for observing would go unreadable for every agent, with a reason about
 # wire logs that has nothing to do with the file.
-WIRE_LOG_MARKER = WIRE_LOG_DIR
+# `WIRE_LOG_MARKER` was a re-binding of the owner's `WIRE_LOG_DIR` (#1077 D7).
 WIRE_LOG_DENY_REASON = (
     "Blocked: wire_logs/ holds this run's wire logs — the verbatim request/response stream of "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "every agent that shares this root, including payload bytes and transcripts this agent is "
@@ -336,7 +334,7 @@ def names_run_provenance(p: Path, run_dir: Path) -> bool:
     other read root is a lesson corpus, and a flat name test would make a corpus file called
     `provenance.json` unreadable with a reason about host bookkeeping."""
     try:
-        return p == (run_dir / PROVENANCE).resolve()
+        return p == RunPaths(run_dir).provenance.resolve()
     except RESOLVE_ERRORS:
         return False
 
@@ -349,7 +347,7 @@ def names_wire_log_dir(p: Path) -> bool:
     so the two read surfaces cannot disagree about a wire log that resolves within-root: the
     JUDGE holds a `cat` grant scoped `under(run, TREE)`, so without this the bash lane would
     admit the very file `decide_read` refuses it."""
-    return WIRE_LOG_MARKER in p.parts
+    return str(RUN_LAYOUT.wire_log_dir) in p.parts
 
 
 # The reason a confined agent earns for reading a staged case artifact. Names the FILE and the
@@ -372,7 +370,7 @@ def names_case_answer_key(p: Path, run_dir: Path) -> bool:
     Both operands are already-resolved — the caller resolves them together inside its one
     fail-closed `try`, so a symlink at `investigation.md`'s name is collapsed onto the staged file
     before parents are compared, and a `..` cannot spell the root some other way."""
-    return p.name in CASE_ANSWER_KEY_NAMES and p.parent == run_dir
+    return is_case_answer_key(p.name) and p.parent == run_dir
 
 
 def _names_raw(p: Path) -> bool:
@@ -381,7 +379,7 @@ def _names_raw(p: Path) -> bool:
     control: an ancestor dir that merely carries the word (a pytest tmp dir named
     `test_gather_raw_…`, a checkout under `~/gather_raw-notes/`) would tag every file in the tree
     as an attacker-influenced payload."""
-    return RAW_MARKER in p.parts
+    return str(RUN_LAYOUT.gather_raw) in p.parts
 
 
 # The two path components that together name a draft query template:
@@ -433,7 +431,7 @@ def is_untrusted_read(path: Path) -> bool:
     narrower predicate makes the containment structural."""
     p = Path(path)
     return (
-        p.name == ALERT
+        p.name == RUN_LAYOUT.alert.name
         or is_captured_payload(p)
         or _names_query_draft(p)
     )
@@ -454,7 +452,7 @@ def is_captured_payload(path: Path) -> bool:
     payload delivered unlabeled. Hence `is_untrusted_read` CALLS this rather than restating its
     members."""
     p = Path(path)
-    return _names_raw(p) or TICKET_READS_MARKER in p.parts
+    return _names_raw(p) or str(RUN_LAYOUT.ticket_reads) in p.parts
 
 
 def decide_write(
@@ -519,7 +517,7 @@ def decide_write(
     # same validator the direct write does, or identical text is refused through the real name and
     # admitted through the alias.
     artifact = next(
-        (n for n in _artifact_schema.ARTIFACT_NAMES if _is_run_dir_file(rp, run_dir, n)), None
+        (n for n in _artifact_schema.artifact_names() if _is_run_dir_file(rp, run_dir, n)), None
     )
     if artifact is None:
         # The UTF-8-encodability check applies to EVERY allowed write, not only the two artifacts
@@ -543,7 +541,7 @@ def decide_write(
     # baseline and let the faulting write REPLACE the document — a fail-open on the one invariant
     # this branch exists to hold.
     current: str | None = None
-    if artifact in _artifact_schema.NEEDS_BASELINE and rp.is_file():
+    if _artifact_schema.needs_baseline(artifact) and rp.is_file():
         try:
             current = rp.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:

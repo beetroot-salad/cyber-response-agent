@@ -6,7 +6,7 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
-from defender._run_paths import GATE_METADATA_KEY, WIRE_LOG, RunPaths
+from defender._run_paths import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
@@ -21,7 +21,9 @@ from defender.scripts.visualize.visualize_primitives import parse_report
 #: its one live use is `load_messages`' fallback below. Named this way because `run_dir / X` on
 #: a constant that reads as "the wire log" silently resolves to a path no current run writes —
 #: a consumer that wants the live wire log asks `RunPaths.wire_log`.
-LEGACY_WIRE_LOG = WIRE_LOG
+# `LEGACY_WIRE_LOG` was a re-binding of the owner's `WIRE_LOG` (#1077 D7). The legacy
+# location is the run ROOT rather than `wire_logs/`; the NAME is the same one, so it is
+# asked of the owner at the read below rather than held here under a second spelling.
 
 
 def load_messages(run_dir: Path) -> list[dict]:
@@ -31,7 +33,8 @@ def load_messages(run_dir: Path) -> list[dict]:
     transcript. A READER fallback only: the `wire_logs/` location is a read-GATE fact
     (`_run_paths.WIRE_LOG_DIR`) and this is host code, outside the gate entirely."""
     current = RunPaths(run_dir).wire_log
-    return read_jsonl_rows(current if current.is_file() else run_dir / LEGACY_WIRE_LOG)
+    return read_jsonl_rows(
+        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name)
 
 
 def _pretty_model(name: str) -> str:

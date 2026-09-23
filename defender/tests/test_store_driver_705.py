@@ -161,7 +161,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(tmp_path
                    main=ReplayFn([Turn(text="done")]),
                    store_factory=store_factory(tmp_path))
 
-    pointer = run_dir / ss.POINTER_FILENAME
+    pointer = RunPaths(run_dir).session_pointer
     assert pointer.is_file(), f"no run-dir pointer at {pointer}"
     body = json.loads(pointer.read_text())
     assert set(body) >= {"case_id", "store_path"}, body

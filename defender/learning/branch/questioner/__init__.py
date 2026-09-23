@@ -67,7 +67,7 @@ import yaml
 from defender import _yaml
 from defender._env import env_str
 from defender._io import read_guarded
-from defender._report import REPORT_NAME, read_report
+from defender._report import read_report
 from defender._run_paths import RunPaths, artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
@@ -354,7 +354,7 @@ def _captured_disposition(source_run_dir: Path) -> str | None:
     which follow a planted link. A report that cannot be read is not an error here — the two
     call-1 fields are the primary sources, and `parse_family` names the field if all three are
     silent."""
-    report = Path(source_run_dir) / REPORT_NAME
+    report = RunPaths(source_run_dir).report
     if not artifact_file(report):
         return None
     return read_report(report).disposition

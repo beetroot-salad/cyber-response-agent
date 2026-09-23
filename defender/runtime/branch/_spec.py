@@ -31,6 +31,8 @@ from pydantic import model_validator
 
 
 
+from defender._run_paths import RUN_LAYOUT, RunPaths
+
 from .. import session_store
 
 
@@ -163,14 +165,14 @@ def open_source_store(run_dir: Path) -> Any:
     # not a well-formed one took exactly the exit this block exists to close.
     try:
         pointer = json.loads(
-            (run_dir / session_store.POINTER_FILENAME).read_text(encoding="utf-8"))
+            RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, runs_base=run_dir.parent).resolve()
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise BranchError(
             f"{run_dir} carries no readable case pointer "
-            f"({session_store.POINTER_FILENAME}): {e!r}") from e
+            f"({RUN_LAYOUT.session_pointer}): {e!r}") from e
     if derived != recorded:
         raise BranchError(
             f"{run_dir} records its store at {recorded}, but its case {case_id!r} under "

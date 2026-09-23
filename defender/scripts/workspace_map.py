@@ -11,7 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._run_paths import BUDGET, PROVENANCE, RAW_MARKER, WIRE_LOG_DIR  # noqa: E402
+from defender._run_paths import RUN_LAYOUT  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -30,7 +30,19 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: shape and no deny names either of these. Suppressing the name keeps it out of the model's
 #: directory view; it does not put the file out of reach. `gather_raw`/`wire_logs` are the two
 #: that are actually refused (`permission.files`).
-_UNLISTED = frozenset({RAW_MARKER, WIRE_LOG_DIR, BUDGET, PROVENANCE})
+def _unlisted() -> frozenset[str]:
+    """The run-dir entries this model-facing view suppresses, ASKED OF THE OWNER per call
+    (#1077 D7).
+
+    Held as a module-level frozenset before, which is the exact failure `PROVENANCE`'s own
+    docstring warns about one module over: a suppression that spells the filename
+    independently of the writer keeps suppressing a name that no longer exists the day the
+    writer renames it — after which the stamp silently reappears in MAIN's message 0, the
+    one outcome this suppression exists to prevent."""
+    return frozenset({
+        RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.wire_log_dir.name,
+        RUN_LAYOUT.budget.name, RUN_LAYOUT.provenance.name,
+    })
 
 
 def _safe_name(name: str) -> str:
@@ -77,7 +89,7 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
     lines.append(f"## Run dir — `{run_dir}`")
     if run_dir.is_dir():
         for child in sorted(run_dir.iterdir()):
-            if child.name in _UNLISTED:
+            if child.name in _unlisted():
                 continue
             kind = "dir/" if child.is_dir() else ""
             lines.append(f"- {_safe_name(child.name)}{(' ' + kind) if kind else ''}")

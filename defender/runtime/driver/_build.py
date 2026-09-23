@@ -46,7 +46,7 @@ from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
 from defender._frontmatter import strip_frontmatter
-from defender._run_paths import INVESTIGATION, RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
@@ -191,7 +191,8 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
     # report.md is not on the model's write allow-list at all — the close tool is its ONLY
     # writer, rendering it host-side through validate_artifact.
-    return permission.build_named_write_allow(roots.run_dir, (INVESTIGATION,))
+    return permission.build_named_write_allow(
+        roots.run_dir, (RUN_LAYOUT.investigation.name,))
 
 
 MAIN_DEF = AgentDefinition(
