@@ -1,23 +1,32 @@
+"""The box wire: the request/response frames, and the env a box may carry.
 
+STDLIB ONLY (#1096) — and that is a COST rule, not an availability one. Two rules are easy to
+confuse here, so both, in order:
+
+  * #1092 retired the AVAILABILITY rule. The owned box image installs the project's
+    dependencies, so pydantic resolves inside a box and the `box` package door is free to use
+    it — `BoxSpec` is a `@model` dataclass today, which is that retirement's live pin.
+  * #1096 adds the COST rule, which is this module's. One process imports it per `docker
+    exec`, and there is one `docker exec` per command an agent issues. Importing the package
+    door instead costs roughly SEVEN TIMES this module's import (measured both ways in #1096;
+    the absolute figures are host-specific, the ratio is what matters), because the door
+    reaches `defender._model` and through it pydantic.
+
+So: everything the in-box entrypoint needs lives here — the codec below and the env allowlist —
+and a third-party import added to this module is paid once per agent command, forever.
+"""
 from __future__ import annotations
 
 import struct
 from collections.abc import Sequence
-from dataclasses import dataclass  # stdlib, deliberately — see the note below
-
+from dataclasses import dataclass  # stdlib, deliberately — see the module docstring
 from defender.runtime import bash_exec
-
-# STDLIB ONLY (#1096). This module is what the box entrypoint imports on EVERY `docker exec`
-# — one process per agent command, plus the alias-ban probe at every start. Everything the
-# entrypoint needs lives here: the wire codec and the env allowlist below. The `box` package
-# door pulls `defender._model` (pydantic) since #1092 and costs ~300 ms per import; this
-# module stays at the stdlib closure's ~80 ms. A third-party import added here is paid on the
-# hot path, per command.
 
 
 #: F7 — the positive env allowlist: the keys a box's environment may carry, whether merged
-#: from a caller's request env by the `docker run` builders or filtered from the entrypoint's
-#: own environment before the pipeline runs. Owned here because the entrypoint reads it.
+#: from a caller's request env by the `docker run` builders or filtered from the in-box
+#: entrypoint's own environment before a command runs. Owned HERE, beside the wire, because
+#: the in-box reader is the one that must not pay for the package door to reach it (#1096).
 BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "DEFENDER_DIR",
     "DEFENDER_RUN_DIR",

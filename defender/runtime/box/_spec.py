@@ -16,10 +16,8 @@ from typing import ClassVar, Protocol, runtime_checkable
 from defender._model import model
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
-    BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: owned by box_codec since #1096 (the entrypoint reads it there)
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
-    _BOX_MARK_ENV,  # noqa: F401 — re-exported: owned by box_codec since #1096, beside the allowlist it is a member of
     BoxFault,
     BoxResult,
     RawExec,
@@ -37,11 +35,15 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 
 
-# `@model(frozen=True)` (#1067, M7): the box entrypoint's import closure is free to pull
-# pydantic now that the image installs it (O2) — this port is the live pin. `rootfs` is
-# `str | None`, defaulting to unset: an unset value is resolved to `_image.image_tag(tree)` by
-# each `docker run` argv builder, never read here (M3 revised) — `DEFAULT_SPEC = BoxSpec()`
-# below runs at import inside every box and must read nothing off the mounted tree (#1092 d5).
+# `@model(frozen=True)` (#1067, M7): pydantic is available to this module — the owned image
+# installs it (O2), and this port is the live pin of that. What #1096 then established is
+# narrower and is NOT a licence to import this module from inside a box: nothing in a box
+# loads it any more (the in-box entrypoint imports `box_codec`, the alias probe is a
+# stdlib-only script), and the door's import is the expensive one precisely because of the
+# pydantic pulled in on this line. `rootfs` is `str | None`, defaulting to unset: an unset
+# value is resolved to `_image.image_tag(tree)` by each `docker run` argv builder, never read
+# here (M3 revised) — evaluating `DEFAULT_SPEC = BoxSpec()` below must still read nothing off
+# the tree it names (#1092 d5, pinned by a live audit-hook test).
 @model(frozen=True)
 class BoxSpec:
 
@@ -139,8 +141,10 @@ class BoxExecutor:
 # calls on `deps.box` (`runtime/tools/_bash.py`) is `run_parsed(...)` — the real contract was
 # always structural, a concrete `BoxExecutor` was just the one implementation that existed.
 # Typed `BoxExecutor` itself, the field refused every test double that duck-types the box
-# (`run_parsed` alone, no real `transport`/`spec`). Defined HERE, stdlib-only: this module
-# rides into the sandbox (see the note above `BoxSpec`), and a `Protocol` costs it nothing.
+# (`run_parsed` alone, no real `transport`/`spec`). Defined HERE because this is where the
+# executor and the transports it discriminates on are declared. Note for anyone pruning this
+# module for import cost: it is the HOST's, not the box's — since #1096 nothing inside a box
+# imports it, and the module that does ride in is `box_codec`.
 @runtime_checkable
 class BoxLike(Protocol):
 

@@ -627,10 +627,12 @@ def run_parsed(
 
 def _run_box_entrypoint() -> int:
     """The process that runs INSIDE the sandbox: only the mounted tree on its `PYTHONPATH`, no
-    venv. One of these per `docker exec`, so it imports `box_codec` — the wire codec and the
-    env allowlist, stdlib — and NOT the `box` package door, which has pulled `defender._model`
-    (pydantic, ~300 ms per process) since #1092 (#1096). Function-local because `box_codec`
-    imports this module at its top."""
+    venv. One of these per `docker exec`, and one `docker exec` per command an agent issues,
+    so it imports `box_codec` — the wire codec and the env allowlist, stdlib — and NOT the
+    `box` package door, whose import costs roughly seven times as much because it reaches
+    `defender._model` and through it pydantic (#1096; #1092 made that resolvable in-box, which
+    is why this is a cost rule and not an availability one). Function-local because
+    `box_codec` imports this module at its top."""
     from defender.runtime import box_codec
 
     frame = sys.stdin.buffer.read()

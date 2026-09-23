@@ -17,6 +17,8 @@ import shlex
 from defender._io import read_text_soft
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime.box_codec import (
+    BOX_ENV_ALLOWLIST,
+    _BOX_MARK_ENV,
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
@@ -29,7 +31,6 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     write_did_not_run,
 )
 from ._image import ImageInputError, image_tag
-from ._spec import BOX_ENV_ALLOWLIST, _BOX_MARK_ENV
 
 
 _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
