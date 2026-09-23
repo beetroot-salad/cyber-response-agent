@@ -130,7 +130,7 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
         name="defender-nested-live", workdir=outer, env={},
         mounts=(Mount(source=outer, target=outer, writable=False),
                 Mount(source=inner, target=inner, writable=True)),
-        # `outer` is a tmp tree with none of the three hash inputs; a real-daemon request
+        # `outer` is a tmp tree with none of the hash inputs; a real-daemon request
         # pins the name of THIS checkout's image, never the stock one (#1092, #94) — on the
         # env-derived spec, so the DEFENDER_BOX_RUNTIME lever still holds (test_540:973).
         spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs=box_mod.image_tag(DEFENDER)),
@@ -285,7 +285,7 @@ def test_mount_source_symlink_target_resolves_outside_worktree_leaf(tmp_path):
         mounts=(Mount(source=run_dir, target=run_dir, writable=False),
                 Mount(source=DEFENDER, target=DEFENDER, writable=False),
                 Mount(source=link, target=link, writable=False)),
-        # `run_dir` is a tmp tree with none of the three hash inputs (#1092, #94 — see above).
+        # `run_dir` is a tmp tree with none of the hash inputs (#1092, #94 — see above).
         spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs=box_mod.image_tag(DEFENDER)),
     )
     box = start_box_request(req, docker=box_mod._docker)
