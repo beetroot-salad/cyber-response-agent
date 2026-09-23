@@ -310,6 +310,14 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         "an entry only unrequested extras reach": {"lock": _lock_edit(bump("epsilon", "5.0.1"))},
         "a dev-extra relock": {"lock": _lock_edit(dev_relock)},
         "a runtime-extra relock": {"lock": _lock_edit(runtime_relock)},
+        # uv re-emitting the lock under a newer format revision, and a release bump of the
+        # project itself (its own version, in pyproject and on the root entry): neither is
+        # anything the image installs (#1097 round-2 adversary H5).
+        "the lock's format revision": {"lock": _lock_edit(lambda lock: lock.__setitem__("revision", 4))},
+        "the project's own version": {
+            "pyproject": pyproject_edit('version = "0.0.0"', 'version = "0.0.1"'),
+            "lock": _lock_edit(lambda lock: _entry(lock, ROOT).__setitem__("version", "0.0.1")),
+        },
     }
     for i, (what, edit) in enumerate(holding.items()):
         held = image_tag(_plant(tmp_path, f"hold-{i}", **edit))
@@ -394,11 +402,18 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         "a marker on the box edge": _set([ROOT, "optional-dependencies", "box", 0, "marker"], "sys_platform == 'linux'"),
         "another extra on the box edge": _set([ROOT, "optional-dependencies", "box", 0, "extra"], ["fast", "slow"]),
         "a new box edge": _append([ROOT, "optional-dependencies", "box"], {"name": "rtlib"}),
+        # A closure entry's OWN edge marker: `alpha -> winonly` gated to linux instead of
+        # win32 changes what a Linux build installs (#1097 round-2 adversary H2).
+        "a closure entry's edge marker": _set(["alpha", "dependencies", 1, "marker"], "sys_platform == 'linux'"),
     }
     manifest_edits = {
         "[tool.uv] value": _replace_once(PLANTED_PYPROJECT, "package = false", "package = true"),
         "[tool.uv] key": _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\ncompile-bytecode = true\n"),
         "[tool.uv] emptied": _replace_once(PLANTED_PYPROJECT, "package = false\n", ""),
+        # Not only scalars: a list-valued key and a nested table change what a sync does
+        # without touching the lock (#1097 round-2 adversary H4).
+        "[tool.uv] list key": _replace_once(PLANTED_PYPROJECT, "package = false\n", 'package = false\nno-binary-package = ["gamma"]\n'),
+        "[tool.uv] nested table": PLANTED_PYPROJECT + "\n[tool.uv.pip]\nno-build = true\n",
     }
     moved: dict[str, str] = {}
     for i, (what, fn) in enumerate(lock_edits.items()):
@@ -417,6 +432,35 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     no_tool_uv = _replace_once(PLANTED_PYPROJECT, "[tool.uv]\npackage = false\n\n", "")
     absent = image_tag(_plant(tmp_path, "tool-uv-absent", pyproject=no_tool_uv))
     assert absent == moved["[tool.uv] emptied"], "an absent [tool.uv] is not read as {}"
+
+    # EVERY wheel's hash is digested, not the first: over an entry carrying two wheels, one
+    # byte of the second moves the name (#1097 round-2 adversary H1 — the image's own
+    # manylinux wheel is rarely wheels[0]).
+    def two_wheels(lock: dict) -> None:
+        wheel = dict(_entry(lock, "alpha")["wheels"][0])
+        wheel["url"] = wheel["url"].replace("py3-none-any", "cp311-cp311-manylinux_2_17_x86_64")
+        wheel["hash"] = "sha256:" + "5a" * 32
+        _entry(lock, "alpha")["wheels"].append(wheel)
+    two = _lock_edit(two_wheels)
+    second_flipped = copy.deepcopy(two)
+    wheel = _entry(second_flipped, "alpha")["wheels"][1]
+    wheel["hash"] = _flip_hex(wheel["hash"])
+    assert image_tag(_plant(tmp_path, "two-wheels", lock=two)) != image_tag(
+        _plant(tmp_path, "two-wheels-flipped", lock=second_flipped)), "the second wheel's hash is not digested"
+
+    # EVERY extra an edge asks for is walked, not the first: with `box -> gamma[fast, slow]`
+    # `epsilon` (gamma's `slow` target) is in the closure, and its bump moves the name
+    # (#1097 round-2 adversary H3).
+    both = _lock_edit(_set([ROOT, "optional-dependencies", "box", 0, "extra"], ["fast", "slow"]))
+    assert "epsilon" in {e["name"] for e in box_closure(both, ROOT)}, "the second extra was not walked"
+    bumped = copy.deepcopy(both)
+    _entry(bumped, "epsilon")["version"] = "5.0.1"
+    assert image_tag(_plant(tmp_path, "both-extras", lock=both)) != image_tag(
+        _plant(tmp_path, "both-extras-bumped", lock=bumped)), "a second extra's target did not rename"
+
+    # A TOML datetime in [tool.uv] (uv's `exclude-newer`) is digested, not a crash.
+    dated = _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\nexclude-newer = 2026-01-01T00:00:00Z\n")
+    assert image_tag(_plant(tmp_path, "dated", pyproject=dated)) not in (baseline, *moved.values())
 
 
 def test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes(tmp_path):
@@ -488,6 +532,12 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
     assert _canonical(tomllib.loads(reversed_lock)) == _canonical(lock)
     assert tomllib.loads(reversed_lock)["package"] != lock["package"]
 
+    installed_wheel = next(
+        w["hash"] for w in _entry(lock, "pydantic-core")["wheels"]
+        if "cp311-cp311-manylinux_2_17_x86_64" in w["url"]
+    )
+    assert installed_wheel != _entry(lock, "pydantic-core")["wheels"][0]["hash"]
+
     baseline = tree("baseline")
     assert TAG_RE.match(baseline), baseline
     holding = {
@@ -506,6 +556,9 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
     moving = {
         "a pydantic version": {"lock_bytes": version_line("pydantic", "99.0.0")},
         "a pydantic-core wheel hash byte": {"lock_bytes": hash_byte("pydantic-core", "wheel")},
+        # The wheel the image actually installs — not wheels[0] (#1097 round-2 adversary H1).
+        "the installed pydantic-core wheel's hash byte": {"lock_bytes": _replace_once(
+            lock_text, installed_wheel, _flip_hex(installed_wheel))},
         "a typing-inspection version": {"lock_bytes": version_line("typing-inspection", "99.0.0")},
         "a duckdb sdist hash byte": {"lock_bytes": hash_byte("duckdb", "sdist")},
         "a second box edge": {"lock_bytes": _replace_once(
@@ -535,6 +588,10 @@ _FAULTS: dict[str, tuple[str, str | None, Callable[[Path], None]]] = {
     "a closure entry's edge names no entry": ("uv.lock", "ghost", lambda d: d.joinpath("uv.lock").write_text(
         _lock_toml(_lock_edit(lambda lock: _entry(lock, "alpha")["dependencies"].append({"name": "ghost"}))),
         encoding="utf-8")),
+    "the lock holds no [[package]] at all": ("uv.lock", ROOT, lambda d: d.joinpath("uv.lock").write_text(
+        "version = 1\nrevision = 3\n", encoding="utf-8")),
+    "pyproject.toml has no [project] name": ("pyproject.toml", None, lambda d: d.joinpath("pyproject.toml").write_text(
+        _replace_once(PLANTED_PYPROJECT, 'name = "planted"\n', ""), encoding="utf-8")),
     "a box edge names no entry": ("uv.lock", "ghost", lambda d: d.joinpath("uv.lock").write_text(
         _lock_toml(_lock_edit(lambda lock: _entry(lock, ROOT)["optional-dependencies"]["box"].append(
             {"name": "ghost"}))), encoding="utf-8")),

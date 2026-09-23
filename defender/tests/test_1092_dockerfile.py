@@ -212,6 +212,27 @@ def test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_sync():
             )
 
 
+# ---- #1097 round-2 adversary H6: no step beyond the recipe's three ------------------------------
+def test_the_recipe_runs_exactly_the_sync_the_installer_uninstall_and_the_ensurepip_removal():
+    """The Dockerfile has exactly three `RUN` steps — the `uv sync` (pinned whole by d14), then
+    `python3 -m pip uninstall --yes pip setuptools wheel` word for word, then `rm -rf` of
+    `ensurepip/_bundled` word for word — so no step can install, copy in, or edit anything
+    beyond the lock's closure: an extra `pip --no-cache-dir install …` step, which slips past
+    d12's `pip install` pattern, fails here.
+
+    # rejected: widening d12's regex to every pip spelling — a blocklist of install verbs is
+    # the shape that missed the option-between-words spelling in the first place."""
+    runs = [ins for ins in _instructions() if ins.startswith("RUN ")]
+    assert len(runs) == 3, runs
+    assert "uv sync" in runs[0], runs[0]
+    assert shlex.split(runs[1][len("RUN "):]) == [
+        "/usr/local/bin/python3", "-m", "pip", "uninstall", "--yes", "pip", "setuptools", "wheel",
+    ], runs[1]
+    assert shlex.split(runs[2][len("RUN "):]) == [
+        "rm", "-rf", "/usr/local/lib/python3.11/ensurepip/_bundled",
+    ], runs[2]
+
+
 # ---- d16 -------------------------------------------------------------------------------------
 def test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it():
     """`pyproject.toml` declares an optional-dependency extra `box` whose only entry is
