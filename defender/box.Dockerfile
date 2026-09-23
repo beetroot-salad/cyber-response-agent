@@ -1,6 +1,7 @@
-# The owned box image (#1092). Build context is the REPO ROOT (see `.dockerignore` there),
-# not `defender/` — `scripts/box_image.py build` invokes `docker build` that way so this file
-# can COPY only the two files it needs without a build-context reach outside the repo.
+# The owned box image (#1092). Build context is `defender/` — `scripts/box_image.py build`
+# invokes `docker build` that way — not the repo root, so the repo root's `.dockerignore` does
+# not apply and needs no entry for this build: the recipe COPYs only the two files it needs,
+# and nothing outside `defender/` is ever walked (#1098).
 #
 # BuildKit recipe: the sync step below LENDS itself uv with `RUN --mount` — the legacy builder
 # has no `--mount`, so `scripts/box_image.py build` sets DOCKER_BUILDKIT=1 for every build.
@@ -10,10 +11,10 @@
 # builds on different days.
 FROM python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9
 
-# Only the two files the sync needs — no source tree, no `.env`, nothing else (O7).
-COPY defender/pyproject.toml defender/uv.lock defender/
-
 WORKDIR /defender
+
+# Only the two files the sync needs — no source tree, no `.env`, nothing else (O7).
+COPY pyproject.toml uv.lock ./
 
 # uv is MOUNTED into this one step from its pinned image (a version AND a digest — O8), never
 # COPYed into a layer: the binary is on the path of the sync and of nothing else, so no

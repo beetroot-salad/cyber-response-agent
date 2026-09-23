@@ -88,8 +88,8 @@ def test_the_dockerfile_copies_a_version_pinned_uv_binary_and_never_pip_installs
 # ---- d13 (negative; positive control: d14 — the two files ARE copied and synced) -----------------
 def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
     """The Dockerfile's `COPY` instructions from the build context name exactly
-    `defender/pyproject.toml` and `defender/uv.lock` — no source tree, no `.env`, nothing
-    else — and there is no `ADD`."""
+    `pyproject.toml` and `uv.lock` (the context is `defender/`, #1098) — no source tree, no
+    `.env`, nothing else — and there is no `ADD`."""
     instructions = _instructions()
     assert not any(ins.startswith("ADD ") for ins in instructions)
     sources: list[str] = []
@@ -99,7 +99,7 @@ def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
         words = [w for w in ins.split()[1:] if not w.startswith("--")]
         assert len(words) >= 2, ins
         sources.extend(words[:-1])
-    assert sorted(sources) == ["defender/pyproject.toml", "defender/uv.lock"], sources
+    assert sorted(sources) == ["pyproject.toml", "uv.lock"], sources
 
 
 # ---- d14 -------------------------------------------------------------------------------------

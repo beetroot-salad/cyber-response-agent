@@ -20,9 +20,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-#: This script's own tree: `defender/scripts/box_image.py` -> `defender/` -> the tree root.
+#: This script's own tree: `defender/scripts/box_image.py` -> `defender/`.
 _DEFENDER_DIR = Path(__file__).resolve().parent.parent
-_TREE_ROOT = _DEFENDER_DIR.parent
 
 
 def _load_image_module() -> ModuleType:
@@ -51,7 +50,9 @@ def _cmd_build(image: ModuleType) -> int:
         "docker", "build",
         "-f", str(dockerfile),
         "-t", tag,
-        str(_TREE_ROOT),
+        # The context is `defender/`, not the repo root: the recipe COPYs only two files from
+        # it, so no root `.dockerignore` has to keep enumerating large local directories (#1098).
+        str(_DEFENDER_DIR),
     ]
     # This is the ONE place the recipe is built, so the builder it needs is pinned here: the
     # recipe's `RUN --mount` (uv lent to the sync step, never a layer) is BuildKit syntax,
