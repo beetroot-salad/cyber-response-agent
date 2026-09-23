@@ -44,9 +44,12 @@ there is nothing to tag by hand — only to build:
 python3 defender/scripts/box_image.py build
 ```
 
-Build it once; it persists on the host daemon until `box.Dockerfile`, `uv.lock` or
-`pyproject.toml` changes. The next `start_box` after such a change faults with a
-missing-image error naming this same command — `start_box` itself never builds.
+Build it once; it persists on the host daemon until `box.Dockerfile` or
+`defender/box-requirements.txt` changes. That list is `uv export` of the core dependencies plus
+the `box` extra — regenerate it with `python3 defender/scripts/box_image.py export` after a
+relock (a test fails CI while it disagrees with `uv.lock`). A relock that leaves the list alone
+(a dev-tool bump, say) keeps the same image. The next `start_box` after a change to either file
+faults with a missing-image error naming the build command — `start_box` itself never builds.
 
 ## Two caveats
 
