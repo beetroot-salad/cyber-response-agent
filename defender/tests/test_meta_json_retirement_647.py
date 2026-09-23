@@ -461,6 +461,13 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
 
     doc = " ".join((RunPaths.__doc__ or "").split())
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
+    # THE COUNT, restored (#1077 D7 review). This arm read `"seven accessors" in doc` and was
+    # DELETED rather than re-pointed when D1 grew the set past seven — so the one check that
+    # this class's prose still describes this class went away, in the same change that made it
+    # wrong. Asserted against the pinned set above, so the two cannot drift apart again.
+    assert f"{len(accessors)} accessors" in doc, (
+        f"the class docstring does not state its own accessor count ({len(accessors)}) — it "
+        "describes a class this is not")
 
 
 #: Calls that make an accessor's path a WRITE TARGET rather than something read back.
@@ -589,6 +596,17 @@ def test_no_accessor_names_a_file_nothing_reads():
         except SyntaxError:  # pragma: no cover — a tracked .py that does not parse
             continue
         unread -= _run_paths_reads(tree, accessors)
+    # SELF-RETIRING, in both directions (#1077 D7 review). The subtraction used to be
+    # unconditional, which made the exemption permanent: once a real in-tree reader for the
+    # ticket receipt lands, the exemption swallows it and nothing says the carve-out is dead;
+    # and if the box's `docker exec` reader for the sentinel is deleted, the accessor stays
+    # green forever. Asserting the exemption is still NEEDED before spending it turns both
+    # into failures. The census exists to catch "an accessor naming a file nothing reads" —
+    # an exemption that cannot expire is a hole in exactly that.
+    assert read_outside_the_census <= unread, (
+        "these accessors are exempted from the census as unreadable by it, but it CAN see a "
+        f"reader for them now: {sorted(read_outside_the_census - unread)} — drop them from "
+        "`read_outside_the_census`")
     unread -= read_outside_the_census
     assert not unread, f"accessors nothing outside the tests reads: {sorted(unread)}"
 

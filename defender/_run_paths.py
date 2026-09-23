@@ -405,6 +405,12 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
+    19 accessors, and the count is stated here on purpose: #647's census test asserts this
+    docstring agrees with the set it pins, so a class that gains or loses a record cannot
+    leave prose describing a different one. The assertion was deleted rather than re-pointed
+    when D1 grew the set from seven, which is the drift it exists to catch, happening to
+    itself.
+
     Every accessor resolves relative to ``run_dir``, so construct ``RunPaths(some_dir)`` on
     whichever root you hold. ONE root, deliberately: a caller needing a second (the per-case
     leg-output dir) takes it as its own argument rather than making every single-root
