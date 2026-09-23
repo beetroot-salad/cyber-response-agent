@@ -138,6 +138,7 @@ base: db1af01a          # `git -C /wt-issue-1077 merge-base HEAD main` ==
 #                                          + run_records_kinds_tsv.domain.distinguished[tenant]
 #                                          + ...distinguished[circuit_breaker]
 #     d31 denies_import_names_from_owner   + owner_constants.domain.distinguished[RAW_MARKER]
+#         (D7: inverted — the gate HOLDS neither, rather than holding the owner's own)
 #                                          + ...distinguished[TICKET_READS_MARKER]
 # ==========================================================================================
 
@@ -631,11 +632,16 @@ demands:
       - "owner_constants"
       - "owner_constants.domain.distinguished[RAW_MARKER]"
       - "owner_constants.domain.distinguished[TICKET_READS_MARKER]"
-    discharged_by: test_every_deny_predicate_reads_its_name_from_the_owner
+    discharged_by: test_no_deny_predicate_holds_a_record_name_at_all
     seed_docstring: >-
-      All six deny predicates read their names from the owner module, including `RAW_MARKER`
-      and `TICKET_READS_MARKER`, which are no longer spelled in the gate.
-    note: "claim C20: `files.py` spells both markers locally today and imports three other names from the owner."
+      The read gate's six deny predicates hold NO record name — not even the owner's own
+      object. They ask for the accessor or the predicate instead.
+    note: >-
+      claim C20: `files.py` spelled both markers locally and imported three other names from
+      the owner. D7 tightened the rule from SPELL to HOLD, so this obligation inverted with
+      it: requiring the gate to hold the owner's own OBJECT still left a second home, and a
+      held name outlives the module it came from — which is how six modules broke at once
+      when an owner dropped two names earlier in this issue.
 
   # ----------------------------------------------------------------------------------------
   # O7 — BOX POSTURE

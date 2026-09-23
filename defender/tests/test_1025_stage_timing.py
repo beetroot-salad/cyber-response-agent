@@ -34,6 +34,8 @@ from typing import Any
 
 import pytest
 
+from defender._episode_paths import LAYOUT, EpisodePaths
+
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
@@ -79,7 +81,7 @@ def _raw_rows(episode_dir) -> list[dict]:
     """The record's entries in DOCUMENT order, read without the reader — so an order assertion
     cannot be satisfied by a reader that sorts what a writer wrote out of order — and parsed
     strictly: a document that is not whole is a failure here, not a skipped line."""
-    path = Path(episode_dir) / _timing().TIMING_NAME
+    path = EpisodePaths(episode_dir).timing
     if not path.is_file():
         return []
     return json.loads(path.read_text(encoding="utf-8"))["steps"]
@@ -272,7 +274,9 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    assert timing.TIMING_NAME == "timing.json"
+    # The name is the OWNER's now (#1077 D7) — `timing.py` held a re-binding of it.
+    assert str(LAYOUT.timing) == "timing.json"
+    assert not hasattr(timing, "TIMING_NAME"), "timing.py still re-binds the name"
     assert list(_steps_mod().STEPS) == EXPECTED_STEPS
     assert [s.value for s in _steps_mod().Step] == EXPECTED_STEPS, (
         "the enum's member order is not launch order, or STEPS is not derived from it")
@@ -287,8 +291,8 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
                      "ended_at": "2026-01-01T00:00:05+00:00"}
     assert second == {"step": "staging", "started_at": "2026-01-01T00:00:07+00:00",
                       "ended_at": "2026-01-01T00:01:30+00:00"}
-    record = episode_dir / timing.TIMING_NAME
-    assert record.is_file(), "the record is not at the episode root under TIMING_NAME"
+    record = EpisodePaths(episode_dir).timing
+    assert record.is_file(), "the record is not at the episode root under the owner's name"
     assert record.read_text(encoding="utf-8") == (
         json.dumps({"steps": [first, second]}, indent=2, sort_keys=True) + "\n"), (
         "the file is not the one whole document holding every entry, verbatim")
@@ -329,12 +333,11 @@ def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
 
     Positive control in the same test: once one step is recorded, the reader returns it.
     """
-    timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
 
     assert _read(episode_dir) is None
-    assert not (episode_dir / timing.TIMING_NAME).exists(), "reading created the record"
+    assert not EpisodePaths(episode_dir).timing.exists(), "reading created the record"
 
     row = _clock(episode_dir).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert _read(episode_dir) == [row], "the control failed"
@@ -353,7 +356,7 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    record = episode_dir / timing.TIMING_NAME
+    record = EpisodePaths(episode_dir).timing
     clock = timing.StageClock(episode_dir)
     first = clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
     before_text = record.read_text(encoding="utf-8")
@@ -380,7 +383,6 @@ def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no
 
     Positive control: the writer's own document, hand-written, reads.
     """
-    timing = _timing()
     good = {"step": "questioner", "started_at": "2026-01-01T00:00:00+00:00",
             "ended_at": "2026-01-01T00:00:05+00:00"}
     foreign = [
@@ -399,13 +401,13 @@ def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no
     for n, text in enumerate(foreign):
         episode_dir = tmp_path / f"episode-{n}"
         episode_dir.mkdir()
-        (episode_dir / timing.TIMING_NAME).write_text(text, encoding="utf-8")
-        with pytest.raises(ValueError, match=timing.TIMING_NAME):
+        EpisodePaths(episode_dir).timing.write_text(text, encoding="utf-8")
+        with pytest.raises(ValueError, match=str(LAYOUT.timing)):
             _read(episode_dir)
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
-    (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [good]}), encoding="utf-8")
+    EpisodePaths(plain).timing.write_text(json.dumps({"steps": [good]}), encoding="utf-8")
     assert _read(plain) == [good], "the control failed"
 
 
@@ -420,7 +422,7 @@ def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    record = episode_dir / timing.TIMING_NAME
+    record = EpisodePaths(episode_dir).timing
     clock = timing.StageClock(episode_dir)
 
     with pytest.raises(ValueError, match="questionner"):
@@ -448,23 +450,22 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
 
     Positive control: the same entry lands at a plain path.
     """
-    timing = _timing()
     outside = tmp_path / "outside.json"
     outside.write_text("untouched\n", encoding="utf-8")
     original_links = os.stat(outside).st_nlink
 
     symlinked = tmp_path / "symlinked-episode"
     symlinked.mkdir()
-    (symlinked / timing.TIMING_NAME).symlink_to(outside)
+    EpisodePaths(symlinked).timing.symlink_to(outside)
     with pytest.raises(OSError, match="aliased") as refusal:
         _clock(symlinked).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert refusal.value.write_guarded_alias is True, (
         "the symlink was refused by something other than the guarded write seam")
-    assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
+    assert EpisodePaths(symlinked).timing.is_symlink(), "the planted link was replaced"
 
     hardlinked = tmp_path / "hardlinked-episode"
     hardlinked.mkdir()
-    os.link(outside, hardlinked / timing.TIMING_NAME)
+    os.link(outside, EpisodePaths(hardlinked).timing)
     assert os.stat(outside).st_nlink == original_links + 1, "the control failed: no hard link"
     with pytest.raises(OSError, match="aliased") as refusal:
         _clock(hardlinked).record("questioner", started_at=now_iso(), ended_at=now_iso())
@@ -473,7 +474,7 @@ def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_
 
     squatted = tmp_path / "squatted-episode"
     squatted.mkdir()
-    (squatted / timing.TIMING_NAME).mkdir()
+    EpisodePaths(squatted).timing.mkdir()
     with pytest.raises(OSError, match="aliased") as refusal:
         _clock(squatted).record("questioner", started_at=now_iso(), ended_at=now_iso())
     assert refusal.value.write_guarded_alias is False, (
@@ -499,7 +500,6 @@ def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(t
 
     Positive control: the same document, at a plain path, is read.
     """
-    timing = _timing()
     planted = tmp_path / "planted.json"
     stray = {"step": "judge", "started_at": "2020-01-01T00:00:00+00:00",
              "ended_at": "2020-01-01T09:00:00+00:00"}
@@ -507,26 +507,26 @@ def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(t
 
     symlinked = tmp_path / "symlinked-episode"
     symlinked.mkdir()
-    (symlinked / timing.TIMING_NAME).symlink_to(planted)
-    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+    EpisodePaths(symlinked).timing.symlink_to(planted)
+    with pytest.raises(ValueError, match=str(LAYOUT.timing)):
         _read(symlinked)
-    assert (symlinked / timing.TIMING_NAME).is_symlink(), "the planted link was replaced"
+    assert EpisodePaths(symlinked).timing.is_symlink(), "the planted link was replaced"
 
     squatted = tmp_path / "squatted-episode"
     squatted.mkdir()
-    (squatted / timing.TIMING_NAME).mkdir()
-    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+    EpisodePaths(squatted).timing.mkdir()
+    with pytest.raises(ValueError, match=str(LAYOUT.timing)):
         _read(squatted)
 
     binary = tmp_path / "binary-episode"
     binary.mkdir()
-    (binary / timing.TIMING_NAME).write_bytes(b"\xff\xfe not text")
-    with pytest.raises(ValueError, match=timing.TIMING_NAME):
+    EpisodePaths(binary).timing.write_bytes(b"\xff\xfe not text")
+    with pytest.raises(ValueError, match=str(LAYOUT.timing)):
         _read(binary)
 
     plain = tmp_path / "plain-episode"
     plain.mkdir()
-    (plain / timing.TIMING_NAME).write_text(json.dumps({"steps": [stray]}) + "\n",
+    EpisodePaths(plain).timing.write_text(json.dumps({"steps": [stray]}) + "\n",
                                             encoding="utf-8")
     assert _read(plain) == [stray], "the control failed"
 
@@ -543,7 +543,7 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    record = episode_dir / timing.TIMING_NAME
+    record = EpisodePaths(episode_dir).timing
     clock = timing.StageClock(episode_dir)
     clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
     clock.record("staging", started_at=now_iso(), ended_at=now_iso())
@@ -834,7 +834,7 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     """
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
     episode_dir.mkdir(parents=True)
-    (episode_dir / _timing().TIMING_NAME).mkdir()
+    EpisodePaths(episode_dir).timing.mkdir()
 
     launch = _launch(tmp_path)
     assert launch.rc == 0, "a refused timing write ended the episode"
@@ -846,5 +846,5 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     for step in EXPECTED_STEPS:
         assert f"the {step} entry could not be written" in err, (
             f"the refused {step} row was not reported")
-    with pytest.raises(ValueError, match=_timing().TIMING_NAME):
+    with pytest.raises(ValueError, match=str(LAYOUT.timing)):
         _steps(launch.episode_dir)

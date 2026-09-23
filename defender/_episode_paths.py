@@ -332,21 +332,29 @@ class EpisodeLayout:
         return self.run(run_dir_name) / RUN_LAYOUT.runtime_html
 
     def world(self, label: str) -> WorldLayout:
-        """One archived world's records. The label is checked HERE, once, so every record
-        under it is composed from a name already judged."""
-        return WorldLayout(_check_label(label))
+        """One archived world's records, by label.
+
+        SHAPE ONLY — `_check_component`, not `_check_label`. This is the READ side: the
+        judge, the enqueue and the episode page address a world whose directory is already on
+        disk, under whatever label the manifest gave it, and a label that is merely not
+        case-stable still names a real directory they must be able to open. Case stability is
+        asked where a label is MINTED (`EpisodePaths.world`, `world_dir`, `sibling_run_dir`),
+        because that is where two labels differing only by case would collapse into one
+        directory — the same read/write split `ArchivedWorldLeaves.gather_summary` documents.
+        """
+        return WorldLayout(_check_component(label, what="label"))
 
     def served_world(self, token: str) -> PurePosixPath:
-        """`served/<episode token>.<label>.jsonl`. The token is `_family.world_token_for`'s
-        composition, which is where decision 12's delimiter refusal lives: the LABEL may not
-        carry `.`, so the label is always the text after the token's last dot — the episode
-        token before it legitimately holds dots (`episode_token_for` folds every `-` of the
-        episode id onto `.`). Here only the case-stability rule is re-asked of that label."""
-        token = _check_component(token, what="token")
-        _head, sep, label = token.rpartition(".")
-        if sep and not is_case_stable_id(label):
-            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
-        return self.served / f"{token}.jsonl"
+        """`served/<episode token>.<label>.jsonl`, by the token a manifest already declares.
+
+        SHAPE ONLY, for the reason `world` gives: this is the READ side. The judge names a
+        world's ledger to open it and to say so in a refusal, and a manifest whose label is
+        merely not case-stable still names a ledger on disk — #921's collision test loads
+        exactly such a label as its POSITIVE control, so refusing here would refuse the run
+        that proves the real refusal is about the collision. Case stability is asked on
+        `EpisodePaths.served_world`, which is where one is created.
+        """
+        return self.served / f"{_check_component(token, what='token')}.jsonl"
 
     def stage_trace(self, stage: str) -> PurePosixPath:
         """`wire_logs/<stage>.trace.jsonl` — the episode-root wire trace of one learning stage.
@@ -401,6 +409,18 @@ class EpisodePaths:
 
     def _at(self, rel: PurePosixPath, *, what: str) -> Path:
         return _confine(self.episode_dir / rel, self.episode_dir, what=what)
+
+    def at(self, rel: PurePosixPath, *, what: str = "path") -> Path:
+        """Root one of `LAYOUT`'s relative paths at this episode, with containment checked.
+
+        The READ side's way to get an absolute path (#1077 D7). A reader that holds a label
+        from a manifest wants `worlds/<label>/` as a directory, not a newly minted one — the
+        minting accessors (`world`, `world_dir`, `served_world`) re-ask decision 20's
+        case-stability rule, which would refuse a label that names a real directory on disk.
+        Takes a path the LAYOUT composed, never a name a caller spelled, so nothing is
+        hand-composed either way.
+        """
+        return self._at(rel, what=what)
 
     # -- episode-root records -----------------------------------------------------------------
 
@@ -463,15 +483,32 @@ class EpisodePaths:
     def world(self, label: str) -> WorldPaths:
         """One archived world, rooted at this episode. Every record the archive projects into
         it is an accessor on the returned handle — the archive's source/destination pairing is
-        then two accessors and no names at all."""
-        return WorldPaths(self.episode_dir, LAYOUT.world(label))
+        then two accessors and no names at all.
+
+        The WRITE side, so decision 20's case-stability refusal applies here (as it always did
+        on `world_dir`): this is where a world directory is created, and two labels differing
+        only by case would become one directory wherever the filesystem folds case.
+        """
+        return WorldPaths(self.episode_dir, LAYOUT.world(_check_label(label)))
 
     def served_world(self, token: str) -> Path:
+        """`served/<episode token>.<label>.jsonl` — the MINTING side.
+
+        Decision 12's delimiter refusal lives in `_family.world_token_for`, which composes the
+        token: the LABEL may not carry `.`, so the label is always the text after the token's
+        last dot — the episode token before it legitimately holds dots (`episode_token_for`
+        folds every `-` of the episode id onto `.`). Decision 20's case-stability rule is
+        re-asked of that label here.
+        """
+        token = _check_component(token, what="token")
+        _head, sep, label = token.rpartition(".")
+        if sep and not is_case_stable_id(label):
+            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
         return self._at(LAYOUT.served_world(token), what="served_world")
 
     def judge_draw(self, label: str, n: int) -> Path:
         """`worlds/<label>/judge/<n>.yaml`."""
-        return self._at(LAYOUT.world(label).draw(n), what="judge_draw")
+        return self._at(LAYOUT.world(_check_label(label)).draw(n), what="judge_draw")
 
     def stage_trace(self, stage: str) -> Path:
         return self._at(LAYOUT.stage_trace(stage), what="stage_trace")
@@ -481,10 +518,11 @@ class EpisodePaths:
 
     def world_dir(self, label: str) -> Path:
         """`worlds/<label>`."""
-        return self._at(LAYOUT.world(label).dir, what="world_dir")
+        return self._at(LAYOUT.world(_check_label(label)).dir, what="world_dir")
 
     def run_dir_pointer(self, label: str) -> Path:
-        return self._at(LAYOUT.world(label).run_dir_pointer, what="run_dir_pointer")
+        return self._at(LAYOUT.world(_check_label(label)).run_dir_pointer,
+                        what="run_dir_pointer")
 
     # -- the archive projection's flat spellings, per label ------------------------------------
 

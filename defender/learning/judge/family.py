@@ -1633,7 +1633,11 @@ def _repository_leads(world: Bound, episode_dir: Path, label: str) -> dict[str, 
         raise JudgeRefused(
             f"world {label!r}: {LAYOUT.world(label).dir} could not be listed: "
             f"{listing.reason or 'nothing is at that name'}")
-    return leads_by_id(EpisodePaths(episode_dir).world(label).dir)
+    # `.at(...)`, not `.world(label)`: this is a READ of a world the manifest declares, and
+    # the minting accessor re-asks decision 20's case-stability rule — which would refuse a
+    # label that names a real directory (#921's collision test loads exactly such a label
+    # as its positive control).
+    return leads_by_id(EpisodePaths(episode_dir).at(LAYOUT.world(label).dir))
 
 
 def is_gradable_row(row: Any) -> bool:
