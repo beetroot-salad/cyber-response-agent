@@ -133,7 +133,7 @@ demands:
   - id: box_rootfs_resolves_to_the_mounted_trees_image
     kind: behavior
     form: test
-    discharged_by: test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_inputs_on_every_docker_run_site
+    discharged_by: test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_hash_inputs_on_every_docker_run_site
     binds:
       - BoxSpec
       - "BoxSpec.domain.distinguished[rootfs_unset]"
@@ -211,7 +211,7 @@ demands:
   - id: image_tag_is_sensitive_to_each_input
     kind: behavior
     form: test
-    discharged_by: test_a_one_byte_change_in_any_of_the_three_inputs_moves_the_tag
+    discharged_by: test_a_byte_change_in_the_recipe_or_the_exported_list_moves_the_tag_and_a_manifest_change_does_not
     binds:
       - image_tag
       - "interacts(image_tag->box_dockerfile)"
@@ -294,7 +294,7 @@ demands:
   - id: missing_inputs_fault_before_docker
     kind: behavior
     form: test
-    discharged_by: test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call
+    discharged_by: test_a_mounted_tree_without_its_hash_inputs_raises_boxfault_naming_the_tree_before_any_docker_call
     binds:
       - image_tag
       - "image_tag.domain.distinguished[missing-input]"
@@ -363,19 +363,19 @@ demands:
   - id: dockerfile_copies_only_manifest_and_lock
     kind: negative      # positive control: dockerfile_syncs_frozen_no_dev_inexact_box_compiled_into_usr_local (the two files ARE copied and synced)
     form: test
-    discharged_by: test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code
+    discharged_by: test_the_dockerfile_copies_nothing_from_the_build_context
     binds: [box_dockerfile, "interacts(box_dockerfile->pyproject)", "interacts(box_dockerfile->uv_lock)"]
     forks: "O7-SHAPE #95 (auto: build context = repo root under the root .dockerignore); silent #96 (auto, discount D1/PJ-r2-1: the COPY list is O7's guarantee under any builder)"
   - id: dockerfile_syncs_frozen_no_dev_inexact_box_compiled_into_usr_local
     kind: shape
     form: test
-    discharged_by: test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra
+    discharged_by: test_the_install_step_installs_exactly_the_mounted_list_hash_checked_unresolved_into_the_system_python
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[sync_flags]"]
     forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
   - id: dockerfile_removes_the_installers_and_keeps_packaging
     kind: shape
     form: test
-    discharged_by: test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_sync_and_names_packaging_as_kept
+    discharged_by: test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_install_and_names_packaging_as_kept
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[installer_removal]"]
     assembly_note: >-
       The sibling cell `box_dockerfile.domain.distinguished[ensurepip_removal]` was unbound at
@@ -386,7 +386,7 @@ demands:
   - id: dockerfile_removes_ensurepip_bundled_wheels
     kind: shape
     form: test
-    discharged_by: test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_sync
+    discharged_by: test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_install
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[ensurepip_removal]"]
     assembly_note: >-
       MINTED BY PHASE E from §7's MF4 (human): one `rm -rf` of a path ending
@@ -425,7 +425,7 @@ demands:
   - id: base_packages_survive_the_sync
     kind: behavior
     form: test
-    discharged_by: test_the_base_images_own_packages_survive_the_inexact_sync
+    discharged_by: test_the_base_images_own_packages_survive_the_install
     binds: [box_image_contents, "box_dockerfile.domain.distinguished[sync_flags]"]
   - id: image_packages_match_the_lock
     kind: parity

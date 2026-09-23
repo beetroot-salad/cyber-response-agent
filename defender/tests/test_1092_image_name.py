@@ -7,10 +7,12 @@ Demand #0 and its neighbourhood in `spec-flow/specs/spec_graph_1092.yaml`: the r
 in the argv builder before docker; the C46 refusal keeps running FIRST; no run-dir marker).
 
 Hermetic: the trees are planted by the tests and the daemon is `RecordingDocker`. Whether
-the three inputs were read is observed tier-1 (`_spec1092`'s hierarchy): over a tree that
-HOLDS none of them a read faults, so a lane that completes — or refuses for another reason —
-read nothing; and a name that equals the digest of the planted bytes was read from them
-(one byte's edit renames it, d3). No process-wide audit hook is installed for it — the one
+the inputs were read is observed tier-1 (`_spec1092`'s hierarchy): over a tree that HOLDS
+none of them a read faults, so a lane that completes — or refuses for another reason — read
+nothing; and a name that equals the digest of the planted bytes was read from them (one
+byte's edit renames it, d3). #1097 narrowed the inputs to `box.Dockerfile` and
+`box-requirements.txt`; every planted tree still carries `uv.lock` and `pyproject.toml` as
+bystanders, the way a real tree does, and an edit to them must not rename the image. No process-wide audit hook is installed for it — the one
 in-process hook a spec test needs (d5) lives in a child interpreter.
 """
 from __future__ import annotations
@@ -31,7 +33,9 @@ from defender.runtime.box_codec import BoxFault
 from defender.runtime.scrub import verdict_path
 from defender.tests._spec1092 import (
     DEFENDER,
+    BYSTANDERS,
     HASH_INPUTS,
+    PLANTED_BYSTANDER_BYTES,
     PLANTED_INPUT_BYTES,
     REPO_ROOT,
     STOCK_ROOTFS,
@@ -73,22 +77,22 @@ def _no_unsandboxed(monkeypatch) -> None:
 
 
 # ---- #0 --------------------------------------------------------------------------------------
-def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_inputs_on_every_docker_run_site(tmp_path):
+def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_hash_inputs_on_every_docker_run_site(tmp_path):
     """`BoxSpec()` leaves `rootfs` unset (`None`), and with it unset the run-dir lane's
     `docker run` argv names `image_tag(defender_dir)`, the request lane's names
     `image_tag(Path(request.workdir) / "defender")`, and `_spec771`'s rootfs runner names
     `image_tag(DEFENDER)` — `defender-box:<RECIPE_VERSION>-` followed by 12 hex of a sha256
-    over the bytes of `box.Dockerfile`, `uv.lock` and `pyproject.toml` in that directory
-    (MF3: the running package's `_image.RECIPE_VERSION` prefixes the digest) — resolved on
+    over the bytes of `box.Dockerfile` and `box-requirements.txt` in that directory (#1097
+    M3; MF3: the running package's `_image.RECIPE_VERSION` prefixes the digest) — resolved on
     the host when the argv is built, never earlier: the spec and the request are constructed
-    over a root that does not yet hold the three files (a read there would fault), and the
+    over a root that does not yet hold the input files (a read there would fault), and the
     name on the argv is the digest of bytes planted only afterwards. Every slot of the create
     payload is bound (no `{`-template token survives on the argv).
 
     # rejected: no checked-in tag constant, no "constant equals recomputed hash" test, no
     # "bump the tag" step, no stale-constant loop (M3 revised). The run record gains NO
     # image/provenance field — the name is derivable from the commit (JF6; platform-design.md's
-    # `defender_image_digest` stays a recorded follow-up). The per-start stat+hash of three
+    # `defender_image_digest` stays a recorded follow-up). The per-start stat+hash of two
     # small files is an accepted cost with NO cache (2.3 ms, N2). No registry, no digest
     # round-trip, no bot commit (D2 B, strictly additive later)."""
     from defender.tests.e2e._spec771 import run_probe_under_profile
@@ -136,7 +140,7 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
 def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     """With `rootfs` set explicitly (`BoxSpec(rootfs="python:3.11-slim")` on either lane) the
     argv appends that token verbatim and no input file is read — the tree holds NONE of the
-    three inputs, so a read would have faulted and the start would not have completed — so a
+    hash inputs, so a read would have faulted and the start would not have completed — so a
     test that needs the stock image pins one (fake-docker tests; a real-daemon test pins
     `image_tag(DEFENDER)` instead — #94)."""
     root = tmp_path / "bare"
@@ -181,13 +185,24 @@ def test_no_runtime_path_names_or_falls_back_to_the_stock_image(tmp_path, monkey
     assert rec.create_argv is None
 
 
-# ---- d3 --------------------------------------------------------------------------------------
-def test_a_one_byte_change_in_any_of_the_three_inputs_moves_the_tag(tmp_path):
-    """Changing one byte in any one of `box.Dockerfile`, `uv.lock` or `pyproject.toml` changes
-    `image_tag(tree)` — the 12-hex digest moves, the `RECIPE_VERSION` prefix does not — and
-    changing a file outside the three does not."""
+# ---- d3 (#1097 O1/O2: the recipe and the exported list name the image; the manifests do not) --
+def test_a_byte_change_in_the_recipe_or_the_exported_list_moves_the_tag_and_a_manifest_change_does_not(tmp_path):
+    """Changing one byte of `box.Dockerfile` or of `box-requirements.txt` changes
+    `image_tag(tree)` — the 12-hex digest moves, the `defender-box:v2-` prefix does not — and
+    restoring the byte restores the name (O2: a change to what the image installs, or to its
+    recipe, is a new name). Changing `uv.lock` or `pyproject.toml` — which still sit in the
+    tree beside the list — does NOT move it, whether by one byte or by a whole added
+    dependency line, nor does a file outside the inputs (O1: an edit that cannot change the
+    image does not rename it). The same tree's two moving flips are the positive control:
+    the resolver demonstrably reads this tree, so an unmoved name is not a resolver that
+    reads nothing.
+
+    # rejected: hashing a slice of `pyproject.toml` or parsing the lock's closure ourselves —
+    # `dev`/`runtime` extras live in `[project]` too, and uv already exports one target's
+    # closure (#1097 design, c4)."""
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     baseline = image_tag(defender_dir)
+    assert baseline.startswith("defender-box:v2-"), baseline
     assert image_tag(defender_dir) == baseline, "the name is not deterministic on re-call"
     for name in HASH_INPUTS:
         original = PLANTED_INPUT_BYTES[name]
@@ -195,18 +210,24 @@ def test_a_one_byte_change_in_any_of_the_three_inputs_moves_the_tag(tmp_path):
         (defender_dir / name).write_bytes(flipped)
         moved = image_tag(defender_dir)
         assert moved != baseline, f"a byte in {name} did not move the tag"
-        assert moved.split("-")[0] == baseline.split("-")[0], "the version prefix moved"
+        assert moved.startswith("defender-box:v2-"), f"the version prefix moved: {moved}"
         (defender_dir / name).write_bytes(original)
         assert image_tag(defender_dir) == baseline, f"restoring {name} did not restore the tag"
+    for name in BYSTANDERS:
+        original = PLANTED_BYSTANDER_BYTES[name]
+        (defender_dir / name).write_bytes(bytes([original[0] ^ 0x01]) + original[1:])
+        assert image_tag(defender_dir) == baseline, f"a byte in {name} moved the tag"
+        (defender_dir / name).write_bytes(original + b'\n[tool.pytest]\n"pytest>=9" = 1\n')
+        assert image_tag(defender_dir) == baseline, f"an added line in {name} moved the tag"
     (defender_dir / "README.md").write_text("not a hash input\n", encoding="utf-8")
     (defender_dir / "runtime").mkdir(exist_ok=True)
     (defender_dir / "runtime" / "extra.py").write_text("x = 1\n", encoding="utf-8")
-    assert image_tag(defender_dir) == baseline, "a file outside the three moved the tag"
+    assert image_tag(defender_dir) == baseline, "a file outside the inputs moved the tag"
 
 
 # ---- d4 --------------------------------------------------------------------------------------
 def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(tmp_path):
-    """Two directories holding byte-identical copies of the three inputs — a checkout and a
+    """Two directories holding byte-identical copies of the inputs — a checkout and a
     worktree, the runner's checkout and the DooD container's `/repo` view of it — yield the
     same `image_tag`, so the same commit names one image wherever it is mounted."""
     a = plant_tree(tmp_path / "checkout", copy_code=False)
@@ -216,18 +237,20 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
     tags = {image_tag(a), image_tag(b), image_tag(copied)}
     assert len(tags) == 1, tags
     assert TAG_RE.match(next(iter(tags))), tags
-    (b / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"] + b"\n# drift\n")
+    (b / "box-requirements.txt").write_bytes(PLANTED_INPUT_BYTES["box-requirements.txt"] + b"# drift\n")
     assert image_tag(b) != image_tag(a), "the positive control: different bytes, same name"
 
 
 # ---- d5 --------------------------------------------------------------------------------------
 def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_path):
     """Importing `runtime/box/_image.py`, importing `defender.runtime.box`, and constructing
-    `BoxSpec()` / evaluating `DEFAULT_SPEC` read none of `box.Dockerfile`, `uv.lock` or
-    `pyproject.toml` (an audit hook on `open` filtered to those three names sees nothing): the
-    name is computed only when an argv builder asks for it, so the box's own import of the
-    package reads no input off the mounted tree. Positive control, same process: calling
-    `image_tag(<tree>)` afterwards opens all three."""
+    `BoxSpec()` / evaluating `DEFAULT_SPEC` read none of `box.Dockerfile`,
+    `box-requirements.txt`, `uv.lock` or `pyproject.toml` (an audit hook on `open` filtered to
+    those four names sees nothing): the name is computed only when an argv builder asks for
+    it, so the box's own import of the package reads no input off the mounted tree. Positive
+    control, same process: calling `image_tag(<tree>)` afterwards opens exactly the two hash
+    inputs — and never opens `uv.lock` or `pyproject.toml`, though the tree holds both
+    (#1097 O1)."""
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     code = (
         "import json, sys\n"
@@ -237,7 +260,7 @@ def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_p
         "    if event == 'open' and isinstance(args[0], (str, bytes)):\n"
         "        seen.append(str(args[0]))\n"
         "sys.addaudithook(hook)\n"
-        "names = ('box.Dockerfile', 'uv.lock', 'pyproject.toml')\n"
+        f"names = {(*HASH_INPUTS, *BYSTANDERS)!r}\n"
         "from defender.runtime.box import _image\n"
         "from defender.runtime import box\n"
         "box.BoxSpec(); box.DEFAULT_SPEC\n"
@@ -265,18 +288,19 @@ def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_p
 @pytest.mark.parametrize("lane", ["run-dir", "request"])
 @pytest.mark.parametrize(("unreadable", "first_named"), [
     ("all-missing", "box.Dockerfile"),
-    ("uv.lock-missing", "uv.lock"),
-    ("pyproject.toml-is-a-directory", "pyproject.toml"),
+    ("list-missing", "box-requirements.txt"),
+    ("list-is-a-directory", "box-requirements.txt"),
 ])
-def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
+def test_a_mounted_tree_without_its_hash_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
     tmp_path, monkeypatch, lane, unreadable, first_named,
 ):
-    """Starting a box on either lane over a mounted tree whose three inputs cannot be read —
+    """Starting a box on either lane over a mounted tree whose hash inputs cannot be read —
     a file missing, or a directory sitting in a file's place (any `OSError`, not only
     `FileNotFoundError`) — raises `BoxFault` (never the bare OSError) naming the tree and the
-    FIRST unreadable file in the resolver's order `box.Dockerfile`, `uv.lock`,
-    `pyproject.toml`, and the recorded docker calls contain no `run` (the reap scan and the
-    shared-mounts discovery that precede argv construction may still be recorded).
+    FIRST unreadable file in the resolver's order `box.Dockerfile`, `box-requirements.txt`,
+    and the recorded docker calls contain no `run` (the reap scan and the shared-mounts
+    discovery that precede argv construction may still be recorded). The tree still holds
+    `uv.lock` and `pyproject.toml` (#1097): they cannot stand in for a missing list.
 
     # rejected: hashing a missing input as empty (a name for an image nobody can build, with a
     # remedy pointing at a tree with no Dockerfile) — F-A; a raw OSError (the in-file
@@ -286,11 +310,12 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     root = tmp_path / "tree"
     if unreadable == "all-missing":
         defender_dir = plant_tree(root, missing=HASH_INPUTS, copy_code=False)
-    elif unreadable == "uv.lock-missing":
-        defender_dir = plant_tree(root, missing=("uv.lock",), copy_code=False)
+    elif unreadable == "list-missing":
+        defender_dir = plant_tree(root, missing=("box-requirements.txt",), copy_code=False)
     else:
-        defender_dir = plant_tree(root, missing=("pyproject.toml",), copy_code=False)
-        (defender_dir / "pyproject.toml").mkdir()
+        defender_dir = plant_tree(root, missing=("box-requirements.txt",), copy_code=False)
+        (defender_dir / "box-requirements.txt").mkdir()
+    assert all((defender_dir / name).is_file() for name in BYSTANDERS)
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start = (
@@ -308,7 +333,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
 
 # ---- MF1 part 2: the C46 refusal keeps running first (both lanes) --------------------------------
 def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes(tmp_path):
-    """Over a tree that lacks the three inputs AND sits on no path this container shares with
+    """Over a tree that lacks the hash inputs AND sits on no path this container shares with
     the daemon, both argv builders raise the pre-existing C46 uncovered-mount refusal — not the
     resolver's missing-input fault, which is what a read of the lacking tree would have raised
     first — and no daemon call is made; the same lacking tree on a native daemon (no mount
@@ -386,7 +411,7 @@ def test_the_image_name_carries_the_running_packages_recipe_version_and_never_th
     through that plain import and never load the MOUNTED tree's `_image.py` by path — a
     mounted tree carrying a different recipe (a `RECIPE_VERSION = "v99"` module that names a
     different image) still yields the running package's name, so a drift between the two
-    recipes is legible in the fault text (`v1-…` vs the build's `v99-…`) instead of silent."""
+    recipes is legible in the fault text (`v2-…` vs the build's `v99-…`) instead of silent."""
     version = recipe_version()
     assert isinstance(version, str)
     assert TAG_RE.match(f"defender-box:{version}-{'0' * 12}"), version

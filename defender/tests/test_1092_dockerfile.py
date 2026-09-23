@@ -1,13 +1,16 @@
 """#1092 — the shape of `defender/box.Dockerfile` (M1, F1, MF4) and the `box` extra (M2).
 
 Static demands over the recipe's TEXT: O8 keys on the digest pin and the pinned uv binary,
-O7 on what is copied in and what installer is taken out, O1 on the extra and its lock entry.
+O7 on what is copied in (nothing, since #1097) and what installer is taken out, O1 on the
+extra and its lock entry, #1097 O4 on the install step: the committed `box-requirements.txt`
+bind-mounted into the one `RUN` that also mounts uv, installed hash-checked and unresolved.
 What the built image then IS — the installed distributions, the absent installers, the
 compiled bytecode — is `test_1092_box_image_live.py`'s, against a real daemon.
 """
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -48,6 +51,55 @@ def _index_of(instructions: list[str], needle: str) -> int:
     return hits[0]
 
 
+def _install_at(instructions: list[str]) -> int:
+    """The index of THE install step: the one `RUN` uv is lent to (d12)."""
+    hits = [i for i, ins in enumerate(instructions) if ins.startswith("RUN ") and "astral-sh/uv" in ins]
+    assert len(hits) == 1, f"expected exactly one RUN mounting uv, got {hits}"
+    return hits[0]
+
+
+def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str]]:
+    """A `RUN` split into its `--mount=` options (each a `key=value` dict; a bare flag maps to
+    "") and the shell words it runs, as `shlex` splits them."""
+    assert instruction.startswith("RUN "), instruction
+    words = shlex.split(instruction[len("RUN "):])
+    mounts: list[dict[str, str]] = []
+    while words and words[0].startswith("--"):
+        flag = words.pop(0)
+        if flag.startswith("--mount="):
+            opts = {}
+            for part in flag[len("--mount="):].split(","):
+                key, _, value = part.partition("=")
+                opts[key] = value
+            mounts.append(opts)
+    return mounts, words
+
+
+def _requirement_files(command: list[str]) -> list[str]:
+    """Every `-r`/`--requirement` argument of the install command, in order."""
+    out: list[str] = []
+    for i, word in enumerate(command):
+        if word in ("-r", "--requirement") and i + 1 < len(command):
+            out.append(command[i + 1])
+        elif word.startswith("--requirement="):
+            out.append(word.split("=", 1)[1])
+        elif word.startswith("-r") and len(word) > 2:
+            out.append(word[2:])
+    return out
+
+
+def _context_list_mount(mounts: list[dict[str, str]]) -> dict[str, str]:
+    """The one mount lending the build context's `box-requirements.txt` to the step — a bind
+    with no `from=` (so its source is the context, `defender/` — #1098)."""
+    hits = [
+        m for m in mounts
+        if m.get("type", "bind") == "bind" and "from" not in m
+        and m.get("source", m.get("src", "")).lstrip("./") == "box-requirements.txt"
+    ]
+    assert len(hits) == 1, f"expected one context bind of box-requirements.txt, got {mounts}"
+    return hits[0]
+
+
 # ---- d11 -------------------------------------------------------------------------------------
 def test_the_dockerfile_pins_its_base_by_sha256_digest():
     """The Dockerfile's base line is `FROM python:3.11-slim@sha256:<64 hex>`, a digest pin
@@ -61,11 +113,12 @@ def test_the_dockerfile_pins_its_base_by_sha256_digest():
 
 # ---- d12 (amended by #1095: mounted, never copied) ---------------------------------------------
 def test_the_dockerfile_copies_a_version_pinned_uv_binary_and_never_pip_installs():
-    """The Dockerfile obtains uv only as a bind MOUNT on the sync's `RUN` — `--mount=type=bind,
+    """The Dockerfile obtains uv only as a bind MOUNT on the install's `RUN` — `--mount=type=bind,
     from=ghcr.io/astral-sh/uv:<explicit version>@sha256:<digest>,source=/uv,target=/bin/uv`
     (a version and a digest — UVPIN #88), never `latest` — so the binary is on the path of
     that one step and enters no layer: no `COPY --from` of uv anywhere, nothing to remove
-    afterwards, and no `pip install` of anything.
+    afterwards, and no `pip install` of anything (uv's own `uv pip install` is the install
+    step, #1097 — pip the installer never runs).
 
     # rejected: `COPY --from … /uv /bin/uv` plus a final `RUN rm -f /bin/uv` (the recipe as
     # first written): the copy is a 45 MB layer every daemon stores and `docker save` still
@@ -78,56 +131,68 @@ def test_the_dockerfile_copies_a_version_pinned_uv_binary_and_never_pip_installs
     assert m, uv_sites[0]
     assert _EXPLICIT_VERSION.match(m.group("version")), m.group("version")
     assert "@sha256:" in m.group(0), "the uv mount is not digest-pinned (UVPIN #88)"
-    assert "uv sync" in uv_sites[0], "uv is mounted on some step other than the sync"
+    assert "uv pip install" in uv_sites[0], "uv is mounted on some step other than the install"
     for ins in instructions:
         assert not (ins.startswith("COPY ") and "--from=" in ins), f"a binary copied into a layer: {ins}"
-        assert not re.search(r"\bpip3?\s+install\b", ins), ins
+        # pip the installer, never uv's pip interface (#1097: `uv pip install` IS the install).
+        assert not re.search(r"(?<!\buv )\bpip3?\s+install\b", ins), ins
         assert "get-pip" not in ins, ins
 
 
-# ---- d13 (negative; positive control: d14 — the two files ARE copied and synced) -----------------
-def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
-    """The Dockerfile's `COPY` instructions from the build context name exactly
-    `pyproject.toml` and `uv.lock` (the context is `defender/`, #1098) — no source tree, no
-    `.env`, nothing else — and there is no `ADD`."""
+# ---- d13 (#1097: negative; positive control in the same test — the list IS bind-mounted) -----------
+def test_the_dockerfile_copies_nothing_from_the_build_context():
+    """The Dockerfile has no `COPY` and no `ADD` at all — no manifest, no lock, no source tree,
+    no `.env` enters a layer (#1097 M2) — while the install step still reads the build
+    context: it bind-mounts `box-requirements.txt` from it (no `from=`) and installs from the
+    mount's target, so the recipe is not simply empty of inputs.
+
+    # rejected: `COPY pyproject.toml uv.lock` + `uv sync` (the #1092 recipe): it put two
+    # manifests in the image and named the image from files whose edits mostly cannot change
+    # it (#1097 O1)."""
     instructions = _instructions()
-    assert not any(ins.startswith("ADD ") for ins in instructions)
-    sources: list[str] = []
-    for ins in instructions:
-        if not ins.startswith("COPY ") or "--from=" in ins:
-            continue
-        words = [w for w in ins.split()[1:] if not w.startswith("--")]
-        assert len(words) >= 2, ins
-        sources.extend(words[:-1])
-    assert sorted(sources) == ["pyproject.toml", "uv.lock"], sources
+    assert [ins for ins in instructions if ins.startswith(("COPY ", "ADD "))] == []
+    mounts, command = _run_parts(instructions[_install_at(instructions)])
+    target = _context_list_mount(mounts).get("target", _context_list_mount(mounts).get("dst"))
+    assert target, mounts
+    assert _requirement_files(command) == [target], (target, command)
 
 
-# ---- d14 -------------------------------------------------------------------------------------
-def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra():
-    """The sync instruction sets `UV_PROJECT_ENVIRONMENT=/usr/local` and
-    `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--locked` (not `--frozen`, which skips
-    the lock-freshness check and would install a stale set under a FRESH image name — #1095),
-    `--no-dev`, `--inexact` and
-    `--extra box`; no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE
-    #60). (uv itself is mounted onto that step and never removed, because it was never
-    added — d12.)"""
+# ---- d14 (#1097 O4) -----------------------------------------------------------------------------
+def test_the_install_step_installs_exactly_the_mounted_list_hash_checked_unresolved_into_the_system_python():
+    """The one `RUN` uv is lent to runs `uv pip install` over exactly one requirement file —
+    the target of its bind mount of the context's `box-requirements.txt` — with `--system`
+    (bare `python3` on the box's PATH is the interpreter every shim runs; no venv), with
+    `--require-hashes` (every download verified against the list's recorded hash), with
+    `--no-deps` (nothing outside the list is resolved), with `--strict`, and with
+    `UV_COMPILE_BYTECODE=1` set for that step (the box's mount is read-only, so nothing could
+    compile `.pyc`s at import time); it no longer runs `uv sync`, and no `ENV` instruction
+    leaks an install-time variable into the image (O7-SHAPE #60).
+
+    # rejected: `uv sync --locked --inexact` from copied manifests (the #1092 recipe) — the
+    # freshness check `--locked` gave moves to the drift test (#1097 M4); `uv pip install`
+    # never prunes, so the base's `packaging` survives the way `--inexact` kept it."""
     instructions = _instructions()
-    sync = instructions[_index_of(instructions, "uv sync")]
-    for flag in ("--locked", "--no-dev", "--inexact", "--extra box"):
-        assert flag in sync, (flag, sync)
-    assert "--frozen" not in sync, sync
-    assert "UV_PROJECT_ENVIRONMENT=/usr/local" in sync, sync
-    assert "UV_COMPILE_BYTECODE=1" in sync, sync
+    mounts, command = _run_parts(instructions[_install_at(instructions)])
+    joined = " ".join(command)
+    assert "uv pip install" in joined, command
+    assert "uv sync" not in joined, command
+    target = _context_list_mount(mounts).get("target", _context_list_mount(mounts).get("dst"))
+    assert target, mounts
+    assert _requirement_files(command) == [target], (target, command)
+    install_args = command[command.index("install") + 1:]
+    for flag in ("--system", "--require-hashes", "--no-deps", "--strict"):
+        assert flag in install_args, (flag, command)
+    assert "UV_COMPILE_BYTECODE=1" in command[:command.index("uv")], command
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
 
 
 # ---- d15 -------------------------------------------------------------------------------------
-def test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_sync_and_names_packaging_as_kept():
-    """After the sync, the Dockerfile uninstalls `pip`, `setuptools` and `wheel` from
-    `/usr/local` and names `packaging` as the base package it keeps (the reason `--inexact`
-    was chosen)."""
+def test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_install_and_names_packaging_as_kept():
+    """After the install, the Dockerfile uninstalls `pip`, `setuptools` and `wheel` from
+    `/usr/local` and names `packaging` as the base package it keeps (`uv pip install` never
+    prunes the base's own site-packages — #1097)."""
     instructions = _instructions()
-    sync_at = _index_of(instructions, "uv sync")
+    sync_at = _install_at(instructions)
     uninstall_at = _index_of(instructions, "uninstall")
     uninstall = instructions[uninstall_at]
     for dist in ("pip", "setuptools", "wheel"):
@@ -137,19 +202,19 @@ def test_the_dockerfile_uninstalls_pip_setuptools_and_wheel_after_the_sync_and_n
 
 
 # ---- MF4: the ensurepip wheels go too ----------------------------------------------------------
-def test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_sync():
-    """After the sync, the Dockerfile removes `ensurepip/_bundled` — the two wheels the base
+def test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_install():
+    """After the install, the Dockerfile removes `ensurepip/_bundled` — the two wheels the base
     ships that survive the pip/setuptools/wheel uninstall and restore a working offline `pip`
     into the tmpfs (G17) — with an `rm -rf` of a path ending in `ensurepip/_bundled`; the
     `ensurepip` module itself stays."""
     instructions = _instructions()
-    sync_at = _index_of(instructions, "uv sync")
+    sync_at = _install_at(instructions)
     hits = [
         i for i, ins in enumerate(instructions)
         if re.search(r"\brm\b.*-rf?\b.*ensurepip/_bundled\b|\brm\b.*ensurepip/_bundled\b", ins)
     ]
     assert hits, "no instruction removes ensurepip/_bundled"
-    assert hits[-1] > sync_at, "the removal precedes the sync"
+    assert hits[-1] > sync_at, "the removal precedes the install"
     for ins in instructions:
         if re.search(r"\brm\b", ins) and "ensurepip" in ins:
             targets = re.findall(r"\S*ensurepip\S*", ins)

@@ -153,7 +153,8 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>/defender` — an argv list,
     never a shell string (a tree path with a space arrives as ONE argument; no `{`-template
     token survives on the argv), the context is the tree's `defender/` — the only directory the
-    recipe COPYs from, so no repo-root exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
+    recipe reads from (its bind-mounted `box-requirements.txt`, #1097), so no repo-root
+    exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
     the recipe's `RUN --mount` is BuildKit syntax, #1095) — and propagates a non-zero build
     exit as its own non-zero exit. The daemon-side failures settled at phase C (a base pull,
     a hash mismatch, a full daemon, no `docker` on PATH) are all the same observable: the
@@ -201,20 +202,21 @@ def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_
 # ---- MF1's script side (CLI #18) ----------------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):
-    """On a tree whose input it cannot read — a directory sitting where `uv.lock` should be —
-    `tag` and `build` print `<tree>/defender: cannot read uv.lock: <reason>` on stderr
+    """On a tree whose input it cannot read — a directory sitting where `box-requirements.txt`
+    should be (#1097; `uv.lock` and `pyproject.toml` still sit readable beside it) — `tag`
+    and `build` print `<tree>/defender: cannot read box-requirements.txt: <reason>` on stderr
     (the same sentence shape as the resolver's `BoxFault`, which the stdlib script cannot
     import), print nothing on stdout, exit 1, and `build` never invokes `docker`."""
     root, script = _planted_script(tmp_path)
     defender_dir = root / "defender"
-    (defender_dir / "uv.lock").unlink()
-    (defender_dir / "uv.lock").mkdir()
+    (defender_dir / "box-requirements.txt").unlink()
+    (defender_dir / "box-requirements.txt").mkdir()
     env, log = fake_docker_on_path(tmp_path, rc=0)
     out = _run_script(script, verb, cwd=tmp_path, env=env)
     assert out.returncode == 1, (out.returncode, out.stderr)
     assert out.stdout == "", out.stdout
     assert str(defender_dir) in out.stderr, out.stderr
     assert "cannot read" in out.stderr, out.stderr
-    assert "uv.lock" in out.stderr, out.stderr
+    assert "box-requirements.txt" in out.stderr, out.stderr
     assert HASH_INPUTS[0] not in out.stderr.split("cannot read", 1)[1], out.stderr
     assert recorded_docker_calls(log) == []

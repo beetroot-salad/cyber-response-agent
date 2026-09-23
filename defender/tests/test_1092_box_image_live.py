@@ -16,20 +16,21 @@ from __future__ import annotations
 
 import json
 import re
-import tomllib
-from pathlib import Path
 
 import pytest
 
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST
 from defender.tests._spec1092 import (
+    BOX_REQUIREMENTS,
     DEFENDER,
     IMAGE_WALK_PROBE,
     box_probe,
     box_run,
     image_shell,
+    lock_closure,
     make_run_dir,
+    parse_pinned,
     real_box,
     requires_daemon,
     requires_live_box,
@@ -110,45 +111,6 @@ print(json.dumps({"pydantic": pydantic.__file__, "duckdb": duckdb.__file__, "pre
 """
 
 
-def _locked_core_and_box(env: dict) -> dict[str, str]:
-    """`uv.lock`'s resolution of the project's core dependencies plus the `box` extra, closed
-    over the lock's own dependency graph with each edge's marker evaluated for `env` (the
-    image's own `packaging.markers.default_environment()`) — canonical name → version."""
-    from packaging.markers import Marker
-    from packaging.utils import canonicalize_name
-
-    lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
-    by_name = {canonicalize_name(p["name"]): p for p in lock["package"]}
-    environment = {**env, "extra": ""}
-
-    def wanted(dep: dict) -> bool:
-        marker = dep.get("marker")
-        return True if not marker else Marker(marker).evaluate(environment, context="lock_file")
-
-    root = by_name[canonicalize_name("defender")]
-    stack = [
-        (canonicalize_name(d["name"]), tuple(d.get("extra", ())))
-        for d in [*root.get("dependencies", []), *root.get("optional-dependencies", {}).get("box", [])]
-        if wanted(d)
-    ]
-    out: dict[str, str] = {}
-    seen: set[tuple[str, tuple[str, ...]]] = set()
-    while stack:
-        name, extras = stack.pop()
-        if (name, extras) in seen:
-            continue
-        seen.add((name, extras))
-        pkg = by_name[name]
-        out[str(name)] = pkg["version"]
-        deps = list(pkg.get("dependencies", []))
-        for extra in extras:
-            deps += pkg.get("optional-dependencies", {}).get(extra, [])
-        stack.extend(
-            (canonicalize_name(d["name"]), tuple(d.get("extra", ()))) for d in deps if wanted(d)
-        )
-    return out
-
-
 # ---- d17 -------------------------------------------------------------------------------------
 @requires_real_box
 def test_defender_model_imports_inside_the_box_from_the_image_site_packages(tmp_path):
@@ -210,9 +172,10 @@ def test_the_runtime_extra_never_enters_the_box(tmp_path):
 
 # ---- d20 -------------------------------------------------------------------------------------
 @requires_real_box
-def test_the_base_images_own_packages_survive_the_inexact_sync(tmp_path):
+def test_the_base_images_own_packages_survive_the_install(tmp_path):
     """Inside a started box, `import packaging` succeeds from the image's own site-packages —
-    the `--inexact` sync did not prune the base image's own site-packages.
+    the install (`uv pip install`, which never prunes — #1097) did not remove the base
+    image's own site-packages.
 
     # rejected: the base's known substitutions (mawk, dash, no `jq`/gawk — #540 M13) are NOT
     # corrected by this image."""
@@ -228,12 +191,17 @@ def test_the_base_images_own_packages_survive_the_inexact_sync(tmp_path):
 def test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_package():
     """Every distribution installed in the image is either a package the lock resolves for
     core + `box` at exactly the locked version or a base package the Dockerfile keeps
-    (`packaging`), and every lock-resolved core + `box` package is present."""
+    (`packaging`), and every lock-resolved core + `box` package is present. The same set is,
+    exactly, the committed `box-requirements.txt` with each entry's marker evaluated for the
+    image (#1097 O4: the image installs exactly the exported set) — the lock walk stays as the
+    independent oracle, so an export that drifted from the lock and an install that drifted
+    from the export are both caught here."""
+    from packaging.markers import Marker
     from packaging.utils import canonicalize_name
 
     seen = image_shell(_DISTRIBUTIONS)
     installed: dict[str, str] = {str(canonicalize_name(n)): v for n, v in seen["dists"].items()}
-    locked = _locked_core_and_box(seen["env"])
+    locked = lock_closure(seen["env"])
     assert "duckdb" in locked, locked
     assert "pydantic" in locked, locked
     kept = {"packaging"}
@@ -242,6 +210,17 @@ def test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_pa
         "missing": sorted(set(locked) - set(installed)),
     }
     assert {n: installed[n] for n in locked} == locked
+
+    listed = {
+        name: entry.version
+        for name, entry in parse_pinned(BOX_REQUIREMENTS.read_text(encoding="utf-8")).items()
+        if entry.marker is None or Marker(entry.marker).evaluate(seen["env"])
+    }
+    assert {"duckdb", "pydantic"} <= set(listed), listed
+    assert {n: v for n, v in installed.items() if n not in kept} == listed, {
+        "installed, not listed": sorted(set(installed) - kept - set(listed)),
+        "listed, not installed": sorted(set(listed) - set(installed)),
+    }
 
 
 # ---- d22 (negative; positive controls: python3 and pydantic work in the same probe) ------------------
@@ -268,26 +247,26 @@ def test_no_uv_binary_and_no_pip_installable_path_remains_in_the_image(tmp_path)
     assert seen["pydantic"] == "imports", seen
 
 
-# ---- d23 (negative; positive control: the two copied files ARE in the image) ----------------------
+# ---- d23 (negative; positive control: the walk DOES see the installed packages' files) ------------
 @requires_daemon
 def test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material():
-    """The image filesystem holds no checkout, no `.env`, no `.ssh` material and no
-    `defender/` code — only the two copied manifest files (`pyproject.toml` beside `uv.lock`,
-    exactly one of each) beside the installed packages.
+    """The image filesystem holds no checkout, no `.env`, no `.ssh` material, no `defender/`
+    code, and — since #1097 — no `uv.lock` and no `pyproject.toml` anywhere: nothing from the
+    build context is copied in (the list is bind-mounted into the install step and leaves no
+    layer). The walk is not blind: it sees `pydantic/__init__.py` under the image's
+    site-packages.
 
     # rejected: a nested secret-shaped file in the build context: O7's image guarantee is
-    # the COPY list (two files); the `defender/` context (#1098) only bounds the transfer
-    # (PJ-r2-1 executed the legacy builder: one added layer, the two files)."""
+    # the empty COPY list; the `defender/` context (#1098) only bounds the transfer."""
     seen = image_shell(IMAGE_WALK_PROBE)
     files, dirs = seen["files"], seen["dirs"]
+    assert SITE + "/pydantic/__init__.py" in files, "the walk did not see the installed packages"
     assert [f for f in files if f.endswith("/.env") or f.endswith(".env.bak")] == []
     assert [d for d in dirs if d.endswith("/.ssh")] == []
     assert [f for f in files if re.search(r"/id_(rsa|ed25519|ecdsa|dsa)$", f)] == []
     assert [f for f in files if f.endswith("/box.Dockerfile") or f.endswith("/defender/run.py")] == []
     assert [d for d in dirs if d.endswith("/defender/runtime")] == []
-    locks = [f for f in files if f.endswith("/uv.lock")]
-    assert len(locks) == 1, locks
-    assert str(Path(locks[0]).with_name("pyproject.toml")) in files, locks
+    assert [f for f in files if f.endswith(("/uv.lock", "/pyproject.toml"))] == []
 
 
 # ---- d24 -------------------------------------------------------------------------------------

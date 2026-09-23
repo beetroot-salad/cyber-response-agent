@@ -38,13 +38,16 @@ No `monkeypatch.setattr` anywhere: fakes enter through `docker=`, `start_box=`, 
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -65,14 +68,22 @@ from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the t
 )
 from defender.tests.e2e._spec771 import requires_daemon, requires_real_box  # noqa: F401
 
-#: The three files the image name is a function of, IN THE ORDER the resolver reads them —
-#: the order decides which file a "cannot read" fault names first (MF1 part 1).
-HASH_INPUTS: tuple[str, ...] = ("box.Dockerfile", "uv.lock", "pyproject.toml")
+#: The two files the image name is a function of, IN THE ORDER the resolver reads them —
+#: the order decides which file a "cannot read" fault names first (MF1 part 1). #1097 M3: the
+#: recipe and the exported package list, never the manifests the list is exported FROM.
+HASH_INPUTS: tuple[str, ...] = ("box.Dockerfile", "box-requirements.txt")
+
+#: Files a real tree still carries beside the inputs that must NOT name the image (#1097 O1):
+#: an edit to either that leaves the exported list unchanged cannot change what the image
+#: installs, so it must not rename it.
+BYSTANDERS: tuple[str, ...] = ("uv.lock", "pyproject.toml")
 
 #: The two new code files and the Dockerfile, where the amendment sites them (N10, F26).
 IMAGE_PY = DEFENDER / "runtime" / "box" / "_image.py"
 BOX_IMAGE_PY = DEFENDER / "scripts" / "box_image.py"
 DOCKERFILE = DEFENDER / "box.Dockerfile"
+#: The committed export the image installs and is named from (#1097 M1).
+BOX_REQUIREMENTS = DEFENDER / "box-requirements.txt"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 README_RUNTIME = REPO_ROOT / ".devcontainer" / "README.runtime.md"
 
@@ -87,12 +98,21 @@ TAG_RE = re.compile(r"^defender-box:(?P<version>[A-Za-z0-9._]+)-(?P<digest>[0-9a
 #: absolutely (d42/d45).
 BUILD_COMMAND_TAIL = "defender/scripts/box_image.py build"
 
+#: The regenerate command the drift check names when the committed list is stale (#1097 M4).
+EXPORT_COMMAND = "python3 defender/scripts/box_image.py export"
+
 EXEC_TIMEOUT = 60.0
 
-#: Synthetic bytes for a planted tree's three inputs. Deterministic, so two plantings name
-#: the same image (d4) and a one-byte edit names another (d3).
+#: Synthetic bytes for a planted tree's inputs. Deterministic, so two plantings name the same
+#: image (d4) and a one-byte edit names another (d3).
 PLANTED_INPUT_BYTES: dict[str, bytes] = {
     "box.Dockerfile": b"FROM python:3.11-slim@sha256:" + b"0" * 64 + b"\nRUN true\n",
+    "box-requirements.txt": b"planted==0.0.0 \\\n    --hash=sha256:" + b"0" * 64 + b"\n",
+}
+
+#: Synthetic bytes for the bystanders a planted tree also carries — a real tree has them, and
+#: an image name that still read them would move when they do (d3's negative half).
+PLANTED_BYSTANDER_BYTES: dict[str, bytes] = {
     "uv.lock": b"version = 1\nrevision = 3\n",
     "pyproject.toml": b"[project]\nname = \"planted\"\nversion = \"0.0.0\"\n",
 }
@@ -114,16 +134,20 @@ def recipe_version() -> str:
 
 # ---- trees ------------------------------------------------------------------------------------
 def plant_tree(root: Path, *, missing: tuple[str, ...] = (), copy_code: bool = True) -> Path:
-    """`root/defender` holding the three hash inputs (synthetic bytes) — the DEFENDER DIR a box
-    would mount — minus `missing`. With `copy_code`, the real `_image.py` and `box_image.py`
-    are copied in where they exist, so the build script can be run FROM the planted tree and
-    hash the planted tree's own inputs (F-B). Returns the defender dir."""
+    """`root/defender` holding the hash inputs and the bystanders (synthetic bytes) — the
+    DEFENDER DIR a box would mount — minus `missing`. With `copy_code`, the real `_image.py`
+    and `box_image.py` are copied in where they exist, so the build script can be run FROM the
+    planted tree and hash the planted tree's own inputs (F-B). Returns the defender dir.
+
+    The bystanders (`uv.lock`, `pyproject.toml`) are planted too, because a real tree carries
+    them: a tree that "lacks the inputs" still holds both, so a resolver that could name an
+    image from them alone is caught (#1097 O1)."""
     defender_dir = root / "defender"
     defender_dir.mkdir(parents=True, exist_ok=True)
-    for name in HASH_INPUTS:
+    for name, data in (*PLANTED_INPUT_BYTES.items(), *PLANTED_BYSTANDER_BYTES.items()):
         if name in missing:
             continue
-        (defender_dir / name).write_bytes(PLANTED_INPUT_BYTES[name])
+        (defender_dir / name).write_bytes(data)
     if copy_code:
         for src, rel in ((IMAGE_PY, Path("runtime") / "box"), (BOX_IMAGE_PY, Path("scripts"))):
             if src.is_file():
@@ -131,6 +155,130 @@ def plant_tree(root: Path, *, missing: tuple[str, ...] = (), copy_code: bool = T
                 dest.mkdir(parents=True, exist_ok=True)
                 shutil.copy(src, dest / src.name)
     return defender_dir
+
+
+def plant_real_manifests(defender_dir: Path) -> Path:
+    """Copy THIS checkout's `pyproject.toml` and `uv.lock` over a planted tree's synthetic
+    bystanders, so `uv export` run there resolves the real closure (#1097). The real tree is
+    only ever READ. Returns the defender dir."""
+    for name in BYSTANDERS:
+        shutil.copyfile(DEFENDER / name, defender_dir / name)
+    return defender_dir
+
+
+def load_box_image_script() -> ModuleType:
+    """`defender/scripts/box_image.py`, loaded BY FILE PATH — the same door the script itself
+    uses for `_image.py` (it is stdlib-only and never an importable `defender.*` module).
+    Its #1097 attribute `export_requirements` is reached by the caller, lazily."""
+    spec = importlib.util.spec_from_file_location("_box_image_script_1097", BOX_IMAGE_PY)
+    assert spec is not None, BOX_IMAGE_PY
+    assert spec.loader is not None, BOX_IMAGE_PY
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# ---- the exported package list, parsed (#1097 M4) ---------------------------------------------
+@dataclass(frozen=True)
+class Pinned:
+    """One entry of a hash-pinned requirements list, normalised so that a formatting change in
+    a newer `uv export` (wrapping, spacing, quote style, hash order) compares equal and a change
+    to what would be INSTALLED does not."""
+
+    version: str
+    marker: str | None
+    hashes: frozenset[str]
+
+
+def parse_pinned(text: str) -> dict[str, Pinned]:
+    """`canonical name -> Pinned` for a `uv export --no-header --no-annotate` list: `\\`
+    continuations joined, whole-line comments dropped, each logical line `name==version
+    [; marker]` followed by one or more `--hash=<algo>:<hex>`. STRICT — anything else on a
+    line (an unpinned spec, an entry with no hash, an option line, a duplicate name) fails
+    the caller's assertion rather than being skipped, and an empty list fails too: the parser
+    is the comparison's own positive control."""
+    from packaging.markers import Marker
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    logical: list[str] = []
+    pending = ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not pending and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        logical.append((pending + line).strip())
+        pending = ""
+    if pending.strip():
+        logical.append(pending.strip())
+
+    out: dict[str, Pinned] = {}
+    for entry in logical:
+        head, *hash_parts = entry.split("--hash=")
+        hashes = frozenset(h.strip() for h in hash_parts)
+        assert hashes, f"no hash: {entry!r}"
+        assert all(re.fullmatch(r"sha(256|384|512):[0-9a-f]{64,128}", h) for h in hashes), entry
+        req = Requirement(head.strip())
+        specs = list(req.specifier)
+        assert len(specs) == 1, f"not an exact pin: {entry!r}"
+        assert specs[0].operator == "==", f"not an exact pin: {entry!r}"
+        assert not req.extras, entry
+        assert req.url is None, entry
+        name = str(canonicalize_name(req.name))
+        assert name not in out, f"{name} listed twice"
+        out[name] = Pinned(
+            version=specs[0].version,
+            marker=str(Marker(str(req.marker))) if req.marker is not None else None,
+            hashes=hashes,
+        )
+    assert out, "the list parsed to no entries"
+    return out
+
+
+def lock_closure(env: dict | None = None) -> dict[str, str]:
+    """`uv.lock`'s resolution of the project's core dependencies plus the `box` extra, closed
+    over the lock's own dependency graph — canonical name -> version. With `env` (an image's
+    `packaging.markers.default_environment()`), each edge's marker is evaluated for it (d21);
+    without, every edge is followed — the universal closure an export lists (#1097). Reads
+    the lock with `tomllib`, never uv: an oracle independent of the exporter it checks."""
+    from packaging.markers import Marker
+    from packaging.utils import canonicalize_name
+
+    lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
+    by_name = {canonicalize_name(p["name"]): p for p in lock["package"]}
+    environment = None if env is None else {**env, "extra": ""}
+
+    def wanted(dep: dict) -> bool:
+        marker = dep.get("marker")
+        if not marker or environment is None:
+            return True
+        return Marker(marker).evaluate(environment, context="lock_file")
+
+    root = by_name[canonicalize_name("defender")]
+    stack = [
+        (canonicalize_name(d["name"]), tuple(d.get("extra", ())))
+        for d in [*root.get("dependencies", []), *root.get("optional-dependencies", {}).get("box", [])]
+        if wanted(d)
+    ]
+    out: dict[str, str] = {}
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    while stack:
+        name, extras = stack.pop()
+        if (name, extras) in seen:
+            continue
+        seen.add((name, extras))
+        pkg = by_name[name]
+        out[str(name)] = pkg["version"]
+        deps = list(pkg.get("dependencies", []))
+        for extra in extras:
+            deps += pkg.get("optional-dependencies", {}).get(extra, [])
+        stack.extend(
+            (canonicalize_name(d["name"]), tuple(d.get("extra", ()))) for d in deps if wanted(d)
+        )
+    return out
 
 
 def make_run_dir(tmp_path: Path, name: str = "run-1092") -> Path:
@@ -411,7 +559,7 @@ def run_shim(shim: str, world: ShimWorld, *, marked: bool) -> str:
 # ---- the drain lane's worktree, as a real git checkout (MF2) -----------------------------------
 class GitWorktreeBranch(RecordingBranch):
     """`RecordingBranch` whose `start_batch` mints a REAL git repo at the worktree path — one
-    commit, holding the three hash inputs under `<wt>/defender` — so `HEAD` there is the
+    commit, holding the hash inputs under `<wt>/defender` — so `HEAD` there is the
     commit the drain's fault must name, whatever channel the implementation reads it through
     (the real `AuthorBranch` cuts the worktree from `origin/main`, so its HEAD is that commit).
     `cleanup` destroys the tree, as the real one does (drains.py:776-780)."""
