@@ -139,7 +139,7 @@ def open_source_store(run_dir: Path) -> Any:
     `runs_base` is derived the way the WRITER derived it — `run_dir.parent`, exactly as
     `driver._default_store_factory` did when this store was created — and then CHECKED against
     the path the writer recorded. The check is not defensive noise: `store_path_for` resolves
-    to `runs_base.parent / "sessions"`, so a `runs_base` off by one directory level still names
+    to a sessions dir beside `runs_base`, so a `runs_base` off by one directory level still names
     a well-formed path, and `open_store` creates-if-missing. A wrong derivation therefore
     returns a live handle over an EMPTY database and the fault surfaces far away, as
     `main_session_id` finding no root session in a store that was never the right one.

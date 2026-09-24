@@ -684,10 +684,9 @@ def _find_nonrepresentable(obj: Any) -> Any:
 # open / resolve
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
-        raise InvalidCaseId(repr(case_id))
-    runs_base = Path(runs_base)
-    return runs_base.parent / "sessions" / f"{case_id}.db"
+    """The store for `case_id` beside `runs_base` — asked of the owner (#1077), which also
+    refuses an id that is malformed or not case-stable (`InvalidCaseId`)."""
+    return RunPaths.session_db(Path(runs_base), case_id)
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:

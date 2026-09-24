@@ -573,16 +573,19 @@ class RunPaths:
     def accounting_failures(self, runs_base: Path) -> Path:
         return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
 
-    def sessions_dir(self, runs_base: Path) -> Path:
+    @staticmethod
+    def sessions_dir(runs_base: Path) -> Path:
         """The sessions directory — a SIBLING of the runs base (claims C10/C15), never a
-        child."""
+        child. Static because the store is keyed by lineage, not by run: the session store
+        asks it with no run dir in hand."""
         return Path(runs_base).parent / SESSIONS_DIRNAME
 
-    def session_db(self, runs_base: Path, lineage_id: str) -> Path:
-        """`<sessions>/<lineage_id>.db`. Refuses a lineage id the case-id pattern rejects
-        EXACTLY as `session_store.store_path_for` does today — the pattern is pinned BY
-        REFERENCE (RG-4), never re-spelled — and, beside that existing check (decision 20),
-        refuses one that is not case-stable (`_run_id.is_case_stable_id`)."""
+    @staticmethod
+    def session_db(runs_base: Path, lineage_id: str) -> Path:
+        """`<sessions>/<lineage_id>.db` — the store's one location; `session_store.store_path_for`
+        delegates here. Refuses a lineage id the case-id pattern rejects (pinned BY REFERENCE,
+        RG-4, never re-spelled) and, beside that, one that is not case-stable (decision 20,
+        `_run_id.is_case_stable_id`)."""
         from defender._run_id import is_case_stable_id
         from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
 
@@ -594,7 +597,7 @@ class RunPaths:
                 f"become one file wherever the filesystem folds case; use "
                 f"{lineage_id.casefold()!r}"
             )
-        return self.sessions_dir(runs_base) / f"{lineage_id}{SESSION_DB_SUFFIX}"
+        return RunPaths.sessions_dir(runs_base) / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

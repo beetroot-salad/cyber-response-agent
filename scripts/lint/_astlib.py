@@ -441,9 +441,16 @@ def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
     if isinstance(node, ast.Name):
         return node.id in e.owner_locals
     if isinstance(node, ast.Attribute):
-        return _owner_instance_in(node.value, set(e.owner_locals), e)
+        # `RunPaths.session_db` — an accessor read on the owner CLASS itself (a static
+        # accessor, asked with no run dir in hand) is the owner's own, like one on an instance.
+        return (_origin(node.value, e) in _OWNER_CLASS_ORIGINS
+                or _owner_instance_in(node.value, set(e.owner_locals), e))
     if isinstance(node, ast.Call):
-        return callee(node, e) in _OWNER_CLASS_ORIGINS
+        called = callee(node, e)
+        # The owner's constructor, or a static accessor called on the owner class — whose
+        # result a literal-free join must not escape (`RunPaths.sessions_dir(base) / name`).
+        return called in _OWNER_CLASS_ORIGINS or (
+            called is not None and called.rpartition(".")[0] in _OWNER_CLASS_ORIGINS)
     return False
 
 
