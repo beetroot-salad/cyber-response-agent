@@ -316,3 +316,32 @@ def test_the_session_proof_fails_when_the_store_path_is_hand_composed(tmp_path):
     assert "session store:" in result.stderr, (
         "the round trip failed, but not at the session store:\n"
         f"{result.stderr[-3000:]}")
+
+
+#: The owner's `sessions_dir` answer, changed IN THE METHOD rather than in a constant. A store
+#: module that asks the owner follows it; one that re-composes the path out of the owner's
+#: imported constants (the same names, so a constant rename cannot tell them apart) does not.
+_SESSIONS_DIR_RETURN = "return Path(runs_base).parent / SESSIONS_DIRNAME"
+_SESSIONS_DIR_RETURN_MOVED = f'return Path(runs_base).parent / (SESSIONS_DIRNAME + "-{_TOKEN}")'
+
+
+def test_the_session_store_follows_the_owners_method_not_just_its_constants(tmp_path):
+    """Change what `RunPaths.sessions_dir` answers without touching a constant, and a real
+    run's store still lands where the owner says and the resume door finds it. This is what
+    tells "asks the owner" apart from "composes from the owner's constants"."""
+    owner = PACKAGE / "_run_paths.py"
+    text = owner.read_text(encoding="utf-8")
+    assert text.count(_SESSIONS_DIR_RETURN) == 1, (
+        "`RunPaths.sessions_dir` no longer returns the spelling this proof rewrites — update "
+        "the anchor, or this case exercises nothing")
+    root = tmp_path / "method-moved"
+    _mirror(PACKAGE, root / "defender",
+            replace={owner: text.replace(_SESSIONS_DIR_RETURN, _SESSIONS_DIR_RETURN_MOVED)})
+    result = _round_trip(root, tmp_path / "work", payload=_SESSION_PAYLOAD)
+    assert _TOKEN in _loaded(result.stdout, "SESSIONS_DIR_SEEN"), (
+        f"the subprocess's owner answered the unchanged sessions dir — this moved nothing:\n"
+        f"{result.stdout}")
+    assert result.returncode == 0, (
+        "the owner's sessions dir moved but the store did not follow — something composes "
+        f"the store's path itself:\n{result.stdout}\n{result.stderr[-3000:]}")
+    assert "SESSION ROUNDTRIP OK" in result.stdout

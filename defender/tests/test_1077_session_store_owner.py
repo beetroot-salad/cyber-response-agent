@@ -37,7 +37,15 @@ from defender.runtime.session_store import (
 
 #: Ids the case-id pattern ADMITS but that are not case-stable — so a refusal of them is the
 #: case-stability rule's, not the pattern's (each test re-checks both facts, by reference).
-UNSTABLE = ("Case-Alpha", "ABC")
+UNSTABLE = ("Case-Alpha", "ABC", "case-Alpha", "aBc", "caseAlpha")
+
+#: Values that are not strings at all — what a hand-edited or corrupted case pointer can carry.
+#: Refused as `InvalidCaseId` like any malformed id, never as whatever the check trips over.
+NOT_A_STRING = (None, 7, ["x"])
+
+#: Ids BOTH the store and the owner admit, at the case-id pattern's edges: they must agree on
+#: every one of them, not only on the id the tests happen to use.
+ADMITTED = ("case-alpha", "a.b_c-d", "0abc", "x", "a" * 128, "7f3c2a9e0b1d4c5e8f6a7b8c9d0e1f2a")
 
 
 def _tree(root: Path) -> set[Path]:
@@ -117,6 +125,28 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
     refuses_and_creates_nothing("with the sessions directory already holding a store")
 
 
+@pytest.mark.parametrize("case_id", NOT_A_STRING, ids=repr)
+def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id):
+    """A case id that is not a string at all is refused as `InvalidCaseId` — the pattern check
+    comes first — never as an `AttributeError`/`TypeError` from a check that ran before it
+    (those escape the resume door's handler and take the run down). Positive control: a
+    well-formed id resolves."""
+    with pytest.raises(InvalidCaseId):
+        store_path_for(case_id, runs_base=runs_base)
+    assert store_path_for("case-alpha", runs_base=runs_base) == _owner_path(
+        runs_base, "case-alpha")
+
+
+@pytest.mark.parametrize("case_id", ADMITTED)
+def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
+    """D1: `store_path_for` IS the owner's answer, for every id the pattern admits — including
+    its edges (a single character, a digit-leading id, the 128-character maximum, `.`/`_`/`-`),
+    not only the id the other tests use."""
+    assert CASE_ID_RE.match(case_id)
+    assert case_id == case_id.casefold()
+    assert store_path_for(case_id, runs_base=runs_base) == _owner_path(runs_base, case_id)
+
+
 def test_the_owner_answers_the_store_path_without_a_run_dir(runs_base):
     """D2: `RunPaths.sessions_dir` and `RunPaths.session_db` read nothing off a run dir, so they
     answer on the CLASS — the store module asks without inventing a run dir — and they answer
@@ -167,9 +197,13 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
     case_id, recorded = pointer["case_id"], Path(pointer["store_path"])
     assert case_id == case_id.casefold(), f"the run minted a case-unstable id: {case_id!r}"
-    mixed = case_id.upper()
-    if mixed == case_id:
+    # ONE letter flipped, not the whole id upper-cased: a check that only spots all-upper or
+    # title-case ids must not pass this.
+    letters = [i for i, ch in enumerate(case_id) if ch.isalpha()]
+    if not letters:
         pytest.skip(f"the minted id {case_id!r} holds no letter to flip")
+    i = letters[len(letters) // 2]
+    mixed = case_id[:i] + case_id[i].upper() + case_id[i + 1:]
     _is_the_subject(mixed)
 
     # Positive control: the run's own pointer opens the run's own store, which holds its run.
@@ -200,3 +234,24 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     assert isinstance(raised.__cause__, InvalidCaseId), (
         f"the resume was refused, but not by the case-stability rule: {raised!r}")
     assert not created, f"the refused resume still created {created}"
+
+
+def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(tmp_path):
+    """A source run whose pointer's `case_id` is `null` fails `open_source_store` as
+    `BranchError` caused by `InvalidCaseId` — the driver's store-setup class — and creates
+    nothing. (The pointer writer would not write it; a hand-edited or truncated file can.)
+    Positive control: the run's own pointer opens."""
+    from defender.runtime import branch
+
+    run_dir = _source_run(tmp_path)
+    pointer_file = RunPaths(run_dir).session_pointer
+    pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
+    branch.open_source_store(run_dir).close()
+
+    pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
+    before = _tree(tmp_path)
+    with pytest.raises(branch.BranchError) as info:
+        branch.open_source_store(run_dir)
+    assert isinstance(info.value.__cause__, InvalidCaseId), (
+        f"refused, but not as a malformed case id: {info.value.__cause__!r}")
+    assert _tree(tmp_path) == before

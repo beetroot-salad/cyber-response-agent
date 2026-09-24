@@ -42,6 +42,7 @@ def main(root: Path) -> int:
     run_dir = materialize(runs_base, GOLDEN)
     owner = RunPaths(run_dir)
     sessions = owner.sessions_dir(runs_base)
+    print(f"SESSIONS_DIR_SEEN={sessions.name}", flush=True)
     # Say which tree this actually loaded, first — so a caller can tell "the store went to the
     # wrong place" apart from "the subprocess imported the real package and renamed nothing".
     # Read off the owner BY NAME: this file never holds either value itself.
