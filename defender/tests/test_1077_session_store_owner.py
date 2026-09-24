@@ -1,0 +1,202 @@
+"""The session store's path comes from its owner, refusal included (#1077, the leftover of D7).
+
+`runtime/session_store.store_path_for` composed `<runs_base>/../sessions/<case_id>.db` itself,
+while the owner's `RunPaths.session_db` — which carries decision 20's case-stability refusal —
+had no production caller. So the refusal the owner states was one no store ever met: a case id
+that is not case-stable (`id != id.casefold()`) opened a store, and on a filesystem that folds
+case two such ids are ONE file.
+
+What this pins, by observable only — the raised class, what is on disk afterwards, and the
+exact path a store lands at:
+
+- O2: `store_path_for` and `open_store` refuse a case-unstable id as `InvalidCaseId`, and
+  nothing is created for it; the lowercase spelling of the same id opens, at the owner's path.
+- O2 at the resume door: a source run whose case pointer carries such an id fails
+  `branch.open_source_store` as `BranchError` (the driver's store-setup class), with the
+  `InvalidCaseId` as its cause and no store file created; the same run's own lowercase pointer
+  opens its store.
+- D2: the owner answers the store's path on the CLASS, with no run dir to invent — which is
+  what lets the store module ask it at all.
+
+O1 — renaming the owner's constants moves the store — is `test_1077_rename_proof.py`'s.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from defender._run_paths import RunPaths
+from defender.runtime.session_store import (
+    CASE_ID_RE,
+    InvalidCaseId,
+    open_store,
+    store_path_for,
+)
+
+#: Ids the case-id pattern ADMITS but that are not case-stable — so a refusal of them is the
+#: case-stability rule's, not the pattern's (each test re-checks both facts, by reference).
+UNSTABLE = ("Case-Alpha", "ABC")
+
+
+def _tree(root: Path) -> set[Path]:
+    return {p.relative_to(root) for p in root.rglob("*")}
+
+
+@pytest.fixture
+def runs_base(tmp_path: Path) -> Path:
+    """A runs base with room beside it: the store's directory is a SIBLING of the runs base,
+    so everything a store open can create lands under `tmp_path`."""
+    base = tmp_path / "defender-runs"
+    base.mkdir()
+    return base
+
+
+def _owner_path(runs_base: Path, case_id: str) -> Path:
+    # The INSTANCE form, which works before and after D2 — so these O2 tests fail on the
+    # refusal they are about, not on how the owner happens to be called.
+    return RunPaths(runs_base / "any-run").session_db(runs_base, case_id)
+
+
+def _is_the_subject(case_id: str) -> None:
+    assert CASE_ID_RE.match(case_id), (
+        f"{case_id!r} must pass the case-id pattern, or its refusal proves nothing about case "
+        "stability")
+    assert case_id != case_id.casefold(), f"{case_id!r} is case-stable; it is not the subject"
+
+
+@pytest.mark.parametrize("case_id", UNSTABLE)
+def test_store_path_for_refuses_an_id_that_is_not_case_stable(runs_base, case_id):
+    """`store_path_for` refuses a case id that is not case-stable, as `InvalidCaseId`; the
+    lowercase spelling of the same id resolves, to exactly the owner's path."""
+    _is_the_subject(case_id)
+    with pytest.raises(InvalidCaseId):
+        store_path_for(case_id, runs_base=runs_base)
+
+    lower = case_id.casefold()
+    assert store_path_for(lower, runs_base=runs_base) == _owner_path(runs_base, lower), (
+        "positive control: a case-stable id resolves to the owner's path")
+
+
+@pytest.mark.parametrize("case_id", UNSTABLE)
+def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
+        tmp_path, runs_base, case_id):
+    """`open_store` refuses a case-unstable id as `InvalidCaseId` and leaves the filesystem
+    exactly as it found it — whether or not the sessions directory exists yet. Between the
+    two refusals, the lowercase spelling of the same id opens a real store at the owner's path.
+
+    The filesystem is the observable, not the raise alone: `open_store` creates-if-missing,
+    so a refusal that came after the create would leave a store behind for an id the owner
+    says names none."""
+    _is_the_subject(case_id)
+    lower = case_id.casefold()
+
+    def refuses_and_creates_nothing(when: str) -> None:
+        before = _tree(tmp_path)
+        raised: BaseException | None = None
+        try:
+            handle = open_store(case_id=case_id, runs_base=runs_base)
+        except InvalidCaseId as exc:
+            raised = exc
+        else:
+            handle.close()
+        created = sorted(str(p) for p in _tree(tmp_path) - before)
+        assert raised is not None, (
+            f"open_store admitted {case_id!r} ({when}) and created {created} — a case id "
+            "that is not case-stable names no store")
+        assert not created, f"open_store refused {case_id!r} ({when}) but created {created}"
+
+    refuses_and_creates_nothing("before any store exists beside the runs base")
+
+    with open_store(case_id=lower, runs_base=runs_base) as handle:
+        assert handle.path == _owner_path(runs_base, lower), (
+            "positive control: the lowercase id's store is not at the owner's path")
+        assert handle.path.is_file(), "positive control: the lowercase id opened no store file"
+
+    refuses_and_creates_nothing("with the sessions directory already holding a store")
+
+
+def test_the_owner_answers_the_store_path_without_a_run_dir(runs_base):
+    """D2: `RunPaths.sessions_dir` and `RunPaths.session_db` read nothing off a run dir, so they
+    answer on the CLASS — the store module asks without inventing a run dir — and they answer
+    exactly what an instance answers, refusal included. Instance calls keep working (the #1077
+    census has them)."""
+    instance = RunPaths(runs_base / "any-run")
+    assert RunPaths.sessions_dir(runs_base) == instance.sessions_dir(runs_base)
+    assert RunPaths.session_db(runs_base, "case-alpha") == instance.session_db(
+        runs_base, "case-alpha") == store_path_for("case-alpha", runs_base=runs_base)
+    assert RunPaths.session_db(runs_base, "case-alpha").parent == RunPaths.sessions_dir(
+        runs_base)
+    with pytest.raises(InvalidCaseId):
+        RunPaths.session_db(runs_base, "Case-Alpha")
+
+
+# ---------------------------------------------------------------------------------------
+# The resume door: a source run whose pointer carries a case-unstable id
+# ---------------------------------------------------------------------------------------
+
+def _source_run(tmp_path: Path) -> Path:
+    """A REAL finished run — the real driver, its default store factory, its own case pointer.
+    `runs/run`, so `open_source_store`'s `runs_base = run_dir.parent` is the base the run was
+    handed and its store sits under `tmp_path`."""
+    replay = pytest.importorskip("defender.tests.e2e._replay_harness")
+    run_dir = replay.materialize(tmp_path / "runs", replay.GOLDEN)
+    summary = replay.drive(run_dir, run_id="1077-session-owner", main=replay.ReplayFn([
+        replay.Turn(text="Nothing to do; stopping."),
+    ]))
+    assert summary.get("truncated_by") is None, (
+        f"the source run did not finish ({summary}); nothing below is about its pointer")
+    return run_dir
+
+
+def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(tmp_path):
+    """`branch.open_source_store` over a real run whose case pointer names the run's own case
+    id in the wrong case refuses as `BranchError`, caused by the store's `InvalidCaseId`, and
+    creates no store; over the same run's own, lowercase pointer it opens the run's store.
+
+    The mixed-case pointer is the real one with the id's case flipped EVERYWHERE it appears —
+    the case id and the store path the writer would have recorded for it — so it is
+    self-consistent. That is what makes the refusal the case-stability rule's: an inconsistent
+    pointer is refused today already, by the derive-and-compare check, for the opposite reason.
+    Rewritten through the real pointer writer, keeping every other field the run wrote."""
+    from defender.runtime import branch, session_store
+
+    run_dir = _source_run(tmp_path)
+    pointer_file = RunPaths(run_dir).session_pointer
+    pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
+    case_id, recorded = pointer["case_id"], Path(pointer["store_path"])
+    assert case_id == case_id.casefold(), f"the run minted a case-unstable id: {case_id!r}"
+    mixed = case_id.upper()
+    if mixed == case_id:
+        pytest.skip(f"the minted id {case_id!r} holds no letter to flip")
+    _is_the_subject(mixed)
+
+    # Positive control: the run's own pointer opens the run's own store, which holds its run.
+    source = branch.open_source_store(run_dir)
+    try:
+        assert source.path == recorded == _owner_path(run_dir.parent, case_id)
+        assert session_store.main_session_id(source), "the store holds no main session"
+    finally:
+        source.close()
+
+    session_store.write_case_pointer(
+        run_dir, case_id=mixed, store_path=recorded.with_name(recorded.name.replace(
+            case_id, mixed)),
+        session_id=pointer.get("session_id"))
+    before = _tree(tmp_path)
+    raised: BaseException | None = None
+    try:
+        handle = branch.open_source_store(run_dir)
+    except branch.BranchError as exc:
+        raised = exc
+    else:
+        handle.close()
+    created = sorted(str(p) for p in _tree(tmp_path) - before)
+    assert raised is not None, (
+        f"open_source_store admitted a pointer carrying {mixed!r} and created {created} — a "
+        "resume over a case id that is not case-stable must fail as the driver's store-setup "
+        "class")
+    assert isinstance(raised.__cause__, InvalidCaseId), (
+        f"the resume was refused, but not by the case-stability rule: {raised!r}")
+    assert not created, f"the refused resume still created {created}"

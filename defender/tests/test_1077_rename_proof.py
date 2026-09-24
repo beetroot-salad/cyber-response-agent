@@ -71,8 +71,10 @@ def _renamed(value: str) -> str:
     return f"{leading}{_TOKEN}{head}{dot}{ext}{trailing}"
 
 
-def _rewrite_owner(source: str) -> tuple[str, int]:
-    """One owner module's source with every record-name literal renamed."""
+def _rewrite_owner(source: str, *, only: frozenset[str] | None = None) -> tuple[str, int]:
+    """One owner module's source with every record-name literal renamed — or, given `only`,
+    exactly the constants it names and nothing else (the skip lists do not apply: naming a
+    constant there is the caller saying it is the subject)."""
     tree = ast.parse(source)
     lines = source.splitlines(keepends=True)
     edits = []
@@ -81,11 +83,11 @@ def _rewrite_owner(source: str) -> tuple[str, int]:
             continue
         name = node.targets[0].id
         value = node.value
-        if (
-            name.isupper() and name not in _SKIP_NAMES
-            and isinstance(value, ast.Constant) and isinstance(value.value, str)
-            and value.value not in _SKIP_VALUES
-        ):
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        chosen = (name in only) if only is not None else (
+            name.isupper() and name not in _SKIP_NAMES and value.value not in _SKIP_VALUES)
+        if chosen:
             edits.append((value.lineno, value.col_offset, value.end_col_offset,
                           _renamed(value.value)))
     for lineno, col, end_col, new in sorted(edits, reverse=True):
@@ -137,16 +139,18 @@ def _renamed_tree(tmp_path: Path, *, sabotage: str | None = None) -> Path:
     return root
 
 
-def _round_trip(tree: Path, work: Path) -> subprocess.CompletedProcess[str]:
+def _round_trip(tree: Path, work: Path, *, payload: str = "defender.tests._rename_proof_1077",
+                ) -> subprocess.CompletedProcess[str]:
     work.mkdir(parents=True, exist_ok=True)
     # `cwd=tree`, not merely `PYTHONPATH=tree`: `python -m` puts the CURRENT DIRECTORY first
     # on `sys.path`, so running from the repo root imports the REAL package and the whole
     # proof passes having renamed nothing. The `ALERT_NAME=` line the payload prints is what
     # the callers below check that against.
     return subprocess.run(
-        [sys.executable, "-m", "defender.tests._rename_proof_1077", str(work)],
+        [sys.executable, "-m", payload, str(work)],
         capture_output=True, text=True, timeout=300, cwd=str(tree),
-        env={**os.environ, "PYTHONPATH": str(tree), "PYTHONDONTWRITEBYTECODE": "1"},
+        env={**os.environ, "PYTHONPATH": str(tree), "PYTHONDONTWRITEBYTECODE": "1",
+             "PYDANTIC_AI_NO_BANNER": "1"},
     )
 
 
@@ -201,3 +205,114 @@ def test_the_rename_keeps_the_shape_it_promises_to_keep(value, want):
     because a rename that changed those would fail the proof above for reasons that are not
     D7's rule, and the failure would read as a real finding."""
     assert _renamed(value) == want
+
+
+# ---------------------------------------------------------------------------------------
+# The session store — the one record whose path the archive round trip never opens
+# ---------------------------------------------------------------------------------------
+#
+# The lint cannot see the store's path: `"sessions"` and `.db` are deliberately outside its
+# match set (too generic). So the rename is the observer (#1077's session-store leftover, O1):
+# rename the sessions directory, or the store's suffix, in `_run_paths.py` ALONE, and a real
+# run must create its store where the owner now says — and a resume must find it there.
+#
+# ONLY those constants move, and only in `_run_paths.py`. Renaming every record as the archive
+# proof does would also move the run's alert, which the replay harness's `drive` still hands
+# the driver by its literal name — a failure that is not this rule's.
+
+_SESSION_PAYLOAD = "defender.tests._rename_proof_1077_session"
+_SESSION_NAMES = ("SESSIONS_DIRNAME", "SESSION_DB_SUFFIX")
+
+#: What a store module that REMEMBERS the store's names looks like — the negative control's
+#: `store_path_for`. Spliced in by AST, not by anchoring on the delegating line, so the control
+#: does not depend on how the delegation happens to be spelled.
+_HAND_COMPOSED_STORE_PATH_FOR = '''def store_path_for(case_id: str, *, runs_base: Path) -> Path:
+    if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
+        raise InvalidCaseId(repr(case_id))
+    return Path(runs_base).parent / "sessions" / f"{case_id}.db"
+'''
+
+
+def _with_function_replaced(source: str, name: str, replacement: str) -> str:
+    tree = ast.parse(source)
+    found = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+    assert len(found) == 1, f"expected one top-level `def {name}`, found {len(found)}"
+    node = found[0]
+    start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+    lines = source.splitlines(keepends=True)
+    return "".join(lines[:start - 1]) + replacement + "".join(lines[node.end_lineno:])
+
+
+def _session_renamed_tree(tmp_path: Path, names: tuple[str, ...], *,
+                          hand_compose_store_path: bool = False) -> Path:
+    root = tmp_path / ("sabotaged" if hand_compose_store_path else "renamed")
+    owner = PACKAGE / "_run_paths.py"
+    text, count = _rewrite_owner(owner.read_text(encoding="utf-8"), only=frozenset(names))
+    assert count == len(names), (
+        f"the rewrite renamed {count} of {names} in _run_paths.py — the owner no longer "
+        "spells them as plain module constants, so this proof is not exercising")
+    replace = {owner: text}
+    if hand_compose_store_path:
+        store = PACKAGE / "runtime" / "session_store.py"
+        replace[store] = _with_function_replaced(
+            store.read_text(encoding="utf-8"), "store_path_for", _HAND_COMPOSED_STORE_PATH_FOR)
+    _mirror(PACKAGE, root / "defender", replace=replace)
+    return root
+
+
+def _loaded(stdout: str, name: str) -> str:
+    """The value the subprocess's OWN owner module holds for `name` — printed by the payload
+    before it drives anything."""
+    for line in stdout.splitlines():
+        if line.startswith(f"{name}="):
+            return line.partition("=")[2]
+    raise AssertionError(f"the payload never reported {name}:\n{stdout}")
+
+
+@pytest.mark.parametrize("names", [("SESSIONS_DIRNAME",), ("SESSION_DB_SUFFIX",)],
+                         ids=["sessions-dirname", "session-db-suffix"])
+def test_the_session_store_moves_when_its_owner_renames_it(tmp_path, names):
+    """Rename the sessions directory — or the store's suffix — in `_run_paths.py` alone, and a
+    REAL run (the real driver, its default store factory, its own case pointer) creates its
+    store at the owner's new path, and the resume door (`branch.open_source_store`, the store
+    factory a resumed run is handed) finds it there.
+
+    Each constant is renamed ALONE, because the obligation is that either one, alone, moves the
+    store: a store module that took the directory from the owner but remembered the suffix
+    passes a both-at-once rename only if the suffix happened to be checked some other way.
+
+    What failure looks like: `store_path_for` composes the path out of names it remembers, the
+    run writes its store under the OLD name, and the payload reports a store that is not where
+    the owner says — the rename silently left every future run writing where it always did."""
+    result = _round_trip(_session_renamed_tree(tmp_path, names), tmp_path / "work",
+                         payload=_SESSION_PAYLOAD)
+    tail = result.stderr[-3000:]
+    for name in names:
+        assert _TOKEN in _loaded(result.stdout, name), (
+            f"the subprocess loaded the REAL {name}, not the renamed one — this run renamed "
+            f"nothing and proves nothing:\n{result.stdout}")
+    assert result.returncode == 0, (
+        f"renaming {names} through the owner did not move the session store — something "
+        f"composes the store's path out of names it was not given:\n{result.stdout}\n{tail}")
+    assert "SESSION ROUNDTRIP OK" in result.stdout
+
+
+def test_the_session_proof_fails_when_the_store_path_is_hand_composed(tmp_path):
+    """The negative control, without which the case above proves nothing.
+
+    `store_path_for` replaced by the hand-composed spelling this leftover exists to remove —
+    the old directory and the old suffix, remembered rather than asked for — under the same
+    rename. The round trip must fail, and fail at the session store rather than somewhere
+    incidental."""
+    tree = _session_renamed_tree(tmp_path, _SESSION_NAMES, hand_compose_store_path=True)
+    result = _round_trip(tree, tmp_path / "work", payload=_SESSION_PAYLOAD)
+    for name in _SESSION_NAMES:
+        assert _TOKEN in _loaded(result.stdout, name), (
+            f"the subprocess loaded the REAL {name} — the control renamed nothing:\n"
+            f"{result.stdout}")
+    assert result.returncode != 0, (
+        "a hand-composed store path survived the rename — this proof is not discriminating, "
+        f"so the positive case above means nothing:\n{result.stdout}")
+    assert "session store:" in result.stderr, (
+        "the round trip failed, but not at the session store:\n"
+        f"{result.stderr[-3000:]}")
