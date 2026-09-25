@@ -311,6 +311,8 @@ def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_p
     ("pyproject.toml-is-a-directory", "pyproject.toml"),
     ("uv.lock-is-not-toml", "uv.lock"),
     ("uv.lock-dependencies-is-a-string", "uv.lock"),
+    ("uv.lock-holds-a-nameless-entry-nested-deep", "uv.lock"),
+    ("uv.lock-holds-an-integer-past-the-digit-limit", "uv.lock"),
 ])
 def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
     tmp_path, monkeypatch, lane, unreadable, first_named,
@@ -325,7 +327,11 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     computed from the PARSED lock, and a parse fault is the resolver's `ImageInputError`
     naming the file, never a fallback hash of its bytes) — and so does a lock that parses but
     has the wrong SHAPE, a reached entry's `dependencies` written as a string (#1097 amendment
-    2's shape check: a `BoxFault`, never the TypeError a walk over it would raise). The
+    2's shape check: a `BoxFault`, never the TypeError a walk over it would raise) — and so
+    does whatever else raises while the read lock is parsed, checked, walked or digested
+    (#1097 amendment 3's ONE fault boundary): a `[[package]]` with no `name` nested 20000
+    tables deep (its `repr` recursed) and a 5000-digit integer in a reached entry (tomllib's
+    bare ValueError) — a `BoxFault`, never the RecursionError or ValueError. The
     message says "cannot read" for a file that is missing or a directory, "cannot use" for one
     that reads but is not usable.
 
@@ -353,6 +359,14 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
         lock = PLANTED_INPUT_BYTES["uv.lock"]
         assert lock.count(alpha_links) == 1, "the planted lock no longer spells alpha's links this way"
         (defender_dir / "uv.lock").write_bytes(lock.replace(alpha_links, b'dependencies = "beta"\n'))
+    elif unreadable == "uv.lock-holds-a-nameless-entry-nested-deep":
+        defender_dir = plant_tree(root, copy_code=False)
+        (defender_dir / "uv.lock").write_bytes(
+            PLANTED_INPUT_BYTES["uv.lock"] + b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n")
+    elif unreadable == "uv.lock-holds-an-integer-past-the-digit-limit":
+        defender_dir = plant_tree(root, copy_code=False)
+        (defender_dir / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"].replace(
+            b'name = "alpha"\nversion = "1.0.0"\n', b'name = "alpha"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n", 1))
     else:
         defender_dir = plant_tree(root, missing=("pyproject.toml",), copy_code=False)
         (defender_dir / "pyproject.toml").mkdir()
@@ -369,7 +383,8 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     assert first_named in message, message
     for later in HASH_INPUTS[HASH_INPUTS.index(first_named) + 1:]:
         assert later not in message, (later, message)
-    malformed = unreadable in ("uv.lock-is-not-toml", "uv.lock-dependencies-is-a-string")
+    malformed = unreadable.startswith("uv.lock-") and unreadable not in (
+        "uv.lock-missing", "uv.lock-and-pyproject.toml-missing")
     verb, other = ("cannot use", "cannot read") if malformed else ("cannot read", "cannot use")
     assert verb in message, (verb, message)
     assert other not in message, (other, message)

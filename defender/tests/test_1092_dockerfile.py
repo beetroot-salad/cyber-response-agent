@@ -54,12 +54,14 @@ def _index_of(instructions: list[str], needle: str) -> int:
     return hits[0]
 
 
-def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str]]:
-    """A `RUN` split into its `--mount=` options (each a `key=value` dict; a bare flag maps to
-    "") and the shell words it runs, as `shlex` splits them."""
+def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    """A `RUN` split into its `--mount=` options (each a `key=value` dict; a bare option maps
+    to ""), every OTHER `--` flag before the command, verbatim (`--network=none`, a `--mount`
+    spelled without `=`, …), and the shell words it runs, as `shlex` splits them."""
     assert instruction.startswith("RUN "), instruction
     words = shlex.split(instruction[len("RUN "):])
     mounts: list[dict[str, str]] = []
+    flags: list[str] = []
     while words and words[0].startswith("--"):
         flag = words.pop(0)
         if flag.startswith("--mount="):
@@ -68,7 +70,9 @@ def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str]]:
                 key, _, value = part.partition("=")
                 opts[key] = value
             mounts.append(opts)
-    return mounts, words
+        else:
+            flags.append(flag)
+    return mounts, flags, words
 
 
 # ---- d11 -------------------------------------------------------------------------------------
@@ -169,7 +173,7 @@ def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the
     assert "UV_COMPILE_BYTECODE=1" in sync, sync
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
 
-    _mounts, command = _run_parts(sync)
+    _mounts, _flags, command = _run_parts(sync)
     assert sorted(command[:2]) == ["UV_COMPILE_BYTECODE=1", "UV_PROJECT_ENVIRONMENT=/usr/local"], command
     assert command[2:4] == ["uv", "sync"], command
     flags = command[4:]
@@ -241,6 +245,61 @@ def test_the_recipe_runs_exactly_the_sync_the_installer_uninstall_and_the_ensure
     assert shlex.split(runs[2][len("RUN "):]) == [
         "rm", "-rf", "/usr/local/lib/python3.11/ensurepip/_bundled",
     ], runs[2]
+
+
+# ---- #1097 amendment 3: nothing outside the instructions changes what they do -------------------
+#: A BuildKit parser directive — `# syntax=`, `# escape=`, `# check=` — is a COMMENT line that
+#: changes how every line after it is read: `syntax` swaps the frontend that interprets the
+#: file, `escape` the line-continuation character. Spaces around `#` and `=` and any case are
+#: accepted by the parser, so the pattern accepts them too.
+_PARSER_DIRECTIVE = re.compile(r"^\s*#\s*(syntax|escape|check)\s*=", re.IGNORECASE | re.MULTILINE)
+
+
+def test_the_dockerfile_carries_no_parser_directive():
+    """The Dockerfile's RAW text (read directly: `_instructions()` drops comment lines, and a
+    directive IS one) has no line that is a parser directive — `# syntax=…` (a custom
+    frontend would read every instruction the other tests pin in its own way), `# escape=…`,
+    `# check=…` — in any case, with any spacing, anywhere in the file.
+
+    Positive controls, same test: the file does open with comment lines (so the check reads
+    the lines `_instructions()` never sees), and the pattern flags a directive planted at the
+    top of that same text, in each of the three names and a spaced, upper-case spelling."""
+    raw = DOCKERFILE.read_text(encoding="utf-8")
+    assert raw.splitlines()[0].startswith("#"), "the Dockerfile opens with no comment line"
+    hits = [line for line in raw.splitlines() if _PARSER_DIRECTIVE.match(line)]
+    assert hits == [], f"a parser directive: {hits}"
+    for planted in ("# syntax=docker/dockerfile:1", "#escape=`", "# check=skip=all", "#  SYNTAX = x/y"):
+        assert _PARSER_DIRECTIVE.search(planted + "\n" + raw), f"the pattern misses {planted!r}"
+
+
+def test_the_sync_run_carries_exactly_the_pinned_uv_mount_and_the_other_runs_carry_no_flag():
+    """The sync's `RUN` carries exactly ONE `--mount`, and it is the pinned uv bind — the
+    option SET `type=bind`, `from=ghcr.io/astral-sh/uv:<x.y.z>@sha256:<64 hex>`,
+    `source=/uv`, `target=/bin/uv`, in any order, and nothing else (no `readonly`, no `rw`) —
+    and no other flag before its command: no `--network`, no second mount, no tmpfs, cache or
+    secret mount, no `--security`. The uninstall's `RUN` and the ensurepip removal's `RUN`
+    carry no flag at all. A flag on a `RUN` changes what that step can reach while its command
+    text stays word for word.
+
+    Positive control: `_run_parts` is not blind to flags — over a planted `RUN` carrying a
+    `--network=none`, a tmpfs mount and a cache mount it returns both mounts and the flag."""
+    planted = _run_parts("RUN --network=none --mount=type=tmpfs,target=/x --mount=type=cache,target=/c true")
+    assert planted == ([{"type": "tmpfs", "target": "/x"}, {"type": "cache", "target": "/c"}], ["--network=none"], ["true"]), planted
+
+    runs = [ins for ins in _instructions() if ins.startswith("RUN ")]
+    assert len(runs) == 3, runs
+    sync_at = _index_of(runs, "uv sync")
+    assert sync_at == 0, runs
+    mounts, flags, _command = _run_parts(runs[sync_at])
+    assert flags == [], f"the sync carries a flag besides its mount: {flags}"
+    assert len(mounts) == 1, mounts
+    (mount,) = mounts
+    assert set(mount) == {"type", "from", "source", "target"}, mount
+    assert mount["type"] == "bind", mount
+    assert re.fullmatch(r"ghcr\.io/astral-sh/uv:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", mount["from"]), mount
+    assert (mount["source"], mount["target"]) == ("/uv", "/bin/uv"), mount
+    for other in runs[1:]:
+        assert _run_parts(other)[:2] == ([], []), f"a flag on a step that needs none: {other}"
 
 
 # ---- d16 -------------------------------------------------------------------------------------

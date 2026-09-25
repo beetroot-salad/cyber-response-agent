@@ -17,11 +17,23 @@ use — a malformed entry or link, a value the canonical form cannot encode — 
 `ImageInputError` naming the file and saying "cannot use"; an unreadable file says "cannot
 read".
 
+Design amendment 3 (M1‴): the digest also covers `pyproject.toml`'s `[project].dependencies`
+and `[project].optional-dependencies.box` AS WRITTEN (lists of requirement strings; absent ->
+`[]`; anything else is `ImageInputError` naming `pyproject.toml`), so a core or `box`
+requirement edited without a relock renames the image and the build's `--locked` sync fails
+loudly (the `dev`/`runtime` lists stay out). Everything after the three reads — parse, shape
+check, walk, digest — is ONE fault boundary: any exception there is `ImageInputError`
+("cannot use") naming the file being processed. Every list inside a hashed value is sorted by
+its canonical encoding, so no list ORDER renames. And the root is not special once reached: a
+link that reaches the root entry walks and hashes it like any other entry, all its optional
+lists included. `box_closure` normalises the `root_name` it is given (PEP 503).
+
 O1: an edit that cannot change the image does not rename it — `[tool.*]` other than
 `[tool.uv]`, the root's `dev`/`runtime` extras and their lock entries, comments, reordering
-and reformatting the lock. O2: an edit to a closure entry (version, source, an artifact hash,
-its own links and optional lists), to an entry reached only through a closure entry's
-unrequested extra, to the closure's roots, to `[tool.uv]`, or to the recipe's bytes renames it.
+and reformatting the lock, reordering any list in a hashed value. O2: an edit to a closure
+entry (version, source, an artifact hash, its own links and optional lists), to an entry
+reached only through a closure entry's unrequested extra, to the closure's roots, to the core
+or `box` requirement strings, to `[tool.uv]`, or to the recipe's bytes renames it.
 
 Real inputs through the real primitive: every tree is planted from well-formed TOML text
 (`_spec1092.PLANTED_LOCK`, or a copy of THIS checkout's `uv.lock`/`pyproject.toml`) and the
@@ -69,7 +81,9 @@ PLANTED_CLOSURE = sorted([
     ("winonly", "9.0.0"),
 ])
 #: In the planted lock and outside the closure: devtool/devdep are the ROOT's `dev` extra's,
-#: rtlib is its `runtime` extra's — the root's optional lists other than `box` are not walked.
+#: rtlib is its `runtime` extra's — of the root's optional lists only `box` is walked FROM the
+#: root; nothing in the planted lock links back to the root, so they stay out (amendment 3: a
+#: link that did reach the root would walk them too).
 PLANTED_OUTSIDE = ("devdep", "devtool", "rtlib")
 
 #: This checkout's core + `box` closure today (#1097 item 2). A relock that moves it moves this
@@ -199,6 +213,40 @@ def _append(path: list, item) -> Callable[[dict], None]:
     return lambda lock: _walk_to(lock, path)[path[-1]].append(copy.deepcopy(item))
 
 
+def _reverse(path: list, version: str | None = None) -> Callable[[dict], None]:
+    """An edit reversing the list at `path` (entry name — at `version`, when split — then
+    keys). The list must hold two or more DIFFERENT items, or the edit would change nothing."""
+    def fn(lock: dict) -> None:
+        node = _entry(lock, path[0], version)
+        for step in path[1:-1]:
+            node = node[step]
+        target = node[path[-1]]
+        assert target != target[::-1], f"reversing {path} changes nothing: {target}"
+        target.reverse()
+    return fn
+
+
+def _reverse_every_list(node) -> None:
+    """Every list at every depth of `node` reversed in place — entries, links, wheels,
+    resolution-markers, metadata rows, the lot."""
+    if isinstance(node, dict):
+        for value in node.values():
+            _reverse_every_list(value)
+    elif isinstance(node, list):
+        node.reverse()
+        for value in node:
+            _reverse_every_list(value)
+
+
+def _two_wheels(lock: dict) -> None:
+    """`alpha` gains a second wheel (a manylinux build beside its `py3-none-any`), so its
+    `wheels` list has an order to change."""
+    wheel = dict(_entry(lock, "alpha")["wheels"][0])
+    wheel["url"] = wheel["url"].replace("py3-none-any", "cp311-cp311-manylinux_2_17_x86_64")
+    wheel["hash"] = "sha256:" + "5a" * 32
+    _entry(lock, "alpha")["wheels"].append(wheel)
+
+
 def _flip_artifact(name: str, artifact: str, version: str | None = None) -> Callable[[dict], None]:
     """An edit changing one byte of an entry's sdist hash, or of its first wheel's."""
     def fn(lock: dict) -> None:
@@ -245,9 +293,11 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
     ignored); `eta` and `delta`, the targets of beta's `speed` and gamma's `fast` lists; and
     `epsilon`, the target of beta's `docs` and gamma's `slow` — extras NO link asks for, walked
     because every list under a reached entry's `optional-dependencies` is (amendment 2, M1″).
-    The root is the one exception: of its optional lists only `box` is walked, so the `dev` and
-    `runtime` extras' entries (devtool, devdep, rtlib) stay out, and the root itself is not
-    returned. The `eta -> alpha` cycle ends the walk rather than looping it.
+    FROM the root only `dependencies` + `box` are taken, and nothing in the planted lock links
+    back to the root, so the `dev` and `runtime` extras' entries (devtool, devdep, rtlib) stay
+    out and the root itself is not returned (a lock whose link DOES reach the root is
+    `test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry`'s). The
+    `eta -> alpha` cycle ends the walk rather than looping it.
 
     Nothing on a link but its `name` is read. A link's `version` does not narrow it: with the
     root's two `split` links replaced by ONE transitive link carrying `version = "1.0.0"`, both
@@ -344,11 +394,12 @@ def test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_
 # ---- O1: what does NOT rename the image --------------------------------------------------------
 def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     """Over the planted tree, none of these renames the image: in `pyproject.toml` a
-    `[tool.ruff]` or `[tool.mypy]` edit, a comment, the `dev` or `runtime` extra changing, and a
-    core or `box` requirement edited WITHOUT a relock (the key flow: the name holds, and every
-    `--locked` build fails with uv's sentence instead); in `uv.lock` a version or artifact-hash
-    change to an entry outside the closure (the dev tool, its dependency, the runtime library —
-    the ROOT's `dev`/`runtime` extras are the one set of optional lists the walk never takes),
+    `[tool.ruff]` or `[tool.mypy]` edit, a comment, and the `dev` or `runtime` extra changing
+    without a relock (amendment 3 moved a CORE or `box` requirement edited without a relock to
+    the renaming side — `test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image`);
+    in `uv.lock` a version or artifact-hash change to an entry outside the closure (the dev
+    tool, its dependency, the runtime library — the ROOT's `dev`/`runtime` extras are never
+    taken FROM the root, and nothing in the planted lock links back to it),
     a dev-extra relock that adds an entry, a link under the root's `optional-dependencies.dev`
     and a `requires-dist` row, and a runtime-extra relock that links the root's `runtime` list to
     an entry outside the closure; and a file outside the three inputs.
@@ -386,8 +437,6 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         "a pyproject comment": {"pyproject": "# a comment\n" + PLANTED_PYPROJECT},
         "the dev extra, unlocked": {"pyproject": pyproject_edit('dev = ["devtool"]', 'dev = ["devtool", "newdev"]')},
         "the runtime extra, unlocked": {"pyproject": pyproject_edit('runtime = ["rtlib"]', 'runtime = ["rtlib>=8"]')},
-        "a core requirement, unlocked": {"pyproject": pyproject_edit('"split",\n', '"split",\n    "requests>=2",\n')},
-        "the box requirement, unlocked": {"pyproject": pyproject_edit('box = ["gamma[fast]"]', 'box = ["gamma[fast]>=3"]')},
         "the dev tool's entry": {"lock": _lock_edit(bump("devtool", "7.0.1"))},
         "the dev tool's dependency": {"lock": _lock_edit(bump("devdep", "0.1.1"))},
         "the runtime library's entry": {"lock": _lock_edit(bump("rtlib", "8.0.1"))},
@@ -459,6 +508,91 @@ def test_reordering_or_reformatting_the_lock_does_not_rename_the_image(tmp_path)
         assert image_tag(tree) != baseline, f"{what}: the positive control did not rename"
 
 
+def test_reordering_a_list_inside_a_hashed_value_does_not_rename_the_image(tmp_path):
+    """Amendment 3, M1‴ (c): every list inside a hashed value is sorted by its canonical
+    encoding before hashing, so no list ORDER renames the image — none of them changes what the
+    sync installs. Each of these holds the name, over a lock that is otherwise the same: a
+    closure entry's `dependencies` reversed (alpha's two links); its `wheels` reversed (alpha
+    with a second wheel); one of its optional lists reversed (gamma's `slow` with a second link);
+    the root's `dependencies` reversed (its three links) and its `box` links reversed (with a
+    second `box` link); an entry's `resolution-markers` reversed (`split` 1.0.0 with a second
+    marker); EVERY list at every depth of the lock reversed at once; and in `pyproject.toml` the
+    core requirements reordered and the `box` requirements reordered (with a second one).
+
+    Positive control under each reordering, same tree: a version or one artifact-hash byte of
+    an entry in the closure — or, for the requirement lists, one requirement's specifier —
+    still renames the image. A list only has an order to change when it holds two different
+    items, so each baseline that needs one grows it first (`_reverse` refuses a no-op)."""
+    def two_slow(lock: dict) -> None:
+        _append(["gamma", "optional-dependencies", "slow"], {"name": "devdep"})(lock)
+
+    def two_box(lock: dict) -> None:
+        _append([ROOT, "optional-dependencies", "box"], {"name": "delta"})(lock)
+
+    def two_markers(lock: dict) -> None:
+        _entry(lock, "split", "1.0.0")["resolution-markers"].append("sys_platform == 'linux'")
+
+    def every_base(lock: dict) -> None:
+        for fn in (_two_wheels, two_slow, two_box, two_markers):
+            fn(lock)
+
+    def every_list(lock: dict) -> None:
+        before = copy.deepcopy(lock)
+        _reverse_every_list(lock)
+        assert lock != before, "reversing every list changed nothing"
+
+    # case -> (the edit that gives the baseline lists an order, the reordering, the control)
+    lock_cases: dict[str, tuple[Callable[[dict], None] | None, Callable[[dict], None], Callable[[dict], None]]] = {
+        "a closure entry's dependencies reversed": (
+            None, _reverse(["alpha", "dependencies"]), _set(["alpha", "version"], "1.0.1")),
+        "a closure entry's wheels reversed": (
+            _two_wheels, _reverse(["alpha", "wheels"]), _flip_artifact("alpha", "wheel")),
+        "a closure entry's optional list reversed": (
+            two_slow, _reverse(["gamma", "optional-dependencies", "slow"]), _set(["epsilon", "version"], "5.0.1")),
+        "the root's dependencies reversed": (
+            None, _reverse([ROOT, "dependencies"]), _flip_artifact("split", "wheel", "2.0.0")),
+        "the root's box links reversed": (
+            two_box, _reverse([ROOT, "optional-dependencies", "box"]), _flip_artifact("delta", "wheel")),
+        "an entry's resolution-markers reversed": (
+            two_markers, _reverse(["split", "resolution-markers"], "1.0.0"), _flip_artifact("split", "sdist", "1.0.0")),
+        "every list in the lock reversed at once": (
+            every_base, every_list, _flip_artifact("alpha", "sdist")),
+    }
+    for i, (what, (base_edit, reorder, control)) in enumerate(lock_cases.items()):
+        base = _lock_edit(base_edit or (lambda lock: None))
+        reordered = copy.deepcopy(base)
+        reorder(reordered)
+        assert reordered != base, f"{what}: the reordering changed nothing"
+        controlled = copy.deepcopy(reordered)
+        control(controlled)
+        before = image_tag(_plant(tmp_path, f"lock-{i}-base", lock=base))
+        assert image_tag(_plant(tmp_path, f"lock-{i}-reordered", lock=reordered)) == before, f"{what} renamed the image"
+        assert image_tag(_plant(tmp_path, f"lock-{i}-control", lock=controlled)) != before, (
+            f"{what}: the positive control did not rename")
+
+    core = '    "alpha>=1",\n    "split",\n'
+    two_box_reqs = _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma[fast]", "delta"]')
+    manifest_cases: dict[str, tuple[str, str, str]] = {
+        # case -> (the baseline manifest, the reordered one, the reordered one with a specifier moved)
+        "the core requirements reordered": (
+            PLANTED_PYPROJECT,
+            _replace_once(PLANTED_PYPROJECT, core, '    "split",\n    "alpha>=1",\n'),
+            _replace_once(PLANTED_PYPROJECT, core, '    "split",\n    "alpha>=2",\n'),
+        ),
+        "the box requirements reordered": (
+            two_box_reqs,
+            _replace_once(two_box_reqs, '["gamma[fast]", "delta"]', '["delta", "gamma[fast]"]'),
+            _replace_once(two_box_reqs, '["gamma[fast]", "delta"]', '["delta", "gamma[fast]>=3"]'),
+        ),
+    }
+    for i, (what, (base_text, reordered_text, control_text)) in enumerate(manifest_cases.items()):
+        before = image_tag(_plant(tmp_path, f"manifest-{i}-base", pyproject=base_text))
+        assert image_tag(_plant(tmp_path, f"manifest-{i}-reordered", pyproject=reordered_text)) == before, (
+            f"{what} renamed the image")
+        assert image_tag(_plant(tmp_path, f"manifest-{i}-control", pyproject=control_text)) != before, (
+            f"{what}: the positive control did not rename")
+
+
 # ---- O2: what DOES rename the image ------------------------------------------------------------
 def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image(tmp_path):
     """Each of these renames the image — `defender-box:v2-` stays, the 12 hex move, and no two
@@ -472,8 +606,16 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     reached entry, so it is in the hashed superset); the root's `dependencies` gaining a link to
     an already-reached entry, a `box` link gaining a marker (the closure's entries unchanged:
     the ROOTS moved), a `box` link asking for another extra, and `box` gaining a link;
-    `[tool.uv]` changing a value, gaining a key, or losing its only key; and one byte of
-    `box.Dockerfile`.
+    `[tool.uv]` changing a value, gaining a key, or losing its only key; one byte of
+    `box.Dockerfile`; and — amendment 3, M1‴ (a) — `pyproject.toml`'s core or `box`
+    requirements edited WITHOUT a relock: a core requirement added, one dropped, one's
+    specifier changed, the `box` requirement's specifier changed, a `box` requirement added
+    (the lock untouched in each: the rename is what sends the next box start to the build,
+    whose `--locked` sync then fails loudly instead of the old name silently holding).
+
+    Both requirement lists read absent as `[]`: no `dependencies` key names the same image as
+    `dependencies = []`, and no `box` key — or no `[project.optional-dependencies]` table at
+    all — the same as `box = []`; each differs from the planted tree's name.
 
     The walk through unrequested extras is transitive and needs no link to ask: with gamma's
     `slow` list also naming `devdep`, a bump of devdep (reached ONLY that way) renames; and with
@@ -520,6 +662,12 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         # without touching the lock (#1097 round-2 adversary H4).
         "[tool.uv] list key": _replace_once(PLANTED_PYPROJECT, "package = false\n", 'package = false\nno-binary-package = ["gamma"]\n'),
         "[tool.uv] nested table": PLANTED_PYPROJECT + "\n[tool.uv.pip]\nno-build = true\n",
+        # Amendment 3, M1‴ (a): the core and `box` requirement lists as written, lock untouched.
+        "a core requirement, unlocked": _replace_once(PLANTED_PYPROJECT, '"split",\n', '"split",\n    "requests>=2",\n'),
+        "a core requirement dropped, unlocked": _replace_once(PLANTED_PYPROJECT, '    "split",\n', ""),
+        "a core requirement's specifier, unlocked": _replace_once(PLANTED_PYPROJECT, '"alpha>=1"', '"alpha>=2"'),
+        "the box requirement, unlocked": _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma[fast]>=3"]'),
+        "a box requirement added, unlocked": _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma[fast]", "delta"]'),
     }
     moved: dict[str, str] = {}
     for i, (what, fn) in enumerate(lock_edits.items()):
@@ -539,15 +687,25 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     absent = image_tag(_plant(tmp_path, "tool-uv-absent", pyproject=no_tool_uv))
     assert absent == moved["[tool.uv] emptied"], "an absent [tool.uv] is not read as {}"
 
+    # The two requirement lists read absent as [] (amendment 3, M1‴ (a)).
+    core_block = 'dependencies = [\n    "alpha>=1",\n    "split",\n]\n'
+    no_core = image_tag(_plant(tmp_path, "core-absent", pyproject=_replace_once(PLANTED_PYPROJECT, core_block, "")))
+    empty_core = image_tag(_plant(tmp_path, "core-empty", pyproject=_replace_once(
+        PLANTED_PYPROJECT, core_block, "dependencies = []\n")))
+    assert no_core == empty_core, "an absent [project].dependencies is not read as []"
+    assert no_core != baseline, "the core requirement list is not digested"
+    box_line = 'box = ["gamma[fast]"]\n'
+    empty_box = image_tag(_plant(tmp_path, "box-empty", pyproject=_replace_once(PLANTED_PYPROJECT, box_line, "box = []\n")))
+    no_box = image_tag(_plant(tmp_path, "box-absent", pyproject=_replace_once(PLANTED_PYPROJECT, box_line, "")))
+    no_table = image_tag(_plant(tmp_path, "optional-absent", pyproject=_replace_once(
+        PLANTED_PYPROJECT, '[project.optional-dependencies]\nbox = ["gamma[fast]"]\ndev = ["devtool"]\nruntime = ["rtlib"]\n\n', "")))
+    assert no_box == empty_box == no_table, "an absent box requirement list is not read as []"
+    assert empty_box != baseline, "the box requirement list is not digested"
+
     # EVERY wheel's hash is digested, not the first: over an entry carrying two wheels, one
     # byte of the second moves the name (#1097 round-2 adversary H1 — the image's own
     # manylinux wheel is rarely wheels[0]).
-    def two_wheels(lock: dict) -> None:
-        wheel = dict(_entry(lock, "alpha")["wheels"][0])
-        wheel["url"] = wheel["url"].replace("py3-none-any", "cp311-cp311-manylinux_2_17_x86_64")
-        wheel["hash"] = "sha256:" + "5a" * 32
-        _entry(lock, "alpha")["wheels"].append(wheel)
-    two = _lock_edit(two_wheels)
+    two = _lock_edit(_two_wheels)
     second_flipped = copy.deepcopy(two)
     wheel = _entry(second_flipped, "alpha")["wheels"][1]
     wheel["hash"] = _flip_hex(wheel["hash"])
@@ -635,13 +793,16 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
     version and one sdist-hash byte), a dev-extra edge dropped from the root, the lock's
     entries in reverse order with a comment, the whole lock re-spelled (every key reversed,
     one-line arrays), a `[tool.mypy]`/`[tool.ruff.lint]` key and a dev requirement added to
-    `pyproject.toml` — none renames the image (the key flow "a pytest bump plus relock: the
-    name holds"). A pydantic bump, one wheel-hash byte of pydantic-core, a typing-inspection
-    bump (reached only through pydantic), one sdist-hash byte of duckdb (`box`'s), a second
-    `box` edge, and `[tool.uv]`'s `package` flipped each rename it — and so does a dnspython
-    or an idna bump, packages the image does NOT install, reached only through pydantic's
-    unrequested `email` extra (amendment 2's recorded superset cost: a relock bumping them
-    renames the image; it never goes stale)."""
+    `pyproject.toml`, and the core requirements reordered (amendment 3's order-free form) —
+    none renames the image (the key flow "a pytest bump plus relock: the name holds"). A
+    pydantic bump, one wheel-hash byte of pydantic-core, a typing-inspection bump (reached only
+    through pydantic), one sdist-hash byte of duckdb (`box`'s), a second `box` edge, and
+    `[tool.uv]`'s `package` flipped each rename it — and so does a dnspython or an idna bump,
+    packages the image does NOT install, reached only through pydantic's unrequested `email`
+    extra (amendment 2's recorded superset cost: a relock bumping them renames the image; it
+    never goes stale) — and, amendment 3, a core requirement added to `pyproject.toml` or the
+    `box` requirement's specifier changed, each WITHOUT a relock (the next box start is sent
+    to the build, whose `--locked` sync fails loudly)."""
     lock_text = (DEFENDER / "uv.lock").read_text(encoding="utf-8")
     pyproject_text = (DEFENDER / "pyproject.toml").read_text(encoding="utf-8")
     lock = tomllib.loads(lock_text)
@@ -687,6 +848,9 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
         "a [tool.mypy] key": {"manifest": _replace_once(pyproject_text, "[tool.mypy]\n", "[tool.mypy]\nplanted_1097 = true\n")},
         "a [tool.ruff.lint] key": {"manifest": _replace_once(pyproject_text, "[tool.ruff.lint]\n", "[tool.ruff.lint]\nplanted-1097 = 1\n")},
         "a dev requirement, unlocked": {"manifest": _replace_once(pyproject_text, 'dev = [\n', 'dev = [\n    "planted-1097",\n')},
+        "the core requirements reordered": {"manifest": _replace_once(
+            _replace_once(pyproject_text, '    "pyyaml>=6.0",\n', ""),
+            '    "typing-extensions>=4.12",\n]\n', '    "typing-extensions>=4.12",\n    "pyyaml>=6.0",\n]\n')},
     }
     for i, (what, edit) in enumerate(holding.items()):
         assert tree(f"hold-{i}", **edit) == baseline, f"{what} renamed the image"
@@ -704,6 +868,10 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
         "a second box edge": {"lock_bytes": _replace_once(
             lock_text, 'box = [\n    { name = "duckdb" },\n]', 'box = [\n    { name = "duckdb" },\n    { name = "pyyaml" },\n]')},
         "[tool.uv] package": {"manifest": _replace_once(pyproject_text, "package = false", "package = true")},
+        "a core requirement, unlocked": {"manifest": _replace_once(
+            pyproject_text, 'dependencies = [\n', 'dependencies = [\n    "planted-1097",\n')},
+        "the box requirement, unlocked": {"manifest": _replace_once(
+            pyproject_text, 'box = [\n    "duckdb>=1.5,<2",\n]', 'box = [\n    "duckdb>=1.5,<3",\n]')},
     }
     for i, (what, edit) in enumerate(moving.items()):
         assert tree(f"move-{i}", **edit) != baseline, f"{what} did not rename the image"
@@ -752,6 +920,78 @@ def test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names(tmp
     assert "pyproject.toml" not in message, message
 
 
+def test_box_closure_normalises_the_root_name_it_is_given():
+    """Amendment 3, M1‴ (e): `box_closure(lock, root_name)` normalises `root_name` itself
+    (PEP 503), so a direct caller need not: over the planted lock `"Planted"` and `"PLANTED"`
+    return exactly what `"planted"` returns, and over a lock whose root entry is `planted-x`,
+    `"planted_x"`, `"Planted.X"` and `"planted-_.x"` return exactly what `"planted-x"` returns
+    (the planted closure, the root not in it).
+
+    Positive control — normalising is not matching loosely: `"plantedx"` over that lock still
+    raises the walk's missing-entry `KeyError` naming it."""
+    planted = box_closure(copy.deepcopy(BASE_LOCK), ROOT)
+    assert _names(planted) == PLANTED_CLOSURE, _names(planted)
+    for spelling in ("Planted", "PLANTED"):
+        assert box_closure(copy.deepcopy(BASE_LOCK), spelling) == planted, spelling
+
+    lock_x = _lock_edit(_renamed_root("planted-x"))
+    base_x = box_closure(copy.deepcopy(lock_x), "planted-x")
+    assert _names(base_x) == PLANTED_CLOSURE, _names(base_x)
+    for spelling in ("planted_x", "Planted.X", "planted-_.x"):
+        assert box_closure(copy.deepcopy(lock_x), spelling) == base_x, spelling
+
+    with pytest.raises(KeyError) as e:
+        box_closure(copy.deepcopy(lock_x), "plantedx")
+    assert "plantedx" in str(e.value), str(e.value)
+
+
+def _links_to_the_root(lock: dict) -> None:
+    """`alpha` (a closure entry) gains a link back to the root, asking for its `runtime` extra —
+    the shape of a `defender[runtime]` link."""
+    _append(["alpha", "dependencies"], {"name": ROOT, "extra": ["runtime"]})(lock)
+
+
+def test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry(tmp_path):
+    """Amendment 3, M1‴ (d): the root is not special once reached. Over a lock where `alpha`
+    links `{ name = "planted", extra = ["runtime"] }`, `box_closure` returns the root entry
+    itself (the lock's own dict) AND the targets of EVERY one of its optional lists — rtlib
+    (`runtime`), devtool (`dev`) and devdep (devtool's) — beside the planted closure; the same
+    link with no `extra` returns the same entries (a link's `extra` is never read). Under that
+    lock a bump to rtlib, and a bump to devdep, each rename the image.
+
+    Negative control, same test: over the planted lock (no link reaches the root) none of
+    those is in the closure and the rtlib bump holds the name."""
+    reached = _lock_edit(_links_to_the_root)
+    got = box_closure(copy.deepcopy(reached), ROOT)
+    root_entry = _entry(reached, ROOT)
+    assert root_entry in got, "a root reached by a link is not in the closure"
+    assert _names(got) == sorted([*PLANTED_CLOSURE, ("devdep", "0.1.0"), ("devtool", "7.0.0"),
+                                  (ROOT, "0.0.0"), ("rtlib", "8.0.0")]), _names(got)
+    for entry in got:
+        assert entry in reached["package"], f"not the lock's own entry: {entry['name']}"
+
+    bare = _lock_edit(lambda lock: _append(["alpha", "dependencies"], {"name": ROOT})(lock))
+    assert _names(box_closure(bare, ROOT)) == _names(got), "a link's extra changed what the root reaches"
+
+    unreached = {name for name, _ in _names(box_closure(copy.deepcopy(BASE_LOCK), ROOT))}
+    assert not unreached & {ROOT, "rtlib", "devtool", "devdep"}, sorted(unreached)
+
+    def bumped(lock: dict, name: str, version: str) -> dict:
+        out = copy.deepcopy(lock)
+        _entry(out, name)["version"] = version
+        return out
+
+    base = image_tag(_plant(tmp_path, "reached", lock=reached))
+    assert image_tag(_plant(tmp_path, "reached-rtlib", lock=bumped(reached, "rtlib", "8.0.1"))) != base, (
+        "rtlib, behind the reached root's runtime list, did not rename")
+    assert image_tag(_plant(tmp_path, "reached-devdep", lock=bumped(reached, "devdep", "0.1.1"))) != base, (
+        "devdep, behind the reached root's dev list, did not rename")
+
+    planted = image_tag(_plant(tmp_path, "planted"))
+    assert image_tag(_plant(tmp_path, "planted-rtlib", lock=bumped(BASE_LOCK, "rtlib", "8.0.1"))) == planted, (
+        "rtlib renamed the image with no link reaching the root")
+
+
 # ---- faults: never a fallback name --------------------------------------------------------------
 READ, USE = "cannot read", "cannot use"
 
@@ -765,6 +1005,23 @@ def _deep_header(table: str, depth: int = 20_000) -> str:
     headers without recursion) into a value nested far past what `json` can encode, the
     canonical form's own recursion limit."""
     return f"\n[{table}." + ".".join(["x"] * depth) + "]\nb = 1\n"
+
+
+#: An integer literal past CPython's 4300-digit int<->str limit: tomllib's `int()` raises a
+#: bare ValueError PARSING it (claim d1). The hex spelling parses (a power-of-two base has no
+#: limit) but cannot be turned back into decimal — its `repr` and any encoder raise instead.
+_BIG_INT = "1" * 5000
+_BIG_HEX = "0x" + "f" * 4000
+
+
+def _with_key(entry: str, key: str) -> str:
+    """The planted lock with `key` added right after `entry`'s `name`/`version` lines."""
+    head = f'name = "{entry}"\nversion = "{_entry(BASE_LOCK, entry)["version"]}"\n'
+    return _replace_once(PLANTED_LOCK, head, head + key + "\n")
+
+
+def _in_tool_uv(line: str) -> str:
+    return _replace_once(PLANTED_PYPROJECT, "package = false\n", f"package = false\n{line}\n")
 
 
 def _write_lock(fn: Callable[[dict], None]) -> Callable[[Path], None]:
@@ -837,6 +1094,40 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         "pyproject.toml", PLANTED_PYPROJECT + _deep_header("tool.uv"))),
     "a reached lock entry nested 20000 tables deep": ("uv.lock", USE, None, None, _write(
         "uv.lock", PLANTED_LOCK + _deep_header("package"))),   # the last [[package]]: winonly
+    # -- amendment 3, M1‴ (b): ONE fault boundary after the reads — any exception while
+    #    parsing, checking, walking or digesting names the file being processed, "cannot use"
+    #    (the /code-review round-3 reproductions, and one per stage) --
+    "a nameless entry nested 20000 tables deep": ("uv.lock", USE, None, None, _write(
+        "uv.lock", PLANTED_LOCK + "\n[[package]]" + _deep_header("package"))),   # its repr recursed
+    "a nameless entry holding a hex integer past the digit limit": ("uv.lock", USE, None, None, _write(
+        "uv.lock", PLANTED_LOCK + f"\n[[package]]\nx = {_BIG_HEX}\n")),        # its repr cannot be decimal
+    "a 5000-digit integer in [tool.uv]": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _in_tool_uv(f"x = {_BIG_INT}"))),
+    "a 5000-digit integer in a reached lock entry": ("uv.lock", USE, None, None, _write(
+        "uv.lock", _with_key("alpha", f"x = {_BIG_INT}"))),
+    "a 5000-digit integer in an unreached lock entry": ("uv.lock", USE, None, None, _write(
+        "uv.lock", _with_key("devtool", f"x = {_BIG_INT}"))),
+    "a hex integer past the digit limit in [tool.uv]": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _in_tool_uv(f"x = {_BIG_HEX}"))),
+    "a hex integer past the digit limit in a reached lock entry": ("uv.lock", USE, None, None, _write(
+        "uv.lock", _with_key("alpha", f"x = {_BIG_HEX}"))),
+    # -- amendment 3, M1‴ (a): the two requirement lists are lists of strings --
+    "[project].dependencies is a string": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(
+            PLANTED_PYPROJECT, 'dependencies = [\n    "alpha>=1",\n    "split",\n]\n', 'dependencies = "alpha>=1"\n'))),
+    "a core requirement is an integer": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(PLANTED_PYPROJECT, '    "split",\n', '    "split",\n    1,\n'))),
+    "a core requirement is a table": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(PLANTED_PYPROJECT, '    "split",\n', '    { name = "split" },\n'))),
+    "the box requirement list is a string": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = "gamma[fast]"'))),
+    "a box requirement is an integer": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma[fast]", 3]'))),
+    "[project].optional-dependencies is a string": ("pyproject.toml", USE, None, None, _write(
+        "pyproject.toml", _replace_once(
+            PLANTED_PYPROJECT,
+            '[project.optional-dependencies]\nbox = ["gamma[fast]"]\ndev = ["devtool"]\nruntime = ["rtlib"]\n',
+            "").replace('requires-python = ">=3.11"\n', 'requires-python = ">=3.11"\noptional-dependencies = "box"\n', 1))),
 }
 
 
@@ -861,7 +1152,20 @@ def test_a_tree_the_resolver_cannot_read_parse_or_walk_raises_image_input_error_
         is not a table;
       - a value the canonical form cannot encode — `[tool.uv]` nested 2000 arrays or 20000
         tables deep, a reached lock entry nested 20000 tables deep — naming the file it came
-        from.
+        from;
+      - amendment 3's ONE fault boundary (M1‴ (b)): whatever raises while the read bytes are
+        parsed, checked, walked or digested is `ImageInputError` naming the file being
+        processed — the /code-review round-3 reproductions: a `[[package]]` entry with no
+        `name` whose body is a table 20000 deep (the shape fault's own `repr` of it recursed),
+        a 5000-digit integer literal (tomllib raises a bare ValueError parsing it) in
+        `[tool.uv]`, in a reached lock entry and in an UNREACHED one; and one per later stage:
+        a nameless entry holding a hex integer too long to print in decimal (its `repr`
+        raises), the same hex integer in `[tool.uv]` and in a reached entry (the encoder
+        raises);
+      - amendment 3's requirement lists (M1‴ (a)): `[project].dependencies` a string, a core
+        requirement an integer or a table, `optional-dependencies.box` a string, a `box`
+        requirement an integer, `[project].optional-dependencies` itself a string — each
+        naming `pyproject.toml`.
 
     Positive control, same test: the complete tree names an image. The resolver's constants
     are pinned exactly: `HASH_INPUTS` is the three files in read order, `RECIPE_VERSION` is

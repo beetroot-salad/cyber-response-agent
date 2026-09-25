@@ -103,8 +103,10 @@ EXEC_TIMEOUT = 60.0
 #:     the walk ignores); beta's and gamma's optional lists are ALL walked — `speed`/`fast`
 #:     (-> eta, delta) and the `docs`/`slow` nobody asks for (both -> epsilon, the superset);
 #:   - `eta -> alpha` closes a cycle;
-#:   - devtool (+ devdep) and rtlib are the ROOT's `dev` and `runtime` extras' — the root's
-#:     optional lists other than `box` are not walked, so they stay outside the closure.
+#:   - devtool (+ devdep) and rtlib are the ROOT's `dev` and `runtime` extras' — from the root
+#:     only `dependencies` + `box` are taken, and nothing here links back to the root, so they
+#:     stay outside the closure (amendment 3: a link that reached the root would walk its every
+#:     optional list, as for any entry).
 PLANTED_LOCK = """\
 version = 1
 revision = 3

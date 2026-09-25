@@ -238,6 +238,11 @@ _UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
     "a link with no name": (_ALPHA_BETA_LINK, b'{ extra = ["speed"] }'),
     "dependencies a string": (_ALPHA_LINKS, b'dependencies = "beta"\n'),
     "a value nested past the encoder": (b"", b"\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
+    # #1097 amendment 3's ONE fault boundary (the /code-review round-3 reproductions): a
+    # nameless entry whose body is 20000 tables deep (the shape fault's `repr` of it recursed),
+    # and a 5000-digit integer in an entry nothing reaches (tomllib's bare ValueError).
+    "a nameless entry nested past repr": (b"", b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
+    "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
 }
 
 
@@ -248,7 +253,9 @@ def test_box_image_reports_a_lock_it_cannot_use_in_the_resolvers_words_and_exits
     computed from the PARSED lock), a reached entry's link with no `name`, a reached entry's
     `dependencies` written as a string, a reached entry nested 20000 tables deep (#1097
     amendment 2: the shape check at the parse seam, and a value the canonical form cannot
-    encode) — `tag` and `build` print ONE line on stderr naming `<tree>/defender` and `uv.lock`
+    encode), a `[[package]]` with no `name` nested 20000 tables deep and a 5000-digit integer
+    in an entry nothing reaches (amendment 3's one fault boundary: whatever raises after the
+    reads is the resolver's fault naming the file) — `tag` and `build` print ONE line on stderr naming `<tree>/defender` and `uv.lock`
     and saying "cannot use" — the resolver's `ImageInputError`, never a traceback — print
     nothing on stdout, exit 1, and `build` never invokes `docker`. Positive control: the same
     tree, before the lock is broken, prints its name and exits 0."""
