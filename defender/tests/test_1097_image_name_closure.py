@@ -275,6 +275,12 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
     narrowed = _lock_edit(one_versioned_link)
     assert _names(box_closure(narrowed, ROOT)) == PLANTED_CLOSURE, "a link's version narrowed the walk"
 
+    # Nor a link's `source`: one that matches no entry's still reaches them all (#1097
+    # round-3 adversary H7 — a source filter dropped alpha's whole subtree).
+    def foreign_source(lock: dict) -> None:
+        _entry(lock, ROOT)["dependencies"][0]["source"] = {"registry": "https://pypi.org/simple/"}
+    assert _names(box_closure(_lock_edit(foreign_source), ROOT)) == PLANTED_CLOSURE, "a link's source narrowed the walk"
+
     for what, fn in (("no link carries an extra", _strip_extras),
                      ("every extra names nothing", _foreign_extras)):
         edited = _lock_edit(fn)
@@ -391,6 +397,13 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         # project itself (its own version, in pyproject and on the root entry): neither is
         # anything the image installs (#1097 round-2 adversary H5).
         "the lock's format revision": {"lock": _lock_edit(lambda lock: lock.__setitem__("revision", 4))},
+        # Dependency groups: the fenced sync (`--no-default-groups`) cannot install them, so a
+        # group edit and its relock never rename (#1097 round-3 adversary H5).
+        "a dependency group and its relock": {
+            "pyproject": PLANTED_PYPROJECT + '\n[dependency-groups]\nlint = ["devtool>=7"]\n',
+            "lock": _lock_edit(lambda lock: _entry(lock, ROOT).__setitem__(
+                "dev-dependencies", {"lint": [{"name": "devtool"}]})),
+        },
         "the project's own version": {
             "pyproject": pyproject_edit('version = "0.0.0"', 'version = "0.0.1"'),
             "lock": _lock_edit(lambda lock: _entry(lock, ROOT).__setitem__("version", "0.0.1")),
@@ -491,6 +504,13 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         # A closure entry's OWN edge marker: `alpha -> winonly` gated to linux instead of
         # win32 changes what a Linux build installs (#1097 round-2 adversary H2).
         "a closure entry's edge marker": _set(["alpha", "dependencies", 1, "marker"], "sys_platform == 'linux'"),
+        # A root CORE link's marker or version, the names unchanged: the Linux image stops
+        # installing alpha (#1097 round-3 adversary H1 — core links hashed by name only).
+        "a root core link's marker": _set([ROOT, "dependencies", 0, "marker"], "sys_platform == 'win32'"),
+        "a root core link's version": _set([ROOT, "dependencies", 0, "version"], "1.0.0"),
+        # Entries are hashed whole: a wheel's url alone moves the name (#1097 round-3
+        # adversary H6 — url/size/upload-time projected away).
+        "a wheel's url alone": _set(["alpha", "wheels", 0, "url"], "https://mirror.example/alpha-1.0.0-py3-none-any.whl"),
     }
     manifest_edits = {
         "[tool.uv] value": _replace_once(PLANTED_PYPROJECT, "package = false", "package = true"),
@@ -557,6 +577,25 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     # A TOML datetime in [tool.uv] (uv's `exclude-newer`) is digested, not a crash.
     dated = _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\nexclude-newer = 2026-01-01T00:00:00Z\n")
     assert image_tag(_plant(tmp_path, "dated", pyproject=dated)) not in (baseline, *moved.values())
+
+    # An entry reached only THROUGH an optional list has its own optional lists walked too:
+    # give `delta` (reached via gamma[fast]) an optional list naming `rtlib`, and a bump to
+    # rtlib renames (#1097 round-3 adversary H2 — a two-phase walk read delta's links only).
+    nested = _lock_edit(_set(["delta", "optional-dependencies"], {"x": [{"name": "rtlib"}]}))
+    assert "rtlib" in {e["name"] for e in box_closure(nested, ROOT)}, "delta's optional list was not walked"
+    nested_bumped = copy.deepcopy(nested)
+    _entry(nested_bumped, "rtlib")["version"] = "8.0.1"
+    assert image_tag(_plant(tmp_path, "nested", lock=nested)) != image_tag(
+        _plant(tmp_path, "nested-bumped", lock=nested_bumped)), "a target behind a nested optional list did not rename"
+
+    # A NaN or infinity in a hashed value names an image or faults — never another exception
+    # (#1097 round-3 adversary H4).
+    for i, special in enumerate(("nan", "inf")):
+        text = _replace_once(PLANTED_PYPROJECT, "package = false\n", f"package = false\nx = {special}\n")
+        try:
+            image_tag(_plant(tmp_path, f"special-{i}", pyproject=text))
+        except image_module().ImageInputError:
+            pass
 
 
 def test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes(tmp_path):
@@ -782,6 +821,13 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         _set(["winonly", "name"], 9))),
     "an entry is not a table": ("uv.lock", USE, None, None, _write(
         "uv.lock", 'version = 1\npackage = [\n    { name = "planted", version = "0.0.0" },\n    1,\n]\n')),
+    # -- the ROOT's links are shape-checked too (#1097 round-3 adversary H3) --
+    "the root's dependencies is a string": ("uv.lock", USE, None, None, _write_lock(
+        _set([ROOT, "dependencies"], "alpha"))),
+    "the root's optional-dependencies is a list": ("uv.lock", USE, None, None, _write_lock(
+        _set([ROOT, "optional-dependencies"], [{"name": "gamma"}]))),
+    "the root's box list is a string": ("uv.lock", USE, None, None, _write_lock(
+        _set([ROOT, "optional-dependencies", "box"], "gamma"))),
     # -- a hashed value the canonical form cannot encode: a fault naming its file, never
     #    RecursionError --
     "[tool.uv] nested 2000 arrays deep": ("pyproject.toml", USE, None, None, _write(

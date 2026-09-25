@@ -227,6 +227,11 @@ def test_the_recipe_runs_exactly_the_sync_the_installer_uninstall_and_the_ensure
 
     # rejected: widening d12's regex to every pip spelling — a blocklist of install verbs is
     # the shape that missed the option-between-words spelling in the first place."""
+    # The WHOLE instruction list, by keyword: a `SHELL` (or `ARG`, `ENV`, `ONBUILD`) line
+    # rewrites what every RUN executes while leaving each RUN's text word for word (#1097
+    # round-3 adversary H8 — a SHELL injected a .pth into site-packages).
+    keywords = [ins.split(None, 1)[0].upper() for ins in _instructions()]
+    assert keywords == ["FROM", "WORKDIR", "COPY", "RUN", "RUN", "RUN"], keywords
     runs = [ins for ins in _instructions() if ins.startswith("RUN ")]
     assert len(runs) == 3, runs
     assert "uv sync" in runs[0], runs[0]
