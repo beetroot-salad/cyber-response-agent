@@ -195,11 +195,32 @@ def _break_commondir_missing(main: Path, wt: Path, admin: Path) -> None:
     (admin / "commondir").unlink()
 
 
+def _break_commondir_content(main: Path, wt: Path, admin: Path) -> None:
+    """`commondir` exists but NAMES somewhere else (with no `defender/`): a resolver that only
+    checks the file exists and assumes `../..` lands on `main` and is caught here (#1084
+    adversary H5)."""
+    elsewhere = main.parent / "elsewhere" / ".git"
+    elsewhere.mkdir(parents=True)
+    (admin / "commondir").write_text(f"{os.path.relpath(elsewhere, admin)}\n", encoding="utf-8")
+
+
+def _break_git_file_undecodable(main: Path, wt: Path, admin: Path) -> None:
+    """Bytes that are not UTF-8 in the pointer: malformed, so a fallback — not a raise (#1084
+    adversary H9)."""
+    (wt / ".git").write_bytes(b"gitdir: \xff\xfe\n")
+
+
+def _break_commondir_undecodable(main: Path, wt: Path, admin: Path) -> None:
+    (admin / "commondir").write_bytes(b"\xff\xfe\n")
+
+
 @pytest.mark.parametrize("breakage", [
     _break_commondir_target, _break_git_file_prefix, _break_gitdir_missing,
-    _break_commondir_missing,
+    _break_commondir_missing, _break_commondir_content, _break_git_file_undecodable,
+    _break_commondir_undecodable,
 ], ids=["commondir-names-a-checkout-without-defender", "git-file-without-gitdir-prefix",
-        "gitdir-points-nowhere", "commondir-missing"])
+        "gitdir-points-nowhere", "commondir-missing", "commondir-names-elsewhere",
+        "git-file-undecodable", "commondir-undecodable"])
 def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
         tmp_path, capsys, no_override, breakage):
     """Positive control first, on the SAME layout: well-formed, the worktree resolves to the
@@ -217,6 +238,48 @@ def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
     got = vr.mirror_root(start=wt)
     assert _same(got, wt / MIRROR), f"a broken chain resolved to {got}, not the fallback"
     assert capsys.readouterr().err.strip(), "the fallback was taken silently"
+
+
+def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, capsys, no_override):
+    """The worktree's `commondir` is READ, not assumed to be `../..`: pointed at a second,
+    well-formed checkout, the answer is that checkout's folder, with no warning. Positive
+    control on the same worktree: with git's own `../..`, the answer is the first checkout
+    (#1084 adversary H5)."""
+    vr = _renderer()
+    main = _checkout(tmp_path / "main")
+    other = _checkout(tmp_path / "other")
+    wt = tmp_path / "trees" / "wt"
+    admin = _worktree(main, wt)
+    assert _same(vr.mirror_root(start=wt), main / MIRROR), "positive control: `../..`"
+
+    (admin / "commondir").write_text(f"{os.path.relpath(other / '.git', admin)}\n",
+                                     encoding="utf-8")
+    assert _same(vr.mirror_root(start=wt), other / MIRROR)
+    assert capsys.readouterr().err == ""
+
+
+def test_1084_the_resolver_does_not_ask_git(tmp_path, monkeypatch, no_override):
+    """M1 finds the main checkout by reading `.git`, never by running git — which, as root in a
+    user-owned repo, answers per `safe.directory` and per an inherited `GIT_DIR`. A real
+    decoy repository is exported through `GIT_DIR`/`GIT_COMMON_DIR`; a resolver that asks git
+    names the decoy, one that reads the files names the layout's own main checkout (#1084
+    adversary H6). Positive control: the decoy is a working repository git does answer for."""
+    vr = _renderer()
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    (decoy / "defender").mkdir()
+    _git.git(["init", "-q", str(decoy)], cwd=tmp_path)
+    main = _checkout(tmp_path / "main")
+    wt = tmp_path / "trees" / "wt"
+    _worktree(main, wt)
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(decoy / ".git"))
+    answered = Path(_git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                             cwd=wt).strip())
+    assert _same(answered, decoy / ".git"), "positive control: git answers for the decoy"
+
+    assert _same(vr.mirror_root(start=wt), main / MIRROR)
+    assert _same(vr.mirror_root(start=main), main / MIRROR)
 
 
 def test_1084_the_default_start_is_the_checkout_holding_this_defender_package(monkeypatch):

@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import run_common
+from defender import _git, run_common
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run
 
 pytestmark = pytest.mark.e2e
@@ -79,6 +79,26 @@ def _defender_snapshot() -> dict[str, tuple[int, int] | None]:
 # ---------------------------------------------------------------------------------------
 
 
+def _main_checkout_by_git() -> Path:
+    """The real main checkout, from git itself — independent of the resolver under test, and
+    of the per-test override that would otherwise answer for it."""
+    try:
+        return Path(_git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                             cwd=run_common.REPO_ROOT).strip()).parent
+    except (_git.GitError, OSError):
+        return run_common.REPO_ROOT
+
+
+def _stray_state(page: Path) -> tuple | None:
+    """What sits at a real checkout's mirror page name — compared, not required absent, since
+    an operator's own pages may already be there. Ignored by git, so `git status` can't see it."""
+    try:
+        st = os.lstat(page)
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_mtime_ns, st.st_size
+
+
 def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_override(
         tmp_path, run_visualizations_dir):
     """A snapshot of this checkout's `defender/` taken immediately before and after
@@ -95,6 +115,9 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
         "in the snapshot")
     mirrored = run_visualizations_dir / run_dir.name / PAGE
     assert not mirrored.exists(), "precondition: a stale page at the override"
+    strays = [root / "run-visualizations" / run_dir.name / PAGE
+              for root in (run_common.REPO_ROOT, _main_checkout_by_git())]
+    strays_before = [_stray_state(p) for p in strays]
     before = _defender_snapshot()
     assert "run.py" in before, "positive control: the snapshot is not reading defender/"
     assert len(before) > 100, "positive control: the snapshot is not reading defender/"
@@ -104,6 +127,9 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
     after = _defender_snapshot()
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     assert changed == [], f"the render wrote under defender/: {changed}"
+    assert [_stray_state(p) for p in strays] == strays_before, (
+        "the render also wrote a copy at a real checkout's top-level mirror, bypassing the "
+        "override (#1084 adversary H3)")
     assert mirrored.is_file(), f"no mirrored page at {mirrored}"
     page = (run_dir / PAGE).read_bytes()
     assert mirrored.read_bytes() == page, "the mirror is not the run's page"
@@ -172,6 +198,29 @@ def test_1084_a_failed_mirror_write_fails_the_render(tmp_path, monkeypatch):
     monkeypatch.setenv(ENV, str(good))
     run_common.visualize(run_dir)
     assert (good / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()
+
+
+def test_1084_a_mirror_write_that_fails_after_its_folder_exists_fails_the_render(
+        tmp_path, run_visualizations_dir):
+    """The fault is past the mkdir: the page NAME is a non-empty directory, so creating the
+    folders succeeds and only the final replace can fail — even as root. A writer that
+    swallows a fault around the stage/replace (#1084 adversary H4) passes the mkdir-only case
+    above and fails here. Positive control: with the name cleared, the same render lands."""
+    vr = _renderer()
+    run_dir = driven_run(tmp_path)
+    occupied = run_visualizations_dir / run_dir.name / PAGE
+    occupied.mkdir(parents=True)
+    (occupied / "keep").write_bytes(b"KEEP\n")
+
+    with pytest.raises(OSError):  # noqa: PT011 — the interface binds that it raises, not its words
+        vr.render_and_mirror(run_dir)
+    with pytest.raises(run_common.VisualizeFailed):
+        run_common.visualize(run_dir)
+    assert (occupied / "keep").read_bytes() == b"KEEP\n"
+
+    shutil.rmtree(occupied)
+    run_common.visualize(run_dir)
+    assert occupied.read_bytes() == (run_dir / PAGE).read_bytes()
 
 
 # ---------------------------------------------------------------------------------------
@@ -438,4 +487,51 @@ def test_1084_a_root_owned_checkout_is_written_in_process_as_root(tmp_path, owne
     page = owned_tree.mirror / run_dir.name / PAGE
     for made in (owned_tree.mirror, page.parent, page):
         _owned_by(made, 0, 0)
+    assert page.read_bytes() == (run_dir / PAGE).read_bytes()
+
+
+@root_only
+@pytest.mark.parametrize("shape", ["root-owned-0755", "users-own-0555"])
+def test_1084_a_mirror_folder_the_owner_cannot_write_fails_the_render_untouched(
+        tmp_path, owned_tree, shape):
+    """The checkout belongs to the uid, but its REAL (not linked) `run-visualizations/` is one
+    the uid cannot write: root:root 0755 (the state today's root-written pages leave behind),
+    or the uid's own folder at 0555. Written as the uid (D5), the render fails and the folder is
+    unchanged. A root writer that vets links and chowns afterwards (#1084 adversary H1), or one
+    that takes the owner from `run-visualizations/` rather than from its parent (H2), writes
+    into it — root ignores mode bits. Positive control: case (a), the same render into a
+    folder the uid can write, succeeds."""
+    _lane_precondition(owned_tree)
+    run_dir = driven_run(tmp_path)
+    owned_tree.mirror.mkdir()
+    if shape == "root-owned-0755":
+        os.chmod(owned_tree.mirror, 0o755)
+    else:
+        os.chown(owned_tree.mirror, owned_tree.uid, owned_tree.gid)
+        os.chmod(owned_tree.mirror, 0o555)
+    before = _fingerprint(owned_tree.mirror)
+
+    with pytest.raises(run_common.VisualizeFailed):
+        run_common.visualize(run_dir)
+
+    assert _fingerprint(owned_tree.mirror) == before, f"the {shape} mirror folder was written"
+
+
+@root_only
+def test_1084_the_child_takes_the_checkouts_gid_not_the_uids_passwd_group(tmp_path, owned_tree):
+    """The group is the checkout's `st_gid`, not the uid's passwd entry: a host uid need not
+    exist in the container's passwd at all, and its folder's group is what the operator sees.
+    The checkout is chowned to `<uid>:4242`; the page, its folder and `run-visualizations/`
+    come out `<uid>:4242` (#1084 adversary H8)."""
+    _lane_precondition(owned_tree)
+    run_dir = driven_run(tmp_path)
+    gid = 4242
+    assert gid != owned_tree.gid, "precondition: 4242 must differ from the uid's passwd group"
+    os.chown(owned_tree.checkout, owned_tree.uid, gid)
+
+    run_common.visualize(run_dir)
+
+    page = owned_tree.mirror / run_dir.name / PAGE
+    for made in (owned_tree.mirror, page.parent, page):
+        _owned_by(made, owned_tree.uid, gid)
     assert page.read_bytes() == (run_dir / PAGE).read_bytes()
