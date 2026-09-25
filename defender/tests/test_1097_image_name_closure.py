@@ -71,6 +71,12 @@ from defender.tests._spec1092 import (
 BASE_LOCK: dict = tomllib.loads(PLANTED_LOCK)
 ROOT = "planted"
 
+#: Two `[[tool.uv.index]]` tables in a given order — index priority is their order.
+_INDEXES = (
+    '\n[[tool.uv.index]]\nname = "{first}"\nurl = "https://{first}.example/simple"\n'
+    '\n[[tool.uv.index]]\nname = "{second}"\nurl = "https://{second}.example/simple"\n'
+)
+
 #: The planted closure (see `_spec1092.PLANTED_LOCK`): both `split` entries, the marker-gated
 #: `winonly`, the optional lists' targets `eta` (beta's `speed`) and `delta` (gamma's `fast`),
 #: and `epsilon` — the target of beta's `docs` and gamma's `slow`, extras NO link asks for
@@ -431,6 +437,12 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     def runtime_relock(lock: dict) -> None:
         _entry(lock, ROOT)["optional-dependencies"]["runtime"].append({"name": "devdep"})
 
+    # `[tool.uv]` keys in another order: a table has no order (#1097 round-4 adversary A6).
+    two_keys = _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\ncompile-bytecode = true\n")
+    swapped_keys = _replace_once(PLANTED_PYPROJECT, "package = false\n", "compile-bytecode = true\npackage = false\n")
+    assert image_tag(_plant(tmp_path, "uv-keys", pyproject=two_keys)) == image_tag(
+        _plant(tmp_path, "uv-keys-swapped", pyproject=swapped_keys)), "reordering [tool.uv] keys renamed the image"
+
     holding: dict[str, dict] = {
         "a [tool.ruff] edit": {"pyproject": pyproject_edit("line-length = 100", "line-length = 120")},
         "a [tool.mypy] edit": {"pyproject": pyproject_edit("strict = true", "strict = false")},
@@ -662,6 +674,18 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         # without touching the lock (#1097 round-2 adversary H4).
         "[tool.uv] list key": _replace_once(PLANTED_PYPROJECT, "package = false\n", 'package = false\nno-binary-package = ["gamma"]\n'),
         "[tool.uv] nested table": PLANTED_PYPROJECT + "\n[tool.uv.pip]\nno-build = true\n",
+        # `[tool.uv]` lists keep their written order: `[[tool.uv.index]]` order is index
+        # priority (#1097 round-4 adversary A1 — sorting them hid a swap). The pair's two
+        # orders must name different images; see the assertion after the loop.
+        "[tool.uv] indexes a, b": PLANTED_PYPROJECT + _INDEXES.format(first="a", second="b"),
+        "[tool.uv] indexes b, a": PLANTED_PYPROJECT + _INDEXES.format(first="b", second="a"),
+        # Requirement strings are hashed AS WRITTEN — extras and markers included (#1097
+        # round-4 adversary A2 — reducing them to name + specifier hid these).
+        "the box requirement's extra dropped, unlocked": _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma"]'),
+        "a core requirement's marker added, unlocked": _replace_once(
+            PLANTED_PYPROJECT, '"alpha>=1",', '"alpha>=1; sys_platform == \'linux\'",'),
+        "a core requirement's marker value's case, unlocked": _replace_once(
+            PLANTED_PYPROJECT, '"alpha>=1",', '"alpha>=1; sys_platform == \'Linux\'",'),
         # Amendment 3, M1‴ (a): the core and `box` requirement lists as written, lock untouched.
         "a core requirement, unlocked": _replace_once(PLANTED_PYPROJECT, '"split",\n', '"split",\n    "requests>=2",\n'),
         "a core requirement dropped, unlocked": _replace_once(PLANTED_PYPROJECT, '    "split",\n', ""),
@@ -986,6 +1010,17 @@ def test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry(tmp_pat
         "rtlib, behind the reached root's runtime list, did not rename")
     assert image_tag(_plant(tmp_path, "reached-devdep", lock=bumped(reached, "devdep", "0.1.1"))) != base, (
         "devdep, behind the reached root's dev list, did not rename")
+
+    # The reached root is HASHED, not only walked: a change to its own dict alone — its
+    # version, or a marker on its runtime link — renames (#1097 round-4 adversary A3).
+    root_version = copy.deepcopy(reached)
+    _entry(root_version, ROOT)["version"] = "0.0.1"
+    runtime_marker = copy.deepcopy(reached)
+    _entry(runtime_marker, ROOT)["optional-dependencies"]["runtime"][0]["marker"] = "sys_platform == 'win32'"
+    assert image_tag(_plant(tmp_path, "reached-root-version", lock=root_version)) != base, (
+        "the reached root's own version did not rename")
+    assert image_tag(_plant(tmp_path, "reached-root-marker", lock=runtime_marker)) != base, (
+        "a marker on the reached root's runtime link did not rename")
 
     planted = image_tag(_plant(tmp_path, "planted"))
     assert image_tag(_plant(tmp_path, "planted-rtlib", lock=bumped(BASE_LOCK, "rtlib", "8.0.1"))) == planted, (

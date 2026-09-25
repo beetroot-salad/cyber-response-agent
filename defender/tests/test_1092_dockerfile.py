@@ -34,7 +34,9 @@ def _instructions(path: Path = DOCKERFILE) -> list[str]:
     assert path.is_file(), f"{path} does not exist"
     joined: list[str] = []
     pending = ""
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    # Split on "\n" ONLY, as BuildKit does — `str.splitlines()` also breaks on \x1c, \x0b,
+    # \x0c, \x85, U+2028…, which would show a test two lines where BuildKit runs one.
+    for raw in path.read_text(encoding="utf-8").split("\n"):
         line = raw.rstrip()
         if not pending and (not line.strip() or line.lstrip().startswith("#")):
             continue
@@ -252,6 +254,26 @@ def test_the_recipe_runs_exactly_the_sync_the_installer_uninstall_and_the_ensure
 #: changes how every line after it is read: `syntax` swaps the frontend that interprets the
 #: file, `escape` the line-continuation character. Spaces around `#` and `=` and any case are
 #: accepted by the parser, so the pattern accepts them too.
+#: Any character other than "\n" and "\t" that Python or a shell might treat as a line or
+#: word boundary, or that has no business in a recipe: C0 controls, DEL, NEL, U+2028/2029.
+_STRAY_CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f\x85\u2028\u2029]")
+
+
+def test_the_dockerfile_holds_no_control_character_but_newline_and_tab():
+    """The Dockerfile's raw text carries no control or line-separator character other than
+    `\n` and `\t` — no `\r`, `\x0b`, `\x0c`, `\x1c`–`\x1f`, `\x85`, U+2028/2029. BuildKit
+    splits lines on `\n` alone and hands a RUN's whole line to `sh -c`, so a `\x1c#;<cmd>`
+    tail is one line to the builder (and runs `<cmd>`) while a `splitlines()` reader sees a
+    pinned RUN plus a dropped comment (#1097 round-4 adversary A4 — a real build of that
+    recipe carried a startup `.pth`).
+
+    Positive control: the pattern catches each such character planted in a copy."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert not _STRAY_CONTROL.search(text), repr(_STRAY_CONTROL.search(text))
+    for ch in ("\r", "\x0b", "\x0c", "\x1c", "\x1f", "\x7f", "\x85", "\u2028"):
+        assert _STRAY_CONTROL.search(text.replace("RUN rm", f"RUN rm{ch}", 1)), repr(ch)
+
+
 _PARSER_DIRECTIVE = re.compile(r"^\s*#\s*(syntax|escape|check)\s*=", re.IGNORECASE | re.MULTILINE)
 
 
