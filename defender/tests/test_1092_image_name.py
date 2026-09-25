@@ -310,6 +310,7 @@ def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_p
     ("uv.lock-and-pyproject.toml-missing", "uv.lock"),
     ("pyproject.toml-is-a-directory", "pyproject.toml"),
     ("uv.lock-is-not-toml", "uv.lock"),
+    ("uv.lock-dependencies-is-a-string", "uv.lock"),
 ])
 def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
     tmp_path, monkeypatch, lane, unreadable, first_named,
@@ -322,7 +323,11 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     reap scan and the shared-mounts discovery that precede argv construction may still be
     recorded). A `uv.lock` that reads but is not TOML takes the same door (#1097: the name is
     computed from the PARSED lock, and a parse fault is the resolver's `ImageInputError`
-    naming the file, never a fallback hash of its bytes).
+    naming the file, never a fallback hash of its bytes) — and so does a lock that parses but
+    has the wrong SHAPE, a reached entry's `dependencies` written as a string (#1097 amendment
+    2's shape check: a `BoxFault`, never the TypeError a walk over it would raise). The
+    message says "cannot read" for a file that is missing or a directory, "cannot use" for one
+    that reads but is not usable.
 
     # rejected: hashing a missing input as empty (a name for an image nobody can build, with a
     # remedy pointing at a tree with no Dockerfile) — F-A; a raw OSError (the in-file
@@ -339,6 +344,15 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     elif unreadable == "uv.lock-is-not-toml":
         defender_dir = plant_tree(root, copy_code=False)
         (defender_dir / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"] + b"[[package]\n")
+    elif unreadable == "uv.lock-dependencies-is-a-string":
+        defender_dir = plant_tree(root, copy_code=False)
+        alpha_links = (
+            b'dependencies = [\n    { name = "beta", extra = ["speed"] },\n'
+            b'    { name = "winonly", marker = "sys_platform == \'win32\'" },\n]\n'
+        )
+        lock = PLANTED_INPUT_BYTES["uv.lock"]
+        assert lock.count(alpha_links) == 1, "the planted lock no longer spells alpha's links this way"
+        (defender_dir / "uv.lock").write_bytes(lock.replace(alpha_links, b'dependencies = "beta"\n'))
     else:
         defender_dir = plant_tree(root, missing=("pyproject.toml",), copy_code=False)
         (defender_dir / "pyproject.toml").mkdir()
@@ -355,6 +369,10 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     assert first_named in message, message
     for later in HASH_INPUTS[HASH_INPUTS.index(first_named) + 1:]:
         assert later not in message, (later, message)
+    malformed = unreadable in ("uv.lock-is-not-toml", "uv.lock-dependencies-is-a-string")
+    verb, other = ("cannot use", "cannot read") if malformed else ("cannot read", "cannot use")
+    assert verb in message, (verb, message)
+    assert other not in message, (other, message)
     assert "run" not in subcommands(rec.calls), rec.calls
     assert rec.create_argv is None
 

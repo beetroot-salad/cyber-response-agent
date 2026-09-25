@@ -15,6 +15,14 @@ design: "1092"   # gh issue #1092 — own the box image: build it from the host 
                  # `RECIPE_VERSION` = v2. An unparseable manifest, a lock with no root entry or a
                  # dangling edge is `ImageInputError` naming the file. The #1097 demands sit at
                  # the end of the M3 block below; line-number comments predate the amendment.
+                 # AMENDED AGAIN BY #1097's "Design amendment 2 — read only package names from
+                 # the lock; fence the install to what is read": the walk reads ONLY link
+                 # `name`s (root: `dependencies` + `optional-dependencies.box`; every reached
+                 # entry: `dependencies` + EVERY optional list, requested or not — the superset
+                 # grows by pydantic's `email` extra), the root is found by the PEP 503-
+                 # normalised `[project].name`, one shape check at the parse seam ("cannot use"
+                 # vs "cannot read"), and the sync is fenced `--no-install-project
+                 # --no-default-groups` (M2″).
 tests: defender/tests   # the suite this graph derives (profile `tests.dir`). check_binds scans
                         # docstrings NON-RECURSIVELY over this one directory, so phase E sites
                         # every new #1092 test file here. Three demands bind tests that ALREADY
@@ -293,9 +301,11 @@ demands:
       - "interacts(image_tag->uv_lock)"
       - "interacts(image_tag->pyproject)"
     rows: >-
-      #1097 O1 — `[tool.ruff]`/`[tool.mypy]`, comments, the dev/runtime extras and their lock
-      entries, an entry reached only through extras nobody asks for, a manifest edited without a
-      relock (the key flow: the name holds, `--locked` fails the build), a file outside the inputs.
+      #1097 O1 — `[tool.ruff]`/`[tool.mypy]`, comments, the ROOT's dev/runtime extras and their
+      lock entries (the one set of optional lists the walk never takes), a manifest edited
+      without a relock (the key flow: the name holds, `--locked` fails the build), a file outside
+      the inputs. (Amendment 2 moved "an entry reached only through extras nobody asks for" to
+      the renaming side.)
   - id: image_tag_holds_under_lock_reformatting
     kind: negative      # positive control in the same test: one artifact-hash byte renames under every spelling
     form: test
@@ -313,29 +323,43 @@ demands:
       - "interacts(image_tag->uv_lock)"
       - "interacts(image_tag->pyproject)"
       - "interacts(image_tag->box_closure)"
-    rows: "#1097 O2 — a closure entry's version/source/artifact hash/edges (entries digested whole), the root's core + box edges, `[tool.uv]` (absent reads as {}), one Dockerfile byte."
+    rows: "#1097 O2 — a closure entry's version/source/artifact hash/edges (entries digested whole), an entry reached only through a closure entry's unrequested extra, transitively (amendment 2's superset), the root's core + box edges, `[tool.uv]` (absent reads as {}), one Dockerfile byte."
   - id: image_tag_names_every_entry_of_a_split_package
     kind: behavior
     form: test
     discharged_by: test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes
     binds: [image_tag, box_closure, "interacts(image_tag->box_closure)"]
     rows: "#1097 M1' superset rule (claim a1's shape: two same-named entries, `resolution-markers`, edges with `version` + `marker`) — either entry renames, even the one the 3.11 image never installs."
-  - id: box_closure_walks_edges_by_name_with_their_extras
+  - id: box_closure_walks_link_names_and_every_optional_list
     kind: behavior
     form: test
-    discharged_by: test_box_closure_follows_every_edge_by_name_to_every_entry_ignoring_markers_and_versions_and_takes_each_edges_extras
+    discharged_by: test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_every_reached_entry
     binds: [box_closure, "interacts(box_closure->uv_lock)"]
+    rows: "#1097 amendment 2 M1″ — only link `name`s are read; every optional list of a reached entry is walked (epsilon, behind extras nobody asks for, is IN); of the root's, only `box`; a link's `extra`/`marker`/`version` neither widens nor narrows. Supersedes round 2's requested-extras walk."
+  - id: box_closure_walks_a_string_extra_like_none
+    kind: behavior
+    form: test
+    discharged_by: test_a_string_extra_on_a_link_walks_exactly_like_no_extra_and_is_no_fault
+    binds: [box_closure, image_tag, "interacts(box_closure->uv_lock)", "interacts(image_tag->box_closure)"]
+    rows: "#1097 amendment 2 (review finding: a string `extra` was split into characters, dropping a target) — `{ name = \"beta\", extra = \"speed\" }` walks like the bare link; no fault. The name moves (the link's bytes are hashed); only the walk is pinned."
+  - id: image_tag_finds_the_root_by_its_normalised_name
+    kind: behavior
+    form: test
+    discharged_by: test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names
+    binds: [image_tag, pyproject, "interacts(image_tag->pyproject)", "interacts(image_tag->uv_lock)"]
+    rows: "#1097 amendment 2 — `[project].name` PEP 503-normalised (lowercase; runs of `-_.` -> `-`) finds the root: `Planted` names planted's image, `planted_x`/`planted.x` planted-x's. Control: `plantedx` still faults naming uv.lock."
   - id: box_closure_of_this_lock_is_core_plus_box
     kind: parity
     form: test
     discharged_by: test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package
     binds: [box_closure, uv_lock, pyproject, "interacts(box_closure->uv_lock)"]
+    rows: "#1097 amendment 2 — the 7 installed packages PLUS email-validator, dnspython, idna (pydantic's unrequested `email` extra: the recorded superset cost)."
   - id: image_tag_on_this_checkouts_manifests
     kind: behavior
     form: test
     discharged_by: test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_closure_relock_moves_it
     binds: [image_tag, uv_lock, pyproject, "interacts(image_tag->uv_lock)", "interacts(image_tag->pyproject)"]
-    rows: "#1097 key flows over the real manifests: a pytest relock holds the name, a pydantic relock moves it."
+    rows: "#1097 key flows over the real manifests: a pytest relock holds the name, a pydantic relock moves it — and (amendment 2's superset) so does a dnspython or idna relock, which the image does not install."
   - id: image_tag_refuses_a_tree_it_cannot_walk
     kind: behavior
     form: test
@@ -345,11 +369,12 @@ demands:
       - "image_tag.domain.distinguished[missing-input]"
       - "image_tag.domain.distinguished[unwalkable-input]"
       - "interacts(image_tag->box_closure)"
-    rows: "#1097 M1' faults — each missing input, unparseable TOML, no root entry, a dangling edge: `ImageInputError` naming the file and the reason, never a fallback hash. Also pins HASH_INPUTS and RECIPE_VERSION = v2 exactly."
-  - id: box_image_script_reports_an_unparseable_lock
+    rows: "#1097 M1' faults — each missing input, unparseable TOML, no root entry, a dangling edge: `ImageInputError` naming the file and the reason, never a fallback hash. Amendment 2: \"cannot read\" (unreadable) vs \"cannot use\" (reads, unusable); the parse-seam shape check (a link with no name, a non-table link, `dependencies` a string, `optional-dependencies` a list or holding a string, a non-string entry name, a non-table entry); a value nested past the canonical encoder names its file, never RecursionError. Also pins HASH_INPUTS and RECIPE_VERSION = v2 exactly."
+  - id: box_image_script_reports_an_unusable_lock
     kind: behavior
     form: test
-    discharged_by: test_box_image_reports_a_lock_it_cannot_parse_in_the_resolvers_words_and_exits_1
+    discharged_by: test_box_image_reports_a_lock_it_cannot_use_in_the_resolvers_words_and_exits_1
+    rows: "#1097 + amendment 2 — not TOML, a link with no name, `dependencies` a string, nested past the encoder: one stderr line saying \"cannot use\", exit 1, no traceback, no docker call."
     binds:
       - "box_image.access[tag]"
       - "box_image.access[build]"
@@ -390,6 +415,7 @@ demands:
       the resolver's order. The sibling cells `[lacking-inputs-and-uncovered]` (MF1 part 2) and
       `did_not_run_marker.domain.distinguished[resolver-refusal]` (MF1 part 3) are bound by
       `c46_refusal_precedes_the_resolver` and `resolver_refusal_leaves_no_marker` below.
+    rows: "#1097 + amendment 2 — a lock that reads but is not TOML, or has the wrong shape (a reached entry's `dependencies` a string), takes the same door: BoxFault saying \"cannot use\", never the TypeError; a missing file or a directory in its place says \"cannot read\"."
     forks: "MF1 (#19, #40, #73, #80, #81, #82 — material, resolved by the human to reading A: BoxFault on any unreadable input, C46 first, no run-dir marker, 11 + 2 sites pin a rootfs); F-A (20-demands, non-material as filed — superseded by MF1's routing)"
   - id: c46_refusal_precedes_the_resolver
     kind: behavior
@@ -451,7 +477,7 @@ demands:
     form: test
     discharged_by: test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[sync_flags]"]
-    forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
+    forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3 — SUPERSEDED by #1097 amendment 2 M2″: the sync is fenced `--no-install-project --no-default-groups`, so the project and dependency groups cannot enter the image whatever pyproject says, and the name need not hash them); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
   - id: dockerfile_removes_the_installers_and_keeps_packaging
     kind: shape
     form: test
@@ -512,6 +538,7 @@ demands:
     form: test
     discharged_by: test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_package
     binds: [box_image_contents, uv_lock, box_closure, "interacts(box_dockerfile->uv_lock)"]
+    rows: "#1097 amendment 2 — installed == the marker-evaluated oracle (exact); installed ⊆ box_closure's names, each version in that name's SET (a split package is several entries); the surplus is today pydantic's email extra."
   - id: image_has_no_uv_and_no_pip_path
     kind: negative      # positive control: base_packages_survive_the_sync / duckdb_imports_in_the_box (python3 and its packages work)
     form: test
@@ -1001,7 +1028,7 @@ structure:
       facets:
         domain:
           type: path
-          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, holding a manifest it cannot parse or a lock it cannot walk (no root entry, a dangling edge — #1097), lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
+          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, holding a manifest it cannot parse or a lock it cannot walk (no root entry, a dangling edge — #1097; a malformed entry or link, a value nested past the canonical encoder — #1097 amendment 2), lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
           default: complete-tree
           distinguished: [complete-tree, missing-input, unreadable-input, unwalkable-input, lacking-inputs-and-uncovered, recipe-drift]
           falsy_valid: false
@@ -1022,11 +1049,12 @@ structure:
           documented_alternatives: []
     - id: box_closure
       provenance: design
-      # runtime/box/_image.py::box_closure(lock, root_name) (#1097) — the lock entries reachable
-      # from the root's `dependencies` + `optional-dependencies.box`, edges followed BY NAME to
-      # every same-named entry (markers and edge `version` ignored), an edge's `extra` adding the
-      # target's `optional-dependencies[<extra>]`. The one owner of the walk; the live parity
-      # test compares the image against it beside an independent marker-evaluating walk.
+      # runtime/box/_image.py::box_closure(lock, root_name) (#1097, amendment 2 M1″) — the lock
+      # entries reachable from the root's `dependencies` + `optional-dependencies.box`, links
+      # followed BY NAME to every same-named entry; from every reached entry its `dependencies`
+      # AND every optional list, requested or not. Nothing on a link but `name` is read (`extra`,
+      # `marker`, `version`, `source` ignored). The one owner of the walk; the live parity test
+      # checks the image is a subset of it, beside an independent marker-evaluating walk.
       facets: {}
     - id: uv_lock
       provenance: design

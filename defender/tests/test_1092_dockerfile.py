@@ -2,9 +2,11 @@
 
 Static demands over the recipe's TEXT: O8 keys on the digest pin and the pinned uv binary,
 O7 on what is copied in and what installer is taken out, O1 on the extra and its lock entry.
-#1097 (design amendment) keeps this recipe unchanged — the image is still synced from the same
-lock as the host venv, `--locked` — and pins the sync's whole command and the absence of any
-context bind, the two holes round 1's adversary found in a presence-only reading.
+#1097 (design amendment) keeps the image synced from the same lock as the host venv,
+`--locked`, and pins the sync's whole command and the absence of any context bind, the two
+holes round 1's adversary found in a presence-only reading. Amendment 2 (M2″) FENCES that sync
+with `--no-install-project --no-default-groups`, so neither the project itself nor a
+dependency group — both outside what the image name reads — can enter the image.
 What the built image then IS — the installed distributions, the absent installers, the
 compiled bytecode — is `test_1092_box_image_live.py`'s, against a real daemon.
 """
@@ -144,20 +146,23 @@ def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the
     """The sync instruction sets `UV_PROJECT_ENVIRONMENT=/usr/local` and
     `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--locked` (not `--frozen`, which skips
     the lock-freshness check and would install a stale set under a FRESH image name — #1095),
-    `--no-dev`, `--inexact` and
-    `--extra box`; no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE
-    #60). (uv itself is mounted onto that step and never removed, because it was never
-    added — d12.)
+    `--no-dev`, `--inexact`, `--extra box`, and — #1097 amendment 2's fence (M2″) —
+    `--no-install-project` and `--no-default-groups`, so neither the project itself nor a
+    `default-groups` dependency group (neither of which the image name hashes) can enter the
+    image whatever `pyproject.toml` says; no `ENV` instruction leaks a sync-time variable into
+    the image (O7-SHAPE #60). (uv itself is mounted onto that step and never removed, because it
+    was never added — d12.)
 
     The step's WHOLE command is pinned, not the presence of each wanted flag: uv takes the last
     of a flag and its negation, so `--locked … --frozen` (or `--no-locked`) passes a presence
     check while skipping the freshness check, and `--exact` prunes the base's `packaging`
     (#1097 adversary H1). Exactly those two assignments (in either order), then `uv sync`, then
-    exactly `--locked --no-dev --inexact --extra box` in any order — no negation, no second
-    extra, no second command."""
+    exactly `--locked --no-dev --inexact --extra box --no-install-project --no-default-groups`
+    in any order — no negation, no second extra, no `--group`, no second command."""
+    fence = ["--locked", "--no-dev", "--inexact", "--no-install-project", "--no-default-groups"]
     instructions = _instructions()
     sync = instructions[_index_of(instructions, "uv sync")]
-    for flag in ("--locked", "--no-dev", "--inexact", "--extra box"):
+    for flag in (*fence, "--extra box"):
         assert flag in sync, (flag, sync)
     assert "--frozen" not in sync, sync
     assert "UV_PROJECT_ENVIRONMENT=/usr/local" in sync, sync
@@ -172,7 +177,7 @@ def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the
     extra_at = flags.index("--extra")
     assert flags[extra_at + 1] == "box", command
     rest = flags[:extra_at] + flags[extra_at + 2:]
-    assert sorted(rest) == sorted(["--locked", "--no-dev", "--inexact"]), command
+    assert sorted(rest) == sorted(fence), command
 
 
 # ---- d15 -------------------------------------------------------------------------------------

@@ -91,16 +91,20 @@ EXEC_TIMEOUT = 60.0
 
 #: The planted project's lock — WELL-FORMED, uv-shaped TOML (#1097: the name is computed from
 #: the lock's parsed core + `box` closure, so a planted tree must carry a lock the resolver can
-#: walk). Its closure from the root `planted` is alpha, beta, eta, winonly, gamma, delta and
-#: BOTH `split` entries; every shape the walk has to handle is in it once:
+#: walk). Its closure from the root `planted` is alpha, beta, eta, epsilon, winonly, gamma,
+#: delta and BOTH `split` entries (#1097 amendment 2: the walk reads only link NAMES — from the
+#: root its `dependencies` + `optional-dependencies.box`, from every reached entry its
+#: `dependencies` and EVERY list under its `optional-dependencies`); every shape the walk has
+#: to handle is in it once:
 #:   - `split` is resolved to two versions, as uv writes a fork (claim a1): two same-named
-#:     `[[package]]` entries with `resolution-markers`, root edges carrying `version`+`marker`;
+#:     `[[package]]` entries with `resolution-markers`, root links carrying `version`+`marker`;
 #:   - `alpha -> winonly` carries a marker no Linux build satisfies (markers are ignored);
-#:   - `alpha -> beta[speed]` and the root's `box -> gamma[fast]` are edges with `extra`, whose
-#:     targets' `speed`/`fast` optional-dependencies are in the closure — and whose `docs`/`slow`
-#:     ones (both -> epsilon) are not;
+#:   - `alpha -> beta[speed]` and the root's `box -> gamma[fast]` are links with `extra` (which
+#:     the walk ignores); beta's and gamma's optional lists are ALL walked — `speed`/`fast`
+#:     (-> eta, delta) and the `docs`/`slow` nobody asks for (both -> epsilon, the superset);
 #:   - `eta -> alpha` closes a cycle;
-#:   - devtool (+ devdep) and rtlib are the `dev` and `runtime` extras' — outside the closure.
+#:   - devtool (+ devdep) and rtlib are the ROOT's `dev` and `runtime` extras' — the root's
+#:     optional lists other than `box` are not walked, so they stay outside the closure.
 PLANTED_LOCK = """\
 version = 1
 revision = 3
@@ -325,24 +329,23 @@ def image_tag(tree: Path) -> str:
     return box_mod.image_tag(tree)  # type: ignore[attr-defined]
 
 
-def recipe_version() -> str:
-    """`_image.RECIPE_VERSION` — the constant that prefixes the name (MF3)."""
-    from defender.runtime.box import _image  # type: ignore[attr-defined]
-
-    return str(_image.RECIPE_VERSION)
-
-
 def image_module():
     """`runtime/box/_image.py` through the package door — for the constants (`HASH_INPUTS`,
-    `RECIPE_VERSION`) and `ImageInputError` a test pins exactly."""
+    `RECIPE_VERSION`) and `ImageInputError` a test pins exactly. The ONE lazy import site of
+    the module in this spec."""
     from defender.runtime.box import _image  # type: ignore[attr-defined]
 
     return _image
 
 
+def recipe_version() -> str:
+    """`_image.RECIPE_VERSION` — the constant that prefixes the name (MF3)."""
+    return str(image_module().RECIPE_VERSION)
+
+
 def box_closure(lock: dict, root_name: str) -> list[dict]:
-    """`_image.box_closure(lock, root_name)` (#1097 M1'): the lock entries reachable from the
-    root's core + `box` edges. Reached lazily, so a module that names it still collects while
+    """`_image.box_closure(lock, root_name)` (#1097 M1″): the lock entries reachable, by link
+    name, from the root's core + `box` links. Reached lazily, so a module that names it still collects while
     the function does not exist and each test fails on the missing attribute."""
     return image_module().box_closure(lock, root_name)  # type: ignore[no-any-return]
 
