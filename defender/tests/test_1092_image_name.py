@@ -9,8 +9,11 @@ in the argv builder before docker; the C46 refusal keeps running FIRST; no run-d
 Hermetic: the trees are planted by the tests and the daemon is `RecordingDocker`. Whether
 the three inputs were read is observed tier-1 (`_spec1092`'s hierarchy): over a tree that
 HOLDS none of them a read faults, so a lane that completes — or refuses for another reason —
-read nothing; and a name that equals the digest of the planted bytes was read from them
-(one byte's edit renames it, d3). No process-wide audit hook is installed for it — the one
+read nothing; and a name that equals the digest of the planted inputs was read from them
+(an edit to the recipe or to the lock's box closure renames it, d3). Since #1097 the name is
+the Dockerfile's bytes plus the lock's core + `box` closure, so the planted `uv.lock` and
+`pyproject.toml` are well-formed TOML (`_spec1092.PLANTED_LOCK`) and an edit OUTSIDE the
+closure does not rename the image; the full O1/O2 matrix is `test_1097_image_name_closure.py`. No process-wide audit hook is installed for it — the one
 in-process hook a spec test needs (d5) lives in a child interpreter.
 """
 from __future__ import annotations
@@ -78,8 +81,9 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
     `docker run` argv names `image_tag(defender_dir)`, the request lane's names
     `image_tag(Path(request.workdir) / "defender")`, and `_spec771`'s rootfs runner names
     `image_tag(DEFENDER)` — `defender-box:<RECIPE_VERSION>-` followed by 12 hex of a sha256
-    over the bytes of `box.Dockerfile`, `uv.lock` and `pyproject.toml` in that directory
-    (MF3: the running package's `_image.RECIPE_VERSION` prefixes the digest) — resolved on
+    over `box.Dockerfile`, `uv.lock` and `pyproject.toml` in that directory (#1097: the
+    Dockerfile's bytes, `[tool.uv]`, and the lock's core + `box` closure; MF3: the running
+    package's `_image.RECIPE_VERSION` prefixes the digest) — resolved on
     the host when the argv is built, never earlier: the spec and the request are constructed
     over a root that does not yet hold the three files (a read there would fault), and the
     name on the argv is the digest of bytes planted only afterwards. Every slot of the create
@@ -181,23 +185,58 @@ def test_no_runtime_path_names_or_falls_back_to_the_stock_image(tmp_path, monkey
     assert rec.create_argv is None
 
 
-# ---- d3 --------------------------------------------------------------------------------------
-def test_a_one_byte_change_in_any_of_the_three_inputs_moves_the_tag(tmp_path):
-    """Changing one byte in any one of `box.Dockerfile`, `uv.lock` or `pyproject.toml` changes
-    `image_tag(tree)` — the 12-hex digest moves, the `RECIPE_VERSION` prefix does not — and
-    changing a file outside the three does not."""
+# ---- d3 (#1097 O1/O2: the recipe and the box closure name the image; nothing else does) ----
+def test_a_recipe_byte_or_a_box_closure_entry_moves_the_tag_and_an_edit_outside_the_closure_does_not(tmp_path):
+    """Changing one byte of `box.Dockerfile`, the version of a lock entry in the core + `box`
+    closure, or `[tool.uv]` changes `image_tag(tree)` — the 12-hex digest moves, the
+    `defender-box:v2-` prefix does not — and restoring it restores the name (O2). A comment in
+    the lock, a version bump of a `dev`-extra entry, a `[tool.ruff]` edit, and a file outside
+    the three inputs leave the name where it was (O1: an edit that cannot change the image does
+    not rename it). Each file's moving edit is that file's positive control: the resolver
+    demonstrably reads it, so an unmoved name is not a resolver that reads nothing.
+
+    The full matrix — extras on edges, the superset rule, reordering and reformatting, the real
+    lock — is `test_1097_image_name_closure.py`'s.
+
+    # rejected: hashing the three files' whole bytes (the #1092 recipe): 18 of 20 manifest
+    # edits in the c4 replay renamed an image whose contents they could not change (#1097 O1);
+    # a committed `uv export` of the closure as the input (#1097 round 1): a second copy of the
+    # lock, with its own drift check and an unpinned exporter's bytes (the design amendment)."""
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     baseline = image_tag(defender_dir)
+    assert baseline.startswith("defender-box:v2-"), baseline
     assert image_tag(defender_dir) == baseline, "the name is not deterministic on re-call"
-    for name in HASH_INPUTS:
+
+    def edited(name: str, old: bytes, new: bytes) -> str:
         original = PLANTED_INPUT_BYTES[name]
-        flipped = bytes([original[0] ^ 0x01]) + original[1:]
-        (defender_dir / name).write_bytes(flipped)
-        moved = image_tag(defender_dir)
-        assert moved != baseline, f"a byte in {name} did not move the tag"
-        assert moved.split("-")[0] == baseline.split("-")[0], "the version prefix moved"
-        (defender_dir / name).write_bytes(original)
-        assert image_tag(defender_dir) == baseline, f"restoring {name} did not restore the tag"
+        assert original.count(old) == 1, (name, old)
+        (defender_dir / name).write_bytes(original.replace(old, new))
+        try:
+            return image_tag(defender_dir)
+        finally:
+            (defender_dir / name).write_bytes(original)
+
+    moving = {
+        "a Dockerfile byte": edited("box.Dockerfile", b"RUN true", b"RUN tru3"),
+        "a closure entry's version": edited(
+            "uv.lock", b'name = "alpha"\nversion = "1.0.0"', b'name = "alpha"\nversion = "1.0.1"',
+        ),
+        "[tool.uv]": edited("pyproject.toml", b"package = false", b"package = true"),
+    }
+    for what, moved in moving.items():
+        assert moved != baseline, f"{what} did not move the tag"
+        assert moved.startswith("defender-box:v2-"), f"the version prefix moved: {moved}"
+    assert image_tag(defender_dir) == baseline, "restoring the inputs did not restore the tag"
+
+    holding = {
+        "a lock comment": edited("uv.lock", b"revision = 3\n", b"revision = 3\n# a comment\n"),
+        "a dev-extra entry's version": edited(
+            "uv.lock", b'name = "devtool"\nversion = "7.0.0"', b'name = "devtool"\nversion = "7.0.1"',
+        ),
+        "[tool.ruff]": edited("pyproject.toml", b"line-length = 100", b"line-length = 120"),
+    }
+    for what, held in holding.items():
+        assert held == baseline, f"{what} moved the tag"
     (defender_dir / "README.md").write_text("not a hash input\n", encoding="utf-8")
     (defender_dir / "runtime").mkdir(exist_ok=True)
     (defender_dir / "runtime" / "extra.py").write_text("x = 1\n", encoding="utf-8")
@@ -216,8 +255,10 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
     tags = {image_tag(a), image_tag(b), image_tag(copied)}
     assert len(tags) == 1, tags
     assert TAG_RE.match(next(iter(tags))), tags
-    (b / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"] + b"\n# drift\n")
-    assert image_tag(b) != image_tag(a), "the positive control: different bytes, same name"
+    # A closure entry moved in one tree only (a comment would not do: it cannot rename, #1097).
+    (b / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"].replace(
+        b'name = "gamma"\nversion = "3.0.0"', b'name = "gamma"\nversion = "3.0.1"'))
+    assert image_tag(b) != image_tag(a), "the positive control: a different closure, same name"
 
 
 # ---- d5 --------------------------------------------------------------------------------------
@@ -266,7 +307,12 @@ def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_p
 @pytest.mark.parametrize(("unreadable", "first_named"), [
     ("all-missing", "box.Dockerfile"),
     ("uv.lock-missing", "uv.lock"),
+    ("uv.lock-and-pyproject.toml-missing", "uv.lock"),
     ("pyproject.toml-is-a-directory", "pyproject.toml"),
+    ("uv.lock-is-not-toml", "uv.lock"),
+    ("uv.lock-dependencies-is-a-string", "uv.lock"),
+    ("uv.lock-holds-a-nameless-entry-nested-deep", "uv.lock"),
+    ("uv.lock-holds-an-integer-past-the-digit-limit", "uv.lock"),
 ])
 def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
     tmp_path, monkeypatch, lane, unreadable, first_named,
@@ -275,8 +321,19 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     a file missing, or a directory sitting in a file's place (any `OSError`, not only
     `FileNotFoundError`) — raises `BoxFault` (never the bare OSError) naming the tree and the
     FIRST unreadable file in the resolver's order `box.Dockerfile`, `uv.lock`,
-    `pyproject.toml`, and the recorded docker calls contain no `run` (the reap scan and the
-    shared-mounts discovery that precede argv construction may still be recorded).
+    `pyproject.toml` (and no later one), and the recorded docker calls contain no `run` (the
+    reap scan and the shared-mounts discovery that precede argv construction may still be
+    recorded). A `uv.lock` that reads but is not TOML takes the same door (#1097: the name is
+    computed from the PARSED lock, and a parse fault is the resolver's `ImageInputError`
+    naming the file, never a fallback hash of its bytes) — and so does a lock that parses but
+    has the wrong SHAPE, a reached entry's `dependencies` written as a string (#1097 amendment
+    2's shape check: a `BoxFault`, never the TypeError a walk over it would raise) — and so
+    does whatever else raises while the read lock is parsed, checked, walked or digested
+    (#1097 amendment 3's ONE fault boundary): a `[[package]]` with no `name` nested 20000
+    tables deep (its `repr` recursed) and a 5000-digit integer in a reached entry (tomllib's
+    bare ValueError) — a `BoxFault`, never the RecursionError or ValueError. The
+    message says "cannot read" for a file that is missing or a directory, "cannot use" for one
+    that reads but is not usable.
 
     # rejected: hashing a missing input as empty (a name for an image nobody can build, with a
     # remedy pointing at a tree with no Dockerfile) — F-A; a raw OSError (the in-file
@@ -288,6 +345,28 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
         defender_dir = plant_tree(root, missing=HASH_INPUTS, copy_code=False)
     elif unreadable == "uv.lock-missing":
         defender_dir = plant_tree(root, missing=("uv.lock",), copy_code=False)
+    elif unreadable == "uv.lock-and-pyproject.toml-missing":
+        defender_dir = plant_tree(root, missing=("uv.lock", "pyproject.toml"), copy_code=False)
+    elif unreadable == "uv.lock-is-not-toml":
+        defender_dir = plant_tree(root, copy_code=False)
+        (defender_dir / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"] + b"[[package]\n")
+    elif unreadable == "uv.lock-dependencies-is-a-string":
+        defender_dir = plant_tree(root, copy_code=False)
+        alpha_links = (
+            b'dependencies = [\n    { name = "beta", extra = ["speed"] },\n'
+            b'    { name = "winonly", marker = "sys_platform == \'win32\'" },\n]\n'
+        )
+        lock = PLANTED_INPUT_BYTES["uv.lock"]
+        assert lock.count(alpha_links) == 1, "the planted lock no longer spells alpha's links this way"
+        (defender_dir / "uv.lock").write_bytes(lock.replace(alpha_links, b'dependencies = "beta"\n'))
+    elif unreadable == "uv.lock-holds-a-nameless-entry-nested-deep":
+        defender_dir = plant_tree(root, copy_code=False)
+        (defender_dir / "uv.lock").write_bytes(
+            PLANTED_INPUT_BYTES["uv.lock"] + b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n")
+    elif unreadable == "uv.lock-holds-an-integer-past-the-digit-limit":
+        defender_dir = plant_tree(root, copy_code=False)
+        (defender_dir / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"].replace(
+            b'name = "alpha"\nversion = "1.0.0"\n', b'name = "alpha"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n", 1))
     else:
         defender_dir = plant_tree(root, missing=("pyproject.toml",), copy_code=False)
         (defender_dir / "pyproject.toml").mkdir()
@@ -302,6 +381,13 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     message = str(e.value)
     assert str(defender_dir) in message, message
     assert first_named in message, message
+    for later in HASH_INPUTS[HASH_INPUTS.index(first_named) + 1:]:
+        assert later not in message, (later, message)
+    malformed = unreadable.startswith("uv.lock-") and unreadable not in (
+        "uv.lock-missing", "uv.lock-and-pyproject.toml-missing")
+    verb, other = ("cannot use", "cannot read") if malformed else ("cannot read", "cannot use")
+    assert verb in message, (verb, message)
+    assert other not in message, (other, message)
     assert "run" not in subcommands(rec.calls), rec.calls
     assert rec.create_argv is None
 
@@ -386,7 +472,7 @@ def test_the_image_name_carries_the_running_packages_recipe_version_and_never_th
     through that plain import and never load the MOUNTED tree's `_image.py` by path — a
     mounted tree carrying a different recipe (a `RECIPE_VERSION = "v99"` module that names a
     different image) still yields the running package's name, so a drift between the two
-    recipes is legible in the fault text (`v1-…` vs the build's `v99-…`) instead of silent."""
+    recipes is legible in the fault text (`v2-…` vs the build's `v99-…`) instead of silent."""
     version = recipe_version()
     assert isinstance(version, str)
     assert TAG_RE.match(f"defender-box:{version}-{'0' * 12}"), version

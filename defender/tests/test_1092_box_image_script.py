@@ -140,7 +140,9 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
         assert out.stdout == expected + "\n", (cwd, out.stdout)
         assert out.stderr == "", (cwd, out.stderr)
     assert expected != image_tag(DEFENDER), "the planted tree must name a different image"
-    for argv in ((), ("frobnicate",), ("tag", "extra")):
+    # `export` included: #1097 round 1's exported-list verb is gone with the list (the design
+    # amendment) — the contract is exactly `tag` | `build` again.
+    for argv in ((), ("frobnicate",), ("export",), ("tag", "extra")):
         out = _run_script(script, *argv, cwd=tmp_path)
         assert out.returncode == 2, (argv, out.returncode, out.stderr)
         assert "usage" in out.stderr.lower(), (argv, out.stderr)
@@ -217,4 +219,65 @@ def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_pat
     assert "cannot read" in out.stderr, out.stderr
     assert "uv.lock" in out.stderr, out.stderr
     assert HASH_INPUTS[0] not in out.stderr.split("cannot read", 1)[1], out.stderr
+    assert recorded_docker_calls(log) == []
+
+
+#: A lock that READS but cannot be used, each spelled as bytes over the planted lock: not TOML;
+#: a reached entry's link with no `name` (#1097 amendment 2's shape check — today's walk would
+#: go hunting a package called "name"); a reached entry's `dependencies` as a string (a walk
+#: over it raises TypeError); a reached entry nested past what the canonical form can encode
+#: (RecursionError). Each must reach the operator as the resolver's one-line fault.
+_ALPHA_BETA_LINK = b'{ name = "beta", extra = ["speed"] }'
+_ALPHA_LINKS = (
+    b'dependencies = [\n    ' + _ALPHA_BETA_LINK + b',\n'
+    b'    { name = "winonly", marker = "sys_platform == \'win32\'" },\n]\n'
+)
+_UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
+    # case -> (the bytes replaced — b"" appends — , what replaces them)
+    "not TOML": (b"", b"[[package]\n"),
+    "a link with no name": (_ALPHA_BETA_LINK, b'{ extra = ["speed"] }'),
+    "dependencies a string": (_ALPHA_LINKS, b'dependencies = "beta"\n'),
+    "a value nested past the encoder": (b"", b"\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
+    # #1097 amendment 3's ONE fault boundary (the /code-review round-3 reproductions): a
+    # nameless entry whose body is 20000 tables deep (the shape fault's `repr` of it recursed),
+    # and a 5000-digit integer in an entry nothing reaches (tomllib's bare ValueError).
+    "a nameless entry nested past repr": (b"", b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
+    "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
+}
+
+
+@pytest.mark.parametrize("verb", ["tag", "build"])
+@pytest.mark.parametrize("case", list(_UNUSABLE_LOCKS))
+def test_box_image_reports_a_lock_it_cannot_use_in_the_resolvers_words_and_exits_1(tmp_path, verb, case):
+    """On a tree whose `uv.lock` reads but cannot be used — not TOML (#1097: the name is
+    computed from the PARSED lock), a reached entry's link with no `name`, a reached entry's
+    `dependencies` written as a string, a reached entry nested 20000 tables deep (#1097
+    amendment 2: the shape check at the parse seam, and a value the canonical form cannot
+    encode), a `[[package]]` with no `name` nested 20000 tables deep and a 5000-digit integer
+    in an entry nothing reaches (amendment 3's one fault boundary: whatever raises after the
+    reads is the resolver's fault naming the file) — `tag` and `build` print ONE line on stderr naming `<tree>/defender` and `uv.lock`
+    and saying "cannot use" — the resolver's `ImageInputError`, never a traceback — print
+    nothing on stdout, exit 1, and `build` never invokes `docker`. Positive control: the same
+    tree, before the lock is broken, prints its name and exits 0."""
+    root, script = _planted_script(tmp_path)
+    defender_dir = root / "defender"
+    assert _run_script(script, "tag", cwd=tmp_path).returncode == 0
+    lock = defender_dir / "uv.lock"
+    old, new = _UNUSABLE_LOCKS[case]
+    text = lock.read_bytes()
+    if old:
+        assert text.count(old) == 1, (case, old)
+        lock.write_bytes(text.replace(old, new))
+    else:
+        lock.write_bytes(text + new)
+    env, log = fake_docker_on_path(tmp_path, rc=0)
+    out = _run_script(script, verb, cwd=tmp_path, env=env)
+    assert out.returncode == 1, (out.returncode, out.stderr[-2000:])
+    assert out.stdout == "", out.stdout
+    assert "Traceback" not in out.stderr, out.stderr[-2000:]
+    assert len(out.stderr.strip().splitlines()) == 1, out.stderr[-2000:]
+    assert str(defender_dir) in out.stderr, out.stderr
+    assert "uv.lock" in out.stderr, out.stderr
+    assert "cannot use" in out.stderr, out.stderr
+    assert "cannot read" not in out.stderr, out.stderr
     assert recorded_docker_calls(log) == []

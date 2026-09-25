@@ -2,12 +2,18 @@
 
 Static demands over the recipe's TEXT: O8 keys on the digest pin and the pinned uv binary,
 O7 on what is copied in and what installer is taken out, O1 on the extra and its lock entry.
+#1097 (design amendment) keeps the image synced from the same lock as the host venv,
+`--locked`, and pins the sync's whole command and the absence of any context bind, the two
+holes round 1's adversary found in a presence-only reading. Amendment 2 (M2″) FENCES that sync
+with `--no-install-project --no-default-groups`, so neither the project itself nor a
+dependency group — both outside what the image name reads — can enter the image.
 What the built image then IS — the installed distributions, the absent installers, the
 compiled bytecode — is `test_1092_box_image_live.py`'s, against a real daemon.
 """
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -28,7 +34,9 @@ def _instructions(path: Path = DOCKERFILE) -> list[str]:
     assert path.is_file(), f"{path} does not exist"
     joined: list[str] = []
     pending = ""
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    # Split on "\n" ONLY, as BuildKit does — `str.splitlines()` also breaks on \x1c, \x0b,
+    # \x0c, \x85, U+2028…, which would show a test two lines where BuildKit runs one.
+    for raw in path.read_text(encoding="utf-8").split("\n"):
         line = raw.rstrip()
         if not pending and (not line.strip() or line.lstrip().startswith("#")):
             continue
@@ -46,6 +54,27 @@ def _index_of(instructions: list[str], needle: str) -> int:
     hits = [i for i, ins in enumerate(instructions) if needle in ins]
     assert len(hits) == 1, f"expected exactly one instruction containing {needle!r}, got {hits}"
     return hits[0]
+
+
+def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    """A `RUN` split into its `--mount=` options (each a `key=value` dict; a bare option maps
+    to ""), every OTHER `--` flag before the command, verbatim (`--network=none`, a `--mount`
+    spelled without `=`, …), and the shell words it runs, as `shlex` splits them."""
+    assert instruction.startswith("RUN "), instruction
+    words = shlex.split(instruction[len("RUN "):])
+    mounts: list[dict[str, str]] = []
+    flags: list[str] = []
+    while words and words[0].startswith("--"):
+        flag = words.pop(0)
+        if flag.startswith("--mount="):
+            opts = {}
+            for part in flag[len("--mount="):].split(","):
+                key, _, value = part.partition("=")
+                opts[key] = value
+            mounts.append(opts)
+        else:
+            flags.append(flag)
+    return mounts, flags, words
 
 
 # ---- d11 -------------------------------------------------------------------------------------
@@ -87,19 +116,35 @@ def test_the_dockerfile_copies_a_version_pinned_uv_binary_and_never_pip_installs
 
 # ---- d13 (negative; positive control: d14 — the two files ARE copied and synced) -----------------
 def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
-    """The Dockerfile's `COPY` instructions from the build context name exactly
-    `pyproject.toml` and `uv.lock` (the context is `defender/`, #1098) — no source tree, no
-    `.env`, nothing else — and there is no `ADD`."""
+    """The Dockerfile's one `COPY` from the build context is exactly `COPY pyproject.toml
+    uv.lock ./` (the context is `defender/`, #1098), under a `WORKDIR` set before it and ahead
+    of the sync that reads them — no source tree, no `.env`, nothing else — there is no `ADD`,
+    and no `RUN` binds the build context: every `--mount` on every `RUN` names a `from=` image
+    (the uv mount), so no step can reach past the COPY list and `cp` the context into a layer
+    (#1097 adversary H6). The mount parser is not blind: it sees the uv mount on the sync.
+
+    # rejected: bind-mounting an exported package list from the context into a `uv pip
+    # install --no-deps` step (#1097 round 1): a second copy of the lock, and an install that
+    # trusts the copy's completeness (the design amendment)."""
     instructions = _instructions()
     assert not any(ins.startswith("ADD ") for ins in instructions)
-    sources: list[str] = []
-    for ins in instructions:
-        if not ins.startswith("COPY ") or "--from=" in ins:
-            continue
-        words = [w for w in ins.split()[1:] if not w.startswith("--")]
-        assert len(words) >= 2, ins
-        sources.extend(words[:-1])
-    assert sorted(sources) == ["pyproject.toml", "uv.lock"], sources
+    copies = [
+        (i, ins) for i, ins in enumerate(instructions)
+        if ins.startswith("COPY ") and "--from=" not in ins
+    ]
+    assert len(copies) == 1, copies
+    copy_at, copy = copies[0]
+    assert copy.split()[1:] == ["pyproject.toml", "uv.lock", "./"], copy
+    workdirs = [i for i, ins in enumerate(instructions) if ins.startswith("WORKDIR ")]
+    assert workdirs, "no WORKDIR: the COPY's `./` is the image root"
+    assert workdirs[0] < copy_at, "the COPY lands before any WORKDIR is set"
+    assert copy_at < _index_of(instructions, "uv sync"), "the sync precedes the COPY it reads"
+
+    runs = [ins for ins in instructions if ins.startswith("RUN ")]
+    mounts = [m for ins in runs for m in _run_parts(ins)[0]]
+    assert any("astral-sh/uv" in m.get("from", "") for m in mounts), mounts
+    context_binds = [m for m in mounts if m.get("type", "bind") == "bind" and "from" not in m]
+    assert context_binds == [], f"a RUN binds the build context: {context_binds}"
 
 
 # ---- d14 -------------------------------------------------------------------------------------
@@ -107,18 +152,38 @@ def test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the
     """The sync instruction sets `UV_PROJECT_ENVIRONMENT=/usr/local` and
     `UV_COMPILE_BYTECODE=1` and runs `uv sync` with `--locked` (not `--frozen`, which skips
     the lock-freshness check and would install a stale set under a FRESH image name — #1095),
-    `--no-dev`, `--inexact` and
-    `--extra box`; no `ENV` instruction leaks a sync-time variable into the image (O7-SHAPE
-    #60). (uv itself is mounted onto that step and never removed, because it was never
-    added — d12.)"""
+    `--no-dev`, `--inexact`, `--extra box`, and — #1097 amendment 2's fence (M2″) —
+    `--no-install-project` and `--no-default-groups`, so neither the project itself nor a
+    `default-groups` dependency group (neither of which the image name hashes) can enter the
+    image whatever `pyproject.toml` says; no `ENV` instruction leaks a sync-time variable into
+    the image (O7-SHAPE #60). (uv itself is mounted onto that step and never removed, because it
+    was never added — d12.)
+
+    The step's WHOLE command is pinned, not the presence of each wanted flag: uv takes the last
+    of a flag and its negation, so `--locked … --frozen` (or `--no-locked`) passes a presence
+    check while skipping the freshness check, and `--exact` prunes the base's `packaging`
+    (#1097 adversary H1). Exactly those two assignments (in either order), then `uv sync`, then
+    exactly `--locked --no-dev --inexact --extra box --no-install-project --no-default-groups`
+    in any order — no negation, no second extra, no `--group`, no second command."""
+    fence = ["--locked", "--no-dev", "--inexact", "--no-install-project", "--no-default-groups"]
     instructions = _instructions()
     sync = instructions[_index_of(instructions, "uv sync")]
-    for flag in ("--locked", "--no-dev", "--inexact", "--extra box"):
+    for flag in (*fence, "--extra box"):
         assert flag in sync, (flag, sync)
     assert "--frozen" not in sync, sync
     assert "UV_PROJECT_ENVIRONMENT=/usr/local" in sync, sync
     assert "UV_COMPILE_BYTECODE=1" in sync, sync
     assert not any(ins.startswith("ENV ") for ins in instructions), "an ENV instruction"
+
+    _mounts, _flags, command = _run_parts(sync)
+    assert sorted(command[:2]) == ["UV_COMPILE_BYTECODE=1", "UV_PROJECT_ENVIRONMENT=/usr/local"], command
+    assert command[2:4] == ["uv", "sync"], command
+    flags = command[4:]
+    assert flags.count("--extra") == 1, command
+    extra_at = flags.index("--extra")
+    assert flags[extra_at + 1] == "box", command
+    rest = flags[:extra_at] + flags[extra_at + 2:]
+    assert sorted(rest) == sorted(fence), command
 
 
 # ---- d15 -------------------------------------------------------------------------------------
@@ -156,6 +221,107 @@ def test_the_dockerfile_removes_ensurepips_bundled_wheels_after_the_sync():
             assert all(t.rstrip("/").endswith("ensurepip/_bundled") for t in targets), (
                 f"the ensurepip module itself is removed: {ins}"
             )
+
+
+# ---- #1097 round-2 adversary H6: no step beyond the recipe's three ------------------------------
+def test_the_recipe_runs_exactly_the_sync_the_installer_uninstall_and_the_ensurepip_removal():
+    """The Dockerfile has exactly three `RUN` steps — the `uv sync` (pinned whole by d14), then
+    `python3 -m pip uninstall --yes pip setuptools wheel` word for word, then `rm -rf` of
+    `ensurepip/_bundled` word for word — so no step can install, copy in, or edit anything
+    beyond the lock's closure: an extra `pip --no-cache-dir install …` step, which slips past
+    d12's `pip install` pattern, fails here.
+
+    # rejected: widening d12's regex to every pip spelling — a blocklist of install verbs is
+    # the shape that missed the option-between-words spelling in the first place."""
+    # The WHOLE instruction list, by keyword: a `SHELL` (or `ARG`, `ENV`, `ONBUILD`) line
+    # rewrites what every RUN executes while leaving each RUN's text word for word (#1097
+    # round-3 adversary H8 — a SHELL injected a .pth into site-packages).
+    keywords = [ins.split(None, 1)[0].upper() for ins in _instructions()]
+    assert keywords == ["FROM", "WORKDIR", "COPY", "RUN", "RUN", "RUN"], keywords
+    runs = [ins for ins in _instructions() if ins.startswith("RUN ")]
+    assert len(runs) == 3, runs
+    assert "uv sync" in runs[0], runs[0]
+    assert shlex.split(runs[1][len("RUN "):]) == [
+        "/usr/local/bin/python3", "-m", "pip", "uninstall", "--yes", "pip", "setuptools", "wheel",
+    ], runs[1]
+    assert shlex.split(runs[2][len("RUN "):]) == [
+        "rm", "-rf", "/usr/local/lib/python3.11/ensurepip/_bundled",
+    ], runs[2]
+
+
+# ---- #1097 amendment 3: nothing outside the instructions changes what they do -------------------
+#: A BuildKit parser directive — `# syntax=`, `# escape=`, `# check=` — is a COMMENT line that
+#: changes how every line after it is read: `syntax` swaps the frontend that interprets the
+#: file, `escape` the line-continuation character. Spaces around `#` and `=` and any case are
+#: accepted by the parser, so the pattern accepts them too.
+#: Any character other than "\n" and "\t" that Python or a shell might treat as a line or
+#: word boundary, or that has no business in a recipe: C0 controls, DEL, NEL, U+2028/2029.
+_STRAY_CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f\x85\u2028\u2029]")
+
+
+def test_the_dockerfile_holds_no_control_character_but_newline_and_tab():
+    """The Dockerfile's raw text carries no control or line-separator character other than
+    `\n` and `\t` — no `\r`, `\x0b`, `\x0c`, `\x1c`–`\x1f`, `\x85`, U+2028/2029. BuildKit
+    splits lines on `\n` alone and hands a RUN's whole line to `sh -c`, so a `\x1c#;<cmd>`
+    tail is one line to the builder (and runs `<cmd>`) while a `splitlines()` reader sees a
+    pinned RUN plus a dropped comment (#1097 round-4 adversary A4 — a real build of that
+    recipe carried a startup `.pth`).
+
+    Positive control: the pattern catches each such character planted in a copy."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert not _STRAY_CONTROL.search(text), repr(_STRAY_CONTROL.search(text))
+    for ch in ("\r", "\x0b", "\x0c", "\x1c", "\x1f", "\x7f", "\x85", "\u2028"):
+        assert _STRAY_CONTROL.search(text.replace("RUN rm", f"RUN rm{ch}", 1)), repr(ch)
+
+
+_PARSER_DIRECTIVE = re.compile(r"^\s*#\s*(syntax|escape|check)\s*=", re.IGNORECASE | re.MULTILINE)
+
+
+def test_the_dockerfile_carries_no_parser_directive():
+    """The Dockerfile's RAW text (read directly: `_instructions()` drops comment lines, and a
+    directive IS one) has no line that is a parser directive — `# syntax=…` (a custom
+    frontend would read every instruction the other tests pin in its own way), `# escape=…`,
+    `# check=…` — in any case, with any spacing, anywhere in the file.
+
+    Positive controls, same test: the file does open with comment lines (so the check reads
+    the lines `_instructions()` never sees), and the pattern flags a directive planted at the
+    top of that same text, in each of the three names and a spaced, upper-case spelling."""
+    raw = DOCKERFILE.read_text(encoding="utf-8")
+    assert raw.splitlines()[0].startswith("#"), "the Dockerfile opens with no comment line"
+    hits = [line for line in raw.splitlines() if _PARSER_DIRECTIVE.match(line)]
+    assert hits == [], f"a parser directive: {hits}"
+    for planted in ("# syntax=docker/dockerfile:1", "#escape=`", "# check=skip=all", "#  SYNTAX = x/y"):
+        assert _PARSER_DIRECTIVE.search(planted + "\n" + raw), f"the pattern misses {planted!r}"
+
+
+def test_the_sync_run_carries_exactly_the_pinned_uv_mount_and_the_other_runs_carry_no_flag():
+    """The sync's `RUN` carries exactly ONE `--mount`, and it is the pinned uv bind — the
+    option SET `type=bind`, `from=ghcr.io/astral-sh/uv:<x.y.z>@sha256:<64 hex>`,
+    `source=/uv`, `target=/bin/uv`, in any order, and nothing else (no `readonly`, no `rw`) —
+    and no other flag before its command: no `--network`, no second mount, no tmpfs, cache or
+    secret mount, no `--security`. The uninstall's `RUN` and the ensurepip removal's `RUN`
+    carry no flag at all. A flag on a `RUN` changes what that step can reach while its command
+    text stays word for word.
+
+    Positive control: `_run_parts` is not blind to flags — over a planted `RUN` carrying a
+    `--network=none`, a tmpfs mount and a cache mount it returns both mounts and the flag."""
+    planted = _run_parts("RUN --network=none --mount=type=tmpfs,target=/x --mount=type=cache,target=/c true")
+    assert planted == ([{"type": "tmpfs", "target": "/x"}, {"type": "cache", "target": "/c"}], ["--network=none"], ["true"]), planted
+
+    runs = [ins for ins in _instructions() if ins.startswith("RUN ")]
+    assert len(runs) == 3, runs
+    sync_at = _index_of(runs, "uv sync")
+    assert sync_at == 0, runs
+    mounts, flags, _command = _run_parts(runs[sync_at])
+    assert flags == [], f"the sync carries a flag besides its mount: {flags}"
+    assert len(mounts) == 1, mounts
+    (mount,) = mounts
+    assert set(mount) == {"type", "from", "source", "target"}, mount
+    assert mount["type"] == "bind", mount
+    assert re.fullmatch(r"ghcr\.io/astral-sh/uv:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", mount["from"]), mount
+    assert (mount["source"], mount["target"]) == ("/uv", "/bin/uv"), mount
+    for other in runs[1:]:
+        assert _run_parts(other)[:2] == ([], []), f"a flag on a step that needs none: {other}"
 
 
 # ---- d16 -------------------------------------------------------------------------------------

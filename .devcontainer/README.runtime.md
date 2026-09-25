@@ -44,9 +44,15 @@ there is nothing to tag by hand — only to build:
 python3 defender/scripts/box_image.py build
 ```
 
-Build it once; it persists on the host daemon until `box.Dockerfile`, `uv.lock` or
-`pyproject.toml` changes. The next `start_box` after such a change faults with a
-missing-image error naming this same command — `start_box` itself never builds.
+Build it once; it persists on the host daemon until one of these changes (#1097):
+`box.Dockerfile`; the lock's entries for the core dependencies plus the `box` extra;
+`pyproject.toml`'s core or `box` requirements; or its `[tool.uv]`. A `[tool.ruff]`-style edit,
+or a relock that only moves dev-only or runtime-only packages, keeps the same image. A relock
+that moves a package the runtime stack SHARES with the image (`idna`, reached through
+pydantic's `email` extra), or changes which extras of such a package the runtime asks for,
+renames it too — the name deliberately errs toward an extra rebuild, never a stale image. The
+next `start_box` after a change that renames it faults with a missing-image error naming this
+same command — `start_box` itself never builds.
 
 ## Two caveats
 

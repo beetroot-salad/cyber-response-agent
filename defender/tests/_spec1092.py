@@ -89,12 +89,238 @@ BUILD_COMMAND_TAIL = "defender/scripts/box_image.py build"
 
 EXEC_TIMEOUT = 60.0
 
+#: The planted project's lock — WELL-FORMED, uv-shaped TOML (#1097: the name is computed from
+#: the lock's parsed core + `box` closure, so a planted tree must carry a lock the resolver can
+#: walk). Its closure from the root `planted` is alpha, beta, eta, epsilon, winonly, gamma,
+#: delta and BOTH `split` entries (#1097 amendment 2: the walk reads only link NAMES — from the
+#: root its `dependencies` + `optional-dependencies.box`, from every reached entry its
+#: `dependencies` and EVERY list under its `optional-dependencies`); every shape the walk has
+#: to handle is in it once:
+#:   - `split` is resolved to two versions, as uv writes a fork (claim a1): two same-named
+#:     `[[package]]` entries with `resolution-markers`, root links carrying `version`+`marker`;
+#:   - `alpha -> winonly` carries a marker no Linux build satisfies (markers are ignored);
+#:   - `alpha -> beta[speed]` and the root's `box -> gamma[fast]` are links with `extra` (which
+#:     the walk ignores); beta's and gamma's optional lists are ALL walked — `speed`/`fast`
+#:     (-> eta, delta) and the `docs`/`slow` nobody asks for (both -> epsilon, the superset);
+#:   - `eta -> alpha` closes a cycle;
+#:   - devtool (+ devdep) and rtlib are the ROOT's `dev` and `runtime` extras' — from the root
+#:     only `dependencies` + `box` are taken, and nothing here links back to the root, so they
+#:     stay outside the closure (amendment 3: a link that reached the root would walk its every
+#:     optional list, as for any entry).
+PLANTED_LOCK = """\
+version = 1
+revision = 3
+requires-python = ">=3.11"
+resolution-markers = [
+    "python_full_version >= '3.12'",
+    "python_full_version < '3.12'",
+]
+
+[[package]]
+name = "alpha"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beta", extra = ["speed"] },
+    { name = "winonly", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.example/alpha-1.0.0.tar.gz", hash = "sha256:3e0f6b95dcc985c9178e23d1abd337eb1b1ade27666a85669dc5e8dd4e17f714", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/alpha-1.0.0-py3-none-any.whl", hash = "sha256:b58ed7ac069404adcbc36415eac21b3701710044f9baf21ae950d335f0c0cdd0", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "beta"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/beta-2.0.0.tar.gz", hash = "sha256:e62105c24b79440afa2deb8a938892a237166f9147968a11a21500d7de9b4018", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/beta-2.0.0-py3-none-any.whl", hash = "sha256:63f3336284f5226cb525fba3055726c9e9c63fd4a5fba8a4b08b0fe884eef39b", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[package.optional-dependencies]
+speed = [
+    { name = "eta" },
+]
+docs = [
+    { name = "epsilon" },
+]
+
+[[package]]
+name = "delta"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/delta-4.0.0.tar.gz", hash = "sha256:9c9b03d0391b2f7eab3308aa96f88114670afe16acd848d6446fc7e74a87e192", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/delta-4.0.0-py3-none-any.whl", hash = "sha256:39ab2f1f5f431bdc56335772bad22489ca56fc1787ebe2f993f34ef8ae35c10d", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "devdep"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/devdep-0.1.0.tar.gz", hash = "sha256:06fa0af22431cf8cc8a5bccb05131a9ccc5670443b4bbbe6d96f3fac1ff6063a", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/devdep-0.1.0-py3-none-any.whl", hash = "sha256:60d191690d44b9d5b29d52bf71a9ca03f9ebbe95367de0dffbe6de64a0a1503a", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "devtool"
+version = "7.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "devdep" },
+]
+sdist = { url = "https://files.example/devtool-7.0.0.tar.gz", hash = "sha256:baad88892bdaca265b3de612a47852c8c2cfc57fe1e214139a442d82369abd65", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/devtool-7.0.0-py3-none-any.whl", hash = "sha256:55ae0eaf2aae50cbe28d73930e7567ab24f6ff33fd0db7e0e37da07bdfeef2aa", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "epsilon"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/epsilon-5.0.0.tar.gz", hash = "sha256:87c5ff861c9f08d8cc824489056d7371cf648417ee956ada90d0b406a3db0bf3", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/epsilon-5.0.0-py3-none-any.whl", hash = "sha256:718b050d40e620adce081a0da779d4c148ca03005e249f49ef28dfc699210229", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "eta"
+version = "6.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "alpha" },
+]
+sdist = { url = "https://files.example/eta-6.0.0.tar.gz", hash = "sha256:67699a935c2a83b28810a6d5670c1db590b673b552de97210230b0a2a259e9b2", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/eta-6.0.0-py3-none-any.whl", hash = "sha256:44a565a41029132120b8adb3344286e43b0ca9f94980d0cddb57e8064ee7b71f", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "gamma"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/gamma-3.0.0.tar.gz", hash = "sha256:5aaf849456bdaff8df781140fa3eb5913d6a099b77a40c62011f08b884db2577", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/gamma-3.0.0-py3-none-any.whl", hash = "sha256:9d5f9a39ddf237a07d3c8681ee8e3204bd549e0c56ca19f1f47eb3e4fcfc2eaa", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[package.optional-dependencies]
+fast = [
+    { name = "delta" },
+]
+slow = [
+    { name = "epsilon" },
+]
+
+[[package]]
+name = "planted"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "alpha" },
+    { name = "split", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "split", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.optional-dependencies]
+box = [
+    { name = "gamma", extra = ["fast"] },
+]
+dev = [
+    { name = "devtool" },
+]
+runtime = [
+    { name = "rtlib" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alpha", specifier = ">=1" },
+    { name = "devtool", marker = "extra == 'dev'" },
+    { name = "gamma", extras = ["fast"], marker = "extra == 'box'" },
+    { name = "rtlib", marker = "extra == 'runtime'" },
+    { name = "split" },
+]
+provides-extras = ["box", "dev", "runtime"]
+
+[[package]]
+name = "rtlib"
+version = "8.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/rtlib-8.0.0.tar.gz", hash = "sha256:781489f3dfa32b2258c258f0087cd79a2ad3bf5d3aa0e9cf40e8d1380af414a3", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/rtlib-8.0.0-py3-none-any.whl", hash = "sha256:9a1cb8c5fff277e2c2b2aaeb5a60de8dec7b5d950672c8cc638b14ddc8b28ee7", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "split"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.12'",
+]
+sdist = { url = "https://files.example/split-1.0.0.tar.gz", hash = "sha256:b6f8b51240e744ff0bdd46f645bca882a57cedba2ff8bc5f2e9725b5253a9e5b", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/split-1.0.0-py3-none-any.whl", hash = "sha256:9832de94b05abeedd86a74cb157bf4583916168e40df9221216c200408007503", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "split"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+]
+sdist = { url = "https://files.example/split-2.0.0.tar.gz", hash = "sha256:9aaf029ed0363b4c9793d3e3e3d4937681fd7e7ce9ef4d5cdab3d15f4b83630d", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/split-2.0.0-py3-none-any.whl", hash = "sha256:10d462f19a190ece5327f5f9227887da422fef8bd669d12ad6996d0804938c1c", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+
+[[package]]
+name = "winonly"
+version = "9.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example/winonly-9.0.0.tar.gz", hash = "sha256:1666617b6f7c4d0ab439f63aba366153843b120f1ee9f8b8f38c3053cd82405f", size = 1000, upload-time = "2026-01-01T00:00:00Z" }
+wheels = [
+    { url = "https://files.example/winonly-9.0.0-py3-none-any.whl", hash = "sha256:61c011ee9e3e7d42b275a49d5acde2d20415561e0db870cdadab63f6469b8091", size = 900, upload-time = "2026-01-01T00:00:00Z" },
+]
+"""
+
+#: The planted project's manifest: `[project].name` names the lock's root, the `box` extra is
+#: `gamma[fast]`, `[tool.uv]` is present, and `[tool.ruff]`/`[tool.mypy]` sit beside it.
+PLANTED_PYPROJECT = """\
+[project]
+name = "planted"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "alpha>=1",
+    "split",
+]
+
+[project.optional-dependencies]
+box = ["gamma[fast]"]
+dev = ["devtool"]
+runtime = ["rtlib"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = true
+"""
+
 #: Synthetic bytes for a planted tree's three inputs. Deterministic, so two plantings name
-#: the same image (d4) and a one-byte edit names another (d3).
+#: the same image (d4) and an edit to the recipe or the closure names another (d3).
 PLANTED_INPUT_BYTES: dict[str, bytes] = {
     "box.Dockerfile": b"FROM python:3.11-slim@sha256:" + b"0" * 64 + b"\nRUN true\n",
-    "uv.lock": b"version = 1\nrevision = 3\n",
-    "pyproject.toml": b"[project]\nname = \"planted\"\nversion = \"0.0.0\"\n",
+    "uv.lock": PLANTED_LOCK.encode("utf-8"),
+    "pyproject.toml": PLANTED_PYPROJECT.encode("utf-8"),
 }
 
 
@@ -105,11 +331,25 @@ def image_tag(tree: Path) -> str:
     return box_mod.image_tag(tree)  # type: ignore[attr-defined]
 
 
-def recipe_version() -> str:
-    """`_image.RECIPE_VERSION` — the constant that prefixes the name (MF3)."""
+def image_module():
+    """`runtime/box/_image.py` through the package door — for the constants (`HASH_INPUTS`,
+    `RECIPE_VERSION`) and `ImageInputError` a test pins exactly. The ONE lazy import site of
+    the module in this spec."""
     from defender.runtime.box import _image  # type: ignore[attr-defined]
 
-    return str(_image.RECIPE_VERSION)
+    return _image
+
+
+def recipe_version() -> str:
+    """`_image.RECIPE_VERSION` — the constant that prefixes the name (MF3)."""
+    return str(image_module().RECIPE_VERSION)
+
+
+def box_closure(lock: dict, root_name: str) -> list[dict]:
+    """`_image.box_closure(lock, root_name)` (#1097 M1″): the lock entries reachable, by link
+    name, from the root's core + `box` links. Reached lazily, so a module that names it still collects while
+    the function does not exist and each test fails on the missing attribute."""
+    return image_module().box_closure(lock, root_name)  # type: ignore[no-any-return]
 
 
 # ---- trees ------------------------------------------------------------------------------------

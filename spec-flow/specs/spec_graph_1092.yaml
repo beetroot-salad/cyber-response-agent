@@ -7,6 +7,30 @@ design: "1092"   # gh issue #1092 — own the box image: build it from the host 
                  # `.spec-flow/issue-1092.md`. Two amendment SPELLINGS are corrected, not refuted
                  # (handoff.refuted): `request.defender_dir` does not exist (N5) and box-dood has
                  # no runner-side `uv sync` (N6).
+                 # AMENDED BY #1097's design amendment ("name the image from the lock's box
+                 # closure, no exported copy"): the three inputs and the recipe stand; what
+                 # `image_tag` digests of them narrows to the Dockerfile's bytes, `[tool.uv]`,
+                 # the root lock entry's core + `box` edges and every lock entry reachable from
+                 # them (`_image.box_closure`, markers ignored — the superset rule), canonically;
+                 # `RECIPE_VERSION` = v2. An unparseable manifest, a lock with no root entry or a
+                 # dangling edge is `ImageInputError` naming the file. The #1097 demands sit at
+                 # the end of the M3 block below; line-number comments predate the amendment.
+                 # AMENDED AGAIN BY #1097's "Design amendment 2 — read only package names from
+                 # the lock; fence the install to what is read": the walk reads ONLY link
+                 # `name`s (root: `dependencies` + `optional-dependencies.box`; every reached
+                 # entry: `dependencies` + EVERY optional list, requested or not — the superset
+                 # grows by pydantic's `email` extra), the root is found by the PEP 503-
+                 # normalised `[project].name`, one shape check at the parse seam ("cannot use"
+                 # vs "cannot read"), and the sync is fenced `--no-install-project
+                 # --no-default-groups` (M2″).
+                 # AMENDED A THIRD TIME BY #1097's "Design amendment 3 — loud unlocked edits,
+                 # one fault boundary, order-free canonical form": the digest also covers
+                 # `[project].dependencies` + `optional-dependencies.box` as written (an unlocked
+                 # core/box edit renames; dev/runtime stay out); everything after the three
+                 # reads is ONE fault boundary ("cannot use" naming the file being processed);
+                 # every list in a hashed value is sorted by its canonical encoding; a root
+                 # reached by a link is walked and hashed like any entry; `box_closure`
+                 # normalises its `root_name` (PEP 503).
 tests: defender/tests   # the suite this graph derives (profile `tests.dir`). check_binds scans
                         # docstrings NON-RECURSIVELY over this one directory, so phase E sites
                         # every new #1092 test file here. Three demands bind tests that ALREADY
@@ -211,13 +235,13 @@ demands:
   - id: image_tag_is_sensitive_to_each_input
     kind: behavior
     form: test
-    discharged_by: test_a_one_byte_change_in_any_of_the_three_inputs_moves_the_tag
+    discharged_by: test_a_recipe_byte_or_a_box_closure_entry_moves_the_tag_and_an_edit_outside_the_closure_does_not
     binds:
       - image_tag
       - "interacts(image_tag->box_dockerfile)"
       - "interacts(image_tag->uv_lock)"
       - "interacts(image_tag->pyproject)"
-    forks: "F5 (auto: 12 hex); SETTLED-BY-DOC #85 (three whole files, cosmetic churn accepted)"
+    forks: "F5 (auto: 12 hex); SETTLED-BY-DOC #85 (three whole files, cosmetic churn accepted) — SUPERSEDED by #1097 O1: only an edit to the recipe, `[tool.uv]` or the lock's core + `box` closure renames"
   - id: image_tag_is_path_independent
     kind: behavior
     form: test
@@ -275,6 +299,113 @@ demands:
       through the script's seam and asserts the exit propagates; the daemon-side rows are
       one fixture each, not one test each.
     forks: "BF #1/#4/#7/#8/#12/#13/#93 (auto: a cold build's failure is the step's own red; no retry, no resume contract, no uv-version parity); DAEMON #46/#63/#64/#90 (auto: always invoke docker build, no presence check, no lock); UVPIN #88 (auto: `COPY --from=ghcr.io/astral-sh/uv:<ver>@sha256:<digest>`)"
+  # ---- #1097 (design amendment): the name is the lock's core + `box` closure ------------------
+  - id: image_tag_holds_under_edits_outside_the_box_closure
+    kind: negative      # positive control in the same test: a closure entry's version and `[tool.uv]` each rename
+    form: test
+    discharged_by: test_an_edit_that_cannot_change_the_image_does_not_rename_it
+    binds:
+      - image_tag
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
+    rows: >-
+      #1097 O1 — `[tool.ruff]`/`[tool.mypy]`, comments, the ROOT's dev/runtime extras and their
+      lock entries (the one set of optional lists the walk never takes FROM the root), the
+      dev/runtime requirement lists edited without a relock, a file outside the inputs.
+      (Amendment 2 moved "an entry reached only through extras nobody asks for" to the renaming
+      side; amendment 3 moved a CORE or `box` requirement edited without a relock there too.)
+  - id: image_tag_holds_under_lock_reformatting
+    kind: negative      # positive control in the same test: one artifact-hash byte renames under every spelling
+    form: test
+    discharged_by: test_reordering_or_reformatting_the_lock_does_not_rename_the_image
+    binds: [image_tag, "interacts(image_tag->uv_lock)"]
+    rows: "#1097 O1 — entries reordered, keys reordered, arrays re-wrapped, comments: a newer uv re-emitting the lock renames nothing (non-obligation: a NEW entry field renames once)."
+  - id: image_tag_moves_with_the_box_closure_its_roots_tool_uv_and_the_recipe
+    kind: behavior
+    form: test
+    discharged_by: test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image
+    binds:
+      - image_tag
+      - box_closure
+      - "interacts(image_tag->box_dockerfile)"
+      - "interacts(image_tag->uv_lock)"
+      - "interacts(image_tag->pyproject)"
+      - "interacts(image_tag->box_closure)"
+    rows: "#1097 O2 — a closure entry's version/source/artifact hash/edges (entries digested whole), an entry reached only through a closure entry's unrequested extra, transitively (amendment 2's superset), the root's core + box edges, `[tool.uv]` (absent reads as {}), one Dockerfile byte. Amendment 3 M1‴ (a): `[project].dependencies` and `optional-dependencies.box` as written — a core requirement added/dropped/re-specified or the box requirement changed WITHOUT a relock renames; both absent read as []."
+  - id: image_tag_names_every_entry_of_a_split_package
+    kind: behavior
+    form: test
+    discharged_by: test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes
+    binds: [image_tag, box_closure, "interacts(image_tag->box_closure)"]
+    rows: "#1097 M1' superset rule (claim a1's shape: two same-named entries, `resolution-markers`, edges with `version` + `marker`) — either entry renames, even the one the 3.11 image never installs."
+  - id: box_closure_walks_link_names_and_every_optional_list
+    kind: behavior
+    form: test
+    discharged_by: test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_every_reached_entry
+    binds: [box_closure, "interacts(box_closure->uv_lock)"]
+    rows: "#1097 amendment 2 M1″ — only link `name`s are read; every optional list of a reached entry is walked (epsilon, behind extras nobody asks for, is IN); FROM the root only `dependencies` + `box` (nothing in the planted lock links back to it — amendment 3's reached root is box_closure_walks_the_root_once_reached's); a link's `extra`/`marker`/`version`/`source` neither widens nor narrows. Supersedes round 2's requested-extras walk."
+  - id: box_closure_walks_a_string_extra_like_none
+    kind: behavior
+    form: test
+    discharged_by: test_a_string_extra_on_a_link_walks_exactly_like_no_extra_and_is_no_fault
+    binds: [box_closure, image_tag, "interacts(box_closure->uv_lock)", "interacts(image_tag->box_closure)"]
+    rows: "#1097 amendment 2 (review finding: a string `extra` was split into characters, dropping a target) — `{ name = \"beta\", extra = \"speed\" }` walks like the bare link; no fault. The name moves (the link's bytes are hashed); only the walk is pinned."
+  - id: image_tag_finds_the_root_by_its_normalised_name
+    kind: behavior
+    form: test
+    discharged_by: test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names
+    binds: [image_tag, pyproject, "interacts(image_tag->pyproject)", "interacts(image_tag->uv_lock)"]
+    rows: "#1097 amendment 2 — `[project].name` PEP 503-normalised (lowercase; runs of `-_.` -> `-`) finds the root: `Planted` names planted's image, `planted_x`/`planted.x` planted-x's. Control: `plantedx` still faults naming uv.lock."
+  - id: box_closure_of_this_lock_is_core_plus_box
+    kind: parity
+    form: test
+    discharged_by: test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package
+    binds: [box_closure, uv_lock, pyproject, "interacts(box_closure->uv_lock)"]
+    rows: "#1097 amendment 2 — the 7 installed packages PLUS email-validator, dnspython, idna (pydantic's unrequested `email` extra: the recorded superset cost)."
+  - id: image_tag_on_this_checkouts_manifests
+    kind: behavior
+    form: test
+    discharged_by: test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_closure_relock_moves_it
+    binds: [image_tag, uv_lock, pyproject, "interacts(image_tag->uv_lock)", "interacts(image_tag->pyproject)"]
+    rows: "#1097 key flows over the real manifests: a pytest relock holds the name, a pydantic relock moves it — and (amendment 2's superset) so does a dnspython or idna relock, which the image does not install. Amendment 3: a core requirement added or the box requirement re-specified WITHOUT a relock renames; the core requirements reordered holds; a dev requirement unlocked still holds."
+  - id: image_tag_refuses_a_tree_it_cannot_walk
+    kind: behavior
+    form: test
+    discharged_by: test_a_tree_the_resolver_cannot_read_parse_or_walk_raises_image_input_error_naming_the_file
+    binds:
+      - image_tag
+      - "image_tag.domain.distinguished[missing-input]"
+      - "image_tag.domain.distinguished[unwalkable-input]"
+      - "interacts(image_tag->box_closure)"
+    rows: "#1097 M1' faults — each missing input, unparseable TOML, no root entry, a dangling edge: `ImageInputError` naming the file and the reason, never a fallback hash. Amendment 2: \"cannot read\" (unreadable) vs \"cannot use\" (reads, unusable); the parse-seam shape check (a link with no name, a non-table link, `dependencies` a string, `optional-dependencies` a list or holding a string, a non-string entry name, a non-table entry); a value nested past the canonical encoder names its file, never RecursionError. Amendment 3 M1‴ (b), ONE fault boundary: a nameless entry 20000 tables deep (its repr recursed), a 5000-digit integer (tomllib's bare ValueError) in [tool.uv] / a reached / an UNREACHED lock entry, a hex integer too long for decimal (repr / encoder) — each names the file being processed; M1‴ (a): the core/box requirement lists (or `optional-dependencies`) not lists of strings name pyproject.toml. Also pins HASH_INPUTS and RECIPE_VERSION = v2 exactly."
+  - id: image_tag_holds_under_reordering_a_hashed_list
+    kind: negative      # positive control in the same test: a version / hash byte / specifier still renames under each reordering
+    form: test
+    discharged_by: test_reordering_a_list_inside_a_hashed_value_does_not_rename_the_image
+    binds: [image_tag, "interacts(image_tag->uv_lock)", "interacts(image_tag->pyproject)"]
+    rows: "#1097 amendment 3 M1‴ (c) — every list in a hashed value sorted by its canonical encoding: a closure entry's dependencies / wheels / optional list, the root's dependencies / box links, an entry's resolution-markers, every lock list at once, the core and box requirement lists — none renames."
+  - id: box_closure_walks_the_root_once_reached
+    kind: behavior
+    form: test
+    discharged_by: test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry
+    binds: [box_closure, image_tag, "interacts(box_closure->uv_lock)", "interacts(image_tag->box_closure)"]
+    rows: "#1097 amendment 3 M1‴ (d) — alpha -> `{ name = \"planted\", extra = [\"runtime\"] }`: the root entry and every optional list's targets (rtlib, devtool, devdep) are in the closure; an rtlib or devdep bump renames. Control: with no such link, rtlib stays out and its bump holds."
+  - id: box_closure_normalises_its_root_name
+    kind: behavior
+    form: test
+    discharged_by: test_box_closure_normalises_the_root_name_it_is_given
+    binds: [box_closure]
+    rows: "#1097 amendment 3 M1‴ (e) — `box_closure(lock, \"Planted\")` == `box_closure(lock, \"planted\")`; over a `planted-x` root, `planted_x` / `Planted.X` work. Control: `plantedx` is still a missing-entry KeyError."
+  - id: box_image_script_reports_an_unusable_lock
+    kind: behavior
+    form: test
+    discharged_by: test_box_image_reports_a_lock_it_cannot_use_in_the_resolvers_words_and_exits_1
+    rows: "#1097 + amendment 2 — not TOML, a link with no name, `dependencies` a string, nested past the encoder; amendment 3's one fault boundary — a nameless entry nested past repr, a 5000-digit integer in an unreached entry: one stderr line saying \"cannot use\", exit 1, no traceback, no docker call."
+    binds:
+      - "box_image.access[tag]"
+      - "box_image.access[build]"
+      - "image_tag.domain.distinguished[unwalkable-input]"
+      - "interacts(box_image->image_tag)"
   - id: box_image_script_reports_an_unreadable_input
     kind: behavior
     form: test
@@ -310,6 +441,7 @@ demands:
       the resolver's order. The sibling cells `[lacking-inputs-and-uncovered]` (MF1 part 2) and
       `did_not_run_marker.domain.distinguished[resolver-refusal]` (MF1 part 3) are bound by
       `c46_refusal_precedes_the_resolver` and `resolver_refusal_leaves_no_marker` below.
+    rows: "#1097 + amendment 2 — a lock that reads but is not TOML, or has the wrong shape (a reached entry's `dependencies` a string), takes the same door: BoxFault saying \"cannot use\", never the TypeError; a missing file or a directory in its place says \"cannot read\". Amendment 3's one fault boundary: a nameless entry nested 20000 deep and a 5000-digit integer in a reached entry — BoxFault, never the RecursionError/ValueError."
     forks: "MF1 (#19, #40, #73, #80, #81, #82 — material, resolved by the human to reading A: BoxFault on any unreadable input, C46 first, no run-dir marker, 11 + 2 sites pin a rootfs); F-A (20-demands, non-material as filed — superseded by MF1's routing)"
   - id: c46_refusal_precedes_the_resolver
     kind: behavior
@@ -371,7 +503,19 @@ demands:
     form: test
     discharged_by: test_the_sync_line_targets_usr_local_frozen_no_dev_inexact_compiled_with_the_box_extra
     binds: [box_dockerfile, "box_dockerfile.domain.distinguished[sync_flags]"]
-    forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
+    forks: "O7-SHAPE #59 (auto: no --no-install-project needed — `[tool.uv] package = false`, PJ-r2-3 — SUPERSEDED by #1097 amendment 2 M2″: the sync is fenced `--no-install-project --no-default-groups`, so the project and dependency groups cannot enter the image whatever pyproject says, and the name need not hash them); #60 (auto: no ENV instruction; sync-time variables are RUN-scoped)"
+  - id: dockerfile_has_no_parser_directive
+    kind: negative      # positive control in the same test: the file opens with comment lines, and a planted directive is caught
+    form: test
+    discharged_by: test_the_dockerfile_carries_no_parser_directive
+    binds: [box_dockerfile]
+    rows: "#1097 amendment 3 recipe pin — no `# syntax=` / `# escape=` / `# check=` line (any case, any spacing) in the RAW file: a directive changes how every pinned instruction is read."
+  - id: dockerfile_runs_carry_only_the_uv_mount
+    kind: shape
+    form: test
+    discharged_by: test_the_sync_run_carries_exactly_the_pinned_uv_mount_and_the_other_runs_carry_no_flag
+    binds: [box_dockerfile, "box_dockerfile.domain.distinguished[uv_pin]"]
+    rows: "#1097 amendment 3 recipe pin — the sync RUN's flags are exactly one --mount, the pinned uv bind (option set type/from/source/target), no --network or other mount; the uninstall and ensurepip RUNs carry no flag."
   - id: dockerfile_removes_the_installers_and_keeps_packaging
     kind: shape
     form: test
@@ -431,7 +575,8 @@ demands:
     kind: parity
     form: test
     discharged_by: test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_package
-    binds: [box_image_contents, uv_lock, "interacts(box_dockerfile->uv_lock)"]
+    binds: [box_image_contents, uv_lock, box_closure, "interacts(box_dockerfile->uv_lock)"]
+    rows: "#1097 amendment 2 — installed == the marker-evaluated oracle (exact); installed ⊆ box_closure's names, each version in that name's SET (a split package is several entries); the surplus is today pydantic's email extra."
   - id: image_has_no_uv_and_no_pip_path
     kind: negative      # positive control: base_packages_survive_the_sync / duckdb_imports_in_the_box (python3 and its packages work)
     form: test
@@ -870,6 +1015,7 @@ structure:
   actors:
     # --- the change's own actors (provenance: design) -----------------------------------------
     - {id: image_tag,               frame: leg,         provenance: design}   # runtime/box/_image.py::image_tag(tree) — reads the three files' bytes; stdlib-only, no sibling import (G22)
+    - {id: box_closure,             frame: leg,         provenance: design}   # runtime/box/_image.py::box_closure(lock, root_name) — the lock walk image_tag digests (#1097); dual-listed — see boundaries
     - {id: box_image,               frame: leg,         provenance: design}   # defender/scripts/box_image.py — `tag` | `build`; loads _image.py BY FILE PATH; a subprocess of GitHub's runner / the operator's shell (cross-process edge, brief floor)
     - {id: _create_argv,            frame: leg,         provenance: design}   # _lifecycle.py:35-65 — run-dir lane argv; C46 loop :46-47 BEFORE the image token :64; env_pairs indexed per allowlist key :62-63
     - {id: _render_argv,            frame: leg,         provenance: design}   # _lifecycle.py:175-204 — request lane argv; C46 per mount :188-191 BEFORE the image token :203
@@ -911,18 +1057,18 @@ structure:
     # ===== the resolver and its inputs ==========================================================
     - id: image_tag
       provenance: design
-      # runtime/box/_image.py::image_tag(tree: Path) -> "defender-box:<sha256[:12] over the
-      # BYTES of tree/box.Dockerfile + tree/uv.lock + tree/pyproject.toml, fixed order,
-      # separated>" — `tree` is the DEFENDER dir (F-D, N5). Called by both argv builders and the
+      # runtime/box/_image.py::image_tag(tree: Path) -> "defender-box:v2-<sha256[:12] over
+      # tree/box.Dockerfile's bytes, pyproject's `[tool.uv]`, the root lock entry's core + `box`
+      # edges and `box_closure`'s entries, canonically — #1097>" — `tree` is the DEFENDER dir (F-D, N5). Called by both argv builders and the
       # _spec771 runner when `rootfs is None`; loaded by file path by the build script. The
       # domain is THE SHAPE OF THE TREE THE RESOLVER MEETS. Three members are UNBOUND on
       # purpose (MF1 ×2, MF3) — the gate names them; §7 decides the root.
       facets:
         domain:
           type: path
-          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
+          refinement: {nl: "The defender dir the box is about to mount, as the resolver finds it: complete, missing a file, holding an unreadable entry in a file's place, holding a manifest it cannot parse or a lock it cannot walk (no root entry, a dangling edge — #1097; a malformed entry or link, a value nested past the canonical encoder — #1097 amendment 2), lacking the files AND invisible to the daemon (DooD), or carrying a `_image.py` whose recipe differs from the running package's."}
           default: complete-tree
-          distinguished: [complete-tree, missing-input, unreadable-input, lacking-inputs-and-uncovered, recipe-drift]
+          distinguished: [complete-tree, missing-input, unreadable-input, unwalkable-input, lacking-inputs-and-uncovered, recipe-drift]
           falsy_valid: false
           documented_alternatives: []
     - id: box_dockerfile
@@ -939,6 +1085,15 @@ structure:
           distinguished: [base_digest, uv_pin, sync_flags, installer_removal, ensurepip_removal]
           falsy_valid: false
           documented_alternatives: []
+    - id: box_closure
+      provenance: design
+      # runtime/box/_image.py::box_closure(lock, root_name) (#1097, amendment 2 M1″) — the lock
+      # entries reachable from the root's `dependencies` + `optional-dependencies.box`, links
+      # followed BY NAME to every same-named entry; from every reached entry its `dependencies`
+      # AND every optional list, requested or not. Nothing on a link but `name` is read (`extra`,
+      # `marker`, `version`, `source` ignored). The one owner of the walk; the live parity test
+      # checks the image is a subset of it, beside an independent marker-evaluating walk.
+      facets: {}
     - id: uv_lock
       provenance: design
       # defender/uv.lock — hash input #2 (S3); gains the `box` extra's resolution (F11: three
@@ -1302,9 +1457,11 @@ structure:
 
   interacts:
     # --- the resolver and its inputs ------------------------------------------------------------
-    - {from: image_tag,               to: box_dockerfile,      mode: read,   via: fs,             provenance: design}   # bytes, at every box start (accepted cost: ~2 ms, N2)
+    - {from: image_tag,               to: box_dockerfile,      mode: read,   via: fs,             provenance: design}   # at every box start: parse the lock + walk + digest (#1097: ~30 ms measured, was ~2 ms for bytes; no cache — container start dominates)
     - {from: image_tag,               to: uv_lock,             mode: read,   via: fs,             provenance: design}
-    - {from: image_tag,               to: pyproject,           mode: read,   via: fs,             provenance: design}
+    - {from: image_tag,               to: pyproject,           mode: read,   via: fs,             provenance: design}   # #1097: `[project].name` (the root) and `[tool.uv]`
+    - {from: image_tag,               to: box_closure,         mode: invoke, via: api,            provenance: design}   # #1097: the entries digested
+    - {from: box_closure,             to: uv_lock,             mode: read,   via: api,            provenance: design}   # the parsed lock, never the bytes
     - {from: image_tag,               to: drain_worktree,      mode: read,   via: fs,             provenance: design}   # the drain lane's tree: `Path(request.workdir)/'defender'` = `<wt>/defender` (S13)
     - {from: _create_argv,            to: image_tag,           mode: invoke, via: api,            provenance: design}   # `spec.rootfs if spec.rootfs is not None else image_tag(defender_dir)` — after the C46 loop (MF1 order: unstated)
     - {from: _render_argv,            to: image_tag,           mode: invoke, via: api,            provenance: design}   # `… else image_tag(Path(request.workdir) / "defender")`

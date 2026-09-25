@@ -58,9 +58,9 @@ is bind-mounted into the box whole, and the box's own interpreter and installed 
 come from the owned image (#1092) — built once, outside any single run, from `uv.lock` and
 `pyproject.toml` — so a clean bit at run time says nothing about when that image was built.
 Read `dirty is False` as "no TRACKED source moved", and pin the dependency set with the
-lockfile, which is tracked and therefore is covered — and which the image's own name is a
-hash over (`runtime/box/_image.py::image_tag`), so a stale image is a wrong-named one, not
-a silently-stale one.
+lockfile, which is tracked and therefore is covered — and whose core + `box` entries the
+image's own name is a hash over (`runtime/box/_image.py::image_tag`, #1097), so a stale image
+is a wrong-named one, not a silently-stale one.
 
 THE RUN DIR IS THE BOX'S RW BIND, so a model can overwrite this file the same way it can
 overwrite any run-dir artifact. The stamp is written by the host BEFORE the box is created and

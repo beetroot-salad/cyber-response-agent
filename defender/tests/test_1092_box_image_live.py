@@ -26,6 +26,7 @@ from defender.runtime.box import BOX_ENV_ALLOWLIST
 from defender.tests._spec1092 import (
     DEFENDER,
     IMAGE_WALK_PROBE,
+    box_closure,
     box_probe,
     box_run,
     image_shell,
@@ -228,7 +229,15 @@ def test_the_base_images_own_packages_survive_the_inexact_sync(tmp_path):
 def test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_package():
     """Every distribution installed in the image is either a package the lock resolves for
     core + `box` at exactly the locked version or a base package the Dockerfile keeps
-    (`packaging`), and every lock-resolved core + `box` package is present."""
+    (`packaging`), and every lock-resolved core + `box` package is present.
+
+    #1097: the image is NAMED from a superset of what it HOLDS — every installed distribution
+    (minus `packaging`) is a name `_image.box_closure` returns over this checkout's lock, at one
+    of the versions the closure carries for that name (a split package is several entries, so
+    the closure is compared as name -> SET of versions). The marker-evaluating walk above stays
+    the independent, EXACT oracle: `box_closure` ignores markers and walks every optional list
+    of a reached entry (amendment 2), so today it also names pydantic's unrequested `email`
+    extra — email-validator, dnspython, idna — which the image does not install."""
     from packaging.utils import canonicalize_name
 
     seen = image_shell(_DISTRIBUTIONS)
@@ -242,6 +251,20 @@ def test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_pa
         "missing": sorted(set(locked) - set(installed)),
     }
     assert {n: installed[n] for n in locked} == locked
+
+    lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
+    root_name = tomllib.loads((DEFENDER / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+    named_from: dict[str, set[str]] = {}
+    for entry in box_closure(lock, root_name):
+        named_from.setdefault(entry["name"], set()).add(entry["version"])
+    assert set(installed) - kept <= set(named_from), {
+        "installed, not in the name": sorted(set(installed) - kept - set(named_from)),
+    }
+    for name, version in installed.items():
+        if name not in kept:
+            assert version in named_from[name], (name, version, sorted(named_from[name]))
+    assert set(named_from) - set(installed) == {"dnspython", "email-validator", "idna"}, sorted(
+        set(named_from) - set(installed))
 
 
 # ---- d22 (negative; positive controls: python3 and pydantic work in the same probe) ------------------
