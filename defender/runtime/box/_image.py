@@ -8,11 +8,19 @@ no venv on it. A relative import would make the second door unusable.
 The name is a function of three files under the tree — `box.Dockerfile`, `uv.lock`,
 `pyproject.toml`, read in that order (the order also decides which file a "cannot read" fault
 names first) — but of only the parts of them the image is built from (#1097): the
-Dockerfile's bytes, `pyproject.toml`'s `[tool.uv]`, and the lock's entries for the core
-dependencies plus the `box` extra. An edit the image cannot see — lint config, the `dev` or
-`runtime` extras and their lock entries, a comment, uv rewriting the lock's layout — keeps the
-name, so already-built images stay valid; any edit to what the image installs names a new one.
+Dockerfile's bytes, `pyproject.toml`'s `[tool.uv]` and its core + `box` requirement strings,
+and the lock's entries for the core dependencies plus the `box` extra (`box_closure`). An edit
+the image cannot see — lint config, the `dev`/`runtime` requirement lists, a comment, uv
+reordering or reformatting the lock — keeps the name, so already-built images stay valid; any
+edit to what the image installs names a new one, and so does an unlocked edit to the core or
+`box` requirements (so the build's `uv sync --locked` gets the chance to refuse it loudly).
 Same name therefore means the same closure under the same recipe, not the same manifest bytes.
+
+The closure is deliberately a SUPERSET (see `box_closure`), which couples the name to the
+runtime stack in one direction: a relock that moves a package the runtime shares with the
+closure (`idna`, via pydantic's `email` extra), or that changes which extras of a closure
+package the runtime asks for, renames the image though its contents are unchanged. That is an
+extra rebuild, never a stale image.
 
 Nothing here reads any file at import time — only `image_tag` touches disk, and only when
 called.
@@ -42,10 +50,9 @@ BOX_EXTRA = "box"
 
 class ImageInputError(Exception):
     """One of `HASH_INPUTS` could not be read under `tree` — missing, a directory in its
-    place, any other `OSError` ("cannot read") — or was read but cannot be used: not TOML, not
-    the shape the walk reads, no root entry, a link to a package the lock does not carry, a
-    value too deep to encode ("cannot use"). Carries enough to build an operator-facing message
-    without importing anything outside the stdlib."""
+    place, any other `OSError` ("cannot read") — or was read but cannot be used: anything that
+    goes wrong while parsing, checking, walking or digesting it ("cannot use"). Carries enough
+    to build an operator-facing message without importing anything outside the stdlib."""
 
     def __init__(self, tree: Path, name: str, reason: BaseException | str, *, unreadable: bool = False) -> None:
         self.tree = tree
@@ -79,28 +86,29 @@ def _entry_links(entry: dict[str, Any]) -> list[dict[str, Any]]:
 
 def box_closure(lock: dict[str, Any], root_name: str) -> list[dict[str, Any]]:
     """@owns the image's package set, as the lock records it — every `[[package]]` entry
-    reachable from `root_name`'s core dependencies plus its `box` extra, whole.
+    reachable from the root's core dependencies plus its `box` extra, whole. `root_name` is
+    normalised as uv writes names, so a `[project].name` can be passed as spelled.
 
     Reads ONE thing from the lock: the `name` each link points at (#1097, amendment 2). A link's
     `extra`, `marker`, `version` and `source` are never interpreted — so they can never be
     MISinterpreted. From each reached entry the walk follows its dependencies and every list
     under its `optional-dependencies`, whether or not anything asks for that extra, and a name
-    reaches every entry of that name (a split package contributes all of them). That is a
+    reaches every entry of that name (a split package contributes all of them). The root is no
+    exception once a link reaches it: it is walked and returned like any entry. That is a
     superset of what any build installs: an extra rename at worst, never a missed one. The
     recipe's sync is fenced to the same set (`--no-install-project --no-default-groups`), so
     nothing it can install lies outside what this walk reads.
 
     Raises `MissingLockEntry` naming the root or a link target the lock does not carry. The
-    root itself is never in the result. The order of the result is the lock's."""
+    order of the result is the lock's."""
+    root_name = normalized_name(root_name)
     by_name: dict[str, list[dict[str, Any]]] = {}
     for entry in lock.get("package", []):
         by_name.setdefault(entry["name"], []).append(entry)
     if root_name not in by_name:
         raise MissingLockEntry(root_name)
     stack = [link["name"] for root in by_name[root_name] for link in _root_links(root)]
-    # The root is never expanded as an ordinary entry, even if some package links back to it:
-    # its other optional lists are the dev and runtime extras, which the image never installs.
-    walked: set[str] = {root_name}
+    walked: set[str] = set()
     reached: set[int] = set()
     while stack:
         name = stack.pop()
@@ -122,14 +130,6 @@ def _read(tree: Path, name: str) -> bytes:
         raise ImageInputError(tree, name, e, unreadable=True) from e
 
 
-def _loads_input(tree: Path, name: str, data: bytes) -> Any:
-    """One input's TOML, unchecked — each reader below narrows the part it uses."""
-    try:
-        return tomllib.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError, RecursionError) as e:
-        raise ImageInputError(tree, name, e) from e
-
-
 def _is_links(value: Any) -> bool:
     return isinstance(value, list) and all(
         isinstance(link, dict) and isinstance(link.get("name"), str) for link in value
@@ -141,13 +141,12 @@ def _lock_packages(tree: Path, data: bytes) -> list[dict[str, Any]]:
     with a string `name`, whose `dependencies` is a list of links (tables with a string
     `name`) and whose `optional-dependencies` is a table of such lists. Nothing else in an
     entry is read, so nothing else is checked."""
-    doc = _loads_input(tree, "uv.lock", data)
-    packages = doc.get("package", []) if isinstance(doc, dict) else None
+    packages = tomllib.loads(data.decode("utf-8")).get("package", [])
     if not isinstance(packages, list):
         raise ImageInputError(tree, "uv.lock", "`package` is not a list of tables")
     for entry in packages:
         if not (isinstance(entry, dict) and isinstance(entry.get("name"), str)):
-            raise ImageInputError(tree, "uv.lock", f"a package entry has no string name: {entry!r:.80}")
+            raise ImageInputError(tree, "uv.lock", "a package entry is not a table with a string name")
         optional = entry.get("optional-dependencies", {})
         if not (_is_links(entry.get("dependencies", []))
                 and isinstance(optional, dict) and all(_is_links(v) for v in optional.values())):
@@ -157,52 +156,83 @@ def _lock_packages(tree: Path, data: bytes) -> list[dict[str, Any]]:
     return packages
 
 
-def _project_root_and_uv(tree: Path, data: bytes) -> tuple[str, dict[str, Any]]:
-    """`pyproject.toml`'s `[project].name`, normalised as uv writes it (the lock's root entry),
-    and its `[tool.uv]` table (absent → empty)."""
-    doc = _loads_input(tree, "pyproject.toml", data)
-    project, tool = (doc.get("project", {}), doc.get("tool", {})) if isinstance(doc, dict) else (None, None)
-    name = project.get("name") if isinstance(project, dict) else None
-    uv = tool.get("uv", {}) if isinstance(tool, dict) else None
+def _is_strings(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _project_parts(tree: Path, data: bytes) -> tuple[str, dict[str, Any], dict[str, list[str]]]:
+    """From `pyproject.toml`: the root's name (normalised as the lock spells it), `[tool.uv]`
+    (absent → empty), and the core + `box` requirement strings as written (absent → [])."""
+    doc = tomllib.loads(data.decode("utf-8"))
+    project, uv = doc.get("project", {}), doc.get("tool", {}).get("uv", {})
+    name = project.get("name")
+    requirements = {
+        "dependencies": project.get("dependencies", []),
+        BOX_EXTRA: project.get("optional-dependencies", {}).get(BOX_EXTRA, []),
+    }
     if not isinstance(name, str) or not isinstance(uv, dict):
         raise ImageInputError(tree, "pyproject.toml", "no [project] name, or [tool.uv] is not a table")
-    return normalized_name(name), uv
+    if not all(_is_strings(r) for r in requirements.values()):
+        raise ImageInputError(tree, "pyproject.toml", "a core or box requirement list is not a list of strings")
+    return normalized_name(name), uv, requirements
 
 
-def _digest_form(tree: Path, name: str, value: Any) -> bytes:
-    """One byte string per value, whatever order the TOML wrote its keys in; a value too deep
-    to encode is a fault in the file it came from, never a crash."""
-    try:
-        return json.dumps(
-            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str,
-        ).encode("ascii")
-    except (RecursionError, ValueError) as e:
-        raise ImageInputError(tree, name, f"a value cannot be encoded: {e}") from e
+def _encode(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+
+
+def _order_free(value: Any) -> Any:
+    """`value` with every list sorted by its members' canonical encoding (and dict keys by
+    `_encode`'s `sort_keys`): the lock's lists and the requirement lists never decide what a
+    sync installs by their order, so their order never decides the name either."""
+    if isinstance(value, dict):
+        return {k: _order_free(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return sorted((_order_free(v) for v in value), key=_encode)
+    return value
 
 
 def image_tag(tree: Path) -> str:
     """`defender-box:<RECIPE_VERSION>-<12 hex>` — a sha256 over the Dockerfile's bytes,
-    `[tool.uv]`, the root's core + `box` links and `box_closure`'s entries, the last three in
-    canonical form. Every input is read before any is parsed, so a fault names the FIRST
-    unreadable file; a file that reads but cannot be used raises `ImageInputError` naming it.
-    Never hashes a tree it could not fully read and understand."""
+    `[tool.uv]` (keys sorted, lists as written) and, in order-free canonical form, the core +
+    `box` requirement strings, the root's core + `box` links and `box_closure`'s entries.
+
+    Every input is read before any is parsed, so a missing file is named first ("cannot
+    read"). Everything after the reads is one pure computation over those bytes, so ANY
+    failure in it — bad TOML, the wrong shape, a missing entry, a value nothing can encode —
+    is the input's fault: it raises `ImageInputError` naming the file being processed ("cannot
+    use"). Never hashes a tree it could not fully read and understand."""
     tree = Path(tree)
     data = {name: _read(tree, name) for name in HASH_INPUTS}
-    packages = _lock_packages(tree, data["uv.lock"])
-    root_name, tool_uv = _project_root_and_uv(tree, data["pyproject.toml"])
+    at = "uv.lock"
     try:
+        packages = _lock_packages(tree, data["uv.lock"])
+        at = "pyproject.toml"
+        root_name, tool_uv, requirements = _project_parts(tree, data["pyproject.toml"])
+        at = "uv.lock"
         closure = box_closure({"package": packages}, root_name)
+        roots = [_root_links(entry) for entry in packages if entry["name"] == root_name]
+        at = "pyproject.toml"
+        # `[tool.uv]` keeps its written list order: `[[tool.uv.index]]` order is index
+        # priority, so there a reordering IS a change to what the sync resolves.
+        parts: list[tuple[str, bytes]] = [
+            ("box.Dockerfile", data["box.Dockerfile"]),
+            ("tool.uv", _encode(tool_uv).encode("ascii")),
+            ("requirements", _encode(_order_free(requirements)).encode("ascii")),
+        ]
+        at = "uv.lock"
+        parts += [
+            ("roots", _encode(_order_free(roots)).encode("ascii")),
+            ("closure", _encode(_order_free(closure)).encode("ascii")),
+        ]
+    except ImageInputError:
+        raise
     except MissingLockEntry as e:
         raise ImageInputError(tree, "uv.lock", f"no package entry for {e.args[0]!r}") from e
-    roots = [_root_links(entry) for entry in packages if entry["name"] == root_name]
-    closure_forms = sorted(_digest_form(tree, "uv.lock", e).decode("ascii") for e in closure)
+    except Exception as e:  # noqa: BLE001 — see the docstring: every failure here is the input's
+        raise ImageInputError(tree, at, f"{type(e).__name__}: {e}") from e
     digest = hashlib.sha256()
-    for label, part in (
-        ("box.Dockerfile", data["box.Dockerfile"]),
-        ("tool.uv", _digest_form(tree, "pyproject.toml", tool_uv)),
-        ("roots", _digest_form(tree, "uv.lock", roots)),
-        ("closure", _digest_form(tree, "uv.lock", closure_forms)),
-    ):
+    for label, part in parts:
         digest.update(label.encode("utf-8"))
         digest.update(b"\0")
         digest.update(part)
