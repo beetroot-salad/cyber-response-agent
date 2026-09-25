@@ -183,15 +183,17 @@ def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
 
 
 def _accessor_names() -> frozenset[str]:
-    """Every public accessor name on `RunPaths`/`EpisodePaths` — computed, not typed out, so
-    it never goes stale as D1 grows the owners."""
+    """Every public accessor name on the path owners (`RunPaths`, `SessionPaths`,
+    `EpisodePaths`) — computed, not typed out, so it never goes stale as D1 grows the owners.
+    A new owner CLASS is still a line here, beside its entry in `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
-    from defender._run_paths import RunPaths  # noqa: PLC0415
+    from defender._run_paths import RunPaths, SessionPaths  # noqa: PLC0415
 
     return frozenset(
-        n for n in (*dir(RunPaths), *dir(EpisodePaths)) if not n.startswith("_"))
+        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths))
+        if not n.startswith("_"))
 
 
 def _is_owner_module(rel: str) -> bool:

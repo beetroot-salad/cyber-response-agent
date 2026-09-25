@@ -233,8 +233,8 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
     return consts
 
 
-#: (#1077 D6(b)) The two name-owner classes `owner_derived` tags — `RunPaths`/`EpisodePaths`
-#: construction, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
+#: (#1077 D6(b)) The name-owner classes `owner_derived` tags — construction of one, and reads on
+#: the instance it builds, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
     "defender._run_paths.RunPaths",
     "defender._episode_paths.EpisodePaths",
@@ -243,6 +243,9 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # `RunPaths(x).<record>` is — every name on that chain is the owner's own.
     "defender._run_handle.Run",
     "defender._episode_paths.WorldPaths",
+    # The session store's owner — built from the runs base, since one store spans a run and
+    # its resumes and forks (#1077). Its accessors answer like any instance owner's.
+    "defender._run_paths.SessionPaths",
 })
 
 #: (#1077 D7) The owner modules' module-level SINGLETONS — stateless layout values a caller

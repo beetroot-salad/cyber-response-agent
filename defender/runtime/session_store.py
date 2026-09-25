@@ -11,7 +11,6 @@ import contextlib
 import hashlib
 import json
 import math
-import re
 import sqlite3
 import uuid
 from dataclasses import field
@@ -28,7 +27,9 @@ from pydantic_ai.messages import (
 )
 
 from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import RunPaths
+from defender._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
+from defender._run_paths import RunPaths, SessionPaths
+from defender._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
 # THE `truncated_by` vocabulary — every value any writer of that column may put in it — and
 # its one normalizer are OWNED by `runtime/run_end.py` (which also says why `dead-end` is the
 # only lead-only member). Re-exported here so the column's own writers keep importing them
@@ -57,18 +58,7 @@ ROLES = ("send", "analysis", "actor")
 #: caller through `append` at all: `fork()` writes its own entry directly.
 HEAD_MOVE_REASONS = ("fork", "fold")
 
-CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
-
 _CONFIG_REQUIRED_FIELDS = ("models", "corpus", "prompts", "versions")
-
-
-class StoreError(Exception):
-    """Base for every failure this store raises on its own behalf.
-
-    The driver catches THIS (alongside `sqlite3.Error`) to end a run through the handled
-    `truncated_by` exit. A new store exception that does not inherit from it propagates out
-    of the `ProcessHistory` hook and takes the whole `run.py` process down instead.
-    """
 
 
 class StoreAppendError(StoreError):
@@ -107,10 +97,6 @@ class UnresolvablePathElement(StoreError):
 
 class IngestTailUnderflow(StoreError):
     """A live message list is shorter than the session's last recorded render length."""
-
-
-class InvalidCaseId(ValueError):
-    """A `case_id` does not conform to the store's slug shape; refused, not sanitized."""
 
 
 DDL = """
@@ -684,10 +670,9 @@ def _find_nonrepresentable(obj: Any) -> Any:
 # open / resolve
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
-        raise InvalidCaseId(repr(case_id))
-    runs_base = Path(runs_base)
-    return runs_base.parent / "sessions" / f"{case_id}.db"
+    """The store for `case_id` beside `runs_base` — asked of the owner (#1077), which also
+    refuses an id that is malformed or not case-stable (`InvalidCaseId`)."""
+    return SessionPaths(runs_base).session_db(case_id)
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:
@@ -701,11 +686,9 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
 
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
-    # The store sits in a `sessions/` dir BESIDE the runs base, so the trust root is their
-    # shared parent — the highest point no box ever gets a writable mount on. Anchoring any
-    # higher would refuse on a symlinked runs base (`/tmp` is one on macOS, and the default
-    # runs base lives there) and no run could open its store at all.
-    guarded_mkdir(path.parent, base=Path(runs_base).parent)
+    # Created under the root the OWNER names — the runs base's parent today — never one
+    # composed here: the owner decides where the store goes and what it must sit under.
+    guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:

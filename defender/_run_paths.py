@@ -7,6 +7,7 @@ import stat
 from pathlib import Path, PurePosixPath
 
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
+from defender._run_id import refuse_bad_case_id
 
 # STDLIB `@dataclass`, not `defender._model.model` (#1077 D1): the box entrypoint's import
 # closure needs this module with no third-party package installed — `runtime/box/__init__.py`
@@ -575,26 +576,48 @@ class RunPaths:
 
     def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory — a SIBLING of the runs base (claims C10/C15), never a
-        child."""
-        return Path(runs_base).parent / SESSIONS_DIRNAME
+        child. Asked of `SessionPaths`, which owns it: the store is keyed by lineage, not by
+        run, so its owner is built from the runs base alone."""
+        return SessionPaths(runs_base).sessions_dir
 
     def session_db(self, runs_base: Path, lineage_id: str) -> Path:
-        """`<sessions>/<lineage_id>.db`. Refuses a lineage id the case-id pattern rejects
-        EXACTLY as `session_store.store_path_for` does today — the pattern is pinned BY
-        REFERENCE (RG-4), never re-spelled — and, beside that existing check (decision 20),
-        refuses one that is not case-stable (`_run_id.is_case_stable_id`)."""
-        from defender._run_id import is_case_stable_id
-        from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
+        """`<sessions>/<lineage_id>.db` — asked of `SessionPaths`, which refuses a malformed or
+        case-unstable lineage id (`InvalidCaseId`)."""
+        return SessionPaths(runs_base).session_db(lineage_id)
 
-        if not isinstance(lineage_id, str) or not CASE_ID_RE.match(lineage_id):
-            raise InvalidCaseId(repr(lineage_id))
-        if not is_case_stable_id(lineage_id):
-            raise InvalidCaseId(
-                f"{lineage_id!r} is not case-stable — two ids differing only by case would "
-                f"become one file wherever the filesystem folds case; use "
-                f"{lineage_id.casefold()!r}"
-            )
-        return self.sessions_dir(runs_base) / f"{lineage_id}{SESSION_DB_SUFFIX}"
+
+@dataclasses.dataclass(frozen=True)
+class SessionPaths:
+    """The session store's directory, its per-lineage database files, and the root they are
+    created under — built from the RUNS BASE, because one store spans a run and every resume
+    and fork of it: there is no single run dir to key it by. `session_store` and the `Run`
+    handle both ask here; `RunPaths.sessions_dir`/`session_db` delegate here.
+    """
+
+    runs_base: Path
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "runs_base", Path(self.runs_base))
+
+    @property
+    def trust_root(self) -> Path:
+        """The root the sessions dir is created under: the runs base's parent — the highest
+        point no box ever gets a writable mount on. Anchoring any higher would refuse on a
+        symlinked runs base (`/tmp` is one on macOS, and the default runs base lives there)
+        and no run could open its store at all."""
+        return self.runs_base.parent
+
+    @property
+    def sessions_dir(self) -> Path:
+        """A SIBLING of the runs base (claims C10/C15), never a child."""
+        return self.trust_root / SESSIONS_DIRNAME
+
+    def session_db(self, lineage_id: str) -> Path:
+        """`<sessions>/<lineage_id>.db` — the store's one location. Refuses, as `InvalidCaseId`,
+        a lineage id the case-id pattern rejects (pinned BY REFERENCE, RG-4, never re-spelled)
+        or one that is not case-stable (decision 20) — `_run_id.refuse_bad_case_id`."""
+        refuse_bad_case_id(lineage_id)
+        return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

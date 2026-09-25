@@ -721,7 +721,8 @@ demands:
       `session_db` refuses a lineage id the case-id pattern rejects, exactly as `store_path_for`
       does today.
     note: >-
-      Claim RG-4: `session_store.py:56` spells the pattern verbatim. Phase E must PIN IT BY
+      Claim RG-4: `session_store.py:56` spelled the pattern verbatim (moved to
+      `defender/_run_id.py` by #1104; `session_store` re-exports it). Phase E must PIN IT BY
       REFERENCE and must not re-spell the regex into the test (dispositions red flag 3). §7
       decision 12 adds one check beside it: the session-database path gains the same
       case-stability refusal the composed identifiers get (demand h36).
@@ -1124,7 +1125,7 @@ demands:
       An empty lineage id fails the case-id pattern (which requires at least one leading
       alphanumeric) and is refused per D1's stated inheritance of the refusal.
     cites: ["RG-4"]
-    note: "Cite `defender/runtime/session_store.py:56` in the test; do NOT re-spell the regex (dispositions red flag 3)."
+    note: "Cite `CASE_ID_RE` in `defender/_run_id.py` (moved from `runtime/session_store.py:56` by #1104) in the test; do NOT re-spell the regex (dispositions red flag 3)."
   - id: s15_session_db_lineage_id_oversized
     kind: domain-outcome
     form: test
@@ -1491,8 +1492,8 @@ demands:
     note: >-
       OUTCOME TRANSCRIBED (`(s39) CONVERGED`). AU-P18 and #1092 remain open for the BROADER
       closure question; this accessor's refusal is not a member of it. Claims C3/C4/R5 anchor
-      the closure constraint, and phase E must cite `session_store.py:56` for the pattern per
-      RG-4 rather than re-spelling it.
+      the closure constraint, and phase E must cite the pattern (`_run_id.CASE_ID_RE`, at
+      `session_store.py:56` when this was written) per RG-4 rather than re-spelling it.
 
   # ---- REINSTATED fork -> settled by the orchestrator's executed reads (RG-1, RG-3) --------
   - id: s40_stale_sidecar_clear_meets_the_new_neighbour
@@ -4355,7 +4356,10 @@ claims:
       NOT a discount — it guards two SETTLED entries (demands s14, s15) whose answers quoted a
       pattern and a cap no claim established. The dispositions stand on D1's stated inheritance
       of `store_path_for`'s refusal; phase E must PIN THE REFUSAL BY REFERENCE and must not
-      re-spell the regex into a test (dispositions red flag 3).
+      re-spell the regex into a test (dispositions red flag 3). MOVED by #1104: the pattern
+      now lives in `defender/_run_id.py` beside the other id rules, so the store's path owner
+      can refuse an id without importing pydantic-ai; `session_store` re-exports it, and the
+      claim above records the read as it was made.
   # ---- resolved by the orchestrator AFTER phase F, closing 92-reconciliation findings 3 and 4 ----
   # RG-5..RG-8 answer cluster M's four unanswered probe obligations (PO5, PO6, PO7, LC-P4) —
   # 92-reconciliation.md finding 4, re-flagged as still open by 93-safety-claim-sweep.md. RG-9
