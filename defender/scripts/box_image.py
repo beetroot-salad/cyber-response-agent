@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Name and build the owned box image (#1092, M3 revised).
 
-STDLIB-ONLY: this script runs on a bare CI runner `python3` (`box-dood`'s runner has no uv
-and no venv) and on a developer's devcontainer `python3`. It never `import defender...` — it
+STDLIB-ONLY, python3 >= 3.11 (the resolver reads the lock with `tomllib` — #1097): this
+script runs on a bare CI runner `python3` (`box-dood`'s runner has no uv and no venv) and on
+a developer's devcontainer `python3`. It never `import defender...` — it
 loads `runtime/box/_image.py` BY FILE PATH, the same door the running package uses only once
 pydantic is on `BoxSpec`'s closure (an ordinary package import would then pull pydantic in,
 which this script cannot assume is installed).

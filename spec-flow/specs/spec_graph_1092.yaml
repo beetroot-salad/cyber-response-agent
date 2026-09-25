@@ -1419,7 +1419,7 @@ structure:
 
   interacts:
     # --- the resolver and its inputs ------------------------------------------------------------
-    - {from: image_tag,               to: box_dockerfile,      mode: read,   via: fs,             provenance: design}   # bytes, at every box start (accepted cost: ~2 ms, N2)
+    - {from: image_tag,               to: box_dockerfile,      mode: read,   via: fs,             provenance: design}   # at every box start: parse the lock + walk + digest (#1097: ~30 ms measured, was ~2 ms for bytes; no cache — container start dominates)
     - {from: image_tag,               to: uv_lock,             mode: read,   via: fs,             provenance: design}
     - {from: image_tag,               to: pyproject,           mode: read,   via: fs,             provenance: design}   # #1097: `[project].name` (the root) and `[tool.uv]`
     - {from: image_tag,               to: box_closure,         mode: invoke, via: api,            provenance: design}   # #1097: the entries digested
