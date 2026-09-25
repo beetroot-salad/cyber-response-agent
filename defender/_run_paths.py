@@ -7,6 +7,8 @@ import stat
 from pathlib import Path, PurePosixPath
 
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
+from defender._run_id import CASE_ID_RE, is_case_stable_id
+from defender._store_errors import InvalidCaseId
 
 # STDLIB `@dataclass`, not `defender._model.model` (#1077 D1): the box entrypoint's import
 # closure needs this module with no third-party package installed — `runtime/box/__init__.py`
@@ -573,22 +575,48 @@ class RunPaths:
     def accounting_failures(self, runs_base: Path) -> Path:
         return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
 
-    @staticmethod
-    def sessions_dir(runs_base: Path) -> Path:
+    def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory — a SIBLING of the runs base (claims C10/C15), never a
-        child. Static because the store is keyed by lineage, not by run: the session store
-        asks it with no run dir in hand."""
-        return Path(runs_base).parent / SESSIONS_DIRNAME
+        child. Asked of `SessionPaths`, which owns it: the store is keyed by lineage, not by
+        run, so its owner is built from the runs base alone."""
+        return SessionPaths(runs_base).sessions_dir
 
-    @staticmethod
-    def session_db(runs_base: Path, lineage_id: str) -> Path:
-        """`<sessions>/<lineage_id>.db` — the store's one location; `session_store.store_path_for`
-        delegates here. Refuses a lineage id the case-id pattern rejects (pinned BY REFERENCE,
-        RG-4, never re-spelled) and, beside that, one that is not case-stable (decision 20,
-        `_run_id.is_case_stable_id`)."""
-        from defender._run_id import is_case_stable_id
-        from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
+    def session_db(self, runs_base: Path, lineage_id: str) -> Path:
+        """`<sessions>/<lineage_id>.db` — asked of `SessionPaths`, which refuses a malformed or
+        case-unstable lineage id (`InvalidCaseId`)."""
+        return SessionPaths(runs_base).session_db(lineage_id)
 
+
+@dataclasses.dataclass(frozen=True)
+class SessionPaths:
+    """The session store's directory, its per-lineage database files, and the root they are
+    created under — built from the RUNS BASE, because one store spans a run and every resume
+    and fork of it: there is no single run dir to key it by. `session_store` and the `Run`
+    handle both ask here; `RunPaths.sessions_dir`/`session_db` delegate here.
+    """
+
+    runs_base: Path
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "runs_base", Path(self.runs_base))
+
+    @property
+    def trust_root(self) -> Path:
+        """The root the sessions dir is created under: the runs base's parent — the highest
+        point no box ever gets a writable mount on. Anchoring any higher would refuse on a
+        symlinked runs base (`/tmp` is one on macOS, and the default runs base lives there)
+        and no run could open its store at all."""
+        return self.runs_base.parent
+
+    @property
+    def sessions_dir(self) -> Path:
+        """A SIBLING of the runs base (claims C10/C15), never a child."""
+        return self.trust_root / SESSIONS_DIRNAME
+
+    def session_db(self, lineage_id: str) -> Path:
+        """`<sessions>/<lineage_id>.db` — the store's one location. Refuses a lineage id the
+        case-id pattern rejects (pinned BY REFERENCE, RG-4, never re-spelled) and, beside
+        that, one that is not case-stable (decision 20, `_run_id.is_case_stable_id`)."""
         if not isinstance(lineage_id, str) or not CASE_ID_RE.match(lineage_id):
             raise InvalidCaseId(repr(lineage_id))
         if not is_case_stable_id(lineage_id):
@@ -597,7 +625,7 @@ class RunPaths:
                 f"become one file wherever the filesystem folds case; use "
                 f"{lineage_id.casefold()!r}"
             )
-        return RunPaths.sessions_dir(runs_base) / f"{lineage_id}{SESSION_DB_SUFFIX}"
+        return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

@@ -12,7 +12,7 @@ accessor: the traversal segments, the embedded separators, the NUL and the newli
 re-probed on every run, so the taxonomy assumption ceases to exist rather than being pinned
 once. Where a name is expected, it is read off `defender/docs/run-records-kinds.tsv` — the
 gate's own data file — rather than re-spelled here, and `CASE_ID_RE` is pinned BY REFERENCE at
-`defender/runtime/session_store.py:56` per RG-4, never re-spelled into an assertion.
+`defender/_run_id.py` per RG-4, never re-spelled into an assertion.
 """
 from __future__ import annotations
 
@@ -486,7 +486,7 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
     from defender.runtime.session_store import CASE_ID_RE, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
-            "the pattern is pinned BY REFERENCE at defender/runtime/session_store.py:56 (RG-4); "
+            "the pattern is pinned BY REFERENCE at defender/_run_id.py (`CASE_ID_RE`) (RG-4); "
             "this test reads it, it does not re-spell it")
         _refuses(run_dir, base, lineage)
         with pytest.raises(Exception):  # noqa: B017,PT011 — today's refusal, unchanged
@@ -514,7 +514,7 @@ def test_session_db_lineage_id_empty(base, run_dir):
     alphanumeric) and is refused per D1's stated inheritance of the refusal."""
     from defender.runtime.session_store import CASE_ID_RE
     assert not CASE_ID_RE.match(""), (
-        "cite defender/runtime/session_store.py:56 — the pattern's own leading-alphanumeric "
+        "cite defender/_run_id.py (`CASE_ID_RE`) — the pattern's own leading-alphanumeric "
         "requirement is what refuses the empty id; it is not re-derived here")
     _refuses(run_dir, base, "")
 
@@ -525,7 +525,7 @@ def test_session_db_lineage_id_oversized(base, run_dir):
     from defender.runtime.session_store import CASE_ID_RE
     oversized = "a" * 4096
     assert not CASE_ID_RE.match(oversized), (
-        "the cap is the pattern's own, read at defender/runtime/session_store.py:56 (RG-4)")
+        "the cap is the pattern's own, read at defender/_run_id.py (`CASE_ID_RE`) (RG-4)")
     _refuses(run_dir, base, oversized)
     just_inside = "a" * 128
     assert CASE_ID_RE.match(just_inside), "positive control: the pattern's own boundary value"
@@ -545,6 +545,7 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
         "import defender._run_paths as rp\n"
         "import pathlib\n"
         "o = rp.RunPaths(pathlib.Path('/tmp/x'))\n"
+        "print('ANSWERED', o.session_db(pathlib.Path('/tmp/runs'), 'good').name)\n"
         "try:\n"
         "    o.session_db(pathlib.Path('/tmp/runs'), '-bad')\n"
         "except Exception as e:\n"
@@ -555,9 +556,15 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
     done = run_blocked(body, block=("pydantic", "pydantic_ai", "pydantic_core"),
                        cwd=PATHS.repo_root)
     assert done.returncode == 0, done.stderr
-    assert b"REFUSED" in done.stdout, (
-        "the re-homed refusal did not fire with no third-party package installed — D1's "
-        "conversion applies to the whole owner module, as `_io.py:17-19` already did")
+    # Positive control first: an owner that cannot even answer a VALID id without pydantic
+    # would print `REFUSED ModuleNotFoundError` below, and a bare `REFUSED` check would pass.
+    assert b"ANSWERED good.db" in done.stdout, (
+        f"the owner could not answer a valid lineage id with no third-party package "
+        f"installed:\n{done.stdout!r}\n{done.stderr!r}")
+    assert b"REFUSED InvalidCaseId" in done.stdout, (
+        "the re-homed refusal did not fire as `InvalidCaseId` with no third-party package "
+        "installed — D1's conversion applies to the whole owner module, as `_io.py:17-19` "
+        f"already did:\n{done.stdout!r}")
 
 
 # ---------------------------------------------------------------------------------------
@@ -620,7 +627,7 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     from defender.runtime.session_store import CASE_ID_RE
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
-        "the format check admits a mixed-case id today (session_store.py:56) — the case-"
+        "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"
         "stability refusal is the NEW check beside it, not a re-spelling of the old one")
     with pytest.raises(Exception):  # noqa: B017,PT011
         S.RunPaths(run_dir).session_db(base, mixed)

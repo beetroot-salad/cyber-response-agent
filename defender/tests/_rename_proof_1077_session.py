@@ -14,7 +14,7 @@ Nothing in this file spells either name, so it keeps working under any rename. W
    handed (`branch.store_factory_for`) is exactly this call, and it re-derives the store's path
    from the pointer's case id before it opens anything.
 
-Both must land on the owner's answer — `RunPaths.session_db(runs_base, case_id)` — and the
+Both must land on the owner's answer — `SessionPaths(runs_base).session_db(case_id)` — and the
 filesystem must hold nothing else: a store module that composes the path out of names it
 remembers creates its store where the owner does not say, and this reports that as a store
 nowhere near the owner's path, rather than, as in production, a rename that silently leaves
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 from defender import _run_paths
-from defender._run_paths import RunPaths
+from defender._run_paths import SessionPaths
 from defender.runtime import branch, session_store
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 
@@ -40,8 +40,8 @@ def _entries(path: Path) -> list[str]:
 def main(root: Path) -> int:
     runs_base = root / "runs"
     run_dir = materialize(runs_base, GOLDEN)
-    owner = RunPaths(run_dir)
-    sessions = owner.sessions_dir(runs_base)
+    owner = SessionPaths(runs_base)
+    sessions = owner.sessions_dir
     print(f"SESSIONS_DIR_SEEN={sessions.name}", flush=True)
     # Say which tree this actually loaded, first — so a caller can tell "the store went to the
     # wrong place" apart from "the subprocess imported the real package and renamed nothing".
@@ -56,7 +56,7 @@ def main(root: Path) -> int:
         f"session store: the run did not reach its own end ({summary}) — a store-setup "
         "failure ends a run as truncated_by='store' before a single turn")
     case_id = summary["case_id"]
-    want = owner.session_db(runs_base, case_id)
+    want = owner.session_db(case_id)
 
     # WHERE THE RUN CREATED ITS STORE: the owner's path, and nowhere else beside the runs base.
     created = Path(str(summary.get("store_path")))

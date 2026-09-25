@@ -260,13 +260,16 @@ def _session_renamed_tree(tmp_path: Path, names: tuple[str, ...], *,
     return root
 
 
-def _loaded(stdout: str, name: str) -> str:
+def _loaded(result: subprocess.CompletedProcess[str], name: str) -> str:
     """The value the subprocess's OWN owner module holds for `name` — printed by the payload
-    before it drives anything."""
-    for line in stdout.splitlines():
+    before it drives anything. A payload that died before printing it (the mirrored tree failed
+    to import, say) is reported with its stderr, where the reason is."""
+    for line in result.stdout.splitlines():
         if line.startswith(f"{name}="):
             return line.partition("=")[2]
-    raise AssertionError(f"the payload never reported {name}:\n{stdout}")
+    raise AssertionError(
+        f"the payload never reported {name} (exit {result.returncode}):\n{result.stdout}\n"
+        f"{result.stderr[-3000:]}")
 
 
 @pytest.mark.parametrize("names", [("SESSIONS_DIRNAME",), ("SESSION_DB_SUFFIX",)],
@@ -288,7 +291,7 @@ def test_the_session_store_moves_when_its_owner_renames_it(tmp_path, names):
                          payload=_SESSION_PAYLOAD)
     tail = result.stderr[-3000:]
     for name in names:
-        assert _TOKEN in _loaded(result.stdout, name), (
+        assert _TOKEN in _loaded(result, name), (
             f"the subprocess loaded the REAL {name}, not the renamed one — this run renamed "
             f"nothing and proves nothing:\n{result.stdout}")
     assert result.returncode == 0, (
@@ -307,7 +310,7 @@ def test_the_session_proof_fails_when_the_store_path_is_hand_composed(tmp_path):
     tree = _session_renamed_tree(tmp_path, _SESSION_NAMES, hand_compose_store_path=True)
     result = _round_trip(tree, tmp_path / "work", payload=_SESSION_PAYLOAD)
     for name in _SESSION_NAMES:
-        assert _TOKEN in _loaded(result.stdout, name), (
+        assert _TOKEN in _loaded(result, name), (
             f"the subprocess loaded the REAL {name} — the control renamed nothing:\n"
             f"{result.stdout}")
     assert result.returncode != 0, (
@@ -321,27 +324,94 @@ def test_the_session_proof_fails_when_the_store_path_is_hand_composed(tmp_path):
 #: The owner's `sessions_dir` answer, changed IN THE METHOD rather than in a constant. A store
 #: module that asks the owner follows it; one that re-composes the path out of the owner's
 #: imported constants (the same names, so a constant rename cannot tell them apart) does not.
-_SESSIONS_DIR_RETURN = "return Path(runs_base).parent / SESSIONS_DIRNAME"
-_SESSIONS_DIR_RETURN_MOVED = f'return Path(runs_base).parent / (SESSIONS_DIRNAME + "-{_TOKEN}")'
+_SESSIONS_DIR_RETURN = "return self.trust_root / SESSIONS_DIRNAME"
+_SESSIONS_DIR_RETURN_MOVED = f'return self.trust_root / (SESSIONS_DIRNAME + "-{_TOKEN}")'
 
 
 def test_the_session_store_follows_the_owners_method_not_just_its_constants(tmp_path):
-    """Change what `RunPaths.sessions_dir` answers without touching a constant, and a real
+    """Change what `SessionPaths.sessions_dir` answers without touching a constant, and a real
     run's store still lands where the owner says and the resume door finds it. This is what
     tells "asks the owner" apart from "composes from the owner's constants"."""
     owner = PACKAGE / "_run_paths.py"
     text = owner.read_text(encoding="utf-8")
     assert text.count(_SESSIONS_DIR_RETURN) == 1, (
-        "`RunPaths.sessions_dir` no longer returns the spelling this proof rewrites — update "
+        "`SessionPaths.sessions_dir` no longer returns the spelling this proof rewrites — update "
         "the anchor, or this case exercises nothing")
     root = tmp_path / "method-moved"
     _mirror(PACKAGE, root / "defender",
             replace={owner: text.replace(_SESSIONS_DIR_RETURN, _SESSIONS_DIR_RETURN_MOVED)})
     result = _round_trip(root, tmp_path / "work", payload=_SESSION_PAYLOAD)
-    assert _TOKEN in _loaded(result.stdout, "SESSIONS_DIR_SEEN"), (
+    assert _TOKEN in _loaded(result, "SESSIONS_DIR_SEEN"), (
         f"the subprocess's owner answered the unchanged sessions dir — this moved nothing:\n"
         f"{result.stdout}")
     assert result.returncode == 0, (
         "the owner's sessions dir moved but the store did not follow — something composes "
         f"the store's path itself:\n{result.stdout}\n{result.stderr[-3000:]}")
     assert "SESSION ROUNDTRIP OK" in result.stdout
+
+
+#: The owner's `trust_root`, moved IN THE METHOD to a directory that is NOT the runs base's
+#: parent — so a store that still anchors its mkdir on `runs_base.parent` by hand refuses the
+#: owner's own answer as outside the tree, while one that asks the owner follows it.
+_TRUST_ROOT_RETURN = "return self.runs_base.parent\n"
+_TRUST_ROOT_RETURN_MOVED = f'return self.runs_base.parent.parent / "{_TOKEN}-state"\n'
+_STORE_MKDIR_ASKED = "guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)"
+_STORE_MKDIR_HAND_COMPOSED = "guarded_mkdir(path.parent, base=Path(runs_base).parent)"
+
+_OPEN_ONE_STORE = (
+    "import sys\n"
+    "from pathlib import Path\n"
+    "from defender.runtime import session_store\n"
+    "with session_store.open_store(case_id='case-alpha', runs_base=Path(sys.argv[1])) as h:\n"
+    "    print(f'STORE={h.path}')\n")
+
+
+def _root_moved_tree(tmp_path: Path, *, hand_composed_mkdir: bool) -> Path:
+    owner = PACKAGE / "_run_paths.py"
+    text = owner.read_text(encoding="utf-8")
+    assert text.count(_TRUST_ROOT_RETURN) == 1, (
+        "`SessionPaths.trust_root` no longer returns the spelling this proof rewrites — update "
+        "the anchor, or this case exercises nothing")
+    replace = {owner: text.replace(_TRUST_ROOT_RETURN, _TRUST_ROOT_RETURN_MOVED)}
+    if hand_composed_mkdir:
+        store = PACKAGE / "runtime" / "session_store.py"
+        store_text = store.read_text(encoding="utf-8")
+        assert store_text.count(_STORE_MKDIR_ASKED) == 1
+        replace[store] = store_text.replace(_STORE_MKDIR_ASKED, _STORE_MKDIR_HAND_COMPOSED)
+    root = tmp_path / ("hand-composed-root" if hand_composed_mkdir else "root-moved")
+    _mirror(PACKAGE, root / "defender", replace=replace)
+    return root
+
+
+def _open_one_store(tree: Path, runs_base: Path) -> subprocess.CompletedProcess[str]:
+    runs_base.mkdir(parents=True)
+    return subprocess.run(
+        [sys.executable, "-c", _OPEN_ONE_STORE, str(runs_base)],
+        capture_output=True, text=True, timeout=120, cwd=str(tree),
+        env={**os.environ, "PYTHONPATH": str(tree), "PYTHONDONTWRITEBYTECODE": "1",
+             "PYDANTIC_AI_NO_BANNER": "1"},
+    )
+
+
+def test_the_session_store_is_created_under_the_root_its_owner_names(tmp_path):
+    """Move `SessionPaths.trust_root` somewhere that is not the runs base's parent, and the
+    store is created there: the owner decides the root the store's directory is created
+    under, not only the file's name. The negative control — the store anchoring its mkdir on
+    `runs_base.parent` by hand, under the same move — must fail."""
+    work = tmp_path / "work" / "inner"
+    result = _open_one_store(_root_moved_tree(tmp_path, hand_composed_mkdir=False),
+                             work / "runs")
+    assert result.returncode == 0, (
+        f"the owner's root moved and the store refused it:\n{result.stdout}\n"
+        f"{result.stderr[-3000:]}")
+    want = tmp_path / "work" / f"{_TOKEN}-state" / "sessions" / "case-alpha.db"
+    assert f"STORE={want}" in result.stdout, result.stdout
+    assert want.is_file()
+
+    control = _open_one_store(_root_moved_tree(tmp_path, hand_composed_mkdir=True),
+                              tmp_path / "control" / "inner" / "runs")
+    assert control.returncode != 0, (
+        "a store anchoring its mkdir by hand survived the owner's root moving — this proof is "
+        f"not discriminating:\n{control.stdout}")
+    assert "not inside" in control.stderr, (
+        f"the control failed, but not at the store's mkdir root:\n{control.stderr[-3000:]}")

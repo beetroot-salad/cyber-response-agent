@@ -35,7 +35,7 @@ from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
 
 #: Decision 1a — the five group cells, group-then-kind addressed.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
@@ -89,9 +89,9 @@ MEMBER_VERB: dict[str, str | None] = {
 }
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
-#: The three sidecars sit DIRECTLY in the runs base; the session db under `<runs_base>/../
-#: sessions` — so their holding directories are anchored there, not on the run dir (claim
-#: C15: `session_store` anchors its own mkdir at `runs_base.parent`).
+#: The three sidecars sit DIRECTLY in the runs base; the session db in the sessions dir beside
+#: it — so their holding directories are anchored there, not on the run dir (claim C15: the
+#: session db's root is `SessionPaths.trust_root`, the same one `session_store` anchors on).
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
 #: Written ONCE, through the exclusive lane: the alert, the stamp and the run-end record —
 #: the facts today's host writes once and never again — and the lead claim, an
@@ -333,7 +333,7 @@ class Run:
                 if name in _SIDECAR_MEMBERS:
                     return self._runs_base_for(group, name)
                 if name == "session_db":
-                    return self._runs_base_for(group, name).parent
+                    return SessionPaths(self._runs_base_for(group, name)).trust_root
                 return self.run_dir
 
             session_args = (args[0], self.runs_base) if name == "session_db" and args else None

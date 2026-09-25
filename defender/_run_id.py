@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from collections.abc import Callable
 
 RUN_ID_ALLOWED = "ASCII alphanumerics, '_', '.', '-', starting alphanumeric"
@@ -13,6 +14,12 @@ def is_valid_run_id(run_id: str) -> bool:
         and run_id[0].isalnum()
         and all(c.isalnum() or c in "_.-" for c in run_id)
     )
+
+
+#: The shape a session store's case (lineage) id must have to name its `.db` file — here, with
+#: the other id rules, so the store's path owner can ask it without importing the store.
+#: `runtime.session_store` re-exports it (RG-4: pinned by reference, never re-spelled).
+CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
 CASE_STABLE_REQUIRED = "lower case only, so two ids cannot become one file"

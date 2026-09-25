@@ -15,25 +15,31 @@ exact path a store lands at:
   `branch.open_source_store` as `BranchError` (the driver's store-setup class), with the
   `InvalidCaseId` as its cause and no store file created; the same run's own lowercase pointer
   opens its store.
-- D2: the owner answers the store's path on the CLASS, with no run dir to invent — which is
-  what lets the store module ask it at all.
+- O2 at a fresh run: a store factory handed such an id ends the run through the driver's
+  handled `truncated_by="store"` exit — `InvalidCaseId` is a `StoreError` — never an escape.
+- D2: the store's owner is `SessionPaths`, built from the runs base (one store spans a run and
+  its resumes and forks, so there is no run dir to key it by). It names the store AND the root
+  the store is created under; `RunPaths.sessions_dir`/`session_db` answer through it.
 
 O1 — renaming the owner's constants moves the store — is `test_1077_rename_proof.py`'s.
 """
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from defender._run_paths import RunPaths
+from defender._run_paths import RunPaths, SessionPaths
 from defender.runtime.session_store import (
     CASE_ID_RE,
     InvalidCaseId,
+    StoreError,
     open_store,
     store_path_for,
 )
+from defender.tests.e2e import _replay_harness as replay
 
 #: Ids the case-id pattern ADMITS but that are not case-stable — so a refusal of them is the
 #: case-stability rule's, not the pattern's (each test re-checks both facts, by reference).
@@ -62,9 +68,7 @@ def runs_base(tmp_path: Path) -> Path:
 
 
 def _owner_path(runs_base: Path, case_id: str) -> Path:
-    # The INSTANCE form, which works before and after D2 — so these O2 tests fail on the
-    # refusal they are about, not on how the owner happens to be called.
-    return RunPaths(runs_base / "any-run").session_db(runs_base, case_id)
+    return SessionPaths(runs_base).session_db(case_id)
 
 
 def _is_the_subject(case_id: str) -> None:
@@ -147,40 +151,78 @@ def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
     assert store_path_for(case_id, runs_base=runs_base) == _owner_path(runs_base, case_id)
 
 
-def test_the_owner_answers_the_store_path_without_a_run_dir(runs_base):
-    """D2: `RunPaths.sessions_dir` and `RunPaths.session_db` read nothing off a run dir, so they
-    answer on the CLASS — the store module asks without inventing a run dir — and they answer
-    exactly what an instance answers, refusal included. Instance calls keep working (the #1077
-    census has them)."""
-    instance = RunPaths(runs_base / "any-run")
-    assert RunPaths.sessions_dir(runs_base) == instance.sessions_dir(runs_base)
-    assert RunPaths.session_db(runs_base, "case-alpha") == instance.session_db(
-        runs_base, "case-alpha") == store_path_for("case-alpha", runs_base=runs_base)
-    assert RunPaths.session_db(runs_base, "case-alpha").parent == RunPaths.sessions_dir(
-        runs_base)
-    with pytest.raises(InvalidCaseId):
-        RunPaths.session_db(runs_base, "Case-Alpha")
+def test_the_store_owner_is_built_from_the_runs_base_and_run_paths_answers_through_it(
+        runs_base):
+    """D2: `SessionPaths(runs_base)` names the sessions dir, each lineage's database in it, and
+    the root they are created under; `RunPaths`' two session accessors answer exactly what it
+    answers, refusal included (the #1077 census keeps them on `RunPaths`)."""
+    owner = SessionPaths(runs_base)
+    run = RunPaths(runs_base / "any-run")
+    assert owner.sessions_dir == run.sessions_dir(runs_base) == runs_base.parent / "sessions"
+    assert owner.session_db("case-alpha") == run.session_db(runs_base, "case-alpha") == (
+        store_path_for("case-alpha", runs_base=runs_base))
+    assert owner.session_db("case-alpha").parent == owner.sessions_dir
+    assert owner.sessions_dir.parent == owner.trust_root
+    for ask in (lambda: owner.session_db("Case-Alpha"),
+                lambda: run.session_db(runs_base, "Case-Alpha")):
+        with pytest.raises(InvalidCaseId):
+            ask()
+
+
+def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_exit(tmp_path):
+    """A fresh run whose store factory is handed a case-unstable id ends through the driver's
+    handled `truncated_by="store"` exit, and no store is created: `InvalidCaseId` is a
+    `StoreError`, which the driver's store-setup handler catches. Before, it was a bare
+    `ValueError` and escaped `run_investigation` with the wire log still registered."""
+    assert issubclass(InvalidCaseId, StoreError)
+    assert issubclass(InvalidCaseId, ValueError), "callers that catch `ValueError` still do"
+    runs = tmp_path / "runs"
+    run_dir = replay.materialize(runs, replay.GOLDEN)
+    before = _tree(tmp_path)
+
+    def mixed_case_factory(case_id: str, rd: Path):
+        return open_store(case_id=f"Case-{case_id}", runs_base=rd.parent)
+
+    summary = replay.drive(run_dir, run_id="1077-mixed-fresh", main=replay.ReplayFn([
+        replay.Turn(text="Nothing to do; stopping."),
+    ]), store_factory=mixed_case_factory)
+    assert summary.get("truncated_by") == "store", summary
+    assert summary.get("exit_reason") == "InvalidCaseId", summary
+    created_stores = [p for p in _tree(tmp_path) - before if p.suffix == ".db"]
+    assert not created_stores, f"the refused id still created {created_stores}"
 
 
 # ---------------------------------------------------------------------------------------
 # The resume door: a source run whose pointer carries a case-unstable id
 # ---------------------------------------------------------------------------------------
 
-def _source_run(tmp_path: Path) -> Path:
-    """A REAL finished run — the real driver, its default store factory, its own case pointer.
-    `runs/run`, so `open_source_store`'s `runs_base = run_dir.parent` is the base the run was
-    handed and its store sits under `tmp_path`."""
-    replay = pytest.importorskip("defender.tests.e2e._replay_harness")
-    run_dir = replay.materialize(tmp_path / "runs", replay.GOLDEN)
+@pytest.fixture(scope="module")
+def _finished_run(tmp_path_factory) -> tuple[Path, Path]:
+    """A REAL finished run — the real driver, its default store factory, its own case pointer
+    — driven ONCE for the module. `runs/run`, so `open_source_store`'s `runs_base =
+    run_dir.parent` is the base the run was handed and its store sits under the returned root."""
+    root = tmp_path_factory.mktemp("source")
+    run_dir = replay.materialize(root / "runs", replay.GOLDEN)
     summary = replay.drive(run_dir, run_id="1077-session-owner", main=replay.ReplayFn([
         replay.Turn(text="Nothing to do; stopping."),
     ]))
     assert summary.get("truncated_by") is None, (
         f"the source run did not finish ({summary}); nothing below is about its pointer")
-    return run_dir
+    return root, run_dir
 
 
-def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(tmp_path):
+@pytest.fixture
+def source_run(_finished_run) -> Iterator[tuple[Path, Path]]:
+    """The module's finished run, with its case pointer restored after each test — the tests
+    below rewrite only the pointer."""
+    root, run_dir = _finished_run
+    pointer_file = RunPaths(run_dir).session_pointer
+    saved = pointer_file.read_bytes()
+    yield root, run_dir
+    pointer_file.write_bytes(saved)
+
+
+def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(source_run):
     """`branch.open_source_store` over a real run whose case pointer names the run's own case
     id in the wrong case refuses as `BranchError`, caused by the store's `InvalidCaseId`, and
     creates no store; over the same run's own, lowercase pointer it opens the run's store.
@@ -192,7 +234,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     Rewritten through the real pointer writer, keeping every other field the run wrote."""
     from defender.runtime import branch, session_store
 
-    run_dir = _source_run(tmp_path)
+    root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
     case_id, recorded = pointer["case_id"], Path(pointer["store_path"])
@@ -218,7 +260,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
         run_dir, case_id=mixed, store_path=recorded.with_name(recorded.name.replace(
             case_id, mixed)),
         session_id=pointer.get("session_id"))
-    before = _tree(tmp_path)
+    before = _tree(root)
     raised: BaseException | None = None
     try:
         handle = branch.open_source_store(run_dir)
@@ -226,7 +268,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
         raised = exc
     else:
         handle.close()
-    created = sorted(str(p) for p in _tree(tmp_path) - before)
+    created = sorted(str(p) for p in _tree(root) - before)
     assert raised is not None, (
         f"open_source_store admitted a pointer carrying {mixed!r} and created {created} — a "
         "resume over a case id that is not case-stable must fail as the driver's store-setup "
@@ -236,22 +278,22 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     assert not created, f"the refused resume still created {created}"
 
 
-def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(tmp_path):
+def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(source_run):
     """A source run whose pointer's `case_id` is `null` fails `open_source_store` as
     `BranchError` caused by `InvalidCaseId` — the driver's store-setup class — and creates
     nothing. (The pointer writer would not write it; a hand-edited or truncated file can.)
     Positive control: the run's own pointer opens."""
     from defender.runtime import branch
 
-    run_dir = _source_run(tmp_path)
+    root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
     branch.open_source_store(run_dir).close()
 
     pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
-    before = _tree(tmp_path)
+    before = _tree(root)
     with pytest.raises(branch.BranchError) as info:
         branch.open_source_store(run_dir)
     assert isinstance(info.value.__cause__, InvalidCaseId), (
         f"refused, but not as a malformed case id: {info.value.__cause__!r}")
-    assert _tree(tmp_path) == before
+    assert _tree(root) == before

@@ -160,9 +160,9 @@ def open_source_store(run_dir: Path) -> Any:
     # ONE read of the pointer, and every way it can be malformed lands as `BranchError` — the
     # class the driver's store-setup handler catches. A bare `KeyError`/`JSONDecodeError` from
     # here escapes that handler and takes the process down with the wire log still registered.
-    # `store_path_for` is INSIDE it for the same reason: it raises `InvalidCaseId`, which is a
-    # bare `ValueError` and no kind of `StoreError`, so a pointer carrying a `case_id` that is
-    # not a well-formed one took exactly the exit this block exists to close.
+    # `store_path_for` is INSIDE it too: a pointer whose `case_id` is malformed, case-unstable
+    # or not a string raises `InvalidCaseId`, and a resume over a bad pointer is a refused
+    # branch, reported as one — not a store fault on the source run's database.
     try:
         pointer = json.loads(
             RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))

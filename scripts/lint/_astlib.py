@@ -233,8 +233,8 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
     return consts
 
 
-#: (#1077 D6(b)) The two name-owner classes `owner_derived` tags — `RunPaths`/`EpisodePaths`
-#: construction, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
+#: (#1077 D6(b)) The name-owner classes `owner_derived` tags — construction of one, and reads on
+#: the instance it builds, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
     "defender._run_paths.RunPaths",
     "defender._episode_paths.EpisodePaths",
@@ -243,6 +243,9 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # `RunPaths(x).<record>` is — every name on that chain is the owner's own.
     "defender._run_handle.Run",
     "defender._episode_paths.WorldPaths",
+    # The session store's owner — built from the runs base, since one store spans a run and
+    # its resumes and forks (#1077). Its accessors answer like any instance owner's.
+    "defender._run_paths.SessionPaths",
 })
 
 #: (#1077 D7) The owner modules' module-level SINGLETONS — stateless layout values a caller
@@ -441,16 +444,9 @@ def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
     if isinstance(node, ast.Name):
         return node.id in e.owner_locals
     if isinstance(node, ast.Attribute):
-        # `RunPaths.session_db` — an accessor read on the owner CLASS itself (a static
-        # accessor, asked with no run dir in hand) is the owner's own, like one on an instance.
-        return (_origin(node.value, e) in _OWNER_CLASS_ORIGINS
-                or _owner_instance_in(node.value, set(e.owner_locals), e))
+        return _owner_instance_in(node.value, set(e.owner_locals), e)
     if isinstance(node, ast.Call):
-        called = callee(node, e)
-        # The owner's constructor, or a static accessor called on the owner class — whose
-        # result a literal-free join must not escape (`RunPaths.sessions_dir(base) / name`).
-        return called in _OWNER_CLASS_ORIGINS or (
-            called is not None and called.rpartition(".")[0] in _OWNER_CLASS_ORIGINS)
+        return callee(node, e) in _OWNER_CLASS_ORIGINS
     return False
 
 

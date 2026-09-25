@@ -329,50 +329,46 @@ def from_an_unannotated_parameter(p) -> object:
     assert len(found) >= 3, f"one of the three untraceable reads was skipped:\n{displays}"
 
 
-def test_a_static_accessor_read_on_the_owner_class_is_the_owners_own(tmp_path: Path):
-    """`RunPaths.session_db(runs_base, case_id)` — an accessor read on the owner CLASS, with no
-    run dir in hand (the session store is keyed by lineage, not by run) — is the owner's own
-    use and is admitted. Its positive control is the same read on a same-named class that is
-    NOT the owner: still `unresolvable accessor use`. And a literal-free join onto a static
-    accessor's RESULT is reported, exactly as one onto `RunPaths(x).gather_raw` is."""
+def test_the_session_store_owner_is_traced_like_any_instance_owner(tmp_path: Path):
+    """`SessionPaths(runs_base).session_db(case_id)` — the session store's owner, built from the
+    runs base because one store spans a run and its resumes and forks — is the owner's own use
+    and is admitted. A literal-free join onto its sessions dir is reported whether written
+    inline or through a local, and an accessor read off the CLASS (no instance, so no runs
+    base) is `unresolvable accessor use`, as it is for `RunPaths`."""
     admitted = S.gate_findings(tmp_path / "a", "runtime/session_store.py", '''
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender._run_paths import SessionPaths
 
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    return RunPaths.session_db(Path(runs_base), case_id)
+    return SessionPaths(runs_base).session_db(case_id)
 ''')
     assert admitted == [], (
-        "a static accessor read on the owner class was reported as reaching around the owner:"
-        f"\n{S.displays(admitted)}")
+        f"the session store's owner was reported as reaching around itself:\n"
+        f"{S.displays(admitted)}")
 
-    impostor = S.gate_findings(tmp_path / "b", "runtime/session_store.py", '''
-from pathlib import Path
+    for label, body in (
+            ("inline", "    return SessionPaths(runs_base).sessions_dir / name\n"),
+            ("through a local", "    sd = SessionPaths(runs_base).sessions_dir\n"
+                                "    return sd / name\n")):
+        joined = S.gate_findings(tmp_path / label.replace(" ", "_"), "runtime/beside.py", (
+            "from pathlib import Path\n\nfrom defender._run_paths import SessionPaths\n\n\n"
+            "def beside_the_store(runs_base: Path, name: str) -> Path:\n" + body))
+        assert "literal-free join" in S.displays(joined), (
+            f"a join onto the sessions dir ({label}) carries no literal, so only the accessor "
+            f"pass can see it — and it did not:\n{S.displays(joined)}")
 
-from somewhere_else import RunPaths
+    class_read = S.gate_findings(tmp_path / "c", "runtime/beside.py", '''
+from defender._run_paths import SessionPaths
 
 
-def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    return RunPaths.session_db(Path(runs_base), case_id)
+def the_accessor_itself():
+    return SessionPaths.session_db
 ''')
-    assert "unresolvable accessor use" in S.displays(impostor), (
-        "a same-named class that is not the owner was admitted — the pass is matching the "
-        f"spelling `RunPaths`, not the owner:\n{S.displays(impostor)}")
-
-    joined = S.gate_findings(tmp_path / "c", "runtime/session_store.py", '''
-from pathlib import Path
-
-from defender._run_paths import RunPaths
-
-
-def beside_the_store(runs_base: Path, name: str) -> Path:
-    return RunPaths.sessions_dir(runs_base) / name
-''')
-    assert "literal-free join" in S.displays(joined), (
-        "a join onto a static accessor's result carries no literal, so only the accessor pass "
-        f"can see it — and it did not:\n{S.displays(joined)}")
+    assert "unresolvable accessor use" in S.displays(class_read), (
+        "an accessor read off the owner class, not an instance, was admitted:\n"
+        f"{S.displays(class_read)}")
 
 
 def test_the_shared_ast_pass_seen_from_its_other_consumer(tmp_path: Path):
