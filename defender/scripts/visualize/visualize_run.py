@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import re
-import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from defender._io import read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
+from defender.scripts.visualize import _mirror_write
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
     gather_cost_by_model,
@@ -56,7 +58,86 @@ from defender.scripts.visualize.visualize_runtime import (
 # `RUNTIME_FILENAME` was a re-binding of the owner's `RUNTIME_HTML` (#1077 D7).
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _DEFENDER_DIR.parent
+
+#: The override for where run pages are mirrored (#1084 D4). Read at call time, so a test's
+#: `setenv` reaches a module it already imported.
+MIRROR_DIR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
+MIRROR_DIR_NAME = "run-visualizations"
+_MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
+
+
+class MirrorRootRefused(Exception):
+    """Under pytest, the mirror root was about to resolve to a real checkout (#1084 O3).
+
+    The conftest gives every test the override; a test that reaches the default anyway has
+    bypassed it, and would write into the operator's real folder. Refusing is the detector."""
+
+
+def mirror_root(start: Path | None = None) -> Path:
+    """Where run pages are mirrored: `<main checkout>/run-visualizations/`.
+
+    Order: the `MIRROR_DIR_ENV` override; else the MAIN checkout reached from `start` (the
+    folder holding `defender/`, by default this package's), so a worktree's render lands in the
+    one folder the operator opens (#1084 D3); else `start` itself. Found by reading `.git`
+    rather than running git, which as root in a user-owned repo depends on `safe.directory`
+    and on inherited `GIT_DIR`.
+    """
+    override = os.environ.get(MIRROR_DIR_ENV)
+    if override:
+        return Path(override)
+    if start is None:
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise MirrorRootRefused(
+                f"{MIRROR_DIR_ENV} is unset under pytest; refusing the real checkout's "
+                f"{MIRROR_DIR_NAME}/")
+        start = _DEFENDER_DIR.parent
+    return _main_checkout(start) / MIRROR_DIR_NAME
+
+
+def _main_checkout(start: Path) -> Path:
+    """`start`, or the main checkout its `.git` file points back to. A chain that cannot be
+    followed, or that lands somewhere without `defender/`, falls back to `start` — loudly,
+    since the page then lands where the operator is not looking."""
+    dot_git = start / ".git"
+    if dot_git.is_dir() or not dot_git.exists():
+        return start
+    try:
+        pointer = dot_git.read_text(encoding="utf-8").strip()
+        if not pointer.startswith("gitdir:"):
+            raise ValueError(f"{dot_git} is not a gitdir pointer")
+        admin = (start / pointer[len("gitdir:"):].strip()).resolve()
+        common = (admin / (admin / "commondir").read_text(encoding="utf-8").strip()).resolve()
+        main = common.parent
+        if not (main / "defender").is_dir():
+            raise ValueError(f"{main} (from {dot_git}) holds no defender/")
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"[visualize_run] warning: mirroring under {start}: {exc}\n")
+        return start
+    return main
+
+
+def _mirror(page: bytes, dest: Path, root: Path) -> None:
+    """Write the mirror copy as the owner of the folder holding the mirror root (#1084 D5).
+
+    Root writing into a user's folder is the one case that drops: the copy runs as that user,
+    so no link they planted can take it anywhere they could not write themselves. Everyone
+    else, and root in a root-owned checkout, writes in-process with the same code."""
+    try:
+        owner = os.lstat(root.parent)
+    except FileNotFoundError:
+        owner = None
+    if os.geteuid() != 0 or owner is None or owner.st_uid == 0:
+        _mirror_write.write_page(dest, page)
+        return
+    proc = subprocess.run(  # noqa: S603 — fixed argv: this interpreter, the writer module
+        [sys.executable, "-I", str(_MIRROR_WRITER), str(dest)],
+        input=page, capture_output=True, cwd="/", check=False,
+        user=owner.st_uid, group=owner.st_gid, extra_groups=[],
+    )
+    if proc.returncode != 0:
+        raise OSError(
+            f"mirror write as uid {owner.st_uid} failed for {dest} (exit {proc.returncode}): "
+            f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
 def render_and_mirror(run_dir: Path) -> list[Path]:
@@ -75,10 +156,9 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
     src.write_text(render_runtime_page(run_dir), encoding="utf-8")
     if not src.is_file():
         return []
-    dest_dir = _DEFENDER_DIR / "run-visualizations" / run_dir.name
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = RunPaths(dest_dir).runtime_html
-    shutil.copyfile(src, dest)
+    root = mirror_root()
+    dest = RunPaths(root / run_dir.name).runtime_html
+    _mirror(src.read_bytes(), dest, root)
     return [dest]
 
 
@@ -471,7 +551,7 @@ def main(argv: list[str]) -> int:
     mirrored = render_and_mirror(run_dir)
     print(f"wrote {RunPaths(run_dir).runtime_html}")
     for dest in mirrored:
-        print(f"mirrored {dest.relative_to(_REPO_ROOT)}")
+        print(f"mirrored {dest}")
     return 0
 
 

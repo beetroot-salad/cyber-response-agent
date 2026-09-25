@@ -57,8 +57,6 @@ PATH_ALLOWLIST = {
 EXCLUDED_PREFIXES = (
     "defender/.venv/",
     "defender/__pycache__/",
-    "defender/run-visualizations/",
-    "defender/run-transcripts/",
     "defender/fixtures/",
     "defender/tests/",
     "defender/lessons/",
@@ -157,7 +155,7 @@ def _iter_command_fields(node, path_prefix: str = ""):
 def _settings_files() -> list[Path]:
     """Known JSON config locations under defender/. Hardcoded list avoids
     the cost of an unscoped rglob over the whole worktree (which can
-    include `.venv/` and large run-visualizations dirs)."""
+    include `.venv/`)."""
     out: list[Path] = []
     for path in DEFENDER.glob("*.json"):
         out.append(path)

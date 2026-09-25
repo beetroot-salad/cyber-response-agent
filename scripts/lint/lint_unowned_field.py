@@ -81,7 +81,7 @@ OWNS_RE = re.compile(r"@owns\s+(?P<field>[A-Za-z_][A-Za-z0-9_.\-]*)")
 #: tag, because its author believes the field is claimed.
 BARE_OWNS_RE = re.compile(r"@owns(?![A-Za-z0-9_])")
 
-EXCLUDED_DIRS = (".venv", "runs", "run-visualizations")
+EXCLUDED_DIRS = (".venv", "runs")
 SUPPRESS = "lint-owns: ok"
 
 

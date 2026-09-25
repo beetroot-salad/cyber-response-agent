@@ -117,7 +117,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPES = (REPO_ROOT / "defender", REPO_ROOT / "spec-flow" / "scripts")
 BASELINE_PATH = Path(__file__).with_name("lint_unpinned_text_io_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-text-io: ok",)
 
 _SUBPROCESS_ORIGINS = tuple(

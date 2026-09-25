@@ -23,6 +23,8 @@
 # Transient / large local state — never needed to build the agent
 defender/learning/runs
 defender/run-transcripts
+run-visualizations
+defender/run-visualizations
 .defender-runs
 /tmp
 

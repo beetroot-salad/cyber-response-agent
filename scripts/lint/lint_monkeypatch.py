@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_monkeypatch_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 
 SUPPRESS = "lint-monkeypatch: ok"
 

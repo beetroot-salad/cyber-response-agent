@@ -603,7 +603,7 @@ jobs:
       # exclusion was retired with the `_cli` name in #619. Measured with the
       # adapters back in scope: 0.90% duplicated tokens against the 3% threshold.
       - name: jscpd (copy-paste detection — all formats, soft report)
-        run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**" || true
+        run: jscpd defender --min-tokens 60 --reporters consoleFull --ignore "**/.venv/**,**/runs/**" || true
 
       # ---- Hard gates: each BLOCKS CI on a NEW smell only. ----
       # The custom lints below are ratcheted against a checked-in, reviewable
@@ -620,7 +620,7 @@ jobs:
       # is a ratchet above today's ~1.4% baseline — it
       # blocks a PR that meaningfully grows copy-pasted Python (the #330 class).
       - name: jscpd Python-duplication gate (hard — blocks CI)
-        run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**,**/run-visualizations/**"
+        run: jscpd defender --format python --min-tokens 60 --threshold 3 --reporters consoleFull --ignore "**/.venv/**,**/runs/**"
 
       # Dead code. Wraps vulture (same invocation as the prior soft step) behind
       # the baseline ratchet so only NEW dead code blocks.

@@ -81,7 +81,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_hand_rolled_frontmatter_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-frontmatter: ok",)
 CANONICAL_MODULE = "_frontmatter.py"
 

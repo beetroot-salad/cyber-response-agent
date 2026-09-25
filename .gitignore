@@ -32,6 +32,11 @@ datasets/
 *.evtx
 *.pcap
 
+# Rendered run pages, mirrored for the operator's browser (#1084). The old in-package
+# location stays listed so a checkout's leftovers can't be committed.
+/run-visualizations/
+/defender/run-visualizations/
+
 # Logs
 *.log
 logs/

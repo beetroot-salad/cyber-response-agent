@@ -62,7 +62,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_tree_read_follows_link_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 
 #: Copy helpers that follow a link at the SOURCE. ``copytree``'s ``symlinks=True`` governs what
 #: it finds while WALKING and says nothing about the root it was handed, so it is here too.

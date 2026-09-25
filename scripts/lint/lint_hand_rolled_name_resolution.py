@@ -103,7 +103,7 @@ HEADER = ("Hand-rolled AST name resolution. See "
           "scripts/lint/lint_hand_rolled_name_resolution.py.")
 LABEL = "lint_hand_rolled_name_resolution"
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts", "node_modules")
+EXCLUDED_DIRS = (".venv", "__pycache__", "node_modules")
 SUPPRESS_MARKER = "lint-ast-resolve: ok"
 
 #: The resolver itself. It must read `.func.id`, `.asname` and `.module` — that is what it is

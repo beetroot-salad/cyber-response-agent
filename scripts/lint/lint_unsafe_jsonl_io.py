@@ -90,7 +90,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_unsafe_jsonl_io_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 
 # Accept the legacy read-only marker too, so any pre-#447 suppression keeps working.
 SUPPRESS_MARKERS = ("lint-jsonl-io: ok", "lint-jsonl-read: ok")

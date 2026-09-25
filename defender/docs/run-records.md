@@ -88,7 +88,7 @@ unreachable by root containment rather than by a named deny.
 | ticket_write | 1 | `ticket_write.json` | — | — | run.observability.ticket_write |  |
 | ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive |
 | session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
-| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | copied to `run-visualizations/` (`visualize_run.py:80`) |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | mirrored to `<main checkout>/run-visualizations/`, written as the checkout's owner (`visualize_run.render_and_mirror`, #1084) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
@@ -137,8 +137,8 @@ Marked here so a reader does not mistake these for a kind this page owns.
   `lead-zero.yaml`, `bash_policy.json`, prompts and templates. `lessons_loaded.jsonl` is the
   in-run receipt of consumption and is a run record; the corpora themselves are not.
 - **Eval case inputs and result trees** (`evals/`).
-- **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the checked-in
-  `run-visualizations/` tree.
+- **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the untracked
+  `run-visualizations/` mirror at the main checkout's top level (#1084).
 - The corpus curators' own wire traces under `_pending/wire_logs/`, learning state rather than a
   run record; the review step's scratch `served/` tree, which is not the episode's.
 - Repo and worktree files, git plumbing, container identity files, stdio and subprocess pipes,
