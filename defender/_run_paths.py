@@ -7,8 +7,7 @@ import stat
 from pathlib import Path, PurePosixPath
 
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
-from defender._run_id import CASE_ID_RE, is_case_stable_id
-from defender._store_errors import InvalidCaseId
+from defender._run_id import refuse_bad_case_id
 
 # STDLIB `@dataclass`, not `defender._model.model` (#1077 D1): the box entrypoint's import
 # closure needs this module with no third-party package installed — `runtime/box/__init__.py`
@@ -614,17 +613,10 @@ class SessionPaths:
         return self.trust_root / SESSIONS_DIRNAME
 
     def session_db(self, lineage_id: str) -> Path:
-        """`<sessions>/<lineage_id>.db` — the store's one location. Refuses a lineage id the
-        case-id pattern rejects (pinned BY REFERENCE, RG-4, never re-spelled) and, beside
-        that, one that is not case-stable (decision 20, `_run_id.is_case_stable_id`)."""
-        if not isinstance(lineage_id, str) or not CASE_ID_RE.match(lineage_id):
-            raise InvalidCaseId(repr(lineage_id))
-        if not is_case_stable_id(lineage_id):
-            raise InvalidCaseId(
-                f"{lineage_id!r} is not case-stable — two ids differing only by case would "
-                f"become one file wherever the filesystem folds case; use "
-                f"{lineage_id.casefold()!r}"
-            )
+        """`<sessions>/<lineage_id>.db` — the store's one location. Refuses, as `InvalidCaseId`,
+        a lineage id the case-id pattern rejects (pinned BY REFERENCE, RG-4, never re-spelled)
+        or one that is not case-stable (decision 20) — `_run_id.refuse_bad_case_id`."""
+        refuse_bad_case_id(lineage_id)
         return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
 

@@ -334,7 +334,9 @@ def test_the_session_store_owner_is_traced_like_any_instance_owner(tmp_path: Pat
     runs base because one store spans a run and its resumes and forks — is the owner's own use
     and is admitted. A literal-free join onto its sessions dir is reported whether written
     inline or through a local, and an accessor read off the CLASS (no instance, so no runs
-    base) is `unresolvable accessor use`, as it is for `RunPaths`."""
+    base) is `unresolvable accessor use`, as it is for `RunPaths`. The class read is asked of
+    `trust_root`, the accessor ONLY this owner has: a name `RunPaths` also carries would be
+    reported whether or not the gate knew this owner at all."""
     admitted = S.gate_findings(tmp_path / "a", "runtime/session_store.py", '''
 from pathlib import Path
 
@@ -364,7 +366,7 @@ from defender._run_paths import SessionPaths
 
 
 def the_accessor_itself():
-    return SessionPaths.session_db
+    return SessionPaths.trust_root
 ''')
     assert "unresolvable accessor use" in S.displays(class_read), (
         "an accessor read off the owner class, not an instance, was admitted:\n"

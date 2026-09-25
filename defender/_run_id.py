@@ -4,6 +4,8 @@ import datetime as _dt
 import re
 from collections.abc import Callable
 
+from defender._store_errors import InvalidCaseId
+
 RUN_ID_ALLOWED = "ASCII alphanumerics, '_', '.', '-', starting alphanumeric"
 
 
@@ -17,7 +19,7 @@ def is_valid_run_id(run_id: str) -> bool:
 
 
 #: The shape a session store's case (lineage) id must have to name its `.db` file — here, with
-#: the other id rules, so the store's path owner can ask it without importing the store.
+#: the other id rules, so `refuse_bad_case_id` can ask it without importing the store.
 #: `runtime.session_store` re-exports it (RG-4: pinned by reference, never re-spelled).
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
@@ -55,9 +57,23 @@ def refuse_bad_run_id(run_id: str) -> None:
     if not is_valid_run_id(run_id):
         raise ValueError(f"{run_id!r} is not a valid run id (allowed: {RUN_ID_ALLOWED})")
     if not is_case_stable_id(run_id):
-        raise ValueError(
-            f"{run_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
-            f"{run_id.casefold()!r}")
+        raise ValueError(_not_case_stable(run_id))
+
+
+def refuse_bad_case_id(case_id: object) -> None:
+    """THE session-store case-id admission rule, `refuse_bad_run_id`'s sibling: the case-id
+    shape (`CASE_ID_RE`) AND case-stable, refused as `InvalidCaseId`. The type check comes
+    first, so a pointer holding `null` or a number is refused as a bad id rather than as
+    whatever the pattern match trips over."""
+    if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
+        raise InvalidCaseId(repr(case_id))
+    if not is_case_stable_id(case_id):
+        raise InvalidCaseId(_not_case_stable(case_id))
+
+
+def _not_case_stable(some_id: str) -> str:
+    return (f"{some_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
+            f"{some_id.casefold()!r}")
 
 
 def _utc_now() -> _dt.datetime:

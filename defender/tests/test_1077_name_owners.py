@@ -483,13 +483,13 @@ def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
 def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_dir):
     """`session_db` refuses a lineage id the case-id pattern rejects, exactly as `store_path_for`
     does today."""
-    from defender.runtime.session_store import CASE_ID_RE, store_path_for
+    from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
             "the pattern is pinned BY REFERENCE at defender/_run_id.py (`CASE_ID_RE`) (RG-4); "
             "this test reads it, it does not re-spell it")
         _refuses(run_dir, base, lineage)
-        with pytest.raises(Exception):  # noqa: B017,PT011 — today's refusal, unchanged
+        with pytest.raises(InvalidCaseId):
             store_path_for(lineage, runs_base=base)
     # Positive control: the id today's resolver admits resolves to today's path.
     assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID) == store_path_for(
@@ -624,12 +624,12 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     with pytest.raises(Exception):  # noqa: B017,PT011
         owner.served_world(f"{S.EPISODE_ID}.Overlay")
     # The session-database path gains the check BESIDE its existing CASE_ID_RE format check.
-    from defender.runtime.session_store import CASE_ID_RE
+    from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
         "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"
         "stability refusal is the NEW check beside it, not a re-spelling of the old one")
-    with pytest.raises(Exception):  # noqa: B017,PT011
+    with pytest.raises(InvalidCaseId):
         S.RunPaths(run_dir).session_db(base, mixed)
     assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID).name.endswith(".db"), (
         "positive control: a case-stable lineage id still resolves")

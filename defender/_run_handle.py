@@ -17,7 +17,8 @@ THE VERBS ARE TODAY'S SEAMS, NOT A SECOND SET. Every write lands through `_io.wr
 (`create` for the write-once facts, `replace` for a document, `append` for a table or a trace)
 or `_io.locked_for_rewrite` (the two locked states), anchored by `guarded_mkdir` on the trust
 root the record actually sits under — the run dir for everything inside it, the runs base for
-the three sidecars, its parent for the session db (claim C15). The two model-authored
+the three sidecars. The session db is opened, not written, through `session_store.open_store`,
+which anchors its own directory on `SessionPaths.trust_root` (claim C15). The two model-authored
 documents are held to `_artifact_schema` at the write, because that schema is what "a
 committed investigation parses" rests on and a writer outside the gate is the #961/#964
 class. Nothing here reaches the pre-#771 `append_jsonl`.
@@ -35,7 +36,7 @@ from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
-from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 
 #: Decision 1a — the five group cells, group-then-kind addressed.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
@@ -89,9 +90,10 @@ MEMBER_VERB: dict[str, str | None] = {
 }
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
-#: The three sidecars sit DIRECTLY in the runs base; the session db in the sessions dir beside
-#: it — so their holding directories are anchored there, not on the run dir (claim C15: the
-#: session db's root is `SessionPaths.trust_root`, the same one `session_store` anchors on).
+#: The three sidecars sit DIRECTLY in the runs base, so their holding directory is anchored
+#: there, not on the run dir. The session db has no root here: its one verb is `open`, which is
+#: `session_store.open_store`, and that anchors its own mkdir on `SessionPaths.trust_root`
+#: (claim C15).
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
 #: Written ONCE, through the exclusive lane: the alert, the stamp and the run-end record —
 #: the facts today's host writes once and never again — and the lead claim, an
@@ -332,8 +334,6 @@ class Run:
             def trust_root() -> Path:
                 if name in _SIDECAR_MEMBERS:
                     return self._runs_base_for(group, name)
-                if name == "session_db":
-                    return SessionPaths(self._runs_base_for(group, name)).trust_root
                 return self.run_dir
 
             session_args = (args[0], self.runs_base) if name == "session_db" and args else None

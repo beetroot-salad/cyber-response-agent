@@ -1,9 +1,10 @@
-"""The session store's error root and its case-id refusal — stdlib only.
+"""The session store's error root and its bad-case-id error — stdlib only.
 
-Here rather than in `runtime/session_store.py` because the store's path owner
-(`_run_paths.SessionPaths`) raises `InvalidCaseId`, and the owner must import with no
-third-party package installed (the box entrypoint's closure); `session_store` pulls in
-pydantic-ai. `session_store` re-exports both names, so every caller keeps its import.
+Here rather than in `runtime/session_store.py` because the case-id refusal
+(`_run_id.refuse_bad_case_id`, which the store's path owner `_run_paths.SessionPaths` asks)
+raises `InvalidCaseId`, and the owner must import with no third-party package installed (the
+box entrypoint's closure); `session_store` pulls in pydantic-ai. `session_store` re-exports
+both names, so every caller keeps its import.
 """
 from __future__ import annotations
 
