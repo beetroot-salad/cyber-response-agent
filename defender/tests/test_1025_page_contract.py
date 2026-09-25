@@ -170,14 +170,18 @@ def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp
 
 
 def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_touches_no_run_visualizations_mirror(
-        tmp_path):
+        tmp_path, run_visualizations_dir):
     """A tree snapshot (paths + sizes + mtimes) of the episode before and after `render_episode`
-    differs in exactly `learning.html`, and `defender/run-visualizations/<episode>/` is not
-    created. Rejected: the mirror into `run-visualizations/` the run pages do. Positive
-    control: the one changed file parses as the page (it carries `sec-verdict`).
+    differs in exactly `learning.html`, and `<mirror root>/<episode>/` is not created.
+    Rejected: the mirror into `run-visualizations/` the run pages do. Positive control: the one
+    changed file parses as the page (it carries `sec-verdict`).
+
+    The mirror root is where the run pages' mirror resolves under test: the per-test override
+    the conftest sets (#1084 D4 — `test_1084_mirror` pins that `mirror_root()` answers with
+    it). The old `defender/run-visualizations/` is no longer written by anything.
     """
     ep = E.sample_episode(tmp_path)
-    mirror = T.DEFENDER / "run-visualizations" / E.EPISODE_ID
+    mirror = run_visualizations_dir / E.EPISODE_ID
     assert not mirror.exists(), "precondition: a stale mirror from another run"
     before = E.snapshot(ep.dir)
     page = render(ep)

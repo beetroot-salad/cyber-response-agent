@@ -65,7 +65,7 @@ RULE_ID = "v2-sshd-success-after-failures"
 
 #: Not mirrored into the planted tree: the venv, caches, this suite, the replay goldens —
 #: nothing a run reads, and the first two are large.
-_NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e", "run-visualizations"})
+_NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e"})
 #: Copied for real rather than symlinked: the two trees a scenario edits. `skills/` holds
 #: the catalog, `knowledge/` the config (and the table, which the run does not read from the
 #: tree — it is process-level — so editing it here changes nothing, deliberately).

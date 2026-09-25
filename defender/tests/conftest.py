@@ -73,6 +73,28 @@ def _held_capabilities(checkout_roster):
         release_capabilities()
 
 
+#: The run-page mirror's location override (#1084 D4). Spelled here rather than imported from
+#: `visualize_run`, so this conftest never imports the renderer; `test_1084_mirror` pins that
+#: the renderer's own constant is this same name, so the two cannot drift apart.
+RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
+
+
+@pytest.fixture(autouse=True)
+def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
+    """Every test's run-page mirror lands in a per-test tmp dir, never in a real checkout's
+    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION; the resolver's refusal
+    under pytest (`MirrorRootRefused`) is the detector for any test that removes it.
+
+    `mktemp`, not `tmp_path`: several suites snapshot or list their own `tmp_path`, and an
+    extra entry there would be a change they never made. The dir sits beside it instead.
+    Requested by name, it hands a test the location without re-reading the environment; a
+    test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance, later).
+    """
+    mirror = tmp_path_factory.mktemp("run-visualizations")
+    monkeypatch.setenv(RUN_VISUALIZATIONS_ENV, str(mirror))
+    return mirror
+
+
 def _resolve_malloc_trim():
     """Bind glibc's `malloc_trim`, or a no-op off glibc (musl has no such symbol)."""
     try:
