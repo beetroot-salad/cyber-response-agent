@@ -142,15 +142,18 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         encoding="utf-8")
     sent: list[tuple] = []
 
-    def request(config, method, path, body=None):
-        sent.append((dict(config), method, path, body))
+    def request(config, method, path, body=None, *, settings_dir):
+        sent.append((dict(config), method, path, body, settings_dir))
         return "201", "{}"
 
     writer.open_case_ticket(
         run_dir, deps=writer.TicketWriterDeps(request=request), settings_dir=injected)
     assert len(sent) == 1, sent
-    config, method, path, body = sent[0]
+    config, method, path, body, settings_dir = sent[0]
     assert (method, path) == ("POST", "/tickets")
+    # The transport's verb context is built over the SAME tenant folder the config came from,
+    # handed to the request as an argument rather than carried inside the config dict.
+    assert settings_dir == injected
     assert config["URL_BASE"] == f"http://case-history-{MARK}:8080"
     assert body["reporter"] == "injected-reporter"
 

@@ -341,7 +341,7 @@ class FakeStore:
         self.calls: list[OutboundCall] = []
 
     def __call__(self, config: dict[str, str], method: str, path: str,
-                 body: Any = None) -> tuple[str | None, str]:
+                 body: Any = None, *, settings_dir: Path) -> tuple[str | None, str]:
         self.calls.append(OutboundCall(method=method, path=path, body=body))
         if self.transport_fault_on and path.endswith(self.transport_fault_on):
             from defender.scripts.adapters.faults import TransportFault

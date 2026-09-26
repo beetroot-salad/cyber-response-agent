@@ -335,7 +335,7 @@ class FakeTicketSystem:
         return dict(TICKET_CONFIG) if self.configured else None
 
     def request(self, _config: dict[str, str], method: str, path: str,
-                body: dict | None = None) -> tuple[str | None, str]:
+                body: dict | None = None, *, settings_dir: Path) -> tuple[str | None, str]:
         self.calls.append(TicketCall(method, path, body))
         if method == "GET":
             # The writer's courtesy read-back before it comments (#767): an open, unreleased

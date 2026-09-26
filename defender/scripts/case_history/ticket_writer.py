@@ -29,11 +29,6 @@ _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 #: the run's tenant's `settings/` folder by `run.py` (#1106).
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
-#: The key under which `_load_config` records the settings folder its values were read from,
-#: so the transport's verb context names the same tenant's folder as the config it carries.
-SETTINGS_DIR_KEY = "SETTINGS_DIR"
-
-
 def _verb_context(settings_dir: Path) -> VerbContext:
     run_dir = Path.cwd()
     return VerbContext(
@@ -51,8 +46,7 @@ def _warn(msg: str) -> None:
 
 
 def _load_config(settings_dir: Path) -> dict[str, str] | None:
-    """The case-history store's config from the run's tenant folder. @owns SETTINGS_DIR —
-    the one place the config dict records which folder it came from; `_request` reads it."""
+    """The case-history store's config from the run's tenant folder."""
     path = transport._config_path(_verb_context(settings_dir), SYSTEM)
     if not path.exists():
         _warn(f"config not found: {path}; skipping ticket write")
@@ -71,19 +65,21 @@ def _load_config(settings_dir: Path) -> dict[str, str] | None:
         _warn(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
               f"integer in {path}; skipping")
         return None
-    cfg[SETTINGS_DIR_KEY] = str(settings_dir)
     return cfg
 
 
 def _request(
-    config: dict[str, str], method: str, path: str, body: dict | None = None
+    config: dict[str, str], method: str, path: str, body: dict | None = None,
+    *, settings_dir: Path,
 ) -> tuple[str | None, str]:
+    """One call to the store. `settings_dir` is the run's tenant folder — the one `config` was
+    read from — handed in by the caller, so the transport's verb context names that tenant."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     try:
         rc, stdout, stderr = transport.docker_exec_curl(
-            _verb_context(Path(config[SETTINGS_DIR_KEY])), bastion, url, method=method,
+            _verb_context(settings_dir), bastion, url, method=method,
             body=body, timeout_sec=timeout,
         )
     except TransportFault as e:
@@ -96,8 +92,9 @@ def _request(
 
 @model(frozen=True)
 class TicketWriterDeps:
-    #: Handed the run's tenant `settings/` folder (#1106) — the one place the case-history
-    #: store's address is read from.
+    #: Both are handed the run's tenant `settings/` folder (#1106): `load_config` reads the
+    #: case-history store's address from it, and `request` (keyword `settings_dir`) builds the
+    #: transport's verb context over the same folder.
     load_config: Callable[[Path], dict[str, str] | None] = _load_config
     request: Callable[..., tuple[str | None, str]] = _request
 
@@ -122,7 +119,7 @@ def open_case_ticket(
         alert = json.loads(alert_path.read_text(encoding="utf-8"))
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id, settings_dir=settings_dir)
-        status, body = deps.request(config, "POST", "/tickets", payload)
+        status, body = deps.request(config, "POST", "/tickets", payload, settings_dir=settings_dir)
         if status is None:
             _warn(f"open {case_id}: {body}")
         elif status == "409":
@@ -184,7 +181,7 @@ def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded 
     `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
     the direction that writes nothing. The released status's spelling is the mapping's, read
     through the same predicate the screen decides with (O5)."""
-    status, body = deps.request(config, "GET", f"/tickets/{quoted}")
+    status, body = deps.request(config, "GET", f"/tickets/{quoted}", settings_dir=settings_dir)
     if status is None or not status.startswith("2"):
         _warn(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
               f"{body}); not recording")
@@ -283,7 +280,8 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
               "would go out under that release unseen — not recording")
         _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED)
         return
-    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload)
+    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload,
+                                settings_dir=settings_dir)
     ok = status is not None and status.startswith("2")
     if not ok:
         _warn(f"record {case_id}: {status or 'transport error'}: {body}")
