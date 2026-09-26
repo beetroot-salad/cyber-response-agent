@@ -1730,7 +1730,10 @@ def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
     questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
-    """`Step.QUESTIONER`: the questioner authors the triplet, and it is validated before
+    """@owns configured_patterns — the one writer of the manifest's recorded tenant patterns
+    (#1106); every later reader takes them from `family.yaml` via `_family.parse_family`.
+
+    `Step.QUESTIONER`: the questioner authors the triplet, and it is validated before
     anything reads it.
 
     THE DERIVED HALF IS THE LAUNCHER'S, and it is written over whatever the model returned. The

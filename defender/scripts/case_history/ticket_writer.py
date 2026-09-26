@@ -51,6 +51,8 @@ def _warn(msg: str) -> None:
 
 
 def _load_config(settings_dir: Path) -> dict[str, str] | None:
+    """The case-history store's config from the run's tenant folder. @owns SETTINGS_DIR —
+    the one place the config dict records which folder it came from; `_request` reads it."""
     path = transport._config_path(_verb_context(settings_dir), SYSTEM)
     if not path.exists():
         _warn(f"config not found: {path}; skipping ticket write")
