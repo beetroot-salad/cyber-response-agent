@@ -163,6 +163,46 @@ def test_a_settings_half_linked_to_a_sibling_tenants_settings_is_refused(tmp_pat
     assert "settings" in message, message
 
 
+def test_a_tenant_folder_linked_to_a_sibling_tenant_inside_the_root_is_refused(tmp_path):
+    """`root/acme -> bravo` stays INSIDE the root, so "the folder resolves under the root" is
+    satisfied — and every reader of acme would read bravo's table, settings and agent half.
+    The tenant folder must be THE folder `<root>/<id>`, not any folder under the root. The
+    control is bravo itself, reached by its own id through the same root."""
+    root = tmp_path / "tenants"
+    bravo = T.plant_tenant(root, "bravo", table=T.TABLE_B)
+    os.symlink(Path("bravo"), root / "acme", target_is_directory=True)
+    assert (root / "acme").resolve() == bravo.resolve()
+    assert (root / "acme" / "settings" / "verb-grants.yaml").read_text(encoding="utf-8") == \
+        T.TABLE_B, "the link must be a working one for the refusal to mean anything"
+    message = _refusal(root, "acme")
+    assert "acme" in message, message
+    tenant_dir, _ = _resolver()
+    assert tenant_dir(root, "bravo").settings == (bravo / "settings").resolve()
+
+
+@pytest.mark.parametrize("target", [Path("settings") / "systems", Path(".")],
+                         ids=["a-subfolder-of-its-own-settings", "its-own-tenant-folder"])
+def test_an_agent_half_linked_inside_its_own_tenant_but_not_to_itself_is_refused(
+        tmp_path, target):
+    """Two links that stay under `<root>/<id>/` and are not `settings/` itself, so a check of
+    "resolves under the tenant folder, and is not the settings half" passes both — yet each
+    puts settings files into the box that mounts `agent/` (O1): `agent -> settings/systems`
+    exposes every system's `config.env`, `agent -> .` exposes the whole tenant. The control is
+    the same tenant with a real `agent/` directory, which resolves."""
+    root = tmp_path / "tenants"
+    acme = T.plant_tenant(root, "acme")
+    tenant_dir, _ = _resolver()
+    assert tenant_dir(root, "acme").agent == (acme / "agent").resolve()
+    _swap_for_link(acme / "agent", target)
+    exposed = (acme / "agent").resolve()
+    assert exposed.is_relative_to(acme.resolve())
+    assert exposed != (acme / "settings").resolve()
+    assert any(p.name == "config.env" for p in exposed.rglob("*")), \
+        "the link must really expose settings files for the refusal to mean anything"
+    message = _refusal(root, "acme")
+    assert "agent" in message, message
+
+
 def _swap_for_link(half: Path, target: Path) -> None:
     """Replace a planted half with a relative symlink to `target` — the real primitive."""
     for p in sorted(half.rglob("*"), reverse=True):

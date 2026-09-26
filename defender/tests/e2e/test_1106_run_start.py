@@ -206,6 +206,38 @@ def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, ca
     assert "elastic.no-such-template" in text, text
 
 
+#: A table whose correlation lead holds `elastic.query` — a legal narrowing (one system, one
+#: query verb, a pair gather holds) that DISAGREES with the shipped template, which binds
+#: `elastic.alerts`.
+TABLE_LEAD_ON_QUERY = """\
+dispositions:
+  cmdb:
+    get-host: {roles: [gather]}
+    health-check: {roles: [gather]}
+  elastic:
+    alerts: {roles: [gather]}
+    health-check: {roles: [gather, lead-zero-correlation]}
+    query: {roles: [gather, lead-zero-correlation]}
+"""
+
+
+def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
+        world, capsys):
+    """M5's agreement half, not only its existence half: the configured template EXISTS and is
+    established, but it binds `elastic.alerts` while the table grants the lead `elastic.query`.
+    An existence-only check passes this; the run must refuse before the box, naming both
+    sides. The control is `test_the_positive_control_reaches_the_box_…` — the same template
+    with a table granting the lead the pair it binds."""
+    T.plant_tenant(world["root"], "drift", table=TABLE_LEAD_ON_QUERY)
+    grants = T.run_grants(world["root"] / "drift" / "settings")
+    assert {(s, v) for s, v, _ in grants.correlation.entries} == {
+        ("elastic", "health-check"), ("elastic", "query")}, "the fixture's lead pair moved"
+    world["runs_base"]("drift")
+    text, _ = _refusal(world, capsys)
+    assert T.SHIPPED_CORRELATION_TEMPLATE in text, text
+    assert "elastic.query" in text, text
+
+
 def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world, capsys):
     """The complementary condition for every refusal above: the same root, a complete tenant,
     and `start_box` IS called — with the run's resolved `agent/` half (M6), and with no
@@ -223,6 +255,11 @@ def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world,
     assert Path(kwargs["tenant_agent"]) == (world["root"] / "acme" / "agent").resolve()
     assert not T.reaches(start.calls, world["root"] / "acme" / "settings")
     assert not T.reaches(start.calls, world["root"] / "bravo")
+    # Nor anything that CONTAINS a settings folder or the other tenant (a tenant folder or the
+    # root handed over as a tree): `exposes` also counts an ancestor of the forbidden path.
+    for forbidden in (world["root"] / "acme" / "settings", world["root"] / "bravo" / "settings",
+                      world["root"] / "bravo"):
+        assert not T.exposes(start.calls, forbidden), (forbidden, start.calls)
 
 
 # =============================================================================================
@@ -277,6 +314,8 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
         assert Path(start.calls[0][1]["tenant_agent"]) == (root / tenant_id / "agent").resolve()
         assert not T.reaches(start.calls, own_settings)
         assert not T.reaches(start.calls, root / other)
+        assert not T.exposes(start.calls, own_settings), start.calls
+        assert not T.exposes(start.calls, root / other), start.calls
 
         # O3 — the registry: exactly this tenant's gather pairs.
         assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built

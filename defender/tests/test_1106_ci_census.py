@@ -129,6 +129,29 @@ def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_te
     assert "alpha.no-such-template" in out, out
 
 
+#: A second established catalog template, binding `beta.lookup` — a template that EXISTS but
+#: is filed on another pair than the one tenant one grants its lead (`alpha.lookup`).
+_BETA_TEMPLATE = T.CENSUS_QUERY_TEMPLATE.replace("alpha.by-entity", "beta.by-entity").replace(
+    "Everything alpha knows", "Everything beta knows")
+
+
+def test_a_lead_zero_naming_an_existing_template_on_another_pair_turns_the_gate_red(tmp_path):
+    """M7 runs the AGREEMENT check, not only existence: tenant one's lead-zero names
+    `beta.by-entity`, which the catalog holds and which binds `beta.lookup`, while its table
+    grants the lead `alpha.lookup`. The control is the green repo, whose lead-zero names the
+    template on the granted pair."""
+    repo = _repo(tmp_path, one_lead_zero="beta.by-entity")
+    beta = repo / "defender" / "skills" / "gather" / "queries" / "beta" / "by-entity.md"
+    beta.parent.mkdir(parents=True, exist_ok=True)
+    beta.write_text(_BETA_TEMPLATE, encoding="utf-8")
+    seed_repo(repo, add="-A", message="beta template")
+    rc, out = _gate(repo)
+    assert rc != 0, out
+    assert "tenant-one" in out, out
+    assert "beta.by-entity" in out, out
+    assert "alpha.lookup" in out, out
+
+
 def test_a_new_tenant_copied_from_the_template_keeps_the_gate_green(tmp_path):
     """O8's second half: a freshly copied tenant is CI-clean (it grants nothing, which the run
     refuses at start — C9 — and CI does not)."""

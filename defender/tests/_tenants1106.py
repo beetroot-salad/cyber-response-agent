@@ -410,6 +410,24 @@ def reaches(value: Any, target: Path) -> bool:
     return False
 
 
+def exposes(value: Any, target: Path) -> bool:
+    """Does `value` carry a path that would EXPOSE `target` if mounted or read as a tree — the
+    target itself, a path below it, or a path ABOVE it (an ancestor directory holds the target)?
+
+    `reaches` answers "was this path handed over"; a mount source is a TREE, so for it the
+    question is also "is the forbidden path inside what was handed over". A bind of
+    `<root>/<tenant>` carries `<root>/<tenant>/settings` without ever spelling it."""
+    target = Path(target).resolve()
+    for p in paths_in(value):
+        try:
+            rp = p.resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if rp == target or rp.is_relative_to(target) or target.is_relative_to(rp):
+            return True
+    return False
+
+
 __all__ = [
     "CENSUS_LEAD_ZERO_ID",
     "CENSUS_QUERY_TEMPLATE",
@@ -444,6 +462,7 @@ __all__ = [
     "playground_tenant",
     "plant_census_catalog",
     "plant_census_settings",
+    "exposes",
     "reaches",
     "run_grants",
     "tenants",

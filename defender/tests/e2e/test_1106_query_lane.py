@@ -125,3 +125,31 @@ def test_the_gather_dispatch_advertises_exactly_the_runs_tenants_systems(
     # binds elastic.alerts, which A grants gather and B does not.
     listed = T.SHIPPED_CORRELATION_TEMPLATE in prompt
     assert listed is ("elastic" in reached), (own, listed)
+
+
+# ---- lead-zero item 1 reads the run's tenant, not the checkout ------------------------------------
+
+def test_lead_zero_item1_reads_the_runs_tenant_alerts_index_and_hands_its_verbs_that_tenant(
+        tmp_path):
+    """Item 1 falls back to the configured `ELASTIC_ALERTS_INDEX` when the alert names no
+    `signal_index` (#808 R4) — and "configured" is the RUN's tenant's `config.env` (O2), not
+    the checkout's. The injected tenant carries the committed tenant's id and a distinct
+    alerts index; the shell fetch's `index` (the inbound payload) must be that value, and every
+    lead-0 verb call must be handed that tenant's settings folder. The control: the same
+    scenario's checkout value is a different string."""
+    from defender.tests.e2e import _lead_zero_808 as LZ
+
+    root = tmp_path / "root-lz"
+    T.plant_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=T.config_texts(
+        "lz", events_index="lz-tenant-events-*", alerts_index="lz-tenant-alerts-*"))
+    tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    grants = T.run_grants(tenant.settings)
+    assert LZ.ALERTS_INDEX != "lz-tenant-alerts-*", "the fixture no longer discriminates"
+
+    res = LZ.run(tmp_path / "run", run_id="lz1106-tenant", alert=LZ.alert_doc(signal_index=None),
+                 answer=LZ.answer_hits([LZ.hit(ts="2026-05-25T15:22:00.000Z")]),
+                 tenant=tenant, grants=grants)
+    assert res.shell_call.params["index"] == "lz-tenant-alerts-*", res.shell_call.params
+    assert res.rec.calls, "lead-0 issued no backend call"
+    for call in res.rec.calls:
+        assert Path(call.ctx.settings_dir).resolve() == tenant.settings, (call.verb, call.ctx)
