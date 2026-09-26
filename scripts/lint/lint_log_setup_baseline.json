@@ -1,0 +1,4 @@
+{
+  "//": "lint_log_setup baseline — defender programs (modules with a __main__ block) that neither call _log.configure_from_env() nor carry `# lint-log-setup: ok — <reason>`. Ships EMPTY. Fingerprint is the file. Regenerate: python scripts/lint/lint_log_setup.py --update-baseline.",
+  "entries": {}
+}

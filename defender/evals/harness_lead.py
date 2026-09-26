@@ -180,4 +180,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main())

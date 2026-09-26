@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, replace
@@ -114,6 +115,8 @@ from ._items import (
     _resolve_item1,
     dispatch_correlation,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def prepare_correlation_lead(
@@ -255,7 +258,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     try:
         companion, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
-        print(f"[lead_zero] could not check whether {lead_id} is declared: {e!r}")
+        _logger.warning(f"could not check whether {lead_id} is declared: {e!r}")
         return True
     return any(
         f.get("id") == lead_id and f.get("name")

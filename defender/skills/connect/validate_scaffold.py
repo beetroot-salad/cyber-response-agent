@@ -265,5 +265,5 @@ def main() -> None:
     report.render_and_exit()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     main()

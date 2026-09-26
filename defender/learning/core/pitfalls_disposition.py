@@ -13,13 +13,15 @@ its own module, so its readers still find them where they look."""
 
 from __future__ import annotations
 
+import logging
+
 from defender._model import model
 from defender.learning.author import drain as _author_drain
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 
 #: The lane's own logger: these lines were the curator's before the move.
-_log = _loop_config.lead_author_log
+_logger = logging.getLogger(__name__)
 
 #: The graveyard reason a held reducer row finally retires under. Its own class, beside
 #: `pitfalls_curator._deadletter_reason`'s three and `drains._retire_pitfalls_batch`'
@@ -80,7 +82,7 @@ def _retire_exhausted_holds(
         timeout_seconds=timeout_seconds,
     )
     if outcome.retired:
-        _log(
+        _logger.info(
             f"pitfalls: retired {len(outcome.retired)} held reducer row(s) at the offer "
             f"ceiling ({_loop_config.author_max_attempts()} tick(s) offered and declined): "
             f"{list(outcome.retired)}"

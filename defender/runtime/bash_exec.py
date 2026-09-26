@@ -663,7 +663,7 @@ def _run_box_entrypoint() -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # lint-log-setup: ok — the box entrypoint: runs inside the sandbox, and its stderr is the host's channel from the box
     # `python3 -m defender.runtime.bash_exec` is how a box starts this file, so the interpreter
     # has it registered as `__main__` and NOT under its own import name. `box_codec` imports it
     # by that name, which without this line parses, compiles and executes all of it a SECOND

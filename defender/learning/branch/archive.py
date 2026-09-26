@@ -47,8 +47,8 @@ be trusted after that, and the launcher's own verification is what should have c
 from __future__ import annotations
 
 import json
+import logging
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,8 @@ from defender.learning.lead_repository import (
 )
 from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
 from defender.runtime.scrub import verdict_path
+
+_logger = logging.getLogger(__name__)
 
 # EVERY NAME THIS MODULE USED TO BIND IS THE OWNER'S (#1077 D7). What stood here was ten
 # module-level constants, seven of them a bare re-binding of an owner name
@@ -316,9 +318,9 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
                 copy_function=refusing_copy2(summaries_refused))
             refused = [*refused, *summaries_refused]
         if refused:
-            print(f"[archive] world {world}: {len(refused)} non-artifact entr"
-                  f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
-                  f"{', '.join(str(p) for p in refused)}", file=sys.stderr)
+            _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
+                            f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
+                            f"{', '.join(str(p) for p in refused)}")
         # The pointer, LAST and as TEXT: informational only, so it is written after the bytes
         # it names have landed, and it is written through the guarded seam like every other
         # write into a tree a box can reach.

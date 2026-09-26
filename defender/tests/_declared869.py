@@ -392,7 +392,7 @@ class LeadAuthorSpawn(Spawn):
 def loop_log(capsys) -> str:
     """Everything the loop said on this drive.
 
-    Both streams, joined: `config.make_logger` writes to stderr and a few of the surfaces
+    Both streams, joined: the lane's loggers write to stderr and a few of the surfaces
     these demands bind print to stdout, and which descriptor a line lands on is not what any
     demand here is about — that a line naming the refusal EXISTS is."""
     captured = capsys.readouterr()

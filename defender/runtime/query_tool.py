@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
-import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -223,17 +223,16 @@ def _release_predicate() -> Any:
     a file can be unreadable (permissions, a non-UTF-8 byte) in ways the mapper never
     classifies. Letting such a raise escape would refuse the whole ticket query as an infra
     fault and charge the `ticket` breaker for a config defect — the opposite of degrading.
-    Degrading is right; degrading SILENTLY is not, so the one line on stderr names the cause:
+    Degrading is right; degrading SILENTLY is not, so the one warning in the log names the cause:
     without it a broken mapping looks, from every gather turn, like a store with no comments."""
     from defender.scripts.case_history import case_ticket
 
     try:
         return case_ticket.release_predicate().is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
-        print(
-            f"[query_tool] WARN ticket release predicate unavailable ({e!r}); serving no "
+        _logger.warning(
+            f"ticket release predicate unavailable ({e!r}); serving no "
             "ticket comments this call",
-            file=sys.stderr,
         )
         return lambda _ticket: False
 
@@ -636,9 +635,8 @@ class QueryCapture(AbstractCapability[Any]):
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
         except Exception as write_failed:  # noqa: BLE001 — see the docstring
-            print(f"[query_tool] could not record the denied row for {system}.{verb} "
-                  f"({write_failed!r}); the refusal itself is what the model sees",
-                  file=sys.stderr)
+            _logger.warning(f"could not record the denied row for {system}.{verb} "
+                            f"({write_failed!r}); the refusal itself is what the model sees")
 
     async def _grant_check(
         self, deps, system: str, verb: str, params: dict,
@@ -1145,14 +1143,13 @@ def _granted_systems(registry: Any) -> tuple[str, ...]:
     except _RERAISE:
         raise
     except BaseException as e:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
-        # LOUD on the operator channel — the one stderr line this module writes. This
-        # arm has no row of its own to write: it answers "your grant
-        # reaches nothing" for EVERY system in the run, which reads to the lead as a
+        # LOUD on the operator channel — a warning in the log. This arm has no row of its own
+        # to write: it answers "your grant reaches nothing" for EVERY system in the run, which
+        # reads to the lead as a
         # correctly-empty grant rather than a broken registry. The tool's own answer cannot
         # carry the distinction without turning a defender fault into a routing instruction.
-        print(f"[query_tool] verb registry could not name its grant "
-              f"({type(e).__name__}: {e}); list_verbs will answer 'no system reached'",
-              file=sys.stderr)
+        _logger.warning(f"verb registry could not name its grant "
+                        f"({type(e).__name__}: {e}); list_verbs will answer 'no system reached'")
         return ()
 
 
@@ -1341,6 +1338,8 @@ def _as_dict(v: Any) -> dict:
 
 from .tools import _bash_env, _format_bash_result  # noqa: E402
 from .tools_gather import _payload_note, _tripped_message  # noqa: E402
+
+_logger = logging.getLogger(__name__)
 
 
 __all__ = [

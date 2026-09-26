@@ -395,7 +395,8 @@ def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
     err = capsys.readouterr().err
-    assert "[run.py] preflight" in err
+    assert "defender.run" in err
+    assert "preflight" in err
     # The fault names the ROLE at fault, not just the model — an operator with eleven roles
     # configured cannot act on "some model is unknown".
     assert AgentRole.MAIN.name in err

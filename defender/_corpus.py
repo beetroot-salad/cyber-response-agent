@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import logging
 import re
-import sys
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
 from defender._model import model
+
+_logger = logging.getLogger(__name__)
 
 
 #: A lesson's BOOKKEEPING keys — provenance, not content.
@@ -55,7 +57,7 @@ def iter_lessons(
             text = read_text_utf8(path)
             fm, raw, body = split_frontmatter(text)
         except malformed as e:
-            print(f"warn: skipping {label(path)} (malformed lesson: {e})", file=sys.stderr)
+            _logger.warning(f"warn: skipping {label(path)} (malformed lesson: {e})")
             if on_skip is not None:
                 on_skip(path)
             continue
@@ -253,6 +255,6 @@ def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
     for path in paths:
         template, reason = read_query_template(path)
         if template is None:
-            print(f"warn: skipping {path.name} ({reason})", file=sys.stderr)
+            _logger.warning(f"warn: skipping {path.name} ({reason})")
             continue
         yield template

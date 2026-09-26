@@ -281,6 +281,17 @@ def helpers():
 # rather than for the tests that actually depend on it.
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _logging_as_a_program_sets_it_up():
+    """Tests run with logging configured the way every entry point configures it (text form,
+    for readable failures). The handler writes to whatever `sys.stderr` is at the moment of
+    writing, so `capsys` / `capfd` see log lines exactly as an operator's terminal would — and a
+    silence check (`err == ""`) cannot pass over a line that moved from `print` to the log."""
+    from defender import _log
+
+    _log.configure(fmt="text", level="INFO")
+
+
 @pytest.fixture
 def build_scene():
     """`_spec773.build_scene` as a factory — one lessons-channel tick, wired through the

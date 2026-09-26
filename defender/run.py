@@ -18,6 +18,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -39,9 +40,11 @@ from typing import Any, Protocol  # noqa: E402
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -56,6 +59,8 @@ from defender._first_party_key import (  # noqa: E402,F401
     _read_env_key,
     resolve_first_party_key,
 )
+
+_logger = logging.getLogger("defender.run")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -113,26 +118,24 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
     if key:
         os.environ[var] = key
         note = " (overrides the ambient subscription credential)" if prov.id == "anthropic" else ""
-        print(f"[run.py] {var} sourced from {src}{note}", file=sys.stderr)
+        _logger.info(f"{var} sourced from {src}{note}")
         return 0
     if os.environ.get(var):
         if prov.id == "anthropic":
-            print("[run.py] WARNING: no .env key found; using the ambient "
-                  "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
-                  "subscription credential and will 401 against the first-party API.",
-                  file=sys.stderr)
+            _logger.warning("no .env key found; using the ambient "
+                            "ANTHROPIC_API_KEY — inside a Claude Code session this is the "
+                            "subscription credential and will 401 against the first-party API.")
         else:
-            print(f"[run.py] using the ambient {var} for the {prov.id} model",
-                  file=sys.stderr)
+            _logger.info(f"using the ambient {var} for the {prov.id} model")
         return 0
     if prov.id == "anthropic":
-        print("[run.py] ERROR: no first-party ANTHROPIC_API_KEY — set it in "
-              "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI engine bills the "
-              "first-party Anthropic API).", file=sys.stderr)
+        _logger.error("no first-party ANTHROPIC_API_KEY — set it in "
+                      "<repo>/.env or $DEFENDER_ENV_FILE (the PydanticAI engine bills the "
+                      "first-party Anthropic API).")
     else:
-        print(f"[run.py] ERROR: a {prov.id} model is selected but no {var} — set it "
-              f"in <repo>/.env or $DEFENDER_ENV_FILE ({prov.id} bills its "
-              "OpenAI-compatible API).", file=sys.stderr)
+        _logger.error(f"a {prov.id} model is selected but no {var} — set it "
+                      f"in <repo>/.env or $DEFENDER_ENV_FILE ({prov.id} bills its "
+                      "OpenAI-compatible API).")
     return 2
 
 
@@ -198,21 +201,19 @@ def preflight_role_models(model_override: str | None = None) -> int:
         try:
             name = _role_model_name(defn, model_override)
         except Exception as e:  # noqa: BLE001 — a broken model accessor is a preflight failure
-            print(f"[run.py] preflight: {defn.role.name} model config raised: {e!r}",
-                  file=sys.stderr)
+            _logger.error(f"preflight: {defn.role.name} model config raised: {e!r}")
             return 2
         try:
             prov = providers.provider_for(name)
         except ValueError as e:
-            print(f"[run.py] preflight: {defn.role.name}: {e}", file=sys.stderr)
+            _logger.error(f"preflight: {defn.role.name}: {e}")
             return 2
         if prov.id in seen_provider_ids:
             continue
         seen_provider_ids.add(prov.id)
         rc = _source_one_provider_key(prov)
         if rc:
-            print(f"[run.py] preflight: {defn.role.name} ({name}) has no usable model config",
-                  file=sys.stderr)
+            _logger.error(f"preflight: {defn.role.name} ({name}) has no usable model config")
             return rc
     return 0
 
@@ -379,10 +380,10 @@ def _announce_provenance(run_dir: Path) -> None:
     stopped being true, not months afterwards when they go looking."""
     rec = _provenance.read(RunPaths(run_dir).provenance)
     if rec is None:
-        print("[run.py] commit=unrecorded", file=sys.stderr)
+        _logger.info("commit=unrecorded")
         return
     if rec.commit is None:
-        print(f"[run.py] commit=unavailable ({rec.unavailable})", file=sys.stderr)
+        _logger.info(f"commit=unavailable ({rec.unavailable})")
         return
     # `dirty is None` is neither clean nor dirty: git answered for HEAD and then could not
     # answer for the working tree, and flattening that to either word would be a claim.
@@ -398,7 +399,7 @@ def _announce_provenance(run_dir: Path) -> None:
         # paths)" beside "+dirty" is a QUANTITY nobody wrote — the announce's own version of
         # filing an unknown as a fact.
         detail = f" ({rec.dirty_path_count} paths)" if rec.dirty_path_count else ""
-    print(f"[run.py] commit={rec.commit[:12]}{mark}{detail}", file=sys.stderr)
+    _logger.info(f"commit={rec.commit[:12]}{mark}{detail}")
 
 
 def resume_world(manifest: Path, world_label: str) -> Any:
@@ -462,10 +463,10 @@ def _resume_target(ns: argparse.Namespace) -> Any:
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run_dir(
+def _materialize_run(
     alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
-) -> Path:
-    """Build this run's directory, stamped with the code and the model it will run on — and,
+) -> Run:
+    """Build this run's directory and hand back its handle, stamped with the code and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
     the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
     path).
@@ -475,8 +476,7 @@ def _materialize_run_dir(
     builder, which is what keeps "the run dir has a single origin" a property of this file rather
     than of whoever reads it — two call sites are two places for the stamp to be forgotten.
     """
-    run_dir = _run.materialize_run_dir(alert, run_id, model=model, world=world)
-    return run_dir
+    return _run.materialize_run(alert, run_id, model=model, world=world)
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
@@ -487,7 +487,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
-    materialize: Callable[..., Path] = _materialize_run_dir,
+    materialize: Callable[..., Run] = _materialize_run,
 ) -> int:
     # The tail's three UNDRIVABLE dependencies — the credentialed investigation lifecycle, the
     # HTML render, the case-ticket endpoint — take an injection seam, each defaulting to
@@ -533,82 +533,85 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, model=model, world=world)
+    run = materialize(alert, run_id, model=model, world=world)
+    run_dir = run.run_dir
 
-    if ns.update_ticket:
-        ticket_writer.open_case_ticket(run_dir)
+    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN, by the handle's own address `(tenant_id,
+    # run_id)` — the tenant `materialize` took from the tenant record, the sole authority.
+    with _log.log_context(run_id=run_dir.name, tenant_id=run.tenant_id):
+        if ns.update_ticket:
+            ticket_writer.open_case_ticket(run_dir)
 
-    print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
-    _announce_provenance(run_dir)
+        _logger.info(f"run_dir={run_dir} model={model}")
+        _announce_provenance(run_dir)
 
-    summary = lifecycle(
-        run_dir=run_dir,
-        model=model,
-        model_override=ns.model,
-        defender_dir=DEFENDER_DIR,
-        world=world,
-    )
+        summary = lifecycle(
+            run_dir=run_dir,
+            model=model,
+            model_override=ns.model,
+            defender_dir=DEFENDER_DIR,
+            world=world,
+        )
 
-    # Every consumer below reads the tree the lifecycle just scrubbed. None of them is
-    # reachable on a tainted tree: `summary` only exists if the lifecycle returned, and
-    # nothing here catches what it raises.
-    out = str(summary.get("output") or "")
-    print(f"[run.py] done ({summary.get('requests')} model requests); "
-          f"output: {out[:200]}", file=sys.stderr)
+        # Every consumer below reads the tree the lifecycle just scrubbed. None of them is
+        # reachable on a tainted tree: `summary` only exists if the lifecycle returned, and
+        # nothing here catches what it raises.
+        out = str(summary.get("output") or "")
+        _logger.info(f"done ({summary.get('requests')} model requests); "
+                     f"output: {out[:200]}")
 
-    print("[run.py] artifacts:", file=sys.stderr)
-    for entry in sorted(run_dir.iterdir()):
-        sys.stderr.write(f"  {entry.name}\n")
-    # The reap scan's verdict is deliberately sited OUTSIDE the tree it judges (§7 D8: in-tree
-    # it would be both plantable and forgeable by the box that is root on that mount), so the
-    # run-dir listing above can never show it. Named explicitly because this run dir SURVIVES
-    # as the artifact an operator opens, and whether the tree was ever walked is part of what
-    # they are opening it to find out.
-    verdict = box_mod.verdict_path(run_dir)
-    sys.stderr.write(
-        f"  ../{verdict.name}   (the reap scan's verdict — sits beside the run dir, not in it)\n"
-        if verdict.is_file() else
-        f"  ../{verdict.name}   MISSING — this tree was never scrubbed\n"
-    )
+        artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
+        _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
+        # The reap scan's verdict is deliberately sited OUTSIDE the tree it judges (§7 D8: in-tree
+        # it would be both plantable and forgeable by the box that is root on that mount), so the
+        # run-dir listing above can never show it. Named explicitly because this run dir SURVIVES
+        # as the artifact an operator opens, and whether the tree was ever walked is part of what
+        # they are opening it to find out.
+        verdict = box_mod.verdict_path(run_dir)
+        if verdict.is_file():
+            _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the run dir, "
+                         "not in it")
+        else:
+            _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
 
-    _run.cross_check_tables(run_dir)
+        _run.cross_check_tables(run_dir)
 
-    # There is no automatic feed into the offline learning pipeline: the only path onto the
-    # learn queue is the operator's own invocation of the learning entrypoint over a run dir.
-    # Catalog curation has its own trigger here instead, behind the tree certification the
-    # lifecycle already performed — a corpus optimisation, cheap to lose, so its failure is
-    # reported and swallowed rather than costing the investigation its exit status.
-    # The investigation is RECORDED onto the case ticket BEFORE the request is published — a
-    # comment, never a close; closing is a person's act (#767). A curation drainer can start the
-    # moment the marker lands, and the ordering keeps the record ahead of it.
-    if ns.update_ticket:
-        # #1047 O2: the lane decides per exit class, and both halves of the run-end record —
-        # the exit class and whether the model had already closed — come off the driver's own
-        # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
-        # is an input: a failed or stale sidecar cannot split the record between two sources.
-        ticket_writer.record_case_ticket(
-            run_dir, truncated_by=summary.get("truncated_by"),
-            closed_before_cut=summary.get("closed_before_cut") is True)
+        # There is no automatic feed into the offline learning pipeline: the only path onto the
+        # learn queue is the operator's own invocation of the learning entrypoint over a run dir.
+        # Catalog curation has its own trigger here instead, behind the tree certification the
+        # lifecycle already performed — a corpus optimisation, cheap to lose, so its failure is
+        # reported and swallowed rather than costing the investigation its exit status.
+        # The investigation is RECORDED onto the case ticket BEFORE the request is published — a
+        # comment, never a close; closing is a person's act (#767). A curation drainer can start the
+        # moment the marker lands, and the ordering keeps the record ahead of it.
+        if ns.update_ticket:
+            # #1047 O2: the lane decides per exit class, and both halves of the run-end record —
+            # the exit class and whether the model had already closed — come off the driver's own
+            # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
+            # is an input: a failed or stale sidecar cannot split the record between two sources.
+            ticket_writer.record_case_ticket(
+                run_dir, truncated_by=summary.get("truncated_by"),
+                closed_before_cut=summary.get("closed_before_cut") is True)
 
-    # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
-    # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is
-    # a synthetic continuation whose evidence was staged on purpose, so a curation marker for
-    # it would feed an authored corpus back into the lesson catalog as if it were a real case.
-    if world is not None:
-        print("[run.py] --resume: a sibling world is not enqueued for curation",
-              file=sys.stderr)
-    elif ns.no_learn:
-        # Fail-closed: the flag governs catalog curation, the one automatic lane left.
-        print("[run.py] --no-learn set; not enqueuing for curation", file=sys.stderr)
-    elif enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
-        print("[run.py] enqueued for catalog curation", file=sys.stderr)
+        # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
+        # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is
+        # a synthetic continuation whose evidence was staged on purpose, so a curation marker for
+        # it would feed an authored corpus back into the lesson catalog as if it were a real case.
+        if world is not None:
+            _logger.info("--resume: a sibling world is not enqueued for curation")
+        elif ns.no_learn:
+            # Fail-closed: the flag governs catalog curation, the one automatic lane left.
+            _logger.info("--no-learn set; not enqueuing for curation")
+        elif enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
+            _logger.info("enqueued for catalog curation")
 
-    try:
-        visualize(run_dir)
-    except _run.VisualizeFailed as e:
-        print(f"[run.py] {e}", file=sys.stderr)
-    return 0
+        try:
+            visualize(run_dir)
+        except _run.VisualizeFailed as e:
+            _logger.warning(f"{e}")
+        return 0
 
 
 if __name__ == "__main__":
+    _log.configure_from_env()
     sys.exit(main(sys.argv[1:]))

@@ -569,7 +569,7 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
 
     after = (run / "investigation.md").read_text(encoding="utf-8")
     assert after == _ERROR_DOC, "the seed appended to a document that does not validate"
-    assert "refused to declare l-00c" in capsys.readouterr().out
+    assert "refused to declare l-00c" in capsys.readouterr().err
 
 
 def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):

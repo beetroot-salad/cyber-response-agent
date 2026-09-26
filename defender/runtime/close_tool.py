@@ -19,7 +19,7 @@ goes through tool registration at all.
 from __future__ import annotations
 
 import asyncio
-import sys
+import logging
 from collections.abc import Callable
 from defender._model import model
 from defender._run_paths import RUN_LAYOUT, RunPaths
@@ -58,6 +58,8 @@ from . import tools as tools_mod
 from .tools import CompanionRead
 from .agent_role import AgentRole
 from .tools import AgentDeps
+
+_logger = logging.getLogger(__name__)
 
 # THE TWO OUTCOME VOCABULARIES, deliberately not one.
 #
@@ -685,11 +687,10 @@ def _document_or_empty(read: CompanionRead) -> str:
     prevent. Logged here, once, where it is acted on — the reader itself runs on every model
     request and says nothing."""
     if read.text is None:
-        print(
-            f"[close] forced close: `investigation.md` could not be read ({read.refusal}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(
+            f"forced close: `investigation.md` could not be read ({read.refusal}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"closing the host's own verdict off an empty document rather than dead-lettering "
             f"the run",
-            file=sys.stderr,
         )
         return ""
     return read.text
@@ -804,11 +805,10 @@ def _refuse_if_entry_price_is_owed(
                 f"price your disposition may owe ({type(exc).__name__}: {exc}). Repair the "
                 f"document — a close is not permitted while the gate cannot look."
             ) from exc
-        print(
-            f"[close] forced close: `investigation.md` could not be parsed "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(
+            f"forced close: `investigation.md` could not be parsed "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"({type(exc).__name__}: {exc}); pricing the host's own verdict off an empty "
             f"document rather than dead-lettering the run",
-            file=sys.stderr,
         )
         companion = CompanionBody()
     try:

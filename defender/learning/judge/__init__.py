@@ -21,7 +21,7 @@ Flow, per `accepted` episode with no existing `judge.yaml`:
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from collections import Counter
 from dataclasses import field, fields as dataclass_fields
 from pathlib import Path
@@ -43,6 +43,8 @@ from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
 from defender.learning.judge import run as run_mod  # noqa: E402
+
+_logger = logging.getLogger(__name__)
 
 #: The judge's own operator knobs — no `DEFENDER_` prefix (run1/G23: a judge knob spelled with
 #: one would be unsettable, matching `QUESTIONER_EFFORT`'s own convention). MODEL and EFFORT are
@@ -432,8 +434,8 @@ def _write_wire_log(
     try:
         write_guarded(path, json.dumps(row) + "\n", mode="replace")
     except Exception as unwritable:  # noqa: BLE001 — see above: observability, never the grade
-        print(f"[judge] the wire log for {agent_id} could not be written ({unwritable!r}); the "
-              "draw itself is unaffected", file=sys.stderr)
+        _logger.warning(f"the wire log for {agent_id} could not be written ({unwritable!r}); the "
+                        "draw itself is unaffected")
 
 
 def _majority_outcome(documents: dict[int, dict[str, Any]], n_completed: int,

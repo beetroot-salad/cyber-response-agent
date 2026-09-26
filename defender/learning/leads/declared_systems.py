@@ -19,6 +19,7 @@ adapter half alone, never consulting the marker source.
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -27,7 +28,6 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender import _git
 from defender._paths import DefenderPaths
-from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
 
@@ -37,7 +37,7 @@ from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, re
 ADAPTERS_REL = DefenderPaths.adapters_rel
 SKILLS_REL = DefenderPaths.skills_rel
 
-_log = _loop_config.lead_author_log
+_logger = logging.getLogger(__name__)
 
 
 class AdaptersUnreadable(LeadAuthorError, RegistryError):
@@ -84,7 +84,7 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"({reason})"
         ) from e
     for name in roster.refused:
-        _log(
+        _logger.warning(
             f"declared_systems: refused anomalous adapter name {name!r} "
             f"from {adapters_dir} — it is not a name the dispatch seam resolves"
         )
@@ -140,7 +140,7 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
         if is_system_name(name):
             names.add(name)
         else:
-            _log(
+            _logger.warning(
                 f"declared_systems: refused shape-anomalous marker name {name!r} "
                 f"from {skills_dir}"
             )
@@ -160,7 +160,7 @@ def declared_systems_over(roster: RosterRead, repo_root: Path) -> frozenset[str]
     this is how it gets the union off that one read rather than a second."""
     union = frozenset(roster.accepted) | _marker_names(repo_root)
     if not union:
-        _log(
+        _logger.warning(
             f"declared_systems: no systems declared by either source "
             f"({roster.root} or {repo_root / SKILLS_REL})"
         )

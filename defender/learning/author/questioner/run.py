@@ -15,6 +15,7 @@ channel's.
 """
 from __future__ import annotations
 
+import logging
 import sys
 import uuid
 from dataclasses import field
@@ -39,7 +40,6 @@ from defender.learning.core.config import (
     repo_lock_wait_seconds,
     author_max_attempts,
     author_timeout as _author_timeout,
-    make_logger,
 )
 
 
@@ -165,7 +165,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        log=_log,
+        log=_logger,
     )
 
 
@@ -195,7 +195,8 @@ def commit_questioner_lessons(message: str, cfg: QuestionerAuthorConfig) -> str 
     return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
 
 
-_log = make_logger(_LOG_PREFIX)
+# Named, not `__name__`: this module also runs as `python -m`, i.e. as `__main__`.
+_logger = logging.getLogger("defender.learning.author.questioner.run")
 
 
 def run_batch(
@@ -218,4 +219,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main(sys.argv))

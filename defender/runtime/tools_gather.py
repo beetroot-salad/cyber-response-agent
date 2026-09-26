@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from defender._model import model
@@ -36,6 +36,8 @@ from defender._untrusted import wrap_fresh
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
 from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
+
+_logger = logging.getLogger(__name__)
 
 
 
@@ -428,8 +430,7 @@ def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
         guarded_mkdir(target.parent, base=run_dir)
         write_guarded(target, wrapped)
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
-        print(f"[run.py] gather-summary persist skipped for {lead_id}: {e!r}",
-              file=sys.stderr)
+        _logger.warning(f"gather-summary persist skipped for {lead_id}: {e!r}")
 
 
 #: The tail every cut-short lead's notice ends on — MAIN's vocabulary (#807 G19: the gather

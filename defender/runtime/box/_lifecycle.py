@@ -5,8 +5,8 @@ box, not properties of one.
 """
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -33,6 +33,8 @@ from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
+
+_logger = logging.getLogger(__name__)
 
 
 def _create_argv(
@@ -318,11 +320,10 @@ def _opt_out_or_raise(fault: BoxFault) -> None:
     the operator under the opt-out, phase F)."""
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
-    print(
-        f"[box] WARNING: {_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
+    _logger.warning(
+        f"{_ALLOW_UNSANDBOXED}=1 — running UNSANDBOXED. The bash lane "
         f"executes on the host with no filesystem or network boundary. The swallowed startup "
         f"fault: {fault}",
-        file=sys.stderr,
     )
 
 
@@ -448,10 +449,9 @@ def stop_and_scrub(
         write_did_not_run(tree, f"teardown faulted before the reap scan could run: {e}")
         if not in_flight:
             raise
-        print(
-            f"[box] WARNING: teardown failed under an in-flight failure: {e} — the box may "
+        _logger.error(
+            f"teardown failed under an in-flight failure: {e} — the box may "
             f"be leaked, and {tree} was NOT scrubbed (the walk needs a provably dead box).",
-            file=sys.stderr,
         )
     if box_down:
         scrub_tree(tree)
@@ -462,9 +462,8 @@ def stop_and_scrub(
         # the tree exactly as the box left it.
         swept = sweep_staged(tree)
         if swept:
-            print(
-                f"[box] swept {len(swept)} orphaned staged file(s) under {tree}",
-                file=sys.stderr,
+            _logger.info(
+                f"swept {len(swept)} orphaned staged file(s) under {tree}",
             )
 
 

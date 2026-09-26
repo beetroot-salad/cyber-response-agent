@@ -24,6 +24,7 @@ port's load-bearing decisions:
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -144,7 +145,7 @@ def _spawn(**over):
     kw = dict(
         system_prompt_file=Path("/tmp/does-not-matter-lae.md"),
         batch_id="run-A", user_prompt="u", repo_root=Path("/tmp/wt"),
-        learning_run_dir=Path("/tmp/rd"), log_label="lead author", log=lambda *a, **k: None,
+        learning_run_dir=Path("/tmp/rd"), log_label="lead author", log=logging.getLogger("defender.test"),
         source_key=lambda model, label: None, run_author=lambda *a, **kw: "",
         model=config.lead_author_model(), effort=config.lead_author_effort(),
         timeout=config.lead_author_timeout(), request_limit=config.lead_author_request_limit(),

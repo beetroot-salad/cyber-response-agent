@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import logging
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -75,7 +76,6 @@ from defender.learning.core import config, persist
 from defender.learning.core.config import (
     FatalConfigError,
     QueueChannel,
-    make_logger,
     provenance_field,
 )
 
@@ -376,14 +376,15 @@ def run_batch(
     propagates."""
     if box is not None:
         cfg = replace(cfg, box=box)
-    log = make_logger(cfg.log_prefix)
+    # One child logger per curator channel: both curators run this module's code.
+    log = logging.getLogger(f"{__name__}.{cfg.log_prefix}")
     channel = cfg.channel
 
     drain_fh = None
     if channel.drain_lock is not None:
         drain_fh = author_shared.acquire_flock(channel.drain_lock)
         if drain_fh is None:
-            log("drain lock held by another process — skipping this tick")
+            log.info("drain lock held by another process — skipping this tick")
             return 0
     try:
         try:
@@ -391,7 +392,7 @@ def run_batch(
                 cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
             )
         except TimeoutError as e:
-            log(f"repo lock unavailable: {e}; queue intact")
+            log.warning(f"repo lock unavailable: {e}; queue intact")
             return 0
         try:
             try:
@@ -399,13 +400,13 @@ def run_batch(
                     cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel
                 )
             except AuthorError as e:
-                log(f"FATAL: {e}")
+                log.critical(f"{e}")
                 # §7 FK-4: a NAMED, REPORTED disposition — an already-dirty corpus at tick
                 # start is loud, not a silent skip an operator has no way to see.
                 try:
                     _record_stuck(channel, e, [])
                 except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-                    log(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
+                    log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
                 return 2
             return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
         finally:
@@ -422,14 +423,14 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         channel.append_lock, timeout_seconds=cfg.repo_lock_wait_seconds
     )
     if append_fh is None:
-        log("append lock held by an appender past the deadline — skipping this tick")
+        log.info("append lock held by an appender past the deadline — skipping this tick")
         return 0
     try:
         batch, unreadable = read_jsonl_rows_report(channel.file)
     finally:
         author_shared.release_flock(append_fh)
     if not batch and not unreadable:
-        log("queue empty — nothing to author")
+        log.info("queue empty — nothing to author")
         return 0
     if unreadable:
         # NOT an early return, and that is the whole point. The wake gate counts an
@@ -449,7 +450,7 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         # fault in the retirement, in the gate, or in the authoring region — and on each of
         # them the lines are still there next tick, printing this same line again. This is
         # the only trace the deletion leaves, so it must not claim to be one.
-        log(
+        log.warning(
             f"{unreadable} unreadable line(s) in the queue — the next rotation this tick "
             "reaches, if it reaches one, will drop them"
         )
@@ -478,7 +479,7 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         stuck_rows = keyed
         held, consumed_pre, to_author = cfg.gate(keyed, cfg)
         batch_id = uuid.uuid4().hex[:12]
-        log(
+        log.info(
             f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
             f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
         )
@@ -517,7 +518,7 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             try:
                 _record_stuck(channel, e, stuck_rows)
             except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
-                log(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
+                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
         raise
 
 
@@ -913,7 +914,7 @@ def _handle_retire(
     cfg: CorpusAuthorConfig, e: BaseException, to_author: list[dict], key: str, log
 ) -> int:
     channel = cfg.channel
-    log(f"FATAL: {e}")
+    log.critical(f"{e}")
     outcome = retire(
         channel=channel,
         batch_ids=[row[key] for row in to_author],
@@ -931,7 +932,7 @@ def _handle_retire(
         try:
             _record_stuck(channel, e, survivors)
         except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-            log(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
+            log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
     return 2
 
 
@@ -1021,7 +1022,7 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
             ),
             cfg,
         )
-    log(
+    log.info(
         f"done batch={batch_id} committed={len(committed)} held={len(held)} "
         f"pre_consumed={len(consumed_pre)} terminal={len(terminal_rows)} "
         f"deferred={len(deferred_ids)} commit_sha={commit_sha}"
@@ -1351,7 +1352,7 @@ def _retire_unkeyable(
     if not rows:
         return
     reason = f"row carries no value under {channel.id_key!r}"
-    log(f"{len(rows)} unkeyable row(s) retired: {reason}")
+    log.warning(f"{len(rows)} unkeyable row(s) retired: {reason}")
     append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
         graveyard_file(channel),
         [{**row, "attempts": int(row.get("attempts") or 0) + 1,

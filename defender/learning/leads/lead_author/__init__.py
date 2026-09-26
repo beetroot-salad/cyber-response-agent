@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import logging
 import string
 import sys
 from collections.abc import Callable, Mapping
@@ -112,11 +113,12 @@ from ._rules import (
 )
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
-    _log,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def _state_dir(run_dir: Path) -> Path:
@@ -214,7 +216,7 @@ def run(
     batch has passed the scrub. The `pitfalls_collected` marker and the pitfalls rows are
     written either way — they are facts about the run, not about a commit."""
     if not run_dir.is_dir():
-        _log(f"FATAL: run_dir not found: {run_dir}")
+        _logger.critical(f"run_dir not found: {run_dir}")
         return 2
     # Resolved ONCE, here at the boundary; every write site below takes the sink as given.
     sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
@@ -250,7 +252,7 @@ def run_under_held_queue_lock(
     `_run_locked` short-circuits on, and a by-hand run in the gap would otherwise re-serve
     the run. Never skips: the lock is the caller's, so there is nothing to contend on."""
     if not run_dir.is_dir():
-        _log(f"FATAL: run_dir not found: {run_dir}")
+        _logger.critical(f"run_dir not found: {run_dir}")
         return 2
     return _run_locked(run_dir, build_lead_author_deps(paths), box=box, on_done=on_done)
 
@@ -259,7 +261,7 @@ def _run_locked(
     run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None, on_done: DoneSink,
 ) -> int:
     if _done_sentinel(run_dir).is_file():
-        _log("already processed (done sentinel exists) — nothing to do")
+        _logger.info("already processed (done sentinel exists) — nothing to do")
         return 0
 
     if not deps.systems:
@@ -274,7 +276,7 @@ def _run_locked(
     try:
         joined_leads, executed = deps.extract(run_dir)
     except (FileNotFoundError, ValueError) as e:
-        _log(f"FATAL: cannot extract leads: {e}")
+        _logger.critical(f"cannot extract leads: {e}")
         return 2
 
     catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
@@ -283,7 +285,7 @@ def _run_locked(
         executed, catalog_dir=deps.paths.catalog_dir, catalog=catalog, systems=deps.systems,
     )
     if synth:
-        _log(
+        _logger.info(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
@@ -304,7 +306,7 @@ def _run_locked(
             # threshold will see, which merges this run's rows against every row already
             # queued. A lead that loops makes the gap large, and that gap is the signal.
             distinct = len(_loop_persist.merge_pitfalls(failures))
-            _log(
+            _logger.info(
                 f"collected {len(failures)} general failure(s) into the queue "
                 f"({distinct} distinct mistake(s) in this run)"
             )
@@ -320,14 +322,14 @@ def _run_locked(
     )
     if rc is not None:
         return rc
-    _log(
+    _logger.info(
         f"built {len(handoffs)} executed-template handoff(s) and "
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
     rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
-        _log(f"FATAL: lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
+        _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
     changed = _verify_skills_state(
@@ -338,7 +340,7 @@ def _run_locked(
         _loop_commit_message(run_dir, changed),
     )
     on_done(sha)
-    _log(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
+    _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0
 
 
@@ -355,7 +357,7 @@ def _prepare_handoffs(
     contradicting = [d for d in pending_drafts_raw if _draft_contradicts_skill(d)]
     if len(pending_drafts_raw) < threshold and not contradicting:
         if pending_drafts_raw:
-            _log(
+            _logger.info(
                 f"lift queue below threshold "
                 f"(n={len(pending_drafts_raw)}, threshold={threshold}) — "
                 "skipping lift"
@@ -363,7 +365,7 @@ def _prepare_handoffs(
         pending_drafts: list[dict] = []
     else:
         if contradicting and len(pending_drafts_raw) < threshold:
-            _log(
+            _logger.info(
                 f"lift queue below threshold (n={len(pending_drafts_raw)}, "
                 f"threshold={threshold}) but {len(contradicting)} draft(s) contradict "
                 "shipped SKILL.md content — bypassing threshold"
@@ -376,14 +378,14 @@ def _prepare_handoffs(
         try:
             joined_leads, executed = deps.extract(run_dir)
         except (FileNotFoundError, ValueError) as e:
-            _log(f"FATAL: cannot extract leads: {e}")
+            _logger.critical(f"cannot extract leads: {e}")
             return [], [], 2
 
     if not executed:
         if not pending_drafts:
-            _log("no executed leads and no pending drafts — nothing to do")
+            _logger.info("no executed leads and no pending drafts — nothing to do")
             return [], [], 0
-        _log(
+        _logger.info(
             "no executed leads with on-disk payloads — proceeding with "
             f"{len(pending_drafts)} pending system-skill draft(s) only"
         )
@@ -392,11 +394,11 @@ def _prepare_handoffs(
     try:
         handoffs = deps.build_handoff(run_dir, executed, joined_leads, catalog=catalog)
     except LeadAuthorError as e:
-        _log(f"FATAL: cannot build handoffs: {e}")
+        _logger.critical(f"cannot build handoffs: {e}")
         return [], [], 2
 
     if not handoffs and not pending_drafts:
-        _log(
+        _logger.info(
             f"none of the {len(executed)} extracted lead(s) resolved to a catalog "
             "template (unresolved query_id, or a `∅.` sentinel routed to the pitfalls "
             "residue) and there are no pending drafts — nothing to do"
@@ -489,6 +491,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main(sys.argv[1:]))
 
 
@@ -542,7 +546,6 @@ __all__ = [
     "_is_system_skill_draft",
     "_is_system_skill_md",
     "_lift_threshold",
-    "_log",
     "_loop_commit_body",
     "_loop_commit_message",
     "_loop_config",

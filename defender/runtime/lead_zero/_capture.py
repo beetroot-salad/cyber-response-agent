@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from defender._model import model
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,8 @@ from defender.hooks.budget_enforcer import (
 from defender.runtime import circuit_breaker
 from defender.runtime.verbs import VerbContext
 from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
+
+_logger = logging.getLogger(__name__)
 
 
 @model(frozen=True)
@@ -59,15 +62,19 @@ def _run_sync(coro: Any) -> Any:
     already running on this thread. `resolve_lead_zero` is a synchronous entry point called
     both from bare pytest functions (no loop) and from inside `run_investigation` (already
     inside one) — the latter cannot call `asyncio.run()` directly, so the coroutine goes to a
-    fresh thread with its own loop."""
+    fresh thread with its own loop.
+
+    The thread runs in a COPY OF THE CALLER'S CONTEXT: a pool thread starts empty, and "run it
+    as if here" includes the run id and tenant every log line inside it is stamped with."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     import concurrent.futures
+    import contextvars
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(asyncio.run, coro).result()
+        return ex.submit(contextvars.copy_context().run, asyncio.run, coro).result()
 
 
 def _sanitize(text: Any) -> str:
@@ -360,7 +367,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     was ALREADY malformed when this frame read it, in which case the seed is the messenger and
     the refusal names the real fault.
 
-    Best-effort is preserved in both directions: a refusal prints and returns, and never
+    Best-effort is preserved in both directions: a refusal logs and returns, and never
     raises into a run that has not started."""
     from defender._artifact_schema import validate_artifact
     from defender._run_paths import RUN_LAYOUT
@@ -381,12 +388,12 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:
-            print(
-                f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            _logger.warning(
+                f"refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                 f"would not pass validation, so nothing was written and the id stays "
                 f"undeclared: {reason}"
             )
             return
         write_guarded(path, proposed)
     except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
-        print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(f"could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path

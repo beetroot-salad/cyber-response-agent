@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import field
@@ -52,6 +52,8 @@ from defender._env import env_int
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
 from defender.skills.invlang.schema import CompanionBody
+
+_logger = logging.getLogger(__name__)
 
 EXTRA_TURN_BOUND = 2
 
@@ -354,10 +356,9 @@ def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
     try:
         _mark_traces_incomplete(deps, state.turns, reason)
     except OSError as exc:
-        print(
-            f"[gate] the review-cannot-run marker could not be written ({exc!r}); the verdict "
+        _logger.warning(
+            f"the review-cannot-run marker could not be written ({exc!r}); the verdict "
             f"stands without its trace rows",
-            file=sys.stderr,
         )
     return _fail("companion", StageOutcome(None, STAGE_ERROR, reason), turns_used=state.turns)
 
