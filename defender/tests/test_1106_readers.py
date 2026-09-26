@@ -193,5 +193,6 @@ def test_the_staging_write_door_addresses_the_injected_tenants_cluster(injected,
 
     door = staging.write_door_from_env(_ctx(injected, tmp_path), transport=transport)
     assert door.count("logs-x") == 3
-    assert calls and calls[0]["url"].startswith(f"https://es-{MARK}:9200/"), calls
+    assert calls, calls
+    assert calls[0]["url"].startswith(f"https://es-{MARK}:9200/"), calls
     assert calls[0]["insecure"] is False, calls

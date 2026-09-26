@@ -529,6 +529,9 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
         "as_of": as_of,
         "continuation_prompt": continuation_prompt,
         "base_story": "the captured story",
+        # #1106: the launcher records the tenant's configured corpus patterns in the manifest
+        # (the loader reads no settings), so the authored document carries them.
+        "configured_patterns": [EVENTS_PATTERN, ALERTS_PATTERN],
         "discriminator": {"predicate": "p", "holding_system": "elastic",
                           "envelope": {"system": "elastic", "verb": "esql",
                                        "params": {"query": f"FROM {EVENTS_PATTERN} | LIMIT 5"}}},

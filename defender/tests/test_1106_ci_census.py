@@ -109,13 +109,15 @@ def test_the_gate_is_green_over_every_tenant_and_the_template_and_says_it_looked
 def test_a_row_missing_from_one_tenant_turns_the_gate_red_naming_that_tenant(tmp_path):
     rc, out = _gate(_repo(tmp_path, two=_without(ROWS_TWO, ("beta", "lookup"))))
     assert rc != 0, out
-    assert "tenant-two" in out and "beta.lookup" in out, out
+    assert "tenant-two" in out, out
+    assert "beta.lookup" in out, out
 
 
 def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(tmp_path):
     rc, out = _gate(_repo(tmp_path, template=_without(ROWS_TEMPLATE, ("alpha", "health-check"))))
     assert rc != 0, out
-    assert "tenant-template" in out and "alpha.health-check" in out, out
+    assert "tenant-template" in out, out
+    assert "alpha.health-check" in out, out
 
 
 def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_tenant(tmp_path):
@@ -123,7 +125,8 @@ def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_te
     alpha.lookup and names a template the catalog does not hold."""
     rc, out = _gate(_repo(tmp_path, one_lead_zero="alpha.no-such-template"))
     assert rc != 0, out
-    assert "tenant-one" in out and "alpha.no-such-template" in out, out
+    assert "tenant-one" in out, out
+    assert "alpha.no-such-template" in out, out
 
 
 def test_a_new_tenant_copied_from_the_template_keeps_the_gate_green(tmp_path):
@@ -141,4 +144,5 @@ def test_the_gate_checks_the_real_repos_tenants_and_template():
                           cwd=T.REPO_ROOT)
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
-    assert T.PLAYGROUND_ID in out and "tenant-template" in out, out
+    assert T.PLAYGROUND_ID in out, out
+    assert "tenant-template" in out, out

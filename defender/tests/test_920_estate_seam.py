@@ -323,7 +323,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
-        as_of=AS_OF,
+        as_of=AS_OF, settings_dir=T1106.PLAYGROUND_SETTINGS,
     )
 
 

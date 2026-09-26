@@ -432,7 +432,7 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
-def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
+def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, defender_dir: Path | None = None,

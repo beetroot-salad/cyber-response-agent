@@ -263,7 +263,8 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
         writer = TicketWriterRecorder()
         investigate = functools.partial(
             run._drive_investigation, registry_cls=_RegistryRecorder,
-            investigate=lambda **kw: driven.append(kw) or {"output": "done", "requests": 0})
+            investigate=lambda driven=driven, **kw: (
+                driven.append(kw) or {"output": "done", "requests": 0}))
         rc = run.main(
             [str(world["alert"]), "--tenants-root", str(root), "--no-learn", "--update-ticket"],
             lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p: None,

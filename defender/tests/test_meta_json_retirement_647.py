@@ -824,7 +824,10 @@ def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
 
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    assert ticket_adapter._cli_context().run_dir == run_dir
+    # #1106: the CLI is handed its tenant's settings folder (parsed from `--tenant`).
+    from defender.tests import _tenants1106
+
+    assert ticket_adapter._cli_context(_tenants1106.PLAYGROUND_SETTINGS).run_dir == run_dir
 
 
 def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):

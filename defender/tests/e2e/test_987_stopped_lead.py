@@ -42,6 +42,7 @@ No `monkeypatch.setattr`: the model enters through `make_model`, the verb regist
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -196,7 +197,9 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     ones."""
     run_dir = materialize(root, GOLDEN_AB3)
     budget_enforcer.open_budget(run_dir, budget_enforcer.DEFAULT_LIMITS)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    # #1106: a run hands MAIN's deps its tenant's settings folder, which every lead inherits.
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+                   settings_dir=T1106.PLAYGROUND_SETTINGS)
     rec = VerbRecorder()
     model = GatherModel(responses)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")

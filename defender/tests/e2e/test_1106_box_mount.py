@@ -60,7 +60,7 @@ def _start(tmp_path: Path, agent: Path) -> RecordingDocker:
     return rec
 
 
-@pytest.mark.parametrize("own, other", [("acme", "bravo"), ("bravo", "acme")])
+@pytest.mark.parametrize(("own", "other"), [("acme", "bravo"), ("bravo", "acme")])
 def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         tmp_path, two_tenants, own, other):
     from defender.runtime import box as box_mod
@@ -76,11 +76,13 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         "source": str(mine.agent), "target": str(box_mod.TENANT_AGENT_TARGET), "readonly": True,
     }], mounts
     # Nothing of the other tenant, anywhere on the argv; no settings half of ANY tenant.
-    assert str(root / other) not in joined and str(theirs.agent) not in joined, joined
+    assert str(root / other) not in joined, joined
+    assert str(theirs.agent) not in joined, joined
     for m in mounts:
         for side in (m["source"], m["target"]):
             assert "settings" not in Path(side).parts, m
-    assert str(mine.settings) not in joined and str(theirs.settings) not in joined
+    assert str(mine.settings) not in joined
+    assert str(theirs.settings) not in joined
 
 
 def test_the_agent_target_is_a_fixed_absolute_path_outside_the_trees_the_box_already_binds(
@@ -92,7 +94,8 @@ def test_the_agent_target_is_a_fixed_absolute_path_outside_the_trees_the_box_alr
 
     target = Path(box_mod.TENANT_AGENT_TARGET)
     assert target.is_absolute()
-    assert not target.is_relative_to(T.DEFENDER) and not T.DEFENDER.is_relative_to(target)
+    assert not target.is_relative_to(T.DEFENDER)
+    assert not T.DEFENDER.is_relative_to(target)
     rec = _start(tmp_path, two_tenants[1].agent)
     for m in rec.mounts():
         if m["target"] != str(target):

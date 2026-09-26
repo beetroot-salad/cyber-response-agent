@@ -355,7 +355,7 @@ def plant_tenant_record(runs_base: Path, tenant_id: str) -> Path:
     return path
 
 
-def paths_in(value: Any, *, _depth: int = 0, _seen: set[int] | None = None) -> set[Path]:
+def paths_in(value: Any, *, _depth: int = 0, _seen: set[int] | None = None) -> set[Path]:  # noqa: C901 — one walk over every container shape a fake may be handed
     """Every `Path` (and absolute path string) reachable from `value` — through mappings,
     sequences, dataclass / pydantic fields and plain object attributes, a few levels deep.
 

@@ -22,6 +22,8 @@ RED against b8a63e66: none of the seams below exists, the launcher runs siblings
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant
+
 import contextlib
 import json
 
@@ -338,7 +340,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
         assert builder in src, f"the launcher never reaches {builder}"
 
     ep = T.episode(tmp_path)
-    assert callable(seams.adapter_seam(ep)), "the review has no production adapter layer"
+    assert callable(seams.adapter_seam(ep, _tenants1106.playground_tenant())), "the review has no production adapter layer"
     assert callable(seams.model_seam(ep)), "the questioner has no production model call"
 
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half

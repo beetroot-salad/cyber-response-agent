@@ -227,7 +227,8 @@ def test_the_withheld_lead_heading_names_the_runs_table(tmp_path):
     result = LeadZeroResult(text="", status="resolved")
     withheld = render_orient_section(
         result, None, correlation_system=grants.correlation_system, grant_home=str(grants.path))
-    assert L3 in withheld and str(grants.path) in withheld, withheld
+    assert L3 in withheld, withheld
+    assert str(grants.path) in withheld, withheld
     dispatched = render_orient_section(
         result, None, correlation_system="elastic", grant_home=str(grants.path))
     assert str(grants.path) not in dispatched, dispatched

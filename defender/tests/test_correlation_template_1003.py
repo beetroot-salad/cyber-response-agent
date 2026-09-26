@@ -337,7 +337,8 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
     tenant = T1106.tenants().tenant_dir(tmp_path / "tenants", "acme")
     grants = T1106.run_grants(tenant.settings)
     config = lead_zero_config_path(tenant.settings)
-    assert config == tenant.settings / "lead-zero.yaml" and config.is_file()
+    assert config == tenant.settings / "lead-zero.yaml"
+    assert config.is_file()
 
     will_dispatch = {"tenant": tenant, "grants": grants, "resume": None,
                      "lead_zero_verbs": object()}

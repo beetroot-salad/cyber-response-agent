@@ -83,7 +83,7 @@ def _render_comment(rec):
         case_ticket, "case_record_to_comment",
         "D3 replaces case_record_to_close with case_record_to_comment",
     )
-    return fn(rec)
+    return fn(rec, settings_dir=current_settings())
 
 
 # =======================================================================================
@@ -878,7 +878,8 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     unconfigured = make_run(tmp_path, name="run-unconfigured")
     no_config = FakeStore()
     fn = require(ticket_writer, "record_case_ticket", "D2's rename")
-    assert fn(unconfigured, writer_deps(no_config, config=None)) is None
+    assert fn(unconfigured, writer_deps(no_config, config=None),
+              settings_dir=current_settings()) is None
     assert no_config.calls == [], "a run with no case-history config still reached the store"
     assert not (unconfigured / "ticket_write.json").exists(), (
         "a run that never reached the store wrote a receipt describing a write"

@@ -104,7 +104,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_settings_folder(tmp_path):
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
 
 
-@pytest.mark.parametrize("own, system, reached, withheld", [
+@pytest.mark.parametrize(("own", "system", "reached", "withheld"), [
     ("A", "cmdb", ("cmdb", "elastic"), ("identity", "threat-intel")),
     ("B", "identity", ("identity", "threat-intel"), ("cmdb", "elastic")),
 ])

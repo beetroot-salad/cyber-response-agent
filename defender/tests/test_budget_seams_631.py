@@ -222,7 +222,8 @@ def _drive_gather_query(run_dir: Path, registry):
         verbs=registry, limits=DEFAULT_LIMITS,
     )
     deps = replace(bind(gather_def, run_dir,
-                        defender_dir=DEFENDER), lead_id="l-001")
+                        defender_dir=DEFENDER), lead_id="l-001",
+                   settings_dir=T1106.PLAYGROUND_SETTINGS)
 
     async def _go():
         with override_allow_model_requests(False):

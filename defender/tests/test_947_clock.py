@@ -407,7 +407,8 @@ def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
     # positional spelling — fifth argument the world — is no longer one any site uses.)
     ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
                       settings_dir=Path("/s"), capture=None, world_id="w1")
-    assert ctx.world_id == "w1" and ctx.as_of is None
+    assert ctx.world_id == "w1"
+    assert ctx.as_of is None
 
 
 def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock(tmp_path):
