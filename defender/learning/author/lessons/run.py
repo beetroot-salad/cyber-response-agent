@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import sys
 import uuid
 from dataclasses import field
@@ -31,7 +32,6 @@ from defender.learning.core.config import (
     repo_lock_wait_seconds,
     author_max_attempts,
     author_timeout as _author_timeout,
-    make_logger,
 )
 
 
@@ -39,8 +39,8 @@ from defender.learning.core.config import (
 
 AuthorError = _shared.AuthorError
 
-# The ONE spelling of this drain's log prefix: `cfg.log_prefix` and `_log` below both come
-# from it, so the envelope, the curator stage and this module cannot drift onto two.
+# The ONE spelling of this drain's log prefix: `cfg.log_prefix` (and with it the drain's per-channel
+# logger) comes from it, so the envelope, the curator stage and this module cannot drift onto two.
 _LOG_PREFIX = "author"
 
 
@@ -161,7 +161,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        log=_log,
+        log=_logger,
     )
 
 
@@ -215,7 +215,8 @@ def write_held_report(
 
 
 # This drain's one diagnostic logger, built from the single prefix anchor at the top.
-_log = make_logger(_LOG_PREFIX)
+# Named, not `__name__`: this module also runs as `python -m`, i.e. as `__main__`.
+_logger = logging.getLogger("defender.learning.author.lessons.run")
 
 
 def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:

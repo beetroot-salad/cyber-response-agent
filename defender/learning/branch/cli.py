@@ -51,7 +51,6 @@ import os
 import sqlite3
 import sys
 import threading
-import traceback
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -1505,7 +1504,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
             source=source_stamp, allow_dirty=ns.allow_dirty)
     failed = sorted(label for label, code in exits.items() if code)
     for label in failed:
-        _logger.info(f"world {label} exited {exits[label]}")
+        _logger.warning(f"world {label} exited {exits[label]}")
     _logger.info(f"episode {episode_id}: outcome={report['outcome']} "
                  f"({len(report['scrub_verified'])}/{len(labels)} verified)")
     # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
@@ -1620,8 +1619,7 @@ def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:
         # logged in full rather than swallowed — the point is that the LAUNCH's status stays
         # about the launch, not that the failure goes unreported.
         _logger.warning(f"episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
-                        "episode itself is otherwise unaffected")
-        traceback.print_exc(file=sys.stderr)
+                        "episode itself is otherwise unaffected", exc_info=True)
 
 
 def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:

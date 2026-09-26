@@ -109,7 +109,7 @@ def test_paths_owns_both_source_directory_names(tmp_path):
     assert "wtonly" not in declared_systems(PATHS.repo_root)
 
 
-def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, monkeypatch, said):
+def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, monkeypatch, capsys):
     """`run_pitfalls` resolves membership ONCE, at its boundary, BEFORE the agent it spawns
     can change the answer — and the value it resolves is the ADAPTER HALF ALONE.
 
@@ -142,13 +142,13 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
         write(marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- x\n")
 
     spawn = Spawn(edit)
-    said.readouterr()
+    capsys.readouterr()
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
 
     assert spawn.systems_seen == ["elastic"]
     assert "late" in declared_systems(repo)     # the tree DOES declare it, by the end
     assert "mcpsys" in declared_systems(repo)   # and the union names it all along
-    log = loop_log(said)
+    log = loop_log(capsys)
     # both dropped and both reported, before the spawn ever happened
     assert "late" in log
     assert "mcpsys" in log
@@ -249,7 +249,7 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
         [_lead("elastic.other-verb")], catalog_dir=cat, catalog=[], systems=empty) == []
 
 
-def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, said):
+def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsys):
     """`run_pitfalls` answers from the tree it COMMITS INTO — `paths.repo_root`, the drain
     worktree — never from the process's own checkout.
 
@@ -269,7 +269,7 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, said)
         [pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly")], paths=paths,
     )
     spawn = Spawn(lambda root: write(marker_file(root, "wtonly"), "# pitfalls\n- x\n"))
-    said.readouterr()
+    capsys.readouterr()
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
     assert spawn.systems_seen == ["wtonly"]
@@ -348,7 +348,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     assert "mcpsys" in declared_systems(other)
 
 
-def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, said):
+def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys):
     """A corpus file lane 1 leaves behind after refusing is not committed by lane 2.
 
     J3 — the BETWEEN-LANE half of resolve-before-spawn, named in no design sentence and found
@@ -391,7 +391,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, said):
             ),
         )
 
-    said.readouterr()
+    capsys.readouterr()
     drains._drain_lead_author(paths, lane1, lane2)
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
@@ -406,7 +406,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, said):
 
 
 def test_the_pitfalls_lane_is_handed_the_adapter_half_and_the_gates_the_union(
-    tmp_path, monkeypatch, said,
+    tmp_path, monkeypatch, capsys,
 ):
     """ONE tick over ONE tree carrying a MARKER-ONLY system, both lanes observed: the pitfalls
     lane does NOT declare it and the path-composition gates DO (NF2, §7).
@@ -437,13 +437,13 @@ def test_the_pitfalls_lane_is_handed_the_adapter_half_and_the_gates_the_union(
         [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "mcpsys")], paths=paths,
     )
 
-    said.readouterr()
+    capsys.readouterr()
     with pytest.raises(LeadAuthorError, match="mcpsys"):
         pitfalls_curator.run_pitfalls(
             paths=paths,
             invoke=Spawn(lambda root: write(marker_file(root, "mcpsys"), "# curated\n")),
         )
-    log = loop_log(said)
+    log = loop_log(capsys)
     assert "mcpsys" in log, "the dropped row must be reported by name"
 
     deps = lead_author.build_lead_author_deps(paths)

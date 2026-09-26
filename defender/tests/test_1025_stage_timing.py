@@ -749,7 +749,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     _clocked(_raw_rows(ep), before=before, after=after)
 
 
-def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, said):
+def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, capsys):
     """A judge failure is non-fatal to the episode — the `JUDGE` frame's body holds it and the
     launcher returns — so the boundary is crossed and the `judge` entry is on the record with
     the five before it, inside the launch's clock bracket.
@@ -767,7 +767,7 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, s
     launch = _launch(tmp_path)
     assert launch.rc == 0, "a failed grade ended the episode instead of being held"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
-    assert "the judge pass failed" in said.readouterr().err, (
+    assert "the judge pass failed" in capsys.readouterr().err, (
         "the control failed: the grade did not fail")
     assert not (launch.episode_dir / "judge.yaml").exists(), (
         "the control failed: a family grade was written")
@@ -820,7 +820,7 @@ def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
         "was raised through its clock")
 
 
-def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, said):
+def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):
     """A timing entry the record cannot take — here a DIRECTORY squatting `timing.json` before
     the launch, so every write is refused by the guarded seam — is printed and absent, and
     the episode is otherwise untouched: it runs to completion, every world is archived, the
@@ -842,7 +842,7 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
         "the family was not archived after the refused write")
     assert launch.judge.calls > 0, "the judge was never reached after the refused write"
     assert (launch.episode_dir / "judge.yaml").exists(), "the grade did not land"
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     for step in EXPECTED_STEPS:
         assert f"the {step} entry could not be written" in err, (
             f"the refused {step} row was not reported")

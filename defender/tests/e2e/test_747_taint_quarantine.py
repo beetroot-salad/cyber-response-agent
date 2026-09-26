@@ -217,7 +217,7 @@ def test_quarantine_refuses_past_the_cap_and_evicts_nothing(tmp_path, monkeypatc
         "the control never archived either — the refusal above was vacuous"
 
 
-def test_a_failure_to_quarantine_does_not_replace_the_taint(tmp_path, caplog):
+def test_a_failure_to_quarantine_does_not_replace_the_taint(tmp_path, capsys):
     """d_preserve_failure_never_masks_the_taint (#747) — if archiving fails, the taint still
     propagates unchanged, and the failure is LOUD.
 
@@ -242,7 +242,7 @@ def test_a_failure_to_quarantine_does_not_replace_the_taint(tmp_path, caplog):
 
     _, taint = _drive_tainted(tmp_path, branch=branch)
 
-    err = caplog.text
+    err = capsys.readouterr().err
     assert "FAILED to quarantine" in err, \
         "the preserve step failed silently — indistinguishable from never having run"
 

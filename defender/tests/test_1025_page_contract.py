@@ -66,9 +66,9 @@ def render(ep) -> E.Page:
     return E.render(ep, module=visualize_episode())
 
 
-def cli(argv, said):
+def cli(argv, capsys):
     """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, said, module=visualize_episode())
+    return E.cli(argv, capsys, module=visualize_episode())
 
 
 def hook_page(episode_dir) -> E.Page:
@@ -122,14 +122,14 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
 
 
 def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no_page_otherwise(
-        tmp_path, said):
+        tmp_path, capsys):
     """`main([dir])` returns 0 and prints the page path; `main([])`, `main([a file])`,
     `main([a dir with no family.yaml])` return 1, print one reason line to stderr, and leave no
     `learning.html`. Rejected: an index over all episodes (issue fork 1) — a second argument is
     refused the same way.
     """
     ep = E.sample_episode(tmp_path)
-    rc, out, err = cli([str(ep.dir)], said)
+    rc, out, err = cli([str(ep.dir)], capsys)
     assert rc == 0, (rc, out, err)
     assert str(ep.page) in out, (rc, out, err)
     assert ep.page.is_file()
@@ -140,7 +140,7 @@ def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no
     bare.mkdir()
     ep.page.unlink()
     for argv in ([], [str(a_file)], [str(bare)], [str(ep.dir), str(bare)]):
-        rc, out, err = cli(argv, said)
+        rc, out, err = cli(argv, capsys)
         assert rc == 1, f"main({argv}) returned {rc}: out={out!r} err={err!r}"
         assert len(_err_lines(err)) == 1, f"main({argv}) wrote {err!r} to stderr, not one line"
         assert not (bare / E.PAGE_NAME).exists()
@@ -232,7 +232,7 @@ class _PlantingJudge(J.FakeJudge):
 
 
 def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_judge_yaml(
-        tmp_path, monkeypatch, said):
+        tmp_path, monkeypatch, capsys):
     """With a symlink planted at `<episode_dir>/learning.html` before the render, `cli.main`
     still returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and
     the link's target is untouched; the control launch without the link writes the page.
@@ -243,7 +243,7 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     episode_dir = launcher.episode_dir_for(T.EPISODE_ID)
     judge = _PlantingJudge(episode_dir, outside, default=J.as_reply_text(J.reply_doc()))
     launch = ST._launch(tmp_path, judge=judge)
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     assert launch.rc == 0, "a render fault changed the launch's exit status"
     assert (launch.episode_dir / "judge.yaml").is_file()
     assert "could not be rendered" in err, err
@@ -256,7 +256,7 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     assert hook_page(control.episode_dir).by_id, "the control launch did not write a real page"
 
 
-def test_1025_review_rejected_episode_and_the_page(tmp_path, said):
+def test_1025_review_rejected_episode_and_the_page(tmp_path, capsys):
     """The review-rejected path returns 1 before RUNS with no `judge.yaml` and no `runs/`, and
     the launcher writes no `learning.html` there — there is no second hook on that exit (J1).
     The standalone CLI still accepts that directory (only `family.yaml` refuses, d01): exit 0,
@@ -270,7 +270,7 @@ def test_1025_review_rejected_episode_and_the_page(tmp_path, said):
     assert not (ep / "runs").exists()
     assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on the rejected exit"
 
-    rc, out, err = cli([str(ep)], said)
+    rc, out, err = cli([str(ep)], capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
@@ -297,36 +297,36 @@ def test_1025_held_teardown_fault_after_a_completed_grade(tmp_path):
     assert "not on the record" not in timing, timing
 
 
-def test_1025_how_the_operator_learns_where_the_page_is(tmp_path, said):
+def test_1025_how_the_operator_learns_where_the_page_is(tmp_path, capsys):
     """The launcher prints the page's path on stderr beside the episode line, and the CLI
     prints it on stdout (J2) — parity with `visualize_run`.
     """
     launch = ST._launch(tmp_path)
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     page = launch.episode_dir / E.PAGE_NAME
     assert launch.rc == 0
     assert page.is_file()
     assert str(page) in err, f"stderr never named the page: {err!r}"
-    rc, out, _err = cli([str(launch.episode_dir)], said)
+    rc, out, _err = cli([str(launch.episode_dir)], capsys)
     assert rc == 0
     assert str(page) in out
 
 
-def test_1025_the_cli_exit_status_for_a_degraded_page(tmp_path, said):
+def test_1025_the_cli_exit_status_for_a_degraded_page(tmp_path, capsys):
     """A page that was written but carries a reader's refusal sentence (a `judge.yaml` that is
     not a grade record) exits 0 — the degradation is on the page — and the refusal sentence is
     echoed to stderr; non-zero is reserved for no page at all (no `family.yaml`, a refused write).
     """
     ep = E.sample_episode(tmp_path)
     E.plant_raw(ep.dir / "judge.yaml", "- not\n- a grade\n")
-    rc, out, err = cli([str(ep.dir)], said)
+    rc, out, err = cli([str(ep.dir)], capsys)
     assert rc == 0, (out, err)
     assert ep.page.is_file()
     assert "grade record unreadable" in E.read_page(ep.dir).text_of("sec-verdict")
     assert "grade record unreadable" in err, err
 
     E.plant_link(ep.page, tmp_path / "nowhere")
-    rc, out, err = cli([str(ep.dir)], said)
+    rc, out, err = cli([str(ep.dir)], capsys)
     assert rc == 1, (rc, out, err)
     assert _err_lines(err), (rc, out, err)
 
@@ -336,20 +336,20 @@ def test_1025_the_cli_exit_status_for_a_degraded_page(tmp_path, said):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_cli_invoked_with_no_positional_argument(tmp_path, said):
+def test_1025_cli_invoked_with_no_positional_argument(tmp_path, capsys):
     """`main([])` returns 1, prints one reason line to stderr, writes no page (d01)."""
     ep = E.sample_episode(tmp_path)
-    rc, out, err = cli([], said)
+    rc, out, err = cli([], capsys)
     assert rc == 1, (rc, out, err)
     assert len(_err_lines(err)) == 1, (rc, out, err)
     assert not ep.page.exists()
     assert not list(tmp_path.glob("*.html"))
 
 
-def test_1025_cli_argument_names_an_existing_regular_file_not_a_directory(tmp_path, said):
+def test_1025_cli_argument_names_an_existing_regular_file_not_a_directory(tmp_path, capsys):
     """`main([<file>])` returns 1, one reason line on stderr, no page (d01)."""
     ep = E.sample_episode(tmp_path)
-    rc, out, err = cli([str(ep.dir / "family.yaml")], said)
+    rc, out, err = cli([str(ep.dir / "family.yaml")], capsys)
     assert rc == 1, (rc, out, err)
     assert len(_err_lines(err)) == 1, (rc, out, err)
     assert not ep.page.exists()
@@ -375,7 +375,7 @@ def test_1025_the_main_guard_wires_the_process_own_argv_not_a_hardcoded_empty_li
     assert ep.page.is_file()
 
 
-def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, said):
+def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, capsys):
     """The page lands at `<episode_dir>/learning.html` for a cwd-relative path, a trailing
     slash and resolvable `..` segments alike; every link on the page is relative
     (`runs/<episode>-<world>/runtime.html`) so the argument's spelling and the cwd change
@@ -388,7 +388,7 @@ def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, said)
     for spelling in (f"{rel}/", f"{rel.parent}/../{rel}", str(rel)):
         if ep.page.exists():
             ep.page.unlink()
-        rc, out, err = cli([spelling], said)
+        rc, out, err = cli([spelling], capsys)
         assert rc == 0, (spelling, rc, out, err)
         assert ep.page.is_file(), (spelling, rc, out, err)
         renders.append(ep.page.read_bytes())
@@ -424,21 +424,21 @@ def test_1025_runs_base_and_episodes_base_env_vars_point_at_nonexistent_paths_du
     assert len(set(renders)) == 1, "the environment's roots changed the page"
 
 
-def _refused_manifest(tmp_path, said, plant) -> tuple[int, str, str, E.Episode]:
+def _refused_manifest(tmp_path, capsys, plant) -> tuple[int, str, str, E.Episode]:
     ep = E.sample_episode(tmp_path)
     plant(ep.dir / "family.yaml")
-    rc, out, err = cli([str(ep.dir)], said)
+    rc, out, err = cli([str(ep.dir)], capsys)
     assert not ep.page.exists(), "a page was written from an unreadable manifest"
     return rc, out, err, ep
 
 
-def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, said):
+def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
     """No page, exit 1, one reason line on stderr naming the manifest as unreadable — not
     "missing" — `raw_manifest`'s refusal (F25/x16) takes d01's refusal arm with a
     distinguishing reason.
     """
     rc, _out, err, _ep = _refused_manifest(
-        tmp_path, said, lambda p: E.plant_raw(p, "worlds: [\n  {world_id: b"))
+        tmp_path, capsys, lambda p: E.plant_raw(p, "worlds: [\n  {world_id: b"))
     lines = _err_lines(err)
     assert rc == 1, (rc, err)
     assert len(lines) == 1, (rc, err)
@@ -448,35 +448,35 @@ def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, said):
     assert "missing" not in lines[0], lines[0]
 
 
-def test_1025_family_yaml_is_a_directory_not_a_file(tmp_path, said):
+def test_1025_family_yaml_is_a_directory_not_a_file(tmp_path, capsys):
     """Refused like malformed syntax: exit 1, one reason line on stderr naming the manifest,
     no page.
     """
     def plant(p):
         p.unlink()
         p.mkdir()
-    rc, _out, err, _ep = _refused_manifest(tmp_path, said, plant)
+    rc, _out, err, _ep = _refused_manifest(tmp_path, capsys, plant)
     lines = _err_lines(err)
     assert rc == 1, (rc, err)
     assert len(lines) == 1, (rc, err)
     assert "family.yaml" in lines[0], (rc, err)
 
 
-def test_1025_family_yaml_is_zero_bytes(tmp_path, said):
+def test_1025_family_yaml_is_zero_bytes(tmp_path, capsys):
     """Refused (an empty document is not a manifest mapping): exit 1, one reason line, no page
     — never a manifest with zero worlds.
     """
-    rc, _out, err, _ep = _refused_manifest(tmp_path, said, lambda p: E.plant_raw(p, b""))
+    rc, _out, err, _ep = _refused_manifest(tmp_path, capsys, lambda p: E.plant_raw(p, b""))
     lines = _err_lines(err)
     assert rc == 1, (rc, err)
     assert len(lines) == 1, (rc, err)
     assert "family.yaml" in lines[0], (rc, err)
 
 
-def test_1025_family_yaml_top_level_document_is_a_list_not_a_mapping(tmp_path, said):
+def test_1025_family_yaml_top_level_document_is_a_list_not_a_mapping(tmp_path, capsys):
     """Refused: exit 1, one reason line naming the manifest, no page."""
     rc, _out, err, _ep = _refused_manifest(
-        tmp_path, said, lambda p: E.plant_raw(p, "- world_id: a\n- world_id: b\n"))
+        tmp_path, capsys, lambda p: E.plant_raw(p, "- world_id: a\n- world_id: b\n"))
     lines = _err_lines(err)
     assert rc == 1, (rc, err)
     assert len(lines) == 1, (rc, err)
@@ -642,7 +642,7 @@ def test_1025_draw_or_judge_yaml_record_is_rewritten_mid_render(tmp_path):
     assert "REWRITTEN CLAIM" in render(ep).text_of("sec-findings")
 
 
-def test_1025_episode_dir_given_through_a_symlink(tmp_path, said):
+def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
     """`episodes/latest -> <id>` as the CLI argument is accepted (J4): exit 0, the page written
     inside the TARGET beside `judge.yaml`, and every world link composed from names
     (`runs/<episode>-<world>/runtime.html`) — identical whether computed against the link or
@@ -651,7 +651,7 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, said):
     ep = E.sample_episode(tmp_path)
     latest = ep.dir.parent / "latest"
     latest.symlink_to(ep.dir, target_is_directory=True)
-    rc, out, err = cli([str(latest)], said)
+    rc, out, err = cli([str(latest)], capsys)
     assert rc == 0, (out, err)
     assert ep.page.is_file()
     assert not ep.page.is_symlink()
@@ -666,7 +666,7 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, said):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, monkeypatch, said):
+def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
     """The launcher writes no page on an abort (the hook is after JUDGE). The standalone CLI
     renders when `family.yaml` exists — a staging abort: no-grade band, a stage row per `STEPS`
     member with a wall for the recorded step (`questioner`) and "not on the record" for the
@@ -681,7 +681,7 @@ def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, m
     assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on an abort"
     assert (ep / "family.yaml").is_file()
     assert not (ep / "runs").exists()
-    rc, out, err = cli([str(ep)], said)
+    rc, out, err = cli([str(ep)], capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
@@ -697,9 +697,9 @@ def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, m
     # The abort above still primes the capture before the interrupt lands (priming precedes the
     # questioner in the launcher's own order) and that print is real launcher stderr, not the
     # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
-    # not noise the launcher run left sitting in the shared said buffer.
-    said.readouterr()
-    rc, out, err = cli([str(ep2)], said)
+    # not noise the launcher run left sitting in the shared capsys buffer.
+    capsys.readouterr()
+    rc, out, err = cli([str(ep2)], capsys)
     assert rc == 1, (out, err)
     assert len(_err_lines(err)) == 1, (out, err)
     assert not (ep2 / E.PAGE_NAME).exists(), (out, err)
@@ -799,7 +799,7 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
 
 
 @NOT_ROOT
-def test_1025_a_read_only_episode_directory(tmp_path, said):
+def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     """The CLI exits 1 with the write failure on stderr and no page when the episode dir is
     read-only; the launcher path prints the failure under the render boundary and its exit
     status is unchanged (d03) — the directory made read-only from inside the judge seam, the
@@ -808,7 +808,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, said):
     ep = E.sample_episode(tmp_path)
     ep.dir.chmod(0o555)
     try:
-        rc, out, err = cli([str(ep.dir)], said)
+        rc, out, err = cli([str(ep.dir)], capsys)
     finally:
         ep.dir.chmod(0o755)
     assert rc == 1, (rc, out, err)
@@ -829,7 +829,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, said):
     judge = _ReadOnlyJudge(launched, default=J.as_reply_text(J.reply_doc()))
     try:
         launch = ST._launch(tmp_path, judge=judge)
-        err = said.readouterr().err
+        err = capsys.readouterr().err
     finally:
         launched.chmod(0o755)
     assert launch.rc == 0, "a refused page write changed the exit status"

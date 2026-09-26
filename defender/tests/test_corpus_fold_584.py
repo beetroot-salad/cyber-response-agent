@@ -208,7 +208,7 @@ def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
     assert "'telemetry_source':" not in lesson.raw
 
 
-def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, said):
+def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
     """demand: d3 — ``Lesson.raw`` is EXACTLY the text between the fences that ``parse_frontmatter``
     handed ``yaml.safe_load``: CRLF-normalized, no leading ``---\\n``, no trailing ``\\n---``, and
     the body NEVER included. ``Lesson.body`` is the stripped body text.
@@ -226,7 +226,7 @@ def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, said):
     _crlf_lesson(corpus)
 
     lesson = next(iter(mod.iter_lessons(corpus)))
-    assert said.readouterr().err == ""
+    assert capsys.readouterr().err == ""
 
     assert "\r" not in lesson.raw
     assert lesson.raw == "name: crlf\ntelemetry_source: [sshd, auditd]"
@@ -279,7 +279,7 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
     )
 
 
-def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, said):
+def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
     """demand: d6 (domain-outcome, R4: the FALSY member of a falsy_valid domain) — a lesson whose
     frontmatter is a valid EMPTY MAPPING (``---\\n{}\\n---``) parses to ``fm == {}``: a SUCCESSFUL
     parse, not a ``FrontmatterError``. It is YIELDED, not dropped, and it draws no warn.
@@ -296,10 +296,10 @@ def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, said):
     assert set(by_stem) == {"normal", "empty-fm"}
     assert by_stem["empty-fm"].fm == {}
     assert by_stem["empty-fm"].body == "body"
-    assert said.readouterr().err == ""
+    assert capsys.readouterr().err == ""
 
 
-def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, said):
+def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys):
     """demand: d7 (domain-outcome, R4) — every ``FrontmatterError`` member of the corpus domain is
     warn-skipped, NAMED once on stderr, and its well-formed siblings still yield.
 
@@ -318,7 +318,7 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, said):
     yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
     assert yielded == ["good"]
 
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     for name, why in members.items():
         assert name in err, f"{name} ({why}) was not named on stderr"
         assert err.count(name) == 1, f"{name} warned more than once"
@@ -326,7 +326,7 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, said):
 
 
 
-def test_d9_oserror_members_are_warn_skipped(tmp_path, said):
+def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
     """demand: d9 (domain-outcome, R4) — the OSError arm of the guard, exercised by the two members
     that reach it as ROOT: a DIRECTORY named ``foo.md`` (``read_text`` → ``IsADirectoryError``) and
     a DANGLING SYMLINK ``dead.md`` (→ ``FileNotFoundError``). Both are matched by ``glob("*.md")``,
@@ -341,12 +341,12 @@ def test_d9_oserror_members_are_warn_skipped(tmp_path, said):
     yielded = [lesson.path.stem for lesson in mod.iter_lessons(corpus)]
     assert yielded == ["good"]
 
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     for name, exc in members.items():
         assert name in err, f"{name} ({exc}) was not named on stderr"
 
 
-def test_d10_discovery_rules_are_unchanged(tmp_path, said):
+def test_d10_discovery_rules_are_unchanged(tmp_path, capsys):
     """demand: d10 — the discovery rules survive the refactor: ``_``-prefixed files are skipped
     SILENTLY (they are not lessons — no warn), and lessons are yielded in FULL-PATH sorted order.
 
@@ -361,7 +361,7 @@ def test_d10_discovery_rules_are_unchanged(tmp_path, said):
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
 
     assert [lesson.path.stem for lesson in mod.iter_lessons(corpus)] == ["cover-prereqs", "cover"]
-    assert said.readouterr().err == ""
+    assert capsys.readouterr().err == ""
 
 
 
@@ -418,7 +418,7 @@ def test_d13_source_path_keys_off_the_injected_root(tmp_path):
         assert (WORKSPACE_ROOT / real["source_path"]).is_file()
 
 
-def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, said):
+def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     """demand: d14 — the FULL classification truth table over one fixture corpus, not a membership
     check.
 
@@ -458,7 +458,7 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, said):
     for skipped in ("unfenced", "no-close", "bad-yaml", "null-doc", "bom", "undecodable"):
         assert by_title[skipped]["status"] == "malformed", skipped
 
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     for name in ("unfenced.md", "no-close.md", "bad-yaml.md", "null-doc.md", "bom.md",
                  "undecodable.md"):
         assert name in err, f"{name} was dropped without being named on stderr"
@@ -490,7 +490,7 @@ def test_d15_empty_mapping_record_shape(tmp_path):
     assert set(rec) >= {"group", "title", "description", "status", "source_path", "metadata", "body"}
 
 
-def test_d16_build_completes_despite_a_bad_lesson(tmp_path, said):
+def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
     """demand: d16 — with an UNDECODABLE lesson AND an OSError lesson (a directory named ``foo.md``)
     in the corpus, ``build_view`` RETURNS, its well-formed siblings render, and each bad file is
     NAMED once on stderr.
@@ -516,12 +516,12 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, said):
     assert _titles(view) == {"survivor", "undecodable", "foo", "dead"}
     assert {r["title"] for r in _records(view) if r["status"] != "malformed"} == {"survivor"}
 
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     for name in ("undecodable.md", "foo.md", "dead.md"):
         assert name in err
 
 
-def test_d17_stdout_stays_a_json_protocol(tmp_path, said):
+def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
     """demand: d17 (negative) — ``serialize.py --stdout`` is an api preview, i.e. a PROTOCOL: over a
     corpus containing malformed lessons, ``build_view`` leaves stdout EMPTY while stderr names the
     files.
@@ -539,7 +539,7 @@ def test_d17_stdout_stays_a_json_protocol(tmp_path, said):
     _undecodable(corpus)
 
     serialize.build_view(defender_dir=root)
-    captured = said.readouterr()
+    captured = capsys.readouterr()
     assert captured.out == ""
     assert "undecodable.md" in captured.err
 
@@ -611,7 +611,7 @@ def test_d19_on_disk_oracle_is_rebuilt_on_iter_lessons():
 
 
 
-def test_d21_trace_all_walks_the_shared_iterator(tmp_path, said):
+def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     """demand: d21 (parity) — ``trace_lesson --all`` walks through ``iter_lessons``, so it inherits
     the discovery rules it hand-rolled WITHOUT: a ``_``-prefixed file (``_TEMPLATE.md``) is no longer
     listed, and a malformed or undecodable lesson is warn-skipped to stderr instead of crashing the
@@ -635,7 +635,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, said):
     _undecodable(corpus)
 
     rc = tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)])
-    captured = said.readouterr()
+    captured = capsys.readouterr()
     assert rc == 0
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
@@ -648,7 +648,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, said):
     assert "undecodable.md" in captured.err
 
 
-def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, said):
+def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     """demand: d22 — the ``if not lessons_dir.is_dir(): return 1`` guard keys on the RESOLVED dir,
     not on the module constant.
 
@@ -664,12 +664,12 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, said):
     missing = tmp_path / "no-such-corpus"
 
     assert tl.main(["--all", "--lessons-dir", str(missing)]) == 1
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     assert f"no lessons dir: {missing}" in err
     assert str(tl.LESSONS_DIR) not in err
 
 
-def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, said):
+def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     """demand: d23 (uniqueness, R2) — lesson identity is the file STEM, pinned CROSS-MODULE against
     the co-writer of the key.
 
@@ -694,11 +694,11 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, said):
     assert oracle == "foo-bar"
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
-    first_column = said.readouterr().out.splitlines()[0].split("\t")[0]
+    first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
 
 
-def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, said):
+def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     """demand: d23b — the paired positive control for d23, end to end through ``main()``.
 
     A lesson ``foo-bar.md`` whose frontmatter says ``name: foo_bar`` (stem != fm name), plus a run
@@ -723,10 +723,10 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, said):
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
-    assert said.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
+    assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
 
 
-def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, said):
+def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
     """demand: d24 — ``iter_lessons`` is a DIRECTORY walk and structurally cannot serve
     ``trace_lesson <name>``, so the single-lesson path keeps its own read — but GUARDED.
 
@@ -748,23 +748,23 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, said):
     base = ["--lessons-dir", str(corpus), "--runs-dir", str(runs)]
 
     assert tl.main(["nope", *base]) == 1
-    assert f"no such lesson: {corpus / 'nope.md'}" in said.readouterr().err
+    assert f"no such lesson: {corpus / 'nope.md'}" in capsys.readouterr().err
 
     assert tl.main(["corrupt", *base]) == 1
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     assert "corrupt.md" in err
     assert "Traceback" not in err
     assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
 
     assert tl.main(["good", *base]) == 0
-    assert said.readouterr().out.startswith("# good")
+    assert capsys.readouterr().out.startswith("# good")
 
 
 
 
 
 
-def test_d26_cmd_grep_still_greps_the_yaml_source(tmp_path, said):
+def test_d26_cmd_grep_still_greps_the_yaml_source(tmp_path, capsys):
     """demand: d26 (survival, R5: the removed ``with_raw`` parameter) — ``cmd_grep`` is the ONE
     behavioral consumer of ``raw`` (it regex-matches it), and frontmatter-only matching is the entire
     reason it exists.
@@ -789,13 +789,13 @@ def test_d26_cmd_grep_still_greps_the_yaml_source(tmp_path, said):
 
     mod = _load(corpus)
     assert mod.main(["prog", r"telemetry_source:.*\bsshd\b"]) == 0
-    out = said.readouterr().out
+    out = capsys.readouterr().out
     assert "sshd-one.md" in out
     assert "falco-one.md" not in out
     assert out.strip().endswith("\tsshd lesson one")
 
 
-def test_d27_cmd_tags_counts_are_unchanged(tmp_path, said):
+def test_d27_cmd_tags_counts_are_unchanged(tmp_path, capsys):
     """demand: d27 (survival, R5) — ``cmd_tags`` asks for ``with_raw=True`` today and DISCARDS raw
     (``for _path, _raw, fm in ...``), so it is precisely the site where a raw/fm swap is INVISIBLE:
     nothing it does would raise, the counts would just be wrong.
@@ -815,7 +815,7 @@ def test_d27_cmd_tags_counts_are_unchanged(tmp_path, said):
 
     mod = _load(corpus)
     assert mod.main(["prog", "--tags", "telemetry_source"]) == 0
-    out = said.readouterr().out
+    out = capsys.readouterr().out
     counts = {
         parts[0]: int(parts[1])
         for parts in (ln.split() for ln in out.splitlines() if ln.startswith("  "))
@@ -823,7 +823,7 @@ def test_d27_cmd_tags_counts_are_unchanged(tmp_path, said):
     assert counts == {"sshd": 2, "auditd": 1}
 
 
-def test_d28_curator_consumers_survive_the_dataclass(tmp_path, said):
+def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     """demand: d28 (survival) — the IN-PROCESS consumers still work through the dataclass, and
     still skip a bad lesson rather than crashing the curator drain (which would strand the whole
     batch, not one file).
@@ -857,7 +857,7 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, said):
     assert "description: DESC" in manifest
 
     assert existing_finding_ids(cfg) == {"fid/0", "fid/1"}
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     assert err.count("undecodable.md") == 2
 
 

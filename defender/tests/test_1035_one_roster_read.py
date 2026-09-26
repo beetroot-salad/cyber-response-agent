@@ -320,7 +320,7 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
     assert f"{shape_only} is {CANNOT_READ}" in verdict.message, verdict.describe()
 
 
-def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, caplog):
+def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, capsys):
     """P5 / M2 (O3, O4) — the resolver's per-refusal log is rendered FROM the primitive's
     `refused` tuple, which is per derived NAME, sorted: over the anomaly fixture plus two
     filenames deriving one refused name (`.hid_den_adapter.py`, `.hid-den_adapter.py` ->
@@ -341,8 +341,9 @@ def test_the_resolver_logs_each_refused_name_once_in_sorted_order(tmp_path, capl
     write(adapters / ".hid-den_adapter.py", ADAPTER_BODY)
     refused = sorted(ANOMALY_NAMES | {".hid-den"})
 
+    capsys.readouterr()
     assert declared_systems.adapter_systems_under(adapters) == frozenset({"cmdb"})
-    lines = caplog.messages
+    lines = capsys.readouterr().err.splitlines()
 
     first_line_of: dict[str, int] = {}
     for name in refused:
@@ -757,7 +758,7 @@ def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
 
 
 def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
-    tmp_path, said,
+    tmp_path, capsys,
 ):
     """P3 / P8 (O4) — over the anomaly fixture the registry declares exactly `("cmdb",)`,
     and each consumer's system set is that set: the resolver's `adapter_systems_under(d)`
@@ -778,7 +779,7 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     `_capability_exists("change-mgmt")` is True."""
     root = tmp_path / "tree"
     adapters = _anomaly_adapters(_repo_adapters(root))
-    said.readouterr()
+    capsys.readouterr()
     expected = ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems()
     assert expected == ("cmdb",), "the anchor is not the filtered roster, so the equalities are vacuous"
     assert read_roster(adapters).refused == tuple(sorted(ANOMALY_NAMES))
@@ -787,13 +788,13 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     # itself would green the per-line pins below while every registry construction — the
     # scaffold rules, the skill-description hook, every `VerbResolver` — logged refusals its
     # callers never asked for.
-    silent = said.readouterr()
+    silent = capsys.readouterr()
     assert silent.err + silent.out == "", (
         f"the registry / the primitive logged on their own: {silent.err!r} {silent.out!r}"
     )
 
     assert declared_systems.adapter_systems_under(adapters) == frozenset(expected)
-    log = said.readouterr().err
+    log = capsys.readouterr().err
     for name in ANOMALY_NAMES:
         assert sum(repr(name) in ln and str(adapters) in ln for ln in log.splitlines()) == 1, (
             f"{name!r} is not refused on exactly one line naming the directory: {log}"

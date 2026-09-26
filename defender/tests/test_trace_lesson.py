@@ -68,7 +68,7 @@ def test_earliest_load_is_chronological_not_lexicographic(tmp_path):
     assert [h.loaded_at for h in hits] == ["2026-06-05T08:00:00+09:00"]
 
 
-def test_all_flattens_tab_and_newline_in_description(tmp_path, said):
+def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     """The description column is LLM-authored; a tab or newline in it would forge a column
     or split the row, so the TSV flattens both (the ``lessons_fm._emit_match`` idiom)."""
     tl = _load()
@@ -79,7 +79,7 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, said):
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
-    lines = said.readouterr().out.splitlines()
+    lines = capsys.readouterr().out.splitlines()
     assert lines == ["L\ta b c\t0\t0"]
 
 
@@ -145,7 +145,7 @@ def _case_ids(out: str) -> list[str]:
          ["caseA"], ("# foo-bar", None)),
     ], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
 def test_trace_reports_the_cases_a_lesson_was_loaded_into(
-    tmp_path, said, case, stem, frontmatter, runs, expected, expect
+    tmp_path, capsys, case, stem, frontmatter, runs, expected, expect
 ):
     """``trace_lesson <name>`` resolves the lesson, windows the recorded loads against its
     ``created_at``, and prints one TSV row per surviving case. Each row here is one way the
@@ -160,7 +160,7 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
 
     rc = tl.main([stem, "--lessons-dir", str(tmp_path / "lessons"),
                   "--runs-dir", str(runs_dir)])
-    out = said.readouterr().out
+    out = capsys.readouterr().out
     assert rc == 0
     assert _case_ids(out) == expected
     expect_header, expect_row = expect
@@ -172,7 +172,7 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
 
 
 
-def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, said):
+def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
     """``report.md`` is model-authored and read once per hit in the whole-runs-dir walk; an
     undecodable byte in ONE historical report must degrade that row to ``"?"`` with a stderr
     warning, not kill the walk with a UnicodeDecodeError traceback (#595 — the walk's last
@@ -187,12 +187,12 @@ def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, said):
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
 
     hits = tl.in_context_cases("L", None, runs)
-    err = said.readouterr().err
+    err = capsys.readouterr().err
     assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "?"), ("caseB", "malicious")]
     assert "caseA/report.md" in err
 
 
-def test_all_survives_undecodable_report(tmp_path, said):
+def test_all_survives_undecodable_report(tmp_path, capsys):
     """The same property at the seam a user drives: ``--all`` over a runs dir containing an
     undecodable report exits 0 and still prints every lesson's row."""
     tl = _load()
@@ -206,12 +206,12 @@ def test_all_survives_undecodable_report(tmp_path, said):
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
     assert rc == 0
-    assert "L\td\t1\t0" in said.readouterr().out.splitlines()
+    assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
 
 
 
-def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, said):
+def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     """A lesson the ``iter_lessons`` walk warn-skips (e.g. a curator edit broke its YAML) must
     still get a row in the ``--all`` audit table — losing it silently hides exactly the lesson
     a human is most likely investigating, while the named path still traces it (#590). The
@@ -228,7 +228,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, said):
             loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"}])
 
     rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
-    cap = said.readouterr()
+    cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
     assert "ok\tfine\t1\t0" in lines
@@ -236,7 +236,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, said):
     assert "skipping broken.md" in cap.err
 
 
-def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, said):
+def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     """The marker pass diffs against ``iter_lesson_paths`` (the shared discovery rule), so an
     ``_``-prefixed draft is not a "skipped lesson" and gets no marker row."""
     tl = _load()
@@ -248,10 +248,10 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, said):
 
     rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
     assert rc == 0
-    assert said.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
+    assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
 
 
-def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, said):
+def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsys):
     """Naming a malformed-but-readable lesson still traces it (an audit of a broken lesson is
     the tool's most likely use), but warns that the trace is unwindowed — silently printing
     ``since None`` hid that the window never engaged (#590's named-path half)."""
@@ -265,13 +265,13 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, said)
             loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
 
     rc = tl.main(["broken", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
-    cap = said.readouterr()
+    cap = capsys.readouterr()
     assert rc == 0
     assert _case_ids(cap.out) == ["caseA"]
     assert "trace is unwindowed" in cap.err
 
 
-def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, said):
+def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys):
     """Valid frontmatter whose LLM-authored ``created_at`` doesn't parse (or is absent) is just
     as unwindowed as malformed frontmatter — the warning keys on "no created_at to window on",
     so ``since None`` never prints silently (#596's named-path half; the ``--all`` row shape and
@@ -285,13 +285,13 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, said):
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
 
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
-    cap = said.readouterr()
+    cap = capsys.readouterr()
     assert rc == 0
     assert _case_ids(cap.out) == ["caseA"]
     assert "trace is unwindowed" in cap.err
 
 
-def test_all_with_lesson_name_is_a_usage_error(tmp_path, said):
+def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
     """``--all`` and a positional <lesson_name> answer different questions; silently preferring
     one (the old behavior ran ``--all`` and dropped the name) hands the operator the wrong
     report under a stray extra argument. Both together is a usage error."""
@@ -302,13 +302,13 @@ def test_all_with_lesson_name_is_a_usage_error(tmp_path, said):
 
     rc = tl.main(["L", "--all",
                   "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
-    cap = said.readouterr()
+    cap = capsys.readouterr()
     assert rc == 1
     assert cap.out == ""
     assert "not both" in cap.err
 
 
-def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, said):
+def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     """An UNREADABLE named lesson stays an ERROR (exit 1): printing "0 case(s)" for a file
     that was never read is worse than failing. Pins the tri-state posture's hard edge so the
     malformed-lesson tolerance above cannot creep into the unreadable case."""
@@ -320,6 +320,6 @@ def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, said):
     runs.mkdir()
 
     rc = tl.main(["undecodable", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
-    cap = said.readouterr()
+    cap = capsys.readouterr()
     assert rc == 1
     assert "cannot read undecodable.md" in cap.err

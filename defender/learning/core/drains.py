@@ -4,6 +4,7 @@ import contextlib
 import functools
 import importlib
 import json
+import logging
 import subprocess
 import uuid
 from defender._model import model
@@ -15,7 +16,6 @@ from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
     QueueChannel,
-    _log,
     author_max_attempts,
     env_int,
     merge_mode,
@@ -46,6 +46,8 @@ from defender.learning.core.persist import (
 from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.learning.core.quarantine import preserve_tainted_tree
 
+_logger = logging.getLogger(__name__)
+
 
 class _LeadAuthorRetry(Exception):
     pass
@@ -57,7 +59,7 @@ def _invoke_lead_author(
 ) -> None:
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
-    _log("step=lead-author")
+    _logger.info("step=lead-author")
     # The per-author queue lock is the DRAIN's for the whole tick (`lead_author_drain`), so
     # the curator is entered past its own acquisition: the sentinel it would have written
     # under that lock is deferred to `on_done`, and a by-hand run that took the lock in the
@@ -93,12 +95,12 @@ def _maybe_trigger_author(
     # one is reached only after it has already answered yes.
     pending_count, held_count = _pending_queue_counts(pending_file)
     if pending_count < threshold:
-        _log(
+        _logger.info(
             f"{pending_label}={pending_count} held={held_count} threshold={threshold} "
             f"— {module_name} not invoked"
         )
         return
-    _log(
+    _logger.info(
         f"step={module_name} {pending_label}={pending_count} held={held_count} "
         f"threshold={threshold}"
     )
@@ -106,7 +108,7 @@ def _maybe_trigger_author(
         module_name, lambda mod: mod.run_batch(hold_committed=True, paths=paths, box=box)
     )
     if rc not in (0, None):
-        _log(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
+        _logger.warning(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
 
 
 _CURATOR_MODULES = {
@@ -124,7 +126,7 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
     try:
         return call(mod)
     except (subprocess.SubprocessError, OSError) as e:
-        _log(f"{module_name} crashed: {e!r} (continuing)")
+        _logger.error(f"{module_name} crashed: {e!r} (continuing)")
         return None
 
 
@@ -216,7 +218,7 @@ def _has_curator_work(paths: LoopPaths) -> bool:
         if authorable >= threshold:
             woken = True
         elif authorable or held:
-            _log(
+            _logger.info(
                 f"{pending_file.name}: pending={authorable} held={held} "
                 f"threshold={threshold} — not woken"
             )
@@ -289,9 +291,9 @@ def _drain_one_curator(
         if not already:
             rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
             drain.record_stuck(channel, e, rows)
-        _log(f"{module_name}: {type(e).__name__} took this curator out of the tick "
-             f"({'already recorded in' if already else 'recorded to'} "
-             f"{drain.stuck_report_file(channel)}); the other curator still ran")
+        _logger.error(f"{module_name}: {type(e).__name__} took this curator out of the tick "
+                      f"({'already recorded in' if already else 'recorded to'} "
+                      f"{drain.stuck_report_file(channel)}); the other curator still ran")
 
 
 def _drain_curators(
@@ -344,9 +346,9 @@ def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
     queue and what is unlinked from `inflight/` are two halves of one hand-back, and a
     caller able to pass a spec belonging to some other claim could split them."""
     if requeue_marker(claim.queued_path, claim.spec):
-        _log(f"lead_author_drain: {note} — left queued for retry")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        _logger.info(f"lead_author_drain: {note} — left queued for retry")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     else:
-        _log(
+        _logger.info(
             f"lead_author_drain: {note} — a fresher request for the same case landed "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             "while it was claimed and supersedes it; dropping this one"
         )
@@ -500,7 +502,7 @@ def _invoke_pitfalls(
     paths: LoopPaths, *, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
 ) -> int:
-    _log("step=pitfalls-curation")
+    _logger.info("step=pitfalls-curation")
     rc = _run_curator_module(
         "pitfalls_curator",
         lambda mod: mod.run_pitfalls(
@@ -513,7 +515,7 @@ def _invoke_pitfalls(
 def _retire_pitfalls_batch(
     paths: LoopPaths, batch_ids: list[str], lock_wait_seconds: int | None, e: Exception,
 ) -> None:
-    _log(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+    _logger.error(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     if not batch_ids:
         return
     drain.retire(
@@ -684,7 +686,7 @@ def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: str) -> bool
         try:
             pr = branch.deliver(pending.batch_id)
         except BranchError as e:
-            _log(
+            _logger.error(
                 f"{label}: delivery of retained branch {pending.branch} failed again: {e} — "
                 "it holds the writer lease; nothing served this tick"
             )
@@ -692,12 +694,12 @@ def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: str) -> bool
         with contextlib.suppress(OSError):
             pending.path.unlink()
         if pr is None:
-            _log(
+            _logger.info(
                 f"{label}: retained branch {pending.branch} has nothing left to deliver "
                 "— record dropped"
             )
         else:
-            _log(f"{label}: delivered retained branch {pending.branch}: opened PR {pr}")
+            _logger.info(f"{label}: delivered retained branch {pending.branch}: opened PR {pr}")
     return True
 
 
@@ -712,7 +714,7 @@ def _land_batch(
         return branch.finish_batch(batch_id, wt), True
     except BranchError as e:
         _record_pending_delivery(paths, branch, batch_id, label=label, reason=str(e))
-        _log(
+        _logger.error(
             f"{label}: finish_batch failed: {e} — commit retained on local branch "
             f"{branch.branch_name(batch_id)}; delivery is retried next tick, before "
             "anything new is served"
@@ -729,16 +731,16 @@ def _open_batch(
     if not _deliver_pending(paths, branch, label):
         return None
     if not has_work(paths):
-        _log(f"{label}: nothing queued and no curator at threshold — skipping")
+        _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
         return None
     try:
         if branch.open_pr_exists():
-            _log(f"{label}: an open {branch.branch_prefix} PR holds the writer lease — skipping")
+            _logger.info(f"{label}: an open {branch.branch_prefix} PR holds the writer lease — skipping")
             return None
         batch_id = uuid.uuid4().hex[:12]
         return batch_id, branch.start_batch(batch_id)
     except BranchError as e:
-        _log(f"{label}: cannot start batch worktree: {e} — skipping")
+        _logger.warning(f"{label}: cannot start batch worktree: {e} — skipping")
         return None
 
 
@@ -846,24 +848,24 @@ def _run_worktree_batch(
         # re-serve is a re-spend, never a loss) — stays for the next tick's reclaim, and the
         # only thing left to do is say so once.
         if disposition is not None and not consumed:
-            _log(
+            _logger.info(
                 f"{label}: batch not consumed — left for the next tick's reclaim, up to: "
                 f"{disposition.retained_summary()}"
             )
         try:
             branch.cleanup(wt)
         except Exception as e:  # noqa: BLE001 — best-effort cleanup; the real fault outranks it
-            _log(f"{label}: worktree cleanup failed: {e} — {wt} leaked, scrub state unknown")
+            _logger.error(f"{label}: worktree cleanup failed: {e} — {wt} leaked, scrub state unknown")
 
     if not delivered:
         return 0
     if pr is None:
-        _log(f"{label}: batch produced no commits — no PR opened")
+        _logger.info(f"{label}: batch produced no commits — no PR opened")
         return 0
-    _log(f"{label}: opened PR {pr}")
+    _logger.info(f"{label}: opened PR {pr}")
     if merge_mode() == "auto_on_green":
-        _log(f"{label}: merge_mode=auto_on_green — green-bar auto-merge not yet "
-             "wired (PR C); leaving PR for review")
+        _logger.info(f"{label}: merge_mode=auto_on_green — green-bar auto-merge not yet "
+                     "wired (PR C); leaving PR for review")
     return 0
 
 
@@ -899,7 +901,7 @@ def author_drain(
 
     with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
         if not locked:
-            _log("author_drain: another drainer holds the lock — exiting")
+            _logger.info("author_drain: another drainer holds the lock — exiting")
             return 0
         return _run_worktree_batch(
             paths, branch, label="author_drain",
@@ -941,7 +943,7 @@ def lead_author_drain(
 
     with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
         if not locked:
-            _log("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            _logger.info("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         # The per-author queue lock — the one a by-hand `lead_author.py <run_dir>` takes — is
         # held for the WHOLE tick, not per serve (#952 M5). The `done` sentinel used to be
@@ -951,7 +953,7 @@ def lead_author_drain(
         # Contended, the tick skips before claiming anything.
         queue_lock = acquire_queue_lock(paths)
         if queue_lock is None:
-            _log("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            _logger.info("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         try:
             return _run_worktree_batch(

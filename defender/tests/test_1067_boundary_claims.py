@@ -49,7 +49,7 @@ def test_read_report_stays_total_over_a_non_string_frontmatter_key(spelled, buil
 
 
 @pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
-def test_iter_lessons_yields_a_lesson_with_a_non_string_key(spelled, built, tmp_path, said):
+def test_iter_lessons_yields_a_lesson_with_a_non_string_key(spelled, built, tmp_path, capsys):
     """The walk's contract is one bad file costs that row and never the walk (#584) — and a
     non-string key is not even a bad file to the parser, so the lesson is YIELDED, its mapping
     as YAML built it, with nothing on stderr."""
@@ -60,7 +60,7 @@ def test_iter_lessons_yields_a_lesson_with_a_non_string_key(spelled, built, tmp_
     yielded = list(iter_lessons(d))
     assert [lesson.path.name for lesson in yielded] == ["good.md", "odd.md"]
     assert yielded[1].fm[built] == "rotated"
-    assert said.readouterr().err == ""
+    assert capsys.readouterr().err == ""
 
 
 def test_as_int_is_an_int_that_is_not_a_bool():

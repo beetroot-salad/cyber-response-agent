@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -247,13 +248,13 @@ def run_author_stage(
     wiring: StageWiring,
     ctx: StageContext,
     log_label: str,
-    log: Callable[[str], None],
+    log: logging.Logger,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_lead_author_pydantic,
 ) -> int:
     """`wiring` and `ctx` are both built per spawn by the caller — the four model/effort/
     limit/timeout knobs are env-backed, so nothing here may be evaluated at import."""
-    log(
+    log.info(
         f"spawn {log_label} in-process "
         f"(model={wiring.model}, effort={wiring.effort}, "
         f"timeout={ctx.wall_clock_timeout}s)"
@@ -262,7 +263,7 @@ def run_author_stage(
     try:
         run_author(wiring, ctx)
     except RunUnprocessable as e:
-        log(f"{log_label} did not complete (per-run fault): {e}")
+        log.error(f"{log_label} did not complete (per-run fault): {e}")
         return 124
-    log(f"{log_label} done")
+    log.info(f"{log_label} done")
     return 0

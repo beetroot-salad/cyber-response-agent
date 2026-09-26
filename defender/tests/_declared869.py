@@ -390,12 +390,11 @@ class LeadAuthorSpawn(Spawn):
 
 
 def loop_log(capsys) -> str:
-    """Everything the loop said on this drive — pass the `said` fixture, which folds the log
-    into `err`.
+    """Everything the loop said on this drive.
 
-    Both channels, joined: `config.make_logger` logs, and a few of the surfaces these demands
-    bind print to stdout; which channel a line lands on is not what any demand here is about —
-    that a line naming the refusal EXISTS is."""
+    Both streams, joined: the lane's loggers write to stderr and a few of the surfaces
+    these demands bind print to stdout, and which descriptor a line lands on is not what any
+    demand here is about — that a line naming the refusal EXISTS is."""
     captured = capsys.readouterr()
     return captured.err + captured.out
 

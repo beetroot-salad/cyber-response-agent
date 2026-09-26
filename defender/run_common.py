@@ -91,7 +91,16 @@ def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Path:
-    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
+    """`materialize_run`'s directory, for callers that only need where the run lives."""
+    return materialize_run(alert, run_id, model=model, world=world).run_dir
+
+
+def materialize_run(
+    alert: Path, run_id: str | None, *, model: str | None = None,
+    world: ResumeWorld | None = None,
+) -> Run:
+    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE, and hand
+    the handle back — its address `(tenant_id, run_id)` is what the rest of the run is named by.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -163,7 +172,7 @@ def materialize_run_dir(
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
-    return run_dir
+    return run
 
 
 def _admit_run_id(alert: Path, run_id: str | None) -> str:
@@ -298,7 +307,6 @@ def visualize(run_dir: Path) -> None:
     if proc.stdout.strip():
         _logger.info(proc.stdout.strip())
     if proc.returncode != 0:
-        _logger.error(f"visualize_run failed: {proc.stderr}")
         raise VisualizeFailed(
             f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
 
@@ -323,7 +331,7 @@ def cross_check_tables(run_dir: Path) -> None:
         if xcheck["queries_without_lead"]:
             _logger.warning(f"query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}")
     if xcheck["leads_without_queries"]:
-        _logger.warning(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
+        _logger.info(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
 
 
 HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"

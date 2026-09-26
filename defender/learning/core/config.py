@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
 import logging
-from collections.abc import Callable
+import os
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -417,17 +416,7 @@ def pitfalls_threshold() -> int:
     return env_int("LEARNING_PITFALLS_THRESHOLD", 3)
 
 
-def make_logger(prefix: str) -> Callable[[str], None]:
-    """A one-argument INFO logger on `defender.learning.<prefix>` — the call shape the drains
-    inject as their `log` seam, now routed through the logging framework (`defender/_log.py`)."""
-    return logging.getLogger(f"defender.learning.{prefix}").info
-
-
-_log = make_logger("loop")
-#: The lead-author lane's ONE logger — every module of the lane, and the disposition the drain
-#: carries for it (`core/pitfalls_disposition`), binds this rather than minting its own, so the
-#: lane's prefix is spelled once and its lines grep as one vocabulary.
-lead_author_log = make_logger("lead-author")
+_logger = logging.getLogger(__name__)
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:
@@ -441,10 +430,10 @@ def source_first_party_key(model: str, *, label: str = "judge") -> None:
     key, src = resolve_first_party_key(var=var, root=REPO_ROOT)
     if key:
         os.environ[var] = key
-        _log(f"{label}_key: {var} sourced from {src} (overrides ambient)")
+        _logger.info(f"{label}_key: {var} sourced from {src} (overrides ambient)")
         return
     if os.environ.get(var):
-        _log(f"{label}_key: no .env key; using the ambient {var}")
+        _logger.info(f"{label}_key: no .env key; using the ambient {var}")
         return
     raise FatalConfigError(
         f"the in-process PydanticAI {label} (model {model!r}) needs {var} — set it in "

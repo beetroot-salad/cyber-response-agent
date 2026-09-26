@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import random
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -323,14 +324,13 @@ def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        log=make_repair_logger(cfg),
+        log=repair_logger(cfg),
     )
 
 
-def make_repair_logger(cfg: Any) -> Callable[[str], None]:
-    from defender.learning.core.config import make_logger
-
-    return make_logger(f"{cfg.log_prefix}.repair")
+def repair_logger(cfg: Any) -> logging.Logger:
+    """The repair pass's logger — a child of the drain's per-channel one."""
+    return logging.getLogger(f"defender.learning.author.drain.{cfg.log_prefix}.repair")
 
 
 def verify_agent_state(

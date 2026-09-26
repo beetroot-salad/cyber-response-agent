@@ -62,15 +62,19 @@ def _run_sync(coro: Any) -> Any:
     already running on this thread. `resolve_lead_zero` is a synchronous entry point called
     both from bare pytest functions (no loop) and from inside `run_investigation` (already
     inside one) — the latter cannot call `asyncio.run()` directly, so the coroutine goes to a
-    fresh thread with its own loop."""
+    fresh thread with its own loop.
+
+    The thread runs in a COPY OF THE CALLER'S CONTEXT: a pool thread starts empty, and "run it
+    as if here" includes the run id and tenant every log line inside it is stamped with."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     import concurrent.futures
+    import contextvars
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(asyncio.run, coro).result()
+        return ex.submit(contextvars.copy_context().run, asyncio.run, coro).result()
 
 
 def _sanitize(text: Any) -> str:

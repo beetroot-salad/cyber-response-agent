@@ -60,7 +60,7 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
     return repo, paths, spawn
 
 
-def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, said):
+def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, capsys):
     """A tick that drops rows naming `gather` and `fakesys` emits a line naming BOTH, the
     reason, and the SOURCE CONSULTED — which at this lane is ONE source, the adapters
     directory, and never the marker source.
@@ -104,10 +104,10 @@ def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, said):
     spawn = Spawn(lambda root: write(
         marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
     ))
-    said.readouterr()
+    capsys.readouterr()
     pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
 
-    log = loop_log(said)
+    log = loop_log(capsys)
     named = log_lines_naming(log, "gather", "fakesys", repo / ADAPTERS_REL)
     assert named, (
         f"no single line names both dropped systems and the source consulted: {log}"
@@ -212,7 +212,7 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     assert repo.is_dir()
 
 
-def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, said):
+def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, capsys):
     """An empty declared set is NOT spendable as a gate: `run_pitfalls` over a tree that
     declares nothing leaves every queued row in `pitfalls.jsonl`, writes nothing to
     `pitfalls.consumed.jsonl`, and fails loud.
@@ -233,7 +233,7 @@ def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, said):
         [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], paths=paths,
     )
     spawn = Spawn()
-    said.readouterr()
+    capsys.readouterr()
 
     with pytest.raises(LeadAuthorError):
         pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
@@ -243,10 +243,10 @@ def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, said):
     assert not paths.pitfalls.consumed.exists()
     assert head_files(repo), "the fixture never committed anything"
     assert "execution.md" not in " ".join(head_files(repo))
-    assert loop_log(said).strip(), "the refusal must be loud"
+    assert loop_log(capsys).strip(), "the refusal must be loud"
 
 
-def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, said):
+def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, capsys):
     """A membership refusal on the lead-author leg is TERMINAL on the first tick and leaves
     one durable, re-drivable record — no retriable class, no burned attempts (FK-17, §7).
 
@@ -283,7 +283,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
         raise LeadAuthorError(
             "lead author refused: mcpsys is not a declared system in this tree")
 
-    said.readouterr()
+    capsys.readouterr()
     for _tick in range(5):
         drains._drain_lead_author_markers(paths, refusing_lane)
 

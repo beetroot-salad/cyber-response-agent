@@ -5,6 +5,7 @@ Split out of `lead_author.py` at 1017 lines.
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -60,9 +61,10 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
 )
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
-    _log,
     _spawn_author_agent,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 #: The per-author queue lock under DEFAULT_PATHS — what the CLI locks. `queue_lock_file(paths)`
@@ -91,12 +93,12 @@ def queue_lock_file(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) 
 
 def acquire_queue_lock(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) -> Any:
     lock = queue_lock_file(paths)
-    _log(f"acquire queue-lock={lock}")
+    _logger.debug(f"acquire queue-lock={lock}")
     fh = _author_shared.acquire_flock(lock)
     if fh is None:
-        _log("queue-lock held by another tick — skipping")
+        _logger.info("queue-lock held by another tick — skipping")
         return None
-    _log("queue-lock acquired")
+    _logger.debug("queue-lock acquired")
     return fh
 
 
@@ -104,7 +106,7 @@ def release_queue_lock(fh: Any) -> None:
     if fh is None:
         return
     _author_shared.release_flock(fh)
-    _log("release queue-lock")
+    _logger.debug("release queue-lock")
 
 
 
@@ -149,8 +151,8 @@ def build_handoff(
             continue
         tpl = by_id.get(lead.query_id)
         if tpl is None:
-            _log(
-                f"WARN unresolved query_id={lead.query_id!r} at lead "
+            _logger.warning(
+                f"unresolved query_id={lead.query_id!r} at lead "
                 f"{lead.lead_id} (runtime contract violation; dropping invocation)"
             )
             continue
@@ -174,7 +176,7 @@ def build_handoff(
                 try:
                     rendered_query = lead_render.render_query(tpl.path, lead.params)
                 except OSError as e:
-                    _log(f"WARN render_query failed for {tpl.path}: {e}")
+                    _logger.warning(f"render_query failed for {tpl.path}: {e}")
                     rendered_query = ""
             invocations.append(
                 {
@@ -253,7 +255,7 @@ def discover_system_drafts(
         if not system_dir.is_dir():
             continue
         if system_dir.name not in systems:
-            _log(
+            _logger.warning(
                 f"discover_system_drafts: skipped undeclared directory {system_dir.name!r}"
             )
             continue

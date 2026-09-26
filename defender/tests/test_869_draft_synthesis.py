@@ -154,7 +154,7 @@ def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_pat
     assert not (cat / "fakesys").exists()
 
 
-def test_synthesize_drafts_names_what_it_refused(tmp_path, said):
+def test_synthesize_drafts_names_what_it_refused(tmp_path, capsys):
     """Site 3 REPORTS a membership refusal — it mints the reporting surface, because there is
     none today (FK-3, §7).
 
@@ -175,21 +175,21 @@ def test_synthesize_drafts_names_what_it_refused(tmp_path, said):
     """
     cat = _catalog(tmp_path)
 
-    said.readouterr()
+    capsys.readouterr()
     assert synthesize_drafts(
         [_lead("fakesys.hunt-creds", system="fakesys")],
         catalog_dir=cat, catalog=[], systems=DECLARED,
     ) == []
-    refusal = loop_log(said)
+    refusal = loop_log(capsys)
     assert "fakesys" in refusal
     named = [ln for ln in refusal.splitlines() if "fakesys" in ln]
     assert named, "the refusal is not reported at all"
 
-    said.readouterr()
+    capsys.readouterr()
     assert synthesize_drafts(
         [_lead("elastic.hunt-creds")], catalog_dir=cat, catalog=[], systems=DECLARED,
     ) != []
-    quiet = loop_log(said)
+    quiet = loop_log(capsys)
     assert "fakesys" not in quiet
     assert not [ln for ln in quiet.splitlines() if "refus" in ln.lower()], (
         "a line that fires on a tick with nothing to refuse reports nothing"
@@ -197,7 +197,7 @@ def test_synthesize_drafts_names_what_it_refused(tmp_path, said):
 
 
 def test_discover_system_drafts_hands_out_no_undeclared_directory(
-    tmp_path, monkeypatch, said,
+    tmp_path, monkeypatch, capsys,
 ):
     """`discover_system_drafts` hands the agent no work under a directory the tree does not
     declare — the FOURTH composition site (FK-4, §7).
@@ -240,20 +240,20 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     assert "gather" not in systems
     assert "elastic" in systems
 
-    said.readouterr()
+    capsys.readouterr()
     found = lead_author.discover_system_drafts(
         skills_dir=repo / SKILLS_REL, systems=systems)
     assert [p.name for p in found] == ["lift-me.md"]
 
-    assert log_lines_naming(loop_log(said), repr("gather")), (
+    assert log_lines_naming(loop_log(capsys), repr("gather")), (
         "the undeclared directory was skipped with no trace at all — a refusal with zero "
         "trace is what O3 forbids, and this is the fourth composition site FK-4 added"
     )
     # The control on the same address: declare it, and the same walk says nothing.
-    said.readouterr()
+    capsys.readouterr()
     lead_author.discover_system_drafts(
         skills_dir=repo / SKILLS_REL, systems=systems | {"gather"})
-    assert log_lines_naming(loop_log(said), repr("gather")) == [], (
+    assert log_lines_naming(loop_log(capsys), repr("gather")) == [], (
         "a line that fires on a walk with nothing to skip reports nothing"
     )
 

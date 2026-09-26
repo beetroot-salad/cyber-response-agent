@@ -12,6 +12,10 @@ Three rules the rest of the tree relies on:
     (`ThreadPoolExecutor.submit` copies nothing) — bind inside the worker function.
   * CONTEXT UNDOES ITSELF. `log_context` resets to the previous mapping on exit, exception
     included, so a reused thread cannot carry the last job's run id into the next one.
+  * EVERY PROGRAM CONFIGURES, AND THE HANDLER WRITES TO WHATEVER `sys.stderr` IS AT THE MOMENT
+    OF WRITING. A redirect (`contextlib.redirect_stderr`, pytest's `capsys`) therefore captures
+    log lines exactly as it captures prints; `scripts/lint/lint_log_setup.py` holds every
+    `__main__` block to calling `configure_from_env()`.
 
 Prints are still right for two things this module is NOT for: a command's own output (a
 report, a table), and text a model reads back as a tool result.
@@ -26,7 +30,7 @@ import logging
 import sys
 from collections.abc import Iterator, Mapping
 from types import MappingProxyType
-from typing import Any, TextIO
+from typing import Any
 
 from defender._env import env_str
 
@@ -42,7 +46,9 @@ BIND_ONLY_FIELDS = ("tenant_id",)
 FORMAT_ENV = "DEFENDER_LOG_FORMAT"
 LEVEL_ENV = "DEFENDER_LOG_LEVEL"
 FORMATS = ("json", "text")
-LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+DEFAULT_FORMAT = "json"
+DEFAULT_LEVEL = "INFO"
 
 #: The logger every `defender.*` module's `getLogger(__name__)` sits under.
 ROOT_LOGGER = "defender"
@@ -88,8 +94,9 @@ def _context_fields() -> dict[str, str | None]:
 
 
 class JsonFormatter(logging.Formatter):
-    """One record → one JSON line. `json.dumps` escapes newlines, so text copied from an alert
-    (attacker-controlled) cannot forge a second line."""
+    """One record → one JSON line, pure ASCII. Escaping every non-ASCII character (not just
+    `\\n`) is what keeps text copied from an alert — attacker-controlled — from forging a second
+    line for ANY splitter: U+2028, U+2029 and U+0085 are line breaks to some of them."""
 
     def format(self, record: logging.LogRecord) -> str:
         out: dict[str, Any] = {
@@ -107,7 +114,16 @@ class JsonFormatter(logging.Formatter):
         out.update((k, v) for k, v in fields.items() if k not in CORE_FIELDS)
         if record.exc_info:
             out["exception"] = self.formatException(record.exc_info)
-        return json.dumps(out, default=str, ensure_ascii=False)
+        try:
+            return json.dumps(out, default=str, ensure_ascii=True, allow_nan=False)
+        except (TypeError, ValueError):
+            # An `extra=` value JSON cannot hold (a non-string key, a cycle, NaN): the line
+            # still goes out, with the offending fields as their repr, rather than being lost
+            # to logging's own error handler.
+            return json.dumps(
+                {k: v if k in CORE_FIELDS or k in ALWAYS_FIELDS else repr(v)
+                 for k, v in out.items()},
+                ensure_ascii=True)
 
 
 class TextFormatter(logging.Formatter):
@@ -123,17 +139,30 @@ class TextFormatter(logging.Formatter):
         return line
 
 
-class _DefenderHandler(logging.StreamHandler[TextIO]):
-    """Marks the one handler `configure` owns, so a second call replaces it and leaves every
-    other handler (pytest's capture among them) alone."""
+class _DefenderHandler(logging.StreamHandler):
+    """Writes to whatever `sys.stderr` is when a record is emitted, not the object it was at
+    setup — Python's own last-resort handler does the same, and it is what lets a redirect
+    capture log lines. Also marks the one handler `configure` owns, so a second call replaces it
+    and leaves every other handler (pytest's capture among them) alone."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def stream(self) -> Any:
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _value: Any) -> None:
+        pass
 
 
-def configure(*, fmt: str, level: str, stream: TextIO) -> None:
+def configure(*, fmt: str, level: str) -> None:
     """Install the defender's handler on the root logger.
 
     The root stays at WARNING so third-party libraries only speak up when something is wrong
     (httpx alone logs every HTTP request at INFO); `level` applies to the `defender` logger."""
-    handler = _DefenderHandler(stream)
+    handler = _DefenderHandler()
     handler.setFormatter(JsonFormatter() if fmt == "json" else TextFormatter())
     root = logging.getLogger()
     for old in [h for h in root.handlers if isinstance(h, _DefenderHandler)]:
@@ -145,10 +174,19 @@ def configure(*, fmt: str, level: str, stream: TextIO) -> None:
 
 def configure_from_env() -> None:
     """`configure` from `DEFENDER_LOG_FORMAT` (json|text, default json) and
-    `DEFENDER_LOG_LEVEL` (default INFO), writing to the error stream. A value outside the
-    choices raises `FatalConfigError` rather than guessing."""
-    configure(
-        fmt=env_str(FORMAT_ENV, "json", choices=FORMATS),
-        level=env_str(LEVEL_ENV, "INFO", choices=LEVELS),
-        stream=sys.stderr,
-    )
+    `DEFENDER_LOG_LEVEL` (a standard level name, any case; default INFO).
+
+    NEVER FATAL: the logging setup does not decide whether a process runs. A value outside the
+    choices falls back to its default and says so as the first line logged, so a typo in a
+    deployment costs formatting, not the investigation — and every entry point answers it the
+    same way, whatever exit-code contract it keeps."""
+    raw_fmt = env_str(FORMAT_ENV, DEFAULT_FORMAT).strip().lower()
+    raw_level = env_str(LEVEL_ENV, DEFAULT_LEVEL).strip().upper()
+    fmt = raw_fmt if raw_fmt in FORMATS else DEFAULT_FORMAT
+    level = raw_level if raw_level in LEVELS else DEFAULT_LEVEL
+    configure(fmt=fmt, level=level)
+    for var, raw, allowed, used in ((FORMAT_ENV, raw_fmt, FORMATS, fmt),
+                                    (LEVEL_ENV, raw_level, LEVELS, level)):
+        if raw != used:
+            logging.getLogger(__name__).error(
+                f"{var}={raw!r} is not one of {allowed}; using {used!r}")

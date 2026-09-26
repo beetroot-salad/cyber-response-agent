@@ -15,7 +15,6 @@ from defender._io import append_jsonl, read_jsonl_rows, write_atomic
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LoopPaths,
-    make_logger,
 )
 # The reducer lane's routing key, at its owner (#870). Imported for the VALUE, the same way
 # `lead_extraction` and `pitfalls_curator` take it: the three seams that ask "is this the
@@ -135,7 +134,6 @@ def derive_alert_rule_key(alert: dict) -> str:
 
 _SHARED_INPUTS_LOCK = threading.Lock()
 
-_persist_log = make_logger("persist")
 
 
 

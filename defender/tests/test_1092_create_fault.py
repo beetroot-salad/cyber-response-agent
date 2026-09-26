@@ -229,9 +229,9 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
 
 
 # ---- phase F (F2, human): the opt-out lane still surfaces the remedy -----------------------------
-def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fault_and_the_build_command(tmp_path, monkeypatch, caplog):
+def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fault_and_the_build_command(tmp_path, monkeypatch, capsys):
     """With `DEFENDER_ALLOW_UNSANDBOXED=1` and a missing image, `start_box` swallows the
-    `BoxFault`, degrades to the unboxed host executor, and the box's WARNING log record
+    `BoxFault`, degrades to the unboxed host executor, and the box's WARNING line on stderr
     carries the swallowed fault's message — the daemon's `No such image` line and the build
     command `python3 <tree>/defender/scripts/box_image.py build` — so O4's remedy still
     reaches the operator under the opt-out; without the opt-out the same fault raises (d44)."""
@@ -242,11 +242,10 @@ def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fau
     rec = NoSuchImageDocker()
     box = box_mod.start_box(run_dir, defender_dir, docker=rec)
     assert box.sandboxed is False
-    err = caplog.text
-    warnings = [r.getMessage() for r in caplog.records
-                if r.name == "defender.runtime.box._lifecycle" and r.levelname == "WARNING"]
+    err = capsys.readouterr().err
+    warnings = [ln for ln in err.splitlines() if " WARNING defender.runtime.box." in ln]
     assert warnings, err
-    warning = warnings[0]
+    warning = "\n".join(err.splitlines()[err.splitlines().index(warnings[0]):])
     assert f"No such image: {image_tag(defender_dir)}" in warning, err
     assert remedy_command(warning) == [
         "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",

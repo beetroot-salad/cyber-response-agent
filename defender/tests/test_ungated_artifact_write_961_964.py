@@ -508,7 +508,7 @@ def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
     assert repairable_diagnostics(deps) == ()
 
 
-def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, caplog):
+def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capsys):
     """The close's structure gate fails OPEN on a validator fault, like the gate one line above
     it (#836 H7) and unlike the WRITE gate it shares a schema with.
 
@@ -530,7 +530,7 @@ def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capl
     finally:
         schema.diagnose = original
 
-    assert "could not be validated" in caplog.text, "the fault must be logged"
+    assert "could not be validated" in capsys.readouterr().err, "the fault must be logged"
 
 
 # #964 — the harness's own seed
@@ -548,7 +548,7 @@ def test_the_harness_seed_lands_when_it_validates(tmp_path):
     assert "l-00c" in text
 
 
-def test_a_seed_that_would_not_validate_is_not_written(tmp_path, caplog):
+def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
     """The decision #964 asks for, not just the check.
 
     Writing it anyway would rebuild the bypass under a new name. Skipping costs a reserved id
@@ -569,7 +569,7 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, caplog):
 
     after = (run / "investigation.md").read_text(encoding="utf-8")
     assert after == _ERROR_DOC, "the seed appended to a document that does not validate"
-    assert "refused to declare l-00c" in caplog.text
+    assert "refused to declare l-00c" in capsys.readouterr().err
 
 
 def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):

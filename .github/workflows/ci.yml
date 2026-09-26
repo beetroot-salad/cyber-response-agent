@@ -633,6 +633,11 @@ jobs:
       - name: Monkeypatch-setattr gate (baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_monkeypatch.py
 
+      # Every defender program sets up logging, or says on its __main__ line why not (a model
+      # tool whose stderr the model reads). Without it INFO lines vanish and nothing is JSON.
+      - name: Log-setup gate (every program configures logging)
+        run: defender/.venv/bin/python scripts/lint/lint_log_setup.py
+
       # Small-helper complement to the jscpd gate: jscpd catches large copy-paste
       # blocks (>=60 tokens) but is blind to 1-5 line helpers copied across
       # modules and to divergent same-named copies (#357/#358/#359/#360).

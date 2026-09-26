@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import tarfile
 from pathlib import Path
 
 from defender._clock import now_iso
 from defender._env import env_int
-from defender.learning.core.config import _log
 from defender.runtime.scrub import RunTainted, verdict_path
+
+_logger = logging.getLogger(__name__)
 
 
 # How many tainted trees may accumulate before the lane stops preserving them. A CAP, never
@@ -116,7 +118,7 @@ def preserve_tainted_tree(
         held = held_archives(quarantine_dir)
         cap = quarantine_cap()
         if held >= cap:
-            _log(
+            _logger.warning(
                 f"{label}: {held} quarantined tree(s) already held at "
                 f"{quarantine_dir} (cap {cap}, {_MAX_ENV}) — NOT preserving {wt}. The "
                 f"existing artifacts are untouched; clear them by hand once triaged."
@@ -140,7 +142,7 @@ def preserve_tainted_tree(
             ) + "\n",
             encoding="utf-8",
         )
-        _log(
+        _logger.warning(
             f"{label}: tainted worktree preserved at {archive} "
             f"({len(taint.findings)} finding(s), manifest {manifest.name})"
         )
@@ -153,5 +155,5 @@ def preserve_tainted_tree(
             if archived is not None
             else "the tree is about to be destroyed and this taint's evidence is being lost"
         )
-        _log(f"{label}: FAILED to quarantine the tainted worktree {wt}: {e!r} — {residue}")
+        _logger.error(f"{label}: FAILED to quarantine the tainted worktree {wt}: {e!r} — {residue}")
         return None
