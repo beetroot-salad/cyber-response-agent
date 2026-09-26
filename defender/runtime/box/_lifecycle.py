@@ -78,6 +78,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
     if tenant_agent is not None:
+        # Covered (checked above) but NOT sentinel-probed: a read-only bind is never planted
+        # into, so a wrong daemon mapping of this mount goes unnoticed — see `_daemon_source`.
         argv += [
             "--mount",
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
