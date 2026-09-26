@@ -255,6 +255,38 @@ def test_a_required_file_that_is_a_directory_is_refused(tmp_path):
     assert "verb-grants.yaml" in message, message
 
 
+@pytest.mark.parametrize("linked", T.REQUIRED_FILES)
+def test_a_required_file_linked_to_another_tenants_copy_is_refused(tmp_path, linked):
+    """The link rule reaches the FILES, not only the folder and its halves: a required file
+    that is a link to tenant B's copy stays inside the root, reads cleanly, and would hand A
+    B's grants (or lead-zero id, or released-status spelling). Paired with the control above:
+    the same two tenants, differing only by the link."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme", table=T.TABLE_A)
+    T.plant_tenant(root, "bravo", table=T.TABLE_B)
+    tenant_dir, _ = _resolver()
+    assert tenant_dir(root, "acme").tenant_id == "acme"
+    own = root / "acme" / "settings" / linked
+    theirs = root / "bravo" / "settings" / linked
+    own.unlink()
+    os.symlink(os.path.relpath(theirs, own.parent), own)
+    assert own.is_file(), "the link must really read as a file for the refusal to mean anything"
+    message = _refusal(root, "acme")
+    assert str(own) in message, message
+
+
+def test_a_linked_directory_on_the_way_to_a_required_file_is_refused(tmp_path):
+    """`settings/systems -> ../../bravo/settings/systems`: no required FILE is itself a link,
+    but the mapping reached through it is bravo's."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme")
+    T.plant_tenant(root, "bravo")
+    systems = root / "acme" / "settings" / "systems"
+    _swap_for_link(systems, Path("../../bravo/settings/systems"))
+    message = _refusal(root, "acme")
+    assert "mapping.yaml" in message, message
+
+
 # ---- D2: the root is an input, and its default belongs to the entry point ---------------------
 
 def test_the_default_tenants_root_is_the_checkouts_knowledge_tenants(tmp_path):

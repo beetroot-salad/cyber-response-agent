@@ -18,9 +18,10 @@ reads is whatever its entry point was given.
 
 ONE RESOLVER. `tenant_dir` is the one place a tenant id becomes a path, so both escapes are
 closed here: the id's grammar (no separator, no `..`, no leading dot, not empty) and the link
-(the tenant folder must resolve under the root, and each half must be a real directory whose
+(the tenant folder must resolve under the root, each half must be a real directory whose
 resolved path is exactly `<resolved tenant>/<half>` — which catches `A/agent -> ../B/agent`
-and `A/agent -> ../settings`, both of which stay inside the root). An absent folder, half or
+and `A/agent -> ../settings`, both of which stay inside the root — and each required settings
+file must resolve to exactly its own place under that half). An absent folder, half or
 required file is a `TenantDirError` naming the path, with no fallback (D3).
 """
 from __future__ import annotations
@@ -120,9 +121,17 @@ def tenant_dir(tenants_root: Path, tenant_id: str) -> TenantDir:
     agent = _half(folder_real, tenant_id, AGENT_HALF)
     for rel in REQUIRED_SETTINGS:
         path = settings / rel
-        if not path.is_file():
+        if not path.exists():
             raise TenantDirError(
                 f"tenant {tenant_id!r} is missing a required settings file: {path}"
+            )
+        # The halves' rule, one level down: a required file (or a directory on the way to it)
+        # that is a link could name another tenant's copy — `A/settings/verb-grants.yaml ->
+        # ../../B/settings/verb-grants.yaml` stays inside the root and would hand A B's grants.
+        if not path.is_file() or path.resolve() != settings / rel:
+            raise TenantDirError(
+                f"tenant {tenant_id!r}'s required settings file must be a real file at {path}; "
+                f"it resolves to {path.resolve()}"
             )
     return TenantDir(tenant_id=tenant_id, settings=settings, agent=agent)
 
