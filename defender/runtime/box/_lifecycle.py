@@ -35,18 +35,29 @@ from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
 
-def _create_argv(
+#: Where a run's box sees its tenant's model-facing `agent/` half (#1106 M6): ONE fixed,
+#: absolute target outside the `defender_dir` and run-dir targets, so the model's view of "my
+#: tenant's knowledge" never depends on where an operator keeps the tenants root. Read-only;
+#: the tenant's `settings/` half is never a mount source.
+TENANT_AGENT_TARGET = Path("/tenant/agent")
+
+
+def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
+    *, tenant_agent: Path | None = None,
 ) -> Create:
     # C46's uncovered-mount refusal runs BEFORE the image resolver (MF1 part 2): a tree that
     # sits on no shared path is a topology fault the resolver's file reads cannot fix, and
     # reading them first would surface the wrong refusal on a tree that is ALSO missing its
     # three inputs.
-    for subject, path, remedy in (
+    subjects = [
         ("run dir", run_dir, "Set DEFENDER_RUNS_BASE to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
-    ):
+    ]
+    if tenant_agent is not None:
+        subjects.append(("tenant agent half", tenant_agent, "Put the tenants root"))
+    for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
     # M3 revised: resolved on the host, here — never earlier (BoxSpec's construction reads
@@ -65,6 +76,14 @@ def _create_argv(
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
+    ]
+    if tenant_agent is not None:
+        argv += [
+            "--mount",
+            f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
+            f"target={TENANT_AGENT_TARGET},readonly",
+        ]
+    argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),
     ]
@@ -129,7 +148,7 @@ def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
 
 def _start_boxed(
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
-    shared_mounts: SharedMountsFn = _shared_mounts,
+    shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -148,6 +167,7 @@ def _start_boxed(
     start_token = uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
+        tenant_agent=tenant_agent,
     )
     try:
         # O4: the image is confirmed on the daemon BEFORE the create names it, so a missing
@@ -353,8 +373,11 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
 
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
-    spec: BoxSpec | None = None, docker: DockerFn = _docker,
+    spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
 ) -> BoxExecutor:
+    """Start the run's box. `tenant_agent` (#1106 M6) is the run's RESOLVED tenant `agent/`
+    half, bound read-only at `TENANT_AGENT_TARGET`; it is the only tenant data a box holds.
+    Illegal with a `BoxRequest`, which carries its own geography."""
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # An explicit `spec=` beside a BoxRequest names two geographies. Tested with
@@ -367,6 +390,11 @@ def start_box(
             raise TypeError(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
+            )
+        if tenant_agent is not None:
+            raise TypeError(
+                "start_box(request, tenant_agent=…) is ambiguous — a BoxRequest carries its "
+                "own mounts; put the tenant's agent half in them instead of the call"
             )
         if defender_dir is not None:
             raise TypeError(
@@ -392,7 +420,7 @@ def start_box(
         # overload's ambiguity check above.
         spec = BoxSpec.from_env(os.environ)
     try:
-        return _start_boxed(run_dir, defender_dir, spec, docker)
+        return _start_boxed(run_dir, defender_dir, spec, docker, tenant_agent=tenant_agent)
     except BoxFault as e:
         _opt_out_or_raise(e)
     from defender import run_common

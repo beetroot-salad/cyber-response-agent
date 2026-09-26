@@ -12,15 +12,15 @@ Take target paths from the user; otherwise audit the files changed on the curren
 The runtime is `defender/`: a single root `defender/SKILL.md` drives the ORIENT→PLAN→GATHER→ANALYZE→REPORT loop. Two layers matter for hygiene:
 
 - **Orchestration core** (vendor-agnostic): `defender/SKILL.md` and `skills/{gather,invlang,handbook,data-source-debug,advisory}/`. Dispatches to per-system skills generically.
-- **Per-system layer** (deployment/vendor): `skills/{elastic,identity,ticket,threat-intel,host-state,cmdb,change-mgmt}/` plus `knowledge/environment/systems/{vendor}/config.env`. This is where v2-playground specifics legitimately live.
+- **Per-system layer** (deployment/vendor): `skills/{elastic,identity,ticket,threat-intel,host-state,cmdb,change-mgmt}/` plus each tenant's `knowledge/tenants/<tenant>/settings/systems/{vendor}/config.env` (repo root, outside `defender/`). This is where v2-playground specifics legitimately live.
 
 ## Rules
 
 ### Scope & layering
 
 1. **Orchestration core stays vendor-agnostic.** `defender/SKILL.md` and `skills/{gather,invlang,handbook,data-source-debug,advisory}/` must not hardcode the deployment — container names, `docker exec`, a specific vendor CLI as the dispatch mechanism, or one system's indices/field names baked into the flow. They dispatch generically (gather reads `skills/{system}/SKILL.md` on demand). Deployment specifics belong to the per-system layer. (Illustrative example rows that name a real source tag are governed by rule 9, not this rule.)
-2. **Per-system skills split descriptor from execution.** A `skills/{system}/SKILL.md` is the lean entrypoint — what the system holds, its field vocabulary, its load-bearing rules. The CLI surface, query syntax, and connectivity notes go in an adjacent `skills/{system}/execution.md` (e.g. elastic), under "use `--help`, don't read source." Verbatim deployment config (hosts, indices, transport) lives in `knowledge/environment/systems/{vendor}/config.env`, not inline in the prompt.
-3. **Runtime reference vs deployment config.** How-the-runtime-works docs (the loop, the learning loop, run artifacts, invlang grammar) live in `skills/handbook/content/`. Deployment/system config lives under `knowledge/environment/`. Don't put runtime mechanics in `knowledge/` or deployment config in the handbook.
+2. **Per-system skills split descriptor from execution.** A `skills/{system}/SKILL.md` is the lean entrypoint — what the system holds, its field vocabulary, its load-bearing rules. The CLI surface, query syntax, and connectivity notes go in an adjacent `skills/{system}/execution.md` (e.g. elastic), under "use `--help`, don't read source." Verbatim deployment config (hosts, indices, transport) lives in the tenant's `settings/systems/{vendor}/config.env`, not inline in the prompt.
+3. **Runtime reference vs deployment config.** How-the-runtime-works docs (the loop, the learning loop, run artifacts, invlang grammar) live in `skills/handbook/content/`. Deployment/system config lives in each tenant's `knowledge/tenants/<tenant>/settings/`. Don't put runtime mechanics in `knowledge/` or deployment config in the handbook.
 
 ### Prompt shape
 

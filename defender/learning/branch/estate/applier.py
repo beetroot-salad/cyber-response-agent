@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import field
 from defender._model import model
+from pathlib import Path
 from typing import Any
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
@@ -69,7 +70,7 @@ def unappliable(world: Any, patches: Mapping) -> list[str]:
 _TICKET_SYSTEM = "ticket"
 
 
-def unservable(patches: Mapping) -> list[str]:
+def unservable(patches: Mapping, settings_dir: Path | None) -> list[str]:
     """The `ticket` patches whose difference the read screen would empty before the sibling
     ever saw it.
 
@@ -96,8 +97,11 @@ def unservable(patches: Mapping) -> list[str]:
         return []
     from defender.scripts.case_history import case_ticket
 
+    if settings_dir is None:
+        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant settings folder "
+                "was handed in to say which status releases them" for entity in with_comments]
     try:
-        released = case_ticket.release_predicate().released_status
+        released = case_ticket.release_predicate(settings_dir).released_status
     except case_ticket.CaseTicketError as e:
         return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but the case-history mapping "
                 f"cannot say which status releases them ({e})" for entity in with_comments]

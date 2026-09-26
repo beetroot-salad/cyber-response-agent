@@ -41,7 +41,6 @@ from ..tools import (
     register_gather_tool,
     register_tools,
 )
-from ..verb_dispositions import HEALTH_CHECK, grant_for, shipped_dispositions
 from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
@@ -212,36 +211,12 @@ MAIN_DEF = AgentDefinition(
 )
 
 
-def _gather_verb_grant() -> VerbGrant:
-    """The gather grant, projected from the verb-disposition table (#995).
-
-    It used to be a tuple of pairs written here, which made this a shared file every new
-    system had to edit while `/connect`'s lane rules forbade touching it — so a connected
-    system was silently unreachable. The table is still AUTHORED, not derived from the
-    adapters on disk; what moved is only where a human writes it. See
-    `runtime/verb_dispositions.py` for why that distinction is the entire design.
-    """
-    return grant_for(AgentRole.GATHER.value, shipped_dispositions())
-
-
-#: The grant's non-`health-check` half, kept as a module export for the same reason it always
-#: was — it is the driver's published name for the census. Its only reader is `driver/__init__`,
-#: which re-exports it: `tests/_verb_authorization_632.py` holds its OWN independently written
-#: copy and `test_verb_grant_632` compares that copy against `GATHER_DEF.verb_grant`, which is
-#: the check that matters now that this side is derived rather than authored.
-#:
-#: Sliced off the ONE projection this module performs — `_gather_verb_grant()` is called once
-#: and both this and `GATHER_DEF` read that value, rather than each calling it and building a
-#: second `VerbGrant` over the same rows. `HEALTH_CHECK` is imported rather than respelled for
-#: the same reason `KNOWN_ROLES` reads `AgentRole`: the table's module owns that token, and a
-#: second copy of it here is one that can drift.
-_GATHER_GRANT = _gather_verb_grant()
-
-GATHER_PAIRS: tuple[tuple[str, str], ...] = tuple(
-    (s, v) for s, v, _ in _GATHER_GRANT.entries if v != HEALTH_CHECK
-)
-
-
+#: Gather's definition carries NO table-projected grant (#1106 M4). A grant read here, at
+#: import, is a grant fixed per process — and the platform runs many tenants' runs, each with
+#: its own table. The run loads its tenant's table (`verb_dispositions.run_grants`) and binds
+#: gather over `gather_def_for(grants.gather)`; the empty grant below is what an unbound
+#: definition holds, and `compile_policy` refuses to bind it with its verb-bearing tools on
+#: (the loud failure a forgotten grant deserves, rather than a deny-all that looks like typos).
 GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
@@ -252,8 +227,14 @@ GATHER_DEF = AgentDefinition(
     deps_cls=GatherDeps,
     deny_reason=permission.GATHER_FALLTHROUGH_DENY_REASON,
     budget_enforced=True,
-    verb_grant=_GATHER_GRANT,
+    verb_grant=VerbGrant(role=AgentRole.GATHER.value),
 )
+
+
+def gather_def_for(verb_grant: VerbGrant) -> AgentDefinition:
+    """Gather's definition carrying ONE run's grant — the only form gather is ever bound in.
+    @owns gather verb_grant"""
+    return replace(GATHER_DEF, verb_grant=verb_grant)
 
 
 def _gather_instructions(defender_dir: Path) -> str:
@@ -273,13 +254,17 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
     extra_capabilities: Sequence[Any] = (),
     session_id: str | None = None,
     cache_key: str | None = None,
+    verb_grant: VerbGrant | None = None,
 ) -> Agent[GatherDeps, str]:
     name = gather_model()
+    # The RUN's gather grant when one is handed in (every production build is); an unbound
+    # build keeps `GATHER_DEF`'s empty grant, which binds nothing.
+    defn = gather_def_for(verb_grant) if verb_grant is not None else GATHER_DEF
     return build_agent_core(
         replace(
-            GATHER_DEF, model=lambda: name,
+            defn, model=lambda: name,
             effort=providers.effort_for_role(name, AgentRole.GATHER),
-            budget_enforced=GATHER_DEF.budget_enforced and enforcement_enabled(),
+            budget_enforced=defn.budget_enforced and enforcement_enabled(),
         ),
         deps_type=GatherDeps,
         instructions=_gather_instructions(defender_dir),
@@ -493,7 +478,12 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     correlation_task: Any = None,
     toolset: Any = None,
     catalog: str | None,
+    gather_grant: VerbGrant | None = None,
 ) -> Agent[AgentDeps, str]:
+    # `gather_grant` is the RUN's (`RunGrants.gather`, #1106) — every lead this root dispatches
+    # is bound over it and its prompt's indexes are narrowed to it. Omitted (a build no run
+    # handed a grant), gather holds the empty grant and a dispatch refuses at `bind`.
+    gather_grant = gather_grant if gather_grant is not None else GATHER_DEF.verb_grant  # lint-default: ok — DI seam owning its default (the unbound, empty grant)
     # The bounds arrive RESOLVED, non-`Optional`. Re-coalescing here would give the gate's ONE
     # bounds object a default at four depths, and the entry point could then resolve one value
     # while a direct build resolved another from its own environment read.
@@ -550,6 +540,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
             extra_capabilities=gather_extra, session_id=gather_session_id,
+            verb_grant=gather_grant,
             # Keyed on the SYSTEM, not this lead and not this run. What the dispatch prompt
             # puts in front of the lead's question — gather's SKILL.md, the descriptor index,
             # this system's catalog — is identical for every lead dispatched here, in this run
@@ -573,16 +564,16 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             print(f"[run.py] gather truncated_by write skipped for {agent_id}: {e!r}",
                   file=sys.stderr)
 
-    # ALWAYS the role's own committed grant — never the per-call `verbs=` registry's. The
-    # dispatch catalog/template index is a ROLE-LEVEL surface (the one verb_roster.py scores
-    # against), not a per-run one; a test injecting a registry scoped narrower than
-    # GATHER_DEF's real grant must not narrow what the catalog advertises.
+    # ALWAYS the run's gather grant — never the per-call `verbs=` registry's. The dispatch
+    # catalog/template index is the ROLE's surface under this run's table (the one
+    # verb_roster.py scores against); a test injecting a registry scoped narrower than the
+    # grant must not narrow what the catalog advertises.
     #
     # `catalog` arrives the same way the bounds do — read by `run_investigation` from the tree
     # at run start, where a tree that cannot be read fails before any model call (#1031) —
     # rather than being built per dispatch inside the tool.
     register_gather_tool(
-        agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant,
+        agent, _build_gather, GATHER_REQUEST_LIMIT, gather_grant,
         _stamp_gather_terminator, catalog=catalog,
     )
     # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — one

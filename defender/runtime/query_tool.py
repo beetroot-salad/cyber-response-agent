@@ -8,6 +8,7 @@ import re
 import sys
 from collections.abc import Mapping
 from typing import Any
+from pathlib import Path
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
@@ -212,7 +213,7 @@ def _self_ticket_reject_reason(
     return None
 
 
-def _release_predicate() -> Any:
+def _release_predicate(settings_dir: Path) -> Any:
     """#767 D4's release predicate, built fresh per call (`d_each_query_screened_at_call_time`
     — no snapshot, no cache). §7 R1's read-side extension (FK20): a predicate-construction
     failure DEGRADES rather than raising into the model's turn or refusing the whole gather
@@ -228,7 +229,7 @@ def _release_predicate() -> Any:
     from defender.scripts.case_history import case_ticket
 
     try:
-        return case_ticket.release_predicate().is_released
+        return case_ticket.release_predicate(settings_dir).is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
         print(
             f"[query_tool] WARN ticket release predicate unavailable ({e!r}); serving no "
@@ -239,7 +240,7 @@ def _release_predicate() -> Any:
 
 
 def _screen_ticket_payload(
-    self_key: str, system: str, verb: str, payload: Any,
+    self_key: str, system: str, verb: str, payload: Any, *, settings_dir: Path,
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion, then #767 D4's per-ticket release step, before
     capture and model display.
@@ -252,6 +253,9 @@ def _screen_ticket_payload(
     D4 runs strictly AFTER the own-case exclusion above (`d4_screen_after_own_case`) and only
     when it answered a served payload (``code == 0``) — a malformed envelope stays malformed,
     never patched into something the release step could act on.
+
+    `settings_dir` is the run's tenant folder (#1106): the released status is THAT tenant's
+    mapping's, read per call.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
@@ -268,7 +272,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_get(payload, is_released=_release_predicate()), 0, ""
+        return screen_release_get(payload, is_released=_release_predicate(settings_dir)), 0, ""
 
     if verb == TICKET_LIST:
         payload, code, detail = screen_list(
@@ -279,7 +283,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_list(payload, is_released=_release_predicate()), 0, ""
+        return screen_release_list(payload, is_released=_release_predicate(settings_dir)), 0, ""
 
     return payload, 0, ""
 
@@ -858,7 +862,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             payload = await handler(args)
             payload, exit_code, detail = _screen_ticket_payload(
-                self_key, system, verb, payload,
+                self_key, system, verb, payload, settings_dir=deps.settings_dir,
             )
         except CONTROL_FLOW_EXCEPTIONS:
             raise
@@ -1310,6 +1314,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
+            settings_dir=deps.settings_dir,
         )
         return await asyncio.to_thread(fn, vctx, **params)
 

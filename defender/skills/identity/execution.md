@@ -36,7 +36,8 @@ data-source outage, not a query problem (see gather SKILL §3.5 validity check).
 
 ## Config
 
-`defender/knowledge/environment/systems/identity/config.env` declares
+The run's tenant's `systems/identity/config.env` (host-only, in the tenant's
+`settings/` folder — not readable from the box) declares
 `IDENTITY_URL_BASE`, `IDENTITY_BASTION_HOST`, `IDENTITY_TIMEOUT_SEC`.
 All three can be overridden by environment variables of the same
 names for ops convenience.

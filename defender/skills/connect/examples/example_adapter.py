@@ -20,7 +20,8 @@ SYSTEM = "example"
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:
-    path = ctx.defender_dir / "knowledge" / "environment" / "systems" / SYSTEM / "config.env"
+    # The run's tenant's settings folder (#1106) — never the code tree.
+    path = ctx.settings_dir / "systems" / SYSTEM / "config.env"
     config: dict[str, str] = {}
     if path.exists():
         for raw in path.read_text(encoding="utf-8").splitlines():

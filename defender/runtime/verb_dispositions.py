@@ -26,7 +26,7 @@ silently ungranted — only ungranted on the record, with a reason a reviewer ca
 strictly stronger than the old property: before, a new system was ungranted by accident.
 
 WHY A CONFIG FILE RATHER THAN A PYTHON LITERAL. The table is this deployment's answer about
-this deployment's systems, so it lives in the environment tree as data. Two consequences that
+this deployment's systems, so it lives in each tenant's `settings/` folder as data (#1106). Two consequences that
 are features: the shipped runtime stops carrying vendor names, and a product with no table
 grants nothing. The second is only safe because `load_dispositions` REFUSES an absent or
 empty table rather than returning one — every refusal below is a raise.
@@ -41,7 +41,7 @@ to end, surviving in the one grant the census could not see. Naming the lead her
 makes the table total over GRANTS and not only over adapters. `_refuse_incoherent_narrowing`
 holds the three rules that keep "narrowing" true: the lead never holds a pair gather does not,
 reaches one system, and holds one query verb. Which query verb is the TEMPLATE's to say
-(`knowledge/environment/lead-zero.yaml` names it; its front matter declares the pair), and
+(the tenant's `lead-zero.yaml` names it; its front matter declares the pair), and
 the run refuses at start if this table grants the lead any other (#1003,
 `lead_zero._agreement`) — the table grants or withholds the lead; it does not relocate it.
 
@@ -55,7 +55,6 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping
 from defender._model import model
-from functools import lru_cache
 from pathlib import Path
 
 from defender import _yaml
@@ -63,15 +62,11 @@ from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER, AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import is_system_name
 
-#: The table's home BELOW a defender tree, and the one place its filename is spelled.
-#: `DISPOSITIONS_REL` and `dispositions_path` both derive from it rather than repeating the
-#: components — two spellings of one path is exactly the drift this module is about.
-_REL_TO_DEFENDER = Path("knowledge") / "environment" / "verb-grants.yaml"
-
-#: Repo-relative home of the table. In the environment tree, not the runtime package: it is
-#: per-deployment data, and `lint_shippable_surface` already treats that tree as the place
-#: vendor names legitimately live.
-DISPOSITIONS_REL = f"defender/{_REL_TO_DEFENDER.as_posix()}"
+#: The table's filename inside a tenant's `settings/` folder (#1106), and the one place it is
+#: spelled. The folder is the RUN's — resolved from its tenant by `defender._tenants` and handed
+#: down — never a path this module works out: a table read from a fixed place is one table per
+#: process, and the platform holds one per tenant.
+DISPOSITIONS_FILENAME = "verb-grants.yaml"
 
 #: The names a row's `roles:` may carry — the grant holders (module docstring, "WHO A ROW MAY
 #: NAME"). Sourced from `agent_role` rather than respelled, so a name that is renamed cannot
@@ -158,39 +153,54 @@ class CensusGaps:
         return bool(self.undecided or self.phantom or self.unreasoned)
 
 
-def dispositions_path(defender_dir: Path) -> Path:
-    """The table's path inside an ARBITRARY defender tree.
+def dispositions_path(settings_dir: Path) -> Path:
+    """The table's path inside a tenant's `settings/` folder.
 
-    Takes the tree rather than reading a module-level constant, for the same reason
-    `_paths.adapters_under` does: the lint gate resolves the table of a repo it was pointed
-    at, which is not the tree this process is running from.
+    Takes the folder rather than reading a module-level constant: the run resolves its own
+    tenant's folder, and the lint gate walks every committed tenant's — neither is a place this
+    module could know.
     """
-    return Path(defender_dir) / _REL_TO_DEFENDER
+    return Path(settings_dir) / DISPOSITIONS_FILENAME
 
 
-@lru_cache(maxsize=1)
-def shipped_dispositions() -> tuple[Disposition, ...]:
-    """The table of the tree THIS process runs from, read and validated once.
+@model(frozen=True)
+class RunGrants:
+    """The grants ONE run holds, projected from its tenant's table (#1106 O3, M4).
 
-    The one cached reader, and it lives here rather than beside either projection: gather's
-    grant is built in `runtime/driver/_build.py` and the judge's in
-    `learning/pipeline/judge/engine_pydantic.py`, and a cache owned by one of those packages
-    is a cache the other cannot reach — so the file gets read and parsed twice at startup and
-    the two halves can disagree about which bytes they read. Two roles projecting from one
-    table is the whole point of #995; one loader is the same argument one level down.
+    A value that travels with the run, never a module constant: before #1106 the table was read
+    once per process at import and these three were module-level, so a process could only ever
+    hold one tenant's permissions. `path` is the resolved table they came from — the file a
+    refusal names when it says where a withholding is written.
 
-    Read at import by both callers, and a missing or malformed table raises here rather than
-    yielding an empty grant. That is deliberate: an empty grant reports every verb as unknown,
-    which is this issue's own symptom applied to the whole product.
-
-    `PATHS` is imported lazily to keep this module's import edge one-way: `defender._paths`
-    pulls in `defender._git`, and this module is imported by the runtime while it assembles
-    its agent definitions. Resolving `PATHS` itself is cheap and runs no git — it is
-    `DefenderPaths(REPO_ROOT)` off `__file__`.
+    `correlation_system` is derived from `correlation` (the one system item 3 is dispatched
+    against, `None` when the table withholds the lead), so the two cannot drift.
     """
-    from defender._paths import PATHS
 
-    return load_dispositions(dispositions_path(PATHS.defender_dir))
+    path: Path
+    gather: VerbGrant
+    correlation: VerbGrant
+    correlation_system: str | None
+
+
+def run_grants(settings_dir: Path) -> RunGrants:
+    """Load `settings_dir`'s table and project the run's grants from it. @owns RunGrants
+
+    Read on every call — no cache — so two runs in one process over two tenants (or over one
+    folder edited between them) each get their own table. A missing or malformed table raises
+    `DispositionError` from `load_dispositions`, as it always has: an absent table is not a
+    deny-all.
+    """
+    from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
+
+    path = dispositions_path(settings_dir).resolve()
+    rows = load_dispositions(path)
+    correlation = correlation_grant(rows)
+    return RunGrants(
+        path=path,
+        gather=grant_for(AgentRole.GATHER.value, rows),
+        correlation=correlation,
+        correlation_system=correlation_system(correlation),
+    )
 
 
 def _systems_block(path: Path) -> Mapping[object, object]:
@@ -486,7 +496,7 @@ def census_gaps(
 
 
 __all__ = [
-    "DISPOSITIONS_REL",
+    "DISPOSITIONS_FILENAME",
     "HEALTH_CHECK",
     "KNOWN_ROLES",
     "READ_CLASS",
@@ -498,5 +508,6 @@ __all__ = [
     "dispositions_path",
     "grant_for",
     "load_dispositions",
-    "shipped_dispositions",
+    "run_grants",
+    "RunGrants",
 ]

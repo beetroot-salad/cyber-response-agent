@@ -184,6 +184,12 @@ def build_parser():
     p = transport.AdapterArgumentParser(
         description="Ticket-server stub CLI — read-only ticket lookups.",
     )
+    # #1106: this CLI is an entry point, so it is HANDED the tenant whose config it reads.
+    p.add_argument("--tenant", default=None,
+                   help="the tenant whose settings/systems/ticket/config.env addresses the "
+                        "store; default the bridge's bootstrap tenant (#1106 D4, until #1078)")
+    p.add_argument("--tenants-root", type=Path, default=None,
+                   help="default <checkout>/knowledge/tenants")
     sub = p.add_subparsers(dest="subcommand", required=True)
 
     sub.add_parser("health-check", help="GET /health and exit.")
@@ -207,20 +213,34 @@ def build_parser():
     return p
 
 
-def _cli_context() -> VerbContext:
+def _cli_context(settings_dir: Path) -> VerbContext:
     """The CLI's own VerbContext: this is a PROCESS, so its tree and its env are the
     process's — `os.environ` here is the ambient env, which is exactly right for a
     subprocess caller and exactly wrong for the in-process driver (which passes the run's
-    scrubbed env instead)."""
+    scrubbed env instead). `settings_dir` is the tenant folder `main` resolved from its own
+    arguments (#1106); the ambient env names no settings."""
     defender_dir = Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
     run_dir = Path(os.environ.get("DEFENDER_RUN_DIR", Path.cwd()))
-    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ))
+    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ),
+                       settings_dir=Path(settings_dir))
 
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    ctx = _cli_context()
+    from defender._tenants import TenantDirError, default_tenants_root, tenant_dir
+
+    tenants_root = (args.tenants_root if args.tenants_root is not None
+                    else default_tenants_root(Path(__file__).resolve().parents[3]))
+    from defender._tenant import DEFAULT_TENANT_ID
+
+    try:
+        settings_dir = tenant_dir(
+            tenants_root, args.tenant if args.tenant is not None else DEFAULT_TENANT_ID).settings
+    except TenantDirError as refusal:
+        print(f"error: {refusal}", file=sys.stderr)
+        sys.exit(2)
+    ctx = _cli_context(settings_dir)
     payload: dict | list
     try:
         if args.subcommand == "health-check":

@@ -597,7 +597,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         return circuit_breaker.down_message(deps.run_dir, system)
 
     from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF
+    from defender.runtime.driver import gather_def_for
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
     # `system` as well as `agent_id`: `agent_id` keys this lead's session and its wire-log
@@ -610,8 +610,11 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # F-19). The hooks that mark the ceiling read it off the run context the framework
     # builds from that same `UsageLimits`.
     gagent = gather_factory(agent_id, system, request_limit)
+    # Bound over the grant this dispatch holds (#1106): the run's gather grant for a
+    # model-dispatched lead, the correlation grant for item 3 — never a process-level one.
+    gather_def = gather_def_for(verb_grant)
     gbase = bind(
-        GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
+        gather_def, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
     stop = LeadStop()
@@ -621,6 +624,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
         stop=stop,
+        settings_dir=deps.settings_dir,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
 

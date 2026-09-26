@@ -49,10 +49,20 @@ from defender.learning.leads.declared_systems import (  # noqa: E402
     read_adapters,
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+from defender._corpus import iter_query_templates  # noqa: E402
+from defender._tenants import default_tenants_root, template_dir  # noqa: E402
+from defender.runtime import lead_zero as lead_zero_mod  # noqa: E402
+from defender.runtime.lead_zero._spec import correlation_grant  # noqa: E402
+from defender.runtime.lead_zero_config import (  # noqa: E402
+    LeadZeroConfigError,
+    lead_zero_config_path,
+    load_correlation_template,
+)
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
     census_gaps,
     dispositions_path,
+    grant_for,
     load_dispositions,
 )
 from defender.runtime.verbs import RosterRead  # noqa: E402
@@ -85,7 +95,33 @@ def _unreadable_adapters(
     return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
 
 
-def main(argv: list[str]) -> int:
+def _settings_folders(root: Path) -> list[tuple[str, Path]]:
+    """Every settings folder the gate checks (#1106 M7): each committed tenant's under
+    `knowledge/tenants/`, then the template's — `(name, settings dir)`, in a stable order."""
+    tenants = default_tenants_root(root)
+    folders = ([(d.name, d / "settings") for d in sorted(tenants.iterdir()) if d.is_dir()]
+               if tenants.is_dir() else [])
+    template = template_dir(root)
+    folders.append((template.name, template / "settings"))
+    return folders
+
+
+def _lead_zero_fault(settings: Path, rows: tuple, defender_dir: Path) -> str | None:
+    """The run-start lead-zero agreement check (`lead_zero.resolve_correlation_dispatch`),
+    run here per folder: the config names an established catalog template whose pair is the
+    one the table grants the lead. `None` when it agrees (or the table withholds the lead)."""
+    try:
+        lead_zero_mod.resolve_correlation_dispatch(
+            load_correlation_template(lead_zero_config_path(settings)),
+            iter_query_templates(defender_dir / "skills" / "gather" / "queries"),
+            correlation_grant(rows),
+        )
+    except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError) as e:
+        return str(e)
+    return None
+
+
+def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every folder; each exit arm is a distinct verdict
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=str(REPO_ROOT), help="repo root to check")
     args = ap.parse_args(argv)
@@ -104,11 +140,6 @@ def main(argv: list[str]) -> int:
         systems = declared_systems_over(roster, root)
     except LeadAuthorError as e:
         print(f"lint_verb_disposition_census: cannot resolve systems: {e}", file=sys.stderr)
-        return 2
-    try:
-        rows = load_dispositions(dispositions_path(defender_dir))
-    except DispositionError as e:
-        print(f"lint_verb_disposition_census: {e}", file=sys.stderr)
         return 2
 
     walked = _walk(roster, systems)
@@ -131,33 +162,49 @@ def main(argv: list[str]) -> int:
                 )
         return 2
 
-    gaps = census_gaps(walked, rows)
-    if not gaps:
+    # EVERY TENANT AND THE TEMPLATE (#1106 M7). Grants describe the SHARED adapters, so each
+    # folder's table must be total over the one walked census; a folder whose table cannot even
+    # load is exit 2 for the same reason an unreadable adapter is.
+    worst = 0
+    for name, settings in _settings_folders(root):
+        try:
+            rows = load_dispositions(dispositions_path(settings))
+        except DispositionError as e:
+            print(f"lint_verb_disposition_census: {name}: {e}", file=sys.stderr)
+            worst = 2
+            continue
+        table = dispositions_path(settings).relative_to(root)
+        gaps = census_gaps(walked, rows)
+        lead_zero_fault = _lead_zero_fault(settings, rows, defender_dir)
+        if not gaps and lead_zero_fault is None:
+            print(
+                f"lint_verb_disposition_census: {name}: clean — {len(rows)} dispositions "
+                f"cover {len(systems)} system(s) with no residue "
+                f"({len(grant_for('gather', rows).entries)} granted to gather)."
+            )
+            continue
+        worst = max(worst, 1)
+        for system, verb in gaps.undecided:
+            print(
+                f"{name}: {system}.{verb}: declared by an adapter, decided by nobody. Add a "
+                f"row to {table} granting it to a role, or `roles: []` with a reason if it is "
+                "deliberately reachable by no one."
+            )
+        for system, verb in gaps.phantom:
+            print(
+                f"{name}: {system}.{verb}: the table decides a verb no adapter declares. "
+                f"Remove the row from {table}, or restore the verb."
+            )
+        for system, verb in gaps.unreasoned:
+            print(f"{name}: {system}.{verb}: granted to nobody with no reason given.")
+        if lead_zero_fault is not None:
+            print(f"{name}: lead-zero: {lead_zero_fault}")
         print(
-            f"lint_verb_disposition_census: clean — {len(rows)} dispositions cover "
-            f"{len(systems)} system(s) with no residue."
+            f"lint_verb_disposition_census: {name}: {len(gaps.undecided)} undecided, "
+            f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned"
+            + (", and its lead-zero config disagrees." if lead_zero_fault is not None else ".")
         )
-        return 0
-
-    for system, verb in gaps.undecided:
-        print(
-            f"{system}.{verb}: declared by an adapter, decided by nobody. Add a row to "
-            f"{dispositions_path(defender_dir).relative_to(root)} granting it to a role, or "
-            "`roles: []` with a reason if it is deliberately reachable by no one."
-        )
-    for system, verb in gaps.phantom:
-        print(
-            f"{system}.{verb}: the table decides a verb no adapter declares. Remove the row, "
-            "or restore the verb."
-        )
-    for system, verb in gaps.unreasoned:
-        print(f"{system}.{verb}: granted to nobody with no reason given.")
-    print(
-        f"lint_verb_disposition_census: {len(gaps.undecided)} undecided, "
-        f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned."
-    )
-    return 1
-
+    return worst
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

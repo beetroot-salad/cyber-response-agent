@@ -1,0 +1,14 @@
+# The turn-zero correlation lead's per-deployment config (#1003). ONE key.
+#
+# `correlation_template` names the query template the harness-dispatched correlation lead
+# (`l-00c`) binds. The template's own front matter declares the system and the verb, so this
+# id is what selects the lead's backend — moving the lead to another backend is this line
+# plus the holder's rows in `verb-grants.yaml`, and no Python edit.
+#
+# The table must AGREE with the template: at run start the id is resolved against this
+# deployment's catalog (`skills/gather/queries/<system>/<name>.md`, established, not a draft)
+# and its (system, verb) pair compared with the one query pair the table grants
+# `lead-zero-correlation`. A disagreement refuses the run naming both sides; a table that
+# withholds the pair skips the lead instead (a withholding is a decision, a mismatch is a
+# mistake). Any key other than this one is refused, as in `verb-grants.yaml`.
+correlation_template: elastic.correlate-alerts-by-entity

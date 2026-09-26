@@ -49,7 +49,7 @@ logs/
 *.crt
 
 # Per-environment config (template is tracked, actual config is not)
-defender/knowledge/environment/systems/wazuh/config.env
+knowledge/tenants/*/settings/systems/wazuh/config.env
 
 # IDE
 .vscode/

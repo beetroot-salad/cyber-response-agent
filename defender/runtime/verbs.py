@@ -70,6 +70,10 @@ def is_system_name(name: str) -> bool:
 
 ADAPTER_SUFFIX = "_adapter.py"
 
+#: A refusal's pointer at the verb-disposition table when no run handed its resolved path in:
+#: the file's name and where it lives, so the reader still knows WHICH file fixes a grant.
+TABLE_POINTER = "the tenant's settings/verb-grants.yaml"
+
 
 @model(frozen=True)
 class VerbContext:
@@ -81,6 +85,12 @@ class VerbContext:
     #: caller handed in would be swapped for a mutable snapshot on every `query` call — the
     #: same copy `RosterRead` was exempted from. The annotation stays for static checking.
     env: Annotated[Mapping[str, str], SkipValidation]
+    #: The run's tenant's `settings/` folder (#1106): where every adapter reads its system's
+    #: `config.env`. REQUIRED, with no default, so every construction site has to hand in the
+    #: RUN's folder — a default would let a site silently read some other tenant's, or the
+    #: checkout's. `defender_dir` stays the code tree; the two stopped being one place when the
+    #: settings left `defender/`.
+    settings_dir: Path
     capture: Any = None
     #: Which branched world this call is being served for, when it is being served for one.
     #: `None` is the ordinary run and the base world alike — both read the corpus itself.
@@ -112,8 +122,8 @@ class VerbContext:
     #: inside a verb body — which the query tool files as exit 2, an INFRA code the circuit
     #: breaker reads as the estate being down for this sibling and up for its base.
     #:
-    #: Appended LAST rather than inserted, so the twenty-odd positional `VerbContext(...)`
-    #: sites keep meaning what they meant.
+    #: Appended LAST rather than inserted. (Since #1106's required `settings_dir` every site
+    #: builds this by keyword.)
     as_of: datetime | None = None
 
 
@@ -576,13 +586,9 @@ class VerbRegistry:
     #: Where THIS registry's grant is authored, or `None` when it is a code literal that no
     #: data edit can widen — a pointer is worse than silence when it names a file that cannot
     #: fix the refusal. Read by `decide`'s DENIED and ungranted-system refusals, which since
-    #: #995 tell the reader where to go. Every grant a model calls through is the table's
-    #: projection since #999 closed the last literal (`lead_zero`'s correlation grant), and
-    #: each such registry sets this itself; the class default is what a subclass over a
-    #: literal inherits. The two registries over `DENY_ALL` (`_scaffold_rules`, the
-    #: skill-description hook) are NOT that case — they are `ModuleVerbRegistry`s and take
-    #: its pointer; what makes them harmless is that neither ever calls `decide`, which is
-    #: the caveat written out in that constructor.
+    #: #995 tell the reader where to go. Every grant a model calls through is a RUN's table
+    #: projection (#999, #1106), and whoever builds such a registry hands it that run's
+    #: resolved table; the class default is what a registry over a literal keeps.
     grant_home: str | None = None
 
     def __init__(self, grant: VerbGrant):
@@ -714,7 +720,7 @@ class VerbRegistry:
 
 class ModuleVerbRegistry(VerbRegistry):
 
-    def __init__(self, roster: RosterRead, grant: VerbGrant):
+    def __init__(self, roster: RosterRead, grant: VerbGrant, *, grant_home: str | None = None):
         super().__init__(grant)
         # THE ROSTER, taken as a VALUE — the one `read_roster` produced where this process
         # started — never a directory to read here. A tree that cannot be read fails at that
@@ -741,23 +747,13 @@ class ModuleVerbRegistry(VerbRegistry):
             )
         self.roster = roster
         self._systems: tuple[str, ...] = tuple(sorted(roster.accepted))
-        # THE registry that resolves a real adapters tree, which is the deployment shape the
-        # disposition table governs — every grant reaching this constructor that a model ever
-        # calls through is one the table projects — so a refusal from here may name the table
-        # as where to fix an ungranted system. `lead_zero`'s narrowed correlation registry
-        # subclasses `VerbRegistry` directly and sets the pointer itself: its grant is the
-        # table's projection too, since #999.
-        #
-        # NOT universal, and the exception is worth knowing: `_scaffold_rules` and
-        # `hooks/inject_system_skill_description` construct this class over the `DENY_ALL`
-        # literal. Neither calls `decide`, so neither can render the pointer — but a third
-        # such caller that did would be told to edit a file that cannot widen its grant.
-        #
-        # Imported HERE, not at module scope: `verb_dispositions` imports this module for
-        # `is_system_name`, so the edge may only run one way at import time.
-        from .verb_dispositions import DISPOSITIONS_REL
-
-        self.grant_home = DISPOSITIONS_REL
+        # Where a refusal says an ungranted verb is withheld: the RUN's resolved table
+        # (`RunGrants.path`, #1106) when whoever built the grant hands it in, else the table
+        # named generically — every grant this class serves a model is some tenant's table
+        # projection, so the pointer always names the file that fixes it. The two `DENY_ALL`
+        # callers (`_scaffold_rules`, `hooks/inject_system_skill_description`) never call
+        # `decide`, so they never render it.
+        self.grant_home = grant_home if grant_home is not None else TABLE_POINTER
         offenders = [
             (s, v) for s, v, _ in grant.entries if v not in self._cold_verb_names(s)
         ]

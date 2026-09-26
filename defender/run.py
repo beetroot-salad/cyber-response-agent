@@ -43,9 +43,11 @@ from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
+from defender._tenants import TenantDir, default_tenants_root  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime.verb_dispositions import RunGrants  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
@@ -91,6 +93,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "flag now governs both lanes)")
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
+    p.add_argument("--tenants-root", type=Path, default=None,
+                   help="the folder holding one sub-folder per tenant (#1106); default "
+                        "<this checkout>/knowledge/tenants. The run's tenant is the one its "
+                        "runs base's tenant record names")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
@@ -227,9 +233,10 @@ class _Investigate(Protocol):
     test (they all inject the seam) and fail only on a real credentialed run.
     """
 
-    def __call__(
+    def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
-        model_name: str, model_override: str | None, box: Any, world: Any = None,
+        model_name: str, model_override: str | None, box: Any, tenant: TenantDir,
+        grants: RunGrants, world: Any = None,
     ) -> dict[str, Any]: ...
 
 
@@ -252,6 +259,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     model_name: str,
     model_override: str | None,
     box: Any,
+    #: The run's tenant folder and the grants projected from its table (#1106) — resolved and
+    #: checked by `main` before the box started, handed to the registry and the driver here.
+    tenant: TenantDir,
+    grants: RunGrants,
     #: The world this process IS, on the `--resume` path; `None` on an ordinary run. The
     #: parity that matters is that `None` builds exactly what it builds today.
     world: Any = None,
@@ -293,12 +304,13 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
 
         family = world.family
         verbs: Any = WorldRegistry(
-            roster, driver.GATHER_DEF.verb_grant,
+            roster, grants.gather,
             # DECLARED, not merely constructed: a world that serves nothing must still leave a
             # ledger, or its silence is indistinguishable from an archive that lost the file.
             world=world, ledger=Ledger.for_world(
                 world.episode_dir, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
+            settings_dir=tenant.settings, grant_home=str(grants.path),
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),
@@ -310,12 +322,13 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             alert_path=alert_path, run_dir=run_dir, run_id=run_id,
             defender_dir=defender_dir, model_name=model_name,
             model_override=model_override, box=box, verbs=verbs, roster=roster, resume=resume,
+            tenant=tenant, grants=grants,
         )
-    verbs = registry_cls(roster, driver.GATHER_DEF.verb_grant)
+    verbs = registry_cls(roster, grants.gather, grant_home=str(grants.path))
     return investigate(
         alert_path=alert_path, run_dir=run_dir, run_id=run_id, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster,
+        roster=roster, tenant=tenant, grants=grants,
     )
 
 
@@ -329,6 +342,10 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: unreachable in production.
     model_override: str | None,
     defender_dir: Path,
+    #: The run's tenant and grants (#1106): the box mounts `tenant.agent` read-only and nothing
+    #: else of any tenant; the drive function builds the registry and the driver over them.
+    tenant: TenantDir,
+    grants: RunGrants,
     #: The world this process IS, threaded through so the drive function can build the world
     #: registry rather than the production one. Five signatures carry it — the parser, this
     #: lifecycle, `main`'s call to it, the drive function and the protocol — so a world
@@ -347,7 +364,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     The exit half belongs to `box_mod.stop_and_scrub`, which owns the ordering, the
     only-scrub-a-provably-dead-box rule, and the exception preference for both writable lanes.
     """
-    box = start_box(run_dir, defender_dir)
+    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent)
     investigation_ok = False
     try:
         summary = investigate(
@@ -358,6 +375,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             model_name=model,
             model_override=model_override,
             box=box,
+            tenant=tenant,
+            grants=grants,
             world=world,
         )
         investigation_ok = True
@@ -367,6 +386,66 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             in_flight=not investigation_ok,
         )
     return summary
+
+
+def _resolve_run_tenant(
+    tenants_root: Path, *, defender_dir: Path, check_lead_zero: bool,
+) -> tuple[TenantDir, RunGrants]:
+    """The run's tenant and grants, or the refusal — BEFORE the run dir, the box and any model
+    call (#1106 M5, D3).
+
+    The tenant is the one this runs base's `_tenant.json` records (D4 — minted as
+    `_tenant.DEFAULT_TENANT_ID` on a fresh base; #1078 moves it onto the request). Everything checked here would otherwise
+    fail later and quieter: an absent folder or required file (the ticket screen served no
+    comments), a table gather is granted nothing in (gather's `GrantError` fired only at its
+    first `bind`, mid-run, after the box was up and MAIN had spent model calls), and a
+    lead-zero config the catalog or table disagrees with (raised inside the driver, after the
+    box). Every refusal names the file an operator edits; a missing tenant also names the
+    record it came from, which is the file to fix for a legacy `default`.
+
+    `check_lead_zero` is False for a `--resume` sibling: a resumed world dispatches no turn-0
+    lead, so a template demoted since the source run must not refuse it (the driver's own
+    run-start frame makes the same exception)."""
+    from defender import _io, _tenant
+    from defender._corpus import iter_query_templates
+    from defender._tenants import TenantDirError, tenant_dir
+    from defender.runtime import lead_zero as lead_zero_mod
+    from defender.runtime.lead_zero_config import (
+        LeadZeroConfigError,
+        lead_zero_config_path,
+        load_correlation_template,
+    )
+    from defender.runtime.tools_gather import _catalog_dir
+    from defender.runtime.verb_dispositions import DispositionError, run_grants
+
+    runs_base = _run.resolve_runs_base()
+    _io.guarded_mkdir(runs_base, base=runs_base)
+    record = _tenant.ensure_tenant(runs_base)
+    try:
+        tenant = tenant_dir(tenants_root, record.tenant_id)
+    except TenantDirError as refusal:
+        sys.exit(
+            f"[run.py] this run's tenant {record.tenant_id!r} (recorded in "
+            f"{_tenant.record_path(runs_base)}) cannot be used: {refusal}")
+    try:
+        grants = run_grants(tenant.settings)
+    except DispositionError as refusal:
+        sys.exit(f"[run.py] tenant {tenant.tenant_id!r}'s verb-disposition table: {refusal}")
+    if not grants.gather.entries:
+        sys.exit(
+            f"[run.py] tenant {tenant.tenant_id!r} grants gather no verb in {grants.path} — a "
+            "run could query nothing. Grant gather at least one (system, verb) there before "
+            "running this tenant (a tenant copied from the template grants nothing).")
+    if check_lead_zero:
+        try:
+            lead_zero_mod.resolve_correlation_dispatch(
+                load_correlation_template(lead_zero_config_path(tenant.settings)),
+                iter_query_templates(_catalog_dir(defender_dir)),
+                grants.correlation,
+            )
+        except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError) as refusal:
+            sys.exit(f"[run.py] tenant {tenant.tenant_id!r}'s lead-zero config: {refusal}")
+    return tenant, grants
 
 
 def _announce_provenance(run_dir: Path) -> None:
@@ -518,6 +597,14 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         alert = ns.alert.resolve()
         run_id = ns.run_id
 
+    # THE RUN'S TENANT, resolved and checked BEFORE anything is spent (#1106 M5): the tenants
+    # root is this entry point's to hand down (D2) — `--tenants-root`, else this checkout's
+    # `knowledge/tenants` — and nothing below reads it again.
+    tenants_root = (ns.tenants_root if ns.tenants_root is not None
+                    else default_tenants_root(DEFENDER_DIR.parent))
+    tenant, grants = _resolve_run_tenant(
+        tenants_root, defender_dir=DEFENDER_DIR, check_lead_zero=world is None)
+
     model = driver.resolve_main_model(ns.model)
     # ONE provider-key pass: the all-roles preflight is a strict superset of the
     # investigator+gather pair (same resolvers, same per-provider key sourcing, and MAIN/GATHER
@@ -536,7 +623,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     run_dir = materialize(alert, run_id, model=model, world=world)
 
     if ns.update_ticket:
-        ticket_writer.open_case_ticket(run_dir)
+        ticket_writer.open_case_ticket(run_dir, settings_dir=tenant.settings)
 
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
     _announce_provenance(run_dir)
@@ -546,6 +633,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         model=model,
         model_override=ns.model,
         defender_dir=DEFENDER_DIR,
+        tenant=tenant,
+        grants=grants,
         world=world,
     )
 
@@ -587,7 +676,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
         # is an input: a failed or stale sidecar cannot split the record between two sources.
         ticket_writer.record_case_ticket(
-            run_dir, truncated_by=summary.get("truncated_by"),
+            run_dir, settings_dir=tenant.settings, truncated_by=summary.get("truncated_by"),
             closed_before_cut=summary.get("closed_before_cut") is True)
 
     # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an

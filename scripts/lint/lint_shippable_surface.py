@@ -37,8 +37,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
-from defender.runtime.lead_zero_config import LEAD_ZERO_CONFIG_REL  # noqa: E402
-from defender.runtime.verb_dispositions import DISPOSITIONS_REL  # noqa: E402
 
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
@@ -49,13 +47,10 @@ EXCLUDED_PREFIXES = (
     # Gather query templates are all per-system (+ the SCHEMA doc that documents
     # them) — the per-vendor surface, not env-agnostic code.
     "defender/skills/gather/queries/",
-    # This deployment's per-system config. Kept at `systems/` rather than widened to the whole
-    # `environment/` tree: the verb-disposition table that landed beside it in #995 is carved
-    # out BY NAME below, so an env-agnostic file that lands in that tree later (a README, a
-    # schema doc) keeps being scanned instead of inheriting a directory-wide exemption nobody
-    # revisits. Moving the grant here is what let the `driver/_build.py:elastic` baseline
-    # entry be deleted rather than relocated: the shipped runtime no longer names a vendor.
-    "defender/knowledge/environment/systems/",
+    # (No settings carve-out: since #1106 each tenant's per-system config, verb-disposition
+    # table and lead-zero config live under `knowledge/tenants/<id>/settings/` at the REPO
+    # ROOT, outside the scanned `defender/` surface — the shipped runtime still names no
+    # vendor, and the per-deployment data that must is simply not part of it.)
     "defender/fixtures/",
     # Vendored golden RUNS replayed by the e2e harness (tests/test_replay_*) —
     # captured from the v2 playground, so env-specific test data BY DESIGN, like
@@ -89,14 +84,6 @@ EXCLUDED_PREFIXES = (
 )
 
 EXCLUDED_FILES = {
-    # The verb-disposition table (#995) — per-deployment data that names every system BECAUSE
-    # naming them is its job. Spelled from `DISPOSITIONS_REL` rather than re-typed, for the
-    # reason `excluded_prefixes` derives the skill dirs: this gate keeping its own idea of
-    # where that file lives is the drift the table exists to close.
-    DISPOSITIONS_REL,
-    # The correlation lead's template id (#1003) — the same kind of file, one row: naming
-    # a vendor's template is its job. Spelled from the runtime's constant for the same reason.
-    LEAD_ZERO_CONFIG_REL,
     "defender/CLAUDE.md",              # internal structure doc
     "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",
