@@ -145,6 +145,8 @@ def test_agentdeps_gains_no_window_field(tmp_path):
 
         "run_dir", "defender_dir", "run_id", "policy", "cwd_anchor", "box",
         "budget_started_monotonic", "authored_paths", "review_state", "roots", "tool_config",
+        # #1106: the run's tenant settings folder every dispatched verb is handed — not a window.
+        "settings_dir",
     }
 
 
