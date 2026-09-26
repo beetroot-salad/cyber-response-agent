@@ -62,8 +62,6 @@ EXCLUDED_PREFIXES = (
     # defender/fixtures/ above; not the shipped vendor-neutral surface.
     "defender/fixtures-e2e/",
     "defender/tests/",
-    "defender/run-visualizations/",
-    "defender/run-transcripts/",
     "defender/lessons/",
     "defender/lessons-actor/",
     # Per-environment lesson corpus (sibling to lessons-actor) + learning-loop

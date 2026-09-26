@@ -111,7 +111,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_half_read_table_baseline.json")
 EXCLUDED_DIRS = frozenset(
-    {".venv", "__pycache__", "tests", "run-visualizations", "run-transcripts", "runs"}
+    {".venv", "__pycache__", "tests", "runs"}
 )
 SUPPRESS = "lint-half-table: ok"
 

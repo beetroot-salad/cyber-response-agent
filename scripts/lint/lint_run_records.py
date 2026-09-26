@@ -67,7 +67,7 @@ OWNER_MODULES: frozenset[str] = frozenset(
 #: below this (decision 5's standing check).
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks")
 SWEEP_TOP_LEVEL = True
-EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
 #: §7 decision 5's carve-out: the three trees this sweep never enters, each holding live
 #: record-name use today (claims S10/G1/G3, brief red flag R3). The written obligation (O1)

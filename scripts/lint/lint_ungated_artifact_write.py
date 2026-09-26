@@ -89,7 +89,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_ungated_artifact_write_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-artifact-gate: ok",)
 
 #: The module that OWNS the schema. Exempted by full relative path rather than basename, the

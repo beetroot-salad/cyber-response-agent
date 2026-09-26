@@ -97,7 +97,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_unnarrowed_parse_baseline.json")
 EXCLUDED_DIRS = frozenset(
-    {".venv", "__pycache__", "tests", "run-visualizations", "run-transcripts", ".worktrees"}
+    {".venv", "__pycache__", "tests", ".worktrees"}
 )
 SUPPRESS = "lint-parse: ok"
 

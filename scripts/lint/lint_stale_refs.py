@@ -162,8 +162,8 @@ NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
-    "defender/run-visualizations", "defender/fixtures",
-    "defender/run-transcripts", "defender/lessons", "defender/lessons-actor",
+    "defender/fixtures",
+    "defender/lessons", "defender/lessons-actor",
     ".claude/worktrees", "experiments",
     # Task files and design docs reference removed symbols historically;
     # they are not code that should be kept consistent with current names.
@@ -568,7 +568,7 @@ def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
 
     It is what keeps the deadline reachable on a large retirement. The cost scales with the
     removed-identifier count, and #797 removes 247 of them: unbounded, that grep measured 85s
-    against 13s with the exclusions — the `defender/run-transcripts`, `defender/lessons*`,
+    against 13s with the exclusions — the `defender/lessons*`,
     `defender/fixtures*` and `experiments/` trees are most of the repo's bytes and none of
     them is a reference source. The 60s budget is left where it is deliberately: it is a real
     ceiling, and raising it to fit a grep that reads trees this gate ignores would hide the

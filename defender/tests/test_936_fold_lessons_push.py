@@ -76,7 +76,7 @@ pytestmark = pytest.mark.e2e
 # the planted tree, and the run
 
 _NOT_MIRRORED = frozenset({
-    ".venv", "__pycache__", "tests", "fixtures-e2e", "run-visualizations", "lessons",
+    ".venv", "__pycache__", "tests", "fixtures-e2e", "lessons",
 })
 
 

@@ -33,7 +33,7 @@ Regenerate the baseline after a deliberate change with `--update-baseline`.
 
 Scope: `defender/` only, module-level defs only (nested defs and methods are
 not counted). Excluded as the jscpd gate's `--ignore` does: `.venv` and the
-transient run-output dirs (`runs/`, `run-visualizations/`). Excluded
+transient run-output dirs (`runs/`). Excluded
 additionally (fixture/scaffold code that re-implements helpers by design):
 test modules — a `tests/` dir or a flat `test_*.py` / `*_test.py` file — and
 `skills/connect/examples/` (adapter scaffold templates meant to be copied). A
@@ -71,7 +71,7 @@ BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.json")
 # Directory names (any path segment, relative to defender/) excluded from scope.
 # `.venv` + the transient run-output dirs mirror the jscpd gate's --ignore;
 # `tests` drops fixture-helper modules (flat test_*.py files handled below).
-EXCLUDED_DIRS = (".venv", "tests", "runs", "run-visualizations")
+EXCLUDED_DIRS = (".venv", "tests", "runs")
 
 # Accepted-boilerplate excludes (by path substring):
 #   connect/examples/   — adapter scaffold templates, meant to be copied

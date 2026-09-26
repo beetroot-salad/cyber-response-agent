@@ -48,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_unguarded_tree_write_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 
 #: The pre-#771 whole-file idioms. `write_atomic` now DELEGATES to `write_guarded` (safe to
 #: call), but stays flagged: `write_guarded` is the one canonical seam #771's M3 gives every

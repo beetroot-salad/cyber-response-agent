@@ -20,7 +20,7 @@ lessons_loaded	1	lessons_loaded.jsonl	—	lessons_loaded.jsonl	run.observability
 ticket_write	1	ticket_write.json	—	—	run.observability.ticket_write		
 ticket_reads	1	ticket_reads/<seq>.json	cap	—	run.tables.ticket_reads	retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive	
 session_pointer	1	session_store_pointer.json	—	—	run.observability.session_pointer	written by the driver before the first turn	
-runtime_html	1	runtime.html	(inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`)	—	run.observability.runtime_html	copied to `run-visualizations/` (`visualize_run.py:80`)	
+runtime_html	1	runtime.html	(inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`)	—	run.observability.runtime_html	mirrored to `<main checkout>/run-visualizations/`, written as the checkout's owner (`visualize_run.render_and_mirror`, #1084)	
 box_sentinel	1	.box-sentinel	—	—	run.observability.box_sentinel	`unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family	
 provenance	1	provenance.json	outright	provenance.json	run.facts.provenance	stamped by the host at materialize time	
 run_end	2	<run>.run-end.json		run_end.json (renamed, `archive.py:148`)	run.facts.run_end	cleared by the host at `run_common.py:71-77` before a reused id	All three are written outside the box's writable mount so the model can neither plant nor suppress them. No read-gate deny names them; root containment keeps every role out.

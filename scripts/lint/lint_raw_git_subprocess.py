@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_raw_git_subprocess_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
+EXCLUDED_DIRS = (".venv", "__pycache__")
 # The facade itself is the one sanctioned git-subprocess site.
 EXCLUDED_FILES = ("defender/_git.py",)
 SUPPRESS_MARKER = "lint-git: ok"
