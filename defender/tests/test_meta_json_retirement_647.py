@@ -196,6 +196,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     assert target.id == "run_dir", f"the bound name must be run_dir; got {target.id}"
 
     from defender.run import _run_investigation_lifecycle
+    from defender.tests import _tenants1106
 
     arrived: dict = {}
 
@@ -207,6 +208,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
+        tenant=_tenants1106.playground_tenant(), grants=_tenants1106.playground_grants(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,

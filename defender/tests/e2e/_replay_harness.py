@@ -74,6 +74,7 @@ from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.tests import _review_bundle  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
@@ -434,7 +435,8 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None, resume=None, defender_dir: Path | None = None):
+        toolset=None, resume=None, defender_dir: Path | None = None,
+        tenant: Any = None, grants: Any = None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -453,6 +455,9 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     distinct fakes, each returned as a `BuiltModel` (settings=None — a FunctionModel
     needs no provider settings). `override_allow_model_requests(False)` makes any real
     provider call raise, so the run is provably hermetic.
+
+    `tenant` / `grants` (#1106) are the run's `TenantDir` and per-run `RunGrants`; omitted,
+    the committed playground tenant's, resolved through the real resolver and loader.
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
@@ -554,8 +559,16 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(tree, run_dir),
     )
+    # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
+    # grant is fixed per process, and no reader finds the settings folder itself). A scenario
+    # names its own tenant when it is about one; every other replay runs as the committed
+    # playground tenant — resolved through the real resolver, never a hand-built value.
+    if tenant is None:
+        tenant = _tenants1106.playground_tenant()
+    if grants is None:
+        grants = _tenants1106.run_grants(tenant.settings)
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=tree, make_model=make_model, **seams,
+            defender_dir=tree, make_model=make_model, tenant=tenant, grants=grants, **seams,
         ))

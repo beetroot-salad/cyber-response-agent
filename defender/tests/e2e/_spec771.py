@@ -896,11 +896,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     import asyncio
     from dataclasses import replace
 
-    from defender.agents import GATHER_DEF
     from defender.runtime.agent_definition import bind
     from defender.runtime.query_tool import QueryCapture
+    from defender.tests import _tenants1106
 
-    deps = replace(bind(GATHER_DEF, run_dir, defender_dir=DEFENDER),
+    # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
+    # process-level one carried by `GATHER_DEF`.
+    deps = replace(bind(_tenants1106.playground_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},

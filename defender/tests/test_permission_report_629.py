@@ -48,6 +48,7 @@ from defender.evals.held_out import predicted_disposition
 from defender.learning.core.validate import RunUnprocessable, normalize_disposition
 from defender.runtime import permission
 from defender.scripts.case_history.case_ticket import CaseTicketError, read_case_record
+from defender.tests._tenants1106 import PLAYGROUND_SETTINGS
 
 # The resolved bounds (70-resolutions.md), all UTF-8 bytes.
 FM_BOUND = 512
@@ -569,7 +570,7 @@ def test_report_body_within_bound_reaches_ticket_http_egress(env):
     (env.run / "report.md").write_text(text, encoding="utf-8")
     (env.run / "alert.json").write_text('{"id": "a-1", "timestamp": "2026-01-01T00:00:00Z"}\n',
                                         encoding="utf-8")
-    assert read_case_record(env.run).narrative == payload  # captured inbound payload, verbatim
+    assert read_case_record(env.run, settings_dir=PLAYGROUND_SETTINGS).narrative == payload  # captured inbound payload, verbatim
 
 
 def test_combined_report_and_investigation_bytes_reaching_judge_uncapped(env):
@@ -675,7 +676,7 @@ def test_absent_report_still_reaches_the_tolerant_consumer_fallbacks(env):
     with pytest.raises(RunUnprocessable):                                   # hard raise, unchanged
         normalize_disposition(env.run / "report.md")
     with pytest.raises(CaseTicketError):                                    # hard raise, unchanged
-        read_case_record(env.run)
+        read_case_record(env.run, settings_dir=PLAYGROUND_SETTINGS)
 
 
 # re-grounded forks: empty investigation (Fork 9), density residual (Fork 10), alias (Fork 12)

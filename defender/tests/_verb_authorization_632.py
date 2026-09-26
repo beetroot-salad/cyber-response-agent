@@ -36,7 +36,8 @@ The surface this suite pins
                    RS14, recorded because it hollows deny-by-default's reach over newly
                    scaffolded SYSTEMS (a new verb on a system the role already holds is
                    still denied, which is what keeps that obligation non-vacuous).
-    `VerbContext(defender_dir, run_dir, env, capture=None)` — `capture` is the transport
+    `VerbContext(defender_dir, run_dir, env, settings_dir, capture=None)` (`settings_dir` since
+    #1106: the run's tenant settings folder) — `capture` is the transport
     capture seam (phase F, finding 6): a `TransportCapture` sink each adapter records its
     resolved outbound request into, before sending.
 
@@ -365,10 +366,13 @@ def shipped_grants() -> dict[str, VerbGrant]:
     both went with the pipeline, and `skills/judge/verb-roster.md` — which advertised three
     ticket verbs to a reader after nothing could dispatch them — went with it. Gather is the
     only verb-bearing role that ships, so this mapping has one key. The derivation is kept
-    exactly because it is what makes a second key appear on its own when one returns."""
-    from defender.runtime.driver import GATHER_DEF
+    exactly because it is what makes a second key appear on its own when one returns.
 
-    return {GATHER_ROLE: GATHER_DEF.verb_grant}
+    #1106 M4: the grant is a RUN's, projected from its tenant's table — `GATHER_DEF` carries
+    none. The shipped one is the committed playground tenant's."""
+    from defender.tests import _tenants1106 as T1106
+
+    return {GATHER_ROLE: T1106.playground_grants().gather}
 
 
 

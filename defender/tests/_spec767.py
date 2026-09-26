@@ -17,9 +17,11 @@ THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile fo
 
   * the writer's collaborators — `TicketWriterDeps{load_config, request}`, the frozen
     dataclass threaded as the second parameter of both writers (g16: there is no third);
-  * the mapping file — `$DEFENDER_DIR`, which `case_ticket._mapping_path` already resolves
-    from and which `tests/test_case_ticket.py` already drives a substitute mapping through
-    (g15), so a hostile-mapping control needs no new seam;
+  * the mapping file — the SETTINGS FOLDER every mapping reader is handed (#1106 D2: no
+    reader finds it itself, so `$DEFENDER_DIR` is no longer a seam). `use_mapping` plants a
+    mapping under `<root>/settings/` and returns that folder; the helpers below hand the
+    folder the test planted (or, with none planted, the committed playground tenant's) to
+    the real writer and screen, so a hostile-mapping control still needs no new seam;
   * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
     `tests/_spec791.py` already implements (g10).
 
@@ -86,7 +88,8 @@ ALERT = {
 #: D3's rendered comment body. The em-dash separator is the MAPPING's, not a code literal.
 COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
 
-MAPPING_RELPATH = "knowledge/environment/systems/case-history/mapping.yaml"
+#: The mapping's home BELOW a tenant's settings folder (#1106: `<tenants root>/<id>/settings/`).
+MAPPING_RELPATH = "systems/case-history/mapping.yaml"
 
 
 def require(obj: Any, name: str, why: str) -> Any:
@@ -102,7 +105,7 @@ def require(obj: Any, name: str, why: str) -> Any:
 
 
 # --------------------------------------------------------------------------------------
-# The mapping — built as data, written to a tree, driven through $DEFENDER_DIR (g15)
+# The mapping — built as data, written to a settings folder, handed in explicitly (#1106)
 # --------------------------------------------------------------------------------------
 
 
@@ -153,33 +156,54 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     return doc
 
 
+def settings_of(root: Path) -> Path:
+    """The settings folder `write_mapping` plants under `root`."""
+    return Path(root) / "settings"
+
+
 def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
-    """Write a mapping into a `$DEFENDER_DIR`-shaped tree and return its path."""
+    """Write a mapping into `settings_of(root)` and return the mapping file's path."""
     import yaml
 
-    path = root / MAPPING_RELPATH
+    path = settings_of(root) / MAPPING_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     text = doc if isinstance(doc, str) else yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
-    """Point the ONE loader at a mapping of this test's choosing.
+#: The settings folder THIS test planted its mapping into, recorded through `monkeypatch`
+#: (`setitem`, undone after every test) so the helpers below hand the same folder to the
+#: writer and the screen. The test's own bookkeeping — production is handed the folder
+#: explicitly by every one of these helpers; nothing in it reads this dict.
+_PLANTED: dict[str, Path] = {}
 
-    `$DEFENDER_DIR` is the seam both sides already resolve through
-    (`case_ticket._mapping_path`, g15) — the writer and the screen read the same file through
-    the same function, which is what `o5_no_vendor_literals_in_code` observes."""
-    path = write_mapping(root, mapping_doc() if doc is None else doc)
-    monkeypatch.setenv("DEFENDER_DIR", str(root))
-    return path
+
+def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
+    """Plant a mapping of this test's choosing and return its SETTINGS FOLDER.
+
+    #1106: the folder is handed to the ONE loader by every caller (`release_predicate(
+    settings)`, `settings_dir=` on the writer and the screen) — the writer and the screen still
+    read the same file through the same function, which is what
+    `o5_no_vendor_literals_in_code` observes."""
+    write_mapping(root, mapping_doc() if doc is None else doc)
+    monkeypatch.setitem(_PLANTED, "settings", settings_of(root))
+    return settings_of(root)
+
+
+def current_settings() -> Path:
+    """The settings folder the running test planted (`use_mapping`), else the committed
+    playground tenant's — the file a driven run resolves when nothing repoints it."""
+    from defender.tests import _tenants1106
+
+    return _PLANTED.get("settings", _tenants1106.PLAYGROUND_SETTINGS)
 
 
 def shipped_released_status_and_author() -> tuple[str, str]:
     """The released status and the agent identity as the SHIPPED mapping spells them.
 
     Read off the real file rather than taken from this module's constants, because the
-    scenarios that cannot repoint `$DEFENDER_DIR` — anything driving the whole run — resolve
+    scenarios that do not plant their own mapping — anything driving the whole run — resolve
     the shipped mapping, and reading it here is what makes those tests a statement about the
     file an operator edits (O5) rather than about a literal."""
     doc = shipped_mapping_doc()
@@ -195,12 +219,14 @@ def shipped_released_status_and_author() -> tuple[str, str]:
 
 
 def shipped_mapping_doc() -> dict[str, Any]:
-    """The repo's own checked-in mapping, read off the real file."""
+    """The repo's own checked-in mapping (the committed playground tenant's), read off the
+    real file."""
     import yaml
 
-    from defender._paths import PATHS
+    from defender.tests import _tenants1106
 
-    return yaml.safe_load((PATHS.defender_dir / MAPPING_RELPATH).read_text(encoding="utf-8"))
+    return yaml.safe_load(
+        (_tenants1106.PLAYGROUND_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------
@@ -371,7 +397,7 @@ class FakeStore:
 
 #: `config` distinguishes THREE states across `writer_deps`/`record`/`open_ticket`: omitted
 #: (use the fixture's own `CONFIG`), explicitly `None` (a run with no case-history config at
-#: all — `deps.load_config()` must answer `None`), or an explicit dict. Python gives both the
+#: all — `deps.load_config(settings)` must answer `None`), or an explicit dict. Python gives both the
 #: first two the same spelling if the default is `None` itself, so the default is this
 #: sentinel instead — never `None` — and `None` is left free to mean what the writer's own
 #: `TicketWriterDeps.load_config` contract says it means.
@@ -384,7 +410,7 @@ def writer_deps(store: FakeStore, *, config: dict[str, str] | None | object = _C
 
     resolved = CONFIG if config is _CONFIG_UNSET else config
     return ticket_writer.TicketWriterDeps(
-        load_config=(lambda: None if resolved is None else dict(resolved)),
+        load_config=(lambda _settings_dir: None if resolved is None else dict(resolved)),
         request=store,
     )
 
@@ -399,6 +425,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
         "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
         "/tickets/{key}/comments, no transition",
     )
+    kw.setdefault("settings_dir", current_settings())
     return fn(run_dir, writer_deps(store, config=config), **kw)
 
 
@@ -407,7 +434,8 @@ def open_ticket(
 ) -> Any:
     from defender.scripts.case_history import ticket_writer
 
-    return ticket_writer.open_case_ticket(run_dir, writer_deps(store, config=config))
+    return ticket_writer.open_case_ticket(
+        run_dir, writer_deps(store, config=config), settings_dir=current_settings())
 
 
 def receipt(run_dir: Path) -> dict[str, Any]:
@@ -464,7 +492,8 @@ def screen(payload: Any, *, verb: str, self_key: str = SELF_KEY) -> tuple[Any, i
     insertion point, called after `handler(args)` and before `_record`/`_model_view`)."""
     from defender.runtime import query_tool
 
-    return query_tool._screen_ticket_payload(self_key, "ticket", verb, payload)
+    return query_tool._screen_ticket_payload(
+        self_key, "ticket", verb, payload, settings_dir=current_settings())
 
 
 def screen_list(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:

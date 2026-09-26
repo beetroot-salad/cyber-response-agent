@@ -8,7 +8,7 @@ the discharge is a PATH CENSUS over the registry, the capability bits and the gr
   * the role registry, walked as `AGENTS` / `AgentRole` / the operator CLI's own name surface;
   * the capability bits, walked as `dataclasses.fields(ToolSet)` cross-checked against what
     `AGENTS` actually grants and against the `tools.<bit>` guards the production tree spells;
-  * the deployment table, PARSED from `knowledge/environment/verb-grants.yaml` through the
+  * the deployment table, PARSED from the playground tenant's `verb-grants.yaml` through the
     loader that owns it, cross-checked against the live `AgentRole` values.
 
 **None of them holds a list of names a careless deletion could edit into agreement.** That is
@@ -152,10 +152,12 @@ def shipped_table():
 
     `load_dispositions` rather than a hand-rolled `yaml.safe_load`: it is the parser production
     reads the file with, so a table this census called well-formed is one the product would
-    actually load. Read from the path rather than `shipped_dispositions()` because that reader
-    is `lru_cache`d for the process.
+    actually load. Read from the path: since #1106 the table is the committed playground
+    tenant's (`knowledge/tenants/playground/settings/`), and no per-process reader exists.
     """
-    return load_dispositions(dispositions_path(DEFENDER))
+    from defender.tests import _tenants1106 as T1106
+
+    return load_dispositions(dispositions_path(T1106.PLAYGROUND_SETTINGS))
 
 
 

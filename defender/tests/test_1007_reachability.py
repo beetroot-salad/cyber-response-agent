@@ -493,7 +493,9 @@ def test_the_production_read_side_declares_the_world_and_the_confinement_needs_i
     assert this_world.ctx.world_id == token, (
         f"the per-world read side declares {this_world.ctx.world_id!r}, not the composed token "
         "the view name's own segment carries")
-    patterns = registry.STAGERS["elastic"].configured_patterns()
+    # #1106: the patterns this RUN's tenant configures — read from the settings folder the
+    # seam's own context carries, never from the checkout.
+    patterns = registry.STAGERS["elastic"].configured_patterns(episode_wide.ctx.settings_dir)
     view = confinement.world_view(W.EVENTS_PATTERN, token)
     assert confinement.confine_index(view, patterns, world_id=this_world.ctx.world_id) == view
     with pytest.raises(W.refusals()):

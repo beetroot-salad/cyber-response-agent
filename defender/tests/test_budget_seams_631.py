@@ -44,11 +44,12 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
 from defender.runtime import driver, observe  # noqa: E402
 from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -198,7 +199,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
             GatherRequest("l-001", "elastic", "goal", ("what",)),
-            GATHER_DEF.verb_grant, catalog=None,
+            T1106.playground_grants().gather, catalog=None,
         ))
     assert seen_gather_deps[0].budget_started_monotonic == deps.budget_started_monotonic
 
@@ -213,13 +214,14 @@ def _drive_gather_query(run_dir: Path, registry):
                                        "params": {"index": "logs"},
                                        "query_id": "elastic.probe"})]])
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    gather_def = T1106.playground_gather_def()
     agent = driver.build_agent_core(
-        GATHER_DEF, deps_type=GATHER_DEF.deps_cls, instructions="probe",
+        gather_def, deps_type=gather_def.deps_cls, instructions="probe",
         logger=logger, agent_id="gather:l-001",
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         verbs=registry, limits=DEFAULT_LIMITS,
     )
-    deps = replace(bind(GATHER_DEF, run_dir,
+    deps = replace(bind(gather_def, run_dir,
                         defender_dir=DEFENDER), lead_id="l-001")
 
     async def _go():
@@ -383,7 +385,7 @@ def test_tier_table_over_the_real_census(tmp_path):
     is the only way MAIN records a finding, and a budget-refusable transcript would mean a
     run that hits the cap can no longer write down what it already knows."""
     main_names = _registered_names(MAIN_DEF)
-    gather_names = _registered_names(GATHER_DEF)
+    gather_names = _registered_names(T1106.playground_gather_def())
     assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
     assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
@@ -434,7 +436,7 @@ def test_same_tool_name_on_two_agents(tmp_path):
     open_budget(gather_dir, "r")
     update_budget_locked(gather_dir, "r", "bash", limits=limits)
     gather_result, _ = drive_agent(
-        GATHER_DEF, gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
+        T1106.playground_gather_def(), gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
         limits=limits, enforce=True, agent_id="gather:l-001")
 
     assert "BUDGET" not in str(main_result.all_messages()).upper(), (
@@ -459,7 +461,7 @@ def _registered_names(defn) -> set[str]:
         from defender.runtime.tools import register_gather_tool
         register_gather_tool(
             agent, lambda agent_id, system, request_limit: agent, driver.GATHER_REQUEST_LIMIT,
-            driver.GATHER_DEF.verb_grant, catalog=None,
+            T1106.playground_grants().gather, catalog=None,
         )
     return set(agent._function_toolset.tools)
 
@@ -477,7 +479,7 @@ def test_gather_keeps_its_request_limit(tmp_path):
     open_budget(run_dir, "r")
     never_stops = [[("read_file", {"path": str(run_dir / "alert.json")})]] * 200
     with pytest.raises(UsageLimitExceeded):
-        drive_agent(GATHER_DEF, run_dir, never_stops, limits=DEFAULT_LIMITS,
+        drive_agent(T1106.playground_gather_def(), run_dir, never_stops, limits=DEFAULT_LIMITS,
                     enforce=False, agent_id="gather:l-001",
                     request_limit=driver.GATHER_REQUEST_LIMIT)
 

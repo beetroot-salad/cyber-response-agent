@@ -266,7 +266,8 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     from defender.runtime import tools_gather
     from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+    from defender.runtime.driver import MAIN_DEF
+    from defender.tests import _tenants1106
 
     seen: list[tuple[str, str]] = []
 
@@ -284,7 +285,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
-        GATHER_DEF.verb_grant, catalog=None,
+        _tenants1106.playground_grants().gather, catalog=None,
     ))
 
     assert seen == [("gather:l-005", "identity")]

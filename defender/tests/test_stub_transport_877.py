@@ -38,7 +38,8 @@ CURL_FAULTS = [
 
 @pytest.fixture
 def ctx(tmp_path):
-    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={})
+    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
+                       settings_dir=tmp_path / "settings")
 
 
 @pytest.fixture(autouse=True)

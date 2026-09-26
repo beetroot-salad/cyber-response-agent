@@ -62,7 +62,8 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.hooks import budget_enforcer  # noqa: E402
@@ -214,7 +215,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
                 deps, factory, ceiling,
                 GatherRequest(LEAD, "elastic", "measure this lead",
                               ("which hosts dev.dana reached",)),
-                GATHER_DEF.verb_grant,
+                T1106.playground_grants().gather,
                 (lambda agent_id, reason: stamps.append((agent_id, reason)))
                 if stamps is not None else None,
                 catalog=None,

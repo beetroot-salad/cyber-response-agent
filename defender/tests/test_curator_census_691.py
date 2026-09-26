@@ -30,6 +30,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     build_registry,
 )
 from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF, CuratorDeps  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 
 def _bash_roles() -> set[AgentRole]:
@@ -121,7 +122,7 @@ def test_a_corpus_name_is_supplied_to_a_role_that_declares_no_corpus(tmp_path):
     compiled policies are equal. RED today: RunScope has no ``corpus_name`` field."""
     from defender.runtime.agent_definition import RunScope
     rd = pending_run_dir(tmp_path)
-    gather = AGENTS[AgentRole.GATHER]
+    gather = T1106.playground_gather_def()  # #1106 M4: gather binds with a RUN's grant
     from defender.runtime.agent_definition import compile_policy_for
     plain = compile_policy_for(gather, rd)
     named = compile_policy_for(gather, rd, scope=RunScope(corpus_name="lessons"))  # RED: no field
@@ -143,6 +144,8 @@ def test_one_shared_spawn_request_drives_every_role_in_the_registry(tmp_path):
     for role, defn in AGENTS.items():
         if role is AgentRole.CORPUS_AUTHOR:
             continue
+        if role is AgentRole.GATHER:
+            defn = T1106.playground_gather_def()  # #1106 M4: gather binds with a RUN's grant
         try:
             # a role with its OWN scope requirements (confine/explicit-tree — e.g. ACTOR,
             # VERIFIER, LEAD_AUTHOR) already raises on a bare RunScope() regardless of
@@ -172,7 +175,7 @@ def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
     from defender.runtime.agent_definition import RunScope, compile_policy_for
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     # a non-curator role reaches a compiled policy through the seam — the positive control.
-    gather_policy = compile_policy_for(AGENTS[AgentRole.GATHER], rd, scope=RunScope())
+    gather_policy = compile_policy_for(T1106.playground_gather_def(), rd, scope=RunScope())
     assert gather_policy.bash_allow  # a real policy came back through the one seam
     # the curator reaches ITS compiled policy through the SAME seam, no private path.
     curator = bind_curator(wt, rd, "lessons")
@@ -192,7 +195,7 @@ def test_the_generic_bind_callers_survive_the_corpus_requirement(tmp_path):
     from defender.runtime.agent_definition import RunScope, compile_policy_for
     from defender.scripts import policy_cli
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    gather = AGENTS[AgentRole.GATHER]
+    gather = T1106.playground_gather_def()  # #1106 M4: gather binds with a RUN's grant
     seam_pol = compile_policy_for(gather, rd, scope=RunScope())      # caller 1: the bare compile seam
     cli_pol = policy_cli._policy(gather, rd, wt / "defender")        # caller 2: policy_cli's bare scope
     assert seam_pol.bash_allow  # a real policy with GATHER's grants, not a degenerate stub

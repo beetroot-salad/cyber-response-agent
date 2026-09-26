@@ -21,7 +21,9 @@ WHAT #995 ADDS
     git and this module is imported at runtime startup, where git must not run.
 
 * `defender/knowledge/environment/verb-grants.yaml` — NEW. The table itself, per-deployment
-  config rather than a Python literal in the shipped runtime.
+  config rather than a Python literal in the shipped runtime. (#1106 moved it to each
+  tenant's `knowledge/tenants/<id>/settings/verb-grants.yaml` at the repo root;
+  `dispositions_path` now takes that settings folder.)
 
 * `scripts/lint/lint_verb_disposition_census.py` — NEW. Wires the resolver's walk to
   `census_gaps` and fails CI on residue in either direction.

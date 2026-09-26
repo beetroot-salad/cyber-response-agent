@@ -37,15 +37,15 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     with `kind == "read"` and the reader's role; the same read through GATHER deps says
     `gather`. Without the role a row cannot say WHICH agent opened the lesson, and without
     the kind a runtime push and a model's choice read the same."""
-    from defender.agents import GATHER_DEF
     from defender.runtime.agent_definition import bind
+    from defender.tests import _tenants1106
     from defender.runtime.tools import _tool_read_file
 
     main, run, dfn = _main_deps(tmp_path)
     corpus = dfn / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, "read-936", nodes=CLASS_SELECTOR)
-    gather = bind(GATHER_DEF, run, defender_dir=dfn)
+    gather = bind(_tenants1106.playground_gather_def(), run, defender_dir=dfn)
 
     assert "lesson body" in _tool_read_file(main, str(lesson.resolve()))
     assert "lesson body" in _tool_read_file(gather, str(lesson.resolve()))

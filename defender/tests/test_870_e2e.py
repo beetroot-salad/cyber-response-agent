@@ -22,7 +22,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.agents import GATHER_DEF  # noqa: E402
 from defender.learning.core import persist  # noqa: E402
 from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.leads import pitfalls_curator  # noqa: E402
@@ -47,6 +46,7 @@ from defender.tests._declared870 import (  # noqa: E402
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -143,7 +143,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     # tick just committed into, admits the reducer surface and refuses the paths outside the
     # corpus that prove it is still a gate. Without this arm the whole round ends at a
     # committed file nobody has shown anyone reads.
-    policy = compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=repo / "defender")
+    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=repo / "defender")
 
     def _readable(path: Path) -> bool:
         return permission.decide_read(

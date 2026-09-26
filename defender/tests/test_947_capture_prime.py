@@ -47,6 +47,7 @@ from defender.learning.branch.ledger import (
     payload_text,
 )
 from defender.runtime.verb_grant import VerbGrant
+from defender.tests import _tenants1106
 from defender.runtime.verbs import VerbContext
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
@@ -176,7 +177,8 @@ def run_ctx(tmp_path: Path) -> VerbContext:
     an arm elsewhere that leans on this helper would pass with the injection deleted."""
     run_dir = tmp_path / "sibling-run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={})
+    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={},
+                       settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
 
 # 1. what a primed row is

@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
 TOKEN_B = T.world_token("b")
@@ -163,7 +164,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
         def __init__(self):
             self.calls: list[str] = []
 
-        def open_case_ticket(self, run_dir):
+        def open_case_ticket(self, run_dir, **_kw):
             self.calls.append("open")
 
         def record_case_ticket(self, run_dir, **_kw):
@@ -233,6 +234,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
+        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
         world=_run().resume_world(ep / "family.yaml", "b"),
         investigate=lambda **kw: seen.update(kw) or {},
     )
@@ -257,6 +259,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
+        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
         world=_run().resume_world(ep / "family.yaml", "b"),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
@@ -268,13 +271,16 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     constraint the resume path adds is enforced on the resume path only."""
     base, src = T.runs_base(tmp_path)
     seen: dict = {}
+    grants = T1106.playground_grants()
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
+        tenant=T1106.playground_tenant(), grants=grants,
         world=None, investigate=lambda **kw: seen.update(kw) or {})
     registry = seen["verbs"]
     assert type(registry).__name__ == "ModuleVerbRegistry"
-    assert registry.grant is T.mod("runtime.driver").GATHER_DEF.verb_grant
+    # #1106 M4: the run's OWN tenant's gather grant, handed in — no process-level grant.
+    assert registry.grant == grants.gather
 
 
 def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
@@ -348,8 +354,9 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     _run()._run_investigation_lifecycle(
         run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(ep / "family.yaml", "b"),
+        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
         investigate=lambda **kw: events.append("investigate") or {},
-        start_box=lambda *a: events.append("start") or object(),
+        start_box=lambda *a, **kw: events.append("start") or object(),
         stop_box=lambda *a, **kw: events.append("stop"),
         scrub=lambda tree: events.append("scrub"))
     assert events == ["start", "investigate", "stop", "scrub"]

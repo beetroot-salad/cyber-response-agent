@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from defender.runtime import bash_exec
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 #: The word every candidate runs. A shim rather than a real tool, because the oracle needs the
 #: argv bash actually passed — recovered from a FILE, not from stdout, so a candidate that
@@ -368,7 +369,6 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
     Every #955 defect is two rules where the code needs one, and every one of them has been
     found at a seam rather than inside a function. This is the seam.
     """
-    from defender.agents import GATHER_DEF
     from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.permission import decide_bash
 
@@ -378,7 +378,7 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
     defender_dir.mkdir()
     target = run_dir / "report.md"
     target.write_text("x", encoding="utf-8")
-    policy = compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=defender_dir)
+    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=defender_dir)
 
     for blank in _NOT_SHELL_BLANKS:
         cmd = f"cat {target}{blank}"

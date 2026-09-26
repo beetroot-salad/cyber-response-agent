@@ -24,6 +24,7 @@ this only moves WHERE policy is supplied.
 """
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 import pytest
@@ -35,10 +36,18 @@ from defender._paths import PATHS  # noqa: E402
 from defender.runtime import tools  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 _MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
-_GATHER_POLICY = compile_policy_for(GATHER_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))
+
+
+@functools.cache
+def _gather_policy():
+    """Gather's policy, compiled with a RUN's grant (#1106 M4: `GATHER_DEF` carries none) —
+    lazily, so the module collects before the tenant folder exists."""
+    return compile_policy_for(
+        T1106.playground_gather_def(), run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
 
 def _ident(run_dir: Path) -> dict:
@@ -108,8 +117,9 @@ def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
     """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an
     explicit per-run policy (`compile_policy_for(GATHER_DEF, run_dir, defender_dir=…)`) — .policy is that
     policy, role is GATHER, lead_id is carried."""
-    deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=_GATHER_POLICY)
-    assert deps.policy is _GATHER_POLICY
+    gather_policy = _gather_policy()
+    deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=gather_policy)
+    assert deps.policy is gather_policy
     assert deps.role is AgentRole.GATHER
     assert deps.lead_id == "l-001"
 

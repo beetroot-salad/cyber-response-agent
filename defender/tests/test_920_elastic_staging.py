@@ -43,11 +43,19 @@ from defender.learning.branch.estate.stagers import elastic
 from defender.scripts.adapters import confinement
 from defender.learning.branch.estate.stagers.dispatch import STAGERS
 from defender.runtime.verbs import VerbContext
+from defender.tests import _tenants1106
 
-#: The run context the stager reads config through — the SHIPPED tree, because the keys it
-#: resolves (`ELASTIC_EVENTS_INDEX`/`ELASTIC_ALERTS_INDEX`) are the ones the adapter falls back
-#: to, and a fixture of our own would pin the stager against a file no run ever reads.
-_CTX = VerbContext(defender_dir=PATHS.defender_dir, run_dir=PATHS.defender_dir, env={})
+#: The run context the stager reads config through — the SHIPPED settings (the committed
+#: playground tenant's, #1106), because the keys it resolves (`ELASTIC_EVENTS_INDEX`/
+#: `ELASTIC_ALERTS_INDEX`) are the ones the adapter falls back to, and a fixture of our own would
+#: pin the stager against a file no run ever reads.
+#:
+#: Built at CALL time (`_ctx()`), not at import: a module constant would fail this file's
+#: collection — and every importer's — on a `VerbContext` the tree cannot yet build.
+def _ctx() -> VerbContext:
+    return VerbContext(defender_dir=PATHS.defender_dir, run_dir=PATHS.defender_dir, env={},
+                       settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+
 
 #: The committed elastic catalog: 15 templates, 12 of them ES|QL. Both numbers are asserted
 #: below rather than merely derived, because a corpus that shrank to one template would make
@@ -346,7 +354,7 @@ def test_an_index_that_is_not_a_real_pattern_is_refused():
         elastic.redirect("query", {"index": 42}, "w1")
 
     with pytest.raises(elastic.StagingError, match="explicit index"):
-        elastic.redirect("query", {"index": 42}, "w1", _CTX)
+        elastic.redirect("query", {"index": 42}, "w1", _ctx())
 
 
 @pytest.mark.parametrize("index", ["", None])
@@ -360,12 +368,12 @@ def test_a_falsy_index_addresses_the_default_the_way_the_adapter_reads_it(index)
     record a `refused` row on every sibling for a call the base served — the harness-owned
     base-vs-sibling difference this seam exists not to manufacture, arriving through the door
     the `42` case above holds shut."""
-    prepared = elastic.redirect("query", {"index": index, "native_query": "*"}, "w1", _CTX)
+    prepared = elastic.redirect("query", {"index": index, "native_query": "*"}, "w1", _ctx())
 
     from defender.scripts.adapters.elastic_adapter import load_config
 
     assert prepared["index"] == elastic.view_name(
-        load_config(_CTX)["ELASTIC_EVENTS_INDEX"], "w1")
+        load_config(_ctx())["ELASTIC_EVENTS_INDEX"], "w1")
 
     # Without a ctx there is no config to read the default through, which is the one refusal
     # that remains — and it is the SAME refusal an omitted `index` gets, not a malformed one.
@@ -389,9 +397,9 @@ def test_an_omitted_index_resolves_through_the_runs_own_config(verb):
     key = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}[verb]
     from defender.scripts.adapters.elastic_adapter import load_config
 
-    expected = elastic.view_name(load_config(_CTX)[key], "w1")
+    expected = elastic.view_name(load_config(_ctx())[key], "w1")
 
-    prepared = elastic.redirect(verb, {"native_query": "*"}, "w1", _CTX)
+    prepared = elastic.redirect(verb, {"native_query": "*"}, "w1", _ctx())
 
     assert prepared == {"native_query": "*", "index": expected}
     assert expected.startswith("wv-w1-")
@@ -422,7 +430,7 @@ def test_the_restored_payload_matches_the_base_it_is_compared_against(verb, aske
     docs = [{"host": "office-ws-1"}]
 
     def payload_for(world_id):
-        prepared = elastic.redirect(verb, asked, world_id, _CTX)
+        prepared = elastic.redirect(verb, asked, world_id, _ctx())
         if verb == "esql":
             return prepared, esql_payload(prepared["query"], wire)
         return prepared, search_envelope(prepared["index"], docs, 1, False, "desc")
@@ -433,7 +441,7 @@ def test_the_restored_payload_matches_the_base_it_is_compared_against(verb, aske
     assert staged != base, (
         "the staged payload does not echo its corpus at all, so this pins nothing — the "
         "parametrized verb no longer carries the identity `restore` exists to take back")
-    assert elastic.restore(verb, staged, asked, prepared, _CTX) == base
+    assert elastic.restore(verb, staged, asked, prepared, _ctx()) == base
 
 
 def test_restore_leaves_a_payload_it_did_not_stage_alone():
@@ -448,10 +456,10 @@ def test_restore_leaves_a_payload_it_did_not_stage_alone():
     The cost of the rule is the failure it cannot catch — an echo field nobody listed stays
     un-restored — which is why the test above derives its shape from the adapter."""
     asked = {"index": "logs-*", "native_query": "*"}
-    prepared = elastic.redirect("query", asked, "w1", _CTX)
+    prepared = elastic.redirect("query", asked, "w1", _ctx())
     evidence = {"index": "somewhere-else", "hits": [{"rule": {"index": ["logs-*"]}}]}
 
-    assert elastic.restore("query", evidence, asked, prepared, _CTX) == evidence
+    assert elastic.restore("query", evidence, asked, prepared, _ctx()) == evidence
 
 
 @pytest.mark.parametrize(("a", "b"), [("logs-*", "logs.*"), ("logs-*", "logs*"),
