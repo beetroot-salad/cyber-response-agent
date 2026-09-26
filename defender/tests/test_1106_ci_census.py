@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from defender.tests import _tenants1106 as T
 from defender.tests._dispositions995 import planted_tree
 from defender.tests._repo import seed_repo
@@ -111,6 +113,26 @@ def test_a_row_missing_from_one_tenant_turns_the_gate_red_naming_that_tenant(tmp
     assert rc != 0, out
     assert "tenant-two" in out, out
     assert "beta.lookup" in out, out
+
+
+@pytest.mark.parametrize("fault", ["no agent half", "no mapping", "linked settings half"])
+def test_a_tenant_the_run_would_refuse_at_start_turns_the_gate_red(tmp_path, fault):
+    """CI checks a tenant through the run's own resolver: a folder whose table loads and whose
+    census is total, but which `run.py` refuses at start, is not clean. The control is the
+    green test above — the same repo without the fault."""
+    repo = _repo(tmp_path)
+    one = repo / "knowledge" / "tenants" / "tenant-one"
+    if fault == "no agent half":
+        shutil.rmtree(one / "agent")
+    elif fault == "no mapping":
+        (one / "settings" / "systems" / "case-history" / "mapping.yaml").unlink()
+    else:
+        shutil.rmtree(one / "settings")
+        (one / "settings").symlink_to(repo / "knowledge" / "tenants" / "tenant-two" / "settings")
+    rc, out = _gate(repo)
+    assert rc != 0, out
+    assert "tenant-one" in out, out
+    assert "refuse this tenant" in out, out
 
 
 def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(tmp_path):

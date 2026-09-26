@@ -69,6 +69,17 @@ def record_path(runs_base: Path) -> Path:
     return Path(runs_base) / TENANT_RECORD_NAME
 
 
+def tenant_of_run(run_dir: Path, *, io: Any = _real_io) -> TenantRecord:
+    """The tenant a finished run ran as: the record of the runs base it sits in (a run dir is
+    `<runs_base>/<run_id>`), or `TenantRecordCorrupt`.
+
+    THE RECORD, NEVER THE RUN'S STAMP. `provenance.json` lives in the run dir, which is the
+    box's writable bind, so its `tenant_id` is whatever the model last wrote there. The record
+    sits beside the run dir, is never mounted into any box, and is the sole authority for which
+    tenant a runs base serves. A stamp is evidence to compare against this, not a source of it."""
+    return read_tenant(Path(run_dir).parent, io=io)
+
+
 def _parse_record(text: str, *, source: Path) -> TenantRecord:
     try:
         obj = json.loads(text)

@@ -50,7 +50,13 @@ from defender.learning.leads.declared_systems import (  # noqa: E402
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
 from defender._corpus import QueryTemplate, is_established  # noqa: E402
-from defender._tenants import default_tenants_root, template_dir  # noqa: E402
+from defender._tenants import (  # noqa: E402
+    TenantDir,
+    TenantDirError,
+    default_tenants_root,
+    tenant_dir,
+    template_dir,
+)
 from defender.runtime import lead_zero as lead_zero_mod  # noqa: E402
 from defender.runtime.lead_zero._spec import correlation_grant  # noqa: E402
 from defender.runtime.lead_zero_config import LeadZeroConfigError  # noqa: E402
@@ -93,14 +99,24 @@ def _unreadable_adapters(
     return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
 
 
-def _settings_folders(root: Path) -> list[tuple[str, Path]]:
-    """Every settings folder the gate checks (#1106 M7): each committed tenant's under
-    `knowledge/tenants/`, then the template's — `(name, settings dir)`, in a stable order."""
+def _tenant_folders(root: Path) -> list[tuple[str, TenantDir | TenantDirError]]:
+    """Every tenant folder the gate checks (#1106 M7): each committed tenant under
+    `knowledge/tenants/`, then the template — `(name, resolved tenant or the refusal)`, in a
+    stable order.
+
+    THROUGH THE RUN'S OWN RESOLVER (`tenant_dir`), so what CI accepts is what a run accepts: a
+    tenant with no `agent/` half (git keeps no empty directory, so a missing `.gitkeep` loses
+    it in every clone), a missing required file or a linked half is refused here exactly as
+    `run.py` would refuse it at start — not passed as clean because its table loads."""
     tenants = default_tenants_root(root)
-    folders = ([(d.name, d / "settings") for d in sorted(tenants.iterdir()) if d.is_dir()]
-               if tenants.is_dir() else [])
+    names = sorted(d.name for d in tenants.iterdir() if d.is_dir()) if tenants.is_dir() else []
     template = template_dir(root)
-    folders.append((template.name, template / "settings"))
+    folders: list[tuple[str, TenantDir | TenantDirError]] = []
+    for parent, name in [*((tenants, n) for n in names), (template.parent, template.name)]:
+        try:
+            folders.append((name, tenant_dir(parent, name)))
+        except TenantDirError as refusal:
+            folders.append((name, refusal))
     return folders
 
 
@@ -167,7 +183,13 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every
     # load is exit 2 for the same reason an unreadable adapter is.
     worst = 0
     catalog = catalog_templates(defender_dir)
-    for name, settings in _settings_folders(root):
+    for name, resolved in _tenant_folders(root):
+        if isinstance(resolved, TenantDirError):
+            print(f"lint_verb_disposition_census: {name}: a run would refuse this tenant at "
+                  f"start: {resolved}", file=sys.stderr)
+            worst = 2
+            continue
+        settings = resolved.settings
         try:
             rows = load_dispositions(dispositions_path(settings))
         except DispositionError as e:

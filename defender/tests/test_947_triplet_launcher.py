@@ -564,9 +564,10 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
     SOURCE's own record it was anchored to (#976 M4/O5), and whether the dirty override was
     given — none sourced from another, so an override cannot be read out of the provenance
     half, and the anchor cannot be mistaken for the siblings' agreement or vice versa."""
-    base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    _cli().verify_family(ep, [T.sibling_run_dir(base, w) for w in T.WORLDS],
+    # The siblings' OWN runs base (`<episode>/runs`, §7 FORK-13), with no tenant record, so
+    # the stamp carries exactly its three roles (a seeded base adds `base_world_id`, #1106).
+    _cli().verify_family(ep, [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS],
                          source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert set(stamp) == {"agreed", "allow_dirty", "source"}

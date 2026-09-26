@@ -118,12 +118,22 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
 
 # ---- end to end through the launcher ------------------------------------------------------------
 
+_AS_STAMPED = object()
+
+
 def _launch(tmp_path: Path, *, stamp_tenant: str | None, root: Path,
-            door: Any = None) -> tuple[Any, SpawnRecorder]:
+            door: Any = None, record_tenant: Any = _AS_STAMPED) -> tuple[Any, SpawnRecorder]:
     """One episode through the real launcher (`cli.main`), as `test_947_triplet_launcher` drives
-    it, with the SOURCE run's stamp naming `stamp_tenant` and `--tenants-root root`."""
+    it, with the SOURCE run's stamp naming `stamp_tenant`, its runs base's record naming
+    `record_tenant` (the same tenant unless a scenario says otherwise; `None` leaves the
+    fixture's own record) and `--tenants-root root`."""
     base, src = P.runs_base(tmp_path)
     P.source_stamp(src, tenant_id=stamp_tenant)
+    record = stamp_tenant if record_tenant is _AS_STAMPED else record_tenant
+    if record is not None:
+        _tenant = T.mod("_tenant")
+        _tenant.record_path(base).unlink()
+        _tenant.ensure_tenant(base, tenant_id=record)
     spawn = SpawnRecorder()
     outcome: Any
     try:
@@ -204,6 +214,24 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     manifest = T.mod("learning.branch.cli").episode_dir_for(P.EPISODE_ID) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert tuple(doc["configured_patterns"]) == TENANT_PATTERNS, doc["configured_patterns"]
+
+
+def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(
+        tmp_path, capsys):
+    """The stamp is in the box's writable run dir; a model can rewrite its `tenant_id`. Both
+    tenants exist, the record says `acme`, the stamp says `bravo`: refused, naming both and the
+    record, before a sibling starts — never a family staged into bravo's estate. The control is
+    `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant` (the two agree)."""
+    root = tmp_path / "tenants"
+    _episode_tenant(root)
+    T.plant_tenant(root, "bravo", configs=T.config_texts(
+        "bravo", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
+    outcome, spawn = _launch(tmp_path, stamp_tenant="bravo", record_tenant="acme", root=root)
+    text = f"{outcome} {capsys.readouterr().err}"
+    assert spawn.launches == [], spawn.launches
+    assert "'bravo'" in text, text
+    assert "'acme'" in text, text
+    assert "_tenant.json" in text, text
 
 
 def test_a_source_stamp_naming_a_tenant_absent_from_the_injected_root_refuses_before_any_sibling(

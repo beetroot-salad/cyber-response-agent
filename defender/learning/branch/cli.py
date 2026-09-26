@@ -463,25 +463,42 @@ def _no_stamp(source_run_dir: Path) -> LauncherRefused:
 
 
 def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> TenantDir:
-    """The episode's tenant: the one the SOURCE run's stamp records (#1106 M2), resolved under
-    the tenants root this launcher was handed — or the refusal, before anything is spent.
+    """The episode's tenant: the SOURCE run's, resolved under the tenants root this launcher
+    was handed — or the refusal, before anything is spent.
 
     Every sibling runs on this tenant (`start_family` seeds it into their runs base), the review
-    replays through its settings, and the manifest is judged against its corpus patterns. A
-    stamp with no tenant (a pre-#1077 run) or the retired bootstrap `default` gets NO fallback
-    (N10): a family run on a tenant nobody chose would measure somebody's estate, but not
-    necessarily the source's."""
+    replays through its settings and write door, and the manifest is judged against its corpus
+    patterns — so it is read from where the box cannot write: the source's runs-base record
+    (`_tenant.tenant_of_run`). The source's stamp sits in the box's writable run dir, and a model
+    that rewrote its `tenant_id` would otherwise pick whose estate the whole family stages into.
+    The stamp must AGREE with the record — a disagreement is a forged or moved stamp, refused
+    rather than settled — and a stamp with no tenant (a pre-#1077 run) or the retired bootstrap
+    `default` gets NO fallback (N10): a family run on a tenant nobody chose would measure
+    somebody's estate, but not necessarily the source's."""
     from defender import _tenant
 
     stamp = _stamp_of(source_run_dir)
     if stamp is None:
         raise _no_stamp(source_run_dir)
-    tenant_id = stamp.get("tenant_id")
+    try:
+        record = _tenant.tenant_of_run(source_run_dir)
+    except _tenant.TenantRecordCorrupt as refusal:
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir}'s tenant: its runs base's record is the "
+            f"authority for it, and {refusal}") from refusal
+    tenant_id = record.tenant_id
     if not _tenant.is_usable_tenant_id(tenant_id):
         raise LauncherRefused(
-            f"[branch] source run {source_run_dir}'s stamp names no usable tenant "
-            f"({tenant_id!r}) — an episode's siblings run on the source's tenant, and there is "
-            "no fallback tenant to run them on")
+            f"[branch] source run {source_run_dir}'s runs base names no usable tenant "
+            f"({tenant_id!r}, in {_tenant.record_path(Path(source_run_dir).parent)}) — an "
+            "episode's siblings run on the source's tenant, and there is no fallback tenant to "
+            "run them on")
+    if stamp.get("tenant_id") != tenant_id:
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir}'s stamp names tenant "
+            f"{stamp.get('tenant_id')!r} but its runs base's record "
+            f"({_tenant.record_path(Path(source_run_dir).parent)}) names {tenant_id!r} — the "
+            "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
     try:
         return tenant_dir(tenants_root, tenant_id)
     except TenantDirError as refusal:

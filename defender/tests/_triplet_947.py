@@ -649,6 +649,9 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Pa
     # to tell an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
         json.dumps(provenance_record(tenant_id=SOURCE_TENANT)), encoding="utf-8")
+    # ...and the runs base's own tenant record, which every ordinary run's base holds (run
+    # start creates it) and which the launcher reads the source's tenant from (#1106).
+    mod("_tenant").ensure_tenant(base, tenant_id=SOURCE_TENANT)
     seed_source_session(base, src)
     return base, src
 
