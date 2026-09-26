@@ -50,7 +50,7 @@ PREFIX = "TICKET"
 
 #: The shared transport template PLUS the store's KEY GRAMMAR. The grammar is an ENVIRONMENT
 #: fact — what a ticket key looks like in the deployed store — so it is declared in
-#: `knowledge/environment/systems/ticket/config.env` (`TICKET_KEY_PATTERN`), not hardcoded in
+#: the tenant's `settings/systems/ticket/config.env` (`TICKET_KEY_PATTERN`), not hardcoded in
 #: a consumer, and it is REQUIRED: absent means the system is down (`ConfigFault`, exit 2),
 #: never a built-in default screening keys against a grammar this environment never agreed to.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")

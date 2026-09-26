@@ -49,7 +49,7 @@ from defender.learning.leads.declared_systems import (  # noqa: E402
     read_adapters,
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
-from defender._corpus import iter_query_templates  # noqa: E402
+from defender._corpus import is_established, iter_query_templates  # noqa: E402
 from defender._tenants import default_tenants_root, template_dir  # noqa: E402
 from defender.runtime import lead_zero as lead_zero_mod  # noqa: E402
 from defender.runtime.lead_zero._spec import correlation_grant  # noqa: E402
@@ -107,17 +107,20 @@ def _settings_folders(root: Path) -> list[tuple[str, Path]]:
 
 
 def _lead_zero_fault(settings: Path, rows: tuple, defender_dir: Path) -> str | None:
-    """The run-start lead-zero agreement check (`lead_zero.resolve_correlation_dispatch`),
-    run here per folder: the config names an established catalog template whose pair is the
-    one the table grants the lead. `None` when it agrees (or the table withholds the lead)."""
+    """Each folder's lead-zero config, checked in CI (#1106 M7): it names an ESTABLISHED
+    catalog template — whether or not the table grants the lead, since a withheld lead's id is
+    never consulted at run start and would otherwise surface only once an operator grants it —
+    and, when the table does grant the lead, that template's pair is the one granted (the
+    run-start agreement check, `lead_zero.resolve_correlation_dispatch`). `None` when both hold."""
+    catalog = list(iter_query_templates(defender_dir / "skills" / "gather" / "queries"))
     try:
-        lead_zero_mod.resolve_correlation_dispatch(
-            load_correlation_template(lead_zero_config_path(settings)),
-            iter_query_templates(defender_dir / "skills" / "gather" / "queries"),
-            correlation_grant(rows),
-        )
+        template_id = load_correlation_template(lead_zero_config_path(settings))
+        lead_zero_mod.resolve_correlation_dispatch(template_id, catalog, correlation_grant(rows))
     except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError) as e:
         return str(e)
+    if not any(t.id == template_id and is_established(t) for t in catalog):
+        return (f"correlation_template {template_id!r} names no established template in the "
+                "catalog (the table withholds the lead, so no run consults it yet)")
     return None
 
 

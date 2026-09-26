@@ -421,6 +421,13 @@ def _resolve_run_tenant(
     runs_base = _run.resolve_runs_base()
     _io.guarded_mkdir(runs_base, base=runs_base)
     record = _tenant.ensure_tenant(runs_base)
+    if not _tenant.is_usable_tenant_id(record.tenant_id):
+        # Refused on the id (N10), not left to the folder lookup: a folder that happened to be
+        # named `default` must not turn the retired bootstrap value back into a tenant.
+        sys.exit(
+            f"[run.py] this run's tenant {record.tenant_id!r} (recorded in "
+            f"{_tenant.record_path(runs_base)}) is the retired bootstrap value — no tenant is "
+            "chosen for it; edit the record to name this runs base's tenant")
     try:
         tenant = tenant_dir(tenants_root, record.tenant_id)
     except TenantDirError as refusal:
