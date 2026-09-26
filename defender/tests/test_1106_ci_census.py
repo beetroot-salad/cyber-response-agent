@@ -66,14 +66,14 @@ def _without(rows: dict[tuple[str, str], dict], pair: tuple[str, str]) -> dict:
 
 def _repo(tmp_path: Path, *, one: dict = ROWS_ONE, two: dict = ROWS_TWO,
           template: dict = ROWS_TEMPLATE, one_lead_zero: str = T.CENSUS_LEAD_ZERO_ID,
-          extra: tuple[str, ...] = ()) -> Path:
+          two_lead_zero: str = T.CENSUS_LEAD_ZERO_ID, extra: tuple[str, ...] = ()) -> Path:
     repo = planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T.plant_census_catalog(repo)
     tenants = repo / "knowledge" / "tenants"
     T.plant_tenant(tenants, "tenant-one", table=_table(one), configs={},
                    lead_zero=T.lead_zero_text(one_lead_zero))
     T.plant_tenant(tenants, "tenant-two", table=_table(two), configs={},
-                   lead_zero=T.lead_zero_text(T.CENSUS_LEAD_ZERO_ID))
+                   lead_zero=T.lead_zero_text(two_lead_zero))
     T.plant_tenant(repo / "knowledge", "tenant-template", table=_table(template), configs={},
                    lead_zero=T.lead_zero_text(T.CENSUS_LEAD_ZERO_ID))
     for name in extra:
@@ -118,6 +118,18 @@ def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(
     assert rc != 0, out
     assert "tenant-template" in out, out
     assert "alpha.health-check" in out, out
+
+
+def test_a_withheld_leads_config_naming_no_catalog_template_still_turns_the_gate_red(tmp_path):
+    """O8 says each folder's lead-zero names a template the catalog HOLDS — not only when the
+    table grants the lead. Tenant two withholds the lead (the run skips it, so the run-start
+    check never consults the id), and its config names a template that does not exist: CI is the
+    only place that catches it before an operator grants the lead. Control: the default repo,
+    where tenant two names the real template, is green (the test above)."""
+    rc, out = _gate(_repo(tmp_path, two_lead_zero="alpha.no-such-template"))
+    assert rc != 0, out
+    assert "tenant-two" in out, out
+    assert "alpha.no-such-template" in out, out
 
 
 def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_tenant(tmp_path):

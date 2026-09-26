@@ -164,6 +164,16 @@ def test_a_legacy_default_record_refuses_naming_the_record_file(world, capsys):
     assert _names(text, base / "_tenant.json"), text
 
 
+def test_a_legacy_default_record_refuses_even_when_a_default_folder_exists(world, capsys):
+    """D4/N10: `default` is the retired bootstrap value and is never a run's tenant — refused
+    on the id itself, not only because no folder happens to carry the name. A complete tenant
+    planted AS `default` must not be accepted; the refusal names the record file."""
+    T.plant_tenant(world["root"], "default")
+    base = world["runs_base"]("default")
+    text, _ = _refusal(world, capsys)
+    assert _names(text, base / "_tenant.json"), text
+
+
 def test_a_fresh_runs_base_runs_as_playground_and_refuses_on_its_missing_mapping(world, capsys):
     """O4's second named case, reached through D4's bridge: a FRESH runs base mints
     `playground`, the injected root's playground lacks `mapping.yaml`, and the run refuses
