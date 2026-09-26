@@ -114,6 +114,31 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(hosted, base, a
         "the stamp is written by the host before the box exists — the sentinel is planted later")
 
 
+def test_materialize_refuses_a_record_rewritten_after_the_tenant_was_chosen(
+        hosted, base, alert):
+    """#1106: `run.py` chooses the run's tenant (its settings, its grants) from the record
+    BEFORE the box and hands that same record to the builder. Rewritten in between, the
+    builder must not stamp the file's new tenant over a run using the old one's settings — it
+    refuses, naming both. Handed the record as it still stands, it stamps it (the control)."""
+    import dataclasses
+
+    import pytest
+
+    from defender import _tenant
+
+    hosted(alert, "run-control")
+    on_disk = _tenant.read_tenant(base)
+    same = hosted(alert, "run-same", tenant_record=on_disk)
+    assert _stamp(same)["tenant_id"] == on_disk.tenant_id
+
+    chosen = dataclasses.replace(on_disk, tenant_id="acme")
+    with pytest.raises(ValueError, match="disagrees with the tenant record") as caught:
+        hosted(alert, "run-rewritten", tenant_record=chosen)
+    assert "acme" in str(caught.value), caught.value
+    assert on_disk.tenant_id in str(caught.value), caught.value
+    assert _record(base)["tenant_id"] == on_disk.tenant_id, "the record itself is left alone"
+
+
 def test_the_tenant_record_is_created_once_under_the_runs_base(hosted, base, alert):
     """The first materialisation creates `<runs_base>/_tenant.json` with `tenant_id="playground"`
     (#1106 D4: the bootstrap value was `"default"` before),

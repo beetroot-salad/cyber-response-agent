@@ -206,6 +206,31 @@ def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(wor
     assert _names(text, world["root"] / "newco" / "settings" / "verb-grants.yaml"), text
 
 
+#: Gather is granted `health-check` and nothing else: the table loads, gather's grant is
+#: NON-EMPTY, and binding it succeeds — yet no `query` can ever be granted.
+TABLE_HEALTH_CHECK_ONLY = """\
+dispositions:
+  cmdb:
+    get-host: {roles: [], reason: "not yet granted in this fixture"}
+    health-check: {roles: [gather]}
+"""
+
+
+def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
+    """The template refusal's sibling: a table granting gather only `health-check` is not an
+    empty grant, so a check on `entries` alone passes it — and the run then spends model calls
+    to have every query DENIED. A health check reaches no data; refused before the box, naming
+    the table. The control is the positive-control test below (a table granting a query)."""
+    T.plant_tenant(world["root"], "probe", table=TABLE_HEALTH_CHECK_ONLY)
+    grants = T.run_grants(world["root"] / "probe" / "settings")
+    assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
+        "the fixture must grant gather a health check and nothing else"
+    world["runs_base"]("probe")
+    text, _ = _refusal(world, capsys)
+    assert _names(text, world["root"] / "probe" / "settings" / "verb-grants.yaml"), text
+    assert "query" in text, text
+
+
 def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
     """M5 runs the lead-zero agreement check at start: a tenant whose table grants the lead
     while its config names a template the catalog does not hold is refused before the box —

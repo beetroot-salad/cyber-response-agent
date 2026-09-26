@@ -169,8 +169,9 @@ class RunGrants:
 
     A value that travels with the run, never a module constant: before #1106 the table was read
     once per process at import and these three were module-level, so a process could only ever
-    hold one tenant's permissions. `path` is the resolved table they came from — the file a
-    refusal names when it says where a withholding is written.
+    hold one tenant's permissions. `path` is the resolved table they came from — the file an
+    OPERATOR-facing refusal names. What the model is told is `run_tenant.table_pointer`: the
+    settings half is host-only, and its host path is not the model's to read.
 
     `correlation_system` is derived from `correlation` (the one system item 3 is dispatched
     against, `None` when the table withholds the lead), so the two cannot drift.
@@ -201,6 +202,23 @@ def run_grants(settings_dir: Path) -> RunGrants:
         correlation=correlation,
         correlation_system=correlation_system(correlation),
     )
+
+
+def require_gather_query(grants: RunGrants) -> None:
+    """Refuse a run's grants under which gather can QUERY nothing — the one "grants nothing"
+    refusal.
+
+    A `health-check` grant is not a query: a table granting gather only health checks loads,
+    binds, and then answers every `query` DENIED mid-run — after the box is up and MAIN has
+    spent model calls. The one predicate every caller asks (the run start, `defender-policy`),
+    so none of them can count a health check as a grant."""
+    if not any(verb != HEALTH_CHECK for _system, verb, _ in grants.gather.entries):
+        raise DispositionError(
+            f"{grants.path} grants gather no query verb — a run could query nothing (a "
+            f"`{HEALTH_CHECK}` grant alone reaches no data). Grant gather at least one (system, "
+            "verb) there before running this tenant (a tenant copied from the template grants "
+            "nothing)."
+        )
 
 
 def _systems_block(path: Path) -> Mapping[object, object]:
@@ -508,6 +526,7 @@ __all__ = [
     "dispositions_path",
     "grant_for",
     "load_dispositions",
+    "require_gather_query",
     "run_grants",
     "RunGrants",
 ]

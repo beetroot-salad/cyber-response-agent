@@ -320,8 +320,7 @@ def _settings_of(deps: Any) -> Path:
 
 
 def _build_deps(
-    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str,
-    settings_dir: Path | None = None,
+    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str, settings_dir: Path,
 ) -> _CaptureDeps:
     return _CaptureDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,

@@ -49,15 +49,12 @@ from defender.learning.leads.declared_systems import (  # noqa: E402
     read_adapters,
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
-from defender._corpus import is_established, iter_query_templates  # noqa: E402
+from defender._corpus import QueryTemplate, is_established  # noqa: E402
 from defender._tenants import default_tenants_root, template_dir  # noqa: E402
 from defender.runtime import lead_zero as lead_zero_mod  # noqa: E402
 from defender.runtime.lead_zero._spec import correlation_grant  # noqa: E402
-from defender.runtime.lead_zero_config import (  # noqa: E402
-    LeadZeroConfigError,
-    lead_zero_config_path,
-    load_correlation_template,
-)
+from defender.runtime.lead_zero_config import LeadZeroConfigError  # noqa: E402
+from defender.runtime.run_tenant import catalog_templates, correlation_dispatch  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
     census_gaps,
@@ -65,6 +62,7 @@ from defender.runtime.verb_dispositions import (  # noqa: E402
     grant_for,
     load_dispositions,
 )
+from defender.runtime.verb_grant import GrantError  # noqa: E402
 from defender.runtime.verbs import RosterRead  # noqa: E402
 
 
@@ -106,17 +104,16 @@ def _settings_folders(root: Path) -> list[tuple[str, Path]]:
     return folders
 
 
-def _lead_zero_fault(settings: Path, rows: tuple, defender_dir: Path) -> str | None:
+def _lead_zero_fault(settings: Path, rows: tuple, catalog: list[QueryTemplate]) -> str | None:
     """Each folder's lead-zero config, checked in CI (#1106 M7): it names an ESTABLISHED
     catalog template — whether or not the table grants the lead, since a withheld lead's id is
     never consulted at run start and would otherwise surface only once an operator grants it —
     and, when the table does grant the lead, that template's pair is the one granted (the
-    run-start agreement check, `lead_zero.resolve_correlation_dispatch`). `None` when both hold."""
-    catalog = list(iter_query_templates(defender_dir / "skills" / "gather" / "queries"))
+    run-start agreement check itself, `run_tenant.correlation_dispatch`). `None` when both
+    hold. `catalog` is the tree's, walked once for every folder."""
     try:
-        template_id = load_correlation_template(lead_zero_config_path(settings))
-        lead_zero_mod.resolve_correlation_dispatch(template_id, catalog, correlation_grant(rows))
-    except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError) as e:
+        template_id = correlation_dispatch(settings, catalog, correlation_grant(rows)).template_id
+    except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError, GrantError) as e:
         return str(e)
     if not any(t.id == template_id and is_established(t) for t in catalog):
         return (f"correlation_template {template_id!r} names no established template in the "
@@ -169,6 +166,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every
     # folder's table must be total over the one walked census; a folder whose table cannot even
     # load is exit 2 for the same reason an unreadable adapter is.
     worst = 0
+    catalog = catalog_templates(defender_dir)
     for name, settings in _settings_folders(root):
         try:
             rows = load_dispositions(dispositions_path(settings))
@@ -178,7 +176,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every
             continue
         table = dispositions_path(settings).relative_to(root)
         gaps = census_gaps(walked, rows)
-        lead_zero_fault = _lead_zero_fault(settings, rows, defender_dir)
+        lead_zero_fault = _lead_zero_fault(settings, rows, catalog)
         if not gaps and lead_zero_fault is None:
             print(
                 f"lint_verb_disposition_census: {name}: clean — {len(rows)} dispositions "

@@ -160,13 +160,8 @@ def check_signatures(report: Report, verbs) -> None:
         report.add(PASS, f"{len(verbs)} verb(s) are dispatchable as fn(ctx, **params)")
 
 
-def check_config(report: Report, settings_dir: Path | str, system: str) -> None:  # noqa: C901 — one check per config rule, plus the unresolved-tenant arm
-    """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106). Handed
-    the tenant's refusal instead of a folder (a `str`), it WARNs — like an absent config.env,
-    the check is advisory, and the scaffold's other checks still run."""
-    if isinstance(settings_dir, str):
-        report.add(WARN, f"config.env not checked — {settings_dir}")
-        return
+def check_config(report: Report, settings_dir: Path, system: str) -> None:
+    """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106)."""
     path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
         report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")
@@ -257,34 +252,28 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
 def main() -> None:
     import argparse
 
-    from defender._tenants import TenantDirError, default_tenants_root, tenant_dir
+    from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
 
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     ap.add_argument("system")
-    ap.add_argument("--tenant", default=None,
-                    help="the tenant being connected — its settings/ holds the config.env; "
-                         "default the bridge's bootstrap tenant (#1106 D4, until #1078)")
-    ap.add_argument("--tenants-root", type=Path, default=None,
-                    help="default <checkout>/knowledge/tenants")
+    add_tenant_arguments(ap, reads="holds the connected system's config.env")
     args = ap.parse_args()
     system = args.system
     defender = _defender_dir()
     os.environ.setdefault("DEFENDER_DIR", str(defender))
-    tenants_root = (args.tenants_root if args.tenants_root is not None
-                    else default_tenants_root(defender.parent))
-    from defender._tenant import DEFAULT_TENANT_ID
-
-    settings_dir: Path | str
-    try:
-        settings_dir = tenant_dir(
-            tenants_root, args.tenant if args.tenant is not None else DEFAULT_TENANT_ID).settings
-    except TenantDirError as refusal:
-        settings_dir = f"the tenant's settings folder could not be resolved: {refusal}"
 
     print(f"validate_scaffold: {system}\n")
     report = Report()
     verbs = check_registry(report, defender, system)
-    check_config(report, settings_dir, system)
+    # An unresolvable tenant WARNs rather than exits: the config check is advisory (an absent
+    # config.env only warns), and the scaffold's other checks still run.
+    try:
+        settings_dir = entry_tenant(defender, args.tenants_root, args.tenant).settings
+    except TenantDirError as refusal:
+        report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
+                         f"resolved: {refusal}")
+    else:
+        check_config(report, settings_dir, system)
     check_skill(report, defender, system)
     check_templates(report, defender, system, verbs)
     report.render_and_exit()

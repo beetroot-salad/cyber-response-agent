@@ -254,12 +254,13 @@ def build_gather_agent(  # noqa: PLR0913 — composition root, same shape as bui
     extra_capabilities: Sequence[Any] = (),
     session_id: str | None = None,
     cache_key: str | None = None,
-    verb_grant: VerbGrant | None = None,
+    *,
+    verb_grant: VerbGrant,
 ) -> Agent[GatherDeps, str]:
     name = gather_model()
-    # The RUN's gather grant when one is handed in (every production build is); an unbound
-    # build keeps `GATHER_DEF`'s empty grant, which binds nothing.
-    defn = gather_def_for(verb_grant) if verb_grant is not None else GATHER_DEF
+    # The grant this lead is bound over — the RUN's gather grant, or item 3's narrower
+    # correlation grant (#1106). Required: there is no process-level grant to fall back to.
+    defn = gather_def_for(verb_grant)
     return build_agent_core(
         replace(
             defn, model=lambda: name,
@@ -478,12 +479,12 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     correlation_task: Any = None,
     toolset: Any = None,
     catalog: str | None,
-    gather_grant: VerbGrant | None = None,
+    gather_grant: VerbGrant,
 ) -> Agent[AgentDeps, str]:
     # `gather_grant` is the RUN's (`RunGrants.gather`, #1106) — every lead this root dispatches
-    # is bound over it and its prompt's indexes are narrowed to it. Omitted (a build no run
-    # handed a grant), gather holds the empty grant and a dispatch refuses at `bind`.
-    gather_grant = gather_grant if gather_grant is not None else GATHER_DEF.verb_grant  # lint-default: ok — DI seam owning its default (the unbound, empty grant)
+    # is bound over it and its prompt's indexes are narrowed to it. Required: a build that
+    # means "no grant" hands `GATHER_DEF.verb_grant` (the empty one), and a dispatch then
+    # refuses at `bind`.
     # The bounds arrive RESOLVED, non-`Optional`. Re-coalescing here would give the gate's ONE
     # bounds object a default at four depths, and the entry point could then resolve one value
     # while a direct build resolved another from its own environment read.

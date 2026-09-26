@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._paths import PATHS
-from defender._tenant import DEFAULT_TENANT_ID
+from defender._tenants import add_tenant_arguments
 from defender.agents import AGENTS
 from defender.runtime import permission
 from defender.runtime.agent_definition import (
@@ -88,19 +88,27 @@ def _policy(
     )
 
 
-def _definition(role: AgentRole, tenants_root: Path, tenant: str) -> AgentDefinition:
+def _definition(
+    role: AgentRole, defender_dir: Path, tenants_root: Path | None, tenant: str | None,
+) -> AgentDefinition:
     """The role's definition as a run would bind it. Gather's grant is the named tenant's
     (#1106 M2: this entry point is handed the root and the tenant, and resolves them the way a
-    run does); every other role's definition carries its own grant and needs no tenant."""
+    run does — refused, like a run, when gather could query nothing under it); every other
+    role's definition carries its own grant and needs no tenant."""
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
-    from defender._tenants import TenantDirError, tenant_dir
+    from defender._tenants import TenantDirError, entry_tenant
     from defender.runtime.driver import gather_def_for
-    from defender.runtime.verb_dispositions import DispositionError, run_grants
+    from defender.runtime.verb_dispositions import (
+        DispositionError,
+        require_gather_query,
+        run_grants,
+    )
 
     try:
-        grants = run_grants(tenant_dir(tenants_root, tenant).settings)
+        grants = run_grants(entry_tenant(defender_dir, tenants_root, tenant).settings)
+        require_gather_query(grants)
     except (TenantDirError, DispositionError) as refusal:
         sys.exit(f"defender-policy: {refusal}")
     return gather_def_for(grants.gather)
@@ -224,13 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--json", action="store_true", dest="as_json")
         p.add_argument("--run-dir", required=True, type=Path)
         p.add_argument("--defender-dir", type=Path, default=PATHS.defender_dir)
-        p.add_argument(
-            "--tenants-root", type=Path, default=None,
-            help="the tenants root (default <checkout>/knowledge/tenants)",
-        )
-        p.add_argument("--tenant", default=DEFAULT_TENANT_ID,
-                       help="the tenant whose grant a gather policy is built from; default the "
-                            "bridge's bootstrap tenant (#1106 D4, until #1078)")
+        add_tenant_arguments(p, reads="verb-grants.yaml a gather policy is built from")
         p.add_argument(
             "--corpus-name", default=None,
             help="the per-spawn corpus name (required for a corpus-requiring role, e.g. corpus_author)",
@@ -238,11 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     role = _role_for(args.agent)
-    from defender._tenants import default_tenants_root
-
-    tenants_root = (args.tenants_root if args.tenants_root is not None
-                    else default_tenants_root(PATHS.repo_root))
-    defn = _definition(role, tenants_root, args.tenant)
+    defn = _definition(role, args.defender_dir, args.tenants_root, args.tenant)
     policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)

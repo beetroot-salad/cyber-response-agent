@@ -51,7 +51,7 @@ def _main_instructions(defender_dir: Path) -> str:
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], verbs: Any = None, limits: dict = DEFAULT_LIMITS,
-    run_id: str | None = None, tenant: Any, grants: Any,
+    run_id: str | None = None, tenant: Any,
 ) -> tuple[str, str, str]:
     """Lead-0's call site, with its OWN exception handler: a `BudgetKill` or
     `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` is caught HERE so it cannot
@@ -69,8 +69,8 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
             verbs=verbs, limits=limits, run_id=run_id, settings_dir=tenant.settings,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(
-            result, run_dir, correlation_system=grants.correlation_system,
-            grant_home=str(grants.path))
+            result, run_dir, correlation_system=tenant.grants.correlation_system,
+            grant_home=tenant.table_pointer)
         ancestor_block = result.text
         status = result.status
     except (BudgetKill, RunAborted) as e:
@@ -86,8 +86,8 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         # findings` row is least likely to be on the page — so it is the arm that most needs
         # the heading's "declare it yourself; that is not reuse" line (#964).
         lead_zero_text = lead_zero_mod.render_orient_section(
-            degraded, run_dir, correlation_system=grants.correlation_system,
-            grant_home=str(grants.path))
+            degraded, run_dir, correlation_system=tenant.grants.correlation_system,
+            grant_home=tenant.table_pointer)
 
     orientation = orient.orientation(
         run_dir, defender_dir, alert_path, systems=systems, lead_zero_section=lead_zero_text,
@@ -112,7 +112,7 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
     resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], verbs: Any, limits: dict, run_id: str | None,
-    tenant: Any, grants: Any,
+    tenant: Any,
 ) -> tuple[str, str, str]:
     """MAIN's first message — for a fresh run or a resumed one.
 
@@ -135,7 +135,7 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     if resume is None:
         return _user_prompt(
             run_dir, alert_path, defender_dir, systems=systems, verbs=verbs, limits=limits,
-            run_id=run_id, tenant=tenant, grants=grants,
+            run_id=run_id, tenant=tenant,
         )
     prompt = (
         f"{resume.continuation_prompt}\n\n"

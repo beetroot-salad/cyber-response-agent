@@ -210,6 +210,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
             make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
             verbs=verbs if verbs is not None else elastic_ok(rec),
             extra_capabilities=extra, session_id=session_id,
+            verb_grant=T1106.playground_grants().gather,
         )
 
     try:

@@ -234,8 +234,9 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
-        world=_run().resume_world(ep / "family.yaml", "b"),
+        tenant=T1106.playground_run_tenant(),
+        world=_run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
         investigate=lambda **kw: seen.update(kw) or {},
     )
     registry = seen["verbs"]
@@ -259,8 +260,9 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
-        world=_run().resume_world(ep / "family.yaml", "b"),
+        tenant=T1106.playground_run_tenant(),
+        world=_run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
 
@@ -275,7 +277,7 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_tenant(), grants=grants,
+        tenant=T1106.playground_run_tenant(grants=grants),
         world=None, investigate=lambda **kw: seen.update(kw) or {})
     registry = seen["verbs"]
     assert type(registry).__name__ == "ModuleVerbRegistry"
@@ -289,9 +291,57 @@ def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
     recording, wherever the manifest lives."""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    world = _run().resume_world(ep / "family.yaml", "b")
+    world = _run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
     assert world.episode_dir == ep
     assert world.ledger_path == ep / "served" / f"{TOKEN_B}.jsonl"
+
+
+def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_patterns(
+        tmp_path):
+    """A manifest authored before #1106 records no `configured_patterns`: its overlays were
+    judged against the checkout's elastic config, which now lives in the tenant's settings.
+    World b's overlay is keyed on a configured-only pattern (`logs-*`, which the capture never
+    named), so a loader handed no configured set refuses it — the control — while the sibling's
+    own resume, which hands its tenant's patterns in, loads the world."""
+    import pytest
+
+    from defender.runtime.branch import _family
+
+    base, src = T.runs_base(tmp_path)
+    doc = T.family_doc(source_run_dir=str(src))
+    del doc["configured_patterns"]
+    assert "captured_patterns" not in doc, "the capture must not name the pattern on its own"
+    ep = T.episode(tmp_path, doc=doc)
+    with pytest.raises(_family.FamilyError, match="logs"):
+        _family.load_family(ep / "family.yaml")
+    world = _run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
+    assert world.family.configured_patterns == T.CONFIGURED
+
+
+def test_a_sibling_resumes_a_pre_1106_manifest_through_its_seeded_tenant_record(
+        tmp_path, monkeypatch):
+    """The entry point end to end: a sibling's runs base holds the tenant record the launcher
+    seeded; `run.py --resume` on a manifest that records no configured set looks that tenant
+    up — reading the record, never minting one — and judges the overlays against its patterns,
+    reaching the lifecycle with the world. The loader-level control is the test above."""
+    from defender import _tenant
+
+    base, src = T.runs_base(tmp_path)
+    doc = T.family_doc(source_run_dir=str(src))
+    del doc["configured_patterns"]
+    ep = T.episode(tmp_path, doc=doc)
+    sibling_base = tmp_path / "sibling-runs"
+    _tenant.ensure_tenant(sibling_base, tenant_id=T1106.PLAYGROUND_ID)
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(sibling_base))
+    lifecycle = _Recorder([])
+    rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
+                      "--tenants-root", str(T1106.TENANTS_ROOT)],
+                     lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
+    assert rc == 0
+    assert lifecycle.kwargs["world"].family.configured_patterns == T.CONFIGURED
+    assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
 
 
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
@@ -301,7 +351,8 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     confinement = T.mod("scripts.adapters.confinement")
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    world = _run().resume_world(ep / "family.yaml", "b")
+    world = _run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
     assert world.token == TOKEN_B
     assert confinement.world_view(T.EVENTS_PATTERN, world.token).startswith(f"wv-{TOKEN_B}-")
     assert world.ledger_path.name == f"{TOKEN_B}.jsonl"
@@ -314,7 +365,8 @@ def test_947_world_applier_compares_the_same_world_token_the_other_three_sites_u
     applier_mod = T.mod("learning.branch.estate.applier")
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    world = _run().resume_world(ep / "family.yaml", "b")
+    world = _run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
     applier = applier_mod.WorldApplier()
     prepared = applier.prepare("elastic", "query", {"index": T.EVENTS_PATTERN}, world, None)
     assert prepared["index"] == f"wv-{TOKEN_B}-logs-"
@@ -353,8 +405,9 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     (run_dir / "gather_raw").mkdir(parents=True)
     _run()._run_investigation_lifecycle(
         run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
-        world=_run().resume_world(ep / "family.yaml", "b"),
-        tenant=T1106.playground_tenant(), grants=T1106.playground_grants(),
+        world=_run().resume_world(
+        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
+        tenant=T1106.playground_run_tenant(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),
         stop_box=lambda *a, **kw: events.append("stop"),

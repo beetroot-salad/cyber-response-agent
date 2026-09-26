@@ -70,7 +70,7 @@ def is_system_name(name: str) -> bool:
 
 ADAPTER_SUFFIX = "_adapter.py"
 
-#: A refusal's pointer at the verb-disposition table when no run handed its resolved path in:
+#: A refusal's pointer at the verb-disposition table when no run handed its tenant's pointer in:
 #: the file's name and where it lives, so the reader still knows WHICH file fixes a grant.
 TABLE_POINTER = "the tenant's settings/verb-grants.yaml"
 
@@ -587,8 +587,9 @@ class VerbRegistry:
     #: data edit can widen — a pointer is worse than silence when it names a file that cannot
     #: fix the refusal. Read by `decide`'s DENIED and ungranted-system refusals, which since
     #: #995 tell the reader where to go. Every grant a model calls through is a RUN's table
-    #: projection (#999, #1106), and whoever builds such a registry hands it that run's
-    #: resolved table; the class default is what a registry over a literal keeps.
+    #: projection (#999, #1106), and whoever builds such a registry hands it that tenant's
+    #: MODEL-FACING pointer (`run_tenant.table_pointer` — the tenant and the file, never the
+    #: resolved host path); the class default is what a registry over a literal keeps.
     grant_home: str | None = None
 
     def __init__(self, grant: VerbGrant):
@@ -747,10 +748,10 @@ class ModuleVerbRegistry(VerbRegistry):
             )
         self.roster = roster
         self._systems: tuple[str, ...] = tuple(sorted(roster.accepted))
-        # Where a refusal says an ungranted verb is withheld: the RUN's resolved table
-        # (`RunGrants.path`, #1106) when whoever built the grant hands it in, else the table
-        # named generically — every grant this class serves a model is some tenant's table
-        # projection, so the pointer always names the file that fixes it. The two `DENY_ALL`
+        # Where a refusal says an ungranted verb is withheld: the run's tenant's table, named
+        # for the model (`run_tenant.table_pointer`, #1106) when whoever built the grant hands
+        # it in, else named generically — every grant this class serves a model is some
+        # tenant's table projection, so the pointer always names the file that fixes it. The two `DENY_ALL`
         # callers (`_scaffold_rules`, `hooks/inject_system_skill_description`) never call
         # `decide`, so they never render it.
         self.grant_home = grant_home if grant_home is not None else TABLE_POINTER

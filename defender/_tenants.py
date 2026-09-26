@@ -26,6 +26,7 @@ required file is a `TenantDirError` naming the path, with no fallback (D3).
 """
 from __future__ import annotations
 
+import argparse
 import dataclasses
 from pathlib import Path
 
@@ -136,6 +137,33 @@ def tenant_dir(tenants_root: Path, tenant_id: str) -> TenantDir:
     return TenantDir(tenant_id=tenant_id, settings=settings, agent=agent)
 
 
+def add_tenant_arguments(parser: argparse.ArgumentParser, *, reads: str) -> None:
+    """`--tenant` and `--tenants-root` for an operator command that reads a tenant's settings
+    (#1106). `reads` says what the command takes from the tenant's `settings/`, for `--help`."""
+    parser.add_argument(
+        "--tenant", default=None,
+        help=f"the tenant whose settings/ {reads}; default the bridge's bootstrap tenant "
+             "(#1106 D4, until #1078)")
+    parser.add_argument(
+        "--tenants-root", type=Path, default=None,
+        help="the folder holding one sub-folder per tenant; default <checkout>/knowledge/tenants, "
+             "the checkout being the one the command's code tree sits in")
+
+
+def entry_tenant(defender_dir: Path, tenants_root: Path | None, tenant_id: str | None) -> TenantDir:
+    """An operator command's tenant, from its own arguments — or `TenantDirError`.
+
+    ONE derivation for every such command: the tenants root defaults to the checkout that holds
+    `defender_dir`, the code tree the command itself runs against, so a command pointed at a
+    worktree's tree reads that worktree's tenants and never another checkout's. The tenant id
+    defaults to the bridge's bootstrap tenant until #1078 puts it on the request."""
+    from defender._tenant import DEFAULT_TENANT_ID
+
+    root = tenants_root if tenants_root is not None else default_tenants_root(
+        Path(defender_dir).parent)
+    return tenant_dir(root, tenant_id if tenant_id is not None else DEFAULT_TENANT_ID)
+
+
 __all__ = [
     "AGENT_HALF",
     "REQUIRED_SETTINGS",
@@ -143,7 +171,9 @@ __all__ = [
     "TEMPLATE_DIRNAME",
     "TenantDir",
     "TenantDirError",
+    "add_tenant_arguments",
     "default_tenants_root",
+    "entry_tenant",
     "tenant_dir",
     "template_dir",
 ]

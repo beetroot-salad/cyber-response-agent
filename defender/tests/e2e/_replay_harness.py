@@ -457,7 +457,8 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     provider call raise, so the run is provably hermetic.
 
     `tenant` / `grants` (#1106) are the run's `TenantDir` and per-run `RunGrants`; omitted,
-    the committed playground tenant's, resolved through the real resolver and loader.
+    the committed playground tenant's, resolved through the real resolver and loader. They are
+    handed to the driver as one `RunTenant` (`_tenants1106.run_tenant`).
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
@@ -563,12 +564,19 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
     # playground tenant — resolved through the real resolver, never a hand-built value.
-    if tenant is None:
-        tenant = _tenants1106.playground_tenant()
-    if grants is None:
-        grants = _tenants1106.run_grants(tenant.settings)
+    #
+    # The driver takes them as ONE value (`RunTenant`), resolved before it runs, the way
+    # `run.py` resolves it before the box: item 3's dispatch identity is checked here — for a
+    # scenario that will dispatch the lead (an injected registry, no resume), exactly the runs
+    # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
+    # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
+    run_tenant = _tenants1106.run_tenant(
+        tenant if tenant is not None else _tenants1106.playground_tenant(),
+        grants=grants, defender_dir=tree,
+        dispatches_lead_zero=resume is None and verbs is not None,
+    )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=tree, make_model=make_model, tenant=tenant, grants=grants, **seams,
+            defender_dir=tree, make_model=make_model, tenant=run_tenant, **seams,
         ))

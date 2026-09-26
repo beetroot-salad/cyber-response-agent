@@ -226,7 +226,7 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     """The review replays through `seams.adapter_seam(episode, tenant)` when no adapters are
     injected: its registry must hold the EPISODE tenant's gather grant (a pair the family's
     siblings cannot reach must not be reachable by the review either), point its refusals at
-    that tenant's table, and carry that tenant's settings on its verb context. Tenant B's
+    that tenant's table (by name, not host path), and carry that tenant's settings on its verb context. Tenant B's
     table differs from the checkout playground's, pair by pair."""
     seams = T.mod("learning.branch.seams")
     b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B, marker="bravo")
@@ -237,8 +237,12 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     assert side.registry.decide("identity", "get-user").outcome == "GRANTED"
     denied = side.registry.decide("identity", "can-access")
     assert denied.outcome == "DENIED", denied
-    assert str(b / "settings" / "verb-grants.yaml") in (denied.refusal or "") or \
-        str(tenant.settings / "verb-grants.yaml") in (denied.refusal or ""), denied.refusal
+    # The refusal is MODEL-facing: it names the episode tenant's table, never its host path.
+    from defender.runtime.run_tenant import table_pointer
+
+    assert table_pointer("bravo") in (denied.refusal or ""), denied.refusal
+    assert str(b) not in (denied.refusal or ""), denied.refusal
+    assert str(tenant.settings) not in (denied.refusal or ""), denied.refusal
     assert Path(side.ctx.settings_dir) == tenant.settings
     transport = T.mod("scripts.adapters._stub_transport")
     assert transport.load_config(side.ctx, "identity", "IDENTITY")["URL_BASE"] == \
@@ -279,11 +283,14 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         run._drive_investigation(
             alert_path=src / "alert.json", run_dir=src, run_id=src.name,
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
-            tenant=tenant, grants=grants, world=run.resume_world(ep / "family.yaml", "b"),
+            tenant=T.run_tenant(tenant, grants=grants),
+            world=run.resume_world(ep / "family.yaml", "b", settings=lambda t=tenant: t.settings),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)
         assert {(s, v) for s, v, _ in registry.grant.entries} == set(pairs), tenant_id
         assert registry.decide(*own_pair).outcome == "GRANTED", (tenant_id, own_pair)
         assert registry.decide(*other_pair).outcome != "GRANTED", (tenant_id, other_pair)
-        assert str(grants.path) in str(registry.grant_home), (tenant_id, registry.grant_home)
+        # The MODEL-FACING pointer names this tenant's table, never the host path to it.
+        assert repr(tenant_id) in str(registry.grant_home), (tenant_id, registry.grant_home)
+        assert str(grants.path) not in str(registry.grant_home), registry.grant_home

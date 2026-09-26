@@ -170,7 +170,7 @@ def _render_section(body: str) -> str:
 
 def render_orient_section(
     result: LeadZeroResult, run_dir: Path | None = None,
-    *, correlation_system: str | None, grant_home: str | None = None,
+    *, correlation_system: str | None, grant_home: str,
 ) -> str:
     """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
     reuse) followed by item 1's whole untrusted frame, unmodified.
@@ -206,8 +206,9 @@ def render_orient_section(
     cannot tell them apart, so it says what is observable and points at the file. The
     parameter mirrors `prepare_correlation_lead`'s, for the same reason, and has no default:
     it is the RUN's value (`RunGrants.correlation_system`, #1106), and a process-level default
-    would be some other tenant's answer. `grant_home` is the run's resolved table, named in
-    that line; `None` names it generically."""
+    would be some other tenant's answer. `grant_home` is the run's table as the model is told of
+    it (`RunTenant.table_pointer` — the tenant and the file, never a host path), named in that
+    line."""
     heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -220,10 +221,9 @@ def render_orient_section(
             f"findings` block first; that is not reuse"
         )
     if correlation_system is None:
-        table = grant_home if grant_home is not None else "this tenant's verb-grants.yaml"
         heading += (
             f". NOTE: {L3} was NOT dispatched on this run — the verb-disposition table "
-            f"({table}) grants the correlation lead no query verb (withheld, or "
+            f"({grant_home}) grants the correlation lead no query verb (withheld, or "
             "never decided for it), so no correlation was run and none is coming"
         )
     return heading + ")\n\n" + result.text
@@ -268,7 +268,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
 
 def resolve_lead_zero(
     *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
-    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, settings_dir: Path | None = None,
+    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, settings_dir: Path,
 ) -> LeadZeroResult:
     run_dir = Path(run_dir)
     defender_dir = Path(defender_dir)

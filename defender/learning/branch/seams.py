@@ -158,6 +158,7 @@ def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
     from defender.learning.branch.review import verb_context
     from defender._paths import adapters_under
     from defender.run_common import DEFENDER_DIR
+    from defender.runtime.run_tenant import table_pointer
     from defender.runtime.verb_dispositions import run_grants
     from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 
@@ -165,6 +166,6 @@ def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
     return EpisodeAdapters(
         registry=ModuleVerbRegistry(
             read_roster(adapters_under(DEFENDER_DIR)), grants.gather,
-            grant_home=str(grants.path)),
+            grant_home=table_pointer(tenant.tenant_id)),
         ctx=verb_context(Path(episode_dir), tenant.settings),
     )

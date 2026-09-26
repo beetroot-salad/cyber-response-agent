@@ -610,7 +610,8 @@ def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_makin
     _declare_l_finding(run, L0, "ancestor resolution", "elastic")
 
     heading = render_orient_section(LeadZeroResult(text="", status="resolved"), run,
-                                    correlation_system="elastic")
+                                    correlation_system="elastic",
+                                    grant_home="settings/verb-grants.yaml of tenant 'playground'")
     assert "is NOT in investigation.md" in heading
     assert "declare it yourself" in heading
     assert "not reuse" in heading
@@ -635,12 +636,14 @@ def test_the_heading_says_nothing_extra_when_the_seed_landed(tmp_path):
     _declare_l_finding(run, L0, "ancestor resolution", "elastic")
 
     heading = render_orient_section(LeadZeroResult(text="", status="resolved"), run,
-                                    correlation_system="elastic")
+                                    correlation_system="elastic",
+                                    grant_home="settings/verb-grants.yaml of tenant 'playground'")
     assert "is NOT in investigation.md" not in heading
 
     # ...and the degraded arm, which has no run dir to look in, is the heading unchanged.
     assert "is NOT in investigation.md" not in render_orient_section(
-        LeadZeroResult(text="", status="failed"), correlation_system="elastic")
+        LeadZeroResult(text="", status="failed"), correlation_system="elastic",
+        grant_home="settings/verb-grants.yaml of tenant 'playground'")
 
 
 # the third site — the turn-N branch's seed

@@ -208,7 +208,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
-        tenant=_tenants1106.playground_tenant(), grants=_tenants1106.playground_grants(),
+        tenant=_tenants1106.playground_run_tenant(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,
@@ -827,7 +827,8 @@ def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
     # #1106: the CLI is handed its tenant's settings folder (parsed from `--tenant`).
     from defender.tests import _tenants1106
 
-    assert ticket_adapter._cli_context(_tenants1106.PLAYGROUND_SETTINGS).run_dir == run_dir
+    assert ticket_adapter._cli_context(
+        DEFENDER, _tenants1106.PLAYGROUND_SETTINGS).run_dir == run_dir
 
 
 def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):

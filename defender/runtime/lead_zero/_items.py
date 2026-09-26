@@ -119,7 +119,7 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
 
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
     *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
-    capture: Any, env: dict, limits: dict, settings_dir: Path | None = None,
+    capture: Any, env: dict, limits: dict, settings_dir: Path,
 ) -> tuple[str, str]:
     from defender.scripts.adapters.elastic_adapter import load_config
 
@@ -146,8 +146,6 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     signal_index = alert.get("signal_index")
     if not isinstance(signal_index, str) or not signal_index.strip():
         try:
-            if settings_dir is None:
-                raise TypeError("no tenant settings folder to read the alerts index from")
             cfg = load_config(VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env,
                                           settings_dir=settings_dir))
             signal_index = cfg["ELASTIC_ALERTS_INDEX"]
@@ -403,7 +401,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     budget_started_monotonic: float = 0.0, catalog: str | None,
-    dispatch: CorrelationDispatch, settings_dir: Path | None = None,
+    dispatch: CorrelationDispatch, settings_dir: Path,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —

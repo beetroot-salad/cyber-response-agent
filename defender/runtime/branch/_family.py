@@ -30,6 +30,7 @@ import re
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -573,7 +574,11 @@ def parse_family(
 
     Both sets are RECORDED in the document by the authoring call and preferred over the
     arguments on load, so a sibling or a judge re-reading the manifest judges its overlays
-    against the sets that authored it without resolving anything.
+    against the sets that authored it without resolving anything. A manifest written before
+    #1106 records no configured set — its overlays were judged against the checkout's corpus
+    config, which now lives in the tenant's settings — so a reader that must accept one hands
+    that tenant's patterns in as `configured_patterns` (`run.py --resume` does, for its own
+    tenant); a reader that hands none admits only the captured set.
     """
     if not isinstance(doc, dict):
         raise FamilyError(f"the manifest must be a mapping, got {type(doc).__name__}")
@@ -620,11 +625,17 @@ def runnable_worlds(family: Family) -> list[World]:
 
 def load_family(
     path: Path, *, captured_patterns: tuple[str, ...] = (),
-    configured_patterns: tuple[str, ...] = (),
+    configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
 ) -> Family:
-    """Read and validate the manifest at `path`."""
-    return parse_family(_read_document(Path(path)), captured_patterns=captured_patterns,
-                        configured_patterns=configured_patterns)
+    """Read and validate the manifest at `path`.
+
+    `configured_patterns` is ASKED only for a manifest that records none (one written before
+    #1106): answering it means resolving the episode's tenant, which a reader holding a
+    manifest that records its own set — every manifest written since — never has to do."""
+    doc = _read_document(Path(path))
+    recorded = isinstance(doc, dict) and bool(doc.get("configured_patterns"))
+    return parse_family(doc, captured_patterns=captured_patterns,
+                        configured_patterns=() if recorded else tuple(configured_patterns()))
 
 
 def _read_document(path: Path) -> object:

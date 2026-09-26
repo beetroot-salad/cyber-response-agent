@@ -179,27 +179,35 @@ def test_the_import_probe_does_see_a_settings_read_when_one_happens(tmp_path):
 
 # ---- the refusal names the run's own table ----------------------------------------------------
 
-def test_a_denied_verb_names_the_runs_own_table_path(tmp_path):
-    """A DENIED refusal points at the table the withholding is written in — the RUN's resolved
-    table (M4), handed to the registry as `grant_home`. The control: tenant B's registry names
-    B's table, not A's, for the same verb."""
+def test_a_denied_verb_names_the_runs_own_tenants_table_but_not_its_host_path(tmp_path):
+    """A DENIED refusal points at the table the withholding is written in — the RUN's tenant's
+    table (M4), named for the model (`RunTenant.table_pointer`) and handed to the registry as
+    `grant_home` by the run. The model reads this text, so it names the tenant and the file,
+    never the resolved host path of a folder that never reaches the box. The control: tenant
+    B's registry names B, not A, for the same verb."""
+    from defender.runtime.run_tenant import table_pointer
+
     root = tmp_path / "tenants"
     a = T.plant_tenant(root, "acme", table=T.TABLE_A)
     b = T.plant_tenant(root, "bravo", table=T.TABLE_B)
     grants_a, grants_b = T.run_grants(a / "settings"), T.run_grants(b / "settings")
+    tenant_a = T.run_tenant(T.tenants().tenant_dir(root, "acme"), grants=grants_a)
+    tenant_b = T.run_tenant(T.tenants().tenant_dir(root, "bravo"), grants=grants_b)
+    assert tenant_a.table_pointer == table_pointer("acme")
     # A's gather reaches cmdb and does not hold `list-roles`, a verb the cmdb adapter really
     # declares: DENIED, and the pointer names A's table.
-    decision_a = _registry(grants_a.gather, grant_home=str(grants_a.path)).decide(
+    decision_a = _registry(grants_a.gather, grant_home=tenant_a.table_pointer).decide(
         "cmdb", "list-roles")
     assert decision_a.outcome == "DENIED", decision_a
-    assert str(grants_a.path) in (decision_a.refusal or ""), decision_a.refusal
-    assert str(grants_b.path) not in (decision_a.refusal or "")
+    assert tenant_a.table_pointer in (decision_a.refusal or ""), decision_a.refusal
+    assert tenant_b.table_pointer not in (decision_a.refusal or "")
+    assert str(tmp_path) not in (decision_a.refusal or ""), decision_a.refusal
     # B's gather reaches identity and does not hold `can-access`: DENIED, naming B's table.
-    decision_b = _registry(grants_b.gather, grant_home=str(grants_b.path)).decide(
+    decision_b = _registry(grants_b.gather, grant_home=tenant_b.table_pointer).decide(
         "identity", "can-access")
     assert decision_b.outcome == "DENIED", decision_b
-    assert str(grants_b.path) in (decision_b.refusal or ""), decision_b.refusal
-    assert str(grants_a.path) not in (decision_b.refusal or "")
+    assert tenant_b.table_pointer in (decision_b.refusal or ""), decision_b.refusal
+    assert tenant_a.table_pointer not in (decision_b.refusal or "")
 
 
 def test_the_narrowed_correlation_registry_names_its_inner_registrys_table(tmp_path):
@@ -207,31 +215,36 @@ def test_the_narrowed_correlation_registry_names_its_inner_registrys_table(tmp_p
     its refusal points at the same run's table as the registry it wraps."""
     from defender.runtime.lead_zero._items import _NarrowedRegistry
 
+    from defender.runtime.run_tenant import table_pointer
+
     a = T.plant_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
     grants = T.run_grants(a / "settings")
-    inner = _registry(grants.gather, grant_home=str(grants.path))
+    inner = _registry(grants.gather, grant_home=table_pointer("acme"))
     narrowed = _NarrowedRegistry(inner, grants.correlation)
     assert narrowed.decide("elastic", "alerts").outcome == "GRANTED"
     decision = narrowed.decide("elastic", "query")
     assert decision.outcome == "DENIED", decision
-    assert str(grants.path) in (decision.refusal or ""), decision.refusal
+    assert table_pointer("acme") in (decision.refusal or ""), decision.refusal
 
 
 def test_the_withheld_lead_heading_names_the_runs_table(tmp_path):
-    """ORIENT's note for a withheld lead names the run's resolved table; with a target, no
-    note. `correlation_system` is the RUN's value — there is no process-level default for it."""
+    """ORIENT's note for a withheld lead names the run's tenant's table (for the model — the
+    tenant and the file, not the host path); with a target, no note. `correlation_system` is the RUN's value — there is no process-level default for it."""
     from defender.runtime.lead_zero import L3, LeadZeroResult, render_orient_section
+
+    from defender.runtime.run_tenant import table_pointer
 
     b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
     grants = T.run_grants(b / "settings")
+    pointer = table_pointer("bravo")
     result = LeadZeroResult(text="", status="resolved")
     withheld = render_orient_section(
-        result, None, correlation_system=grants.correlation_system, grant_home=str(grants.path))
+        result, None, correlation_system=grants.correlation_system, grant_home=pointer)
     assert L3 in withheld, withheld
-    assert str(grants.path) in withheld, withheld
+    assert pointer in withheld, withheld
     dispatched = render_orient_section(
-        result, None, correlation_system="elastic", grant_home=str(grants.path))
-    assert str(grants.path) not in dispatched, dispatched
+        result, None, correlation_system="elastic", grant_home=pointer)
+    assert pointer not in dispatched, dispatched
 
 
 # ---- the verb context carries the run's settings folder ------------------------------------------
@@ -275,3 +288,24 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
     text += capsys.readouterr().err
     assert "unrecognized arguments" not in text, text
     assert str(root / "ghost") in text, text
+
+
+def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(tmp_path, capsys):
+    """A tenant freshly copied from the template grants gather nothing. `defender-policy show
+    gather` for it is refused the way a run is — a `defender-policy:` line naming the table —
+    never a `GrantError` traceback out of `compile_policy`. The control is the test above (a
+    tenant granting gather verbs shows its policy)."""
+    import pytest
+
+    policy_cli = T.mod("scripts.policy_cli")
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "newco", table=T.TABLE_BLANK)
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    with pytest.raises(SystemExit) as caught:
+        policy_cli.main(["show", "gather", "--run-dir", str(run_dir),
+                         "--tenants-root", str(root), "--tenant", "newco"])
+    text = str(caught.value.code)
+    assert text.startswith("defender-policy:"), text
+    assert "verb-grants.yaml" in text, text
+    assert "newco" in text, text
