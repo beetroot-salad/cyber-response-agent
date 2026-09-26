@@ -35,7 +35,8 @@ http://cmdb:8080/...`. Bastion default `web-1`. No SSH tunnel needed.
 
 ## Config
 
-`defender/knowledge/environment/systems/cmdb/config.env` declares
+The run's tenant's `systems/cmdb/config.env` (host-only, in the tenant's
+`settings/` folder — not readable from the box) declares
 `CMDB_URL_BASE`, `CMDB_BASTION_HOST`, `CMDB_TIMEOUT_SEC`. All three can
 be overridden by environment variables of the same names.
 

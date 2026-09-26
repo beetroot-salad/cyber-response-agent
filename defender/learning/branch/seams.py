@@ -137,12 +137,14 @@ class EpisodeAdapters:
         return replace(self, ctx=replace(self.ctx, world_id=world_id))
 
 
-def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
+def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
     """The production read side the review replays through.
 
-    THE GATHER GRANT, which is the same roster a sibling serves through — `run.py` builds its
-    registry from it, and a review that could reach a verb no sibling can would be measuring a
-    world through a door the family cannot open.
+    THE EPISODE TENANT'S GATHER GRANT (#1106), which is the same grant every sibling serves
+    through — `run.py` builds its registry from that tenant's table, and a review that could
+    reach a verb no sibling can would be measuring a world through a door the family cannot
+    open. `tenant` is the episode's resolved `TenantDir`: its table gives the grant and its
+    `settings/` the context's config folder.
 
     ONE registry and ONE context for the whole review, built here rather than per call.
     `review.verb_context` owns what that context is — including that it writes no query row
@@ -156,11 +158,14 @@ def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
     from defender.learning.branch.review import verb_context
     from defender._paths import adapters_under
     from defender.run_common import DEFENDER_DIR
-    from defender.runtime.driver import GATHER_DEF
+    from defender.runtime.run_tenant import table_pointer
+    from defender.runtime.verb_dispositions import run_grants
     from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 
+    grants = run_grants(tenant.settings)
     return EpisodeAdapters(
         registry=ModuleVerbRegistry(
-            read_roster(adapters_under(DEFENDER_DIR)), GATHER_DEF.verb_grant),
-        ctx=verb_context(Path(episode_dir)),
+            read_roster(adapters_under(DEFENDER_DIR)), grants.gather,
+            grant_home=table_pointer(tenant.tenant_id)),
+        ctx=verb_context(Path(episode_dir), tenant.settings),
     )

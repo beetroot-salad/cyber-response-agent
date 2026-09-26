@@ -49,6 +49,8 @@ queries is the GATHER subagent, whose deps carry no clock and whose prompt rende
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import re
 from defender._model import model
 from typing import Any
@@ -88,8 +90,12 @@ _DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS
 _PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
-def configured_patterns() -> tuple[str, ...]:
-    """The two corpus patterns this deployment configures, in a stable order.
+def configured_patterns(settings_dir: Path) -> tuple[str, ...]:
+    """The two corpus patterns a tenant configures, in a stable order.
+
+    `settings_dir` is that tenant's `settings/` folder (#1106), handed in by the caller — the
+    launcher resolved it from the source stamp, and a serving call carries it on its verb
+    context. Nothing here finds a folder for itself.
 
     ONE reading of the pair the whole design keys on: the overlay-key gate, the staging
     namespace guard and the manifest loader all ask which patterns exist, and three independent
@@ -104,10 +110,9 @@ def configured_patterns() -> tuple[str, ...]:
     """
     import os
 
-    from defender._paths import PATHS
     from defender.scripts.adapters.elastic_adapter import config_from, config_path
 
-    values = config_from(config_path(PATHS.defender_dir), os.environ, expected=_PATTERN_KEYS)
+    values = config_from(config_path(Path(settings_dir)), os.environ, expected=_PATTERN_KEYS)
     return tuple(values[key] for key in _PATTERN_KEYS if values.get(key))
 
 

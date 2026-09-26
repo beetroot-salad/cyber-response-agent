@@ -263,7 +263,8 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
     from defender.runtime.verbs import VerbContext
 
     env = MappingProxyType({"A": "1"})
-    ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env=env)
+    ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env=env,
+                      settings_dir=Path("/s"))
     assert ctx.env is env
 
 

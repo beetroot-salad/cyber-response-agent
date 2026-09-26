@@ -11,6 +11,8 @@ if the implementer removes MORE than the one branch the design retires.
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 
 from defender.tests import _world_1007 as W
 
@@ -56,7 +58,7 @@ def test_injected_retrieved_is_the_envelopes_own_hits_and_present_is_the_door_co
         adapters=W.FakeAdapters({("elastic", "esql"): {"hits": [injected[0]]},
                                  ("elastic", "query"): {"hits": [injected[0]]}}),
         door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 3}),
-        invoke=W.FakeAgent("same"))
+        invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
     block = record["worlds"]["b"]["reachability"]
     assert block["injected_present"] == 3, (
@@ -179,7 +181,7 @@ def test_the_review_admits_a_world_that_is_unreachable_by_capture(tmp_path, monk
         adapters=W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "i1"}]},
                                  ("elastic", "esql"): {"hits": [{"_id": "i1"}]}}),
         door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 1}),
-        invoke=W.FakeAgent("same"))
+        invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
     entry = record["worlds"]["b"]
     assert entry["reachability"]["reachable_by_capture"] is False, (

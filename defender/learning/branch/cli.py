@@ -73,6 +73,7 @@ from defender._episode_paths import EpisodePaths
 from defender._io import guarded_mkdir, load_json_artifact, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender._tenants import TenantDir, TenantDirError, default_tenants_root, tenant_dir
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
@@ -366,7 +367,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
     continuation_prompt: str, allow_dirty: bool,
-    live_tree: Callable[[], _provenance.RunProvenance],
+    live_tree: Callable[[], _provenance.RunProvenance], settings_dir: Path,
 ) -> tuple[str, tuple[str, ...], dict]:
     """Everything that can refuse BEFORE the questioner is paid for, in one block.
 
@@ -394,7 +395,9 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     and a seam by that name reads as a way to seed it.
     """
     token = _episode_token(episode_id)
-    patterns = staging_mod.check_configured_patterns(configured_patterns())
+    # The EPISODE tenant's corpus patterns (#1106): `settings_dir` is the source run's tenant's
+    # folder, which `_episode_tenant` resolved from the source stamp.
+    patterns = staging_mod.check_configured_patterns(configured_patterns(settings_dir))
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
     # THE ANCHOR IS READ AND JUDGED BEFORE THE PAID ROLE PREFLIGHT, beside the other reads of
@@ -404,10 +407,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     # `--allow-dirty` reaches. Nothing has been sourced or spent when it refuses.
     source_stamp = _stamp_of(source_run_dir)
     if source_stamp is None:
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
-            "family is anchored to the commit its source ran, and a source with no readable "
-            "stamp cannot anchor one")
+        raise _no_stamp(source_run_dir)
     # THE LIVE TREE IS ASKED ONLY WHEN THE SOURCE CAN ANCHOR IT. The capture is two git
     # subprocesses over the checkout, each on a 60 s timeout; against a source that names no
     # commit the comparison has no anchor and the refusal is the source's own, so its answer
@@ -453,6 +453,56 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     # world's view would read the dead attempt's documents.
     staging_mod.sweep(episode_dir, episode_token=token, door=door)
     return token, patterns, source_stamp
+
+
+def _no_stamp(source_run_dir: Path) -> LauncherRefused:
+    return LauncherRefused(
+        f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
+        "family is anchored to the commit its source ran, and a source with no readable "
+        "stamp cannot anchor one")
+
+
+def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> TenantDir:
+    """The episode's tenant: the SOURCE run's, resolved under the tenants root this launcher
+    was handed — or the refusal, before anything is spent.
+
+    Every sibling runs on this tenant (`start_family` seeds it into their runs base), the review
+    replays through its settings and write door, and the manifest is judged against its corpus
+    patterns — so it is read from where the box cannot write: the source's runs-base record
+    (`_tenant.tenant_of_run`). The source's stamp sits in the box's writable run dir, and a model
+    that rewrote its `tenant_id` would otherwise pick whose estate the whole family stages into.
+    The stamp must AGREE with the record — a disagreement is a forged or moved stamp, refused
+    rather than settled — and a stamp with no tenant (a pre-#1077 run) or the retired bootstrap
+    `default` gets NO fallback (N10): a family run on a tenant nobody chose would measure
+    somebody's estate, but not necessarily the source's."""
+    from defender import _tenant
+
+    stamp = _stamp_of(source_run_dir)
+    if stamp is None:
+        raise _no_stamp(source_run_dir)
+    try:
+        record = _tenant.tenant_of_run(source_run_dir)
+    except _tenant.TenantRecordCorrupt as refusal:
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir}'s tenant: its runs base's record is the "
+            f"authority for it, and {refusal}") from refusal
+    tenant_id = record.tenant_id
+    if not _tenant.is_usable_tenant_id(tenant_id):
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir}'s runs base names no usable tenant "
+            f"({tenant_id!r}, in {_tenant.record_path(Path(source_run_dir).parent)}) — an "
+            "episode's siblings run on the source's tenant, and there is no fallback tenant to "
+            "run them on")
+    if stamp.get("tenant_id") != tenant_id:
+        raise LauncherRefused(
+            f"[branch] source run {source_run_dir}'s stamp names tenant "
+            f"{stamp.get('tenant_id')!r} but its runs base's record "
+            f"({_tenant.record_path(Path(source_run_dir).parent)}) names {tenant_id!r} — the "
+            "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
+    try:
+        return tenant_dir(tenants_root, tenant_id)
+    except TenantDirError as refusal:
+        raise LauncherRefused(f"[branch] the source run's tenant: {refusal}") from refusal
 
 
 def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
@@ -645,7 +695,10 @@ def sibling_runs_base(episode_dir: Path) -> Path:
     return EpisodePaths(episode_dir).runs
 
 
-def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = None) -> list[str]:
+def sibling_argv(
+    episode_dir: Path, world_label: str, *, model: str | None = None,
+    tenants_root: Path | None = None,
+) -> list[str]:
     """One sibling's command line: the manifest, which arm of it this process is, and the model.
 
     Everything else a sibling needs is DERIVED from the manifest, which is what makes the
@@ -664,6 +717,11 @@ def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = Non
             "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label]
     if model is not None:
         argv += ["--model", model]
+    # THE TENANTS ROOT RIDES TOO (#1106 M2): the child is an entry point, and one that worked
+    # the root out for itself would read its own checkout's copy rather than the one this
+    # launcher resolved the episode's tenant under.
+    if tenants_root is not None:
+        argv += ["--tenants-root", str(tenants_root)]
     return argv
 
 
@@ -674,9 +732,10 @@ def sibling_argv(episode_dir: Path, world_label: str, *, model: str | None = Non
 SPAWN_FAILED_EXIT = 70
 
 
-def start_family(
+def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every arm runs on
     episode_dir: Path, world_labels: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
+    tenant_id: str | None, tenants_root: Path,
 ) -> dict[str, int]:
     """Start every accepted sibling TOGETHER, and wait for all of them.
 
@@ -693,11 +752,32 @@ def start_family(
 
     `spawn` is the process seam. Defaulted at the boundary rather than re-coalesced in the body,
     per the project's own anchoring rule.
+
+    THE CHILD'S TENANT IS SEEDED BEFORE IT STARTS (#1106 M2). A sibling reads its tenant from
+    its runs base's `_tenant.json`, and before this nothing wrote one there, so every sibling
+    minted the bootstrap tenant whatever the episode ran on. The record is created with the
+    episode's `tenant_id` through `_tenant`'s own create lane, and `tenants_root` rides on each
+    child's command line. No tenant — or the retired `default` — refuses before any record is
+    written or any child is started (N10).
     """
+    from defender import _tenant
+
+    if not _tenant.is_usable_tenant_id(tenant_id):
+        # A ValueError, not a `LauncherRefused`: the launcher resolved the episode's tenant
+        # before anything was spent (`_episode_tenant`), so reaching here without one is a
+        # caller's bug, and it rides the episode's one abort rule like any other fault.
+        raise ValueError(
+            f"episode {episode_dir} has no usable tenant ({tenant_id!r}) to run its siblings "
+            "on — refused before any sibling started")
     start = _default_spawn if spawn is None else spawn
     episode_dir = Path(episode_dir)
     runs = sibling_runs_base(episode_dir)
     guarded_mkdir(runs, base=episode_dir)
+    seeded = _tenant.ensure_tenant(runs, tenant_id=tenant_id)
+    if seeded.tenant_id != tenant_id:
+        raise ValueError(
+            f"{_tenant.record_path(runs)} already names tenant {seeded.tenant_id!r}, not the "
+            f"episode's {tenant_id!r} — refused before any sibling started")
     labels = list(world_labels)
     if not labels:
         return {}
@@ -711,7 +791,8 @@ def start_family(
         # scheduling happened to produce, and a family whose arms did not overlap would still
         # look like one that did.
         ready.wait(timeout=30)
-        exits[label] = start(sibling_argv(episode_dir, label, model=model), env=env)
+        exits[label] = start(
+            sibling_argv(episode_dir, label, model=model, tenants_root=tenants_root), env=env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
         futures = {label: pool.submit(launch_one, label) for label in labels}
@@ -1213,6 +1294,10 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
              "dirt — never a commit or scope mismatch, an absent stamp or a stamp with no "
              "commit — and the override is NAMED in the stamp")
     p.add_argument("--model", default=None)
+    p.add_argument(
+        "--tenants-root", type=Path, default=None,
+        help="the tenants root the episode's tenant (the source stamp's) is resolved under; "
+             "default <this checkout>/knowledge/tenants. Handed to every sibling (#1106)")
     return p.parse_args(argv)
 
 
@@ -1280,7 +1365,14 @@ def _launch(  # noqa: PLR0913 — see `main`
     # project's anchoring rule is then to resolve at the boundary rather than to re-coalesce in
     # each body, which is what would let two frames disagree about which door an episode used.
     role_preflight = preflight_role_models if preflight is None else preflight
-    write_door = staging_mod.write_door_from_env() if door is None else door
+    # THE EPISODE'S TENANT FIRST (#1106): the door, the corpus patterns, the review's read side
+    # and every sibling all resolve through it, so it is settled before any of them is built.
+    source = Path(ns.source_run_dir).resolve()
+    tenants_root = (ns.tenants_root if ns.tenants_root is not None
+                    else default_tenants_root(REPO_ROOT))
+    tenant = _episode_tenant(source, tenants_root)
+    write_door = (staging_mod.write_door_from_env(staging_mod.host_context(tenant.settings))
+                  if door is None else door)
     # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
     # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
     # `tmp_path` corpus and this frame is the only one that ever sees the production path.
@@ -1291,14 +1383,13 @@ def _launch(  # noqa: PLR0913 — see `main`
     # against the HEAD of whatever tree the suite ran under.
     live_capture = ((lambda: _provenance.capture_tree(REPO_ROOT)) if live_tree is None
                     else live_tree)
-    source = Path(ns.source_run_dir).resolve()
     episode_id = episode_id_for(source.name, ns.branch_message_id)
     episode_dir = episode_dir_for(episode_id)
     token, patterns, source_stamp = preflight_episode(
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
         model=ns.model, continuation_prompt=ns.continuation_prompt,
-        allow_dirty=ns.allow_dirty, live_tree=live_capture)
+        allow_dirty=ns.allow_dirty, live_tree=live_capture, settings_dir=tenant.settings)
 
     # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
     # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they
@@ -1320,7 +1411,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     try:
         author = seams.model_seam(episode_dir) if questioner is None else questioner
         compare_with = seams.model_seam(episode_dir) if invoke is None else invoke
-        read_side = seams.adapter_seam(episode_dir) if adapters is None else adapters
+        read_side = seams.adapter_seam(episode_dir, tenant) if adapters is None else adapters
     except Exception as unbuildable:  # noqa: BLE001 — every seam's own fault class, and the answer is the same refusal
         raise LauncherRefused(
             f"[branch] the launcher could not build its model and adapter seams "
@@ -1349,7 +1440,8 @@ def _launch(  # noqa: PLR0913 — see `main`
             ns, source=source, source_stamp=source_stamp, episode_id=episode_id,
             episode_dir=episode_dir, token=token, patterns=patterns, door=write_door,
             questioner=author, adapters=read_side, invoke=compare_with, spawn=spawn,
-            judge=judge, lessons_dir=questioner_lessons_dir, teardown=teardown)
+            judge=judge, lessons_dir=questioner_lessons_dir, teardown=teardown,
+            tenant=tenant, tenants_root=tenants_root)
     except SystemExit:
         aborting = True
         raise
@@ -1439,7 +1531,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     ns: argparse.Namespace, *, source: Path, source_stamp: dict, episode_id: str,
     episode_dir: Path, token: str, patterns: Sequence[str], door: Any, questioner: Any,
     adapters: Any, invoke: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
-    teardown: Any = None,
+    teardown: Any = None, tenant: TenantDir, tenants_root: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`, inside the teardown guard.
 
@@ -1479,7 +1571,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
     with clock.step(Step.REVIEW):
         record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
-                                   door=door, invoke=invoke)
+                                   door=door, invoke=invoke, settings_dir=tenant.settings)
     if record.get("episode", {}).get("decision") == REJECTED:
         # ANY REJECTED WORLD ENDS THE EPISODE (§7 FORK-14). Not the rejected one alone: a world
         # is a difference against its siblings, so a family missing an arm measures nothing the
@@ -1495,7 +1587,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
     labels = [w.world_id for w in runnable_worlds(family)]
     with clock.step(Step.RUNS):
-        exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model)
+        exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model,
+                             tenant_id=tenant.tenant_id, tenants_root=tenants_root)
     runs = sibling_runs_base(episode_dir)
     with clock.step(Step.VERIFY):
         report = verify_family(
@@ -1654,7 +1747,10 @@ def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
     questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
-    """`Step.QUESTIONER`: the questioner authors the triplet, and it is validated before
+    """@owns configured_patterns — the one writer of the manifest's recorded tenant patterns
+    (#1106); every later reader takes them from `family.yaml` via `_family.parse_family`.
+
+    `Step.QUESTIONER`: the questioner authors the triplet, and it is validated before
     anything reads it.
 
     THE DERIVED HALF IS THE LAUNCHER'S, and it is written over whatever the model returned. The
@@ -1733,8 +1829,12 @@ def _author(
         # authoring to RESUME — after three worlds had been staged and reviewed. Recorded, every
         # reader judges the overlays against the set that authored them.
         "captured_patterns": list(captured),
+        # #1106: the tenant's configured patterns the overlays were judged against, recorded so
+        # a sibling or judge re-reading the manifest needs no settings folder to re-judge them.
+        "configured_patterns": list(patterns),
     })
-    family = parse_family(document, captured_patterns=captured)
+    family = parse_family(document, captured_patterns=captured,
+                          configured_patterns=tuple(patterns))
     check_identities(family)
     _family.write_family(episode_dir, document)
     return family

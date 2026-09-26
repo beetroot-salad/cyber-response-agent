@@ -32,6 +32,8 @@ exist (X16).
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 import pytest
 
 from defender.tests import _triplet_947 as T
@@ -52,7 +54,7 @@ def _run_review(episode_dir, *, adapters=None, door=None, invoke=None, doc=None,
     return _review().review(
         fam, episode_dir=episode_dir, adapters=adapters or T.FakeAdapters(),
         door=door or T.FakeDoor(counts={"logs-000001": 3}), invoke=invoke or T.FakeAgent("same"),
-        **kw)
+        **kw, settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
 
 # ---------------------------------------------------------------------------------------
@@ -80,7 +82,7 @@ def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, mon
     runs-base walk may reach."""
     base, _src, root = T.configured_layout(tmp_path, monkeypatch)
     ep = T.episode(tmp_path, root=root)
-    ctx = _review().verb_context(ep)
+    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS)
     assert ctx.run_dir == ep
     assert ctx.capture is None
     assert ctx.env["DEFENDER_RUN_DIR"] == str(ep)

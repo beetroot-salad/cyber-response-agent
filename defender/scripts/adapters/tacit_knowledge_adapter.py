@@ -112,7 +112,7 @@ def registry_path(defender_dir: Path) -> Path:
     The per-system directory convention, so the file is a SYSTEM's data queried through a
     gather verb rather than a vocabulary of the invlang module — and so
     `runtime.verb_roster.model_read_surfaces`, which already enumerates `skills/*/`, sees the
-    skill beside it. Deliberately NOT `knowledge/environment/systems/{system}/`: that lane
+    skill beside it. Deliberately NOT a tenant's `settings/systems/{system}/`: that lane
     holds endpoints and credentials for a live service, and this system has no service.
     """
     return Path(defender_dir) / "skills" / SYSTEM / "registry.yaml"

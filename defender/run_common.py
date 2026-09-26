@@ -86,9 +86,15 @@ def _setup_state(run: Run) -> str:
 
 def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None,
+    world: ResumeWorld | None = None, tenant_record: _tenant.TenantRecord | None = None,
 ) -> Path:
     """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
+
+    `tenant_record` is the record the caller already chose this run's tenant by (`run.py`
+    reads it once, before the box, and resolves the tenant from it) — so the stamp names the
+    tenant whose settings the run actually used. A `_tenant.json` rewritten in between is
+    refused (`Run.for_tenant` holds the record it is given to the file), never stamped over a
+    run using the old tenant's settings. Omitted, it is read (and minted when absent) here.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -110,7 +116,8 @@ def materialize_run_dir(
     # parse, or a write that fails (an alias planted at its name, a directory squatting it),
     # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
     # run — a run with a forged tenant is worse than no run (decision 4/7).
-    tenant_record = _tenant.ensure_tenant(runs_base)
+    tenant_record = (  # lint-default: ok — DI seam owning its default: `run.py` hands the record it chose the run's tenant by; a direct caller (a test, a tool) has none and reads it here
+        tenant_record if tenant_record is not None else _tenant.ensure_tenant(runs_base))
     run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)

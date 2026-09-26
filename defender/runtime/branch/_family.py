@@ -30,6 +30,7 @@ import re
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -85,8 +86,8 @@ _ENTITY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 #: Every top-level field the manifest declares. Unknown ones refuse.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
-    "as_of", "continuation_prompt", "captured_patterns", "base_story", "discriminator",
-    "worlds",
+    "as_of", "continuation_prompt", "captured_patterns", "configured_patterns", "base_story",
+    "discriminator", "worlds",
 )
 
 #: Every field a world entry declares.
@@ -431,6 +432,10 @@ class Family:
     base_story: str
     discriminator: dict
     worlds: list[World]
+    #: The episode TENANT's configured corpus patterns the launcher judged the overlays against
+    #: (#1106), recorded beside `captured_patterns` for the same reason: every later reader
+    #: judges against the set that authored the manifest, and none of them resolves a tenant.
+    configured_patterns: tuple[str, ...] = ()
 
     def world(self, world_id: str) -> World:
         for candidate in self.worlds:
@@ -510,14 +515,17 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
     return worlds
 
 
-def _check_overlay_keys(worlds: list[World], captured_patterns: tuple[str, ...]) -> None:
+def _check_overlay_keys(
+    worlds: list[World], captured_patterns: tuple[str, ...],
+    configured_patterns: tuple[str, ...],
+) -> None:
     """Every staged overlay key names a corpus this episode can actually address.
 
     A configured corpus pattern, or one the capture's own FROM sources name, and nothing else.
     An invented pattern is a world staging a corpus no query in this episode addresses — a
     difference that is staged, recorded, and unobservable.
     """
-    allowed = set(captured_patterns) | set(_configured_patterns())
+    allowed = set(captured_patterns) | set(configured_patterns)
     for world in worlds:
         for pattern in world.overlay.elastic:  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
             if pattern not in allowed:
@@ -528,8 +536,9 @@ def _check_overlay_keys(worlds: list[World], captured_patterns: tuple[str, ...])
 
 
 
-def _parse_captured_patterns(raw: Any) -> tuple[str, ...]:
-    """The capture's own FROM sources as the manifest records them.
+def _parse_captured_patterns(raw: Any, *, field: str = "captured_patterns") -> tuple[str, ...]:
+    """A pattern list the manifest records — the capture's own FROM sources, or (`field=
+    "configured_patterns"`) the tenant's configured corpus patterns the launcher judged with.
 
     ABSENT IS EMPTY, not a refusal: a manifest written before this field existed is still a
     manifest this loader must read, and an episode whose capture addressed nothing is a real
@@ -542,22 +551,34 @@ def _parse_captured_patterns(raw: Any) -> tuple[str, ...]:
         return ()
     if not isinstance(raw, (list, tuple)):
         raise FamilyError(
-            f"the manifest's captured_patterns must be a list, got {type(raw).__name__}")
+            f"the manifest's {field} must be a list, got {type(raw).__name__}")
     out: list[str] = []
     for entry in raw:
         if not isinstance(entry, str) or not entry:
             raise FamilyError(
-                f"the manifest's captured_patterns names {entry!r}, which is not a pattern")
+                f"the manifest's {field} names {entry!r}, which is not a pattern")
         out.append(entry)
     return tuple(dict.fromkeys(out))
 
-def parse_family(doc: Any, *, captured_patterns: tuple[str, ...] = ()) -> Family:
+def parse_family(
+    doc: Any, *, captured_patterns: tuple[str, ...] = (),
+    configured_patterns: tuple[str, ...] = (),
+) -> Family:
     """Validate a raw manifest document into `Family`, naming the field that refused.
 
-    `captured_patterns` are the FROM sources the capture itself names. An overlay's staged half
-    may key a configured corpus pattern or one of these and nothing else: an invented pattern is
-    a world staging a corpus no query in this episode addresses, which stages a difference
-    nothing can observe.
+    `captured_patterns` are the FROM sources the capture itself names; `configured_patterns`
+    are the corpus patterns the episode's TENANT configures (#1106 — handed in by the launcher,
+    which resolved the tenant; this loader reads no settings). An overlay's staged half may key
+    one of either and nothing else: an invented pattern is a world staging a corpus no query in
+    this episode addresses, which stages a difference nothing can observe.
+
+    Both sets are RECORDED in the document by the authoring call and preferred over the
+    arguments on load, so a sibling or a judge re-reading the manifest judges its overlays
+    against the sets that authored it without resolving anything. A manifest written before
+    #1106 records no configured set — its overlays were judged against the checkout's corpus
+    config, which now lives in the tenant's settings — so a reader that must accept one hands
+    that tenant's patterns in as `configured_patterns` (`run.py --resume` does, for its own
+    tenant); a reader that hands none admits only the captured set.
     """
     if not isinstance(doc, dict):
         raise FamilyError(f"the manifest must be a mapping, got {type(doc).__name__}")
@@ -577,7 +598,10 @@ def parse_family(doc: Any, *, captured_patterns: tuple[str, ...] = ()) -> Family
     # document and has no record to read yet, passes the argument. Preferring the argument
     # would let a re-derivation at load time disagree with what was actually authored.
     recorded = _parse_captured_patterns(doc.get("captured_patterns"))
-    _check_overlay_keys(worlds, recorded or tuple(captured_patterns))
+    recorded_configured = _parse_captured_patterns(
+        doc.get("configured_patterns"), field="configured_patterns")
+    _check_overlay_keys(worlds, recorded or tuple(captured_patterns),
+                        recorded_configured or tuple(configured_patterns))
     return Family(
         episode_id=doc["episode_id"], source_run_dir=doc["source_run_dir"],
         source_run_id=doc["source_run_id"], branch_message_id=doc["branch_message_id"],
@@ -586,18 +610,8 @@ def parse_family(doc: Any, *, captured_patterns: tuple[str, ...] = ()) -> Family
         captured_patterns=recorded or tuple(captured_patterns),
         base_story=doc["base_story"],
         discriminator=dict(discriminator), worlds=worlds,
+        configured_patterns=recorded_configured or tuple(configured_patterns),
     )
-
-
-def _configured_patterns() -> tuple[str, ...]:
-    """The corpus patterns this deployment configures, read where the adapter reads them.
-
-    Imported lazily: the manifest loader sits on the resume path and must not pull the adapter
-    tree in merely to know the two default patterns.
-    """
-    from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
-
-    return configured_patterns()
 
 
 def runnable_worlds(family: Family) -> list[World]:
@@ -609,9 +623,19 @@ def runnable_worlds(family: Family) -> list[World]:
     return [w for w in family.worlds if w.role is not None]
 
 
-def load_family(path: Path, *, captured_patterns: tuple[str, ...] = ()) -> Family:
-    """Read and validate the manifest at `path`."""
-    return parse_family(_read_document(Path(path)), captured_patterns=captured_patterns)
+def load_family(
+    path: Path, *, captured_patterns: tuple[str, ...] = (),
+    configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
+) -> Family:
+    """Read and validate the manifest at `path`.
+
+    `configured_patterns` is ASKED only for a manifest that records none (one written before
+    #1106): answering it means resolving the episode's tenant, which a reader holding a
+    manifest that records its own set — every manifest written since — never has to do."""
+    doc = _read_document(Path(path))
+    recorded = isinstance(doc, dict) and bool(doc.get("configured_patterns"))
+    return parse_family(doc, captured_patterns=captured_patterns,
+                        configured_patterns=() if recorded else tuple(configured_patterns()))
 
 
 def _read_document(path: Path) -> object:

@@ -28,7 +28,6 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
-from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import VerbContext, VerbRegistry
 from ._agreement import CorrelationDispatch
@@ -53,15 +52,14 @@ class _NarrowedRegistry(VerbRegistry):
 
     `grant_home` names the table for the same reason `ModuleVerbRegistry` does: since #999
     the grant here is the table's projection too, so a refusal that points at the file points
-    at the one place that can widen or withdraw it. Before, this grant was a literal in
-    Python and the pointer was rightly withheld.
+    at the one place that can widen or withdraw it. It is the INNER registry's pointer — the
+    same run's resolved table (#1106) — never a fixed path.
     """
-
-    grant_home = DISPOSITIONS_REL
 
     def __init__(self, inner: VerbRegistry, grant: VerbGrant):
         super().__init__(grant)
         self._inner = inner
+        self.grant_home = getattr(inner, "grant_home", None)
 
     def systems(self):
         return self._inner.systems()
@@ -121,11 +119,11 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
 
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
     *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
-    capture: Any, env: dict, limits: dict,
+    capture: Any, env: dict, limits: dict, settings_dir: Path,
 ) -> tuple[str, str]:
     from defender.scripts.adapters.elastic_adapter import load_config
 
-    deps = _build_deps(run_dir, defender_dir, run_id, L0)
+    deps = _build_deps(run_dir, defender_dir, run_id, L0, settings_dir)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
@@ -148,7 +146,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     signal_index = alert.get("signal_index")
     if not isinstance(signal_index, str) or not signal_index.strip():
         try:
-            cfg = load_config(VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env))
+            cfg = load_config(VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env,
+                                          settings_dir=settings_dir))
             signal_index = cfg["ELASTIC_ALERTS_INDEX"]
         except Exception:  # noqa: BLE001 — degrade the whole item, never the run
             return (_unavailable("could not resolve this alert's signal_index"),
@@ -402,7 +401,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     budget_started_monotonic: float = 0.0, catalog: str | None,
-    dispatch: CorrelationDispatch,
+    dispatch: CorrelationDispatch, settings_dir: Path,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
@@ -412,10 +411,13 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     `dispatch` is the identity the run-start check resolved (#1003): the system this lead is
     dispatched on and cache-keyed by, and the grant that narrows its registry. Both are read
     from it and not from `_spec`'s constants, so the frame that checked the template against
-    the table and the frame that dispatches on the result are one derivation."""
+    the table and the frame that dispatches on the result are one derivation.
+
+    `settings_dir` is the run's tenant folder (#1106), carried onto the lead's deps so every
+    verb it dispatches reads that tenant's config."""
     from ..agent_definition import bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
-    from ..driver import GATHER_DEF, build_gather_agent
+    from ..driver import build_gather_agent, gather_def_for
     from ..tools import GatherDeps
     from ..tools_gather import GatherRequest, _run_gather
 
@@ -457,6 +459,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         return build_gather_agent(
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
+            verb_grant=dispatch.grant,
             # Same per-system cache-key convention as the model-dispatched path
             # (`driver.py::_build_gather`).
             #
@@ -476,7 +479,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
             print(f"[run.py] correlation lead truncated_by write skipped: {e!r}")
 
-    gbase = bind(GATHER_DEF, run_dir, defender_dir=defender_dir, box=box)
+    gbase = bind(gather_def_for(dispatch.grant), run_dir, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
     # Thread the RUN's own budget-clock origin through, the way `_run_gather`'s model-dispatched
     # path does. Otherwise `bind`'s `AgentDeps` default (`default_factory=time.monotonic`)
@@ -485,6 +488,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     # time from its own start rather than the run's true remaining budget.
     gdeps = replace(
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
+        settings_dir=settings_dir,
     )
 
     request = GatherRequest(L3, dispatch_system, goal, tuple(what_to_summarize))

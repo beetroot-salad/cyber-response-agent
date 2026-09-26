@@ -49,6 +49,9 @@ logs/
 *.crt
 
 # Per-environment config (template is tracked, actual config is not)
+knowledge/tenants/*/settings/systems/wazuh/config.env
+# Its pre-#1106 home: a checkout that still holds a real one there must not see it un-ignored
+# (it sits inside the tree mounted into every box, and `git add -A` would commit it).
 defender/knowledge/environment/systems/wazuh/config.env
 
 # IDE

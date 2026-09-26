@@ -79,7 +79,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.driver import GATHER_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.runtime.verb_roster import (  # noqa: E402
     RosterError,
     generate_roster,
@@ -289,7 +289,9 @@ def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
     assert committed.is_file(), \
         "gather ships no generated roster — its model-facing verb prose is still authored"
 
-    granted = {(s, v) for s, v, _ in GATHER_DEF.verb_grant.entries}
+    # #1106 M4: the shipped grant is the committed playground tenant's (GATHER_DEF holds none).
+    shipped = T1106.playground_grants().gather
+    granted = {(s, v) for s, v, _ in shipped.entries}
     advertised = roster_pairs(committed.read_text(encoding="utf-8"))
     assert advertised == granted, (
         "gather's roster and gather's grant disagree: "
@@ -297,7 +299,7 @@ def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
         f"granted-not-advertised={sorted(granted - advertised)}"
     )
 
-    assert generate_roster(GATHER_DEF.verb_grant, defender_dir=DEFENDER) == \
+    assert generate_roster(shipped, defender_dir=DEFENDER) == \
         committed.read_text(encoding="utf-8"), \
         "the committed gather roster is not what its own grant generates — regenerate it"
 

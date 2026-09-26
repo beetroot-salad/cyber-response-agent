@@ -41,6 +41,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import AdapterFault, TransportFault, UpstreamFault
@@ -50,7 +51,7 @@ PREFIX = "TICKET"
 
 #: The shared transport template PLUS the store's KEY GRAMMAR. The grammar is an ENVIRONMENT
 #: fact — what a ticket key looks like in the deployed store — so it is declared in
-#: `knowledge/environment/systems/ticket/config.env` (`TICKET_KEY_PATTERN`), not hardcoded in
+#: the tenant's `settings/systems/ticket/config.env` (`TICKET_KEY_PATTERN`), not hardcoded in
 #: a consumer, and it is REQUIRED: absent means the system is down (`ConfigFault`, exit 2),
 #: never a built-in default screening keys against a grammar this environment never agreed to.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
@@ -184,6 +185,8 @@ def build_parser():
     p = transport.AdapterArgumentParser(
         description="Ticket-server stub CLI — read-only ticket lookups.",
     )
+    # #1106: this CLI is an entry point, so it is HANDED the tenant whose config it reads.
+    add_tenant_arguments(p, reads="systems/ticket/config.env addresses the store")
     sub = p.add_subparsers(dest="subcommand", required=True)
 
     sub.add_parser("health-check", help="GET /health and exit.")
@@ -207,20 +210,33 @@ def build_parser():
     return p
 
 
-def _cli_context() -> VerbContext:
+def _cli_defender_dir() -> Path:
+    """The code tree this process runs against: `$DEFENDER_DIR`, else the tree this file is in."""
+    return Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
+
+
+def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
     """The CLI's own VerbContext: this is a PROCESS, so its tree and its env are the
     process's — `os.environ` here is the ambient env, which is exactly right for a
     subprocess caller and exactly wrong for the in-process driver (which passes the run's
-    scrubbed env instead)."""
-    defender_dir = Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
+    scrubbed env instead). `settings_dir` is the tenant folder `main` resolved from its own
+    arguments (#1106), under the checkout of the same `defender_dir`; the ambient env names no
+    settings."""
     run_dir = Path(os.environ.get("DEFENDER_RUN_DIR", Path.cwd()))
-    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ))
+    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ),
+                       settings_dir=Path(settings_dir))
 
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    ctx = _cli_context()
+    defender_dir = _cli_defender_dir()
+    try:
+        settings_dir = entry_tenant(defender_dir, args.tenants_root, args.tenant).settings
+    except TenantDirError as refusal:
+        print(f"error: {refusal}", file=sys.stderr)
+        sys.exit(2)
+    ctx = _cli_context(defender_dir, settings_dir)
     payload: dict | list
     try:
         if args.subcommand == "health-check":

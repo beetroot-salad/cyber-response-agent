@@ -670,7 +670,14 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     assert stamp["source"]["model"] == "m-1", "the source's model, not the capture's None"
     assert stamp["source"]["dirty"] is False
     assert stamp["allow_dirty"] is False
-    assert set(stamp) == {"agreed", "allow_dirty", "source"}
+    # #1106 M2: the launcher now SEEDS each sibling's runs base with the episode's tenant record
+    # before any child starts (real siblings always minted one), so the family's base world is
+    # read from it — and it is exactly the seeded record's.
+    assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id"}
+    from defender import _tenant
+
+    assert stamp["base_world_id"] == _tenant.read_tenant(
+        launch.episode_dir / "runs").base_world_id
 
 
 # ---------------------------------------------------------------------------------------

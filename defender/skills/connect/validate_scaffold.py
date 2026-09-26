@@ -160,10 +160,11 @@ def check_signatures(report: Report, verbs) -> None:
         report.add(PASS, f"{len(verbs)} verb(s) are dispatchable as fn(ctx, **params)")
 
 
-def check_config(report: Report, defender: Path, system: str) -> None:
-    path = defender / "knowledge" / "environment" / "systems" / system / "config.env"
+def check_config(report: Report, settings_dir: Path, system: str) -> None:
+    """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106)."""
+    path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
-        report.add(WARN, f"no config.env at {path.relative_to(defender)} (fine only if the adapter needs none)")
+        report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")
         return
     secrets_found = False
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -249,17 +250,30 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print(f"usage: {Path(sys.argv[0]).name} <system>", file=sys.stderr)
-        raise SystemExit(2)
-    system = sys.argv[1]
+    import argparse
+
+    from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
+
+    ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
+    ap.add_argument("system")
+    add_tenant_arguments(ap, reads="holds the connected system's config.env")
+    args = ap.parse_args()
+    system = args.system
     defender = _defender_dir()
     os.environ.setdefault("DEFENDER_DIR", str(defender))
 
     print(f"validate_scaffold: {system}\n")
     report = Report()
     verbs = check_registry(report, defender, system)
-    check_config(report, defender, system)
+    # An unresolvable tenant WARNs rather than exits: the config check is advisory (an absent
+    # config.env only warns), and the scaffold's other checks still run.
+    try:
+        settings_dir = entry_tenant(defender, args.tenants_root, args.tenant).settings
+    except TenantDirError as refusal:
+        report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
+                         f"resolved: {refusal}")
+    else:
+        check_config(report, settings_dir, system)
     check_skill(report, defender, system)
     check_templates(report, defender, system, verbs)
     report.render_and_exit()

@@ -42,9 +42,12 @@ from defender.tests._dispositions995 import (
     write_table,
 )
 from defender.runtime.verbs import read_roster
+from defender.tests import _tenants1106 as T1106
 
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
+#: The committed tenant's settings folder, where the shipped table lives since #1106.
+SETTINGS = T1106.PLAYGROUND_SETTINGS
 
 #: The holder's name as the table spells it. Written here as a LITERAL rather than imported,
 #: so a rename on one side cannot silently pass on the other — the constant's own test below
@@ -58,7 +61,7 @@ WITHHELD = {"roles": [], "reason": "test: withheld from every holder"}
 
 def _table(tmp_path: Path, rows: dict) -> Path:
     return write_table(
-        tmp_path / "defender" / "knowledge" / "environment" / "verb-grants.yaml", rows,
+        tmp_path / "settings" / "verb-grants.yaml", rows,
     )
 
 
@@ -79,7 +82,7 @@ def test_the_holder_is_a_known_name_and_not_an_agent_role():
 
 def test_the_projected_correlation_grant_is_exactly_the_historical_pairs():
     """Conservation: moving the grant into the table widened or narrowed it by nothing."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     granted = {(s, v) for s, v, _ in grant_for(HOLDER, rows).entries}
     assert granted == set(CORRELATION_CENSUS), (
         f"gained={sorted(granted - CORRELATION_CENSUS)} lost={sorted(CORRELATION_CENSUS - granted)}"
@@ -87,16 +90,17 @@ def test_the_projected_correlation_grant_is_exactly_the_historical_pairs():
 
 
 def test_the_shipped_correlation_grant_is_the_tables_projection():
-    """The wiring: `_spec.CORRELATION_GRANT` must be BUILT from the table, not merely agree
+    """The wiring: the correlation grant must be BUILT from the table, not merely agree
     with it today. Checked against the projection function over the shipped rows, so a
-    leftover literal that happens to match is still caught the first time the table changes."""
-    from defender.runtime.lead_zero import CORRELATION_GRANT, CORRELATION_SYSTEM
+    leftover literal that happens to match is still caught the first time the table changes.
+    (#1106 M4: the grant is the RUN's — `run_grants(settings)` — not a `_spec` constant.)"""
     from defender.runtime.lead_zero._spec import correlation_grant
 
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert CORRELATION_GRANT.role == HOLDER
-    assert set(CORRELATION_GRANT.entries) == set(correlation_grant(rows).entries)
-    assert CORRELATION_SYSTEM == "elastic"
+    grants = T1106.run_grants(SETTINGS)
+    rows = load_dispositions(dispositions_path(SETTINGS))
+    assert grants.correlation.role == HOLDER
+    assert set(grants.correlation.entries) == set(correlation_grant(rows).entries)
+    assert grants.correlation_system == "elastic"
 
 
 # =========================================================================================
@@ -109,48 +113,59 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
     holder and the lead's registry must DENY it — and say where the decision lives."""
     from defender.runtime.lead_zero._items import _NarrowedRegistry
     from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
-    from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
     tree = planted_tree(tmp_path, {"alpha": "lookup"})
     adapters = adapters_under(tree / "defender")
 
     # Positive control: granted to both, the narrowed registry grants it.
-    granted = load_dispositions(_table(tmp_path / "ok", {
+    granted_table = _table(tmp_path / "ok", {
         ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
-    }))
-    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", granted))
+    })
+    granted = load_dispositions(granted_table)
+    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", granted),
+                               grant_home=str(granted_table))
     assert _NarrowedRegistry(inner, correlation_grant(granted)).decide("alpha", "lookup").outcome == "GRANTED"
     assert correlation_system(correlation_grant(granted)) == "alpha"
 
     # The withholding.
-    withheld = load_dispositions(_table(tmp_path / "withheld", {
+    withheld_table = _table(tmp_path / "withheld", {
         ("alpha", "lookup"): WITHHELD, ("alpha", "health-check"): BOTH,
-    }))
-    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", withheld))
+    })
+    withheld = load_dispositions(withheld_table)
+    inner = ModuleVerbRegistry(read_roster(adapters), grant_for("gather", withheld),
+                               grant_home=str(withheld_table))
     decision = _NarrowedRegistry(inner, correlation_grant(withheld)).decide("alpha", "lookup")
     assert decision.outcome == "DENIED", decision
-    assert DISPOSITIONS_REL in (decision.refusal or ""), (
+    # #1106 M4: the RUN's resolved table, not a repo-relative constant — and not the other
+    # table this test also built.
+    assert str(granted_table) not in (decision.refusal or ""), decision.refusal
+    assert str(withheld_table) in (decision.refusal or ""), (
         f"the refusal must name the table the withholding was written in:\n{decision.refusal}"
     )
     assert correlation_system(correlation_grant(withheld)) is None
 
 
-def test_the_narrowed_registry_points_at_the_table():
+def test_the_narrowed_registry_points_at_the_table(tmp_path):
+    """#1106 M4: the pointer is the run's resolved table, carried by the registry the narrowed
+    one wraps — there is no class-level constant to point at any more."""
     from defender.runtime.lead_zero._items import _NarrowedRegistry
-    from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
-    assert _NarrowedRegistry.grant_home == DISPOSITIONS_REL
+    grants = T1106.run_grants(SETTINGS)
+    inner = ModuleVerbRegistry(read_roster(ADAPTERS), grants.gather, grant_home=str(grants.path))
+    narrowed = _NarrowedRegistry(inner, grants.correlation)
+    assert narrowed.grant_home == inner.grant_home == str(grants.path)
 
 
 def test_a_denied_verb_names_the_table_for_gather_too():
     """M6 is not holder-specific: every registry over a table-projected grant tells a DENIED
     caller where the withholding is authored. Pinned on gather's own withheld pair."""
-    from defender.runtime.verb_dispositions import DISPOSITIONS_REL
-
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    decision = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows)).decide("cmdb", "list-roles")
+    table = dispositions_path(SETTINGS)
+    rows = load_dispositions(table)
+    decision = ModuleVerbRegistry(
+        read_roster(ADAPTERS), grant_for("gather", rows), grant_home=str(table),
+    ).decide("cmdb", "list-roles")
     assert decision.outcome == "DENIED"
-    assert DISPOSITIONS_REL in (decision.refusal or ""), decision.refusal
+    assert str(table) in (decision.refusal or ""), decision.refusal
 
 
 # =========================================================================================
@@ -267,10 +282,12 @@ def test_the_orient_heading_says_the_lead_was_withheld():
     """MAIN reads why `l-00c` is absent — a trusted line naming the table — rather than the
     ordinary 'if any'. With a target, the heading is exactly what it was."""
     from defender.runtime.lead_zero import L3, LeadZeroResult, render_orient_section
-    from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
+    # #1106 M4: the note names the RUN's resolved table (`grant_home`), not a fixed constant.
+    table = str(dispositions_path(SETTINGS))
     result = LeadZeroResult(text="", status="resolved")
-    withheld = render_orient_section(result, None, correlation_system=None)
+    withheld = render_orient_section(result, None, correlation_system=None, grant_home=table)
     assert L3 in withheld, withheld
-    assert DISPOSITIONS_REL in withheld, withheld
-    assert DISPOSITIONS_REL not in render_orient_section(result, None, correlation_system="alpha")
+    assert table in withheld, withheld
+    assert table not in render_orient_section(
+        result, None, correlation_system="alpha", grant_home=table)

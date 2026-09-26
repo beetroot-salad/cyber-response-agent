@@ -64,7 +64,7 @@ what manufactures the read PR's fixtures.
   `{disposition} — {cause}\n\n{narrative}`, the agent's `comment.author`, the
   `released.status` a person's close moves a case to, and the dotted `source.*`
   paths into `alert.json` — lives in
-  `knowledge/environment/systems/case-history/mapping.yaml` and is *rendered* by
+  the tenant's `settings/systems/case-history/mapping.yaml` and is *rendered* by
   the mapper. Changing the convention (label prefix, body format, which alert
   field is the signature, which status means "reviewed") is a config edit, no code
   change. Nothing decodes a disposition back out of the store any more: the
@@ -111,7 +111,7 @@ what manufactures the read PR's fixtures.
   mapper (`alert_to_open_payload`, `case_record_to_comment`), the release predicate
   (`release_predicate` / `is_released`) the read screen and the writer both decide
   with, rendering from the mapping config.
-- `knowledge/environment/systems/case-history/mapping.yaml` — the de-facto schema
+- `knowledge/tenants/<tenant>/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions + the released status), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `record_case_ticket` (one read-back, at most one comment POST, a `ticket_write.json`
@@ -120,7 +120,7 @@ what manufactures the read PR's fixtures.
   unreleased case's comments are served to no model; a released case is served whole.
 - `run.py` — `--update-ticket`: open after materialize, record after
   `cross_check_tables`.
-- `knowledge/environment/systems/case-history/config.env` — `CASE_HISTORY_*`.
+- `knowledge/tenants/<tenant>/settings/systems/case-history/config.env` — `CASE_HISTORY_*`.
 
 The `ticket_write.json` receipt (`{key, status, url, ok}`) has no reader: it is a
 per-run trace for an operator, not a seam anything keys on.

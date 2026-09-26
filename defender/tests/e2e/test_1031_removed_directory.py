@@ -31,7 +31,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.agents import GATHER_DEF  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
@@ -208,7 +208,8 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
 def _record(capture: QueryCapture, run_dir: Path, *, system: str, exit_code: int, **extra) -> dict:
     """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
     run dir, a dispatched lead id, every row column the caller decides spelled out."""
-    deps = replace(bind(GATHER_DEF, run_dir, defender_dir=DEFENDER), lead_id=LEAD)
+    deps = replace(bind(_tenants1106.playground_gather_def(), run_dir, defender_dir=DEFENDER),
+                   lead_id=LEAD)
     row, _text = asyncio.run(capture._record(
         deps, system=system, verb="query", query_id="elastic.query", params={},
         payload=None, exit_code=exit_code, detail="down", system_key="", **extra,

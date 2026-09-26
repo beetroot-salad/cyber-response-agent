@@ -15,9 +15,9 @@ a REAL run whose main agent dispatches one gather lead against an INJECTED verb 
 the query tool, the grant decision, the capture capability, the payload view and the two tables
 all production. A new scenario is a verb table and two `Turn`s, not fresh plumbing.
 
-THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run resolves `$DEFENDER_DIR` for
-its skills, its lessons and its grants, so repointing it at a fixture tree would change the run
-rather than the mapping. The released status and the agent identity are therefore READ OFF
+THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run reads the committed playground
+tenant's settings (#1106) for its mapping and its grants alike, so repointing it at a fixture
+tenant would change the run rather than the mapping. The released status and the agent identity are therefore READ OFF
 the shipped file (`shipped_released_status_and_author`), which also makes these tests a
 statement about the file an operator edits (O5).
 """

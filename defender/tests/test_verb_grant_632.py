@@ -18,7 +18,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
@@ -106,15 +107,17 @@ def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
     against. The design names no mechanism here; the seam is the contract."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    policy = compile_policy_for(GATHER_DEF, run_dir)
+    # #1106 M4: gather is bound with a RUN's grant (the playground tenant's here).
+    gather_def = T1106.playground_gather_def()
+    policy = compile_policy_for(gather_def, run_dir)
 
-    assert policy.verb_allow is GATHER_DEF.verb_grant, \
+    assert policy.verb_allow is gather_def.verb_grant, \
         "the compiled policy does not carry the definition's own grant object"
     assert policy.bash_allow, "the bash half vanished — the two halves must compile together"
     assert set(policy.verb_allow.entries), "gather compiled with an empty verb allowance"
 
-    effective = compile_policy_for(GATHER_DEF, run_dir, tools=GATHER_DEF.tools)
-    assert effective.verb_allow is GATHER_DEF.verb_grant, \
+    effective = compile_policy_for(gather_def, run_dir, tools=gather_def.tools)
+    assert effective.verb_allow is gather_def.verb_grant, \
         "compile_policy_for accepts no effective ToolSet — a stage's runtime-set bit cannot reach it"
 
 
@@ -127,7 +130,7 @@ def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bas
     operator-facing audit reads."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    gather = compile_policy_for(GATHER_DEF, run_dir)
+    gather = compile_policy_for(T1106.playground_gather_def(), run_dir)
     main = compile_policy_for(MAIN_DEF, run_dir)
 
     pairs = {(s, v) for s, v, _ in gather.verb_allow.entries}
@@ -301,7 +304,7 @@ def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query", HEALTH_CHECK)})
 
-    gather = ScopedFakeVerbs(table, GATHER_DEF.verb_grant)
+    gather = ScopedFakeVerbs(table, T1106.playground_grants().gather)
     assert gather.decide("elastic", HEALTH_CHECK).outcome == GRANTED
 
     other = ScopedFakeVerbs(table, grant_of("main", ()))

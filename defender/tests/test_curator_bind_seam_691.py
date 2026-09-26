@@ -41,6 +41,7 @@ from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 
 # #0 — the binding seam returns a corpus-scoped curator deps
@@ -155,6 +156,8 @@ def test_every_role_this_change_does_not_mention_carries_the_new_record(tmp_path
     for role, defn in AGENTS.items():
         if role is AgentRole.CORPUS_AUTHOR:
             continue
+        if role is AgentRole.GATHER:
+            defn = T1106.playground_gather_def()  # #1106 M4: gather binds with a RUN's grant
         try:
             deps = bind(defn, rd)                           # its own generic scope
         except Exception:

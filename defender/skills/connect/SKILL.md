@@ -172,8 +172,11 @@ everything here grows post-merge.
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.
 
-`defender/knowledge/environment/systems/{system}/config.env` — non-secret
-config (endpoint, timeout, `AUTH_TYPE`, the *names* of secret env vars).
+`knowledge/tenants/{tenant}/settings/systems/{system}/config.env` (repo root, not
+under `defender/`) — the connected tenant's non-secret config (endpoint, timeout,
+`AUTH_TYPE`, the *names* of secret env vars). Also add a `CHANGE-ME` placeholder copy at
+`knowledge/tenant-template/settings/systems/{system}/config.env`, so a tenant copied from
+the template knows the keys.
 Track it in git when it holds no secrets; gitignore it only if it would
 encode a sensitive deployment. Secrets are always env vars.
 
@@ -190,9 +193,13 @@ the verb does not declare as a model-bindable param is a FAIL, and so is a
 verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
-`defender/knowledge/environment/verb-grants.yaml` — **adapter path only:
-one row per verb the adapter declares, `health-check` included.** This is
-the one shared file a new adapter-backed system requires, and skipping it
+`knowledge/tenants/*/settings/verb-grants.yaml` and
+`knowledge/tenant-template/settings/verb-grants.yaml` — **adapter path only:
+one row per verb the adapter declares, `health-check` included, in EVERY
+committed tenant's table and the template's.** The adapter is shared code, so
+every table must decide it: grant it in the tenant you are connecting,
+withhold it (`roles: []` with a reason) in the others and in the template.
+This is the one shared edit a new adapter-backed system requires, and skipping it
 is why step 5 below would otherwise fail in a way that looks like a bug in
 your adapter: an ungranted system's verbs are refused, and the refusal says
 the system is not reachable at all. **On the MCP path, write nothing here**
@@ -233,7 +240,7 @@ For a **generated-adapter** integration, run the scaffold validator and fix
 every FAIL:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant}
 ```
 
 Skip it on the **MCP** path — it checks the adapter module an MCP system
@@ -247,7 +254,10 @@ the branch and just leave the files in place for review:
 git checkout -b connect/{system}
 git add defender/scripts/adapters/{system}_adapter.py \
         defender/skills/{system}/ \
-        defender/knowledge/environment/systems/{system}/config.env \
+        knowledge/tenants/{tenant}/settings/systems/{system}/config.env \
+        knowledge/tenant-template/settings/systems/{system}/config.env \
+        knowledge/tenants/*/settings/verb-grants.yaml \
+        knowledge/tenant-template/settings/verb-grants.yaml \
         defender/skills/gather/queries/{system}/
 # add pyproject.toml / uv.lock only if a dependency was added
 ```
@@ -270,7 +280,7 @@ Then stop. `/ship` can open the PR.
   `ctx.env` — the skill never sees a value.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
   `skills/{system}/`, that system's `config.env`, its seed templates, and
-  its rows in `knowledge/environment/verb-grants.yaml`
+  its rows in every tenant's and the template's `settings/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
   skill, or another system's files. On the `tacit.md` route the lane is

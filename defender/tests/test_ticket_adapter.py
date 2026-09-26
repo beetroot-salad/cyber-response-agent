@@ -30,9 +30,11 @@ _REAL_LOAD_CONFIG = transport.load_config
 
 @pytest.fixture
 def ctx(tmp_path):
-    """A VerbContext over a throwaway tree; the transport is stubbed, so its config is never
-    loaded for real (each test stubs `_config` via `load_config`)."""
-    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={})
+    """A VerbContext over a throwaway tree and a throwaway settings folder (#1106: the run's
+    tenant `settings/`, handed in); the transport is stubbed, so its config is never loaded
+    for real (each test stubs `_config` via `load_config`)."""
+    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
+                       settings_dir=tmp_path / "settings")
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +109,7 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
 
 
 def _write_config(ctx, **values) -> None:
-    d = ctx.defender_dir / "knowledge" / "environment" / "systems" / "ticket"
+    d = ctx.settings_dir / "systems" / "ticket"
     d.mkdir(parents=True, exist_ok=True)
     (d / "config.env").write_text(
         "\n".join(f'{k}="{v}"' for k, v in values.items()) + "\n", encoding="utf-8",
@@ -124,7 +126,7 @@ _BASE_CONFIG = {
 @pytest.fixture
 def real_config(monkeypatch):
     """Undo the autouse stub: these tests are ABOUT config loading, so they drive the real
-    loader against a config file written into the throwaway tree."""
+    loader against a config file written into the throwaway settings folder."""
     monkeypatch.setattr(transport, "load_config", _REAL_LOAD_CONFIG)  # lint-monkeypatch: ok — restores the real function the autouse fixture stubs (this file's established pattern)
 
 
@@ -158,7 +160,7 @@ def test_run_env_overrides_the_declared_grammar(ctx, real_config):
     per-run override can point at a different store's vocabulary without editing the tree."""
     _write_config(ctx, **_BASE_CONFIG, TICKET_KEY_PATTERN="SOC-[0-9]+")
     over = VerbContext(defender_dir=ctx.defender_dir, run_dir=ctx.run_dir,
-                       env={"TICKET_KEY_PATTERN": "CASE-[0-9]+"})
+                       env={"TICKET_KEY_PATTERN": "CASE-[0-9]+"}, settings_dir=ctx.settings_dir)
     assert ticket_adapter.key_pattern(over) == "CASE-[0-9]+"
 
 

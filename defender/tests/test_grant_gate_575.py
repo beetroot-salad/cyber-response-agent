@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import functools
 import json
 import os
 import re
@@ -56,7 +57,6 @@ from defender.agents import (  # noqa: E402
     AGENTS,
     COMPOSER_DEF,
     CORPUS_AUTHOR_DEF,
-    GATHER_DEF,
     LEAD_AUTHOR_DEF,
     MAIN_DEF,
     QUESTIONER_DEF,
@@ -81,6 +81,7 @@ from defender.runtime.permission import (  # noqa: E402
     under,
 )
 from defender.runtime.permission.grant import PathShapes  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
@@ -114,8 +115,18 @@ def env(tmp_path):
     # demands below sweep that policy.
     seed_adapter_stubs(dfn, ("elastic",))
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
-    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
-    return SimpleNamespace(run=run, dfn=dfn, main=main, gather=gather, tmp=tmp_path)
+    return _Env(run=run, dfn=dfn, main=main, tmp=tmp_path)
+
+
+class _Env(SimpleNamespace):
+    """The planted tree and its compiled policies. Gather's is compiled LAZILY and with a RUN's
+    grant (#1106 M4: `GATHER_DEF` carries no table grant; the driver binds gather with the run's
+    tenant's), so a test about main alone does not depend on the tenant folder."""
+
+    @functools.cached_property
+    def gather(self) -> permission.AgentPolicy:
+        return compile_policy_for(T1106.playground_gather_def(), run_dir=self.run,
+                                  defender_dir=self.dfn)
 
 
 def _bash(env, cmd, which="gather"):
@@ -897,7 +908,7 @@ def test_h1_compile_policy_for_is_idempotent(env):
     """h1: compiling the same (def, roots) twice yields an EQUAL policy — the compile is a pure
     projection of declared data, with no accumulated or cached state leaking between calls
     (`tools_gather.py:325` binds GATHER_DEF once per DISPATCH, many times per run)."""
-    for defn in (MAIN_DEF, GATHER_DEF):
+    for defn in (MAIN_DEF, T1106.playground_gather_def()):
         a = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
         b = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
         assert _projection(a) == _projection(b)
@@ -992,8 +1003,12 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     CONSUMER of the gate, never a second implementation — an audit tool that models the gate
     separately is worse than none: it certifies a policy nobody runs."""
     c = cmd.format(run=env.run, dfn=env.dfn)
+    # #1106 M2: gather's grant is built from a named tenant under an injected root — the CLI
+    # holds no process-level grant to fall back to.
+    tenant = (("--tenants-root", str(T1106.TENANTS_ROOT), "--tenant", T1106.PLAYGROUND_ID)
+              if which == "gather" else ())
     p = _cli("explain", which, c, "--run-dir", str(env.run), "--defender-dir", str(env.dfn),
-             "--json")
+             *tenant, "--json")
     assert p.returncode == 0, p.stderr
     got = json.loads(p.stdout)
     d = _bash(env, c, which)

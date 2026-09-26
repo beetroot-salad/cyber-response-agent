@@ -84,16 +84,18 @@ class OutboundBody:
 
 #: Where this deployment's elastic configuration lives, relative to `defender_dir`. Named once
 #: because three readers reach it, and one of them holds no `VerbContext` to derive it from.
-CONFIG_RELPATH = ("knowledge", "environment", "systems", "elastic", "config.env")
+#: Relative to a tenant's `settings/` folder (#1106).
+CONFIG_RELPATH = ("systems", "elastic", "config.env")
 
 
-def config_path(defender_dir: _Path) -> _Path:
-    """The config file under `defender_dir` — for a caller that has no verb context."""
-    return _Path(defender_dir).joinpath(*CONFIG_RELPATH)
+def config_path(settings_dir: _Path) -> _Path:
+    """The config file under a tenant's `settings_dir` — for a caller that has no verb context
+    (it is handed the run's folder all the same; nothing here finds one)."""
+    return _Path(settings_dir).joinpath(*CONFIG_RELPATH)
 
 
 def _config_path(ctx: VerbContext) -> _Path:
-    return config_path(ctx.defender_dir)
+    return config_path(ctx.settings_dir)
 
 
 def config_from(

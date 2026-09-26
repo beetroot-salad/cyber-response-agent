@@ -8,13 +8,24 @@
 # rootfs should be minimal. So this image carries ONLY python + the defender
 # runtime deps + the defender code. No dev tooling, no egress tooling.
 #
+# NO TENANT DATA (#1106). Each tenant's folder (`knowledge/tenants/<id>/`) holds its
+# settings — endpoints, and later credentials — and its model-facing knowledge. It is
+# deployment data, not code, so it is never baked into an image (an image would carry
+# every tenant's settings, and go stale the moment one changes). The tenants root is
+# MOUNTED at run time at the path run.py defaults to, `/workspace/knowledge/tenants`,
+# or anywhere else with `--tenants-root`. `.dockerignore` keeps `knowledge/` out of the
+# build context so a later COPY cannot bake it in by accident.
+#
 # HOW IT'S BUILT/RUN. From the dev container (via the mounted docker socket) or
 # straight from the host, context = repo root:
 #   docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
-# Hermetic replay smoke test (no key, no egress):
-#   docker run --rm defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
-# Live investigation (needs the LLM key; egress is NOT baked in — see below):
-#   docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json>
+# Hermetic replay smoke test (no key, no egress; the replays run as the committed
+# `playground` tenant, so the repo's `knowledge/` is mounted):
+#   docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
+#       defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
+# Live investigation (needs the LLM key and the tenants root; egress is NOT baked in):
+#   docker run --rm --env-file .env -v "<HOST_TENANTS_ROOT>":/workspace/knowledge/tenants:ro \
+#       defender-runtime python3 defender/run.py <alert.json>
 #
 # EGRESS CAVEAT. Live gather currently shells out to `docker --context
 # soc-playground exec … curl` (mode-2 in the design). That egress is deliberately

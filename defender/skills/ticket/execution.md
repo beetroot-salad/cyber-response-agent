@@ -28,7 +28,8 @@ http://ticket-server:8080/...`. Bastion default `web-1`.
 
 ## Config
 
-`defender/knowledge/environment/systems/ticket/config.env` declares
+The run's tenant's `systems/ticket/config.env` (host-only, in the tenant's
+`settings/` folder — not readable from the box) declares
 `TICKET_URL_BASE`, `TICKET_BASTION_HOST`, `TICKET_TIMEOUT_SEC`,
 `TICKET_KEY_PATTERN`. All are required — a missing one means the system is
 down (`ConfigFault`, exit 2), never a default.

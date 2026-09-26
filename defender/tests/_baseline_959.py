@@ -42,11 +42,12 @@ this frozen tuple in `test_959_scanner.py`, which is where a drift between the t
 from __future__ import annotations
 
 import json
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender.agents import GATHER_DEF, MAIN_DEF
+from defender.agents import MAIN_DEF
 from defender.runtime import permission
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.permission import bash as _bash
@@ -60,8 +61,27 @@ RUN = Path("/run")
 DFN = Path("/dfn")
 
 MAIN = compile_policy_for(MAIN_DEF, run_dir=RUN, defender_dir=DFN)
-GATHER = compile_policy_for(GATHER_DEF, run_dir=RUN, defender_dir=DFN)
-POLICIES = {"main": MAIN, "gather": GATHER}
+
+
+@functools.cache
+def _gather_policy() -> Any:
+    """Gather's policy, compiled on first use from the committed playground tenant's grant.
+
+    #1106 M4: `GATHER_DEF` carries no table grant (a grant fixed per process), so gather is
+    compiled from a RUN's grant — and lazily, so importing this module reads no settings file.
+    `GATHER` and `POLICIES` below stay attribute-spelled (`base.GATHER`) through the module
+    `__getattr__`."""
+    from defender.tests import _tenants1106
+
+    return compile_policy_for(_tenants1106.playground_gather_def(), run_dir=RUN, defender_dir=DFN)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "GATHER":
+        return _gather_policy()
+    if name == "POLICIES":
+        return {"main": MAIN, "gather": _gather_policy()}
+    raise AttributeError(name)
 
 #: The 26 characters `str.strip()` removes that bash does not treat as a blank at all, written
 #: as CODEPOINTS and FROZEN here (claim a1, computed: `str.strip()`'s 29 minus space, tab and
@@ -620,7 +640,7 @@ def decision_record(command: str, policy_name: str = "main") -> dict[str, Any]:
     so a text comparison would report that deliberate edit as a verdict change on every shape
     the lexing reason answers.
     """
-    policy = POLICIES[policy_name]
+    policy = MAIN if policy_name == "main" else {"gather": _gather_policy}[policy_name]()
     d = permission.decide_bash(command, policy=policy, run_dir=RUN, defender_dir=DFN)
     known = reason_classes(policy)
     if not d.reason:

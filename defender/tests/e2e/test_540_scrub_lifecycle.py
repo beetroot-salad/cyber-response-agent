@@ -57,7 +57,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender import run_common  # noqa: E402
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
@@ -77,6 +77,7 @@ from defender.runtime.box import (  # noqa: E402
     stop_box,
 )
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     drive_worktree_batch,
@@ -302,7 +303,8 @@ def gate_env(tmp_path):
     return _GateEnv(
         run=run, dfn=dfn,
         main=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn),
-        gather=compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn),
+        gather=compile_policy_for(
+            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn),
     )
 
 
@@ -378,6 +380,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
         run_dir=run, model="m-741", model_override=None, defender_dir=DEFENDER,
+        tenant=_tenants1106.playground_run_tenant(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
 

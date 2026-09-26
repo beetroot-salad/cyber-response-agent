@@ -32,7 +32,6 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
-from defender._corpus import iter_query_templates
 from defender._io import write_guarded
 from defender import _git
 from defender._paths import DefenderPaths, adapters_under
@@ -63,6 +62,7 @@ from ..tools import (
     register_tools,
 )
 from ..verb_grant import VerbGrant
+from ..verb_dispositions import RunGrants
 from ..verbs import ModuleVerbRegistry, RosterRead, read_roster
 from defender.skills.invlang.validate import hold_capabilities
 from defender.hooks.inject_system_skill_description import descriptor_catalog
@@ -71,6 +71,7 @@ from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
+from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,
     DEFAULT_GATHER_MODEL,
@@ -94,7 +95,6 @@ from ._budget import (
 )
 from ._build import (
     GATHER_DEF,
-    GATHER_PAIRS,
     MAIN_DEF,
     MakeModel,
     _CORPUS_DIRS,
@@ -104,7 +104,6 @@ from ._build import (
     _gather_bash_shapes,
     _gather_extra_capabilities,
     _gather_instructions,
-    _gather_verb_grant,
     _main_bash_shapes,
     _main_extra_capabilities,
     _main_write_shape,
@@ -113,6 +112,7 @@ from ._build import (
     _summary_pointers,
     build_agent,
     build_agent_core,
+    gather_def_for,
     build_gather_agent,
     gather_model,
     resolve_main_model,
@@ -405,7 +405,9 @@ async def _close_a_run_cut_short(
     return exit_reason
 
 
-def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | None, str | None]:
+def _dispatch_catalogs(
+    defender_dir: Path, roster: RosterRead, grants: RunGrants,
+) -> tuple[str | None, str | None]:
     """The descriptor index each dispatch prompt opens with — MAIN's, narrowed to the gather
     role's committed grant, and lead-0's, narrowed to the correlation grant — built HERE,
     once, at run start, over the roster the run read, and handed down to the two dispatch
@@ -415,24 +417,21 @@ def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | No
     model is mid-run on, and not inside item 3's task, which swallows its own failures into
     "injection skipped".
 
-    The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
-    narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
+    The RUN's grants (#1106), never the injected `verbs=` registry's: a registry scoped
+    narrower than the run's gather grant must not narrow what the catalog advertises (the
     same decoupling `build_agent` states at the dispatch tool's registration)."""
-    from .. import lead_zero as lead_zero_mod
-
     skills = defender_dir / "skills"
     return (
-        descriptor_catalog(skills, roster, GATHER_DEF.verb_grant),
-        descriptor_catalog(skills, roster, lead_zero_mod.CORRELATION_GRANT),
+        descriptor_catalog(skills, roster, grants.gather),
+        descriptor_catalog(skills, roster, grants.correlation),
     )
 
 
 def _correlation_dispatch_at_run_start(
-    defender_dir: Path, *, resume: Any, lead_zero_verbs: Any,
+    *, tenant: RunTenant, resume: Any, lead_zero_verbs: Any,
 ) -> CorrelationDispatch | None:
-    """Item 3's dispatch identity, resolved FIRST — before the budget opens, the logger opens
-    or any model exists — for a run that WILL dispatch the lead (#1003), and `None` for one
-    that will not.
+    """Item 3's dispatch identity for a run that WILL dispatch the lead (#1003), and `None` for
+    one that will not.
 
     WHETHER this run dispatches item 3 at all is decided here, once, on the two facts the
     dispatch frame itself keys on: a resume skips turn-0 work, and a scenario with no
@@ -441,38 +440,24 @@ def _correlation_dispatch_at_run_start(
     have consulted — a branch episode resuming every sibling world after an operator demoted
     the template — and the dispatch cannot run unchecked.
 
-    Three inputs, each from where it is authored: the id from the run's own `lead-zero.yaml`
-    (`load_correlation_template`, read here and nowhere earlier — there is no process-cached
-    copy to fall behind the tree), the catalog of the run's own tree (walked, not linted,
-    because the operator who can author the mismatch never runs repo CI), and the table's
-    projection for the holder (`CORRELATION_GRANT`, process-level like every role's grant).
-    An unresolvable, misfiled, malformed or disagreeing template raises
-    `CorrelationDispatchError` out of `run_investigation`'s own frame, naming both sides, and
-    nothing downstream is spent; an unusable config raises `LeadZeroConfigError` naming the
-    file. A withheld lead (`system is None`) consults no template and degrades as before.
-
-    The value is CARRIED to `prepare_correlation_lead` and `dispatch_correlation` rather than
-    re-derived there: the system the lead is labelled with, dispatched on and cache-keyed by
-    is the one this frame checked the template against, by construction.
-
-    A sibling of `_adapters_at_run_start`, and the same shape: the one place a refusing read
-    of the tree happens is a frame named for it at the entry point, not a builder's side
-    effect."""
+    WHAT it dispatches on is not derived here: `run_tenant.resolve_run_tenant` resolved and
+    checked it before the box started (the run's tenant's `lead-zero.yaml` against the catalog
+    of the run's tree and the tenant's correlation grant), and it is CARRIED on the tenant — to
+    here, and from here to `prepare_correlation_lead` and `dispatch_correlation` — so the frame
+    that checked the template and the frames that dispatch on it hold one value, and the files
+    are read once. A tenant resolved as not dispatching the lead, handed to a run that would,
+    is a caller's bug, and raises rather than dispatching unchecked."""
     if resume is not None or lead_zero_verbs is None:
         return None
-    from .. import lead_zero as lead_zero_mod
-    from ..lead_zero_config import lead_zero_config_path, load_correlation_template
-    from ..tools_gather import _catalog_dir
-
-    return lead_zero_mod.resolve_correlation_dispatch(
-        load_correlation_template(lead_zero_config_path(defender_dir)),
-        iter_query_templates(_catalog_dir(defender_dir)),
-        lead_zero_mod.CORRELATION_GRANT,
-    )
+    if tenant.correlation is None:
+        raise TypeError(
+            "this run dispatches the lead-zero correlation lead, but its tenant was resolved "
+            "without it (`resolve_run_tenant(dispatches_lead_zero=False)`)")
+    return tenant.correlation
 
 
 def _adapters_at_run_start(
-    defender_dir: Path, roster: RosterRead | None, verbs: Any,
+    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any]:
     """Everything a run resolves from an adapters tree, resolved FIRST — before the budget
     opens, the logger opens, or any model exists — so an adapters tree this process cannot
@@ -495,7 +480,10 @@ def _adapters_at_run_start(
     close's price wrap and the prepare-time readers each re-filed the host's fault as the
     document's when the gate read lazily on first use."""
     roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(roster, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    # The default registry is built over the RUN's gather grant (#1106) — there is no
+    # process-level one to fall back to.
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
+        roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
     hold_capabilities(
         roster if Path(roster.root).resolve() == checkout.resolve() else read_roster(checkout)
@@ -532,7 +520,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_override: str | None = None,
     toolset: Any = None,
     resume: Any = None,
+    tenant: RunTenant,
 ) -> dict:
+    # `tenant` (#1106) is the run's own, resolved once at the entry point: its tenant folder
+    # (the settings every verb reads), the permissions projected from that tenant's table, and
+    # item 3's checked dispatch identity. Required — there is no process-level grant or
+    # settings folder to fall back to.
     model_name = resolve_main_model(model_name)
     # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
     # lead-0 acquire one via the MAIN-gather default resolved below. Captured before it.
@@ -541,11 +534,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs)
+    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
     correlation = _correlation_dispatch_at_run_start(
-        defender_dir, resume=resume, lead_zero_verbs=lead_zero_verbs,
+        tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster)
+    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
@@ -649,6 +642,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
+        tenant=tenant,
     )
 
     # Item 3's async frame: scheduled here (after item 1 has resolved synchronously) and
@@ -680,17 +674,22 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
                 catalog=correlation_catalog, dispatch=correlation,
+                settings_dir=tenant.settings,
             ))
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
         correlation_task=correlation_task, toolset=toolset, catalog=catalog,
+        gather_grant=tenant.grants.gather,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
+        # The run's tenant folder rides on MAIN's deps so every gather lead it dispatches
+        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3.
+        settings_dir=tenant.settings,
     )
 
     t0 = time.time()
@@ -743,7 +742,7 @@ __all__ = [
     "DEFAULT_TOOL_RETRIES",
     "GATHER_AGENT_ID_PREFIX",
     "GATHER_DEF",
-    "GATHER_PAIRS",
+    "gather_def_for",
     "GATHER_REQUEST_LIMIT",
     "GatherDeps",
     "Hooks",
@@ -780,7 +779,6 @@ __all__ = [
     "_gather_bash_shapes",
     "_gather_extra_capabilities",
     "_gather_instructions",
-    "_gather_verb_grant",
     "_log_node",
     "_main_bash_shapes",
     "_main_extra_capabilities",

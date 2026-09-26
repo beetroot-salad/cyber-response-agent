@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import re
 import sys
 from collections.abc import Mapping
 from typing import Any
+from pathlib import Path
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
@@ -40,7 +40,8 @@ from defender.scripts.gather_tools.record_query import (
     _json_safe_params,  # noqa: F401 — re-export: test_repeat_breaker_807 imports it from here
     append_query_row,
     dead_end_reason,
-    is_reserved_query_id,
+    _QID_FORBIDDEN,
+    resolve_query_id,
     lead_rows,
     names_something_readable,
     payload_digest,
@@ -150,43 +151,6 @@ UNDECLARED_SYSTEM_DETAIL = "unresolvable: " + UNDECLARED_SYSTEM
 #: entry a DEGRADATION (a real argument printed as `argument`) rather than a leak.
 DECLARED_ARGS = frozenset({"system", "verb", "params", "query_id"})
 
-#: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
-#: would walk the id out of the directory it names a file in. The last three are RENDER
-#: shapes: a catalog id is interpolated into markdown three offline collectors read, and a
-#: newline or a heading marker in it forges document structure inside the judge's per-lead
-#: comparison. Both families screen as one rule: a `query_id` is a catalog IDENTIFIER the
-#: collectors partition on, not free text.
-_QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
-
-#: The kebab half: the remainder after the first `.` in a coined `query_id`. No dot — a second
-#: dot lets `'system.foo.bar'` slip past a prefix-only check and become a SECOND unvalidated
-#: model-supplied path component at the host-side draft writer
-#: (`draft_synthesis._draft_candidate_segments`'s `split('.', 1)`).
-_KEBAB_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
-
-
-def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
-    # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
-    # through here) to mark a row whose ROUTING the offline collectors take on trust. A
-    # model-supplied `query_id` spelling one — or carrying a character `_screen` would reject —
-    # must not reach a real row through this path: the repeat-trip's own record sits ABOVE
-    # `_screen`, so nothing else screens it. Keyed on the whole PREFIX, not on each literal, so
-    # it cannot fall behind the set.
-    if (
-        model_query_id
-        and not is_reserved_query_id(model_query_id)
-        and not any(t in model_query_id for t in _QID_FORBIDDEN)
-    ):
-        # The WHOLE `{system}.{kebab-name}` shape, not only the prefix: the prefix must
-        # EXACTLY equal the dispatched system (no case folding, no NFC) and the remainder must
-        # be a single well-formed segment. A foreign prefix, a missing separator, an empty
-        # remainder, or a second `.` all fall back to the untagged value.
-        prefix, sep, remainder = model_query_id.partition(".")
-        if sep and prefix == system and remainder and _KEBAB_SEGMENT.match(remainder):
-            return model_query_id
-    return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
-
-
 def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
         return e.code
@@ -212,7 +176,7 @@ def _self_ticket_reject_reason(
     return None
 
 
-def _release_predicate() -> Any:
+def _release_predicate(settings_dir: Path) -> Any:
     """#767 D4's release predicate, built fresh per call (`d_each_query_screened_at_call_time`
     — no snapshot, no cache). §7 R1's read-side extension (FK20): a predicate-construction
     failure DEGRADES rather than raising into the model's turn or refusing the whole gather
@@ -228,7 +192,7 @@ def _release_predicate() -> Any:
     from defender.scripts.case_history import case_ticket
 
     try:
-        return case_ticket.release_predicate().is_released
+        return case_ticket.release_predicate(settings_dir).is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
         print(
             f"[query_tool] WARN ticket release predicate unavailable ({e!r}); serving no "
@@ -239,7 +203,7 @@ def _release_predicate() -> Any:
 
 
 def _screen_ticket_payload(
-    self_key: str, system: str, verb: str, payload: Any,
+    self_key: str, system: str, verb: str, payload: Any, *, settings_dir: Path,
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion, then #767 D4's per-ticket release step, before
     capture and model display.
@@ -252,6 +216,9 @@ def _screen_ticket_payload(
     D4 runs strictly AFTER the own-case exclusion above (`d4_screen_after_own_case`) and only
     when it answered a served payload (``code == 0``) — a malformed envelope stays malformed,
     never patched into something the release step could act on.
+
+    `settings_dir` is the run's tenant folder (#1106): the released status is THAT tenant's
+    mapping's, read per call.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
@@ -268,7 +235,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_get(payload, is_released=_release_predicate()), 0, ""
+        return screen_release_get(payload, is_released=_release_predicate(settings_dir)), 0, ""
 
     if verb == TICKET_LIST:
         payload, code, detail = screen_list(
@@ -279,7 +246,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_list(payload, is_released=_release_predicate()), 0, ""
+        return screen_release_list(payload, is_released=_release_predicate(settings_dir)), 0, ""
 
     return payload, 0, ""
 
@@ -858,7 +825,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             payload = await handler(args)
             payload, exit_code, detail = _screen_ticket_payload(
-                self_key, system, verb, payload,
+                self_key, system, verb, payload, settings_dir=deps.settings_dir,
             )
         except CONTROL_FLOW_EXCEPTIONS:
             raise
@@ -1310,6 +1277,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
+            settings_dir=deps.settings_dir,
         )
         return await asyncio.to_thread(fn, vctx, **params)
 

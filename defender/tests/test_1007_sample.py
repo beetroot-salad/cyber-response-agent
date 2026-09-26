@@ -24,6 +24,8 @@ RED AGAINST HEAD is the expected state.
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 import json
 from pathlib import Path
 
@@ -755,7 +757,7 @@ def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
 
     record = review.review(family_mod.parse_family(doc), episode_dir=ep,
                            adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
-                           door=W.FakeDoor(), invoke=W.FakeAgent("same"))
+                           door=W.FakeDoor(), invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
     block = record["worlds"]["b"]["reachability"]
     assert "stale" not in json.dumps(block), (

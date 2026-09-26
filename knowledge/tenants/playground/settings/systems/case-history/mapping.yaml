@@ -1,0 +1,57 @@
+# Case-history field mapping (issue #317, gated by a person's close since #767).
+#
+# How the defender's INTERNAL case model (alert.json + report.md) maps onto the
+# EXTERNAL ticket schema — the "de-facto schema". The frozen v1 ticket has no
+# disposition or signature field, so they ride existing fields by convention.
+# Edit THIS FILE to change the convention; no code change required.
+#
+# Templates use {placeholders}: case_id, signature, summary, disposition, cause,
+# narrative, event_time. `source.*` are dotted paths into alert.json.
+
+# Where to read facts from the internal model (alert.json).
+source:
+  signature: rule.id
+  summary: rule.description
+  # The SIEM event time — when the activity happened, NOT when we investigated it.
+  # Stamped onto the open ticket (the `evt:` label) so a later run can window
+  # candidates by alert time; the server-set `created` is materialize time and
+  # drifts from this under replay/backtest.
+  event_time: timestamp
+
+# POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
+# Keys are external ticket fields (TicketCreate); values are rendered templates.
+# This whole section ships to the wire UNFILTERED (`alert_to_open_payload`).
+# `status` must be a literal and must differ from `released.status` below —
+# the status vocabulary is the store's own closed set, so nothing rendered from
+# an alert can move a case along its lifecycle. Both rules are ENFORCED when
+# this file is loaded (`case_ticket._check_lifecycle`): a templated or colliding
+# `status` refuses the open leg, the record leg and the read screen alike.
+open:
+  key: "{case_id}"
+  summary: "{summary}"
+  description: "Auto-created from alert {case_id} (rule {signature})."
+  status: open
+  reporter: defender
+  # `sig:` is the signature filter key; `evt:` carries the alert event time.
+  labels:
+    - "sig:{signature}"
+    - "evt:{event_time}"
+
+# POST /tickets/{key}/comments — the host RECORDS its investigation into the
+# case as its own comment (#767 D2/D3); it never transitions or closes the
+# ticket, and it never sets a disposition itself — closing is a person's (O1).
+# `body` is rendered from a `CaseRecord`'s `disposition` (proposed, never
+# committed by this write), `cause` (the host's own sentence) and `narrative`
+# (the report's body, fence-stripped and bounded on the wire).
+comment:
+  author: defender
+  body: "{disposition} — {cause}\n\n{narrative}"
+
+# The lifecycle state a person moves a case to when they have reviewed it. A
+# later run's gather is served a case's comments ONLY once it is in this state
+# (O2/O5); until then it sees the case — summary, labels, status — with no
+# comments at all. The host never sets this status (it records, never
+# transitions), so the person's close is the one act that releases a case's
+# history, and re-opening it hides that history again.
+released:
+  status: closed

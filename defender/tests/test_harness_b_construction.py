@@ -266,7 +266,8 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     from defender.runtime import tools_gather
     from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+    from defender.runtime.driver import MAIN_DEF
+    from defender.tests import _tenants1106
 
     seen: list[tuple[str, str]] = []
 
@@ -284,7 +285,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
-        GATHER_DEF.verb_grant, catalog=None,
+        _tenants1106.playground_grants().gather, catalog=None,
     ))
 
     assert seen == [("gather:l-005", "identity")]
@@ -294,6 +295,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
         agent = driver.build_gather_agent(
             _DEFENDER, logger, "gather:l-005", make_model=fake, verbs=FakeVerbs({}),
             session_id="sess-7", cache_key="gather:identity",
+            verb_grant=driver.GATHER_DEF.verb_grant,
         )
     assert agent.model_settings["openai_prompt_cache_key"] == "gather:identity"
 
@@ -372,6 +374,7 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     with override_allow_model_requests(False):
         agent = driver.build_gather_agent(
             _DEFENDER, logger, "gather:l-001", make_model=fake, verbs=FakeVerbs({}),
+            verb_grant=driver.GATHER_DEF.verb_grant,
         )
     assert list(agent._function_toolset.tools) == [
         "bash", "read_file", "template_search", "query", "list_verbs",
@@ -393,6 +396,7 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
         agent = driver.build_agent(
             _DEFENDER, logger, make_model=fake,
             bounds=challenge_gate.default_bounds(), catalog=None,
+            gather_grant=driver.GATHER_DEF.verb_grant,
         )
     tools = set(agent._function_toolset.tools)
     # The authoring tool is `append_block` since #810 — MAIN's write grant is `append=True`,

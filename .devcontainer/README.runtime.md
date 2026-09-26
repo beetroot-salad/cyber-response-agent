@@ -5,7 +5,7 @@ Two images, on purpose:
 | | Dev container (`Dockerfile.dev`) | Runtime container (`Dockerfile.runtime`) |
 |---|---|---|
 | Role | the "coding machine" — editing, this session, infra tooling | where an investigation actually executes (`defender/run.py`) |
-| Carries | terraform, hcloud, codex, docker CLI, ssh, uv, node | **only** python 3.11 + the defender `.[runtime]` deps + defender code |
+| Carries | terraform, hcloud, codex, docker CLI, ssh, uv, node | **only** python 3.11 + the defender `.[runtime]` deps + defender code — never tenant data (mounted at run time) |
 | Privilege | none special | gets the privilege runsc needs later (the dev container never does) |
 | Maps to the sandbox design | the trusted orchestration/dev host | (superseded — see "The box image" below) |
 
@@ -23,12 +23,21 @@ Context is the repo root; a `.dockerignore` keeps it lean.
 # build (from the dev container via the socket, or from the host)
 docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
 
-# hermetic replay smoke test — no key, no egress
-docker run --rm defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
+# hermetic replay smoke test — no key, no egress; replays run as the committed
+# `playground` tenant, so the repo's knowledge/ is mounted
+docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
+    defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 
-# live investigation — needs the LLM key
-docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json>
+# live investigation — needs the LLM key and the tenants root
+docker run --rm --env-file .env -v "<HOST_TENANTS_ROOT>":/workspace/knowledge/tenants:ro \
+    defender-runtime python3 defender/run.py <alert.json>
 ```
+
+**Tenant folders are mounted, never baked (#1106).** A tenant's folder holds its settings
+(endpoints, later credentials) and its model-facing knowledge — deployment data, not code.
+The image carries none of it; `run.py` reads the tenants root at `/workspace/knowledge/tenants`
+by default (or `--tenants-root`), and `.dockerignore` keeps `knowledge/` out of the build
+context. From the dev container, `<HOST_…>` is a HOST path (see the caveat below).
 
 ## The box image (the sandbox itself)
 

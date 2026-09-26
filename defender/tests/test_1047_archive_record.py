@@ -60,6 +60,7 @@ import json
 import pytest
 
 from defender.tests import _spec1047 as S
+from defender.tests import _tenants1106 as T1106
 
 
 def _archive():
@@ -358,7 +359,8 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
             raise
         return 0
 
-    cli.start_family(ep, ["b", "c"], spawn=spawn)
+    cli.start_family(ep, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID,
+                     tenants_root=T1106.TENANTS_ROOT)
     if faults:
         raise faults[0]
     assert set(written) == {"b", "c"}, f"the launcher fanned {sorted(written)}"
@@ -397,7 +399,8 @@ def test_sidecar_write_ordering_relative_to_the_archives_own_run_dir_discovery(t
             raise
         return 0
 
-    exits = cli.start_family(ep, ["b", "c"], spawn=spawn)
+    exits = cli.start_family(ep, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID,
+                             tenants_root=T1106.TENANTS_ROOT)
     if faults:
         raise faults[0]
     assert set(exits) == {"b", "c"}

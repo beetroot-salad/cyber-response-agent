@@ -47,6 +47,15 @@ from defender.tests._spec767 import (
 )
 
 DEFENDER_DIR = PATHS.defender_dir
+
+
+def _shipped_rows():
+    """The committed playground tenant's table (#1106 moved it out of `defender/`, and there
+    is no per-process cached reader any more)."""
+    from defender.tests import _tenants1106 as T1106
+
+    return verb_dispositions.load_dispositions(
+        verb_dispositions.dispositions_path(T1106.PLAYGROUND_SETTINGS))
 REPO_ROOT = PATHS.repo_root
 URL_BASE = "http://case-history.test"
 
@@ -96,7 +105,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
     through its real projection, the allowlist is exercised by the real `guard_outbound` over
     real write URLs, and the program set is built by its real producer. Its positive control
     is `o6_read_verb_still_granted` — the read verb the same three surfaces DO admit."""
-    rows = verb_dispositions.shipped_dispositions()
+    rows = _shipped_rows()
     for role in sorted(verb_dispositions.KNOWN_ROLES):
         grant = verb_dispositions.grant_for(role, rows)
         for system, verb, verb_class in grant.entries:
@@ -144,7 +153,7 @@ def test_767_list_tickets_still_granted_to_gather():
     The ungranted ticket verbs stay in the table as rows granted to NOBODY with a reason —
     that is this file's way of spelling an examined no, and it is why a future re-grant is a
     decision rather than a restoration."""
-    rows = verb_dispositions.shipped_dispositions()
+    rows = _shipped_rows()
     by_pair = {d.pair: d for d in rows}
     gather = verb_dispositions.grant_for("gather", rows)
 
@@ -177,7 +186,7 @@ def test_767_verb_class_vocabulary_stays_closed_at_two():
     with pytest.raises(GrantError):
         VerbGrant(role="gather", entries=(("ticket", "record-comment", "w"),))
 
-    rows = verb_dispositions.shipped_dispositions()
+    rows = _shipped_rows()
     assert not [d for d in rows if d.system == "case-history"], (
         "the host writer's system appeared in the verb table — it is a post-step, not a verb"
     )
@@ -207,7 +216,7 @@ def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
                 method=method,
             )
 
-    rows = verb_dispositions.shipped_dispositions()
+    rows = _shipped_rows()
     for d in rows:
         if d.system == "ticket":
             for word in ("transition", "close"):
@@ -272,7 +281,7 @@ def test_767_ticket_adapter_edge_carries_no_model_reachable_comment_content(tmp_
     screened = {TICKET_LIST, TICKET_GET}
     contentless = {"health-check"}
 
-    rows = verb_dispositions.shipped_dispositions()
+    rows = _shipped_rows()
     reachable = {
         d.verb for d in rows
         if d.system == "ticket" and d.roles

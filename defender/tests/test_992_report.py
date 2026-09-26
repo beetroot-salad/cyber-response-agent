@@ -365,22 +365,22 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     test names (REPORT_CAUSES gaining a seventh member) is unaffected by that rename."""
     from defender.tests._spec767 import use_mapping
 
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    settings = use_mapping(monkeypatch, tmp_path / "dfn")
     deps, run_dir = deps_over(tmp_path / "held", ceiling_companion())
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    rec = case_ticket.read_case_record(run_dir)
+    rec = case_ticket.read_case_record(run_dir, settings_dir=settings)
     assert rec.disposition == GAP
     assert rec.cause == CEILING_EXAMINED
-    comment = case_ticket.case_record_to_comment(rec)
+    comment = case_ticket.case_record_to_comment(rec, settings_dir=settings)
     assert comment["body"].startswith(f"{GAP} — {CEILING_EXAMINED}")
 
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
     assert broken.outcome == "forced-inconclusive"
     assert broken.failure_kind is not None
-    rec = case_ticket.read_case_record(run_dir)
+    rec = case_ticket.read_case_record(run_dir, settings_dir=settings)
     assert rec.disposition == UNRESOLVED
     assert rec.cause == CAUSE_REVIEW_INCOMPLETE
-    assert CEILING_EXAMINED not in case_ticket.case_record_to_comment(rec)["body"]
+    assert CEILING_EXAMINED not in case_ticket.case_record_to_comment(rec, settings_dir=settings)["body"]

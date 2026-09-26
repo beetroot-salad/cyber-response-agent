@@ -29,7 +29,7 @@ from .tools import (
     LeadStop,
 )
 
-from defender._corpus import QueryTemplate, is_established, iter_query_templates
+from defender._corpus import QueryTemplate, is_established, iter_query_templates, query_catalog_dir
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
@@ -71,10 +71,6 @@ def _payload_note(deps: GatherDeps, record: dict) -> str:
         f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
         if record.get("payload_path") else ""
     )
-
-
-def _catalog_dir(defender_dir: Path) -> Path:
-    return defender_dir / "skills" / "gather" / "queries"
 
 
 def _repo_rel(defender_dir: Path, path: Path) -> str:
@@ -124,7 +120,7 @@ def _template_index(
     on_target: list[str] = []
     elsewhere: list[str] = []
     established_seen = 0
-    for t in iter_query_templates(_catalog_dir(defender_dir)):
+    for t in iter_query_templates(query_catalog_dir(defender_dir)):
         if not is_established(t):
             continue
         established_seen += 1
@@ -304,7 +300,7 @@ _SEARCH_LINES_PER_TEMPLATE = 3
 
 
 def _search_root(deps: AgentDeps, system: str | None) -> Path:
-    root = _catalog_dir(deps.defender_dir)
+    root = query_catalog_dir(deps.defender_dir)
     if system is None:
         return root
     systems = sorted({p.name for p in root.iterdir() if p.is_dir()}) if root.is_dir() else []
@@ -331,7 +327,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
     scope = f"system `{system}`" if system else "every system"
 
     hits: list[tuple[QueryTemplate, list[str]]] = []
-    for t in iter_query_templates(_catalog_dir(deps.defender_dir)):
+    for t in iter_query_templates(query_catalog_dir(deps.defender_dir)):
         if root not in t.path.parents:
             continue
         matched = [ln.strip() for ln in t.body.splitlines() if needle in ln.lower()]
@@ -597,7 +593,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         return circuit_breaker.down_message(deps.run_dir, system)
 
     from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import GATHER_DEF
+    from defender.runtime.driver import gather_def_for
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
     # `system` as well as `agent_id`: `agent_id` keys this lead's session and its wire-log
@@ -610,8 +606,11 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # F-19). The hooks that mark the ceiling read it off the run context the framework
     # builds from that same `UsageLimits`.
     gagent = gather_factory(agent_id, system, request_limit)
+    # Bound over the grant this dispatch holds (#1106): the run's gather grant for a
+    # model-dispatched lead, the correlation grant for item 3 — never a process-level one.
+    gather_def = gather_def_for(verb_grant)
     gbase = bind(
-        GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
+        gather_def, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
     )
     assert isinstance(gbase, GatherDeps)
     stop = LeadStop()
@@ -621,6 +620,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
         stop=stop,
+        settings_dir=deps.settings_dir,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
 

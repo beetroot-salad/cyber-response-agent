@@ -58,9 +58,9 @@ from defender.learning.branch.ledger import (  # noqa: E402
     STAGED,
     Ledger,
 )
-from defender.runtime import driver  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.tests._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
@@ -86,7 +86,12 @@ T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
 T0_Z = "2026-05-25T15:30:45Z"
 
 REAL_ADAPTERS = PATHS.adapters_dir
-GATHER_GRANT = driver.GATHER_DEF.verb_grant
+
+
+def _gather_grant() -> VerbGrant:
+    """The committed playground tenant's gather grant (#1106: grants are per run, projected from
+    the run's tenant's table — there is no process-level `GATHER_DEF.verb_grant` any more)."""
+    return _tenants1106.playground_grants().gather
 
 #: What the fake `docker` records, under the run dir the test reads.
 DOCKER_LOG = "docker-calls.jsonl"
@@ -227,7 +232,8 @@ def fake_docker(tmp_path: Path) -> Path:
 
 
 def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
-               defender_dir: Path | None = None) -> VerbContext:
+               defender_dir: Path | None = None,
+               settings_dir: Path | None = None) -> VerbContext:
     """A `VerbContext` whose env is the whole world the transports fork into.
 
     `as_of` DEFAULTS TO NONE, and that default is the production shape: `query_tool.py` builds
@@ -244,6 +250,10 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
     return VerbContext(
         defender_dir=defender_dir if defender_dir is not None else tmp_path / "defender",
         run_dir=run_dir,
+        # #1106: the run's tenant settings folder — the committed playground's unless a caller
+        # hands its own (the folder every read resolved before the run had to hand it in).
+        settings_dir=(settings_dir if settings_dir is not None
+                      else _tenants1106.PLAYGROUND_SETTINGS),
         env={
             "PATH": str(fake_docker(tmp_path)),
             "DOCKER_CALL_LOG": str(tmp_path / DOCKER_LOG),
@@ -256,13 +266,15 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
 def elastic_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None) -> VerbContext:
     """`docker_ctx`, plus the config file `load_config` refuses to run without."""
     defender_dir = tmp_path / "defender"
-    config = defender_dir / "knowledge" / "environment" / "systems" / "elastic" / "config.env"
+    settings_dir = tmp_path / "settings"
+    config = settings_dir / "systems" / "elastic" / "config.env"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
         f"ELASTICSEARCH_URL=http://elasticsearch:9200\nKIBANA_URL=http://kibana:5601\n"
         f"ELASTIC_EVENTS_INDEX={EVENTS_INDEX}\nELASTIC_ALERTS_INDEX={ALERTS_INDEX}\n",
         encoding="utf-8")
-    return docker_ctx(tmp_path, as_of=as_of, defender_dir=defender_dir)
+    return docker_ctx(tmp_path, as_of=as_of, defender_dir=defender_dir,
+                      settings_dir=settings_dir)
 
 
 def docker_calls(tmp_path: Path) -> list[list[str]]:
@@ -388,10 +400,15 @@ def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
     names = [f.name for f in dataclasses.fields(VerbContext)]
 
     assert names[-2:] == ["world_id", "as_of"], f"the clock did not land last: {names}"
-    assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={}).as_of is None
-    # Positionally, exactly as the pre-947 sites build one: the fifth argument is still the
-    # world, not the clock.
-    assert VerbContext(Path("/d"), Path("/r"), {}, None, "w1").world_id == "w1"
+    assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
+                       settings_dir=Path("/s")).as_of is None
+    # The world and the clock are two fields: a context naming a world names no moment. (#1106
+    # made `settings_dir` a REQUIRED field, so every site now builds by keyword and the old
+    # positional spelling — fifth argument the world — is no longer one any site uses.)
+    ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
+                      settings_dir=Path("/s"), capture=None, world_id="w1")
+    assert ctx.world_id == "w1"
+    assert ctx.as_of is None
 
 
 def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock(tmp_path):
@@ -413,7 +430,7 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     the second is what separates "the clock was threaded" from "the adapter stamped something
     that happened to be a timestamp"."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT, world=World("w1"),
+    reg = WorldRegistry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")

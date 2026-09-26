@@ -14,6 +14,8 @@ RED AGAINST HEAD is the expected state.
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 import json
 from pathlib import Path
 
@@ -51,7 +53,7 @@ def run_review(ep: Path, family, *, adapters=None, door=None, invoke=None):
         family, episode_dir=ep,
         adapters=adapters if adapters is not None else W.FakeAdapters(),
         door=door if door is not None else W.FakeDoor(),
-        invoke=invoke if invoke is not None else W.FakeAgent("same"))
+        invoke=invoke if invoke is not None else W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
 
 def block_of(record: dict, label: str = "b") -> dict:
@@ -485,7 +487,7 @@ def test_the_production_read_side_declares_the_world_and_the_confinement_needs_i
     registry = W.mod("learning.branch.estate.registry")
     token = W.world_token("b")
 
-    episode_wide = seams.adapter_seam(ep)
+    episode_wide = seams.adapter_seam(ep, _tenants1106.playground_tenant())
     this_world = episode_wide.for_world(token)
 
     assert episode_wide.ctx.world_id is None, (
@@ -493,7 +495,9 @@ def test_the_production_read_side_declares_the_world_and_the_confinement_needs_i
     assert this_world.ctx.world_id == token, (
         f"the per-world read side declares {this_world.ctx.world_id!r}, not the composed token "
         "the view name's own segment carries")
-    patterns = registry.STAGERS["elastic"].configured_patterns()
+    # #1106: the patterns this RUN's tenant configures — read from the settings folder the
+    # seam's own context carries, never from the checkout.
+    patterns = registry.STAGERS["elastic"].configured_patterns(episode_wide.ctx.settings_dir)
     view = confinement.world_view(W.EVENTS_PATTERN, token)
     assert confinement.confine_index(view, patterns, world_id=this_world.ctx.world_id) == view
     with pytest.raises(W.refusals()):

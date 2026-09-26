@@ -40,7 +40,8 @@ second one.
   `config.env` (names, never values) and resolve them in the adapter — but
   nothing in this tree does today.
 - **Config — `URL_BASE`, `BASTION_HOST`, `TIMEOUT_SEC`** in
-  `../../knowledge/environment/systems/{system}/config.env`, each key
+  the run's tenant's `settings/systems/{system}/config.env`
+  (`knowledge/tenants/<tenant>/` at the repo root; the adapter reads `ctx.settings_dir`), each key
   prefixed with the system name (e.g. `IDENTITY_URL_BASE`). Non-secret only;
   an env var of the same prefixed name overrides the file for CI/per-run use.
 - **Exit codes — `0` ok / `1` query rejected / `2`

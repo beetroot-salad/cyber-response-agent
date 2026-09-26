@@ -114,8 +114,34 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(hosted, base, a
         "the stamp is written by the host before the box exists — the sentinel is planted later")
 
 
+def test_materialize_refuses_a_record_rewritten_after_the_tenant_was_chosen(
+        hosted, base, alert):
+    """#1106: `run.py` chooses the run's tenant (its settings, its grants) from the record
+    BEFORE the box and hands that same record to the builder. Rewritten in between, the
+    builder must not stamp the file's new tenant over a run using the old one's settings — it
+    refuses, naming both. Handed the record as it still stands, it stamps it (the control)."""
+    import dataclasses
+
+    import pytest
+
+    from defender import _tenant
+
+    hosted(alert, "run-control")
+    on_disk = _tenant.read_tenant(base)
+    same = hosted(alert, "run-same", tenant_record=on_disk)
+    assert _stamp(same)["tenant_id"] == on_disk.tenant_id
+
+    chosen = dataclasses.replace(on_disk, tenant_id="acme")
+    with pytest.raises(ValueError, match="disagrees with the tenant record") as caught:
+        hosted(alert, "run-rewritten", tenant_record=chosen)
+    assert "acme" in str(caught.value), caught.value
+    assert on_disk.tenant_id in str(caught.value), caught.value
+    assert _record(base)["tenant_id"] == on_disk.tenant_id, "the record itself is left alone"
+
+
 def test_the_tenant_record_is_created_once_under_the_runs_base(hosted, base, alert):
-    """The first materialisation creates `<runs_base>/_tenant.json` with `tenant_id="default"`,
+    """The first materialisation creates `<runs_base>/_tenant.json` with `tenant_id="playground"`
+    (#1106 D4: the bootstrap value was `"default"` before),
     a fresh `base_world_id` and a `created_at`, and a second materialisation reuses it
     unchanged."""
     assert not (base / S.TENANT_RECORD_NAME).exists()
@@ -417,7 +443,7 @@ def test_run_creation_refuses_a_run_directory_named_like_the_tenant_record(hoste
 def test_a_second_runs_base_is_live_in_the_same_process(tmp_path: Path):
     """Two runs bases live at once — a sibling's `<episode>/runs` alongside its parent's — and
     each independently creates and reads its OWN `_tenant.json`, each defaulting to
-    `tenant_id="default"` and each minting its own `base_world_id`; the tenant record is 1:1
+    `tenant_id="playground"` (#1106 D4) and each minting its own `base_world_id`; the tenant record is 1:1
     with its runs base, not a process-wide singleton, and no refusal fires when both are live.
     """
     parent = S.make_runs_base(tmp_path, "defender-runs")
@@ -438,8 +464,9 @@ def test_a_second_runs_base_is_live_in_the_same_process(tmp_path: Path):
 
 
 def test_a_tenant_record_whose_tenant_id_is_not_the_built_in_default(hosted, base, alert):
-    """A tenant record whose `tenant_id` is not the built-in 'default' is read and stamped
-    as-is: the record is the sole authority for the stamped tenant, `'default'` is only D2's
+    """A tenant record whose `tenant_id` is not the built-in default ('playground' since #1106
+    D4) is read and stamped as-is: the record is the sole authority for the stamped tenant, the
+    default is only D2's
     creation-time bootstrap value, and the handle neither refuses the record nor rewrites it.
     Runs stamped under a previous value keep that value, with no reconciliation performed."""
     S.plant_tenant_record(base, tenant_id="acme-corp")

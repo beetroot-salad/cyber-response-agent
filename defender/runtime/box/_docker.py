@@ -413,9 +413,15 @@ def _daemon_source(path: Path, mounts: Sequence[tuple[Path, Path]]) -> Path:
     Identity when no mapping covers `path`.
 
     A wrong mapping is caught at startup wherever a sentinel covers the mount. The two-arg
-    tier's READ-ONLY defender_dir bind is the one gap — a sentinel there would write into the
-    tree it declares read-only — so a wrong mapping of that mount surfaces on first use, as an
-    unresolvable `defender.runtime.bash_exec`.
+    tier's two READ-ONLY binds are the gaps — a sentinel there would write into a tree it
+    declares read-only — and they fail differently:
+
+      * `defender_dir`: a wrong mapping surfaces on first use, as an unresolvable
+        `defender.runtime.bash_exec`.
+      * the tenant's `agent/` half (#1106, at `TENANT_AGENT_TARGET`): a wrong mapping does
+        NOT surface — the box sees some other directory, or an empty one, and nothing refuses.
+        Harmless while the half is empty; #1108, which fills it, owns deciding how a read-only
+        tree is verified (a committed identity marker the box reads back is the cheap form).
     """
     covering = _covering_mount(path, mounts)
     if covering is None:

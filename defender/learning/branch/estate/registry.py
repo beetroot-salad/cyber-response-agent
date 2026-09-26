@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass, replace
 from defender._model import model
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from defender.runtime.verbs import DENIED, ModuleVerbRegistry, VerbDecision
@@ -128,7 +129,7 @@ def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWor
     difference is a world, not a missing argument.
     """
     # Imported HERE rather than at module scope: the manifest module reads the corpus patterns
-    # off this package's own stager (`_family._configured_patterns`), so a top-level import
+    # off this package's own stager, so a top-level import
     # would close a cycle between the two halves of the branch — and the estate must stay
     # importable by a run that never loads a manifest at all.
     from defender.runtime.branch._family import Overlay, parse_overlay
@@ -137,7 +138,24 @@ def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWor
     return ServingWorld(world_id=token, touches=tuple(touches), overlay=parsed)
 
 
-def refuse_a_foreign_world_view(world: Any, system: str, verb: str, params: Mapping) -> None:
+def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
+    """The episode tenant's configured corpus patterns, for the own-view test (#1106).
+
+    The MANIFEST's record first — the set the launcher judged this family's overlays against,
+    which every production world (`ResumeWorld`) carries on its family — and only for a world
+    with no such record (one assembled without a manifest, or a manifest written before the
+    field) the patterns the serving context's tenant folder configures. A frame with neither has
+    no tenant to consult and admits no view as this world's own: the refusal, fail-closed."""
+    recorded = tuple(getattr(getattr(world, "family", None), "configured_patterns", ()) or ())
+    if recorded:
+        return recorded
+    settings_dir = getattr(ctx, "settings_dir", None)
+    return tuple(stager.configured_patterns(settings_dir)) if settings_dir is not None else ()
+
+
+def refuse_a_foreign_world_view(
+    world: Any, system: str, verb: str, params: Mapping, ctx: Any = None,
+) -> None:
     """Refuse a call that names ANOTHER world's staged view, before anything runs (FORK-6).
 
     Inside one episode the siblings share a cluster, and each stages its own private corpus
@@ -196,7 +214,7 @@ def refuse_a_foreign_world_view(world: Any, system: str, verb: str, params: Mapp
     # that answers nothing — and only for a system this world actually stages, since a world
     # that stages nothing has no view of its own for any name to be.
     if system in getattr(world, "touches", ()) and is_world_view(
-            source, stager.configured_patterns(), world.world_id):
+            source, _configured_for(world, ctx, stager), world.world_id):
         return
     raise ConfinementFault(
         f"index expression {source!r} names a staged corpus this world does not read — "
@@ -268,7 +286,7 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
     is handed `(prepared, moved)` and owes back the restored payload, so everything on either
     side of it stays here, in one order, for both.
     """
-    refuse_a_foreign_world_view(world, system, verb, params)
+    refuse_a_foreign_world_view(world, system, verb, params, ctx)
     applier = (  # lint-default: ok — DI seam owning its default, the same one `WorldRegistry` resolves at construction  # noqa: E501
         applier if applier is not None else WorldApplier())
     asked = dict(params)
@@ -294,9 +312,14 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
 
-    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,
-                 applier: Any = None):
-        super().__init__(roster, grant)
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
+                 applier: Any = None, settings_dir: Path | None = None,
+                 grant_home: str | None = None):
+        # `settings_dir` is the episode tenant's folder (#1106), which the ticket-comment check
+        # below reads the released status from; `None` (a registry no run built) can release
+        # nothing, so such a world's comment patch is refused rather than judged against some
+        # other tenant's mapping.
+        super().__init__(roster, grant, grant_home=grant_home)
         # THE CLOCK FIRST, and read ONCE here rather than per call. A `TypeError` or an
         # `AttributeError` raised deep inside `served` is not an `AdapterFault`, so the query
         # tool files it as `DEFAULT_FAULT_EXIT` — which is 2, which is in
@@ -377,7 +400,7 @@ class WorldRegistry(ModuleVerbRegistry):
                     f"can never apply — `touches` is {declared!r} and a staged system is served "
                     "from its corpus rather than patched, so the overlay would be silently "
                     "dropped while every row still read honestly")
-            unservable = applier_module.unservable(patches)
+            unservable = applier_module.unservable(patches, settings_dir)
             if unservable:
                 raise EstateError(
                     f"world {world_id!r} carries a difference the read screen would empty "
