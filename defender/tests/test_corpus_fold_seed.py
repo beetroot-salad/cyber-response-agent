@@ -303,7 +303,7 @@ def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
     assert _headers(_shared.build_corpus_manifest(corpus)) == ["cover-prereqs", "cover"]
 
 
-def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, capsys):
+def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, said):
     """demand: w1 — after the fold the warn text is ``iter_lessons``' format, but the contract that
     survives is the one that matters: the offending file is NAMED on stderr, one bad file never aborts
     the manifest, and its well-formed siblings still render. (#559's M6/M6b assert a substring of the
@@ -317,7 +317,7 @@ def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, capsys):
     (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
     manifest = _shared.build_corpus_manifest(corpus)
     assert _headers(manifest) == ["good", "bad", "corrupt"]
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert "bad.md" in err
     assert "corrupt.md" in err
 

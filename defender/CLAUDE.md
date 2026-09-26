@@ -147,6 +147,7 @@ until then ran on the questioner's definition. `git show e9e11a48` is the deleti
 ## Conventions
 
 - Runs live outside the repo (`/tmp/defender-runs/`) so transcripts stay out of git.
+- **Status and diagnostics go through logging, not `print`** (`_log.py`): `logging.getLogger(__name__)` in library code, `_log.configure_from_env()` only in an entry point's `__main__` block (JSON on the error stream by default; `DEFENDER_LOG_FORMAT=text` for people, `DEFENDER_LOG_LEVEL`), and `_log.log_context(run_id=..., tenant_id=...)` to stamp a run onto every line inside it — bind inside a thread-pool worker, since workers don't inherit it. `print` stays for a command's own output and for text a model reads back as a tool result. Tests that check what the operator was told read it through the `said` fixture (`tests/conftest.py`: `capsys` with log messages folded into `err`), so a silence check cannot miss a line that moved to the log; logs go to stderr until #1114.
 - **In the devcontainer, set `DEFENDER_RUNS_BASE=/workspace/.defender-runs`** (gitignored) — the default `/tmp/defender-runs` is not a path this container shares with the docker daemon, so the box cannot resolve its bind source and `start_box` fails with a C46/DooD `BoxFault`.
 
 ## Lint gates

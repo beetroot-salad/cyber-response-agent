@@ -46,6 +46,7 @@ import argparse
 import concurrent.futures
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -92,6 +93,9 @@ from defender.runtime.branch._family import (
     parse_family,
     runnable_worlds,
 )
+
+# Named, not `__name__`: this file runs as `__main__`, which is outside the `defender` logger.
+_logger = logging.getLogger("defender.learning.branch.cli")
 
 #: The environment variable naming where episodes live. THERE IS NO DEFAULT DERIVATION, and the
 #: absence is the whole point (§7 round 2, F5-EPISODE-ROOT). Deriving this from the runs base is
@@ -330,11 +334,11 @@ def prepare_episode(
         if not _is_empty_capture(nothing_to_prime):
             raise
         write_guarded(base_file(episode), "")
-        print(
-            f"[branch] {source_run_dir} captured no replayable query — the family's base is "
+        _logger.warning(
+            f"{source_run_dir} captured no replayable query — the family's base is "
             "EMPTY, so every key each sibling asks reaches the live estate and any difference "
             "between siblings includes the estate's own drift. The review records what it "
-            "replayed; read it before comparing.", file=sys.stderr)
+            "replayed; read it before comparing.")
         return episode
     finally:
         # The claim is released on EVERY exit, including the primer's own refusal, so a refused
@@ -344,10 +348,10 @@ def prepare_episode(
     # BOTH HALVES, NAMED. Every skipped row is a key that will reach the LIVE estate during the
     # episode rather than replaying, so the skips are the size of the non-deterministic surface
     # — and a reader shown only "primed 10" would assume it was zero.
-    print(
-        f"[branch] primed {report.primed} captured row(s) into {base_file(episode)}; "
+    _logger.info(
+        f"primed {report.primed} captured row(s) into {base_file(episode)}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
-        "than replayed", file=sys.stderr)
+        "than replayed")
     return episode
 
 
@@ -730,8 +734,7 @@ def start_family(
             future.result()
         except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
             exits[label] = SPAWN_FAILED_EXIT
-            print(f"[branch] world {label} was never started: {never_started!r}",
-                  file=sys.stderr)
+            _logger.warning(f"world {label} was never started: {never_started!r}")
     return exits
 
 
@@ -1416,7 +1419,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
     episode that was actually rejected in review.
 
     NOT SWALLOWED, though — `teardown` has already written the unverified names into the review
-    record before it raises, which is the obligation, and this frame adds the stderr line. With
+    record before it raises, which is the obligation, and this frame adds the log line. With
     nothing else propagating, the failure is the answer and it is re-raised.
     """
     # PASSED IN, never inferred. `sys.exc_info()` is THREAD-global, not frame-local: read here
@@ -1430,9 +1433,9 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
     except Exception as cleanup_failed:  # noqa: BLE001 — see the docstring: never mask
         if not aborting:
             raise
-        print(f"[branch] teardown also failed ({cleanup_failed!r}); the names it could not "
-              "verify gone are in the review record, and the failure that ended the episode "
-              "is what follows", file=sys.stderr)
+        _logger.error(f"teardown also failed ({cleanup_failed!r}); the names it could not "
+                      "verify gone are in the review record, and the failure that ended the episode "
+                      "is what follows")
 
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
@@ -1489,8 +1492,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
         guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
-        print(f"[branch] episode {episode_id}: rejected before any sibling started",
-              file=sys.stderr)
+        _logger.info(f"episode {episode_id}: rejected before any sibling started")
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
@@ -1503,9 +1505,9 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
             source=source_stamp, allow_dirty=ns.allow_dirty)
     failed = sorted(label for label, code in exits.items() if code)
     for label in failed:
-        print(f"[branch] world {label} exited {exits[label]}", file=sys.stderr)
-    print(f"[branch] episode {episode_id}: outcome={report['outcome']} "
-          f"({len(report['scrub_verified'])}/{len(labels)} verified)", file=sys.stderr)
+        _logger.info(f"world {label} exited {exits[label]}")
+    _logger.info(f"episode {episode_id}: outcome={report['outcome']} "
+                 f"({len(report['scrub_verified'])}/{len(labels)} verified)")
     # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
     # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
     # THE HAND-BACK IS THE OUTER FRAME AND THE CLOCK THE INNER ONE, in that order: the cluster
@@ -1558,14 +1560,14 @@ def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
     answered from a FRAME-LOCAL flag, never `sys.exc_info()`, which is thread-global and
     answers for whatever is being handled anywhere up this thread's stack: `completed` is set
     only when the body leaves normally, so it is False exactly when something is still on its
-    way to the operator, and then the cleanup fault is printed (its unverified names are
+    way to the operator, and then the cleanup fault is logged (its unverified names are
     already in the review record, which is the obligation) rather than raised.
     """
     held: BaseException | None = None
     if teardown is not None:
         try:
             teardown(aborting=False)
-        except Exception as cleanup_failed:  # noqa: BLE001 — held: raised unchanged after a body that completed, printed under one that did not (see the docstring)
+        except Exception as cleanup_failed:  # noqa: BLE001 — held: raised unchanged after a body that completed, logged under one that did not (see the docstring)
             held = cleanup_failed
     completed = False
     try:
@@ -1575,24 +1577,24 @@ def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
         if held is not None:
             if completed:
                 raise held
-            print(f"[branch] episode {episode_id}: teardown also failed ({held!r}); "
-                  "the names it could not verify gone are in the review record, and the failure "
-                  "that ended the episode is what follows", file=sys.stderr)
+            _logger.error(f"episode {episode_id}: teardown also failed ({held!r}); "
+                          "the names it could not verify gone are in the review record, and the failure "
+                          "that ended the episode is what follows")
 
 
 def _render_page(episode_dir: Path, *, episode_id: str) -> None:
     """The episode page (#1025), holding every failure it can have — the render's own frame,
     called AFTER the judge's clock frame closes so the stage table it reads already carries
-    the judge row. Never fatal to the launch: a page that could not be written is printed, not
+    the judge row. Never fatal to the launch: a page that could not be written is logged, not
     raised, exactly as `_grade`'s own boundary is."""
     try:
         from defender.scripts.visualize import visualize_episode
 
         page = visualize_episode.render_episode(episode_dir)
-        print(f"[branch] episode {episode_id}: page {page}", file=sys.stderr)
+        _logger.info(f"episode {episode_id}: page {page}")
     except Exception as render_failed:  # noqa: BLE001 — see the docstring: a render fault is non-fatal to the launch
-        print(f"[branch] episode {episode_id}: the page could not be rendered "
-              f"({render_failed!r})", file=sys.stderr)
+        _logger.warning(f"episode {episode_id}: the page could not be rendered "
+                        f"({render_failed!r})")
 
 
 def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:
@@ -1615,10 +1617,10 @@ def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:
         # an injected model seam, and each of those produced a live escape (a decode error, a
         # corrupt draw file, a lock timeout, whatever the seam raises) that reached here as a
         # traceback and cost an otherwise-clean episode its own exit status. The failure is
-        # printed in full rather than swallowed — the point is that the LAUNCH's status stays
+        # logged in full rather than swallowed — the point is that the LAUNCH's status stays
         # about the launch, not that the failure goes unreported.
-        print(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
-              "episode itself is otherwise unaffected", file=sys.stderr)
+        _logger.warning(f"episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
+                        "episode itself is otherwise unaffected")
         traceback.print_exc(file=sys.stderr)
 
 
@@ -1747,19 +1749,19 @@ def _corpus_samples(leads: Any, sampler: Any, pattern_of: Any) -> dict[str, Any]
     skipped candidate, not a blank sample set — so like `_joined_leads` beside it, the arm here
     is for a fault at the READ the host raises, and for the same reason: the samples are an
     ORIENTATION aid, so a run whose payloads cannot be reached should author a family with a
-    thinner prompt rather than refuse an episode over an aside. The count is printed because a
+    thinner prompt rather than refuse an episode over an aside. The count is logged because a
     silently empty sample set looks identical to a capture that queried nothing, and the two
     call for different operator responses.
     """
     try:
         samples = sampler(leads, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
     except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
-        print(f"[branch] could not sample the source's corpora ({unreadable!r}); the questioner "
-              "is shown none", file=sys.stderr)
+        _logger.warning(f"could not sample the source's corpora ({unreadable!r}); the questioner "
+                        "is shown none")
         return {}
     shown = sum(1 for doc in samples.values() if doc)
-    print(f"[branch] sampled {shown} corpus document(s) across {len(samples)} pattern(s) the "
-          "capture addressed")
+    _logger.info(f"sampled {shown} corpus document(s) across {len(samples)} pattern(s) the "
+                 "capture addressed")
     return samples
 
 def _fence_count(source: Path, branch_message_id: int, *,
@@ -1810,12 +1812,12 @@ def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any
     is not a row, a row nested past `_io.JSON_NESTING_LIMIT`, a numeric column past an `int`
     — as `[]`, a skipped row or a defaulted column, silently. What can still raise is the
     host: a directory it refuses to walk. That is an episode with a thinner prompt, not no
-    episode, so the arm is broad and says so on stderr."""
+    episode, so the arm is broad and says so in the log."""
     try:
         return joined(source)
     except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
-        print(f"[branch] could not join the source's leads ({unreadable!r}); the questioner is "
-              "shown none", file=sys.stderr)
+        _logger.warning(f"could not join the source's leads ({unreadable!r}); the questioner is "
+                        "shown none")
         return []
 
 
@@ -1853,4 +1855,6 @@ __all__ = [
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     raise SystemExit(main(sys.argv[1:]))

@@ -10,10 +10,12 @@ files copied in. The fixture builds one ``LoopPaths(repo_root=tmp)`` and an
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -279,6 +281,41 @@ def helpers():
 # `defender/tests/` tree, so a module-scope import of a #773 symbol would turn any
 # breakage in that import into a collection error for every suite in the directory
 # rather than for the tests that actually depend on it.
+
+
+class Said(NamedTuple):
+    out: str
+    err: str
+
+
+class _SaidCapture:
+    """`capsys` with the log folded into `err` — see the `said` fixture."""
+
+    def __init__(self, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture):
+        self._capsys = capsys
+        self._caplog = caplog
+
+    def readouterr(self) -> Said:
+        cap = self._capsys.readouterr()
+        # What `_log.configure` lets through: the defender's own loggers at any level, anyone
+        # else's at WARNING and up (httpx logs every request at INFO).
+        logged = "".join(f"{r.getMessage()}\n" for r in self._caplog.records
+                         if r.name.startswith("defender") or r.levelno >= logging.WARNING)
+        self._caplog.clear()
+        return Said(cap.out, cap.err + logged)
+
+
+@pytest.fixture
+def said(capsys, caplog) -> _SaidCapture:
+    """What the code said to the operator: `capsys`, with the message of every log record the
+    production handler would show appended to `err` (and cleared on read, as `capsys` clears
+    the streams).
+
+    Status and diagnostics moved from `print(..., file=sys.stderr)` to logging, and in a real
+    process the configured handler writes them to that same error stream — so a test about
+    the operator channel reads both. A drop-in for `capsys`: pass it wherever a helper takes
+    one. A silence check (`err == ""`) made through it cannot pass over a line that moved."""
+    return _SaidCapture(capsys, caplog)
 
 
 @pytest.fixture

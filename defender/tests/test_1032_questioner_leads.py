@@ -77,10 +77,10 @@ from defender.tests.test_1017_row_schema import (
 #: and the marker checks below are made on that text, not on the render's return value.
 SECTION_TITLE = "The joined leads at the branch point"
 
-#: The stderr line `_joined_leads`'s `except` arm prints, as two fixed halves around the
+#: The line `_joined_leads`'s `except` arm logs, as two fixed halves around the
 #: exception's repr. Both halves are asserted, so a rewording that kept "could not join" and
 #: dropped what the questioner is then shown would not pass.
-LINE_HEAD = "[branch] could not join the source's leads ("
+LINE_HEAD = "could not join the source's leads ("
 LINE_TAIL = "); the questioner is shown none"
 
 
@@ -338,7 +338,7 @@ def _nested_bomb(run_dir: Path) -> Path:
 
 
 def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_what_survived(
-    tmp_path, capsys,
+    tmp_path, said,
 ):
     """O4a — `joined()` absorbs a missing run dir, a non-JSON table and a directory at the
     table's path as `[]`, a row nested past `_io.JSON_NESTING_LIMIT` as one skipped row, and
@@ -397,7 +397,7 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
     shown = lead_repository.questioner_leads(_joined_leads(overflow, lead_repository.joined))
     assert [(q["seq"], q["exit_code"], q["query_id"]) for q in shown[0]["queries"]] == \
         [(0, 0, "q")], f"a numeric column past an int was not defaulted: {shown!r}"
-    assert capsys.readouterr().err == "", "the read surface's tolerances are no longer silent"
+    assert said.readouterr().err == "", "the read surface's tolerances are no longer silent"
 
 
 # ---------------------------------------------------------------------------------------
@@ -405,7 +405,9 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
 # ---------------------------------------------------------------------------------------
 
 
-def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(tmp_path, capsys):
+def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(
+    tmp_path, said,
+):
     """O4b — `_joined_leads(source, joined)` on a surface that raises returns `[]` and prints
     the existing stderr line with the exception's repr inside it; on a surface that answers it
     returns that answer and prints nothing (the positive control). The surface is a fake that
@@ -429,7 +431,7 @@ def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(tmp
         raise OSError(13, "Permission denied", str(source))
 
     assert _joined_leads(tmp_path, surface_that_raises) == []
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     for part in (LINE_HEAD, "PermissionError(", LINE_TAIL):
         assert part in err, f"the arm's line is missing, reworded, or silent on what raised: {err!r}"
     assert handed == [tmp_path], f"the surface was handed {handed!r}, not the source run dir"
@@ -444,13 +446,13 @@ def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(tmp
     assert _joined_leads(tmp_path, surface_that_answers) is answer, \
         "the arm changed the surface's answer on the way through"
     assert handed == [tmp_path, tmp_path]
-    assert capsys.readouterr().err == "", "the arm printed on a surface that did not raise"
+    assert said.readouterr().err == "", "the arm printed on a surface that did not raise"
 
     def surface_that_raises_differently(source):
         raise RuntimeError("a fault no reader names")
 
     assert _joined_leads(tmp_path, surface_that_raises_differently) == []
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     for part in (LINE_HEAD, "RuntimeError(", LINE_TAIL):
         assert part in err, f"the arm does not cover a second fault class: {err!r}"
 
@@ -461,7 +463,7 @@ def test_o4b_the_launchers_read_seam_absorbs_a_fault_at_the_read_and_says_so(tmp
     assert through, "the healthy run dir joined to nothing — the passthrough check is vacuous"
     assert through == lead_repository.joined(healthy), \
         "the seam is not a passthrough — it re-rendered or dropped the join surface's answer"
-    assert capsys.readouterr().err == ""
+    assert said.readouterr().err == ""
 
 
 # ---------------------------------------------------------------------------------------

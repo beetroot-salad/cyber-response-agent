@@ -716,7 +716,7 @@ def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monk
     )
 
 
-def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatch, capsys):
+def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatch, said, caplog):
     """FK20's read-side degrade holds for a mapping that is not even text. A non-UTF-8 byte
     in the file is the loader's OWN typed refusal (so the writer can receipt it like any other
     mapping fault), and the screen degrades on it exactly as on a missing section: the call
@@ -734,7 +734,7 @@ def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatc
     with pytest.raises(case_ticket.CaseTicketError, match="UTF-8"):
         case_ticket.release_predicate()
 
-    capsys.readouterr()
+    said.readouterr()
     payload, code, detail = screen_list(listing(_released(), _unreleased()))
     assert code == 0, f"an unreadable mapping refused the whole gather call ({detail})"
     kept = served_tickets(payload)
@@ -742,8 +742,10 @@ def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatc
     for t in kept:
         assert served_comments(t) == [], "a comment was served under an unreadable mapping"
         assert t["summary"] == "a prior case"
-    err = capsys.readouterr().err
-    assert "WARN" in err, (
+    warned = [r for r in caplog.records
+              if r.levelname == "WARNING" and "ticket release predicate" in r.getMessage()]
+    err = said.readouterr().err
+    assert warned, (
         "the screen degraded silently — from every gather turn a broken mapping is now "
         "indistinguishable from a store with no comments"
     )

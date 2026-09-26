@@ -20,7 +20,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import sys
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass, replace
 from defender._model import model
@@ -41,6 +41,8 @@ from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCa
 from . import applier as applier_module
 from .applier import WorldApplier
 from .stagers.dispatch import STAGERS
+
+_logger = logging.getLogger(__name__)
 
 
 class EstateError(Exception):
@@ -646,7 +648,7 @@ def _record_beside(ledger: Ledger, call: ServedCall) -> None:
     five abort the run, in the SIBLING and not in its base, which is exactly the "the estate was
     up for one and down for the other" contamination the usage class was invented to prevent.
 
-    So the write failure is reported to stderr and dropped. That leaves the state the ledger
+    So the write failure is logged and dropped. That leaves the state the ledger
     exists to make visible — a served response with no row — but it leaves it for a call that is
     ALREADY failing and already reaching the model as a fault, rather than manufacturing a
     second, differently-classed failure to announce it.
@@ -654,8 +656,8 @@ def _record_beside(ledger: Ledger, call: ServedCall) -> None:
     try:
         ledger.record(call)
     except Exception as write_failed:  # noqa: BLE001 — see docstring: never displace the raise
-        print(f"[estate] could not record the {call.source} row for {call.system}.{call.verb} "
-              f"({write_failed!r}); the call's own failure is what propagates", file=sys.stderr)
+        _logger.warning(f"could not record the {call.source} row for {call.system}.{call.verb} "
+                        f"({write_failed!r}); the call's own failure is what propagates")
 
 
 def _carrying(ctx: Any, **values: Any) -> Any:

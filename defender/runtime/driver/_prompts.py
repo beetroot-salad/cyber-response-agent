@@ -5,7 +5,7 @@ makes the resume's substitution testable on its own.
 """
 from __future__ import annotations
 
-import sys
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,8 @@ from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 BUDGET_ENFORCE_FLAG = "DEFENDER_BUDGET_ENFORCE"
@@ -72,7 +74,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         ancestor_block = result.text
         status = result.status
     except (BudgetKill, RunAborted) as e:
-        print(f"[run.py] lead-0 degraded ({e!r}); continuing without it", file=sys.stderr)
+        _logger.warning(f"lead-0 degraded ({e!r}); continuing without it")
         degraded = lead_zero_mod.LeadZeroResult(
             text=lead_zero_mod._render_section(
                 lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),

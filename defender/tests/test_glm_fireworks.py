@@ -388,14 +388,15 @@ def test_preflight_missing_required_key_exits_2(monkeypatch):
     assert run.preflight_role_models() == 2
 
 
-def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
+def test_preflight_unknown_model_exits_2(monkeypatch, caplog):
     # The sentinel is a name NO vendor can ship, not a plausible next version. This test
     # used "glm-5.3" until #1023 registered it, at which point the preflight succeeded and
     # the assertion read as a regression in the preflight rather than as a claimed name.
     monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
     assert run.preflight_role_models() == 2
-    err = capsys.readouterr().err
-    assert "[run.py] preflight" in err
+    err = caplog.text
+    assert "preflight" in err
+    assert any(r.name == "defender.run" and r.levelname == "ERROR" for r in caplog.records)
     # The fault names the ROLE at fault, not just the model — an operator with eleven roles
     # configured cannot act on "some model is unknown".
     assert AgentRole.MAIN.name in err

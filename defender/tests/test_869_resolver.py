@@ -254,7 +254,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
-def test_the_marker_half_reads_every_name_the_tree_carries(tmp_path, capsys):
+def test_the_marker_half_reads_every_name_the_tree_carries(tmp_path, said):
     """The marker half declares a system whose directory name holds a SPACE or a NON-ASCII
     byte, exactly as the adapter half already does.
 
@@ -299,11 +299,11 @@ def test_the_marker_half_reads_every_name_the_tree_carries(tmp_path, capsys):
         tmp_path, adapters=(), markers=("elastic", *anomalous), skills=(), catalog=(),
     )
 
-    capsys.readouterr()
+    said.readouterr()
     got = declared_systems(repo)
 
     assert got == frozenset({"elastic"}), "the shape check no longer holds the marker half"
-    log = loop_log(capsys)
+    log = loop_log(said)
     for name in anomalous:
         assert log_lines_naming(log, repr(name), repo / SKILLS_REL), (
             f"{name!r} was dropped without a refusal line naming its source — which is what a "
@@ -435,7 +435,7 @@ def test_the_resolver_tests_each_source_rather_than_trusting_the_glob(tmp_path):
     )
 
 
-def test_declared_systems_reports_an_empty_union(tmp_path, capsys):
+def test_declared_systems_reports_an_empty_union(tmp_path, said):
     """Both sources present and the union empty is an honest `frozenset()` PLUS one log line
     naming BOTH directories — never a silent one.
 
@@ -455,16 +455,16 @@ def test_declared_systems_reports_an_empty_union(tmp_path, capsys):
     assert _adapter_half_of(repo) == set()
     assert _marker_half_of(repo) == set()
 
-    capsys.readouterr()
+    said.readouterr()
     assert declared_systems(repo) == frozenset()
 
-    named = log_lines_naming(loop_log(capsys), repo / ADAPTERS_REL, repo / SKILLS_REL)
+    named = log_lines_naming(loop_log(said), repo / ADAPTERS_REL, repo / SKILLS_REL)
     assert len(named) == 1, (
         f"expected exactly one line naming both source directories, got {named}"
     )
 
 
-def test_declared_systems_imports_no_adapter_and_reads_no_marker_body(tmp_path, capsys):
+def test_declared_systems_imports_no_adapter_and_reads_no_marker_body(tmp_path, said):
     """The resolver is COLD on both halves: it never imports an adapter module and never
     reads an `execution.md` body.
 
@@ -497,7 +497,7 @@ def test_declared_systems_imports_no_adapter_and_reads_no_marker_body(tmp_path, 
 
     before_modules = dict(sys.modules)
     before_cache = dict(verbs._MODULES)
-    capsys.readouterr()
+    said.readouterr()
 
     assert declared_systems(repo) == frozenset({"boom", "elastic"})
 
@@ -508,10 +508,10 @@ def test_declared_systems_imports_no_adapter_and_reads_no_marker_body(tmp_path, 
     ]
     assert new_modules == []
     assert set(verbs._MODULES) - set(before_cache) == set()
-    assert "not utf-8" not in loop_log(capsys)
+    assert "not utf-8" not in loop_log(said)
 
 
-def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypatch):
+def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, said, monkeypatch):
     """A resolver failure on the pitfalls leg is NOT a green tick with the queue rotated.
 
     `drains._run_curator_module` catches `(SubprocessError, OSError)`, logs "(continuing)"
@@ -538,17 +538,17 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
         [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
         paths=paths,
     )
-    capsys.readouterr()
+    said.readouterr()
 
     with pytest.raises(LeadAuthorError):
         drains._invoke_pitfalls(paths, on_curated=lambda _d: None)
 
     assert len(persist.read_pitfalls(paths)) == 2
     assert not paths.pitfalls.consumed.exists()
-    assert "(continuing)" not in loop_log(capsys)
+    assert "(continuing)" not in loop_log(said)
 
 
-def test_the_resolver_never_emits_a_shape_anomalous_name(tmp_path, capsys):
+def test_the_resolver_never_emits_a_shape_anomalous_name(tmp_path, said):
     """The set can never CARRY a malformed name, from EITHER source, and every refusal is
     logged with the source it came from (FK-5, §7).
 
@@ -579,11 +579,11 @@ def test_the_resolver_never_emits_a_shape_anomalous_name(tmp_path, capsys):
     derived = {verbs._system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
     assert {"dir", ".hidden", "", ".."} <= derived
 
-    capsys.readouterr()
+    said.readouterr()
     got = declared_systems(repo)
 
     assert got == frozenset({"cmdb", "mcpsys"})
-    log = loop_log(capsys)
+    log = loop_log(said)
     for name in ("dir", ".hidden", "", ".."):
         assert log_lines_naming(log, repr(name), repo / ADAPTERS_REL), (
             f"the adapter-source refusal of {name!r} is not named with its source: {log}"
@@ -593,7 +593,7 @@ def test_the_resolver_never_emits_a_shape_anomalous_name(tmp_path, capsys):
     )
 
 
-def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch, capsys):
+def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch, said):
     """NF2's SECOND resolution point is a NAMED call with a signature of its own —
     `adapter_declared_systems(repo_root) -> frozenset[str]`, the value the PITFALLS lane is
     handed — and THREE properties ride on it that it does not inherit from the union.
@@ -676,13 +676,13 @@ def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch
     derived = {verbs._system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
     assert {"dir", ".hidden", "", ".."} <= derived
 
-    capsys.readouterr()
+    said.readouterr()
     got = adapter_declared_systems(hostile)
     assert got == frozenset({"cmdb"}), (
         "the adapter half carries a shape-anomalous name, or the marker-only `mcpsys` reached "
         "the lane that must not see it"
     )
-    log = loop_log(capsys)
+    log = loop_log(said)
     for name in ("dir", ".hidden", "", ".."):
         assert log_lines_naming(log, repr(name), adapters), (
             f"the adapter-half refusal of {name!r} is not named with its source: {log}"

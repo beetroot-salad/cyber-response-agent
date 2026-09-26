@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import errno
+import logging
 import re
-import sys
 from collections.abc import Iterable
 from defender._model import model
 from pathlib import Path
@@ -25,6 +25,8 @@ from defender._artifact_schema import _utf8_len
 from ._deps import AgentDeps
 from ._bash import _guarded_parents, _resolved
 from ._files import _closed_for_investigation_write
+
+_logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------------------
@@ -147,9 +149,8 @@ def flagged_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
     try:
         return _addressable(warn_diagnostics(read.text))
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
-        print(
-            f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
-            file=sys.stderr,
+        _logger.warning(
+            f"repair-window derivation failed, treating it as empty: {e!r}",
         )
         return ()
 
@@ -244,9 +245,8 @@ def repairable_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
             and d.locus.block == REPAIRABLE_BLOCK
         )
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
-        print(
-            f"[tools] repair-set derivation failed, treating it as empty: {e!r}",
-            file=sys.stderr,
+        _logger.warning(
+            f"repair-set derivation failed, treating it as empty: {e!r}",
         )
         return ()
 
@@ -523,7 +523,7 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         lessons_push.record(deps, hits)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
-        print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)
+        _logger.warning(f"frontier recall failed, omitting it: {e!r}")
         return ""
 
 
@@ -537,9 +537,8 @@ def _warn_over(text: str) -> tuple[Diagnostic, ...]:
     try:
         return _addressable(warn_diagnostics(text))
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
-        print(
-            f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
-            file=sys.stderr,
+        _logger.warning(
+            f"repair-window derivation failed, treating it as empty: {e!r}",
         )
         return ()
 

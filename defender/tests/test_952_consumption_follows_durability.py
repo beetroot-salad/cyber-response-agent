@@ -359,7 +359,7 @@ def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> N
 
 @pytest.mark.parametrize("fault", ["run_tainted_from_scrub", "box_fault_from_teardown"])
 def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
-    tmp_path: Path, capsys, fault: str,
+    tmp_path: Path, said, fault: str,
 ):
     """O1, the exits BEFORE the apply. The scrub's `RunTainted` and a box fault from the
     teardown both mean the curators' commits are not sound to deliver — so a tick that served
@@ -401,7 +401,7 @@ def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
     assert _inflight_attempts(paths, "case-1") == 1, "the serve was not counted as an attempt"
     assert _pending_deliveries(paths) == [], "an unsound batch was recorded for delivery"
 
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     summary = (
         f"lead_author_drain: batch not consumed — left for the next tick's reclaim, up to: "
         f"{RETAINED}"
@@ -452,7 +452,7 @@ def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
 
 
 def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_failure(
-    tmp_path: Path, capsys,
+    tmp_path: Path, said,
 ):
     """O1 + O2 + O7, the `BranchError` arm. A tick whose tree passed the scrub consumes what
     it served BEFORE `finish_batch` runs, and a push that is then rejected undoes none of it:
@@ -482,7 +482,7 @@ def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_fai
     assert records[0]["batch_id"] == branch.batch_id
     assert records[0]["reason"] == "push rejected"
 
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     expected = (
         f"lead_author_drain: finish_batch failed: push rejected — commit retained on local "
         f"branch lead-author/{branch.batch_id}; delivery is retried next tick, before "
@@ -498,7 +498,7 @@ def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_fai
 
 
 def test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption(
-    tmp_path: Path, capsys,
+    tmp_path: Path, said,
 ):
     """O1 is about the scrub, not the push: a `GitError` raised by `finish_batch` itself
     (`commits_ahead` runs outside its own `try`) propagates as the systemic fault it is —
@@ -517,7 +517,7 @@ def test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption(
 
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
     _assert_consumed(paths, run_dir)
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert "batch not consumed" not in err
     assert "inflight" not in err
 
@@ -592,7 +592,7 @@ def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
 
 
 def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
-    tmp_path: Path, capsys,
+    tmp_path: Path, said,
 ):
     """O7. The tick after a rejected push delivers the retained branch FIRST — push and PR
     from the branch alone, no agent — then goes on to serve whatever is queued. The record
@@ -606,7 +606,7 @@ def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     ) == 0
     assert len(_pending_deliveries(paths)) == 1
     retained = failing.batch_id
-    capsys.readouterr()
+    said.readouterr()
 
     second = _queued_run(tmp_path, "case-2", "run-2", paths)
     landing = _Branch(tmp_path / "worktrees")
@@ -619,7 +619,7 @@ def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     assert landing.delivered == [retained]
     assert served[-1] == second.resolve(), "the second tick did not go on to serve new work"
     assert _pending_deliveries(paths) == []
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert (
         f"lead_author_drain: delivered retained branch lead-author/{retained}: opened PR "
         f"PR/{retained}"
@@ -627,7 +627,7 @@ def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     assert served.count(served[0]) == 1, "the retained batch's run was served again"
 
 
-def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: Path, capsys):
+def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: Path, said):
     """O7's ceiling. While the retained branch cannot be delivered, the lane is PARKED: no
     lease check, no worktree, no box, no agent, the queued marker untouched — exactly as an
     open PR parks it. The record stays. Released (the delivery succeeds), the same tick
@@ -641,7 +641,7 @@ def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: P
     ) == 0
     retained = failing.batch_id
     _queued_run(tmp_path, "case-2", "run-2", paths)
-    capsys.readouterr()
+    said.readouterr()
 
     for _ in range(3):
         parked = _Branch(tmp_path / "worktrees", deliver_fail=BranchError("token expired"))
@@ -653,7 +653,7 @@ def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: P
     assert len(served) == 1, "an agent ran while delivery was failing"
     assert author_markers(paths) == ["case-2.json"]
     assert len(_pending_deliveries(paths)) == 1
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert err.count(
         f"lead_author_drain: delivery of retained branch lead-author/{retained} failed again: "
         "token expired — it holds the writer lease; nothing served this tick"
@@ -668,7 +668,7 @@ def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: P
     assert _pending_deliveries(paths) == []
 
 
-def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path: Path, capsys):
+def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path: Path, said):
     """`deliver` answering `None` — the branch is gone, or has nothing ahead of `origin/main`
     any more — is not a failure: the record is dropped, the log says so, and the tick goes on."""
     paths = loop_paths(tmp_path)
@@ -682,7 +682,7 @@ def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path:
 
     assert branch.events == ["deliver"], "with nothing queued the tick stops at the wake gate"
     assert _pending_deliveries(paths) == []
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert (
         f"lead_author_drain: retained branch lead-author/{retained} has nothing left to "
         "deliver — record dropped"
@@ -805,7 +805,7 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
 
 
 def test_952_o2_the_lessons_lane_failure_line_is_lane_neutral_and_records_delivery(
-    tmp_path: Path, capsys,
+    tmp_path: Path, said,
 ):
     """O2 + O7 on the lane that does NOT collect a disposition. `_run_worktree_batch` is
     shared, so the lessons lane's `finish_batch` failure is logged by the same line and
@@ -829,7 +829,7 @@ def test_952_o2_the_lessons_lane_failure_line_is_lane_neutral_and_records_delive
     assert "author" in triggered, "the tick never ran a curator, so the line below is vacuous"
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
     assert [r["branch"] for r in _pending_deliveries(paths)] == [f"lessons/{branch.batch_id}"]
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     expected = (
         "author_drain: finish_batch failed: push rejected — commit retained on local branch "
         f"lessons/{branch.batch_id}; delivery is retried next tick, before anything new is "
@@ -1257,7 +1257,7 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
         "outside a tick the by-hand run must serve, not skip"
 
 
-def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: Path, capsys):
+def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: Path, said):
     """M5's other direction: a tick that finds the per-author queue lock held — a by-hand run
     in progress — skips BEFORE claiming, and says so. The markers stay at the top level
     (nothing in `inflight/`, no `attempts` spent), the serve seam is never reached, and the
@@ -1282,7 +1282,7 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
         assert "attempts" not in marker_body(paths.author_queue_dir / name), \
             "a skip spent one of the request's attempts"
     assert "start" not in branch.events, "a skipped tick minted a batch"
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert "lead_author_drain: another lead-author run holds the queue lock — skipping" in err
 
     # Positive control: released, the same tick serves.
@@ -1446,7 +1446,7 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
 
 @pytest.mark.parametrize("fault", ["git_error_from_finish_batch", "run_tainted_from_scrub"])
 def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
-    tmp_path: Path, capsys, fault: str,
+    tmp_path: Path, said, fault: str,
 ):
     """Kills E. Rendering a `None` disposition as zeros put "batch not consumed — …; 0 served
     marker(s) left in inflight/, 0 committed pitfall row(s) …" on the LESSONS lane's systemic
@@ -1477,7 +1477,7 @@ def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
 
     assert "author" in triggered, "the tick never ran a curator, so the negatives are vacuous"
     assert "cleanup" in branch.events
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert "batch not consumed" not in err, "the lessons lane logged a summary it never collected"
     assert "inflight" not in err
     assert "pitfall" not in err
@@ -1485,7 +1485,7 @@ def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
 
 
 def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
-    tmp_path: Path, capsys,
+    tmp_path: Path, said,
 ):
     """Kills F. Every pre-apply exit above seeds one served marker, one committed id and one
     held id (or zeros), so a summary that counted recorded-done markers as served markers,
@@ -1525,7 +1525,7 @@ def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
     assert paths.pitfalls.file.read_bytes() == queue_before
     assert not _done(run_1).exists()
     assert not _done(run_2).exists()
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     expected = (
         "lead_author_drain: batch not consumed — left for the next tick's reclaim, up to: "
         "2 served marker(s) left in inflight/, 3 committed pitfall row(s) left queued, "

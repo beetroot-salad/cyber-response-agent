@@ -725,7 +725,7 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     assert forge.list_calls == ["lead-author/"]
 
 
-def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path: Path, capsys):
+def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path: Path, said):
     """#952 O7 through the REAL `AuthorBranch` over a real origin: the first tick's push
     lands but the forge refuses the PR, so the tick records the batch for delivery; the next
     tick — nothing queued — delivers it from the branch alone: the push is a no-op, the forge
@@ -762,7 +762,7 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     assert [json.loads(r.read_text())["branch"] for r in records] == [head]
     assert not (paths.author_queue_dir / "case-pr.json").exists(), "the served run was re-queued"
     assert _real(work, "rev-parse", "--verify", f"refs/heads/{head}").returncode == 0
-    capsys.readouterr()
+    said.readouterr()
 
     forge.raises = False
     assert drains.lead_author_drain(
@@ -776,7 +776,7 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     assert list(paths.pending_delivery_dir.glob("*.json")) == []
     remote = _real(work, "ls-remote", "--heads", str(origin), head).stdout
     assert head in remote, "the retained branch never reached origin"
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert f"delivered retained branch {head}: opened PR https://github.com/o/r/pull/78" in err
 
 

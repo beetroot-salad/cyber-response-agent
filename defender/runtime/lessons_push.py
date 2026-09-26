@@ -19,7 +19,7 @@ The gate that decides WHETHER to push stays with each caller — the write retur
 hits of two documents and renders only when they differ, the fold composes only when the
 mint primitive asks it to (`selection.Composer`). The walk, the match and the render are
 `_corpus.iter_lessons` and `lessons_frontier.match_loaded` / `render`, called directly by
-both — this module holds only what has logic of its own: the corpus check with its stderr
+both — this module holds only what has logic of its own: the corpus check with its log
 line, the identity a block is compared on, the record, and the fold's composition.
 
 NOT gated by `permission.decide_read`, deliberately, on the same terms `_frontier_recall`
@@ -28,12 +28,14 @@ it. The corpus is a fixed internal path under `defender_dir`, never a model oper
 """
 from __future__ import annotations
 
-import sys
+import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from defender.scripts.lessons.lessons_frontier import Hit
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
 
 
 def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
-    """`defender_dir/lessons`, or `None` — LOUD under the caller's stderr prefix (`lane`,
+    """`defender_dir/lessons`, or `None` — LOUD under the caller's log prefix (`lane`,
     the same one its own failure line wears), on the same terms `frontier_from_text` states:
     a corpus that is not there produces the same silence as a corpus that matched nothing,
     and SKILL.md tells the model to read that silence as "nothing NEW matched". A
@@ -50,7 +52,7 @@ def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
     exception, no test red, and no operator signal."""
     corpus = deps.defender_dir / "lessons"
     if not corpus.is_dir():
-        print(f"{lane} no lessons corpus at {corpus}; omitting the lessons push", file=sys.stderr)
+        _logger.warning(f"{lane} no lessons corpus at {corpus}; omitting the lessons push")
         return None
     return corpus
 
@@ -96,7 +98,7 @@ def compose_fold(
     processor that prepares MAIN's next request, so an exception would surface as a failed
     round on a fold that is otherwise sound — the frontier row must mint whether or not the
     lessons lane could contribute to it, and a row that minted must not fail its round over
-    the record. One stderr line, never silence.
+    the record. One log line, never silence.
     """
     try:
         from defender._corpus import iter_lessons
@@ -114,14 +116,13 @@ def compose_fold(
             return record_text, None
         block = render(hits, lead=FOLD_LEAD)
     except Exception as e:  # noqa: BLE001 — fail open; the frontier row mints regardless
-        print(f"{_FOLD_LANE} fold lessons push failed, omitting it: {e!r}", file=sys.stderr)
+        _logger.warning(f"{_FOLD_LANE} fold lessons push failed, omitting it: {e!r}")
         return record_text, None
 
     def on_minted() -> None:
         try:
             record(deps, hits)
         except Exception as e:  # noqa: BLE001 — fail open; the row is already in front of MAIN
-            print(f"{_FOLD_LANE} fold lessons push minted but did not record: {e!r}",
-                  file=sys.stderr)
+            _logger.warning(f"{_FOLD_LANE} fold lessons push minted but did not record: {e!r}")
 
     return record_text + "\n\n" + block, on_minted

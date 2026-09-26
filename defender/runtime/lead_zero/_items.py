@@ -17,8 +17,8 @@ is what makes that visible.
 """
 from __future__ import annotations
 
+import logging
 import re
-import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,8 @@ from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_REQUEST_LIM
 from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
 from ._render import _render_doc, _sort_chrono, _unavailable
 from ._capture import _declare_l_finding
+
+_logger = logging.getLogger(__name__)
 
 
 _DS_RE = re.compile(r"^\.ds-(?P<name>.+)-[^-]+-\d{4}\.\d{2}\.\d{2}-\d+$")
@@ -474,7 +476,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         try:
             store.set_truncated_by(gather_session_id, reason)
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
-            print(f"[run.py] correlation lead truncated_by write skipped: {e!r}")
+            _logger.warning(f"correlation lead truncated_by write skipped: {e!r}")
 
     gbase = bind(GATHER_DEF, run_dir, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
@@ -496,6 +498,5 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     except (BudgetKill, circuit_breaker.RunAborted):
         raise
     except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
-        print(f"[run.py] correlation lead dispatch failed ({e!r}); skipping its summary",
-              file=sys.stderr)
+        _logger.warning(f"correlation lead dispatch failed ({e!r}); skipping its summary")
         return None

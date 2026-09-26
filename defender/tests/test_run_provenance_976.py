@@ -313,7 +313,7 @@ def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
         (RunProvenance(commit="a" * 40, dirty=True, dirty_path_count=0), "+dirty"),
     ],
 )
-def test_the_announce_line_says_what_the_record_says(tmp_path, capsys, rec, expected):
+def test_the_announce_line_says_what_the_record_says(tmp_path, caplog, rec, expected):
     """The stamp's one consumer on the day it lands, and the line an operator actually reads.
 
     Every branch is pinned because each is a different CLAIM: no stamp, no sha, a clean sha, a
@@ -329,7 +329,7 @@ def test_the_announce_line_says_what_the_record_says(tmp_path, capsys, rec, expe
 
     run._announce_provenance(run_dir)
 
-    line = capsys.readouterr().err
+    line = caplog.text
     assert expected in line, line
     if rec is not None and rec.dirty is False:
         assert "dirty" not in line, "a clean tree was marked"
@@ -504,7 +504,7 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
         _provenance.write(link, RunProvenance(commit="b" * 40, dirty=False))
 
 
-def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
+def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, caplog):
     """`capture_tree` goes to some length never to raise; a write that raised beside it would
     hand that promise back — and it arrives AFTER the run dir exists. (Before #1077 an escaping
     OSError also burned the run id; setup is resumable now, so this drives the whole
@@ -526,7 +526,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
     # run continue unstamped.
     assert run_common.materialize_run_dir(alert, run_id) == runs / run_id
-    assert "could not stamp" in capsys.readouterr().err
+    assert "could not stamp" in caplog.text
     assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
 
 

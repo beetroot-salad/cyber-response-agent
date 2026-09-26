@@ -955,7 +955,7 @@ def test_the_reap_scrubs_once_the_box_is_down(tmp_path):
     assert log == ["stop", "scrub"]
 
 
-def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, capsys):
+def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, caplog):
     """d_reap_skips_the_scrub_on_a_failed_teardown — the scrub runs only once the box is
     PROVABLY dead. "No live writer" is the walk's entire justification, so a teardown that
     faulted leaves that unproven and the walk is SKIPPED, not attempted anyway.
@@ -979,12 +979,12 @@ def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, capsy
     assert e.value is fault
     assert log == ["stop"], "the scrub walked a tree whose box was not provably dead"
 
-    capsys.readouterr()
+    caplog.clear()
     log2, stop2, scrub_tree2 = _reap_probe(stop_fault=fault)
     assert stop_and_scrub(object(), tmp_path, stop_box=stop2, scrub_tree=scrub_tree2,
                           in_flight=True) is None
     assert log2 == ["stop"], "the scrub walked a tree whose box was not provably dead"
-    err = capsys.readouterr().err
+    err = caplog.text
     assert "teardown refused" in err, (
         "the suppressed teardown fault left no trace — a box that may have outlived its run "
         f"went unrecorded; stderr was {err!r}"
@@ -1290,7 +1290,7 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
                     "the bash tool still reaches the in-process executor directly"
 
 
-def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsys):
+def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, caplog):
     """d_allow_unsandboxed_is_the_only_opt_out — the POSITIVE CONTROL for the no-fallback
     negative: there IS exactly one way to run un-boxed, it is an explicit operator opt-out, and
     it is LOUD.
@@ -1311,7 +1311,7 @@ def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsy
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     box = start_box(run, DEFENDER, docker=FakeDocker(broken))
     assert box.sandboxed is False
-    assert "UNSANDBOXED" in capsys.readouterr().err.upper(), "the opt-out is silent"
+    assert "UNSANDBOXED" in caplog.text.upper(), "the opt-out is silent"
 
     for spelling in ("0", "true", "yes", "", "01"):
         monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", spelling)

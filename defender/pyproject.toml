@@ -93,6 +93,10 @@ dev = [
 # test, so `defender.*` namespace imports resolve in tests under both tests/ and
 # learning/ — in isolation or in a full run — without per-file sys.path hacks.
 pythonpath = [".."]
+# Status and diagnostics go through logging (`defender/_log.py`), and no test calls
+# `configure`, so without this `caplog` would see only WARNING and up — and a test asserting
+# the code said NOTHING would pass over an INFO line it never captured.
+log_level = "INFO"
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",

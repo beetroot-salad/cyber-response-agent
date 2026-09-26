@@ -20,7 +20,7 @@ returned reason back into `Decision(False, reason)`.
 
 from __future__ import annotations
 
-import sys
+import logging
 
 from defender import _run_paths
 from defender._frontmatter import FrontmatterError, split_frontmatter
@@ -30,6 +30,8 @@ from defender._yaml import duplicate_top_level_key
 # and on write the value is tested exactly (see `validate_report`).
 from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import Diagnostic, diagnose, warn_diagnostics
+
+_logger = logging.getLogger(__name__)
 
 # Output-structure bounds for the run's two model-authored artifacts, all in UTF-8 BYTES.
 # A VOLUME + STRUCTURE control on bytes that leave the system, not a content oracle: an
@@ -350,10 +352,9 @@ def committed_investigation_reason(text: str) -> str | None:
     try:
         found = diagnose(text, text)
     except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
-        print(
-            f"[artifact_schema] investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(
+            f"investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"treating it as publishable: {e!r}",
-            file=sys.stderr,
         )
         return None
     rendered = _rendered_errors(found)

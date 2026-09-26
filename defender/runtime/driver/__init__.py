@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -132,17 +133,19 @@ from defender.hooks.budget_enforcer import (
     update_budget_locked,
 )
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from ..lead_zero import CorrelationDispatch
 
 
 def _log_node(node: Any) -> None:
     if Agent.is_model_request_node(node):
-        print("[run.py] · model request", file=sys.stderr)
+        _logger.info("· model request")
     elif Agent.is_call_tools_node(node):
-        print("[run.py] · tool calls", file=sys.stderr)
+        _logger.info("· tool calls")
     elif Agent.is_end_node(node):
-        print("[run.py] · end", file=sys.stderr)
+        _logger.info("· end")
 
 
 StoreFactory = Callable[[str, Path], Any]
@@ -215,12 +218,12 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
                 if len(live) > confirmed_len:
                     selection.ingest(store, session_id, live, agent_id="main")
         except Exception as e:  # noqa: BLE001 — the run-end flush is best-effort
-            print(f"[run.py] run-end flush skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"run-end flush skipped: {e!r}")
     if truncated_by is not None:
         try:
             store.set_truncated_by(session_id, truncated_by)
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
-            print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
 async def _reap_correlation_task(task: Any) -> None:
@@ -239,8 +242,7 @@ async def _reap_correlation_task(task: Any) -> None:
     try:
         await task
     except Exception as e:  # noqa: BLE001 — this cleanup step must not itself break the run
-        print(f"[run.py] correlation task reaped with an unretrieved fault: {e!r}",
-              file=sys.stderr)
+        _logger.warning(f"correlation task reaped with an unretrieved fault: {e!r}")
     except asyncio.CancelledError:
         pass
 
@@ -277,8 +279,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
             async for node in run:
                 _log_node(node)
     except UsageLimitExceeded as e:
-        print(f"[run.py] request limit reached ({e}); writing partial trace",
-              file=sys.stderr)
+        _logger.warning(f"request limit reached ({e}); writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
         exit_reason = "UsageLimitExceeded"
     except UnexpectedModelBehavior as e:
@@ -286,15 +287,15 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # report.md) exhausts the framework's shared tool-retry budget (`DEFAULT_TOOL_RETRIES`)
         # and pydantic_ai raises this; no other handler here catches it, so uncaught it takes
         # the process down.
-        print(f"[run.py] {e}; writing partial trace (retry budget exhausted)", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace (retry budget exhausted)")
         truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
     except RunAborted as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_ABORTED
         exit_reason = "RunAborted"
     except BudgetKill as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
     except (sqlite3.Error, session_store.StoreError) as e:
@@ -302,7 +303,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # CyclicParentChain / UnknownSchemaVersion all reach here from inside the
         # ProcessHistory hook, and any one escaping takes the whole run.py process down
         # instead of writing the partial trace this handler exists for.
-        print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
+        _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
     finally:
@@ -324,8 +325,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         if written:
             exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
         elif not end.closed_before_cut:
-            print("[run.py] the run-end record could not be written; not forcing a close",
-                  file=sys.stderr)
+            _logger.error("the run-end record could not be written; not forcing a close")
             exit_reason = f"{exit_reason}+RunEndRecordFailed"
     return run, end, exit_reason
 
@@ -341,7 +341,7 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
         run_end.write_sidecar(deps.run_dir, end)
         return True
     except OSError as e:
-        print(f"[run.py] run-end record write skipped: {e!r}", file=sys.stderr)
+        _logger.warning(f"run-end record write skipped: {e!r}")
         return False
 
 
@@ -389,10 +389,9 @@ async def _close_a_run_cut_short(
     would end the run with no report.md for the wrong reason. The run's own bounds are
     threaded so this limb cannot act on a different value from the rest of the run."""
     if challenge_gate.ReviewState.of(deps).closed:
-        print("[run.py] the investigation already closed; keeping its disposition",
-              file=sys.stderr)
+        _logger.info("the investigation already closed; keeping its disposition")
         return exit_reason
-    print("[run.py] forcing an unresolved close", file=sys.stderr)
+    _logger.warning("forcing an unresolved close")
     try:
         from ..close_tool import _close_investigation_async
 
@@ -400,7 +399,7 @@ async def _close_a_run_cut_short(
             deps, HOST_ONLY_DISPOSITION, stages=None, bounds=bounds, forced=True,
         )
     except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
-        print(f"[run.py] the forced close also failed ({close_err!r})", file=sys.stderr)
+        _logger.error(f"the forced close also failed ({close_err!r})")
         return "ForcedCloseFailed"
     return exit_reason
 
@@ -629,7 +628,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
         # process down instead of ending the run through the handled `truncated_by="store"`
         # exit. Not one model turn is driven.
-        print(f"[run.py] store setup failed ({e!r}); ending the run", file=sys.stderr)
+        _logger.error(f"store setup failed ({e!r}); ending the run")
         if store is not None:
             # `factory()` can succeed — a live connection, DDL already run — and a LATER
             # call in this same try (`write_case_pointer`, `new_session`) still fail;
@@ -637,8 +636,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             try:
                 store.close()
             except Exception as close_err:  # noqa: BLE001 — best-effort on an already-failing path
-                print(f"[run.py] store close after setup failure also failed "
-                      f"({close_err!r})", file=sys.stderr)
+                _logger.error(f"store close after setup failure also failed "
+                              f"({close_err!r})")
         logger.close()
         return _run_summary(
             output=None, model_name=model_name, requests=logger.n_requests,
@@ -704,7 +703,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     try:
         observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
+        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
             write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
@@ -713,8 +712,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # trace could not be built" into an uncaught OSError that ends the run at its last
             # step, discarding the summary and every artifact already written. The trace is
             # observability; the run's result is not.
-            print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-                  f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)  # lint-run-records: ok — an operator diagnostic naming the missing record
+            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(

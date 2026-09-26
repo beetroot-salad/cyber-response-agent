@@ -5,7 +5,7 @@ harness dispatch that bypasses them has to account itself.
 """
 from __future__ import annotations
 
-import sys
+import logging
 import time
 from typing import Any
 
@@ -30,6 +30,8 @@ from defender.hooks.budget_enforcer import (
     tier,
     update_budget_locked,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -64,11 +66,11 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
             state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
         state = _budget_state_for_enforcement(state, deps)
         for w in check_budgets(state, limits):
-            print(f"[run.py] {w}", file=sys.stderr)
+            _logger.warning(f"{w}")
     except BudgetKill:
         raise
     except Exception as e:  # noqa: BLE001 — budget accounting must never break the run
-        print(f"[run.py] budget accounting skipped: {e!r}", file=sys.stderr)
+        _logger.warning(f"budget accounting skipped: {e!r}")
 
 
 def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> None:
@@ -122,7 +124,7 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
                 toon_gate=toon_gate.snapshot() if toon_gate is not None else None,
             )
         except Exception as e:  # noqa: BLE001
-            print(f"[run.py] request logging skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"request logging skipped: {e!r}")
         return resp
 
     return hooks

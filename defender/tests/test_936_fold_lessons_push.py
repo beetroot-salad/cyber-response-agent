@@ -340,7 +340,7 @@ def test_a_fold_that_matches_no_lesson_mints_the_row_and_records_nothing(tmp_pat
 
 # O4 — fail-open at the fold
 
-def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypatch, capsys):
+def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypatch, said):
     """O4 / M1: with no `lessons/` under the tree the run reads, the fold still mints its row
     and the run completes; the row has no block, no row is recorded, and stderr carries the
     "no lessons corpus" line the write-return lane already prints — the shared derivation
@@ -356,7 +356,7 @@ def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypat
     assert seq == 1
     assert FOLD_HEADER not in text
     assert _rows(rd) == []
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert "no lessons corpus" in err, f"the fold disabled its lessons lane silently:\n{err[-2000:]}"
     assert str(tree / "lessons") in err, "the stderr line does not name the corpus it looked for"
     # M2: composed ONLY at mint. Three renders on this boundary, one corpus lookup — a fold

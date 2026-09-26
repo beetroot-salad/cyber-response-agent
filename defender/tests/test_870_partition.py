@@ -463,7 +463,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
 
 
-def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
+def test_a_reducer_only_tick_reports_what_it_taught(scene, said):
     """On a tick that taught ONLY the reducer surface, the operator log NAMES that surface and
     the commit message stops claiming it folded pitfalls into per-system `execution.md`.
 
@@ -484,11 +484,11 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
     repo, paths = scene
     _shim_batch(paths)
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
-    capsys.readouterr()
+    said.readouterr()
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_reducer_surface())) == 0
 
-    log = loop_log(capsys)
+    log = loop_log(said)
     named = [ln for ln in log.splitlines() if REDUCER_REL in ln or "defender-sql.md" in ln]
     assert named, f"an operator cannot tell a reducer lesson was taught: {log}"
 

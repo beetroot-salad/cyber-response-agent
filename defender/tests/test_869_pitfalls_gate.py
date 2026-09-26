@@ -135,7 +135,7 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     assert head_files(repo) == before
 
 
-def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, capsys):
+def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, said):
     """A tree that declares `ticket` through its ADAPTER ALONE — no `defender/skills/ticket/
     SKILL.md`, no `execution.md` — still admits a ticket handoff and commits the curator's
     edit.
@@ -166,7 +166,7 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
     spawn = Spawn(lambda root: write(
         marker_file(root, "ticket"), "# ticket\n## Common pitfalls\n- use the key, not the id\n",
     ))
-    capsys.readouterr()
+    said.readouterr()
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
     assert spawn.systems_seen == ["ticket"]
@@ -175,4 +175,4 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
     assert persist.read_pitfalls(paths) == []
     assert not skill_md(repo, "ticket").exists()
     assert "execution.md pitfalls" in git(repo, "log", "--oneline", "-1").stdout
-    assert loop_log(capsys)
+    assert loop_log(said)

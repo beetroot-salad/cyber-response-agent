@@ -5,8 +5,8 @@ build is where the configuration and the injection seams meet.
 """
 from __future__ import annotations
 
+import logging
 import os
-import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -53,6 +53,8 @@ from defender.hooks.budget_enforcer import (
 )
 from ._prompts import DEFAULT_GATHER_MODEL, DEFAULT_MODEL, DEFAULT_TOOL_RETRIES, GATHER_REQUEST_LIMIT, _main_instructions, enforcement_enabled
 from ._budget import _make_hooks
+
+_logger = logging.getLogger(__name__)
 
 
 def gather_model() -> str:
@@ -375,7 +377,7 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
             raise
         except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
             summary = None
-            print(f"[run.py] correlation lead injection skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"correlation lead injection skipped: {e!r}")
         if not summary:
             return
         from datetime import UTC, datetime as _dt
@@ -505,7 +507,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             correlation_task=correlation_task,
         )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
-    print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
+    _logger.info(f"gather model: {gather_model()}{_override}")
     name = resolve_main_model(main_model)
     # Named rather than inlined into the build call: the EFFECTIVE definition — not `MAIN_DEF`
     # — is what decides below whether this root registers the close tool, the same way
@@ -570,8 +572,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         try:
             store.set_truncated_by(gather_session_id, reason)
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
-            print(f"[run.py] gather truncated_by write skipped for {agent_id}: {e!r}",
-                  file=sys.stderr)
+            _logger.warning(f"gather truncated_by write skipped for {agent_id}: {e!r}")
 
     # ALWAYS the role's own committed grant — never the per-call `verbs=` registry's. The
     # dispatch catalog/template index is a ROLE-LEVEL surface (the one verb_roster.py scores

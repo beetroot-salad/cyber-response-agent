@@ -141,7 +141,7 @@ def test_m5_built_from_the_passed_corpus_dir(tmp_path):
     assert _REAL_SLUG not in m_a
 
 
-def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, capsys):
+def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, said):
     """demand: M6 — a ``_``-prefixed file and a malformed (non-fenced) ``.md`` are warn-skipped
     (stderr, not raised) while a well-formed sibling still renders.
 
@@ -163,10 +163,10 @@ def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, capsys):
     assert "TEMPLATE" not in heads
     assert "bad" in heads
     assert "the stem is taken" in manifest.lower()
-    assert "bad" in capsys.readouterr().err
+    assert "bad" in said.readouterr().err
 
 
-def test_m6b_undecodable_bytes_are_skipped_not_raised(tmp_path, capsys):
+def test_m6b_undecodable_bytes_are_skipped_not_raised(tmp_path, said):
     """demand: M6, decode half — "one bad file never aborts the manifest" has to cover UNDECODABLE
     bytes too: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and NOT an
     ``OSError``, so an except tuple naming only ``(FrontmatterError, OSError)`` lets it escape and
@@ -181,7 +181,7 @@ def test_m6b_undecodable_bytes_are_skipped_not_raised(tmp_path, capsys):
     manifest = _shared.build_corpus_manifest(corpus)
     assert _headers(manifest) == ["good", "corrupt"]
     assert "frontmatter cannot be shown" in manifest
-    assert "corrupt" in capsys.readouterr().err
+    assert "corrupt" in said.readouterr().err
 
 
 def test_m7_empty_missing_or_nondir_is_empty(tmp_path):

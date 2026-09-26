@@ -230,7 +230,7 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
     assert any(e.get("type") == "result" for e in events)
 
 
-def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, capsys):
+def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, caplog):
     """The tail-exhaustion kill is raised from a seam OUTSIDE after_tool_execute's
     broad exception guard, so the guard added specifically so that budget accounting
     could never itself break a run does not swallow the kill: the run ends and is
@@ -248,7 +248,7 @@ def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, cap
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
-    err = capsys.readouterr().err
+    err = caplog.text
     assert summary["truncated_by"] == "budget", "the kill did not end the run at all"
     assert "budget accounting skipped" not in err, (
         "the kill was swallowed by after_tool_execute's except Exception guard"
@@ -477,7 +477,7 @@ def test_refusal_message_content(tmp_path, enforced):
     )
 
 
-def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
+def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, caplog):
     """A call refused at the execute seam leaves tool_calls unchanged in budget.json
     AND emits NOTHING on the stderr channel — across a long run of consecutive
     refusals no budget warning or exceeded line appears — so a model looping on a
@@ -501,7 +501,7 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
     ])
     drive(run_dir, run_id="silent", main=replay,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
-    err = capsys.readouterr().err
+    err = caplog.text
 
     assert refusal_stem() in "\n".join(replay.seen), "no refusal was delivered at all"
     assert budget(run_dir)["tool_calls"] == 1, "a refusal spent the tail band"
@@ -699,7 +699,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
     assert recorder.verbs == ["esql"]
 
 
-def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
+def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, caplog):
     """Counter increments AND stderr warnings happen on every tool call that ACTUALLY
     EXECUTES, whether or not the posture bit enables enforcement — accounting is
     unconditional with respect to POSTURE, which is a different axis from whether a
@@ -725,7 +725,8 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
         drive(rd, run_id=posture, main=script(),
               limits=caps(max_tool_calls=4))
         states[posture] = budget(rd)
-        warned[posture] = "Budget warning" in capsys.readouterr().err
+        warned[posture] = "Budget warning" in caplog.text
+        caplog.clear()
 
     assert states["off"]["tool_calls"] == states["on"]["tool_calls"] == 3
     _both_warned = "the 75% warning did not fire under both postures — accounting is gated on posture"
@@ -733,7 +734,7 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
     assert warned["on"], _both_warned
 
 
-def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
+def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, caplog):
     """With the flag off, a run that crosses every cap observes no refusal and no kill
     — only the existing stderr warnings — and completes exactly as it does today.
 
@@ -750,7 +751,7 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
     summary = drive(run_dir, run_id="off", main=replay,
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
-    err = capsys.readouterr().err
+    err = caplog.text
 
     assert refusal_stem() not in "\n".join(replay.seen), "an unenforced run was refused"
     assert summary["truncated_by"] is None

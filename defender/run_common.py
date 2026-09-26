@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import os
 import subprocess
 import sys
@@ -21,6 +22,8 @@ from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
+
+_logger = logging.getLogger(__name__)
 
 VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
@@ -234,7 +237,7 @@ def _stamp(
 
     The asymmetry with the alert write above is the point, not an oversight. A run without its
     alert has no case to investigate and must die. A run without its stamp is a run nobody can
-    later prove the code for — worth a loud line on stderr and worth nothing more, because
+    later prove the code for — worth a loud error in the log and worth nothing more, because
     `read` already answers "no usable record" for a file that is not there, and an operator
     who needs the guarantee has the announce line saying it is missing."""
     path = run.facts.provenance.path
@@ -253,8 +256,8 @@ def _stamp(
             parent_run_id=parent_run_id, fork_turn=fork_turn)
         run.facts.provenance.write(record.as_json())
     except OSError as e:
-        print(f"[run_common] could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
-              "nothing downstream can prove which code it ran", file=sys.stderr)
+        _logger.error(f"could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
+                      "nothing downstream can prove which code it ran")
 
 
 def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
@@ -292,9 +295,10 @@ def visualize(run_dir: Path) -> None:
         [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
         capture_output=True, text=True, encoding="utf-8"
     )
-    sys.stderr.write(proc.stdout)
+    if proc.stdout.strip():
+        _logger.info(proc.stdout.strip())
     if proc.returncode != 0:
-        sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
+        _logger.error(f"visualize_run failed: {proc.stderr}")
         raise VisualizeFailed(
             f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
 
@@ -307,20 +311,19 @@ def cross_check_tables(run_dir: Path) -> None:
 
         xcheck = lead_repository.narration_crosscheck_from_run(run_dir)
     except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
-        print(f"[run.py] narration cross-check skipped: {e!r}", file=sys.stderr)
+        _logger.warning(f"narration cross-check skipped: {e!r}")
         return
     if not xcheck["ok"]:
-        print(
-            "[run.py] WARN narration cross-check FAILED — the live tables "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(
+            "narration cross-check FAILED — the live tables "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "disagree with investigation.md's :L rows:",
-            file=sys.stderr,
         )
         if xcheck["missing_from_narration"]:
-            print(f"[run.py]   table lead_ids with no :L row: {xcheck['missing_from_narration']}", file=sys.stderr)
+            _logger.warning(f"table lead_ids with no :L row: {xcheck['missing_from_narration']}")
         if xcheck["queries_without_lead"]:
-            print(f"[run.py]   query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}", file=sys.stderr)
+            _logger.warning(f"query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}")
     if xcheck["leads_without_queries"]:
-        print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
+        _logger.warning(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
 
 
 HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"
@@ -404,7 +407,7 @@ def enqueue_curation(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
     if reason is not None:
-        print(f"[run.py] NOT enqueuing for curation: {reason}", file=sys.stderr)
+        _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
     from defender.learning.core import markers as _markers
     from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
@@ -418,7 +421,6 @@ def enqueue_curation(
         case_id = case_ref(alert.read_bytes())
         _markers.enqueue_case_for_curation(case_id, run_dir, paths)
     except OSError as e:
-        print(f"[run.py] NOT enqueuing for curation: could not write the request: {e!r}",
-              file=sys.stderr)
+        _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
         return False
     return True

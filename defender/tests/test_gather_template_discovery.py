@@ -146,7 +146,7 @@ def test_d18b_missing_catalog_dir_yields_nothing_and_does_not_raise(tmp_path):
     assert list(_corpus.iter_query_templates(tmp_path / "nope" / "queries")) == []
 
 
-def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, capsys):
+def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, said):
     """load_catalog reads OUTSIDE its try (lead_neighbors.py:153) and drops an id-less file
     SILENTLY (:156-157). Post-fold that walk runs on EVERY gather dispatch, so one undecodable
     byte in one of 63 templates would take down every dispatch. The folded walk takes
@@ -165,7 +165,7 @@ def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, c
     assert "elastic.sshd-auth-history" in ids
     assert "cmdb.hostname-by-ip" in ids
     assert not {"elastic.no-fence", "elastic.bad-yaml", "elastic.no-id", "elastic.u"} & ids
-    err = capsys.readouterr().err
+    err = said.readouterr().err
     assert err.count("skipping") >= 4, "each malformed template warns on stderr"
 
 

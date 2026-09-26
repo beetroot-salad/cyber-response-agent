@@ -31,7 +31,7 @@ def test_lesson_with_no_frontmatter_is_ignored(tmp_repo):
     assert a.existing_finding_ids(tmp_repo.cfg) == set()
 
 
-def test_existing_finding_ids_skips_an_undecodable_lesson(tmp_repo, capsys):
+def test_existing_finding_ids_skips_an_undecodable_lesson(tmp_repo, said):
     """One corrupt byte must not abort the author drain. ``read_text()`` raises
     ``UnicodeDecodeError`` — a ``ValueError``, not an ``OSError`` — so the un-guarded read this
     walk used to do took the whole pre-flight down, where the corpus manifest beside it warned and
@@ -42,7 +42,7 @@ def test_existing_finding_ids_skips_an_undecodable_lesson(tmp_repo, capsys):
     )
     (tmp_repo.paths.lessons_dir / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
     assert a.existing_finding_ids(tmp_repo.cfg) == {"r/0"}
-    assert "corrupt.md" in capsys.readouterr().err
+    assert "corrupt.md" in said.readouterr().err
 
 
 def test_existing_finding_ids_skips_underscore_prefixed_files(tmp_repo):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import sys
+import logging
 from collections.abc import Callable
 from dataclasses import field
 from defender._model import model
@@ -417,17 +417,17 @@ def pitfalls_threshold() -> int:
     return env_int("LEARNING_PITFALLS_THRESHOLD", 3)
 
 
-def make_logger(prefix: str, *, flush: bool = False) -> Callable[[str], None]:
-    def _log(msg: str) -> None:
-        print(f"[{prefix}] {msg}", file=sys.stderr, flush=flush)
-    return _log
+def make_logger(prefix: str) -> Callable[[str], None]:
+    """A one-argument INFO logger on `defender.learning.<prefix>` — the call shape the drains
+    inject as their `log` seam, now routed through the logging framework (`defender/_log.py`)."""
+    return logging.getLogger(f"defender.learning.{prefix}").info
 
 
 _log = make_logger("loop")
 #: The lead-author lane's ONE logger — every module of the lane, and the disposition the drain
 #: carries for it (`core/pitfalls_disposition`), binds this rather than minting its own, so the
 #: lane's prefix is spelled once and its lines grep as one vocabulary.
-lead_author_log = make_logger("lead-author", flush=True)
+lead_author_log = make_logger("lead-author")
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:

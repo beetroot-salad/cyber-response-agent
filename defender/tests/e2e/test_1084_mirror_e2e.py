@@ -228,10 +228,10 @@ def test_1084_a_mirror_write_that_fails_after_its_folder_exists_fails_the_render
 # ---------------------------------------------------------------------------------------
 
 
-def test_1084_the_render_names_the_mirror_by_its_absolute_path(tmp_path, capfd, monkeypatch):
+def test_1084_the_render_names_the_mirror_by_its_absolute_path(tmp_path, capfd, caplog, monkeypatch):
     """With the override OUTSIDE the running checkout, `run_common.visualize` succeeds (a
     `dest.relative_to(<repo>)` would raise `ValueError` in the child and surface as
-    `VisualizeFailed`) and the child's stdout — forwarded to stderr — names the mirror's
+    `VisualizeFailed`) and the child's stdout — forwarded to the log — names the mirror's
     absolute path. The in-process `main` prints the same absolute path on its own stdout."""
     run_dir = driven_run(tmp_path)
     outside = tmp_path / "pages"
@@ -240,9 +240,10 @@ def test_1084_the_render_names_the_mirror_by_its_absolute_path(tmp_path, capfd, 
     mirrored = outside / run_dir.name / PAGE
     assert mirrored.is_absolute()
     capfd.readouterr()
+    caplog.clear()
 
     run_common.visualize(run_dir)
-    forwarded = capfd.readouterr().err
+    forwarded = caplog.text
     assert str(mirrored) in forwarded, f"the render did not name {mirrored}: {forwarded!r}"
     assert mirrored.is_file()
 

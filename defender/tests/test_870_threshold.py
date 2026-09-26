@@ -301,7 +301,7 @@ def test_a_threshold_of_one_curates_on_the_first_mistake(scene, monkeypatch):
 # The other two readers of the same moved count.
 
 
-def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_path, capsys):
+def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_path, said):
     """`lead_author.py:607`'s "N distinct mistake(s) in this run" line reports the
     POST-normalization count.
 
@@ -335,11 +335,11 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda _fh: None,
     )
-    capsys.readouterr()
+    said.readouterr()
 
     assert lead_author.run(run_dir, deps=deps) == 0
 
-    log = loop_log(capsys)
+    log = loop_log(said)
     counted = [ln for ln in log.splitlines() if "distinct mistake(s) in this run" in ln]
     assert counted, f"the per-run count line is gone: {log}"
     assert "1 distinct mistake(s) in this run" in counted[0], (
