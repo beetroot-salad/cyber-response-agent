@@ -384,17 +384,23 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
 
 def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_path, monkeypatch):
     """A sibling's run dir lives under its own episode rather than beside the source run: the
-    child process is handed a runs base inside the episode dir, and the source's own store still
-    resolves because the manifest names the source run by absolute path."""
+    child process is handed the MANIFEST inside the episode dir, from which its own materialize
+    derives the episode's runs base (#1078 D2: `EpisodePaths(world.episode_dir).runs`), and the
+    source's own store still resolves because the manifest names the source run by absolute path.
+
+    #1078 D2 (brief R2, settled s104): the launcher sets NO `DEFENDER_RUNS_BASE` of its own. A
+    child's value is the parent's, inherited unchanged (J46) — the stale configured base here —
+    never one the launcher composed."""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     spawn = T.FakeSpawn()
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
     T.mod("learning.branch.cli").start_family(ep, ["a", "b", "c"], spawn=spawn)
     assert spawn.launches, "no sibling was started"
     for launch in spawn.launches:
-        child_base = launch["env"]["DEFENDER_RUNS_BASE"]
-        assert child_base.startswith(str(ep)), child_base
-        assert not child_base.startswith(str(base) + "/")
+        assert launch["env"].get("DEFENDER_RUNS_BASE") == str(base), (
+            "the launcher composed a runs base of its own for a sibling: "
+            f"{launch['env'].get('DEFENDER_RUNS_BASE')}")
+        assert str(ep / "family.yaml") in launch["argv"], launch["argv"]
 
 
 def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_path, monkeypatch):

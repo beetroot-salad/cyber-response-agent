@@ -391,10 +391,18 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     """Drive the REAL entrypoint over one alert with the tail's dependencies injected.
 
     `main` is passed in rather than imported here so each scenario's own body names the
-    entry point it drives."""
+    entry point it drives.
+
+    #1078 O1: a fresh run names its tenant, and the tenant must exist (O2). The argv carries
+    `--tenant` with D9's one tenant, created in this test's own data root (the autouse
+    `data_root` fixture) through the real `create_tenant` first — without it `main` refuses the
+    run before anything is spent."""
+    from defender.tests._data_root_1078 import ensure_d9_tenant
+
     require_tail_seam(main)
-    return main([str(alert), *args], lifecycle=tail.lifecycle, visualize=tail.visualize,
-                ticket_writer=tail)
+    tenant_id = ensure_d9_tenant()
+    return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
+                visualize=tail.visualize, ticket_writer=tail)
 
 
 def plant_alert(tmp_path: Path, *, name: str = "alert.json",

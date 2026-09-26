@@ -375,6 +375,23 @@
           "_VENV_PY"
         ],
         "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `scripts/_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
+      },
+      "tenant_root": {
+        "writers": [],
+        "readers": [],
+        "grep": [
+          "tenant.json",
+          "TenantPaths",
+          "DEFENDER_DATA_ROOT",
+          "resolve_data_root",
+          "tenant_of_run_dir",
+          "create_tenant",
+          "require_tenant",
+          "runs_base_for",
+          "/tmp/defender-data",
+          ".defender-data"
+        ],
+        "note": "DECLARED BY #1078's GROUNDING (base ed5386bc) as an EMPTY-WRITER root, which is the fact worth recording: at this base nothing in defender/ or scripts/ writes or reads a data root or a tenant row — `grep -rn 'tenant\\.json' --include=*.py defender scripts` (no tests) finds only `_tenant.py`'s docstrings and `TENANT_RECORD_NAME = '_tenant.json'`, the RUNS-BASE record, which is a different file under a different root (`runs_base`). #1078 makes `<data root>/<tenant>/` (DEFENDER_DATA_ROOT, REQUIRED: there is no code default, and an unset or empty value is refused naming the variable, per #1078 §7 J01) the PARENT of four roots already declared here: `runs/` (was runs_base), `sessions/` (session_store, derived as runs_base.parent/sessions and unchanged), `episodes/` (was episode_dir's DEFENDER_EPISODES_BASE) and `learning/` (was learning_queue / pending_dir / learning_run_dir's state root, plus the three drain/repo locks drain_worktree's writers take). Its own record is the tenant ROW `<root>/<T>/tenant.json`, whose ONE production writer is to be `_tenant.py::create_tenant` (write_guarded mode=create) and whose readers are to be `require_tenant` and `tenant_of_run_dir`. NONE OF THOSE SYMBOLS EXISTS YET — add each here in the commit that creates it, per this block's rule that a row naming a symbol that resolves to nothing is indistinguishable from a row nobody wrote. `_tenant.py` is in lint_unguarded_tree_write's LINT_HARD_GATED_MODULES, so the tenant folder's own mkdir must be `guarded_mkdir`, and every new module-level str constant in `_tenant.py` is an import-refused 'record name' under lint_run_records arm (c) unless it joins `_OWNER_NON_RECORD_EXPORTS`. When #1078 lands, the six rows its C45 names (runs_base, episode_dir, learning_queue, pending_dir, learning_run_dir, session_store) go stale on their knob names and resolver symbols (`resolve_runs_base`, `DEFENDER_RUNS_BASE`, `DEFENDER_EPISODES_BASE`, `DEFAULT_PATHS`) — rewrite them in that commit."
       }
     }
   },

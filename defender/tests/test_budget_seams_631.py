@@ -541,39 +541,40 @@ def test_ci_runs_the_suite_with_enforcement_on(monkeypatch):
 
 
 def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """The learning state root and $DEFENDER_RUNS_BASE cannot resolve to the same
-    directory: pairing the two env vars onto one path is REFUSED rather than quietly
+    """The learning state root and the runs base cannot resolve to the same
+    directory: pairing the two onto one path is REFUSED rather than quietly
     letting unenforced learning agents spend the enforced pool.
 
     Q1's probe dissolved D3 — learning stages bind under the learning state root,
-    MAIN/GATHER bind $DEFENDER_RUNS_BASE, overlap False for all five — but the
+    MAIN/GATHER bind the runs base, overlap False for all five — but the
     disjointness is EMERGENT FROM TWO ENV-VAR DEFAULTS, and the probe collided them
     deliberately: one operator pairing yields `SAME DIR? True`, at which point
-    unenforced learning agents spend the enforced pool. Asserted, not assumed."""
-    from defender import run_common
+    unenforced learning agents spend the enforced pool. Asserted, not assumed.
 
-    shared = tmp_path / "both"
-    shared.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(shared))
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(shared))
-    with pytest.raises(FatalConfigError):
-        run_common.resolve_runs_base()
+    #1078 (settled s102, design correction R-A2(b)): the runs base is now
+    `runs_base_for(T)` under `DEFENDER_DATA_ROOT` (the D9 tenant fixture), and the
+    refusal is widened to "equal, or either contains the other" against the data root
+    (O13) — so a learning state root AT the tenant's runs base, or an alias of it, is
+    refused, and a disjoint one leaves the runs base where the tenant says."""
+    from defender import _tenant
+
+    base = _tenant.runs_base_for(d9_tenant)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(base))
+    with pytest.raises(ValueError):  # noqa: PT011 — the owner's one ValueError-subclass refusal (#1078 d0); the design names no narrower class
+        _tenant.runs_base_for(d9_tenant)
 
     alias = tmp_path / "alias"
-    alias.symlink_to(shared)
+    alias.symlink_to(data_root)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
-    with pytest.raises(FatalConfigError):
-        run_common.resolve_runs_base()
+    with pytest.raises(ValueError):  # noqa: PT011 — as above
+        _tenant.runs_base_for(d9_tenant)
 
-    runs = tmp_path / "runs"
     learn = tmp_path / "learn"
-    runs.mkdir()
     learn.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learn))
-    assert run_common.resolve_runs_base().resolve() == runs.resolve()
+    assert _tenant.runs_base_for(d9_tenant) == data_root.resolve() / d9_tenant / "runs"
 
 
 

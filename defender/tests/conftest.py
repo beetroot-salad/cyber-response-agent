@@ -95,6 +95,38 @@ def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     return mirror
 
 
+@pytest.fixture(autouse=True)
+def data_root(tmp_path_factory, monkeypatch) -> Path:
+    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b)).
+
+    #1078 gives the data root NO default — an unset `DEFENDER_DATA_ROOT` is refused, naming the
+    variable (§7 J01) — so this fixture is the PREVENTION half: no test, whether it asks for
+    isolation or not, can reach a host data root, and no two tests (or xdist workers) share
+    one (J58). The detector half J57 once planned (a pytest-time refusal of the code default)
+    collapsed into that production refusal: with no default there is nothing to refuse.
+
+    `mktemp`, not `tmp_path`, for the same reason as `run_visualizations_dir` above: suites
+    that snapshot their own `tmp_path` must not see an entry they never made. It SETS THE
+    VARIABLE AND NOTHING ELSE — the tenant is created on request (`d9_tenant` below), never
+    here. A test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance,
+    later).
+    """
+    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+
+    root = tmp_path_factory.mktemp("data-root")
+    monkeypatch.setenv(DATA_ROOT_ENV, str(root))
+    return root
+
+
+@pytest.fixture
+def d9_tenant(data_root) -> str:
+    """D9's one tenant, created in this test's data root through the real `create_tenant`,
+    and returned as the id a test hands to `--tenant`."""
+    from defender.tests._data_root_1078 import ensure_d9_tenant
+
+    return ensure_d9_tenant()
+
+
 def _resolve_malloc_trim():
     """Bind glibc's `malloc_trim`, or a no-op off glibc (musl has no such symbol)."""
     try:

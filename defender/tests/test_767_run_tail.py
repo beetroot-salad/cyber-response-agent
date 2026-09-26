@@ -162,7 +162,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     seam — with the flag, both steps ARE reached — so "no write" here is not "the tail never
     ran". The inline control is the run's own completion: the lifecycle and the render step
     are reached either way."""
-    assert run_py.parse_args(["/tmp/alert.json"]).update_ticket is False, (
+    assert run_py.parse_args(["/tmp/alert.json", "--tenant", "playground"]).update_ticket is False, (
         "the ticket flag is no longer opt-in"
     )
 

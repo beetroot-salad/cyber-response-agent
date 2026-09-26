@@ -71,7 +71,8 @@ def test_947_review_registry_uses_a_scratch_ledger_with_an_empty_base(tmp_path):
     assert not list(ledger.base_rows())
 
 
-def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, monkeypatch):
+def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, monkeypatch,
+                                                                  d9_tenant):
     """The replay's verb context is host-side over the episode dir: its tree is the episode
     directory rather than any run dir, it carries no capture recorder at all, and the environment
     the host composes for it names that directory as the run dir and the CONFIGURED runs base as
@@ -80,16 +81,21 @@ def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, mon
     runs-base walk may reach."""
     base, _src, root = T.configured_layout(tmp_path, monkeypatch)
     ep = T.episode(tmp_path, root=root)
-    ctx = _review().verb_context(ep)
+    # #1078 D4 (review row, brief R2, settled s104): the base is THREADED — the launcher passes
+    # `runs_base_for(T)` — never read off the (retired) `DEFENDER_RUNS_BASE` knob, whose stale
+    # configured value `configured_layout` still exports here.
+    runs_base = T.sym("_tenant", "runs_base_for")(d9_tenant)
+    ctx = _review().verb_context(ep, runs_base=runs_base)
     assert ctx.run_dir == ep
     assert ctx.capture is None
     assert ctx.env["DEFENDER_RUN_DIR"] == str(ep)
     # `run_common.run_env` sets DEFENDER_RUNS_BASE = run_dir.parent unconditionally
     # (`run_common.py:119`), which is F10's precondition — "correct here only because the episode
     # dir is a direct child of the runs base" — and after two relocations that is false. The
-    # review COMPOSES the configured runs base instead; inheriting the parent would point every
+    # review COMPOSES the tenant's runs base instead; inheriting the parent would point every
     # replay subprocess at the tree holding every episode.
-    assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
+    assert ctx.env["DEFENDER_RUNS_BASE"] == str(runs_base)
+    assert ctx.env["DEFENDER_RUNS_BASE"] != str(base), "the replay read the retired knob"
     assert ctx.env["DEFENDER_RUNS_BASE"] != str(ep.parent), (
         "the replay's subprocesses resolve their runs base to the EPISODES ROOT")
 
