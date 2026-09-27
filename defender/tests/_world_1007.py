@@ -104,6 +104,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported: one spe
     capture_call,
     captured_row,
     configured_layout as _configured_layout_947,
+    current_tenant_paths,
     elastic_overlay,
     episode,
     family_doc,

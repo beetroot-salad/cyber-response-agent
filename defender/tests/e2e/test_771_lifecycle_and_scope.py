@@ -604,13 +604,14 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     removes, so the pinning would still hold and would still buy nothing. Each arm carries its
     own positive control, because every one of them is a not-observable assertion and the
     vacuous pass is a tree with nothing in it."""
-    from defender import run_common
+    from defender import _tenant, run_common
 
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
+    tenant_id = "t771"
+    _tenant.create_tenant(data_root, tenant_id)
     alert = tmp_path / "alert.json"
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
 
     # ARM 1 — the mint refuses an id whose directory a RUN has been in, and touches nothing.
     # "Has been in" is judged by contents: setup writes exactly the alert, `gather_raw/` and
@@ -618,12 +619,12 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     # and a container from that run may still be mounted on the tree. (#1077 decision 3 makes
     # a directory holding NOTHING BUT setup's own writes resumable — an interrupted setup
     # never started a box, so that premise does not reach it.)
-    first = run_common.materialize_run_dir(alert, "stale-771")
+    first = run_common.materialize_run_dir(alert, "stale-771", tenant_id=tenant_id)
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
 
     with pytest.raises(SystemExit) as exit_:
-        run_common.materialize_run_dir(alert, "stale-771")
+        run_common.materialize_run_dir(alert, "stale-771", tenant_id=tenant_id)
 
     assert "already exists" in str(exit_.value), (
         f"the second mint on a live run id did not refuse on the directory's contents: "
@@ -638,7 +639,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     )
     # The complementary condition: a FRESH id under the same base materializes, so the refusal
     # above is the existing directory and not a mint that fails on everything.
-    fresh = run_common.materialize_run_dir(alert, "fresh-771")
+    fresh = run_common.materialize_run_dir(alert, "fresh-771", tenant_id=tenant_id)
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
     assert fresh != first, "a fresh id minted the same directory the refusal was about"
 

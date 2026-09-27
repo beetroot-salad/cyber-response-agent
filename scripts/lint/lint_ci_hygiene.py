@@ -79,9 +79,10 @@ TEXT_SUFFIXES = {".py", ".md", ".json", ".sh", ".yaml", ".yml", ".toml"}
 PATH_PATTERN = re.compile(r"/workspace/|/tmp/(?:defender|soc-agent)[/_-]")
 
 # Allow documented defaults — these are good practice, not bugs.
-# #1078 D8: the three /tmp/defender-runs allowances are RETIRED — their last users
-# (run_common.DEFAULT_RUNS_BASE, generate_case.py's own hardcoded fallback) are gone, and
-# there is deliberately no default data root to allow in their place (§7 J01).
+# #1078 D8: the three /tmp/defender-runs allowances are RETIRED — their last users (the
+# module-level runs-base default this file used to carry, generate_case.py's own hardcoded
+# fallback) are gone, and there is deliberately no default data root to allow in their place
+# (§7 J01).
 DEFAULT_PATTERNS: list[re.Pattern[str]] = []
 
 # Bare `python3 X.py` — only flagged in JSON `command:` fields.

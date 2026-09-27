@@ -1113,7 +1113,7 @@ def test_1025_a_sibling_process_exited_non_zero(tmp_path):
     world. Positive control: the section, its link and its rows exist.
     """
     launch = ST._launch(tmp_path, spawn=J.FakeSibling(
-        ST._cli().episode_dir_for(T.EPISODE_ID), exits={"b": 1}))
+        ST._cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()), exits={"b": 1}))
     assert launch.rc == 1, "the control failed: no sibling exited non-zero"
     page = hook_page(launch.episode_dir)
     world = _world(page, "b")

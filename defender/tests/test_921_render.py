@@ -45,7 +45,7 @@ def _render():
     return J.mod("learning.judge.render")
 
 
-def _prompts(tmp_path, ep, **kw):
+def _prompts(tmp_path, ep, *, runs_base=None, **kw):
     """Drive the real episode-grading pass and hand back what the model seam was SHOWN.
 
     Every payload assertion in this file reads `judge.prompts`, never the canned reply: a fake
@@ -54,7 +54,8 @@ def _prompts(tmp_path, ep, **kw):
     """
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", **kw)
+        ep, judge=judge, runs_base=runs_base if runs_base is not None
+        else tmp_path / "defender-runs", **kw)
     return judge
 
 
@@ -322,7 +323,7 @@ def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp
 
     # Computed once per pass and threaded: both worlds see the identical union object's rows.
     other = _render().render(ep, "c", runs_base=base)
-    judge = _prompts(tmp_path, ep, draws=1)
+    judge = _prompts(tmp_path, ep, runs_base=base, draws=1)
     assert other.siblings == view.siblings
     assert judge.prompts[0].count("closed-trial") >= 1
 
