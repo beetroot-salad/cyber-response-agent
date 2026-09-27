@@ -15,14 +15,19 @@ through the handle's own `io=` seam and the assertion is on the CALL it captured
   run's records — a before/after snapshot of the test's temp tree (the runs base, its
   `sessions/` sibling, the conftest's copy override), this checkout's `defender/`, and a real
   checkout's top-level copy name. Positive control: under `dev` the same snapshot shows the copy.
-- O4: a failed copy is not a failed render; an unresolvable run, a crashing renderer, or a
-  record write the handle refuses IS one (`VisualizeFailed`), and then no page record exists.
+  Beyond that universe: a production re-render in a child whose system temp dir and home are
+  fresh folders leaves both empty, and a copy root that does not exist yet is not created.
+- M2: the dev copy is the in-memory page, not the record read back.
+- O4: a failed copy is not a failed render; an unresolvable run, a crashing renderer (two
+  observed exception classes), a renderer that cannot even be imported, or a record write the
+  handle refuses IS one (`VisualizeFailed`), and then no page record exists.
 - O5: a failed copy is a WARNING naming its destination, or — with none resolved — the
   resolver's reason. A copy that lands warns nothing.
 - O6: an unrecognised deployment renders the record, makes no copy, and logs an error.
-- O7: `run.py main` exits 0 over a run whose renderer genuinely crashes.
+- O7: `run.py main` exits 0 over a run whose renderer genuinely crashes, or cannot be imported.
 - O8: `python visualize_run.py <run_dir>` re-renders a finished run into its `runtime_html`
-  record, and under `production` copies nothing.
+  record, and under `production` copies nothing; like the post-run step it writes through the
+  handle, so a link planted at the record's name is refused, not followed (S2).
 
 The #1084 copy mechanics under `dev` (O3/S3) are `test_1084_mirror_e2e.py`'s, migrated.
 
@@ -63,11 +68,21 @@ pytestmark = pytest.mark.e2e
 DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
 MIRROR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 PAGE = "runtime.html"
-#: A trace row the renderer is OBSERVED to crash on (probed against `render_runtime_page`: an
-#: `assistant` event whose `message` is not an object raises `AttributeError: 'str' object has
-#: no attribute 'get'` in `_stats`). A real bad input through the real renderer, not a planted
-#: exception.
-CRASHING_TRACE_ROW = {"type": "assistant", "message": "not-a-dict"}
+#: Trace rows the renderer is OBSERVED to crash on (probed against `render_runtime_page`), each
+#: with the exception class it raises there and a fragment of that exception's message: real bad
+#: inputs through the real renderer, not planted exceptions. TWO CLASSES on purpose — a step
+#: whose catch named only the class one planted row happens to raise (`except (AttributeError,
+#: OSError)`) passes a single-row suite while an other-shaped crash still escapes `run.py main`.
+CRASHING_TRACE_ROWS: dict[str, tuple[dict, str, str]] = {
+    # `_stats`: `(e.get("message") or {}).get(...)` on a string.
+    "message-not-an-object": (
+        {"type": "assistant", "message": "not-a-dict"}, "AttributeError", "has no attribute 'get'"),
+    # `_stats`: iterating `message.content` when it is a number.
+    "content-not-a-list": (
+        {"type": "assistant", "message": {"content": 5}}, "TypeError", "not iterable"),
+}
+#: The renderer's module, as `run_common.visualize` imports it.
+RENDERER_MODULE = "defender.scripts.visualize.visualize_run"
 
 
 def _renderer():
@@ -115,15 +130,51 @@ class ArgRecordingIo:
         return [c for c in self.calls if c.op == "write_guarded" and Path(c.args[0]) == path]
 
 
+class _RecordReplacedAfterWriteIo(ArgRecordingIo):
+    """The recorder, plus one event: right after the handle writes `record`, `other` replaces
+    it — what a second render driver over the same run id does (#705). Through the real
+    primitive, so a read-back of the record, through the handle or around it, sees `other`."""
+
+    def __init__(self, record: Path, other: str) -> None:
+        super().__init__()
+        self._record = record
+        self._other = other
+
+    def write_guarded(self, path: Any, text: Any, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append(IoCall("write_guarded", (path, text, *args), dict(kwargs)))
+        result = _io.write_guarded(path, text, *args, **kwargs)
+        if Path(path) == self._record:
+            _io.write_guarded(path, self._other, mode="replace")
+        return result
+
+
 def _text(payload: str | bytes) -> str:
     return payload.decode("utf-8") if isinstance(payload, bytes) else payload
 
 
-def _plant_crashing_row(run_dir: Path) -> None:
+def _plant_crashing_row(run_dir: Path, row: dict) -> None:
     trace = RunPaths(run_dir).tool_trace
     body = trace.read_text(encoding="utf-8")
     assert body.strip(), "precondition: the run has a trace for the renderer to read"
-    trace.write_text(body + json.dumps(CRASHING_TRACE_ROW) + "\n", encoding="utf-8")
+    trace.write_text(body + json.dumps(row) + "\n", encoding="utf-8")
+
+
+def _make_renderer_unimportable(monkeypatch) -> None:
+    """The renderer module cannot be imported — #922 C12's failure (a deleted symbol it imports
+    breaks it AT IMPORT), produced without editing the module: `None` in `sys.modules` makes any
+    import of it raise `ModuleNotFoundError`. The package attribute is removed as well, because
+    `from package import module` answers an attribute the package already carries (set by any
+    earlier import in this worker) without consulting `sys.modules`. `monkeypatch` restores both.
+
+    The precondition is asserted in the same statement form the step uses, so a fault that did
+    not take stops the test here rather than passing it vacuously."""
+    import importlib
+
+    package = importlib.import_module("defender.scripts.visualize")
+    monkeypatch.setitem(sys.modules, RENDERER_MODULE, None)
+    monkeypatch.delattr(package, "visualize_run", raising=False)
+    with pytest.raises(ImportError):
+        from defender.scripts.visualize import visualize_run  # noqa: F401
 
 
 # ---------------------------------------------------------------------------------------
@@ -171,17 +222,22 @@ class _ReplayLifecycle:
     """`run.py main`'s lifecycle seam, doing what an investigation does to the run dir `main`
     materialized: the real driver over it, with the replayed model `driven_run` uses (so its
     page carries `MARKER`). `crash_row`, when set, is appended to the run's trace afterwards —
-    the input the renderer is observed to crash on."""
+    an input the renderer is observed to crash on. `after`, when set, runs last, once the
+    investigation is over (a fault the post-run step alone should meet)."""
 
-    def __init__(self, *, crash_row: bool = False) -> None:
+    def __init__(self, *, crash_row: dict | None = None,
+                 after: Callable[[], None] | None = None) -> None:
         self.crash_row = crash_row
+        self.after = after
         self.run_dirs: list[Path] = []
 
     def __call__(self, *, run_dir: Path, **_kw: Any) -> dict:
         self.run_dirs.append(run_dir)
         drive(run_dir, run_id=run_dir.name, main=golden_replay(run_dir))
-        if self.crash_row:
-            _plant_crashing_row(run_dir)
+        if self.crash_row is not None:
+            _plant_crashing_row(run_dir, self.crash_row)
+        if self.after is not None:
+            self.after()
         return {"output": "done", "requests": 3, "truncated_by": None}
 
 
@@ -441,31 +497,90 @@ def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes
     assert len(io.writes_to(record)) == 1
 
 
-def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_path):
-    """O4/O7 (the step half). A trace row the renderer genuinely crashes on — an `assistant`
-    event whose `message` is a string — makes the post-run step raise `VisualizeFailed`, NOT
-    the renderer's raw `AttributeError` (which `run.py main` does not catch: it would escape
-    and change the exit code), chained from that error so the cause is not lost. No page
-    record is written.
+@pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
+def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_path, crash):
+    """O4/O7 (the step half). A trace row the renderer genuinely crashes on makes the post-run
+    step raise `VisualizeFailed`, NOT the renderer's raw exception (which `run.py main` does not
+    catch: it would escape and change the exit code), chained from that error so the cause is
+    not lost. No page record is written. Two rows, raising two different exception classes
+    (`AttributeError`, `TypeError`): the step's boundary is "any failure to render", not the
+    classes someone has seen.
 
     Positive control on the same run, before the row is planted: the step renders and writes
     the record — so it is the row, not the run, that fails the render."""
+    row, cause_type, cause_text = CRASHING_TRACE_ROWS[crash]
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
     record = RunPaths(run_dir).runtime_html
     run_common.visualize(run)
     _assert_record_written(run_dir)
     record.unlink()
-    _plant_crashing_row(run_dir)
+    _plant_crashing_row(run_dir, row)
 
     with pytest.raises(run_common.VisualizeFailed) as failed:
         run_common.visualize(run)
 
     cause = failed.value.__cause__
-    assert type(cause).__name__ == "AttributeError", (
+    assert type(cause).__name__ == cause_type, (
         f"VisualizeFailed is not chained from the renderer's own error: {cause!r}")
-    assert "has no attribute 'get'" in str(cause), f"not the observed renderer crash: {cause!r}"
+    assert cause_text in str(cause), f"not the observed renderer crash: {cause!r}"
     assert not record.exists(), "a crashed render left a page behind"
+
+
+def test_1110_o4_o7_a_renderer_that_cannot_be_imported_is_visualize_failed(tmp_path, monkeypatch):
+    """O4/O7 — the renderer fails AT IMPORT (#922 C12: the live investigation's renderer breaks
+    when a symbol it imports is deleted). The step imports the renderer lazily; that import is
+    part of rendering, so its failure is `VisualizeFailed` like any other failed render — an
+    import placed outside the step's boundary lets the `ImportError` out raw, which `run.py
+    main` does not catch. Chained from the import error; no page record is written.
+
+    Positive control on the same run, before the module is made unimportable: the step renders
+    and writes the record."""
+    run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    record = RunPaths(run_dir).runtime_html
+    run_common.visualize(run)
+    _assert_record_written(run_dir)
+    record.unlink()
+    _make_renderer_unimportable(monkeypatch)
+
+    with pytest.raises(run_common.VisualizeFailed) as failed:
+        run_common.visualize(run)
+
+    assert isinstance(failed.value.__cause__, ImportError), (
+        f"VisualizeFailed is not chained from the import failure: {failed.value.__cause__!r}")
+    assert not record.exists(), "a render that could not import its renderer left a page"
+
+
+def test_1110_m2_the_dev_copy_is_the_in_memory_page_not_the_record_read_back(
+        tmp_path, monkeypatch, run_visualizations_dir):
+    """M2: under `dev` the copy is of the page the step just RENDERED, held in memory — never
+    the record read back. A read-back is indistinguishable while the record holds exactly what
+    was written, so the handle's `io` here models the case where it does not: a second render
+    driver over the same run id (#705's two drivers) replaces the record right after this
+    step's write. The copy must still be byte-identical to `render_page`'s output — whether a
+    read-back went through the handle or around it, it would carry the other driver's page.
+
+    Positive control, same test: the record on disk DOES hold the other driver's page, so a
+    read-back would have been observable; and the handle was handed this step's page."""
+    vr = _renderer()
+    run_dir = driven_run(tmp_path)
+    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    record = RunPaths(run_dir).runtime_html
+    other = "<!doctype html><title>ANOTHER DRIVER'S PAGE</title>\n"
+    io = _RecordReplacedAfterWriteIo(record, other)
+    run = tenant_run(run_dir, io=io)
+    page = vr.render_page(run_dir)
+
+    run_common.visualize(run)
+
+    (write,) = io.writes_to(record)
+    assert _text(write.args[1]) == page, "the handle was not handed this step's page"
+    assert record.read_text(encoding="utf-8") == other, (
+        "positive control: the other driver's replace did not land, so a read-back is invisible")
+    copy = run_visualizations_dir / run_dir.name / PAGE
+    assert copy.read_bytes() == page.encode("utf-8"), (
+        "the dev copy is not the page this step rendered — it was read back from the record")
 
 
 @pytest.mark.parametrize("squatter", ["link", "directory"])
@@ -545,16 +660,18 @@ def test_1110_o6_an_unrecognised_deployment_renders_the_record_makes_no_copy_and
 # ---------------------------------------------------------------------------------------
 
 
-def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(tmp_path, entrypoint_env):
+@pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
+def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
+        tmp_path, entrypoint_env, crash):
     """O7 through the entry point, everything real but the model and the preflight: `main`
     materializes the run, the lifecycle drives it and leaves a trace row the renderer crashes
-    on, and the production `visualize` renders in-process. `main` returns 0 — the crash did not
-    escape it — and no page record exists, which is what makes the 0 mean something: the
-    render really failed.
+    on (two rows, two exception classes), and the production `visualize` renders in-process.
+    `main` returns 0 — the crash did not escape it — and no page record exists, which is what
+    makes the 0 mean something: the render really failed.
 
     Positive control: `test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized`
     — the same entry point over the same replay without the row writes the record."""
-    lifecycle = _ReplayLifecycle(crash_row=True)
+    lifecycle = _ReplayLifecycle(crash_row=CRASHING_TRACE_ROWS[crash][0])
 
     assert _main(lifecycle=lifecycle) == 0
 
@@ -562,6 +679,24 @@ def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(tmp_path, en
     assert run_dir.parent == entrypoint_env, "precondition: main built the run under the runs base"
     assert not RunPaths(run_dir).runtime_html.exists(), (
         "the page record exists — the renderer did not crash, so the 0 proves nothing")
+
+
+def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
+        tmp_path, entrypoint_env, monkeypatch):
+    """O7 through the entry point, for a renderer that fails AT IMPORT (#922 C12). The module is
+    made unimportable once the investigation is over — the post-run step is the first thing
+    that needs it — and `main` still returns 0, with no page record: the import failure is a
+    failed render, not an exception out of the run.
+
+    Positive control: `test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized`
+    — the same entry point, the renderer importable, writes the record."""
+    lifecycle = _ReplayLifecycle(after=lambda: _make_renderer_unimportable(monkeypatch))
+
+    assert _main(lifecycle=lifecycle) == 0
+
+    (run_dir,) = lifecycle.run_dirs
+    assert not RunPaths(run_dir).runtime_html.exists(), (
+        "the page record exists — the renderer was importable after all, so the 0 proves nothing")
 
 
 # ---------------------------------------------------------------------------------------
@@ -601,3 +736,100 @@ def test_1110_o8_the_standalone_re_render_writes_the_record_and_copies_only_unde
 
     assert child.returncode == 0, f"the dev re-render failed: {child.stderr}"
     assert (run_visualizations_dir / run_dir.name / PAGE).read_bytes() == record.read_bytes()
+
+
+def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_record(
+        tmp_path, run_visualizations_dir):
+    """O8/S2 (and M6: the re-render goes through the same step, over a handle). A symlink is
+    planted at `runtime.html`, aimed at a file OUTSIDE the run. The re-render must not write
+    through it: the handle's write refuses the link, the child exits non-zero (a refused record
+    is not a rendered run), the outside file is byte-for-byte unchanged, and the link is still
+    the link it was. A re-render that wrote its own page with a plain `write_text` follows the
+    link and overwrites the outside file.
+
+    Positive control on the same run: the link removed, the same command exits 0 and writes the
+    record (as the unplanted O8 case above does)."""
+    run_dir = driven_run(tmp_path)
+    record = RunPaths(run_dir).runtime_html
+    outside = tmp_path / "outside.html"
+    outside.write_bytes(b"OUTSIDE\n")
+    os.symlink(outside, record)
+
+    child = _standalone(run_dir)
+
+    assert child.returncode != 0, (
+        f"the re-render reported success over a refused record: {child.stdout!r}")
+    assert outside.read_bytes() == b"OUTSIDE\n", "the re-render wrote through the planted link"
+    assert record.is_symlink(), "the planted link was replaced"
+    assert os.readlink(record) == str(outside), "the planted link was re-aimed"
+
+    record.unlink()
+    child = _standalone(run_dir)
+    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
+    assert MARKER in record.read_text(encoding="utf-8")
+
+
+def _fresh_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    temp, home = tmp_path / "system-temp", tmp_path / "home"
+    temp.mkdir()
+    home.mkdir()
+    return temp, home
+
+
+def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_home(
+        tmp_path, run_visualizations_dir):
+    """O2/S1 beyond the snapshot's universe: the system temp dir and the home directory. A
+    production render in a child whose `TMPDIR` and `HOME` are fresh, empty folders leaves both
+    empty — no page staged in `/tmp` "for later", nothing cached under `~`. The standalone
+    re-render is the vehicle because the child's interpreter reads both variables at start,
+    where this process has long since fixed its own temp dir.
+
+    Positive controls: the child's interpreter really resolves the system temp dir and home to
+    those folders (so a write there would be seen), and the re-render wrote the record (so two
+    empty folders are not a child that did nothing). And the override stays empty: production."""
+    run_dir = driven_run(tmp_path / "runs-base")
+    temp, home = _fresh_dirs(tmp_path)
+    env = {"TMPDIR": str(temp), "HOME": str(home)}
+    resolved = subprocess.run(  # noqa: S603 — this interpreter, asked where it would write
+        [sys.executable, "-c",
+         "import os, tempfile; print(tempfile.gettempdir()); print(os.path.expanduser('~'))"],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+        env={**os.environ, **env}).stdout.split()
+    assert resolved == [str(temp), str(home)], f"precondition: the child resolves {resolved}"
+
+    child = _standalone(run_dir, **env)
+
+    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
+    assert MARKER in RunPaths(run_dir).runtime_html.read_text(encoding="utf-8")
+    assert sorted(temp.rglob("*")) == [], "a production render wrote into the system temp dir"
+    assert sorted(home.rglob("*")) == [], "a production render wrote into the home directory"
+    assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"
+
+
+@pytest.mark.parametrize("deployment", [None, "staging"], ids=["unset", "unrecognised"])
+def test_1110_o2_a_production_render_does_not_create_the_copy_root(
+        tmp_path, monkeypatch, deployment):
+    """O2: the copy root is the copy's, and production makes no copy — so a production render
+    does not create it either. The override points at `run-visualizations/` under a folder that
+    does NOT exist yet (as `<folder holding defender/>/run-visualizations/` does not, in a
+    worker image); after a render under an unset or an unrecognised deployment, neither exists.
+    The conftest's override is pre-created, which is why the snapshot tests cannot see this.
+
+    Positive control on the same run and override: under `dev`, the render creates the root
+    and puts the copy in it."""
+    run_dir = driven_run(tmp_path / "runs-base")
+    run = tenant_run(run_dir)
+    stand_in = tmp_path / "stand-in-for-the-folder-holding-defender"
+    root = stand_in / "run-visualizations"
+    monkeypatch.setenv(MIRROR_ENV, str(root))
+    if deployment is not None:
+        monkeypatch.setenv(DEPLOYMENT_ENV, deployment)
+
+    run_common.visualize(run)
+
+    _assert_record_written(run_dir)
+    assert not stand_in.exists(), f"a production render created the copy root's folder {stand_in}"
+
+    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    run_common.visualize(run)
+    assert (root / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()

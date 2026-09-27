@@ -81,12 +81,19 @@ def test_1110_o6_a_recognised_value_is_read_stripped_and_lowercased_and_logs_not
         f"a recognised value {raw!r} was logged as an error")
 
 
-@pytest.mark.parametrize("typo", ["staging", "prdo", "QA-Box", "true"])
+@pytest.mark.parametrize("typo", [
+    "staging", "prdo", "QA-Box", "true",
+    # Near-misses of the two values: EXACT values only. A prefix alias (`startswith("dev")`)
+    # would turn the copy on for `development`/`dev2`/`devbox`; a `startswith("prod")` one
+    # would answer `prod`/`prodution` correctly but SILENTLY — and the typo must be loud.
+    "development", "dev2", "devbox", "prod", "prodution",
+])
 def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
         monkeypatch, caplog, typo):
     """O6: anything else is treated as `production` — never `dev` (a typo must not turn the
     copy on), never a raise (a typo must not abort the run) — and is logged as exactly ONE
-    error per read, naming the variable, the value it saw, and the choices it accepts."""
+    error per read, naming the variable, the value it saw, and the choices it accepts. The two
+    recognised values are exact: a value that merely starts like one is still a typo."""
     monkeypatch.setenv(DEPLOYMENT_ENV, typo)
     caplog.set_level(logging.DEBUG)
 
