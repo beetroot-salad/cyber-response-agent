@@ -327,7 +327,7 @@ def visualize(run: Run) -> None:
         _logger.warning("the page for %s was not copied: %s: %s",
                         run.run_dir, type(e).__name__, e)
     else:
-        print(f"[run.py] copied the run page to {dest}", file=sys.stderr)
+        _logger.info("copied the page for %s to %s", run.run_dir, dest)
 
 
 def cross_check_tables(run_dir: Path) -> None:
