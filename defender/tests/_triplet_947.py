@@ -931,15 +931,17 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     checkout.
 
     #1078: `runs_base()`'s base IS the source's real tenant runs base now (the launcher's own
-    derivation needs it to be). The retired `DEFENDER_RUNS_BASE` knob is still set here, but to
-    a DECOY directory distinct from the real base — never equal to it — so a caller that reads
-    the stale knob instead of the threaded base is observably wrong rather than accidentally
-    right.
+    derivation needs it to be). Pointed at its OWN fresh data root under `tmp_path` — isolated
+    from whatever tenant an ambient fixture (`d9_tenant`) may already have created — so O10's
+    one-tenant-per-root rule never collides with it, and this base is trivially distinct from
+    `runs_base_for` of any other tenant. The retired `DEFENDER_RUNS_BASE` knob is still set
+    here, to `base` itself — today's "stale configured value" a child inherits unchanged
+    (J46) — never one the launcher composes.
     """
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
     base, src = runs_base(tmp_path)
-    stale = tmp_path / "stale-defender-runs"
     root = tmp_path / "episodes-root"
-    monkeypatch.setenv(RUNS_BASE_ENV, str(stale))
+    monkeypatch.setenv(RUNS_BASE_ENV, str(base))
     monkeypatch.setenv(EPISODES_BASE_ENV, str(root))
     return base, src, root
 
