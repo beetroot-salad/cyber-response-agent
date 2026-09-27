@@ -198,7 +198,7 @@
           "defender/runtime/tools/_files.py::_tool_write_file",
           "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
-          "defender/run_common.py::visualize",
+          "defender/scripts/visualize/visualize_run.py::publish_page",
           "defender/runtime/lead_zero/__init__.py::resolve_lead_zero",
           "defender/runtime/lead_zero/_items.py::dispatch_correlation",
           "defender/runtime/lead_zero/__init__.py::prepare_correlation_lead",

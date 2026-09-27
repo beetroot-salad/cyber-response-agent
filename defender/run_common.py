@@ -21,6 +21,7 @@ from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
+from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
@@ -303,40 +304,22 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
-class VisualizeFailed(Exception):
-    """This render did not save the run's page as its record — the render or the record write
-    failed; the message says which, and the cause is chained. A page left over from a prior
-    render is not proof this one succeeded. Never raised for the dev-only copy: a record that
-    was written is a rendered run, whatever became of the copy."""
-
-
 def visualize(run: Run) -> None:
-    """The post-run step: render the run's page and save it as the run's `runtime_html`
-    record through `run` — so whatever backend the handle sits on receives it like every other
-    record — then hand it to the dev-only copy, which decides for itself whether to copy (#1110).
+    """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
+    (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
+    copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
+    been scrubbed, so the model never had a chance to rewrite its own report.
 
-    Runs in the process holding the handle, after the sandbox has exited and the tree has been
-    scrubbed, so the model never had a chance to rewrite its own report. A failure to render,
-    or to save the record, is `VisualizeFailed` — the caller's single "no record" signal, which
-    is also what keeps a renderer crash from reaching the run's exit code — and each says which
-    of the two it was. The copy never raises.
+    Only the load is decided here. The renderer is imported lazily — it reads its stylesheet at
+    import time, and nothing but this step needs it — and inside the `try`, so a renderer that
+    cannot even load is a `VisualizeFailed` like any other failed render, and never reaches the
+    run's exit code.
     """
     try:
-        # Imported here, as `learning/branch/cli.py::_render_page` does for the episode page:
-        # the renderer reads its stylesheet at import time, and nothing but this step needs it
-        # loaded. Inside the `try`, so a renderer that cannot even load is a failed render too.
         from defender.scripts.visualize import visualize_run as vr
-
-        page = vr.render_page(run.run_dir)
     except Exception as e:
-        raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
-    record = run.observability.runtime_html
-    try:
-        record.write(page)
-    except Exception as e:
-        raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
-    _logger.info("saved the run page as %s", record.path)
-    vr.mirror_page(page, run.run_dir.name)
+        raise VisualizeFailed("the renderer could not be loaded") from e
+    vr.publish_page(run)
 
 
 def cross_check_tables(run_dir: Path) -> None:

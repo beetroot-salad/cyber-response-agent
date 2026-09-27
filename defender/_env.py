@@ -46,6 +46,21 @@ def env_str(name: str, default: str, *, choices: Sequence[str] | None = None) ->
     return value
 
 
+def env_choice(name: str, default: str, choices: Sequence[str]) -> tuple[str, str | None]:
+    """A setting that is one of `choices`, read leniently: never fatal, so a typo in a
+    deployment costs what the setting decides, not the process. Stripped and lowercased; unset
+    or blank is `default`. Anything else is `default` too, and comes back with a notice naming
+    the variable, the value, the choices and the default — the caller reports it its own way
+    (logging may not be set up yet when the caller is the logging setup itself)."""
+    raw = env_str(name, "")
+    value = raw.strip().lower()
+    if not value:
+        return default, None
+    if value in choices:
+        return value, None
+    return default, f"{name}={raw!r} is not one of {tuple(choices)}; using {default!r}"
+
+
 #: The deployment type (#1110): `dev` turns on the run page's local copy; everything else is a
 #: deployment with no operator filesystem to copy into.
 DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
@@ -60,11 +75,7 @@ def deployment() -> str:
     itself. Never inferred from `.git`, the image, the uid or pytest. An unrecognised value is
     `production` too — never `dev`, so a typo cannot turn the copy on — and is logged as an
     error on every read rather than raised, so a typo cannot abort a run either."""
-    raw = env_str(DEPLOYMENT_ENV, "")
-    value = raw.strip().lower()
-    if value in DEPLOYMENTS:
-        return value
-    if value:
-        _logger.error("%s=%r is not one of %s; treating it as 'production'",
-                      DEPLOYMENT_ENV, raw, DEPLOYMENTS)
-    return "production"
+    value, notice = env_choice(DEPLOYMENT_ENV, "production", DEPLOYMENTS)
+    if notice:
+        _logger.error(notice)
+    return value
