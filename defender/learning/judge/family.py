@@ -89,7 +89,6 @@ from defender.learning.branch.ledger import (
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
-from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
     episode_token_for,
@@ -751,7 +750,9 @@ def world_label_names_directory(episode_id: str, label: str) -> bool:
     return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
 
 
-def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
+def _check_world_labels(
+    episode_id: str, worlds: list[dict[str, Any]], *, runs_base: Path | None,
+) -> None:
     """Two rules about the label as a NAME, both applied before any path is built from it.
 
     THE LABEL HAS TO NAME A DIRECTORY. Every per-world read in this pass joins the label
@@ -794,10 +795,9 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
                 f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
                 "per-world path this pass reads and writes, so a label off that grammar reads "
                 "and writes outside the world it names")
-    try:
-        base = resolve_runs_base()
-    except Exception:  # noqa: BLE001 — an unconfigured runs base means nothing to collide with
+    if runs_base is None:
         return
+    base = Path(runs_base)
     for world in worlds:
         label = world.get("world_id")
         # `exists() or is_symlink()`, WIDER than `is_dir()` and deliberately so: this is a
@@ -1678,6 +1678,7 @@ def grade_family(
     episode_dir: Path, *, manifest: dict[str, Any] | None = None,
     review: dict[str, Any] | None = None, review_reader: Any = None,
     samples: dict[str, Any] | None = None, bound: Bound | None = None,
+    runs_base: Path | None = None,
 ) -> FamilyGrade:
     """The mechanical pass: per-world facts and a bucket per non-control world, plus the
     family's `verdict_word`. Self-contained over `episode_dir` alone — no comparator call,
@@ -1712,18 +1713,20 @@ def grade_family(
     # than each formatting the episode dir for itself; closed when the pass returns.
     with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
         return _grade_family(bound, episode_dir, manifest=manifest, review=review,
-                             review_reader=review_reader, samples=samples)
+                             review_reader=review_reader, samples=samples,
+                             runs_base=runs_base)
 
 
 def _grade_family(
     bound: Bound, episode_dir: Path, *, manifest: dict[str, Any] | None,
     review: dict[str, Any] | None, review_reader: Any, samples: dict[str, Any] | None,
+    runs_base: Path | None = None,
 ) -> FamilyGrade:
     doc = manifest if manifest is not None else read_manifest(bound)
     holding_system = _holding_system(doc)
     worlds = _non_control_worlds(doc)
     episode_id = episode_id_of(doc)
-    _check_world_labels(episode_id, worlds)
+    _check_world_labels(episode_id, worlds, runs_base=runs_base)
     episode_token = episode_token_for(episode_id)
     review_doc = review if review is not None else (
         read_review_record(bound, reader=review_reader) or {})

@@ -27,24 +27,6 @@ VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
 
-DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
-
-
-def resolve_runs_base() -> Path:
-    base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
-    from defender._env import FatalConfigError
-    from defender.learning.core.config import learning_state_root
-
-    if base.resolve() == learning_state_root().resolve():
-        raise FatalConfigError(
-            "DEFENDER_RUNS_BASE and the learning state root "
-            "(DEFENDER_LEARNING_STATE_DIR) resolve to the same directory "
-            f"({base.resolve()}): the enforced runtime budget pool would be spent by "
-            "unenforced learning agents. Point them at distinct directories."
-        )
-    return base
-
-
 _GENERIC_ALERT_STEMS = {"alert"}
 
 
@@ -85,7 +67,7 @@ def _setup_state(run: Run) -> str:
 
 
 def materialize_run_dir(
-    alert: Path, run_id: str | None, *, model: str | None = None,
+    alert: Path, run_id: str | None, *, tenant_id: str, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Path:
     """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
@@ -97,20 +79,35 @@ def materialize_run_dir(
     handed in by the launcher that already loaded the manifest, never re-derived from the
     runs base's path (decision 15(1): 'forked' means 'has a family record', and the record is
     the manifest).
+
+    #1078 D2's order, observed from the outside: (1) `require_tenant` — the row exists, before
+    anything is created; (2) the runs base — `runs_base_for(tenant_id)` for a fresh run, or
+    `EpisodePaths(world.episode_dir).runs` for a sibling; (3) `guarded_mkdir`; (4)
+    `ensure_runs_base_record` — mint with `tenant_id`, or read back and refuse on
+    disagreement; (5) `Run.for_tenant` — the race backstop.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     run_id = _admit_run_id(alert, run_id)
-    runs_base = resolve_runs_base()
+    data_root = _tenant.resolve_data_root()
+    # Step 1 — the row exists, before the runs base or anything else is touched (D2, O2): an
+    # unknown tenant leaves no runs base at all.
+    _tenant.require_tenant(data_root, tenant_id)
+    if world is not None:
+        from defender._episode_paths import EpisodePaths
+
+        runs_base = EpisodePaths(world.episode_dir).runs
+    else:
+        runs_base = _tenant.TenantPaths(data_root, tenant_id).runs
     # The runs base is the trust root — host-controlled, created plainly (`guarded_mkdir` on
     # its own anchor creates the anchor and judges nothing above it).
     guarded_mkdir(runs_base, base=runs_base)
-    # THE TENANT RECORD, created once when absent (#1077 D2) — BEFORE the provenance stamp,
-    # which must equal its values, and BEFORE the box exists. A tenant record that fails to
-    # parse, or a write that fails (an alias planted at its name, a directory squatting it),
-    # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
-    # run — a run with a forged tenant is worse than no run (decision 4/7).
-    tenant_record = _tenant.ensure_tenant(runs_base)
+    # THE TENANT RECORD, created once when absent (#1077 D2, #1078 D1/O6) — BEFORE the
+    # provenance stamp, which must equal its values, and BEFORE the box exists. A tenant record
+    # that fails to parse, or refuses on disagreement, PROPAGATES: unlike the provenance stamp
+    # below, this is never swallowed into a degraded run — a run with a forged tenant is worse
+    # than no run (decision 4/7).
+    tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant_id)
     run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)

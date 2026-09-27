@@ -343,6 +343,7 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("episode_runs", "episode", "sibling_run_dir", (EPISODE_ID, LABEL), composing=True),
     Accessor("archive_proj", "episode", "world_dir", (LABEL,), composing=True),
     Accessor("tenant", "tenant", "record_path"),
+    Accessor("tenant_row", "tenant_row", "row"),
 )
 
 #: The three UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs
@@ -396,16 +397,21 @@ def appendix_only() -> frozenset[str]:
 
 
 def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
-            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None) -> Path:
+            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None,
+            data_root: Path | None = None, tenant_id: str | None = None) -> Path:
     """Drive ONE accessor and hand back the path it resolved.
 
     The owner is reached through its own constructor every time — `RunPaths(run_dir)`,
     `EpisodePaths(episode_dir)` — so a test that walks the kinds table is driving ~43 real
-    accessors, not asserting a structural property of a registry.
+    accessors, not asserting a structural property of a registry. #1078 D1 adds `tenant_row`,
+    owned by `_tenant.TenantPaths(data_root, tenant_id).row` — a data-root-and-tenant-aware
+    accessor rather than a runs-base one.
     """
     values = acc.args if args is None else args
     if acc.owner == "tenant":
         return tenant().record_path(runs_base)
+    if acc.owner == "tenant_row":
+        return tenant().TenantPaths(data_root, tenant_id).row
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:

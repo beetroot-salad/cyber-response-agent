@@ -47,11 +47,14 @@ def scene(tmp_path: Path, monkeypatch, *, worlds=None, captured=None) -> tuple[P
 
 def run_review(ep: Path, family, *, adapters=None, door=None, invoke=None):
     review = W.mod("learning.branch.review")
+    # #1078 D4: `review()`'s `runs_base` is a required keyword; a harmless never-created
+    # sibling dir, since these tests are about the reachability facts, not which base threads.
     return review.review(
         family, episode_dir=ep,
         adapters=adapters if adapters is not None else W.FakeAdapters(),
         door=door if door is not None else W.FakeDoor(),
-        invoke=invoke if invoke is not None else W.FakeAgent("same"))
+        invoke=invoke if invoke is not None else W.FakeAgent("same"),
+        runs_base=ep.parent / "runs-base")
 
 
 def block_of(record: dict, label: str = "b") -> dict:
@@ -485,7 +488,7 @@ def test_the_production_read_side_declares_the_world_and_the_confinement_needs_i
     registry = W.mod("learning.branch.estate.registry")
     token = W.world_token("b")
 
-    episode_wide = seams.adapter_seam(ep)
+    episode_wide = seams.adapter_seam(ep, runs_base=tmp_path / "runs")
     this_world = episode_wide.for_world(token)
 
     assert episode_wide.ctx.world_id is None, (

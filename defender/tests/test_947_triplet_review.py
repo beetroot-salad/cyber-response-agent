@@ -48,7 +48,13 @@ def _compare():
 
 
 def _run_review(episode_dir, *, adapters=None, door=None, invoke=None, doc=None, **kw):
+    from pathlib import Path
+
     fam = T.mod("runtime.branch._family").parse_family(doc if doc is not None else T.family_doc())
+    # #1078 D4: `review()`'s `runs_base` is a required keyword; this harness defaults it to a
+    # harmless, never-created sibling dir for every caller that does not care which base is
+    # threaded.
+    kw.setdefault("runs_base", Path(episode_dir).parent / "runs-base")
     return _review().review(
         fam, episode_dir=episode_dir, adapters=adapters or T.FakeAdapters(),
         door=door or T.FakeDoor(counts={"logs-000001": 3}), invoke=invoke or T.FakeAgent("same"),
@@ -146,8 +152,11 @@ def test_947_an_uncaptured_key_does_reach_the_adapter(tmp_path):
     ep = T.episode(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1")])
     adapters = T.FakeAdapters()
+    # #1078 D4: verb_context/replay_one take the runs base as a required keyword — a plain tmp
+    # dir here, since this test is about the capture memo, not which base is threaded.
+    ctx = _review().verb_context(ep, runs_base=tmp_path / "runs")
     _review().replay_one(("elastic", "esql", {"query": "FROM logs-* | LIMIT 1"}),
-                         episode_dir=ep, adapters=adapters)
+                         episode_dir=ep, adapters=adapters, ctx=ctx)
     assert ("elastic", "esql") in adapters.asked
 
 
@@ -239,7 +248,13 @@ def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path,
                   live_tree=T.source_capture(),
                   questioner=T.FakeAgent(
                       T.family_doc(worlds=[T.base_world(), patched]), patched))
-    ep = cli.episode_dir_for(T.EPISODE_ID)
+    import os
+    from pathlib import Path
+
+    from defender import _tenant
+
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant.TenantPaths(
+        Path(os.environ["DEFENDER_DATA_ROOT"]), "acme"))
     assert rc != 0
     assert spawn.launches == [], "a sibling started for a rejected episode"
     doc = T.review_doc(ep)

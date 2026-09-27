@@ -45,7 +45,7 @@ import yaml
 from pydantic import SkipValidation
 
 from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_guarded
-from defender.run_common import DEFENDER_DIR, resolve_runs_base, run_env
+from defender.run_common import DEFENDER_DIR, run_env
 from defender.runtime.branch._family import (
     BASE_ROLE,
     ElasticEntry,
@@ -174,23 +174,24 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
     return book
 
 
-def verb_context(episode_dir: Path) -> VerbContext:
+def verb_context(episode_dir: Path, *, runs_base: Path) -> VerbContext:
     """The host-side context the replay's adapter calls run under.
 
     `run_dir` is the EPISODE dir rather than any run dir, and `capture` is `None`: the replay
     writes no `executed_queries.jsonl` row anywhere, because a review is not a run and a row
     claiming otherwise would put queries no model asked into a table a later reader counts.
 
-    `DEFENDER_RUNS_BASE` IS THE CONFIGURED ROOT, composed here rather than inherited.
-    `run_common.run_env` sets it to `run_dir.parent` unconditionally, which was correct for this
-    caller only while an episode dir was a direct child of the runs base — and after #947's
-    relocation that parent is the EPISODES ROOT, a configured location holding every episode
-    and not a runs base at all. Inherited, every adapter subprocess this replay spawns would
-    resolve its runs base to that tree.
+    `DEFENDER_RUNS_BASE` IS THE TENANT'S RUNS BASE, composed here from `runs_base` — the value
+    the launcher derived once (#1078 D4, `runs_base_for(T)`) and threads down — rather than
+    inherited. `run_common.run_env` sets it to `run_dir.parent` unconditionally, which was
+    correct for this caller only while an episode dir was a direct child of the runs base — and
+    after #947's relocation that parent is the EPISODES ROOT, a configured location holding
+    every episode and not a runs base at all. Inherited, every adapter subprocess this replay
+    spawns would resolve its runs base to that tree.
     """
     episode_dir = Path(episode_dir)
     env = run_env(DEFENDER_DIR, episode_dir)
-    env["DEFENDER_RUNS_BASE"] = str(resolve_runs_base())
+    env["DEFENDER_RUNS_BASE"] = str(runs_base)
     return VerbContext(
         defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None)
 
@@ -276,7 +277,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
 
 
 def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
-           invoke: Any, write: Any = None) -> dict:
+           invoke: Any, runs_base: Path, write: Any = None) -> dict:
     """Replay the capture through every world, judge each, and write `review.yaml`.
 
     THE CONTROL FIRST, always: the rest of the pass is defined against its result, and computing
@@ -296,7 +297,7 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
     episode_dir = Path(episode_dir)
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
-    context = verb_context(episode_dir)
+    context = verb_context(episode_dir, runs_base=runs_base)
     token = episode_token_for(family.episode_id)
     drifted = frozenset(_capture_drift(rows))
     scratch = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))

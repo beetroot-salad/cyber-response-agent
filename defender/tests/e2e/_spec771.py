@@ -955,13 +955,25 @@ def _invoke_write_guarded(run_dir: Path) -> None:
 
 
 def _invoke_tenant_writer(run_dir: Path) -> None:
-    """#1077 decision 16: the tenant record's writer, beside the runs base (`run_dir.parent`)
-    rather than inside the run dir — `Writer.artifact` names it `../_tenant.json`, which the
-    generic `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
+    """#1077 decision 16, renamed by #1078 D1 (`ensure_tenant` -> `ensure_runs_base_record`):
+    the runs-base record's writer, beside the runs base (`run_dir.parent`) rather than inside
+    the run dir — `Writer.artifact` names it `../_tenant.json`, which the generic
+    `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
     stat/open time."""
     from defender import _tenant
 
-    _tenant.ensure_tenant(run_dir.parent)
+    _tenant.ensure_runs_base_record(run_dir.parent, "census-tenant")
+
+
+def _invoke_tenant_row_writer(run_dir: Path) -> None:
+    """#1078 D1: the tenant ROW's writer, `create_tenant`. Its data root is a fresh subtree of
+    the run dir (`tenant-root/`, never touched by `run_tree`) rather than `run_dir.parent`,
+    because O10 refuses a data root holding anything beside the tenant it is creating — and
+    `run_tree`'s own sibling (`run-771`) sits directly in `run_dir.parent`. `Writer.artifact`
+    names it `tenant-root/census-tenant/tenant.json`."""
+    from defender import _tenant
+
+    _tenant.create_tenant(run_dir / "tenant-root", "census-tenant")
 
 
 #: The census, one row per `no_write_through_planted_leaf` bind. It is a FLOOR, not a closed
@@ -1025,6 +1037,9 @@ CENSUS: tuple[Writer, ...] = (
     # that reason (its own artifact is outside every box mount, X6-shaped).
     Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
            _invoke_tenant_writer, "_tenant.py", cite="§7 decision 16"),
+    # #1078 D1: create_tenant's own row, a second _tenant.py writer with its own artifact.
+    Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
+           _invoke_tenant_row_writer, "_tenant.py", cite="#1078 D1"),
 )
 
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture

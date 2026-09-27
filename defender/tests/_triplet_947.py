@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import threading
 import time
@@ -613,14 +614,28 @@ def branchable_investigation() -> str:
     return f"# investigation\n\n```invlang\n{bodies[0]}\n```\n"
 
 
-def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Path, Path]:
+def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
+              tenant_id: str = "acme") -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
+    the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
+    tenant created (and its runs-base record minted) on first use, so `tenant_of_run_dir` and
+    the launcher's own derivation see an ordinary, well-formed tenant location.
 
     The source carries the two artifacts a sibling seeds from — `alert.json` and
     `investigation.md` — because both are model-writable (the run dir is a prior box's rw bind)
     and the containment demands drive exactly those reads.
     """
-    base = tmp_path / "defender-runs"
+    from defender import _tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    if not (root / tenant_id / "tenant.json").is_file():
+        _tenant.create_tenant(root, tenant_id)
+    base = _tenant.runs_base_for(tenant_id)
+    base.mkdir(parents=True, exist_ok=True)
+    if not (base / "_tenant.json").is_file():
+        _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
@@ -891,12 +906,18 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     Returns `(runs_base, source_run_dir, episodes_root)`. The episodes root is a sibling of the
     runs base here only because `tmp_path` is where a test may write; what the demands assert is
     that it is READ FROM CONFIGURATION and is neither inside the runs base nor inside the
-    checkout. Both roots are steered with `monkeypatch.setenv` because `resolve_runs_base` is
-    already an environment-read; nothing here patches a module attribute.
+    checkout.
+
+    #1078: `runs_base()`'s base IS the source's real tenant runs base now (the launcher's own
+    derivation needs it to be). The retired `DEFENDER_RUNS_BASE` knob is still set here, but to
+    a DECOY directory distinct from the real base — never equal to it — so a caller that reads
+    the stale knob instead of the threaded base is observably wrong rather than accidentally
+    right.
     """
     base, src = runs_base(tmp_path)
+    stale = tmp_path / "stale-defender-runs"
     root = tmp_path / "episodes-root"
-    monkeypatch.setenv(RUNS_BASE_ENV, str(base))
+    monkeypatch.setenv(RUNS_BASE_ENV, str(stale))
     monkeypatch.setenv(EPISODES_BASE_ENV, str(root))
     return base, src, root
 

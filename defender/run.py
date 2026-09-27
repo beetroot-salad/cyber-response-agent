@@ -94,6 +94,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
+    p.add_argument("--tenant", default=None,
+                   help="the tenant this run belongs to; required on a fresh run (there is no "
+                        "default), and optional on --resume, where it is derived from the "
+                        "source run and merely checked if given")
     ns = p.parse_args(argv)
     if ns.resume is not None and ns.alert is not None:
         p.error(
@@ -457,13 +461,16 @@ def _resume_target(ns: argparse.Namespace) -> Any:
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        return resume_world(ns.resume, ns.world)
+        # RESOLVED AT ENTRY (§7 J42): `resume_world`'s episode dir is the manifest's own PARENT,
+        # so a relative or symlinked `--resume` path made every path built from it relative or
+        # symlinked too — the sibling's `EpisodePaths(world.episode_dir).runs` among them.
+        return resume_world(ns.resume.resolve(), ns.world)
     except FamilyError as refusal:
         sys.exit(f"[run.py] {refusal}")
 
 
 def _materialize_run_dir(
-    alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
+    alert: Path, run_id: str | None, *, tenant_id: str, model: str | None, world: Any = None,
 ) -> Path:
     """Build this run's directory, stamped with the code and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
@@ -474,9 +481,43 @@ def _materialize_run_dir(
     can observe run-dir creation without a real runs base; and it is the ONE site that names the
     builder, which is what keeps "the run dir has a single origin" a property of this file rather
     than of whoever reads it — two call sites are two places for the stamp to be forgotten.
+
+    #1078 D3: the `materialize` seam gains `tenant_id`; `_Investigate` does not — everything it
+    drives follows from `run_dir` alone.
     """
-    run_dir = _run.materialize_run_dir(alert, run_id, model=model, world=world)
+    run_dir = _run.materialize_run_dir(alert, run_id, tenant_id=tenant_id, model=model,
+                                       world=world)
     return run_dir
+
+
+def _resolve_tenant_id(ns: argparse.Namespace, world: Any) -> str:
+    """The request's tenant, or the refusal — surfaced as `[run.py] ...`, before the preflight
+    (#1078 D3, O1, O2, O5). A fresh run's `--tenant` is required (there is no default) and
+    checked against the grammar and the row; a sibling's tenant is DERIVED from its source's
+    host-only runs-base record (`tenant_of_run_dir`), never from its box-writable stamp, and a
+    `--tenant` given alongside `--resume` is merely checked against that derivation."""
+    from defender import _tenant
+
+    try:
+        if world is not None:
+            tenant_id = _tenant.tenant_of_run_dir(Path(world.family.source_run_dir))
+            if ns.tenant is not None:
+                _tenant.refuse_bad_tenant_id(ns.tenant)
+                if ns.tenant != tenant_id:
+                    raise _tenant.TenantRefused(
+                        f"--tenant {ns.tenant!r} disagrees with the source run's tenant "
+                        f"{tenant_id!r}")
+        else:
+            if ns.tenant is None:
+                raise _tenant.TenantRefused(
+                    "--tenant is required: every run names its tenant, and there is no default")
+            _tenant.refuse_bad_tenant_id(ns.tenant)
+            tenant_id = ns.tenant
+        root = _tenant.resolve_data_root()
+        _tenant.require_tenant(root, tenant_id)
+        return tenant_id
+    except ValueError as refused:
+        sys.exit(f"[run.py] {refused}")
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
@@ -518,6 +559,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         alert = ns.alert.resolve()
         run_id = ns.run_id
 
+    # THE TENANT, RESOLVED BEFORE THE PREFLIGHT (#1078 D3, O1/O2/O5): required and validated on
+    # a fresh run, derived from the source's host-only record on a sibling.
+    tenant_id = _resolve_tenant_id(ns, world)
+
     model = driver.resolve_main_model(ns.model)
     # ONE provider-key pass: the all-roles preflight is a strict superset of the
     # investigator+gather pair (same resolvers, same per-provider key sourcing, and MAIN/GATHER
@@ -533,7 +578,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, model=model, world=world)
+    run_dir = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
 
     if ns.update_ticket:
         ticket_writer.open_case_ticket(run_dir)

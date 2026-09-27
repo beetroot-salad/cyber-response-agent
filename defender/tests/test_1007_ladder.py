@@ -56,7 +56,10 @@ def graded_episode(tmp_path: Path, monkeypatch, *, worlds=("b",),
 
 
 def grade(ep: Path, *, judge=None, **kw):
-    """`judge.grade_episode` through its own injection seams — never a live provider."""
+    """`judge.grade_episode` through its own injection seams — never a live provider. #1078
+    D4/J48: `runs_base` is a required keyword; this wrapper defaults it to a harmless,
+    never-created sibling dir for every caller that does not care which base is threaded."""
+    kw.setdefault("runs_base", ep.parent / "runs-base")
     judge_mod = W.mod("learning.judge")
     return judge_mod.grade_episode(
         ep, judge=judge if judge is not None else W.FakeJudge(W.reply_document()), **kw)
@@ -673,7 +676,8 @@ def test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejec
     adapters = W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "other"}]}})
 
     review.review(family_mod.parse_family(doc), episode_dir=ep, adapters=adapters,
-                  door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"))
+                  door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"),
+                  runs_base=ep.parent / "runs-base")
 
     block = W.review_doc(ep)["worlds"]["b"]["reachability"]
     for key in ("capture_replays", "capture_addressed", "reachable_by_capture"):

@@ -137,7 +137,7 @@ class EpisodeAdapters:
         return replace(self, ctx=replace(self.ctx, world_id=world_id))
 
 
-def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
+def adapter_seam(episode_dir: Path, *, runs_base: Path) -> EpisodeAdapters:
     """The production read side the review replays through.
 
     THE GATHER GRANT, which is the same roster a sibling serves through — `run.py` builds its
@@ -162,5 +162,5 @@ def adapter_seam(episode_dir: Path) -> EpisodeAdapters:
     return EpisodeAdapters(
         registry=ModuleVerbRegistry(
             read_roster(adapters_under(DEFENDER_DIR)), GATHER_DEF.verb_grant),
-        ctx=verb_context(Path(episode_dir)),
+        ctx=verb_context(Path(episode_dir), runs_base=runs_base),
     )
