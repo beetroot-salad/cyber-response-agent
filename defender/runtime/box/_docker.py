@@ -138,14 +138,17 @@ def container_name(run_id: str) -> str:
 
 def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     """The infra env every tier's box needs: the shims + package location. A caller composing
-    a BoxRequest merges this in (or `_render_env` derives the same shape off its workdir)."""
-    return {
-        "DEFENDER_DIR": str(defender_dir),
-        "DEFENDER_RUN_DIR": str(run_dir),
-        "DEFENDER_RUNS_BASE": str(run_dir.parent),
-        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
-        "PYTHONPATH": str(defender_dir.parent),
-    }
+    a BoxRequest merges this in (or `_render_env` derives the same shape off its workdir).
+
+    `DEFENDER_RUNS_BASE` is DERIVED here, exactly as `run_common.run_env` derives it — never an
+    operator knob, never re-read from the environment (#1078 D5/O7)."""
+    env: dict[str, str] = {}
+    env["DEFENDER_DIR"] = str(defender_dir)
+    env["DEFENDER_RUN_DIR"] = str(run_dir)
+    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env["PATH"] = f"{defender_dir / 'bin'}:{_BOX_PATH}"
+    env["PYTHONPATH"] = str(defender_dir.parent)
+    return env
 
 
 def _derived_infra_env(workdir: Path) -> dict[str, str]:

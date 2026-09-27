@@ -51,6 +51,11 @@ def _archive():
     return T.mod("learning.branch.archive")
 
 
+def _tenant_paths():
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
+
+
 def _episode():
     return T.mod("learning.branch.episode")
 
@@ -296,7 +301,7 @@ def _relocated(tmp_path, monkeypatch):
     arithmetic.
     """
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
-    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID)
+    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w)
     return base, src, root, ep
@@ -336,14 +341,14 @@ def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
     root is refused if it resolves inside either."""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     cli = T.mod("learning.branch.cli")
-    ep = cli.episode_dir_for(T.EPISODE_ID)
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     assert ep != base
     assert base not in ep.parents
     assert T.mod("run_common").REPO_ROOT not in ep.parents
     for bad in (base / "episodes", T.mod("run_common").REPO_ROOT / "episodes"):
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(bad))
         with pytest.raises(T.refusals()) as refusal:
-            cli.episode_dir_for(T.EPISODE_ID)
+            cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
         assert str(bad) in str(refusal.value)
 
 
@@ -354,13 +359,13 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
     under the runs base."""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     cli = T.mod("learning.branch.cli")
-    before = cli.episode_dir_for(T.EPISODE_ID)
+    before = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     assert before.parent == root
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "somewhere-else"))
-    assert cli.episode_dir_for(T.EPISODE_ID) == before
+    assert cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()) == before
     monkeypatch.delenv(T.EPISODES_BASE_ENV)
     with pytest.raises(T.refusals()) as refusal:
-        cli.episode_dir_for(T.EPISODE_ID)
+        cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     assert T.EPISODES_BASE_ENV in str(refusal.value)
 
 
@@ -372,7 +377,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     checkout = _clean_checkout(tmp_path)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(checkout / ".defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID)
+    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     T.write_family(ep)
     T.sibling_run_dir(ep / "runs", "b")
     assert ep != checkout
@@ -413,7 +418,7 @@ def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_p
     held_out = T.mod("evals.held_out")
     slug = "web-1-suspicious-binary"
     (base / slug).mkdir(parents=True)
-    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID)
+    ep = T.mod("learning.branch.cli").episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     for label in ("a", "b", slug):
         (ep / "runs" / f"{slug}-n3-{label}").mkdir(parents=True)
     resolved = held_out.index_runs([slug], base)

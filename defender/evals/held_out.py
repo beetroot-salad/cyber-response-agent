@@ -44,7 +44,7 @@ from defender._yaml import safe_load
 from defender._model import model
 from defender._report import read_report
 from defender._run_paths import RunPaths
-from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR, resolve_runs_base
+from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
@@ -200,15 +200,35 @@ def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
 
 
 def main(argv: list[str]) -> int:
+    """#1078 D4/C27/N9: exactly one of a positional runs dir or `--tenant` is required — never
+    both, never neither — and the two branches are strictly separate. `--tenant` resolves
+    `runs_base_for(T)` (grammar, then `require_tenant`, each refusal surfaced verbatim); the
+    positional branch never touches `DEFENDER_DATA_ROOT` at all (§7 J50) — it scores exactly
+    the directory it is given. `--help` resolves neither."""
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    default = str(resolve_runs_base())
-    p.add_argument("runs_dir", nargs="?", default=default,
-                   help=f"directory of run dirs (default: {default})")
+    p.add_argument("runs_dir", nargs="?", default=None,
+                   help="directory of run dirs (mutually exclusive with --tenant)")
+    p.add_argument("--tenant", default=None,
+                   help="score runs_base_for(tenant) instead of a positional directory")
     p.add_argument("--fixtures-dir", type=Path, default=FIXTURES_DIR,
                    help=f"held-out fixtures dir (default: {FIXTURES_DIR})")
     ns = p.parse_args(argv)
-    runs_dir = Path(ns.runs_dir)
+    if (ns.runs_dir is None) == (ns.tenant is None):
+        p.error("exactly one of a positional runs dir or --tenant is required")
+    if ns.tenant is not None:
+        from defender import _tenant
+
+        try:
+            _tenant.refuse_bad_tenant_id(ns.tenant)
+            root = _tenant.resolve_data_root()
+            _tenant.require_tenant(root, ns.tenant)
+        except ValueError as refused:
+            print(f"[held_out] {refused}", file=sys.stderr)
+            return 2
+        runs_dir = _tenant.runs_base_for(ns.tenant)
+    else:
+        runs_dir = Path(ns.runs_dir)
     if not runs_dir.is_dir():
         print(f"runs dir does not exist: {runs_dir}", file=sys.stderr)
         return 2

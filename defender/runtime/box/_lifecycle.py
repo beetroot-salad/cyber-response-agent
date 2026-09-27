@@ -44,7 +44,7 @@ def _create_argv(
     # reading them first would surface the wrong refusal on a tree that is ALSO missing its
     # three inputs.
     for subject, path, remedy in (
-        ("run dir", run_dir, "Set DEFENDER_RUNS_BASE to a path"),
+        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
     ):
         if mounts and not _covered(path, mounts):

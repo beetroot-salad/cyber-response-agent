@@ -43,6 +43,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _tenant_paths():
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
+
+
 def _launch(tmp_path, *, judge=None, spawn=None, argv_extra=(), **seams):
     """Drive ONE whole episode through the real launcher, judge included.
 
@@ -51,7 +56,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, argv_extra=(), **seams):
     of the contract and driving every launcher scenario through it is what discharges it.
     """
     base, src = T.runs_base(tmp_path)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:

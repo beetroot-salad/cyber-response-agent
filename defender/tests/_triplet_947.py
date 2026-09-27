@@ -614,14 +614,32 @@ def branchable_investigation() -> str:
     return f"# investigation\n\n```invlang\n{bodies[0]}\n```\n"
 
 
+def current_tenant_paths() -> Any:
+    """#1078: the ONE tenant O10 permits in this test's `DEFENDER_DATA_ROOT` (whichever
+    `runs_base()`, `d9_tenant` or the like already created there), as a `_tenant.TenantPaths` —
+    for callers (`episode_dir_for`, `prepare_episode`) that need the tenant rather than its
+    runs base alone."""
+    from defender import _tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    existing = sorted(p.name for p in root.iterdir()
+                      if (p / "tenant.json").is_file()) if root.is_dir() else []
+    tenant_id = existing[0] if existing else "acme"
+    return _tenant.TenantPaths(root, tenant_id)
+
+
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
-              tenant_id: str = "acme") -> tuple[Path, Path]:
+              tenant_id: str | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
     #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
     the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
     tenant created (and its runs-base record minted) on first use, so `tenant_of_run_dir` and
     the launcher's own derivation see an ordinary, well-formed tenant location.
+
+    O10 permits only ONE tenant per data root, so when `tenant_id` is not given this reuses
+    whichever tenant already exists there (e.g. one a `d9_tenant` fixture already created)
+    rather than colliding with it, and falls back to `acme` for a still-empty root.
 
     The source carries the two artifacts a sibling seeds from — `alert.json` and
     `investigation.md` — because both are model-writable (the run dir is a prior box's rw bind)
@@ -630,6 +648,10 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     from defender import _tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    if tenant_id is None:
+        existing = sorted(p.name for p in root.iterdir()
+                          if (p / "tenant.json").is_file()) if root.is_dir() else []
+        tenant_id = existing[0] if existing else "acme"
     if not (root / tenant_id / "tenant.json").is_file():
         _tenant.create_tenant(root, tenant_id)
     base = _tenant.runs_base_for(tenant_id)

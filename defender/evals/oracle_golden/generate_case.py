@@ -322,20 +322,36 @@ def synthesise_alert(meta: dict, out_path: Path) -> dict:
     return alert
 
 
-def investigate(alert: Path, run_id: str) -> Path:
+def investigate(alert: Path, run_id: str, *, tenant_id: str, run: Runner = subprocess.run) -> Path:
     """One defender investigation — the LLM cost floor, and the envelope source.
 
     `run.py` refuses to reuse an existing run dir, so a retried cell picks the next free
     suffix rather than clobbering the earlier attempt's transcript. Keeping the failed
     attempt is deliberate: it is the only record of why it failed.
+
+    #1078 D4/J32: `tenant_id` is checked (`require_tenant`, and `resolve_data_root` behind it)
+    BEFORE the free-suffix prediction or the child spawn — a tenant with no row, or no data
+    root at all, is refused with nothing spent and no hardcoded runs-base fallback of its own.
+    `run` is the child-process seam (the same shape `rules_fired_since`/`wait_for_alert` take):
+    the child is `defender/run.py`, handed `--tenant` alongside `--run-id`.
     """
-    env_base = Path(os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs"))
+    from defender import _tenant
+
+    root = _tenant.resolve_data_root()
+    _tenant.require_tenant(root, tenant_id)
+    env_base = _tenant.runs_base_for(tenant_id)
     candidate, attempt = run_id, 1
     while (env_base / candidate).exists():
         attempt += 1
         candidate = f"{run_id}-{attempt}"
-    _run([sys.executable, DEFENDER_RUN, str(alert), "--run-id", candidate, "--no-learn"],
-         timeout=3600, label="investigate")
+    proc = run(
+        [sys.executable, DEFENDER_RUN, str(alert), "--run-id", candidate,
+         "--tenant", tenant_id, "--no-learn"],
+        capture_output=True, text=True, encoding="utf-8", timeout=3600, cwd=REPO_ROOT,
+        check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"investigate failed ({proc.returncode}):\n"
+                           f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
     run_dir = env_base / candidate
     if not run_dir.is_dir():
         raise RuntimeError(f"defender run dir missing: {run_dir}")
@@ -397,6 +413,8 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scenario", required=True)
+    p.add_argument("--tenant", required=True,
+                   help="the tenant this case's investigation runs under (#1078 D4/J32)")
     p.add_argument("--rule", default=None,
                    help="detection rule to wait for; omit to take whichever rule the "
                         "activity actually raises (the usual case)")
@@ -445,8 +463,21 @@ def main(argv: list[str] | None = None) -> int:
 
     `_recruit` is kept, uncalled, rather than deleted: it is the executable record of how the
     committed cases were recruited, and the successor harness has the same five steps to make.
+
+    #1078 D4/J32: `--tenant` is checked at entry too — before prediction, scoring or spawn,
+    and before the retirement refusal below — with the owner's own refusal (grammar, then
+    `require_tenant`) surfaced verbatim.
     """
-    build_parser().parse_args(argv)
+    ns = build_parser().parse_args(argv)
+    from defender import _tenant
+
+    try:
+        _tenant.refuse_bad_tenant_id(ns.tenant)
+        root = _tenant.resolve_data_root()
+        _tenant.require_tenant(root, ns.tenant)
+    except ValueError as refused:
+        print(f"[generate_case] {refused}", file=sys.stderr)
+        return 2
     print("!! generate_case.py cannot assemble a case: the assembler retired with the "
           "oracle in #922. The steps it drove are listed in this file's docstring; the "
           "existing cases under cases/ are still readable and scorable.", file=sys.stderr)
@@ -520,7 +551,7 @@ def _recruit(argv: list[str] | None = None) -> int:
         f"operation_window: [\"{meta.get('started_at')}\", \"{meta.get('finished_at')}\"]\n",
         encoding="utf-8")
 
-    run_dir = investigate(alert, f"golden-{ns.case_id}")
+    run_dir = investigate(alert, f"golden-{ns.case_id}", tenant_id=ns.tenant)
     _assemble(run_dir, story, controls_yaml, case_dir)
 
     write_environment(case_dir / "environment.yaml", ns.capture_environment)

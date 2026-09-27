@@ -49,14 +49,8 @@ def _cli():
 
 
 def _tenant_paths():
-    """#1078: `episode_dir_for`/`prepare_episode` take the tenant `T.runs_base` already
-    created — the autouse data-root fixture's own tenant, `playground`."""
-    import os
-    from pathlib import Path
-
-    from defender import _tenant
-
-    return _tenant.TenantPaths(Path(os.environ["DEFENDER_DATA_ROOT"]), "acme")
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
 
 
 def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams):
