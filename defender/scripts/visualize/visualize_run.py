@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -10,6 +11,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _env
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
@@ -65,16 +67,14 @@ MIRROR_DIR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 MIRROR_DIR_NAME = "run-visualizations"
 _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
+_logger = logging.getLogger(__name__)
+
 
 class MirrorRootRefused(Exception):
     """Under pytest, the mirror root was about to resolve to a real checkout (#1084 O3).
 
     The conftest gives every test the override; a test that reaches the default anyway has
     bypassed it, and would write into the operator's real folder. Refusing is the detector."""
-
-
-class MirrorWriteFailed(OSError):
-    """The mirror destination resolved and could not be written; the message leads with it."""
 
 
 def mirror_root(start: Path | None = None) -> Path:
@@ -115,7 +115,7 @@ def _main_checkout(start: Path) -> Path:
         if not (main / "defender").is_dir():
             raise ValueError(f"{main} (from {dot_git}) holds no defender/")
     except (OSError, ValueError) as exc:
-        sys.stderr.write(f"[visualize_run] warning: mirroring under {start}: {exc}\n")
+        _logger.warning("mirroring under %s: %s", start, exc)
         return start
     return main
 
@@ -140,7 +140,7 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
     )
     if proc.returncode != 0:
         raise OSError(
-            f"mirror write as uid {owner.st_uid} failed for {dest} (exit {proc.returncode}): "
+            f"mirror write as uid {owner.st_uid} failed (exit {proc.returncode}): "
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
@@ -160,15 +160,33 @@ def render_page(run_dir: Path) -> str:
     return render_runtime_page(run_dir)
 
 
-def mirror_page(page: str, run_id: str) -> Path:
-    """Copy a rendered page to `<mirror root>/<run_id>/runtime.html`, written as the mirror
-    folder's owner (#1084), and return where it landed. Called only on a `dev` deployment."""
-    root = mirror_root()
+def mirror_page(page: str, run_id: str) -> Path | None:
+    """The dev-only copy, whole: whether to copy, where, the write, and what to say about it.
+
+    Copies the page to `<mirror root>/<run_id>/runtime.html`, written as the mirror folder's
+    owner (#1084), only on a `dev` deployment (#1110) — the rule lives here, beside the write, so
+    no caller can reach the copy without it. Best-effort: it never raises. Returns where the
+    page landed, or None when it was not copied, and logs which — a skipped copy at INFO, a
+    failed one at WARNING naming the destination (or, when none resolved, the resolver's
+    reason).
+    """
+    deployment = _env.deployment()
+    if deployment != "dev":
+        _logger.info("page not copied: %s is %r, and only 'dev' copies",
+                     _env.DEPLOYMENT_ENV, deployment)
+        return None
+    try:
+        root = mirror_root()
+    except Exception as e:
+        _logger.warning("page not copied: %s: %s", type(e).__name__, e)
+        return None
     dest = RunPaths(root / run_id).runtime_html
     try:
         _mirror(page.encode("utf-8"), dest, root)
     except Exception as e:
-        raise MirrorWriteFailed(f"{dest}: {e}") from e
+        _logger.warning("page not copied to %s: %s: %s", dest, type(e).__name__, e)
+        return None
+    _logger.info("page copied to %s", dest)
     return dest
 
 
@@ -549,8 +567,9 @@ def render_runtime_page(run_dir: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
-    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7)."""
-    from defender import run_common
+    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
+    through the same post-run step `run.py` takes, with every line stamped with the run."""
+    from defender import _log, run_common
     from defender._run_handle import Run
 
     if len(argv) != 2:
@@ -560,8 +579,12 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    run_common.visualize(Run.at(run_dir))
-    print(f"wrote {RunPaths(run_dir).runtime_html}")
+    with _log.run_context(run_dir.name, None, logger=_logger):
+        try:
+            run_common.visualize(Run.at(run_dir))
+        except run_common.VisualizeFailed:
+            _logger.error("the re-render failed", exc_info=True)
+            return 1
     return 0
 
 

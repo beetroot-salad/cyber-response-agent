@@ -60,7 +60,7 @@ def deployment() -> str:
     itself. Never inferred from `.git`, the image, the uid or pytest. An unrecognised value is
     `production` too — never `dev`, so a typo cannot turn the copy on — and is logged as an
     error on every read rather than raised, so a typo cannot abort a run either."""
-    raw = os.environ.get(DEPLOYMENT_ENV, "")
+    raw = env_str(DEPLOYMENT_ENV, "")
     value = raw.strip().lower()
     if value in DEPLOYMENTS:
         return value

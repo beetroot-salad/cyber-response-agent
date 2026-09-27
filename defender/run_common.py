@@ -16,7 +16,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _env, _io, _provenance, _tenant  # noqa: E402
+from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
@@ -82,16 +82,6 @@ def _setup_state(run: Run) -> str:
     if extra or any(_io.entry_present(p) for p in sidecars):
         return "ran"
     return "setup"
-
-
-def materialize_run_dir(
-    alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None, tenant_id: str | None = None,
-    expected_record: _tenant.TenantRecord | None = None,
-) -> Path:
-    """`materialize_run`, for a caller that needs only where the run lives."""
-    return materialize_run(alert, run_id, model=model, world=world, tenant_id=tenant_id,
-                           expected_record=expected_record).run_dir
 
 
 def materialize_run(
@@ -260,7 +250,7 @@ def _stamp(
     hand that promise straight back. The failure is real and unexceptional — ENOSPC on the runs
     base, a read-only remount, an alias planted where a previous run left one — and it arrives
     AFTER the run dir exists. (Before #1077 an escaping `OSError` also burned the run id —
-    `materialize_run_dir` refused a dir that already existed; decision 3 made an interrupted
+    the run builder refused a dir that already existed; decision 3 made an interrupted
     setup resumable, so a retry now finishes what the first call left undone and re-stamps.)
 
     The asymmetry with the alert write above is the point, not an oversight. A run without its
@@ -314,20 +304,22 @@ def _prepend(head: str, tail: str | None) -> str:
 
 
 class VisualizeFailed(Exception):
-    """The run's page was not saved as its record — the render or the record write failed. A
-    page left over from a prior render is not proof this one succeeded. Never raised for the
-    dev-only copy: a record that was written is a rendered run, whatever became of the copy."""
+    """This render did not save the run's page as its record — the render or the record write
+    failed; the message says which, and the cause is chained. A page left over from a prior
+    render is not proof this one succeeded. Never raised for the dev-only copy: a record that
+    was written is a rendered run, whatever became of the copy."""
 
 
 def visualize(run: Run) -> None:
     """The post-run step: render the run's page and save it as the run's `runtime_html`
     record through `run` — so whatever backend the handle sits on receives it like every other
-    record — then, on a `dev` deployment only, copy it to the operator's folder (#1110).
+    record — then hand it to the dev-only copy, which decides for itself whether to copy (#1110).
 
     Runs in the process holding the handle, after the sandbox has exited and the tree has been
-    scrubbed, so the model never had a chance to rewrite its own report. Any failure to render
-    or save is `VisualizeFailed` — the caller's single "not rendered" signal, which is also what
-    keeps a renderer crash from ever reaching the run's exit code. A failed copy is a warning.
+    scrubbed, so the model never had a chance to rewrite its own report. A failure to render,
+    or to save the record, is `VisualizeFailed` — the caller's single "no record" signal, which
+    is also what keeps a renderer crash from reaching the run's exit code — and each says which
+    of the two it was. The copy never raises.
     """
     try:
         # Imported here, as `learning/branch/cli.py::_render_page` does for the episode page:
@@ -336,20 +328,15 @@ def visualize(run: Run) -> None:
         from defender.scripts.visualize import visualize_run as vr
 
         page = vr.render_page(run.run_dir)
-        run.observability.runtime_html.write(page)
     except Exception as e:
-        raise VisualizeFailed(f"the page for {run.run_dir} was not rendered: {e!r}") from e
-    if _env.deployment() != "dev":
-        return
+        raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
+    record = run.observability.runtime_html
     try:
-        dest = vr.mirror_page(page, run.run_dir.name)
+        record.write(page)
     except Exception as e:
-        # The destination when one resolved (`MirrorWriteFailed` names it), else the
-        # resolver's own reason — `MirrorRootRefused` and its message.
-        _logger.warning("the page for %s was not copied: %s: %s",
-                        run.run_dir, type(e).__name__, e)
-    else:
-        _logger.info("copied the page for %s to %s", run.run_dir, dest)
+        raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
+    _logger.info("saved the run page as %s", record.path)
+    vr.mirror_page(page, run.run_dir.name)
 
 
 def cross_check_tables(run_dir: Path) -> None:

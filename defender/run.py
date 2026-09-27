@@ -550,7 +550,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     """The source run's alert, or the refusal that says it is not a plain file.
 
     THE SOURCE RUN DIR IS A PRIOR BOX'S WRITABLE BIND. `alert.json` there is model-writable, so
-    an entry at that name may be a link the model planted, and `materialize_run_dir` admits it
+    an entry at that name may be a link the model planted, and `materialize_run` admits it
     with `alert.is_file()` and copies it with `shutil.copy` — both of which FOLLOW a link. Asked
     here, before the copy, so bytes from outside the source run never arrive in this run's own
     dir under the case input's name, where the visualizer and the archive read them as the alert.
@@ -771,8 +771,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
 
         try:
             visualize(run)
-        except _run.VisualizeFailed as e:
-            _logger.warning(f"{e}")
+        except _run.VisualizeFailed:
+            _logger.warning("the run page was not saved", exc_info=True)
         return 0
 
 if __name__ == "__main__":

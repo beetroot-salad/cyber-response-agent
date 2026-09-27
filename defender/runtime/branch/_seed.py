@@ -248,7 +248,7 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
                 f"{alert} is not a plain file — the alert is the case input both siblings "
                 f"investigate, and one that is {_not_a_plain_file(alert)} is not the source "
                 "run's own")
-        # BYTES, for `_copy_artifact`'s reason: `materialize_run_dir` puts this file here with
+        # BYTES, for `_copy_artifact`'s reason: `materialize_run` puts this file here with
         # `shutil.copy`, and a decode/re-encode round trip is a second spelling of the case
         # input that only agrees with the first while the alert happens to be valid UTF-8.
         write_guarded(RunPaths(run_dir).alert, alert.read_bytes())

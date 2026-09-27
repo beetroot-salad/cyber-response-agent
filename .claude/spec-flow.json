@@ -164,7 +164,7 @@
       },
       "runs_base": {
         "writers": [
-          "defender/run_common.py::materialize_run_dir"
+          "defender/run_common.py::materialize_run"
         ],
         "readers": [
           "defender/run_common.py::resolve_runs_base",
