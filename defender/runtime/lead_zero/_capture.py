@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from defender._model import model
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,8 @@ from defender.hooks.budget_enforcer import (
 from defender.runtime import circuit_breaker
 from defender.runtime.verbs import VerbContext
 from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
+
+_logger = logging.getLogger(__name__)
 
 
 @model(frozen=True)
@@ -59,15 +62,19 @@ def _run_sync(coro: Any) -> Any:
     already running on this thread. `resolve_lead_zero` is a synchronous entry point called
     both from bare pytest functions (no loop) and from inside `run_investigation` (already
     inside one) — the latter cannot call `asyncio.run()` directly, so the coroutine goes to a
-    fresh thread with its own loop."""
+    fresh thread with its own loop.
+
+    The thread runs in a COPY OF THE CALLER'S CONTEXT: a pool thread starts empty, and "run it
+    as if here" includes the run id and tenant every log line inside it is stamped with."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     import concurrent.futures
+    import contextvars
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(asyncio.run, coro).result()
+        return ex.submit(contextvars.copy_context().run, asyncio.run, coro).result()
 
 
 def _sanitize(text: Any) -> str:
@@ -100,6 +107,10 @@ class _CaptureDeps:
     lead_id: str
     box: Any = None
     budget_started_monotonic: float = 0.0
+    #: The run's tenant `settings/` folder (#1106) — what item 1's verb context hands the
+    #: adapter. `None` only for a caller with no run (a direct test of the recorder); a verb
+    #: built over it is refused by `VerbContext`.
+    settings_dir: Path | None = None
 
 
 def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
@@ -141,7 +152,8 @@ async def _capture_issue(
 
     async def handler(_args: dict) -> Any:
         fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
-        vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
+        vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
+                           settings_dir=_settings_of(deps))
         result = await asyncio.to_thread(fn, vctx, **params)
         captured.append(result)
         return result
@@ -277,7 +289,8 @@ class _CallLedger:
             # `record_outcome`), still writing a queries-table row of the same shape.
             try:
                 fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
-                vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env)
+                vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
+                                   settings_dir=_settings_of(deps))
                 envelope = await asyncio.to_thread(fn, vctx, **params)
                 _record_manual_row(deps, verb, params, envelope, exit_code=0)
                 return envelope, ""
@@ -304,9 +317,21 @@ class _CallLedger:
         return envelope, text
 
 
-def _build_deps(run_dir: Path, defender_dir: Path, run_id: str, lead_id: str) -> _CaptureDeps:
+def _settings_of(deps: Any) -> Path:
+    """The run's tenant settings folder a lead-0 verb is handed — refused, not guessed, when the
+    deps were built without one (#1106: there is no checkout copy to fall back to)."""
+    settings = getattr(deps, "settings_dir", None)
+    if settings is None:
+        raise TypeError("lead-0's verb context needs the run's tenant settings folder")
+    return Path(settings)
+
+
+def _build_deps(
+    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str, settings_dir: Path,
+) -> _CaptureDeps:
     return _CaptureDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,
+        settings_dir=settings_dir,
     )
 
 
@@ -360,7 +385,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     was ALREADY malformed when this frame read it, in which case the seed is the messenger and
     the refusal names the real fault.
 
-    Best-effort is preserved in both directions: a refusal prints and returns, and never
+    Best-effort is preserved in both directions: a refusal logs and returns, and never
     raises into a run that has not started."""
     from defender._artifact_schema import validate_artifact
     from defender._run_paths import RUN_LAYOUT
@@ -381,12 +406,12 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:
-            print(
-                f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            _logger.warning(
+                f"refused to declare {lead_id} in investigation.md — the document "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                 f"would not pass validation, so nothing was written and the id stays "
                 f"undeclared: {reason}"
             )
             return
         write_guarded(path, proposed)
     except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
-        print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(f"could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path

@@ -23,7 +23,7 @@ at its name) or fail (`ENOSPC`, a read-only root), and raised through the step's
 was the STEP's own failure: after `RUNS` it reached `_launch`'s abort arm — "no sibling started
 and every staged name is torn down", false of every arm that had just run — and after `JUDGE`
 it left `main` as a bare `OSError` traceback for a fully graded episode. A clock that costs the
-archive is the wrong trade, so the fault is printed and the step is simply not on the record —
+archive is the wrong trade, so the fault is logged and the step is simply not on the record —
 which the record's own rule already reads as "not seen to finish". A step name outside `Step`
 is a programming error, not an I/O fault, and still raises.
 
@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-import sys
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,8 @@ from defender._clock import now_iso, parse_iso_utc
 from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._io import Bound, write_guarded
 from defender.learning.branch.steps import STEPS, Step
+
+_logger = logging.getLogger(__name__)
 
 # `TIMING_NAME` — the record's name at the episode root, the owner's (`_episode_paths`,
 # #1077 D1), imported above.
@@ -112,7 +114,7 @@ class StageClock:
         end this frame never saw. The moments are the launcher's own clock at the step's real
         start and end — the one outer clock the archive has.
 
-        A record that cannot be written is printed, not raised — the module docstring says why.
+        A record that cannot be written is logged, not raised — the module docstring says why.
 
         WHILE A STEP RUNS, ITS OWN ENTRY IS NOT YET ON THE RECORD. A reader called from
         INSIDE the judge pass — the episode page, if it is rendered there as #1025's key flow
@@ -125,8 +127,8 @@ class StageClock:
         try:
             self.record(step, started_at=started_at, ended_at=ended_at)
         except OSError as unwritable:
-            print(f"[branch] the {step} entry could not be written to the timing record "
-                  f"({unwritable!r}); the episode itself is unaffected", file=sys.stderr)
+            _logger.warning(f"the {step} entry could not be written to the timing record "
+                            f"({unwritable!r}); the episode itself is unaffected")
 
 
 def _record_text(rows: list[dict[str, Any]]) -> str:

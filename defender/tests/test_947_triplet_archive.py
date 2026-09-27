@@ -44,6 +44,7 @@ import json
 
 import pytest
 
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
 
@@ -389,7 +390,9 @@ def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_pat
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     spawn = T.FakeSpawn()
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
-    T.mod("learning.branch.cli").start_family(ep, ["a", "b", "c"], spawn=spawn)
+    T.mod("learning.branch.cli").start_family(
+        ep, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT,
+        tenants_root=T1106.TENANTS_ROOT)
     assert spawn.launches, "no sibling was started"
     for launch in spawn.launches:
         child_base = launch["env"]["DEFENDER_RUNS_BASE"]

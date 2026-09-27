@@ -22,12 +22,12 @@ from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
 
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
-
-_logger = logging.getLogger(__name__)
 
 
 def resolve_runs_base() -> Path:
@@ -86,18 +86,30 @@ def _setup_state(run: Run) -> str:
 
 def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None,
+    world: ResumeWorld | None = None, tenant_id: str | None = None,
+    expected_record: _tenant.TenantRecord | None = None,
 ) -> Path:
     """`materialize_run`, for a caller that needs only where the run lives."""
-    return materialize_run(alert, run_id, model=model, world=world).run_dir
+    return materialize_run(alert, run_id, model=model, world=world, tenant_id=tenant_id,
+                           expected_record=expected_record).run_dir
 
 
 def materialize_run(
     alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None,
+    world: ResumeWorld | None = None, tenant_id: str | None = None,
+    expected_record: _tenant.TenantRecord | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE, and
     return that tenant-bound handle — the one the run's later records are saved through.
+
+    `tenant_id` is the tenant the caller resolved this run for, and `expected_record` the
+    record it chose that tenant by (`run.py` reads it once, before the box; `None` when the
+    base had none). A caller that chose no tenant (`tenant_id=None`: a tool, a test) gets the
+    record's, which is the sole authority for the stamp. The record is created HERE when
+    absent — the one place a runs base gets its tenant choice, so an invocation refused earlier leaves none on disk — and then held to
+    both: a record naming another tenant (`Run.for_tenant`), or one that is no longer the
+    record the caller read (rewritten, or deleted and re-created with a new base world), is
+    refused, never stamped over a run using the settings the caller resolved.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -119,8 +131,18 @@ def materialize_run(
     # parse, or a write that fails (an alias planted at its name, a directory squatting it),
     # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
     # run — a run with a forged tenant is worse than no run (decision 4/7).
-    tenant_record = _tenant.ensure_tenant(runs_base)
-    run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
+    if tenant_id is None:
+        tenant_record = _tenant.ensure_tenant(runs_base)
+        chosen = tenant_record.tenant_id
+    else:
+        tenant_record = _tenant.ensure_tenant(runs_base, tenant_id=tenant_id)
+        chosen = tenant_id
+    if expected_record is not None and tenant_record != expected_record:
+        raise _tenant.TenantRecordMismatch(
+            f"the tenant record at {_tenant.record_path(runs_base)} changed after this run's "
+            f"tenant was chosen from it (read {expected_record}, now {tenant_record}) — the "
+            "run would be stamped with a record its settings were not resolved from")
+    run = Run.for_tenant(chosen, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
 
@@ -243,7 +265,7 @@ def _stamp(
 
     The asymmetry with the alert write above is the point, not an oversight. A run without its
     alert has no case to investigate and must die. A run without its stamp is a run nobody can
-    later prove the code for — worth a loud line on stderr and worth nothing more, because
+    later prove the code for — worth a loud error in the log and worth nothing more, because
     `read` already answers "no usable record" for a file that is not there, and an operator
     who needs the guarantee has the announce line saying it is missing."""
     path = run.facts.provenance.path
@@ -262,8 +284,8 @@ def _stamp(
             parent_run_id=parent_run_id, fork_turn=fork_turn)
         run.facts.provenance.write(record.as_json())
     except OSError as e:
-        print(f"[run_common] could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
-              "nothing downstream can prove which code it ran", file=sys.stderr)
+        _logger.error(f"could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
+                      "nothing downstream can prove which code it ran")
 
 
 def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
@@ -338,20 +360,19 @@ def cross_check_tables(run_dir: Path) -> None:
 
         xcheck = lead_repository.narration_crosscheck_from_run(run_dir)
     except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
-        print(f"[run.py] narration cross-check skipped: {e!r}", file=sys.stderr)
+        _logger.warning(f"narration cross-check skipped: {e!r}")
         return
     if not xcheck["ok"]:
-        print(
-            "[run.py] WARN narration cross-check FAILED — the live tables "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        _logger.warning(
+            "narration cross-check FAILED — the live tables "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             "disagree with investigation.md's :L rows:",
-            file=sys.stderr,
         )
         if xcheck["missing_from_narration"]:
-            print(f"[run.py]   table lead_ids with no :L row: {xcheck['missing_from_narration']}", file=sys.stderr)
+            _logger.warning(f"table lead_ids with no :L row: {xcheck['missing_from_narration']}")
         if xcheck["queries_without_lead"]:
-            print(f"[run.py]   query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}", file=sys.stderr)
+            _logger.warning(f"query FKs with no lead sidecar (orphans): {xcheck['queries_without_lead']}")
     if xcheck["leads_without_queries"]:
-        print(f"[run.py]   note: leads with no queries (monitor): {xcheck['leads_without_queries']}", file=sys.stderr)
+        _logger.info(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
 
 
 HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"
@@ -435,7 +456,7 @@ def enqueue_curation(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
     if reason is not None:
-        print(f"[run.py] NOT enqueuing for curation: {reason}", file=sys.stderr)
+        _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
     from defender.learning.core import markers as _markers
     from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
@@ -449,7 +470,6 @@ def enqueue_curation(
         case_id = case_ref(alert.read_bytes())
         _markers.enqueue_case_for_curation(case_id, run_dir, paths)
     except OSError as e:
-        print(f"[run.py] NOT enqueuing for curation: could not write the request: {e!r}",
-              file=sys.stderr)
+        _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
         return False
     return True

@@ -41,7 +41,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -49,6 +49,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     read_allow_of,
 )
 from defender.runtime.permission import AgentPolicy  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 _DEFENDER = config.REPO_ROOT / "defender"
 
@@ -333,7 +334,7 @@ def test_gather_multiline_command_denies_with_the_lexing_reason_not_a_policy_one
     over-tightening this test exists to catch would now hand back `ADAPTER_RETIRED_REASON`)."""
     run = tmp_path / "run"
     dfn = _DEFENDER
-    pol = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
+    pol = compile_policy_for(T1106.playground_gather_def(), run_dir=run, defender_dir=dfn)
     raw = f"{run}/gather_raw/l-001/0.json"
     multi = f"cat {raw} | defender-sql 'SELECT host,\ncount(*)\nFROM data GROUP BY host'"
     flat = f"cat {raw} | defender-sql 'SELECT host, count(*) FROM data GROUP BY host'"
@@ -381,7 +382,7 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
-    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(T1106.playground_gather_def(), run_dir=run, defender_dir=dfn)
 
     def bash(cmd):
         return permission.decide_bash(cmd, policy=gather, run_dir=run, defender_dir=dfn)

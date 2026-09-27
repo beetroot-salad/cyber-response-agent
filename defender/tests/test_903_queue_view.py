@@ -23,6 +23,7 @@ import copy
 import html
 import inspect
 import json
+import logging
 import os
 import re
 import types
@@ -1070,7 +1071,7 @@ def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
     _write_lines(ch.file, [])
 
     with _Clock() as clock:
-        drain._retire_unkeyable(ch, [{"run_id": "r9", "note": "no id here"}], lambda _m: None, 5)
+        drain._retire_unkeyable(ch, [{"run_id": "r9", "note": "no id here"}], logging.getLogger("defender.test"), 5)
 
     [record] = read_jsonl_rows(drain.graveyard_file(ch))
     assert "row" not in record

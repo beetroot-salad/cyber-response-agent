@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 from collections.abc import Iterator
 from defender._model import model
 from pathlib import Path
 
 from defender._io import write_atomic
-from defender.learning.core.config import LoopPaths, _log
+from defender.learning.core.config import LoopPaths
+
+_logger = logging.getLogger(__name__)
 
 
 def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
@@ -18,7 +21,7 @@ def _enqueue_marker(run_dir: Path, queue_dir: Path, label: str) -> None:
         marker,
         json.dumps({"run_id": run_dir.name, "run_dir": str(run_dir.resolve())}) + "\n",
     )
-    _log(f"enqueued for {label}: {marker}")
+    _logger.info(f"enqueued for {label}: {marker}")
 
 
 def enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
@@ -37,7 +40,7 @@ def enqueue_case_for_curation(case_id: str, run_dir: Path, paths: LoopPaths) -> 
         marker,
         json.dumps({"case_id": case_id, "run_dir": str(run_dir.resolve())}) + "\n",
     )
-    _log(f"enqueued for curation: {marker}")
+    _logger.info(f"enqueued for curation: {marker}")
 
 
 
@@ -131,7 +134,7 @@ def claim_markers(
     markers = sorted(queue_dir.glob("*.json")) if queue_dir.is_dir() else []
     inflight_dir = queue_dir / "inflight"
     orphans = sorted(inflight_dir.glob("*.json")) if inflight_dir.is_dir() else []
-    _log(
+    _logger.info(
         f"{label}: {len(markers)} run(s) queued for {noun}, "
         f"{len(orphans)} reclaimed from a prior claim{extra}"
     )
@@ -203,4 +206,4 @@ def quarantine_marker(spec: dict, marker: Path, queue_dir: Path, reason: str) ->
     (failed_dir / marker.name).write_text(json.dumps(rec) + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         marker.unlink()
-    _log(f"quarantined {marker_identity(spec, marker)} — {reason}")
+    _logger.warning(f"quarantined {marker_identity(spec, marker)} — {reason}")

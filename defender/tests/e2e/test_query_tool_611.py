@@ -9,7 +9,7 @@ that is the point — the tests are the spec the code is written against.
 The surface this suite pins
 ---------------------------
 `defender/runtime/verbs.py`
-    `VerbContext(defender_dir, run_dir, env)` — what the harness hands a verb: the RUN's tree
+    `VerbContext(defender_dir, run_dir, env, settings_dir)` — what the harness hands a verb: the RUN's tree
     (never an import-time constant) and the RUN's scrubbed env (never `os.environ`).
     `declared_params(fn)` — a verb's param surface = the keyword-only params of its annotated
     signature. This is the ONE reader of a verb's signature; the tool's validator uses it.
@@ -69,6 +69,7 @@ from defender.runtime.permission.grant import _SHIM_FLAGS, Route  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.scripts.adapters import ticket_adapter  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.tests.e2e import _replay_harness  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -280,7 +281,7 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     ])
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
-    gdeps = bind(GATHER_DEF, r.run_dir, defender_dir=DEFENDER)
+    gdeps = bind(_tenants1106.playground_gather_def(), r.run_dir, defender_dir=DEFENDER)
     out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
 
     assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
@@ -585,8 +586,10 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
     assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
 
-    ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={})
-    ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={})
+    ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={},
+                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+    ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={},
+                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
     fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
     fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
 
@@ -1144,11 +1147,12 @@ def test_provider_key_scrub_positive_control(tmp_path):
 
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
-    """verb_resolves_config_from_deps_tree — a verb resolves its config from the RUN's tree
-    (deps), not an import-time module constant: a run against a worktree or an eval tmp tree
-    reads THAT tree's knowledge/environment/systems/{system}/config.env."""
+    """verb_resolves_config_from_deps_tree — a verb resolves its config from the RUN's
+    settings folder (the ctx), not an import-time module constant: a run handed tenant A's
+    settings reads `<A settings>/systems/{system}/config.env` (#1106: the folder is the run's
+    tenant's `settings/` half, handed in on `VerbContext.settings_dir`)."""
     def _tree(root: Path, url: str) -> Path:
-        d = root / "knowledge" / "environment" / "systems" / "elastic"
+        d = root / "systems" / "elastic"
         d.mkdir(parents=True)
         (d / "config.env").write_text(
             f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n",
@@ -1160,9 +1164,11 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
     b = _tree(tmp_path / "b", "http://tree-b:9200")
 
     cfg_a = _stub_transport.load_config(
-        VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={}), "elastic", "ELASTIC")
+        VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, settings_dir=a),
+        "elastic", "ELASTIC")
     cfg_b = _stub_transport.load_config(
-        VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={}), "elastic", "ELASTIC")
+        VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, settings_dir=b),
+        "elastic", "ELASTIC")
 
     assert cfg_a["URL_BASE"] == "http://tree-a:9200"
     assert cfg_b["URL_BASE"] == "http://tree-b:9200", \
@@ -1170,7 +1176,8 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 
     with pytest.raises(ConfigFault):
         _stub_transport.load_config(
-            VerbContext(defender_dir=tmp_path / "nowhere", run_dir=tmp_path / "run", env={}),
+            VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
+                        settings_dir=tmp_path / "nowhere"),
             "elastic", "ELASTIC",
         )
 
@@ -1273,7 +1280,8 @@ def _policies(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw" / LEAD).mkdir(parents=True)
     (run_dir / "gather_raw" / LEAD / "0.json").write_text("[]", encoding="utf-8")
-    gather = compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=DEFENDER)
+    gather = compile_policy_for(
+        _tenants1106.playground_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
     main = compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=DEFENDER)
     return run_dir, gather, main
 

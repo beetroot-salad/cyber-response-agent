@@ -7,6 +7,18 @@ from defender._git import REPO_ROOT
 from defender._model import model
 
 
+def process_defender_dir() -> Path:
+    """The code tree a command-line process runs against: `$DEFENDER_DIR` when set, else the
+    tree this package is in. ONE derivation for every operator command and host-side writer, so
+    an override honoured by one is honoured by all — they also root their default tenants
+    folder at its checkout (`_tenants.entry_tenant`), and two derivations would read two
+    checkouts' tenants."""
+    import os
+
+    env = os.environ.get("DEFENDER_DIR")
+    return Path(env) if env else Path(__file__).resolve().parent
+
+
 def adapters_under(defender_dir: Path) -> Path:
     """`<defender_dir>/scripts/adapters` — the adapters directory of an ARBITRARY tree.
 

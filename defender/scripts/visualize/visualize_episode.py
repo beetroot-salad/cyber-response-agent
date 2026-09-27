@@ -2559,4 +2559,6 @@ if __name__ == "__main__":
     # visualize_episode.py <dir>` from anywhere — has no package on `sys.path` until it is put
     # there, the same bootstrap `visualize_run.py` carries (#1025 F14). Under `-m` or an
     # import the module-level imports above have already resolved and this is inert.
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main(sys.argv[1:]))

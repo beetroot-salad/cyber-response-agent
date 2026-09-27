@@ -128,9 +128,18 @@ pytestmark = pytest.mark.e2e
 _ADAPTERS = DEFENDER / "scripts" / "adapters"
 LEAD = "l-001"
 
-#: The systems the shipped gather grant reaches. Read off the grant rather than restated, so a
-#: new system in `GATHER_PAIRS` is covered by this suite the day it lands.
-_GRANT_SYSTEMS = tuple(sorted(GATHER_DEF.verb_grant.systems))
+def _shipped_gather_grant():
+    """The shipped gather grant — the committed playground tenant's (#1106 M4: `GATHER_DEF`
+    carries none; a run's grant is projected from its tenant's table)."""
+    from defender.tests import _tenants1106 as T1106
+
+    return T1106.playground_grants().gather
+
+
+def _grant_systems() -> tuple[str, ...]:
+    """The systems the shipped gather grant reaches. Read off the grant rather than restated,
+    so a new system in the table is covered by this suite the day it lands."""
+    return tuple(sorted(_shipped_gather_grant().systems))
 
 #: Verbs the adapters DECLARE and gather's grant WITHHOLDS (`driver.py:375-377` names the first
 #: two outright; the three `ticket` ones are the judge's closed-ticket surface). Each is checked
@@ -257,7 +266,7 @@ def _binding(fn: Any, names: Any) -> dict[str, Any]:
 
 def _registry() -> ModuleVerbRegistry:
     """The PRODUCTION registry under gather's own grant — the shipped surface O1/O5 are about."""
-    return ModuleVerbRegistry(read_roster(_ADAPTERS), GATHER_DEF.verb_grant)
+    return ModuleVerbRegistry(read_roster(_ADAPTERS), _shipped_gather_grant())
 
 
 def _granted(registry: VerbRegistry, system: str) -> dict[str, Any]:
@@ -307,7 +316,9 @@ def _agent(registry: VerbRegistry):
 def _deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return bind(GATHER_DEF, run_dir)
+    from defender.tests import _tenants1106 as T1106
+
+    return bind(T1106.playground_gather_def(), run_dir)
 
 
 def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
@@ -349,7 +360,7 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
     registry = _registry()
     seen_verbs = seen_params = seen_reserved = 0
 
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         calls = _parse(_ask(registry, system, tmp_path))
         assert calls, f"{system}: the answer published no verb at all"
         for (named_system, verb), params in calls.items():
@@ -391,10 +402,10 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
     # verbs declare had to be published for the loop above to have measured anything. (#900
     # counted 28 granted verbs / 44 declared params at design time; the numbers are read off
     # the registry so a new adapter verb is covered the day it lands.)
-    expected_verbs = sum(len(_granted(registry, s)) for s in _GRANT_SYSTEMS)
+    expected_verbs = sum(len(_granted(registry, s)) for s in _grant_systems())
     expected_params = sum(
         len(model_facing_params(fn))
-        for s in _GRANT_SYSTEMS for fn in _granted(registry, s).values()
+        for s in _grant_systems() for fn in _granted(registry, s).values()
     )
     assert (seen_verbs, seen_params) == (expected_verbs, expected_params)
 
@@ -419,7 +430,7 @@ def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(
     registry = _registry()
     checked = 0
 
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         for (_, verb), params in _parse(_ask(registry, system, tmp_path)).items():
             fn = registry.decide(system, verb).fn
             full = _binding(fn, params)
@@ -437,7 +448,7 @@ def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(
             )
             checked += 1
 
-    assert checked == sum(len(_granted(registry, s)) for s in _GRANT_SYSTEMS)
+    assert checked == sum(len(_granted(registry, s)) for s in _grant_systems())
 
 
 def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
@@ -457,7 +468,7 @@ def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
     registry = _registry()
     saw_default_value = 0
 
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         for (_, verb), params in _parse(_ask(registry, system, tmp_path)).items():
             fn = registry.decide(system, verb).fn
             declared = declared_params(fn)
@@ -511,7 +522,7 @@ def test_o3_positive_control_a_resolvable_annotation_is_published_by_its_python_
     registry = _registry()
     checked = 0
 
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         for (_, verb), params in _parse(_ask(registry, system, tmp_path)).items():
             hints = _resolved_hints(registry.decide(system, verb).fn)
             for p, descriptor in params.items():
@@ -531,7 +542,7 @@ def test_o3_positive_control_a_resolvable_annotation_is_published_by_its_python_
     # changed correctly.
     expected = sum(
         len(model_facing_params(fn))
-        for s in _GRANT_SYSTEMS for fn in _granted(registry, s).values()
+        for s in _grant_systems() for fn in _granted(registry, s).values()
     )
     assert checked == expected, f"only {checked} typed params were checked, expected {expected}"
 
@@ -548,7 +559,7 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
     registry = _registry()
     checked = 0
 
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         for (_, verb), params in _parse(_ask(registry, system, tmp_path)).items():
             fn = registry.decide(system, verb).fn
             full = _binding(fn, params)
@@ -572,7 +583,7 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
     # (no wrong-typed sample exists for it) is legitimately skipped.
     reachable = sum(
         len(model_facing_params(fn))
-        for s in _GRANT_SYSTEMS for fn in _granted(registry, s).values()
+        for s in _grant_systems() for fn in _granted(registry, s).values()
     )
     assert checked >= reachable - 2, f"only {checked} type claims were checked of {reachable}"
 
@@ -666,7 +677,7 @@ def test_o5_the_published_set_is_exactly_what_decide_grants(tmp_path):
     second list that can drift from it: `decide` is where DENIED and UNDECLARED are separated
     and where the grant/declaration class disagreement raises."""
     registry = _registry()
-    for system in _GRANT_SYSTEMS:
+    for system in _grant_systems():
         published = {v for _, v in _parse(_ask(registry, system, tmp_path))}
         assert published == set(_granted(registry, system)), f"{system}: {sorted(published)}"
 

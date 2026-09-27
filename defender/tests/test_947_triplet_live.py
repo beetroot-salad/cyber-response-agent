@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
 pytestmark = pytest.mark.live
@@ -38,7 +39,10 @@ INJECT = f"{VIEW}.inject"
 @pytest.fixture
 def cluster():
     """A reachable playground, or a skip that names why — never a fake standing in for one."""
-    door = T.mod("learning.branch.staging").write_door_from_env()
+    # #1106: the door reads the elastic config from the run's tenant settings folder, carried on
+    # the ctx — the committed playground tenant's for the live playground.
+    ctx = T1106.verb_context(T.DEFENDER, T.DEFENDER, {})
+    door = T.mod("learning.branch.staging").write_door_from_env(ctx)
     if door is None:
         pytest.skip("no Elasticsearch cluster is reachable; set the playground's write door")
     return door

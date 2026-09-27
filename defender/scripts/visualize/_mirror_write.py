@@ -44,5 +44,5 @@ def write_page(dest: Path, data: bytes) -> None:
         raise
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # lint-log-setup: ok — a stdlib-only child that imports nothing from `defender` by design (#1084 D5)
     write_page(Path(sys.argv[1]), sys.stdin.buffer.read())

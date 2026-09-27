@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, replace
@@ -45,15 +46,12 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
-from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
 from ._spec import (
     ALERT_ID_FIELD,
     BUILDING_BLOCK_FIELD,
-    CORRELATION_GRANT,
     CORRELATION_REQUEST_LIMIT,
-    CORRELATION_SYSTEM,
     ELIDED,
     GROUP_ID_FIELD,
     HARNESS_PROVENANCE,
@@ -115,6 +113,8 @@ from ._items import (
     dispatch_correlation,
 )
 
+_logger = logging.getLogger(__name__)
+
 
 def prepare_correlation_lead(
     run_dir: Path, alert: dict, ancestor_block: str, status: str,
@@ -173,7 +173,7 @@ def _render_section(body: str) -> str:
 
 def render_orient_section(
     result: LeadZeroResult, run_dir: Path | None = None,
-    *, correlation_system: str | None = CORRELATION_SYSTEM,
+    *, correlation_system: str | None, grant_home: str,
 ) -> str:
     """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
     reuse) followed by item 1's whole untrusted frame, unmodified.
@@ -207,7 +207,11 @@ def render_orient_section(
     it — a written withholding (`roles:` without the holder) and a table that never named the
     holder at all are the distinction #995 exists to keep, and `correlation_system` alone
     cannot tell them apart, so it says what is observable and points at the file. The
-    parameter mirrors `prepare_correlation_lead`'s, for the same reason."""
+    parameter mirrors `prepare_correlation_lead`'s, for the same reason, and has no default:
+    it is the RUN's value (`RunGrants.correlation_system`, #1106), and a process-level default
+    would be some other tenant's answer. `grant_home` is the run's table as the model is told of
+    it (`RunTenant.table_pointer` — the tenant and the file, never a host path), named in that
+    line."""
     heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -222,7 +226,7 @@ def render_orient_section(
     if correlation_system is None:
         heading += (
             f". NOTE: {L3} was NOT dispatched on this run — the verb-disposition table "
-            f"({DISPOSITIONS_REL}) grants the correlation lead no query verb (withheld, or "
+            f"({grant_home}) grants the correlation lead no query verb (withheld, or "
             "never decided for it), so no correlation was run and none is coming"
         )
     return heading + ")\n\n" + result.text
@@ -255,7 +259,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     try:
         companion, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
-        print(f"[lead_zero] could not check whether {lead_id} is declared: {e!r}")
+        _logger.warning(f"could not check whether {lead_id} is declared: {e!r}")
         return True
     return any(
         f.get("id") == lead_id and f.get("name")
@@ -267,7 +271,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
 
 def resolve_lead_zero(
     *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
-    limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
+    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, settings_dir: Path,
 ) -> LeadZeroResult:
     run_dir = Path(run_dir)
     defender_dir = Path(defender_dir)
@@ -306,6 +310,7 @@ def resolve_lead_zero(
             return await _resolve_item1(
                 run_dir=run_dir, defender_dir=defender_dir, run_id=resolved_run_id,
                 alert=alert, capture=capture, env=env, limits=limits,
+                settings_dir=settings_dir,
             )
         except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
                 KeyboardInterrupt, GeneratorExit):
@@ -329,13 +334,10 @@ __all__ = [
     "BUILDING_BLOCK_FIELD",
     "BudgetKill",
     "CLAIMED",
-    "CORRELATION_GRANT",
     "CORRELATION_REQUEST_LIMIT",
-    "CORRELATION_SYSTEM",
     "CorrelationDispatch",
     "CorrelationDispatchError",
     "DEFAULT_LIMITS",
-    "DISPOSITIONS_REL",
     "ELIDED",
     "GROUP_ID_FIELD",
     "GrantError",

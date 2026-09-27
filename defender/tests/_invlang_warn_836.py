@@ -235,6 +235,7 @@ def build_main_agent(model_fn: Any, *, review_stages: Any = None) -> Any:
             DEFENDER, logger,
             make_model=lambda name, effort: BuiltModel(FunctionModel(model_fn), None),
             review_stages=stages, bounds=challenge_gate.default_bounds(), catalog=None,
+            gather_grant=driver.GATHER_DEF.verb_grant,
         )
 
 

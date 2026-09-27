@@ -325,6 +325,10 @@ class SpecTail:
         self.record_calls: list[dict[str, Any]] = []
         #: Every `Run` handle the render step was handed, in order (#1110).
         self.visualized: list[Any] = []
+        #: The settings folder each ticket leg was handed (#1106: the writer no longer finds
+        #: its mapping and store config itself — `run.py` hands it the run's tenant folder).
+        #: Kept apart from `record_calls` so that list stays the exit-class record it was.
+        self.ticket_settings: list[Any] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
@@ -345,10 +349,12 @@ class SpecTail:
         self.visualized.append(run)
         self._note("visualize", run.run_dir)
 
-    def open_case_ticket(self, run_dir: Path) -> None:
+    def open_case_ticket(self, run_dir: Path, *, settings_dir: Any = None) -> None:
+        self.ticket_settings.append(settings_dir)
         self._note("open_case_ticket", run_dir)
 
     def record_case_ticket(self, run_dir: Path, **kw: Any) -> None:
+        self.ticket_settings.append(kw.pop("settings_dir", None))
         # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
         # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
         # branching (which `test_1047_ticket_lane.py` drives against the real

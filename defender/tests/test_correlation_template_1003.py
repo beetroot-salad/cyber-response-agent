@@ -37,7 +37,8 @@ THE NAMES this suite pins (the implementation is written against them):
     — `CorrelationDispatch`, `CorrelationDispatchError`, `resolve_correlation_dispatch`.
   * `defender/runtime/driver/__init__.py` — `_correlation_dispatch_at_run_start`, the frame
     that reads the run's config and catalog and hands the result to the dispatch.
-  * `defender/knowledge/environment/lead-zero.yaml` — one key, `correlation_template:`.
+  * `defender/knowledge/environment/lead-zero.yaml` — one key, `correlation_template:`
+    (since #1106: `knowledge/tenants/<id>/settings/lead-zero.yaml`).
 """
 from __future__ import annotations
 
@@ -51,6 +52,7 @@ from defender._corpus import iter_query_templates, read_query_template, section_
 from defender._paths import PATHS
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests._dispositions995 import grant_for, load_dispositions, write_table
+from defender.tests import _tenants1106 as T1106
 
 DEFENDER = PATHS.defender_dir
 SHIPPED_TEMPLATE = DEFENDER / "skills" / "gather" / "queries" / "elastic" / "correlate-alerts-by-entity.md"
@@ -74,7 +76,7 @@ def _rows(tmp_path: Path, rows: dict) -> tuple:
     """A table holding exactly `rows`, loaded through the REAL loader (so its three narrowing
     rules have already passed — the tables here are all ones the loader stands behind)."""
     return load_dispositions(write_table(
-        tmp_path / "defender" / "knowledge" / "environment" / "verb-grants.yaml", rows,
+        tmp_path / "settings" / "verb-grants.yaml", rows,
     ))
 
 
@@ -151,7 +153,7 @@ class _NeverWalked:
 
 
 def _config(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "defender" / "knowledge" / "environment" / "lead-zero.yaml"
+    path = tmp_path / "settings" / "lead-zero.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
@@ -170,29 +172,35 @@ def _pair(system: str, verb: str) -> str:
 def test_the_shipped_config_names_the_template_and_the_run_start_frame_reads_it():
     """Conservation and wiring in one: the shipped `lead-zero.yaml` exists at the path the
     module derives, names exactly the id `_spec.py` used to spell, and the RUN-START frame
-    over this checkout (`driver._correlation_dispatch_at_run_start`) resolves that file's
-    value on the shipped table to a dispatch on `elastic` carrying the id and the table's
-    projection. Serves O1: the id is authored config, and the dispatch is its projection —
+    over this checkout (`run_tenant.resolve_run_tenant`, whose value the driver's
+    `_correlation_dispatch_at_run_start` carries) resolves that file's value on the shipped
+    table to a dispatch on `elastic` carrying the id and the table's projection. Serves O1: the id is authored config, and the dispatch is its projection —
     there is no import-time constant for it to be read from."""
     from defender.runtime import lead_zero
     from defender.runtime.driver import _correlation_dispatch_at_run_start
     from defender.runtime.lead_zero_config import (
-        LEAD_ZERO_CONFIG_REL,
         lead_zero_config_path,
         load_correlation_template,
     )
+    from defender.runtime.run_tenant import resolve_run_tenant
 
-    path = lead_zero_config_path(DEFENDER)
-    assert path == DEFENDER / "knowledge" / "environment" / "lead-zero.yaml"
+    # #1106: the config lives in the RUN's tenant settings folder (the committed playground
+    # tenant at the repo root), and the frame reads it from the tenant and grants it is handed.
+    settings = T1106.PLAYGROUND_SETTINGS
+    path = lead_zero_config_path(settings)
+    assert path == settings / "lead-zero.yaml"
     assert path.is_file(), f"the shipped config is missing at {path}"
-    assert path.relative_to(PATHS.repo_root).as_posix() == LEAD_ZERO_CONFIG_REL
-    assert LEAD_ZERO_CONFIG_REL == "defender/knowledge/environment/lead-zero.yaml"
+    assert path.relative_to(PATHS.repo_root).as_posix() == \
+        "knowledge/tenants/playground/settings/lead-zero.yaml"
 
     assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
+    grants = T1106.playground_grants()
+    run_tenant = resolve_run_tenant(
+        T1106.playground_tenant(), defender_dir=DEFENDER, dispatches_lead_zero=True)
     assert _correlation_dispatch_at_run_start(
-        DEFENDER, resume=None, lead_zero_verbs=object(),
+        tenant=run_tenant, resume=None, lead_zero_verbs=object(),
     ) == lead_zero.CorrelationDispatch(
-        template_id=SHIPPED_TEMPLATE_ID, system="elastic", grant=lead_zero.CORRELATION_GRANT,
+        template_id=SHIPPED_TEMPLATE_ID, system="elastic", grant=grants.correlation,
     )
     assert not hasattr(lead_zero, "CORRELATION_TEMPLATE"), (
         "the template id is a per-tree fact read at run start; a process-wide constant for "
@@ -227,7 +235,7 @@ def test_a_missing_config_is_refused_naming_the_path(tmp_path):
     typed refusal naming where the file was looked for, the way an absent table does."""
     from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
-    missing = tmp_path / "defender" / "knowledge" / "environment" / "lead-zero.yaml"
+    missing = tmp_path / "settings" / "lead-zero.yaml"
     with pytest.raises(LeadZeroConfigError) as caught:
         load_correlation_template(missing)
     assert str(missing) in str(caught.value), str(caught.value)
@@ -311,8 +319,9 @@ def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
 
 
 def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_handed(tmp_path):
-    """`driver._correlation_dispatch_at_run_start(defender_dir, …)` joins THAT tree's config
-    with THAT tree's catalog (and the process's table, which every role reads process-wide).
+    """`run_tenant.resolve_run_tenant(tenant, defender_dir=…)` joins THAT run's config (its
+    tenant's settings folder, #1106) with THAT tree's catalog and the run's own grants, and the
+    driver's `_correlation_dispatch_at_run_start` carries the value it resolved.
     A tree whose catalog holds only `elastic.other-alerts` and whose config names it resolves
     to a dispatch on that id — a frame reading the checkout's config would look for the
     shipped id in this catalog and refuse. Negative control on the same tree: the config
@@ -320,25 +329,43 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
     raised for a run that will not dispatch the lead (a resume, no registry), which reads
     neither file."""
     from defender.runtime.driver import _correlation_dispatch_at_run_start
-    from defender.runtime.lead_zero import CORRELATION_GRANT, CorrelationDispatch
+    from defender.runtime.lead_zero import CorrelationDispatch
     from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
+    from defender.runtime.run_tenant import resolve_run_tenant
 
     tree = tmp_path / "repo" / "defender"
     _plant(tree / "skills" / "gather" / "queries", "elastic", "other-alerts", verb="alerts")
-    config = _config(tmp_path / "repo", "correlation_template: elastic.other-alerts\n")
-    assert config == lead_zero_config_path(tree)
+    # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts).
+    T1106.plant_tenant(tmp_path / "tenants", "acme",
+                       lead_zero="correlation_template: elastic.other-alerts\n")
+    tenant = T1106.tenants().tenant_dir(tmp_path / "tenants", "acme")
+    grants = T1106.run_grants(tenant.settings)
+    config = lead_zero_config_path(tenant.settings)
+    assert config == tenant.settings / "lead-zero.yaml"
+    assert config.is_file()
 
-    will_dispatch = {"resume": None, "lead_zero_verbs": object()}
-    assert _correlation_dispatch_at_run_start(tree, **will_dispatch) == CorrelationDispatch(
-        template_id="elastic.other-alerts", system="elastic", grant=CORRELATION_GRANT,
+    dispatching = resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=True)
+    assert dispatching.correlation == CorrelationDispatch(
+        template_id="elastic.other-alerts", system="elastic", grant=grants.correlation,
     )
+    assert _correlation_dispatch_at_run_start(
+        tenant=dispatching, resume=None, lead_zero_verbs=object()) == dispatching.correlation
 
     config.unlink()
     with pytest.raises(LeadZeroConfigError) as caught:
-        _correlation_dispatch_at_run_start(tree, **will_dispatch)
+        resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=True)
     assert str(config) in str(caught.value), str(caught.value)
-    assert _correlation_dispatch_at_run_start(tree, resume=object(), lead_zero_verbs=object()) is None
-    assert _correlation_dispatch_at_run_start(tree, resume=None, lead_zero_verbs=None) is None
+    # A run that will not dispatch the lead reads neither file, and the driver keys on that.
+    resumed = resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=False)
+    assert resumed.correlation is None
+    assert _correlation_dispatch_at_run_start(
+        tenant=resumed, resume=object(), lead_zero_verbs=object()) is None
+    assert _correlation_dispatch_at_run_start(
+        tenant=resumed, resume=None, lead_zero_verbs=None) is None
+    # ...and a tenant resolved as not dispatching, handed to a run that WOULD, is refused
+    # rather than dispatched unchecked.
+    with pytest.raises(TypeError):
+        _correlation_dispatch_at_run_start(tenant=resumed, resume=None, lead_zero_verbs=object())
 
 
 # =========================================================================================
@@ -418,7 +445,6 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
         render_orient_section,
         resolve_correlation_dispatch,
     )
-    from defender.runtime.verb_dispositions import DISPOSITIONS_REL
 
     withheld = _grant(tmp_path, {
         ("elastic", "alerts"): GATHER_ONLY, ("elastic", "health-check"): BOTH,
@@ -436,10 +462,12 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
     with pytest.raises(AssertionError, match="WITHHELD lead"):
         resolve_correlation_dispatch(SHIPPED_TEMPLATE_ID, _NeverWalked(), granted)
 
+    # #1106 M4: the note names the run's resolved table — here the one `_grant` planted.
+    table = str(tmp_path / "settings" / "verb-grants.yaml")
     orient = render_orient_section(LeadZeroResult(text="", status="resolved"), None,
-                                   correlation_system=dispatch.system)
+                                   correlation_system=dispatch.system, grant_home=table)
     assert L3 in orient, orient
-    assert DISPOSITIONS_REL in orient, orient
+    assert table in orient, orient
 
 
 # =========================================================================================

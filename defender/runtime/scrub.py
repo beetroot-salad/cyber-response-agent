@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
-import sys
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass  # stdlib, deliberately — see the note below
 from pathlib import Path
 
 from defender._io import write_guarded
 from defender._run_paths import RunPaths
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -137,7 +139,7 @@ def _write_verdict(tree: Path, doc: dict) -> None:
     try:
         write_guarded(verdict_path(tree), json.dumps(doc))
     except OSError as e:
-        print(f"[scrub] could not write the scan verdict for {tree}: {e!r}", file=sys.stderr)
+        _logger.error(f"could not write the scan verdict for {tree}: {e!r}")
 
 
 def write_did_not_run(tree: Path, reason: str) -> None:

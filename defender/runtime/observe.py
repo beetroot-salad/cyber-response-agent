@@ -4,9 +4,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import math
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,8 @@ from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
+
+_logger = logging.getLogger(__name__)
 
 WIRE_LOG_ENSURE_ASCII = True
 
@@ -239,16 +241,15 @@ def _denial_logger_or_null(path: Path) -> RequestLogger:
     opportunity to plant a symlink at its name. `open_guarded` refuses that plant, and letting
     the refusal escape would hand the box a denial-of-service lever costing one planted entry.
     The refusal being audited has ALREADY taken effect, so the run survives and the model
-    still sees its denial; only the RECORD is lost, announced on stderr, with the plant left
+    still sees its denial; only the RECORD is lost, announced in the log, with the plant left
     on disk for the reap scan to report as taint. `log_policy_denial`'s own write stays
     non-swallowing (§7 R2): only a refused OPEN is a lever the box can pull at will."""
     try:
         return RequestLogger(path)
     except OSError as e:
-        print(
-            f"[observe] the policy-denial log at {path} could not be opened ({e!r}); denials "
+        _logger.error(
+            f"the policy-denial log at {path} could not be opened ({e!r}); denials "
             f"for this run will be REFUSED AS NORMAL but not recorded",
-            file=sys.stderr,
         )
         return RequestLogger(Path(os.devnull))
 
@@ -259,7 +260,7 @@ def denial_logger(run_dir: Path) -> RequestLogger:
     logger = _DENIAL_LOGGERS.get(key)
     if logger is None:
         # The null fallback is cached like any other: without that, every later denial re-probes
-        # the planted name and re-prints, turning one plant into per-call stderr noise.
+        # the planted name and re-logs, turning one plant into per-call log noise.
         logger = _denial_logger_or_null(path)
         _DENIAL_LOGGERS[key] = logger
     return logger

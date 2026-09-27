@@ -11,6 +11,7 @@ Split out of `test_systemic_stage_frames_680.py` by #720; the shared harness is
 """
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 
@@ -99,7 +100,7 @@ def test_curator_runs_successive_batches_via_its_non_bindable_lifetime(tmp_path)
                 repo_root=repo,
             ),
             corpus_dir=corpus,
-            log=lambda _m: None,
+            log=logging.getLogger("defender.test"),
             source_key=lambda *_a, **_k: object(),
             run_author=run_author,
         )

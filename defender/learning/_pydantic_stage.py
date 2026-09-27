@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from typing import Any, ClassVar, Protocol
 
@@ -11,7 +12,6 @@ from defender.learning.core.config import (
     StageAbort,
     StageContext,
     StageWiring,
-    _log,
 )
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
@@ -20,6 +20,8 @@ from defender.runtime.driver import MakeModel, build_agent_core
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
+
+_logger = logging.getLogger(__name__)
 
 
 class RoleDeps(Protocol):
@@ -116,7 +118,7 @@ def run_stage(
     logger = observe.RequestLogger(
         observe.stage_trace_path(ctx.learning_run_dir, wiring.trace_name)
     )
-    _log(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
+    _logger.info(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
     try:
         try:
             agent = build_stage_agent(

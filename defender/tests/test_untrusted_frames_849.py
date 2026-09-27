@@ -25,7 +25,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.box import BoxResult  # noqa: E402
@@ -39,6 +39,7 @@ from defender.tests._frames680 import (
     assert_one_frame,
     _learning_read_deps,
 )
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 CAPTURE_CAP = tools._capture_view_cap()
 AUTHORED_CAP = tools._read_char_cap()
@@ -184,7 +185,7 @@ def test_the_cat_lane_caps_a_captured_payload_at_the_capture_ceiling(tmp_path):
     later read cannot recover what the capture view withheld, and `cat` — the lane gather's own
     prompt recommends — returned the whole file."""
     body = "x" * (CAPTURE_CAP + 5000)
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=body.encode())
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
     out = _tool_bash(deps, f"cat {payload}")
@@ -200,7 +201,7 @@ def test_the_two_lanes_return_the_same_head_of_the_same_payload(tmp_path):
     The ceiling is keyed on the DATA — `_cap_for` over the operands the command opens — the way
     #776 keyed the untrusted wrap."""
     body = "y" * (CAPTURE_CAP + 5000)
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=body.encode())
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
     through_cat = _stdout_of(_tool_bash(deps, f"cat {payload}"))
@@ -213,7 +214,7 @@ def test_a_reduced_return_under_the_ceiling_is_verbatim(tmp_path):
     """The control against a cap that just truncates: the reduce step the prompt asks for
     (`cat <payload> | defender-sql`) returns a small result, and it comes back whole and
     unannotated. A bound that fires on the normal path is a broken tool."""
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=b"count\n3\n")
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=b"count\n3\n")
     payload = _payload(run, "z" * (CAPTURE_CAP + 5000))
 
     out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT count(*) FROM data'")
@@ -226,7 +227,7 @@ def test_a_command_that_opens_no_file_is_bounded_at_the_authored_cap(tmp_path):
     """A shim invocation names no path, so no file chooses its ceiling — but a return with no
     ceiling at all is what the finding was about, so it gets the authored cap and a hint that
     does not point at a `cat` it cannot run."""
-    deps, _ = _scene(tmp_path, GATHER_DEF, stdout=b"w" * (AUTHORED_CAP + 100))
+    deps, _ = _scene(tmp_path, T1106.playground_gather_def(), stdout=b"w" * (AUTHORED_CAP + 100))
 
     out = _tool_bash(deps, "defender-sql 'SELECT 1'")
 
@@ -239,7 +240,7 @@ def test_the_ceiling_names_the_operand_that_set_it(tmp_path):
     ceiling: the smallest cap wins, and the notice names the file that chose it so the caller
     can reduce the right one."""
     body = "v" * (CAPTURE_CAP + 5000)
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=body.encode())
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
     summary = run / "gather_summaries" / "l-001.md"
     summary.parent.mkdir(parents=True, exist_ok=True)
@@ -257,7 +258,7 @@ def test_an_already_reduced_overflow_is_not_told_to_re_run_its_own_pipe(tmp_path
     reducer computed from it — so the reduce lane can overflow, and the generic hint's answer
     ("reduce it in a pipe: `cat <payload> | defender-sql …`") is the command that just
     overflowed. A hint that names the failing command back is an instruction loop."""
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=b"agg\n" * (CAPTURE_CAP // 2))
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=b"agg\n" * (CAPTURE_CAP // 2))
     payload = _payload(run, "q" * 10)
 
     out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT user FROM data GROUP BY 1'")
@@ -283,7 +284,7 @@ def test_stderr_is_held_to_the_same_ceiling_as_stdout(tmp_path):
     streams. `defender-sql` writes payload-derived text to stderr — duckdb's parse error quotes
     the offending JSON, `_shape_hint` names the payload's own columns — so a bound that covered
     stdout alone was a bound the data could step over."""
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=b"")
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=b"")
     payload = _payload(run, "p" * 10)
     deps.box.result = BoxResult(1, b"", b"E" * (CAPTURE_CAP + 5000))
 
@@ -299,7 +300,7 @@ def test_the_cap_lands_inside_the_frame(tmp_path):
     now pinned for this one: cap FIRST, then wrap, so the head and its notice sit inside the
     delimiters and the closing tag is never the thing that got truncated away."""
     body = "u" * (CAPTURE_CAP + 5000)
-    deps, run = _scene(tmp_path, GATHER_DEF, stdout=body.encode())
+    deps, run = _scene(tmp_path, T1106.playground_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
     out = _tool_bash(deps, f"cat {payload}")

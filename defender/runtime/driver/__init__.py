@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -32,7 +33,6 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
-from defender._corpus import iter_query_templates
 from defender._io import write_guarded
 from defender import _git
 from defender._paths import DefenderPaths, adapters_under
@@ -63,6 +63,7 @@ from ..tools import (
     register_tools,
 )
 from ..verb_grant import VerbGrant
+from ..verb_dispositions import RunGrants
 from ..verbs import ModuleVerbRegistry, RosterRead, read_roster
 from defender.skills.invlang.validate import hold_capabilities
 from defender.hooks.inject_system_skill_description import descriptor_catalog
@@ -71,6 +72,7 @@ from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
+from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,
     DEFAULT_GATHER_MODEL,
@@ -94,7 +96,6 @@ from ._budget import (
 )
 from ._build import (
     GATHER_DEF,
-    GATHER_PAIRS,
     MAIN_DEF,
     MakeModel,
     _CORPUS_DIRS,
@@ -104,7 +105,6 @@ from ._build import (
     _gather_bash_shapes,
     _gather_extra_capabilities,
     _gather_instructions,
-    _gather_verb_grant,
     _main_bash_shapes,
     _main_extra_capabilities,
     _main_write_shape,
@@ -113,6 +113,7 @@ from ._build import (
     _summary_pointers,
     build_agent,
     build_agent_core,
+    gather_def_for,
     build_gather_agent,
     gather_model,
     resolve_main_model,
@@ -132,17 +133,19 @@ from defender.hooks.budget_enforcer import (
     update_budget_locked,
 )
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from ..lead_zero import CorrelationDispatch
 
 
 def _log_node(node: Any) -> None:
     if Agent.is_model_request_node(node):
-        print("[run.py] · model request", file=sys.stderr)
+        _logger.info("· model request")
     elif Agent.is_call_tools_node(node):
-        print("[run.py] · tool calls", file=sys.stderr)
+        _logger.info("· tool calls")
     elif Agent.is_end_node(node):
-        print("[run.py] · end", file=sys.stderr)
+        _logger.info("· end")
 
 
 StoreFactory = Callable[[str, Path], Any]
@@ -215,12 +218,12 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
                 if len(live) > confirmed_len:
                     selection.ingest(store, session_id, live, agent_id="main")
         except Exception as e:  # noqa: BLE001 — the run-end flush is best-effort
-            print(f"[run.py] run-end flush skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"run-end flush skipped: {e!r}")
     if truncated_by is not None:
         try:
             store.set_truncated_by(session_id, truncated_by)
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
-            print(f"[run.py] truncated_by write skipped: {e!r}", file=sys.stderr)
+            _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
 async def _reap_correlation_task(task: Any) -> None:
@@ -239,8 +242,7 @@ async def _reap_correlation_task(task: Any) -> None:
     try:
         await task
     except Exception as e:  # noqa: BLE001 — this cleanup step must not itself break the run
-        print(f"[run.py] correlation task reaped with an unretrieved fault: {e!r}",
-              file=sys.stderr)
+        _logger.warning(f"correlation task reaped with an unretrieved fault: {e!r}")
     except asyncio.CancelledError:
         pass
 
@@ -277,8 +279,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
             async for node in run:
                 _log_node(node)
     except UsageLimitExceeded as e:
-        print(f"[run.py] request limit reached ({e}); writing partial trace",
-              file=sys.stderr)
+        _logger.warning(f"request limit reached ({e}); writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
         exit_reason = "UsageLimitExceeded"
     except UnexpectedModelBehavior as e:
@@ -286,15 +287,15 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # report.md) exhausts the framework's shared tool-retry budget (`DEFAULT_TOOL_RETRIES`)
         # and pydantic_ai raises this; no other handler here catches it, so uncaught it takes
         # the process down.
-        print(f"[run.py] {e}; writing partial trace (retry budget exhausted)", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace (retry budget exhausted)")
         truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
     except RunAborted as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_ABORTED
         exit_reason = "RunAborted"
     except BudgetKill as e:
-        print(f"[run.py] {e}; writing partial trace", file=sys.stderr)
+        _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
     except (sqlite3.Error, session_store.StoreError) as e:
@@ -302,7 +303,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         # CyclicParentChain / UnknownSchemaVersion all reach here from inside the
         # ProcessHistory hook, and any one escaping takes the whole run.py process down
         # instead of writing the partial trace this handler exists for.
-        print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
+        _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
     finally:
@@ -324,8 +325,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         if written:
             exit_reason = await _close_a_run_cut_short(deps, bounds, exit_reason)
         elif not end.closed_before_cut:
-            print("[run.py] the run-end record could not be written; not forcing a close",
-                  file=sys.stderr)
+            _logger.error("the run-end record could not be written; not forcing a close")
             exit_reason = f"{exit_reason}+RunEndRecordFailed"
     return run, end, exit_reason
 
@@ -341,7 +341,7 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
         run_end.write_sidecar(deps.run_dir, end)
         return True
     except OSError as e:
-        print(f"[run.py] run-end record write skipped: {e!r}", file=sys.stderr)
+        _logger.warning(f"run-end record write skipped: {e!r}")
         return False
 
 
@@ -389,10 +389,9 @@ async def _close_a_run_cut_short(
     would end the run with no report.md for the wrong reason. The run's own bounds are
     threaded so this limb cannot act on a different value from the rest of the run."""
     if challenge_gate.ReviewState.of(deps).closed:
-        print("[run.py] the investigation already closed; keeping its disposition",
-              file=sys.stderr)
+        _logger.info("the investigation already closed; keeping its disposition")
         return exit_reason
-    print("[run.py] forcing an unresolved close", file=sys.stderr)
+    _logger.warning("forcing an unresolved close")
     try:
         from ..close_tool import _close_investigation_async
 
@@ -400,12 +399,14 @@ async def _close_a_run_cut_short(
             deps, HOST_ONLY_DISPOSITION, stages=None, bounds=bounds, forced=True,
         )
     except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
-        print(f"[run.py] the forced close also failed ({close_err!r})", file=sys.stderr)
+        _logger.error(f"the forced close also failed ({close_err!r})")
         return "ForcedCloseFailed"
     return exit_reason
 
 
-def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | None, str | None]:
+def _dispatch_catalogs(
+    defender_dir: Path, roster: RosterRead, grants: RunGrants,
+) -> tuple[str | None, str | None]:
     """The descriptor index each dispatch prompt opens with — MAIN's, narrowed to the gather
     role's committed grant, and lead-0's, narrowed to the correlation grant — built HERE,
     once, at run start, over the roster the run read, and handed down to the two dispatch
@@ -415,24 +416,21 @@ def _dispatch_catalogs(defender_dir: Path, roster: RosterRead) -> tuple[str | No
     model is mid-run on, and not inside item 3's task, which swallows its own failures into
     "injection skipped".
 
-    The ROLE's committed grant, never the injected `verbs=` registry's: a registry scoped
-    narrower than GATHER_DEF's real grant must not narrow what the catalog advertises (the
+    The RUN's grants (#1106), never the injected `verbs=` registry's: a registry scoped
+    narrower than the run's gather grant must not narrow what the catalog advertises (the
     same decoupling `build_agent` states at the dispatch tool's registration)."""
-    from .. import lead_zero as lead_zero_mod
-
     skills = defender_dir / "skills"
     return (
-        descriptor_catalog(skills, roster, GATHER_DEF.verb_grant),
-        descriptor_catalog(skills, roster, lead_zero_mod.CORRELATION_GRANT),
+        descriptor_catalog(skills, roster, grants.gather),
+        descriptor_catalog(skills, roster, grants.correlation),
     )
 
 
 def _correlation_dispatch_at_run_start(
-    defender_dir: Path, *, resume: Any, lead_zero_verbs: Any,
+    *, tenant: RunTenant, resume: Any, lead_zero_verbs: Any,
 ) -> CorrelationDispatch | None:
-    """Item 3's dispatch identity, resolved FIRST — before the budget opens, the logger opens
-    or any model exists — for a run that WILL dispatch the lead (#1003), and `None` for one
-    that will not.
+    """Item 3's dispatch identity for a run that WILL dispatch the lead (#1003), and `None` for
+    one that will not.
 
     WHETHER this run dispatches item 3 at all is decided here, once, on the two facts the
     dispatch frame itself keys on: a resume skips turn-0 work, and a scenario with no
@@ -441,38 +439,24 @@ def _correlation_dispatch_at_run_start(
     have consulted — a branch episode resuming every sibling world after an operator demoted
     the template — and the dispatch cannot run unchecked.
 
-    Three inputs, each from where it is authored: the id from the run's own `lead-zero.yaml`
-    (`load_correlation_template`, read here and nowhere earlier — there is no process-cached
-    copy to fall behind the tree), the catalog of the run's own tree (walked, not linted,
-    because the operator who can author the mismatch never runs repo CI), and the table's
-    projection for the holder (`CORRELATION_GRANT`, process-level like every role's grant).
-    An unresolvable, misfiled, malformed or disagreeing template raises
-    `CorrelationDispatchError` out of `run_investigation`'s own frame, naming both sides, and
-    nothing downstream is spent; an unusable config raises `LeadZeroConfigError` naming the
-    file. A withheld lead (`system is None`) consults no template and degrades as before.
-
-    The value is CARRIED to `prepare_correlation_lead` and `dispatch_correlation` rather than
-    re-derived there: the system the lead is labelled with, dispatched on and cache-keyed by
-    is the one this frame checked the template against, by construction.
-
-    A sibling of `_adapters_at_run_start`, and the same shape: the one place a refusing read
-    of the tree happens is a frame named for it at the entry point, not a builder's side
-    effect."""
+    WHAT it dispatches on is not derived here: `run_tenant.resolve_run_tenant` resolved and
+    checked it before the box started (the run's tenant's `lead-zero.yaml` against the catalog
+    of the run's tree and the tenant's correlation grant), and it is CARRIED on the tenant — to
+    here, and from here to `prepare_correlation_lead` and `dispatch_correlation` — so the frame
+    that checked the template and the frames that dispatch on it hold one value, and the files
+    are read once. A tenant resolved as not dispatching the lead, handed to a run that would,
+    is a caller's bug, and raises rather than dispatching unchecked."""
     if resume is not None or lead_zero_verbs is None:
         return None
-    from .. import lead_zero as lead_zero_mod
-    from ..lead_zero_config import lead_zero_config_path, load_correlation_template
-    from ..tools_gather import _catalog_dir
-
-    return lead_zero_mod.resolve_correlation_dispatch(
-        load_correlation_template(lead_zero_config_path(defender_dir)),
-        iter_query_templates(_catalog_dir(defender_dir)),
-        lead_zero_mod.CORRELATION_GRANT,
-    )
+    if tenant.correlation is None:
+        raise TypeError(
+            "this run dispatches the lead-zero correlation lead, but its tenant was resolved "
+            "without it (`resolve_run_tenant(dispatches_lead_zero=False)`)")
+    return tenant.correlation
 
 
 def _adapters_at_run_start(
-    defender_dir: Path, roster: RosterRead | None, verbs: Any,
+    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any]:
     """Everything a run resolves from an adapters tree, resolved FIRST — before the budget
     opens, the logger opens, or any model exists — so an adapters tree this process cannot
@@ -495,7 +479,10 @@ def _adapters_at_run_start(
     close's price wrap and the prepare-time readers each re-filed the host's fault as the
     document's when the gate read lazily on first use."""
     roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
-    verbs = verbs if verbs is not None else ModuleVerbRegistry(roster, GATHER_DEF.verb_grant)  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    # The default registry is built over the RUN's gather grant (#1106) — there is no
+    # process-level one to fall back to.
+    verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
+        roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
     hold_capabilities(
         roster if Path(roster.root).resolve() == checkout.resolve() else read_roster(checkout)
@@ -532,7 +519,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_override: str | None = None,
     toolset: Any = None,
     resume: Any = None,
+    tenant: RunTenant,
 ) -> dict:
+    # `tenant` (#1106) is the run's own, resolved once at the entry point: its tenant folder
+    # (the settings every verb reads), the permissions projected from that tenant's table, and
+    # item 3's checked dispatch identity. Required — there is no process-level grant or
+    # settings folder to fall back to.
     model_name = resolve_main_model(model_name)
     # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
     # lead-0 acquire one via the MAIN-gather default resolved below. Captured before it.
@@ -541,11 +533,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs)
+    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
     correlation = _correlation_dispatch_at_run_start(
-        defender_dir, resume=resume, lead_zero_verbs=lead_zero_verbs,
+        tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster)
+    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
@@ -629,7 +621,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
         # process down instead of ending the run through the handled `truncated_by="store"`
         # exit. Not one model turn is driven.
-        print(f"[run.py] store setup failed ({e!r}); ending the run", file=sys.stderr)
+        _logger.error(f"store setup failed ({e!r}); ending the run")
         if store is not None:
             # `factory()` can succeed — a live connection, DDL already run — and a LATER
             # call in this same try (`write_case_pointer`, `new_session`) still fail;
@@ -637,8 +629,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             try:
                 store.close()
             except Exception as close_err:  # noqa: BLE001 — best-effort on an already-failing path
-                print(f"[run.py] store close after setup failure also failed "
-                      f"({close_err!r})", file=sys.stderr)
+                _logger.error(f"store close after setup failure also failed "
+                              f"({close_err!r})")
         logger.close()
         return _run_summary(
             output=None, model_name=model_name, requests=logger.n_requests,
@@ -649,6 +641,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
+        tenant=tenant,
     )
 
     # Item 3's async frame: scheduled here (after item 1 has resolved synchronously) and
@@ -680,17 +673,22 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
                 catalog=correlation_catalog, dispatch=correlation,
+                settings_dir=tenant.settings,
             ))
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
         correlation_task=correlation_task, toolset=toolset, catalog=catalog,
+        gather_grant=tenant.grants.gather,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
+        # The run's tenant folder rides on MAIN's deps so every gather lead it dispatches
+        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3.
+        settings_dir=tenant.settings,
     )
 
     t0 = time.time()
@@ -704,7 +702,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     try:
         observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        print(f"[run.py] write_trace failed ({e!r}); writing an empty trace", file=sys.stderr)
+        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
             write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
@@ -713,8 +711,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # trace could not be built" into an uncaught OSError that ends the run at its last
             # step, discarding the summary and every artifact already written. The trace is
             # observability; the run's result is not.
-            print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-                  f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)  # lint-run-records: ok — an operator diagnostic naming the missing record
+            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(
@@ -743,7 +741,7 @@ __all__ = [
     "DEFAULT_TOOL_RETRIES",
     "GATHER_AGENT_ID_PREFIX",
     "GATHER_DEF",
-    "GATHER_PAIRS",
+    "gather_def_for",
     "GATHER_REQUEST_LIMIT",
     "GatherDeps",
     "Hooks",
@@ -780,7 +778,6 @@ __all__ = [
     "_gather_bash_shapes",
     "_gather_extra_capabilities",
     "_gather_instructions",
-    "_gather_verb_grant",
     "_log_node",
     "_main_bash_shapes",
     "_main_extra_capabilities",
