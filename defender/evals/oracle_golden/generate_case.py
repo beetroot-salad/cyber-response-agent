@@ -13,7 +13,7 @@ case whose every lead investigates a host the activity never ran on.
 
   fire       playground-v2/attacks/runner.py run <scenario> --seed --user --target
   alert      the rule's own alert if one fired, else synthesised from the runner record
-  envelope   defender/run.py <alert.json> --run-id <slug> --no-learn
+  envelope   defender/run.py <alert.json> --tenant playground --run-id <slug> --no-learn
   story      story_from_run.py <meta.json> <story.md>
   assemble   RETIRED — see the refusal in `main`
   controls   controls.py cases/<id>
@@ -43,8 +43,9 @@ which is right for capturing an alert fixture and wrong for calibration: the ora
 answer is a signed diff over baseline, so with the generators off `+noise` cannot occur
 at all and `+event` is easier than production.
 
-Usage:
-  generate_case.py --scenario cross-tier-ssh-probe --target web-2 \\
+Usage (every run names its tenant, and there is no default — #1078; create one once with
+`python3 defender/scripts/tenant.py setup playground`):
+  generate_case.py --scenario cross-tier-ssh-probe --tenant playground --target web-2 \\
       --case-id case-010-... --split held-out --activity-family data-access/T1021.004
 """
 from __future__ import annotations

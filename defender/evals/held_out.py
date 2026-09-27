@@ -2,7 +2,7 @@
 """Primary-metric harness: score defender held-out runs against ground truth.
 
 Walks the FIXTURE set (``defender/fixtures/held-out/``), locates each fixture's run
-under the runs dir (``$DEFENDER_RUNS_BASE``, or the ``runs_dir`` argument) by run-id
+under the runs dir (``--tenant``'s ``<T>/runs``, or the ``runs_dir`` argument) by run-id
 convention, and reports defender disposition correctness.
 
 **Ground truth never leaves this repo's fixture dirs.** The eval owns the labels and
@@ -11,10 +11,12 @@ agent's own readable workspace. The direction matters: this walks fixtures and l
 for runs, not runs and looks for labels. That is what lets the run dir carry no
 provenance back to its fixture and no answer key.
 
-Launch the runs this scores with (see ``index_runs``)::
+Every run names its tenant, and there is no default (#1078): create one once with
+``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
+(see ``index_runs``)::
 
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
-        --run-id <slug> --no-learn
+        --tenant playground --run-id <slug> --no-learn
 
 ``--no-learn`` keeps a scored run out of the learning corpora. The second, independent net
 that refused held-out fixtures at the queue write left with the learn queue in #922.
@@ -25,8 +27,9 @@ in the closed enum, or a runtime crash that aborted the run) counts as
 **wrong** against the ground-truth class. Excluding failures would let
 regressions hide behind crashes.
 
-Usage:
-  python3 defender/evals/held_out.py [<runs_dir>]
+Usage (exactly one of the two — never both, never neither):
+  python3 defender/evals/held_out.py --tenant playground
+  python3 defender/evals/held_out.py <runs_dir>
 """
 from __future__ import annotations
 

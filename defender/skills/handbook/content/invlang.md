@@ -32,6 +32,9 @@ Closed catalogs (vertex `type`, edge `rel`, `class`/`attrs.kind` slots,
 `anchor_kind`) are **not** preloaded — look them up at author time. The CLI
 is also the corpus-retrieval surface:
 
+`$DEFENDER_RUNS_BASE` here is the derived, per-run value (`<T>/runs`, a tenant's own runs
+base) that `run_env`/`infra_env` export — never an operator-set knob.
+
 ```bash
 # Enums — what values a slot accepts (corpus_root positional but unread for enum)
 python3 -m defender.skills.invlang.cli "$DEFENDER_RUNS_BASE" enum               # slot names

@@ -184,15 +184,17 @@ def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
 
 def _accessor_names() -> frozenset[str]:
     """Every public accessor name on the path owners (`RunPaths`, `SessionPaths`,
-    `EpisodePaths`) — computed, not typed out, so it never goes stale as D1 grows the owners.
-    A new owner CLASS is still a line here, beside its entry in `_astlib._OWNER_CLASS_ORIGINS`."""
+    `EpisodePaths`, `TenantPaths`) — computed, not typed out, so it never goes stale as D1
+    grows the owners. A new owner CLASS is still a line here, beside its entry in
+    `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender._run_paths import RunPaths, SessionPaths  # noqa: PLC0415
+    from defender._tenant import TenantPaths  # noqa: PLC0415
 
     return frozenset(
-        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths))
+        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths), *dir(TenantPaths))
         if not n.startswith("_"))
 
 
@@ -362,7 +364,7 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     # Not record names: an id shape, a regex body, a read-grant shape, a metadata KEY on a
     # tool-return part, a refusal sentence, and the tenant vocabulary.
     "LEAD_ID_RE", "LEAD_ID_BODY", "GATHER_RAW_SHAPE", "GATE_METADATA_KEY",
-    "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED", "DEFAULT_TENANT_ID",
+    "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED",
     "TENANT_RECORD_NAME",
 })
 

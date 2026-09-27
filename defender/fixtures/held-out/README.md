@@ -104,14 +104,17 @@ rationale: |                # what makes this label the right call —
 
 ## Running the baseline
 
+Every run names its tenant, and there is no default (#1078) — see the repo `README.md` for
+the one-time tenant setup step.
+
 ```bash
 # Investigate every held-out alert through the runtime defender:
 for f in defender/fixtures/held-out/*/alert.json; do
-  python3 defender/run.py "$f"
+  python3 defender/run.py "$f" --tenant playground
 done
 
 # Score correctness against ground truth:
-python3 defender/evals/held_out.py /tmp/defender-runs
+python3 defender/evals/held_out.py --tenant playground
 ```
 
 `held_out.py` reports aggregate accuracy plus per-class recall and

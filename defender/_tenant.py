@@ -199,10 +199,25 @@ class TenantPaths:
             raise TenantRefused(f"data root {str(root)!r} must be an absolute path")
         _refuse_inside_defender_tree(root, tenant_id)
         self.dir = root / tenant_id
-        self.row = self.dir / ROW_NAME
-        self.runs = self.dir / "runs"
-        self.episodes = self.dir / "episodes"
-        self.learning = self.dir / "learning"
+
+    #: Computed as properties, not `__init__`-set attributes, so `dir(TenantPaths)` lists them
+    #: for the #1077 owner-derived-join lint (`_astlib._OWNER_CLASS_ORIGINS`,
+    #: `lint_run_records._accessor_names`) exactly as `RunPaths`/`EpisodePaths` do.
+    @property
+    def row(self) -> Path:
+        return self.dir / ROW_NAME
+
+    @property
+    def runs(self) -> Path:
+        return self.dir / "runs"
+
+    @property
+    def episodes(self) -> Path:
+        return self.dir / "episodes"
+
+    @property
+    def learning(self) -> Path:
+        return self.dir / "learning"
 
 
 def _refuse_inside_defender_tree(root: Path, tenant_id: str) -> None:
@@ -350,12 +365,14 @@ def tenant_of_run_dir(run_dir: Path) -> str:
     run_dir = Path(run_dir)
     runs_base = run_dir.parent
     record = read_tenant(runs_base)
-    expected = runs_base_for(record.tenant_id)
+    data_root = resolve_data_root()
+    expected = TenantPaths(data_root, record.tenant_id).runs
     if runs_base.resolve() != expected.resolve():
         raise TenantRefused(
             f"{runs_base} does not match the current runs base for tenant "
             f"{record.tenant_id!r} ({expected}) — refusing a run directory outside its "
             "tenant's own tree")
+    require_tenant(data_root, record.tenant_id)
     return record.tenant_id
 
 

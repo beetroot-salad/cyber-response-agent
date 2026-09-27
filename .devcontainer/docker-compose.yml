@@ -22,6 +22,10 @@ services:
       # this container at its memory ceiling and got workers OOM-killed.
       # pytest-xdist >= 3.8 reads this var as the cap for `auto`.
       PYTEST_XDIST_AUTO_NUM_WORKERS: "6"
+      # Every run names its tenant, and there is no default data root (#1078, §7 J01) — this is
+      # the devcontainer's ONLY data root, not an alternative to a code default. It must be a
+      # path this container shares with the host docker daemon (DooD, C46), which /workspace is.
+      DEFENDER_DATA_ROOT: /workspace/.defender-data
     volumes:
       - ../:/workspace # Mount full workspace directory
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can

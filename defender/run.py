@@ -6,8 +6,9 @@ The investigation is driven by the in-process PydanticAI driver
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
-Usage:
-    python3 defender/run.py <alert.json> [--run-id ID] [--no-learn] [--model M]
+Usage (every run names its tenant, and there is no default — #1078; create one once with
+    `python3 defender/scripts/tenant.py setup playground`):
+    python3 defender/run.py <alert.json> --tenant playground [--run-id ID] [--no-learn] [--model M]
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
 needs a real billable API key. Inside a Claude Code session the *ambient*
@@ -505,8 +506,8 @@ def _resolve_tenant_id(ns: argparse.Namespace, world: Any) -> str:
                 _tenant.refuse_bad_tenant_id(ns.tenant)
                 if ns.tenant != tenant_id:
                     raise _tenant.TenantRefused(
-                        f"--tenant {ns.tenant!r} disagrees with the source run's tenant "
-                        f"{tenant_id!r}")
+                        f"the requested tenant {ns.tenant!r} disagrees with the source run's "
+                        f"tenant {tenant_id!r}")
         else:
             if ns.tenant is None:
                 raise _tenant.TenantRefused(

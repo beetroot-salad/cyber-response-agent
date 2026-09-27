@@ -25,9 +25,23 @@ docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
 
 # hermetic replay smoke test — no key, no egress
 docker run --rm defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
+```
 
+Every run names its tenant, and there is no default (#1078), so create yours once:
+
+```bash
+docker run --rm --env-file .env defender-runtime python3 defender/scripts/tenant.py setup playground
+```
+
+Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
+default data root) and no run, fork or drain in flight on any checkout of the host, as the same
+user that runs defender; a destination already occupied makes setup refuse, naming it in the
+message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
+setup run as root — that adoption case only.)
+
+```bash
 # live investigation — needs the LLM key
-docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json>
+docker run --rm --env-file .env defender-runtime python3 defender/run.py <alert.json> --tenant playground
 ```
 
 ## The box image (the sandbox itself)

@@ -121,15 +121,29 @@ Live runs additionally need a provider API key (Anthropic by default; Fireworks 
 
 ## Running The Agent
 
-Investigate one alert end-to-end (runtime loop + post-steps + learning loop):
+Every run names its tenant, and there is no default (#1078): set `DEFENDER_DATA_ROOT` to a
+directory outside the checkout and create your tenant once —
 
 ```bash
-python3 defender/run.py <alert.json>
+export DEFENDER_DATA_ROOT=/path/outside/the/checkout
+python3 defender/scripts/tenant.py setup playground
+```
+
+Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
+default data root) and no run, fork or drain in flight on any checkout of the host, as the same
+user that runs defender; a destination already occupied makes setup refuse, naming it in the
+message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
+setup run as root — that adoption case only.)
+
+— then investigate one alert end-to-end (runtime loop + post-steps + learning loop):
+
+```bash
+python3 defender/run.py <alert.json> --tenant playground
 ```
 
 Notes:
 
-- run dirs are created under `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`), outside the repo
+- run dirs are created under `$DEFENDER_DATA_ROOT/<tenant>/runs/{run_id}/` (`<T>/runs`), outside the repo
 - pass `--no-learn` to skip the catalog-curation enqueue, the one automatic post-step, while iterating on the runtime loop only
 - the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
 

@@ -5,7 +5,8 @@ and the contracts they carry.
 
 ## Run-dir layout
 
-`run.py` creates a dir under `$DEFENDER_RUNS_BASE/{run_id}/`. Runs live
+`run.py` creates a dir under `<T>/runs/{run_id}/` — a tenant's own runs base
+(`$DEFENDER_RUNS_BASE`, derived as `run_dir.parent`, never an operator-set knob). Runs live
 **outside the repo** so transcripts stay out of git and the SIEM CLIs have
 writable scratch space.
 

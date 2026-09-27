@@ -60,7 +60,7 @@ def episodes_root(tmp_path, monkeypatch):
 
 #: #1078 D4/J52: the two cases pinning the pre-#1078 distant-source pre-check (a source run
 #: parked off a single configured runs base; the positive control admitting an ordinary run dir)
-#: are RETIRED — that function is deleted (`test_s7_j52_refuse_distant_source_deleted`). Its
+#: are RETIRED — that function is deleted (see #1078's pass-A launcher spec, J52). Its
 #: intent is carried by `tenant_of_run_dir`'s location check on the launch path
 #: (`test_1078_launcher.py::test_d4_launch_location_check` and its neighbors), which this file
 #: predates.

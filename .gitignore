@@ -119,6 +119,8 @@ experiments/actor-author-discipline/**/__pycache__/
 # tests/e2e/test_540_box_boundary.py anchors its run dirs here when it detects DooD, because
 # pytest's tmp_path is a private /tmp the docker daemon cannot resolve as a bind source.
 .defender-runs/
+# The tenant data root (#1078 D8) — no default; the devcontainer points DEFENDER_DATA_ROOT here.
+.defender-data/
 # Throwaway script the ci.yml `box-dood` job writes into the checkout (it needs a path the
 # daemon can already resolve, which is exactly the checkout it bind-mounts).
 .dood-inner.sh

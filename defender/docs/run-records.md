@@ -111,7 +111,7 @@ unreachable by root containment rather than by a named deny.
 | archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
 | tenant | 2 | `_tenant.json` | — | — | tenant | D2: created once when absent |
-| tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by tenant.py setup |
+| tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->
 
