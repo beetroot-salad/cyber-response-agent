@@ -16,20 +16,24 @@ fails the render" are re-pinned to that, and keep their copy-side guarantees (no
 through a planted link, a folder the owner cannot write left untouched).
 
 Since the #1110 review, the copy OWNS ITS WHOLE POLICY: `mirror_page(page, run_id)` decides
-whether to copy at all (the deployment), never raises, and says what it did — `None` plus an INFO
-line naming `DEFENDER_DEPLOYMENT` when the deployment is not `dev`; `None` plus ONE WARNING when
-the copy fails (naming the destination exactly once, or the resolver's exception and message when
-none resolved); the destination plus an INFO line naming it when it lands.
+whether to copy at all (the deployment), never raises, and says what it did. Since the SECOND
+review it answers one of three words — `"skipped"` plus an INFO line naming
+`DEFENDER_DEPLOYMENT` and `production` when the deployment is not `dev` (without claiming the
+variable's value: unset and a typo both read as `production`); `"failed"` plus ONE WARNING when
+the copy fails, naming the destination exactly once, the error's type, and only the error's
+REASON (an `OSError`'s `strerror`, never its `str()`, which repeats the path); `"copied"` plus
+an INFO line naming the destination when it lands.
 
 - O2: a render writes nothing under `defender/` (a before/after snapshot of this checkout's
   `defender/` tree is identical), and the page is at `<override>/<run>/runtime.html`,
   byte-identical to the run's own page.
 - M2: an existing mirror page is REPLACED (stage + rename), never truncated in place; a failed
-  mirror write is `mirror_page`'s `None` and its WARNING, never a raise.
-- M3: `mirror_page` answers the copy's ABSOLUTE path, so an override outside the running
-  checkout does not fail the copy.
-- O3: a render under pytest with the override removed is refused — `mirror_page` answers `None`
-  and warns with the resolver's reason.
+  mirror write is `mirror_page`'s `"failed"` and its WARNING, never a raise — in-process too,
+  where the writer's refusal of a link at the page name names the page in its own `str()`.
+- M3: the copy lands at its ABSOLUTE path, so an override outside the running checkout does not
+  fail it.
+- O3: a render under pytest with the override removed is refused — `mirror_page` answers
+  `"failed"` and warns with the resolver's reason.
 - D5/O1/O4 (root only): with the mirror's parent owned by a non-root uid, every path the copy
   creates belongs to that uid; a link the user could plant at any of the three names, aimed at
   a root-only target, is refused and leaves the target untouched.
@@ -52,13 +56,12 @@ from pathlib import Path
 
 import pytest
 
-from defender import _git, run_common
+from defender import _env, _git, run_common
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
 
 ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
-DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
 PAGE = "runtime.html"
 #: Not part of the checkout's content: the venv (a symlink in a worktree), bytecode the child
 #: interpreter compiles as it imports, and tool caches. Pruned — neither descended nor recorded.
@@ -70,7 +73,7 @@ def _dev_deployment(deployment_unset, monkeypatch):
     """Every test in this module is about the copy, which only a `dev` deployment makes
     (#1110 O3). Requests the conftest's `deployment_unset` by name, so this `setenv` lands after
     its `delenv` whatever order pytest would otherwise pick."""
-    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
 
 
 def _renderer():
@@ -121,6 +124,26 @@ def _assert_one_warning_naming_the_destination_once(caplog, dest: Path) -> str:
 def _infos_naming(caplog, needle: str) -> list[str]:
     return [r.getMessage() for r in caplog.records
             if r.levelno == logging.INFO and needle in r.getMessage()]
+
+
+def _assert_claims_no_deployment_value(message: str) -> None:
+    """#1110 second review: the "not copied" line says the copy is `dev`-only and the page was
+    treated as `production` — but it must not CLAIM the variable's value. Unset, or set to a
+    typo (`staging`), there is no `DEFENDER_DEPLOYMENT=production` to report, and a line
+    saying so sends an operator to check a setting that reads otherwise."""
+    var = _env.DEPLOYMENT_ENV
+    for claim in (f"{var} is", f"{var}='production'", f"{var}=production"):
+        assert claim not in message, (
+            f"the line claims a value the variable does not hold ({claim!r}): {message!r}")
+
+
+def _assert_the_errors_reason_not_its_str(message: str, type_name: str, reason: str) -> None:
+    """#1110 second review: a failed copy's WARNING carries the error's TYPE and its REASON —
+    for an `OSError`, `strerror` — never `str(e)`, whose `[Errno N] <reason>: '<path>'` form
+    repeats a path the line already names (or names a second, different path beside it)."""
+    assert type_name in message, f"the warning does not name the error's type {type_name}: {message!r}"
+    assert reason in message, f"the warning does not carry the error's reason {reason!r}: {message!r}"
+    assert "[Errno" not in message, f"the warning carries the error's str(), not its reason: {message!r}"
 
 
 def _assert_record_written(run_dir: Path) -> None:
@@ -216,11 +239,12 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
     assert MARKER in page.decode("utf-8"), "the page does not carry this run's own final turn"
 
 
-def test_1084_mirror_page_returns_the_path_under_mirror_root(
+def test_1084_mirror_page_answers_copied_with_the_page_at_the_path_under_mirror_root(
         tmp_path, run_visualizations_dir, caplog):
-    """In-process, under `dev`, `mirror_page(page, run_id)` returns exactly
-    `mirror_root() / run_id / "runtime.html"` — here the override's page — and that file holds
-    the page it was handed, byte for byte (#1110 M3: the copy is of the in-memory page, which
+    """In-process, under `dev`, `mirror_page(page, run_id)` answers `"copied"` (#1110 second
+    review: one of three words, no longer the path) and the page is at exactly
+    `mirror_root() / run_id / "runtime.html"` — here the override's page — holding the page it
+    was handed, byte for byte (#1110 M3: the copy is of the in-memory page, which
     `render_page` generated). It says so: one INFO line naming the destination, and no
     warning (#1110 review: the copy reports what it did either way)."""
     vr = _renderer()
@@ -231,7 +255,7 @@ def test_1084_mirror_page_returns_the_path_under_mirror_root(
     assert MARKER in page, "positive control: the page handed over is this run's"
     caplog.set_level(logging.DEBUG)
 
-    assert vr.mirror_page(page, run_dir.name) == expected
+    assert vr.mirror_page(page, run_dir.name) == "copied"
     assert expected.read_bytes() == page.encode("utf-8")
     assert len(_infos_naming(caplog, str(expected))) == 1, (
         f"a landed copy was not reported once at INFO naming {expected}: "
@@ -239,41 +263,47 @@ def test_1084_mirror_page_returns_the_path_under_mirror_root(
     assert _warning_records(caplog) == [], "a copy that landed was warned about"
 
 
-@pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
+@pytest.mark.parametrize("deployment", [None, "production", "staging"],
+                         ids=["unset", "production", "unrecognised"])
 def test_1084_mirror_page_off_dev_copies_nothing_and_says_so(
         tmp_path, monkeypatch, caplog, deployment):
     """#1110 review: the deployment check lives IN `mirror_page`, the copy's one owner. Off
-    `dev` (unset, or `production`) it answers `None`, writes nothing — its root, which does not
-    exist yet here, is still absent afterwards — and logs ONE INFO line saying the page was
-    "not copied" and naming `DEFENDER_DEPLOYMENT` and the deployment it read (`production`), so
-    a skipped copy is never silent. Nothing is warned: not copying is the answer, not a fault.
+    `dev` (unset, `production`, or a typo read as production) it answers `"skipped"`, writes
+    nothing — its root, which does not exist yet here, is still absent afterwards — and logs
+    ONE INFO line saying the page was "not copied" and naming `DEFENDER_DEPLOYMENT` and
+    `production`, so a skipped copy is never silent. Nothing is warned: not copying is the
+    answer, not a fault. Since the second review, under an unset variable or a typo the line
+    does not CLAIM the variable's value (`DEFENDER_DEPLOYMENT is …`, `…='production'`,
+    `…=production`): it has none, or another one.
 
-    Positive control on the same page and override: under `dev` the same call returns the
-    destination and the root holds the copy."""
+    Positive control on the same page and override: under `dev` the same call answers
+    `"copied"` and the root holds the copy."""
     vr = _renderer()
     run_dir = driven_run(tmp_path / "runs-base")
     root = tmp_path / "not-yet" / "run-visualizations"
     monkeypatch.setenv(ENV, str(root))
     if deployment is None:
-        monkeypatch.delenv(DEPLOYMENT_ENV)
+        monkeypatch.delenv(_env.DEPLOYMENT_ENV)
     else:
-        monkeypatch.setenv(DEPLOYMENT_ENV, deployment)
+        monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
     page = vr.render_page(run_dir)
     caplog.set_level(logging.DEBUG)
 
-    assert vr.mirror_page(page, run_dir.name) is None
+    assert vr.mirror_page(page, run_dir.name) == "skipped"
 
     assert not (tmp_path / "not-yet").exists(), "an off-dev copy created the copy root"
-    skipped = [m for m in _infos_naming(caplog, DEPLOYMENT_ENV)
+    skipped = [m for m in _infos_naming(caplog, _env.DEPLOYMENT_ENV)
                if "not copied" in m.lower() and "production" in m]
     assert len(skipped) == 1, (
-        f"expected one INFO saying the page was not copied under {DEPLOYMENT_ENV}=production; "
-        f"got {[r.getMessage() for r in caplog.records]!r}")
+        f"expected one INFO saying the page was not copied under {_env.DEPLOYMENT_ENV} "
+        f"(production); got {[r.getMessage() for r in caplog.records]!r}")
+    if deployment != "production":
+        _assert_claims_no_deployment_value(skipped[0])
     assert _warning_records(caplog) == [], "a copy skipped by design was warned about"
 
-    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     dest = root / run_dir.name / PAGE
-    assert vr.mirror_page(page, run_dir.name) == dest
+    assert vr.mirror_page(page, run_dir.name) == "copied"
     assert dest.read_bytes() == page.encode("utf-8")
 
 
@@ -308,8 +338,10 @@ def test_1084_an_existing_mirror_page_is_replaced_not_rewritten_in_place(
 def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monkeypatch, caplog):
     """RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render`. The override is placed under a
     regular FILE, so no folder can be created there. The copy primitive `mirror_page` answers
-    `None` — never a raise (#1110 review: the copy owns its failure) — with ONE WARNING that
-    names the destination page path exactly once and carries the error (`Not a directory`).
+    `"failed"` — never a raise (#1110 review: the copy owns its failure) — with ONE WARNING
+    that names the destination page path exactly once, the error's type
+    (`NotADirectoryError`) and its reason (`Not a directory`) — not the error's `str()`, which
+    names the folder it could not make as well (#1110 second review).
     Through the post-run step `run_common.visualize` the same: no `VisualizeFailed`, the run's
     page record written, the failed copy warned. The blocking file is untouched.
 
@@ -326,10 +358,10 @@ def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monk
     page = vr.render_page(run_dir)
 
     caplog.set_level(logging.DEBUG)
-    assert vr.mirror_page(page, run_dir.name) is None
-    warned = _assert_one_warning_naming_the_destination_once(caplog, dest)
-    assert "Not a directory" in warned or "NotADirectoryError" in warned, (
-        f"the warning does not carry the error: {warned!r}")
+    assert vr.mirror_page(page, run_dir.name) == "failed"
+    _assert_one_warning_naming_the_destination_once(caplog, dest)
+    _assert_the_errors_reason_not_its_str(
+        _warning_records(caplog)[0].getMessage(), "NotADirectoryError", "Not a directory")
     caplog.clear()
     run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
 
@@ -351,9 +383,10 @@ def test_1084_a_mirror_write_that_fails_after_its_folder_exists_is_warned_and_th
     page NAME is a non-empty directory, so creating the folders succeeds and only the final
     replace can fail — even as root. A writer that swallows a fault around the stage/replace
     (#1084 adversary H4) passes the mkdir-only case above and fails here: `mirror_page` must
-    still answer `None` with a WARNING naming the destination (the error itself names the page
-    path here too, so the count is not pinned). The post-run step writes the record, warns, and
-    does not raise; the directory squatting the name keeps its content.
+    still answer `"failed"` with ONE WARNING naming the destination exactly once — the error's
+    `str()` names the page path too, so since the second review the line carries only its type
+    (`IsADirectoryError`) and reason (`Is a directory`). The post-run step writes the record,
+    warns, and does not raise; the directory squatting the name keeps its content.
 
     Positive control: with the name cleared, the same render lands the copy."""
     vr = _renderer()
@@ -365,9 +398,10 @@ def test_1084_a_mirror_write_that_fails_after_its_folder_exists_is_warned_and_th
     page = vr.render_page(run_dir)
 
     caplog.set_level(logging.DEBUG)
-    assert vr.mirror_page(page, run_dir.name) is None
-    assert len(_warning_records(caplog)) == 1, "the failed copy was not ONE warning"
-    _assert_warned(caplog, str(occupied))
+    assert vr.mirror_page(page, run_dir.name) == "failed"
+    _assert_one_warning_naming_the_destination_once(caplog, occupied)
+    _assert_the_errors_reason_not_its_str(
+        _warning_records(caplog)[0].getMessage(), "IsADirectoryError", "Is a directory")
     caplog.clear()
     run_common.visualize(run)
 
@@ -382,6 +416,55 @@ def test_1084_a_mirror_write_that_fails_after_its_folder_exists_is_warned_and_th
     assert _warnings(caplog) == [], "a copy that landed was warned about"
 
 
+def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it_once(
+        tmp_path, run_visualizations_dir, caplog):
+    """#1110 second review, on the IN-PROCESS lane: the conftest's override is a folder of the
+    test user's own, so `_mirror` writes in this process rather than dropping to an owner (the
+    drop lane's link cases are the root-only tests below; this one runs as any user). A symlink
+    is planted at `<override>/<run>/runtime.html`, aimed at a file outside. The writer refuses
+    it — an `OSError` (ELOOP, "refusing to replace a symlink at the mirror page") whose own
+    `str()` names the page path AGAIN — and `mirror_page` answers `"failed"` with ONE WARNING
+    naming the destination exactly once, the error's type and only its reason. Nothing is
+    written through the link, and the link is left as it was. Through the post-run step the
+    same: the record written, no raise, one warning naming the page once.
+
+    Positive control: the link removed, the same call answers `"copied"` and warns nothing."""
+    vr = _renderer()
+    run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    root = vr.mirror_root()
+    assert root == run_visualizations_dir, "precondition: the copy resolves to the override"
+    assert os.geteuid() != 0 or os.lstat(root.parent).st_uid == 0, (
+        "precondition: the copy is written in-process, not by a dropped-privilege child")
+    dest = root / run_dir.name / PAGE
+    dest.parent.mkdir()
+    outside = tmp_path / "outside.html"
+    outside.write_bytes(b"OUTSIDE\n")
+    os.symlink(outside, dest)
+    page = vr.render_page(run_dir)
+
+    caplog.set_level(logging.DEBUG)
+    assert vr.mirror_page(page, run_dir.name) == "failed"
+    _assert_one_warning_naming_the_destination_once(caplog, dest)
+    _assert_the_errors_reason_not_its_str(
+        _warning_records(caplog)[0].getMessage(), "OSError", "refusing to replace a symlink")
+    assert outside.read_bytes() == b"OUTSIDE\n", "the copy was written through the planted link"
+    assert dest.is_symlink(), "the planted link was replaced"
+    assert os.readlink(dest) == str(outside), "the planted link was re-aimed"
+
+    caplog.clear()
+    run_common.visualize(run)  # a refused copy is not a failed render: no VisualizeFailed
+    _assert_record_written(run_dir)
+    _assert_one_warning_naming_the_destination_once(caplog, dest)
+    assert outside.read_bytes() == b"OUTSIDE\n", "the post-run step wrote through the link"
+
+    dest.unlink()
+    caplog.clear()
+    assert vr.mirror_page(page, run_dir.name) == "copied"
+    assert dest.read_bytes() == page.encode("utf-8")
+    assert _warning_records(caplog) == [], "a copy that landed was warned about"
+
+
 # ---------------------------------------------------------------------------------------
 # M3 — the absolute path; an outside override does not fail the copy
 # ---------------------------------------------------------------------------------------
@@ -391,8 +474,9 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
         tmp_path, monkeypatch, caplog):
     """With the override OUTSIDE the running checkout, the post-run step lands the copy there
     with no warning (a `dest.relative_to(<repo>)` would raise `ValueError` — a warned, missing
-    copy since #1110, where it used to be a failed render), and `mirror_page` answers the
-    copy's ABSOLUTE path. The standalone re-render (`visualize_run.main`) also exits 0.
+    copy since #1110, where it used to be a failed render), and `mirror_page` answers
+    `"copied"` with the page at that ABSOLUTE path. The standalone re-render
+    (`visualize_run.main`) also exits 0 — a copy that landed is a clean re-render.
 
     DROPPED BY #1110: this test also pinned that the render PRINTED the mirror's path on
     success (the renderer child's stdout, forwarded). The post-run step is in-process now and
@@ -411,7 +495,9 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
     assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
     assert _warnings(caplog) == [], f"the outside copy was warned about: {_warnings(caplog)!r}"
 
-    assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == mirrored
+    mirrored.unlink()
+    assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == "copied"
+    assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
     assert vr.main(["visualize_run.py", str(run_dir)]) == 0
 
 
@@ -425,8 +511,9 @@ def test_1084_a_render_under_pytest_without_the_override_is_refused_warned_and_t
     """RE-PINNED BY #1110 (O4/O5) from `..._is_refused`. With the override removed, the bare
     resolver raises `MirrorRootRefused` — asked first, so a resolver that does not refuse stops
     the test before any render could reach a real checkout — and `mirror_page` reaches that
-    refusing default resolution (not a `start` passed explicitly around it): it answers `None`
-    with ONE WARNING naming the exception's type and its message (no destination resolved).
+    refusing default resolution (not a `start` passed explicitly around it): it answers
+    `"failed"` with ONE WARNING naming the exception's type and its message (no destination
+    resolved; not an `OSError`, so its message is its reason).
     The post-run step writes the record, does not raise, and warns the same; a real checkout's
     top-level mirror page is untouched.
 
@@ -439,7 +526,7 @@ def test_1084_a_render_under_pytest_without_the_override_is_refused_warned_and_t
     with pytest.raises(vr.MirrorRootRefused) as refused:
         vr.mirror_root()
     caplog.set_level(logging.DEBUG)
-    assert vr.mirror_page(page, run_dir.name) is None
+    assert vr.mirror_page(page, run_dir.name) == "failed"
     records = _warning_records(caplog)
     assert len(records) == 1, f"the refused copy was not ONE warning: {records!r}"
     assert "MirrorRootRefused" in records[0].getMessage(), (

@@ -10,6 +10,11 @@ Two things live here, both cheap (no driven run):
   TENANT-BOUND handle — the one the real builder materialized — and a `VisualizeFailed` out of
   it leaves the run's exit code at 0. Driven through `_spec791`'s tail seam over the real
   entrypoint, with the real builder.
+- The failure type (#1110 second review): `VisualizeFailed` is ONE class, defined in the
+  stdlib-only leaf `defender/scripts/visualize/_page_failed.py` and re-exported by
+  `run_common`, so the renderer (which raises it) and `run.py` (which catches it by
+  `run_common`'s name) share it without either importing the other. The lenient-choice rule
+  both settings are read by is `test_env.py`'s (`env_choice`) and `test_log.py`'s.
 
 The end-to-end half (a real rendered run, the handle's `io` seam, the copy, the snapshot) is
 `tests/e2e/test_1110_run_page_record_e2e.py`.
@@ -19,11 +24,15 @@ does not have them yet.
 """
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
+import sys
 from typing import Any
 
 import pytest
 
+from defender import _env
 from defender import run as run_py
 from defender.tests._spec791 import (
     SpecTail,
@@ -32,8 +41,6 @@ from defender.tests._spec791 import (
     plant_alert,
     satisfy_entrypoint_keys,
 )
-
-DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
 
 
 def _deployment() -> str:
@@ -46,7 +53,7 @@ def _deployment_logs(caplog, level: int) -> list[str]:
     """Every record at exactly `level` that names the setting — filtered by content rather
     than by logger name, which the design does not fix."""
     return [r.getMessage() for r in caplog.records
-            if r.levelno == level and DEPLOYMENT_ENV in r.getMessage()]
+            if r.levelno == level and _env.DEPLOYMENT_ENV in r.getMessage()]
 
 
 # ---------------------------------------------------------------------------------------
@@ -74,7 +81,7 @@ def test_1110_o6_a_recognised_value_is_read_stripped_and_lowercased_and_logs_not
         monkeypatch, caplog, raw, expected):
     """O6/M4: the two values, stripped and lowercased; empty is unset. None of them is an
     error — the positive control for the typo case below, on the same logger capture."""
-    monkeypatch.setenv(DEPLOYMENT_ENV, raw)
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, raw)
     caplog.set_level(logging.DEBUG)
     assert _deployment() == expected
     assert _deployment_logs(caplog, logging.ERROR) == [], (
@@ -94,13 +101,13 @@ def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
     copy on), never a raise (a typo must not abort the run) — and is logged as exactly ONE
     error per read, naming the variable, the value it saw, and the choices it accepts. The two
     recognised values are exact: a value that merely starts like one is still a typo."""
-    monkeypatch.setenv(DEPLOYMENT_ENV, typo)
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, typo)
     caplog.set_level(logging.DEBUG)
 
     assert _deployment() == "production"
 
     errors = _deployment_logs(caplog, logging.ERROR)
-    assert len(errors) == 1, f"expected one error naming {DEPLOYMENT_ENV}; got {errors!r}"
+    assert len(errors) == 1, f"expected one error naming {_env.DEPLOYMENT_ENV}; got {errors!r}"
     (message,) = errors
     assert typo.lower() in message.lower(), f"the error does not name the value {typo!r}: {message!r}"
     assert "dev" in message, f"the error does not name the choice 'dev': {message!r}"
@@ -110,7 +117,7 @@ def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
 def test_1110_o6_the_error_is_logged_on_every_read_not_once(monkeypatch, caplog):
     """O6: 'logged as an error on each read' — two reads, two errors. A once-per-process
     latch would hide the typo from every run after the first in a long-lived worker."""
-    monkeypatch.setenv(DEPLOYMENT_ENV, "staging")
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "staging")
     caplog.set_level(logging.DEBUG)
 
     assert [_deployment(), _deployment()] == ["production", "production"]
@@ -121,11 +128,11 @@ def test_1110_o6_the_setting_is_read_at_call_time(monkeypatch):
     """M4: read when asked, not frozen at import — the same process answers `dev`, then
     `production`, as the environment changes under it (which is also what lets a test's
     `setenv` reach a module it already imported)."""
-    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     assert _deployment() == "dev"
-    monkeypatch.setenv(DEPLOYMENT_ENV, "production")
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "production")
     assert _deployment() == "production"
-    monkeypatch.delenv(DEPLOYMENT_ENV)
+    monkeypatch.delenv(_env.DEPLOYMENT_ENV)
     assert _deployment() == "production"
 
 
@@ -195,3 +202,60 @@ def test_1110_o7_a_failed_render_step_leaves_the_exit_code_at_0(tmp_path, state,
         f"the render step was never reached (ran {tail.names}) — the 0 proves nothing")
     err = capfd.readouterr().err
     assert "not rendered (#1110 O7)" in err, "the failed render was not reported on stderr"
+
+
+# ---------------------------------------------------------------------------------------
+# The failure type — one class, in a leaf both sides import (#1110 second review)
+# ---------------------------------------------------------------------------------------
+
+#: Imports `module` in a fresh interpreter and reports every module that import added.
+_IMPORT_PROBE = """
+import json, sys
+module = sys.argv[1]
+before = set(sys.modules)
+__import__(module)
+print(json.dumps(sorted(set(sys.modules) - before)))
+"""
+
+
+def _modules_added_by_importing(module: str) -> list[str]:
+    from defender import run_common
+
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed probe, a module name
+        [sys.executable, "-c", _IMPORT_PROBE, module], cwd=run_common.REPO_ROOT,
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert child.returncode == 0, f"importing {module} failed: {child.stderr[-800:]!r}"
+    return json.loads(child.stdout.strip().splitlines()[-1])
+
+
+def _not_stdlib(modules: list[str], allowed: set[str]) -> list[str]:
+    return [m for m in modules
+            if m not in allowed and m.split(".")[0] not in sys.stdlib_module_names]
+
+
+def test_1110_the_failure_type_is_one_class_in_a_stdlib_only_leaf():
+    """`run_common.VisualizeFailed` IS `_page_failed.VisualizeFailed` — the same object, not a
+    twin with the same name (a renderer raising its own copy would sail past `run.py main`'s
+    `except run_common.VisualizeFailed`) — and it is an ordinary `Exception`.
+
+    The leaf is stdlib-only: importing it in a fresh interpreter adds nothing but the standard
+    library, the leaf, and the namespace packages above it — so `run_common` can import it at
+    the top without importing the renderer, and the renderer without importing `run_common`.
+
+    Positive control for the probe: the same probe over `defender.run_common` does see
+    non-stdlib `defender` modules, so an empty answer for the leaf is the leaf's, not a probe
+    that sees nothing."""
+    from defender import run_common
+    from defender.scripts.visualize import _page_failed
+
+    assert run_common.VisualizeFailed is _page_failed.VisualizeFailed
+    assert issubclass(_page_failed.VisualizeFailed, Exception)
+
+    leaf = "defender.scripts.visualize._page_failed"
+    added = _modules_added_by_importing(leaf)
+    assert leaf in added, f"positive control: the probe did not see the leaf imported: {added!r}"
+    packages = {"defender", "defender.scripts", "defender.scripts.visualize", leaf}
+    assert _not_stdlib(added, packages) == [], (
+        f"the leaf is not stdlib-only — importing it brought in {_not_stdlib(added, packages)!r}")
+    assert _not_stdlib(_modules_added_by_importing("defender.run_common"), packages), (
+        "positive control: the probe saw nothing beyond the stdlib in run_common either")

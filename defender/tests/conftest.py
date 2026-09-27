@@ -82,8 +82,10 @@ RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 @pytest.fixture(autouse=True)
 def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     """Every test's run-page mirror lands in a per-test tmp dir, never in a real checkout's
-    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION; the resolver's refusal
-    under pytest (`MirrorRootRefused`) is the detector for any test that removes it.
+    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION. For a test that removes
+    it, the resolver still refuses the real checkout under pytest (`MirrorRootRefused`), so no
+    copy lands there — but since #1110 a refused copy is a logged WARNING, not a failed render,
+    so that refusal surfaces as a warning in the test's log, never as a failing test.
 
     `mktemp`, not `tmp_path`: several suites snapshot or list their own `tmp_path`, and an
     extra entry there would be a change they never made. The dir sits beside it instead.
