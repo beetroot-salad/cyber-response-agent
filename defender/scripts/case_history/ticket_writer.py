@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import replace
@@ -19,6 +19,8 @@ from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import TransportFault
 
+_logger = logging.getLogger(__name__)
+
 SYSTEM = "case-history"
 PREFIX = "CASE_HISTORY"
 _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
@@ -32,18 +34,10 @@ def _verb_context() -> VerbContext:
     )
 
 
-def _log(msg: str) -> None:
-    print(f"[ticket_writer] {msg}", file=sys.stderr)
-
-
-def _warn(msg: str) -> None:
-    print(f"[ticket_writer] WARN {msg}", file=sys.stderr)
-
-
 def _load_config() -> dict[str, str] | None:
     path = transport._config_path(_verb_context(), SYSTEM)
     if not path.exists():
-        _warn(f"config not found: {path}; skipping ticket write")
+        _logger.warning(f"config not found: {path}; skipping ticket write")
         return None
     raw = transport._parse_env_file(path)
     cfg: dict[str, str] = {}
@@ -53,10 +47,10 @@ def _load_config() -> dict[str, str] | None:
             cfg[key] = val
     missing = [k for k in _CONFIG_KEYS if not cfg.get(k)]
     if missing:
-        _warn(f"missing config keys {[f'{PREFIX}_{k}' for k in missing]} in {path}; skipping")
+        _logger.warning(f"missing config keys {[f'{PREFIX}_{k}' for k in missing]} in {path}; skipping")
         return None
     if not cfg["TIMEOUT_SEC"].isdigit():
-        _warn(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
+        _logger.warning(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
               f"integer in {path}; skipping")
         return None
     return cfg
@@ -96,22 +90,22 @@ def open_case_ticket(run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS) -> No
             return
         alert_path = RunPaths(run_dir).alert
         if not alert_path.is_file():
-            _warn(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            _logger.warning(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             return
         alert = json.loads(alert_path.read_text(encoding="utf-8"))
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id)
         status, body = deps.request(config, "POST", "/tickets", payload)
         if status is None:
-            _warn(f"open {case_id}: {body}")
+            _logger.warning(f"open {case_id}: {body}")
         elif status == "409":
-            _log(f"open {case_id}: already exists (409) — proceeding")
+            _logger.info(f"open {case_id}: already exists (409) — proceeding")
         elif status.startswith("2"):
-            _log(f"open {case_id}: created ({status})")
+            _logger.info(f"open {case_id}: created ({status})")
         else:
-            _warn(f"open {case_id}: HTTP {status}: {body}")
+            _logger.warning(f"open {case_id}: HTTP {status}: {body}")
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
-        _warn(f"open raised, ignored: {e!r}")
+        _logger.warning(f"open raised, ignored: {e!r}")
 
 
 #: The receipt words. `commented` is the record (#767 D2) and `escalated` the cut-short note
@@ -162,21 +156,21 @@ def _ticket_is_released(
     through the same predicate the screen decides with (O5)."""
     status, body = deps.request(config, "GET", f"/tickets/{quoted}")
     if status is None or not status.startswith("2"):
-        _warn(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
+        _logger.warning(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
               f"{body}); not recording")
         return None
     try:
         ticket = json.loads(body)
     except json.JSONDecodeError:
-        _warn(f"record {case_id}: the case read back is not JSON; not recording")
+        _logger.warning(f"record {case_id}: the case read back is not JSON; not recording")
         return None
     if not isinstance(ticket, dict):
-        _warn(f"record {case_id}: the case read back is not a ticket object; not recording")
+        _logger.warning(f"record {case_id}: the case read back is not a ticket object; not recording")
         return None
     try:
         return case_ticket.release_predicate().is_released(ticket)
     except case_ticket.CaseTicketError as e:
-        _warn(f"record {case_id}: {e}; cannot tell whether the case is released; not recording")
+        _logger.warning(f"record {case_id}: {e}; cannot tell whether the case is released; not recording")
         return None
 
 
@@ -221,7 +215,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         case_id = key if key is not None else run_dir.name
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
-            _log(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
+            _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
         try:
             if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
@@ -232,12 +226,12 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         except case_ticket.CaseTicketError as e:
             # The mapping (or a template in it) refused: no POST, but the receipt still says
             # so — a WARN, a receipt and a return on every arm that meant to call out.
-            _warn(f"record {case_id}: {e}; not recording")
+            _logger.warning(f"record {case_id}: {e}; not recording")
             _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
             return
         _post_comment(run_dir, deps, config, case_id, payload, word)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
-        _warn(f"record raised, ignored: {e!r}")
+        _logger.warning(f"record raised, ignored: {e!r}")
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
@@ -253,16 +247,16 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
         _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
         return
     if released:
-        _warn(f"record {case_id}: a person has already released this case; a new comment "
+        _logger.warning(f"record {case_id}: a person has already released this case; a new comment "
               "would go out under that release unseen — not recording")
         _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED)
         return
     status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload)
     ok = status is not None and status.startswith("2")
     if not ok:
-        _warn(f"record {case_id}: {status or 'transport error'}: {body}")
+        _logger.warning(f"record {case_id}: {status or 'transport error'}: {body}")
     else:
-        _log(f"record {case_id}: comment posted ({status}, {word})")
+        _logger.info(f"record {case_id}: comment posted ({status}, {word})")
     _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR)
 
 
@@ -279,4 +273,4 @@ def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: 
         # followed.
         write_guarded(RunPaths(run_dir).ticket_write, json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
-        _warn(f"could not write receipt: {e}")
+        _logger.warning(f"could not write receipt: {e}")

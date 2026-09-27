@@ -901,7 +901,7 @@ def author_drain(
 
     with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
         if not locked:
-            _logger.info("author_drain: another drainer holds the lock — exiting")
+            _logger.warning("author_drain: another drainer holds the lock — exiting")
             return 0
         return _run_worktree_batch(
             paths, branch, label="author_drain",
@@ -943,7 +943,7 @@ def lead_author_drain(
 
     with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
         if not locked:
-            _logger.info("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            _logger.warning("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         # The per-author queue lock — the one a by-hand `lead_author.py <run_dir>` takes — is
         # held for the WHOLE tick, not per serve (#952 M5). The `done` sentinel used to be
@@ -953,7 +953,7 @@ def lead_author_drain(
         # Contended, the tick skips before claiming anything.
         queue_lock = acquire_queue_lock(paths)
         if queue_lock is None:
-            _logger.info("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
         try:
             return _run_worktree_batch(

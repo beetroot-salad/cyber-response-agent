@@ -10,9 +10,6 @@ import contextlib
 import io
 import json
 import logging
-import subprocess
-import sys
-import threading
 import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -44,20 +41,18 @@ def emit():
 
 
 @pytest.fixture
-def restore_root(capsys):
-    """`configure` touches process-wide state — the root's handlers, two loggers' levels, and
-    in JSON mode `sys.stderr` and the exception hooks; put all of it back after. Depends on
-    `capsys` so it is torn down FIRST: the `sys.stderr` it restores is capsys's own."""
+def restore_root():
+    """`configure` touches process-wide state — the root's handlers and two loggers' levels,
+    and the program name it resolves; put all of it back after."""
     root = logging.getLogger()
     levels = {n: logging.getLogger(n).level for n in (_log.ROOT_LOGGER, _log.MAIN_LOGGER)}
-    saved = (list(root.handlers), root.level, sys.stderr, sys.excepthook, threading.excepthook,
-             _log._program)
+    saved = (list(root.handlers), root.level, _log._program)
     yield
     root.handlers[:] = saved[0]
     root.setLevel(saved[1])
     for name, level in levels.items():
         logging.getLogger(name).setLevel(level)
-    sys.stderr, sys.excepthook, threading.excepthook, _log._program = saved[2:]
+    _log._program = saved[2]
 
 
 def test_a_line_carries_exactly_the_core_and_always_on_fields(emit):
@@ -257,7 +252,10 @@ def test_text_format_is_readable_and_names_the_bound_run(restore_root, capsys):
     assert out.endswith("WARNING defender.x [run_id=r9 tenant_id=t9] careful")
 
 
-@pytest.mark.parametrize(("var", "value"), [(_log.FORMAT_ENV, "yaml"), (_log.LEVEL_ENV, "LOUD")])
+@pytest.mark.parametrize(("var", "value"), [
+    (_log.FORMAT_ENV, "yaml"), (_log.LEVEL_ENV, "LOUD"), (_log.LEVEL_ENV, "--5"),
+    (_log.LEVEL_ENV, "²"), (_log.LEVEL_ENV, "NOTSET"), (_log.LEVEL_ENV, "0"),
+])
 def test_an_unknown_setting_falls_back_and_says_so(monkeypatch, restore_root, capsys, var, value):
     """The logging setup never decides whether a process runs: a bad value costs the setting,
     names itself as the first line, and the process carries on."""
@@ -316,45 +314,6 @@ def test_a_program_s_own_info_lines_are_kept_and_named(restore_root, capsys):
     assert (line["logger"], line["message"]) == ("defender.some.program", "mine")
 
 
-def test_direct_stderr_writes_become_records_in_json_mode(restore_root, capsys):
-    """A stray print, written in pieces, becomes one WARNING record once its line ends."""
-    _log.configure(fmt="json", level="INFO")
-    capsys.readouterr()
-    print("[legacy] half", end="", file=sys.stderr)
-    assert capsys.readouterr().err == "", "a partial line was emitted before its newline"
-    print(" and the rest", file=sys.stderr)
-    line = _strict(capsys.readouterr().err)
-    assert (line["logger"], line["severity"], line["message"]) == (
-        "stderr", "WARNING", "[legacy] half and the rest")
-
-
-def test_the_wrapper_hands_anything_else_to_the_real_stream(restore_root, capsys):
-    _log.configure(fmt="json", level="INFO")
-    underlying = sys.stderr.underlying
-    assert sys.stderr.errors == underlying.errors
-    assert sys.stderr.buffer is underlying.buffer
-
-
-@pytest.mark.parametrize(("tail", "severity", "needle"), [
-    ('sys.exit("refused: bad input")', "WARNING", "refused: bad input"),
-    ('raise RuntimeError("boom")', "CRITICAL", "RuntimeError: boom"),
-    ('sys.stderr.write("no newline before exit")', "WARNING", "no newline before exit"),
-])
-def test_a_program_s_stderr_is_all_json_even_when_it_exits_or_crashes(tail, severity, needle):
-    """The end-to-end guarantee, in a real process: an exit message and an uncaught traceback
-    each arrive as one JSON record, and nothing else reaches the stream."""
-    code = ("import sys, logging\nfrom defender._log import configure_from_env\n"
-            "configure_from_env()\nlogging.getLogger('defender.p').info('started')\n" + tail)
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          encoding="utf-8", cwd=Path(_log.__file__).parent.parent, check=False,
-                          env={"PATH": "/usr/bin:/bin"})
-    lines = [_strict(ln) for ln in proc.stderr.splitlines()]
-    assert [ln["message"] for ln in lines][0] == "started"
-    [last] = lines[1:]
-    assert last["severity"] == severity
-    assert needle in last["message"] + last.get("exception", "")
-
-
 def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkeypatch):
     """The wiring: everything `run.main` does after the run dir exists — the lifecycle
     included — logs under this run's id and its tenant."""
@@ -374,3 +333,24 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
     tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]
     assert seen["ctx"] == {"run_id": seen["run_dir"].name, "tenant_id": tenant}
     assert _log.current_context() == {}, "the binding outlived the run"
+
+
+def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypatch, capsys):
+    """A lifecycle that raises: the failure propagates, and its CRITICAL record — traceback
+    included — names the run and its tenant."""
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    base, src = T.runs_base(tmp_path)
+
+    def lifecycle(**kw):
+        raise RuntimeError("lifecycle blew up")
+
+    capsys.readouterr()
+    with pytest.raises(RuntimeError, match="lifecycle blew up"):
+        T.mod("run").main([str(src / "alert.json"), "--no-learn"], lifecycle=lifecycle,
+                          visualize=lambda p: None, preflight=T.no_preflight)
+    tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]
+    [crash] = [ln for ln in capsys.readouterr().err.splitlines() if " CRITICAL " in ln]
+    assert "the run failed" in crash
+    assert f"tenant_id={tenant}" in crash
+    assert "run_id=" in crash

@@ -1,6 +1,6 @@
 """Structured logging for the defender — one JSON object per line on the error stream.
 
-Five rules the rest of the tree relies on:
+Four rules the rest of the tree relies on:
 
   * EVERY PROGRAM CONFIGURES, AND ONLY PROGRAMS DO. Library code writes through
     `logging.getLogger(__name__)` and never decides format or destination; a program's
@@ -18,29 +18,27 @@ Five rules the rest of the tree relies on:
     `contextvars.copy_context().run`.
   * CONTEXT UNDOES ITSELF. `log_context` resets to the previous mapping on exit, exception
     included, so a reused thread cannot carry the last job's run id into the next one.
-  * IN JSON MODE, EVERY LINE ON THE ERROR STREAM IS JSON. `configure` routes anything written
-    to `sys.stderr` directly — a stray `print`, a `sys.exit("…")` message, a library's
-    warning — into a log record, and an uncaught exception into one CRITICAL record with its
-    traceback as a field. The guarantee holds by construction, not by every caller remembering.
 
 Prints are still right for two things this module is NOT for: a command's own output (a report,
 a table — stdout), and text a model reads back as a tool result (those programs don't configure).
+
+NOT EVERY LINE ON THE ERROR STREAM IS JSON, and nothing here pretends otherwise: argparse's usage
+errors, a `sys.exit("…")` refusal of a program's arguments, and a crash's traceback stay plain
+text. Log collectors take such a line as a text entry. A program that must tie its own crash to
+a run logs it itself, inside the run's context (`run.main` does).
 """
 from __future__ import annotations
 
-import atexit
 import contextlib
 import contextvars
 import datetime as _dt
-import io
 import json
 import logging
 import math
 import sys
-import threading
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from types import MappingProxyType, ModuleType, TracebackType
+from types import MappingProxyType, ModuleType
 from typing import Any
 
 from defender._env import env_str
@@ -63,8 +61,6 @@ DEFAULT_LEVEL = "INFO"
 ROOT_LOGGER = "defender"
 #: Where a program's own module logs from — see "A PROGRAM'S OWN LINES" above.
 MAIN_LOGGER = "__main__"
-#: Where a direct write to `sys.stderr` is logged from once `configure` routes it.
-STDERR_LOGGER = "stderr"
 
 _EMPTY: Mapping[str, str | None] = MappingProxyType({})
 _context: contextvars.ContextVar[Mapping[str, str | None]] = contextvars.ContextVar(
@@ -101,6 +97,20 @@ def log_context(**fields: str | None) -> Iterator[None]:
         yield
     finally:
         _context.reset(token)
+
+
+@contextlib.contextmanager
+def run_context(run_id: str, tenant_id: str | None, *, logger: logging.Logger) -> Iterator[None]:
+    """`log_context` for one run, plus the run's crash: a failure escaping the block is logged
+    CRITICAL, with its traceback, WHILE the run is still bound — after the block the context is
+    gone, and a crash record without its run id cannot be joined to the run. The exception
+    propagates unchanged (a caller or Python's own handler still sees it)."""
+    with log_context(run_id=run_id, tenant_id=tenant_id):
+        try:
+            yield
+        except Exception:
+            logger.critical("the run failed", exc_info=True)
+            raise
 
 
 def program_name(main: ModuleType | None) -> str:
@@ -193,103 +203,20 @@ class TextFormatter(logging.Formatter):
         return line
 
 
-class _StderrToLog(io.TextIOBase):
-    """`sys.stderr` in JSON mode: each whole line written to it becomes a record on the
-    `stderr` logger — at WARNING, because nothing says how bad an unstructured line is, and
-    the `stderr` logger follows the root's WARNING rather than `DEFENDER_LOG_LEVEL`, so such a
-    line is always shown: a `sys.exit("…")` refusal is exactly what an operator filtering to
-    ERROR still needs. A partial line waits for its newline, and whatever is still waiting at
-    exit is emitted then. Our own handler writes to `underlying`, and a write made while one of
-    these records is being emitted (logging's own error report) goes straight there too, so the
-    two can never feed each other."""
-
-    def __init__(self, underlying: Any) -> None:
-        super().__init__()
-        self.underlying = underlying
-        self._pending = ""
-        self._lock = threading.Lock()
-        self._busy = threading.local()
-
-    def write(self, s: str) -> int:
-        if getattr(self._busy, "on", False):
-            return int(self.underlying.write(s))
-        with self._lock:
-            *lines, self._pending = (self._pending + s).split("\n")
-        self._emit(lines)
-        return len(s)
-
-    def close_pending(self) -> None:
-        """Emit a trailing partial line — registered to run at exit."""
-        with self._lock:
-            lines, self._pending = [self._pending], ""
-        self._emit(lines)
-
-    def _emit(self, lines: list[str]) -> None:
-        self._busy.on = True
-        try:
-            for line in lines:
-                if line.strip():
-                    logging.getLogger(STDERR_LOGGER).warning(line)
-        finally:
-            self._busy.on = False
-
-    def flush(self) -> None:
-        self.underlying.flush()
-
-    def writable(self) -> bool:
-        return True
-
-    def fileno(self) -> int:
-        return int(self.underlying.fileno())
-
-    def isatty(self) -> bool:
-        return bool(self.underlying.isatty())
-
-    @property
-    def encoding(self) -> str:  # type: ignore[override]
-        return str(getattr(self.underlying, "encoding", "utf-8"))
-
-    @property
-    def errors(self) -> str | None:  # type: ignore[override]
-        return getattr(self.underlying, "errors", None)
-
-    def __getattr__(self, name: str) -> Any:
-        # Anything a text stream does not define here (`buffer`, `errors`, `reconfigure`...)
-        # is the real stream's: code that reaches past `write` gets the stream, not a crash.
-        return getattr(self.underlying, name)
-
-
-def _real_stderr() -> Any:
-    stream = sys.stderr
-    return stream.underlying if isinstance(stream, _StderrToLog) else stream
-
-
 class _DefenderHandler(logging.StreamHandler):
-    """Writes to whatever `sys.stderr` is when a record is emitted (beneath our own wrapper),
-    not the object it was at setup — Python's own last-resort handler does the same, and it is
+    """Writes to whatever `sys.stderr` is when a record is emitted, not the object it was at
+    setup — Python's own last-resort handler does the same, and it is
     what lets a redirect (`contextlib.redirect_stderr`, pytest's `capsys`) capture log lines.
     Also marks the one handler `configure` owns, so a second call replaces it and leaves every
     other handler (pytest's capture among them) alone."""
 
     @property
     def stream(self) -> Any:
-        return _real_stderr()
+        return sys.stderr
 
     @stream.setter
     def stream(self, _value: Any) -> None:
         pass
-
-
-def _log_uncaught(kind: type[BaseException], exc: BaseException,
-                  tb: TracebackType | None) -> None:
-    logging.getLogger(MAIN_LOGGER).critical("uncaught exception", exc_info=(kind, exc, tb))
-
-
-def _log_uncaught_in_thread(args: threading.ExceptHookArgs) -> None:
-    if args.exc_value is not None:
-        logging.getLogger(MAIN_LOGGER).critical(
-            f"uncaught exception in thread {getattr(args.thread, 'name', '?')}",
-            exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
 
 
 def configure(*, fmt: str, level: int | str) -> None:
@@ -297,8 +224,7 @@ def configure(*, fmt: str, level: int | str) -> None:
 
     The root stays at WARNING so third-party libraries only speak up when something is wrong
     (httpx alone logs every HTTP request at INFO); `level` applies to the `defender` logger and
-    to the program's own `__main__`. In JSON mode, direct writes to `sys.stderr` and uncaught
-    exceptions become records too; text mode leaves both as a person expects them."""
+    to the program's own `__main__`."""
     global _program
     _program = program_name(sys.modules.get(MAIN_LOGGER))
     handler = _DefenderHandler()
@@ -310,23 +236,19 @@ def configure(*, fmt: str, level: int | str) -> None:
     root.setLevel(logging.WARNING)
     for name in (ROOT_LOGGER, MAIN_LOGGER):
         logging.getLogger(name).setLevel(level)
-    if fmt == "json":
-        if not isinstance(sys.stderr, _StderrToLog):
-            sys.stderr = _StderrToLog(sys.stderr)
-            atexit.register(sys.stderr.close_pending)
-        sys.excepthook = _log_uncaught
-        threading.excepthook = _log_uncaught_in_thread
-    elif isinstance(sys.stderr, _StderrToLog):
-        sys.stderr = sys.stderr.underlying
 
 
 def _level(raw: str) -> int | None:
-    """A level as `logging` itself accepts one: any registered name (WARN and FATAL included),
-    in any case, or a number; `None` for anything else."""
+    """A level as `logging` itself accepts one — any registered name (WARN and FATAL included),
+    in any case, or a number — or `None`. NOTSET and anything at or below it are `None` too:
+    on a logger they mean "inherit", which here is the root's WARNING, so every INFO line would
+    vanish without a word."""
     name = raw.strip().upper()
-    if name.lstrip("-").isdigit():
-        return int(name)
-    return logging.getLevelNamesMapping().get(name)
+    try:
+        level = int(name)
+    except ValueError:
+        level = logging.getLevelNamesMapping().get(name, logging.NOTSET)
+    return level if level > logging.NOTSET else None
 
 
 def configure_from_env() -> None:
@@ -346,7 +268,7 @@ def configure_from_env() -> None:
         notices.append(f"{FORMAT_ENV}={raw_fmt!r} is not one of {FORMATS}; using {DEFAULT_FORMAT!r}")
         fmt = DEFAULT_FORMAT
     if level is None:
-        notices.append(f"{LEVEL_ENV}={raw_level!r} is not a logging level; using {DEFAULT_LEVEL!r}")
+        notices.append(f"{LEVEL_ENV}={raw_level!r} is not a usable logging level; using {DEFAULT_LEVEL!r}")
     configure(fmt=fmt, level=DEFAULT_LEVEL if level is None else level)
     handler = next(h for h in logging.getLogger().handlers if isinstance(h, _DefenderHandler))
     for message in notices:

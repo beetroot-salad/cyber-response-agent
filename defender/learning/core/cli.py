@@ -57,7 +57,7 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         # The raiser this was written for (`run_one`) left with #922; the arm stays because
         # the lease discipline it answers for is the drains', and #955 F-49's choice — say so,
         # do nothing, exit clean — is the same answer for them.
-        _logger.info(f"{e}")
+        _logger.warning(f"{e}")
         return 0
     except RunUnprocessable as e:
         if not allow_run_error:

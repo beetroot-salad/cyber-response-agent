@@ -536,10 +536,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # own path and `--run-id` (or the auto timestamp).
     run_dir = materialize(alert, run_id, model=model, world=world)
 
-    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN. The tenant comes from the tenant record — the
-    # sole authority, which `materialize` has just ensured exists beside the run dir.
-    with _log.log_context(run_id=run_dir.name,
-                          tenant_id=_tenant.read_tenant(run_dir.parent).tenant_id):
+    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN — its crash included. The tenant comes from the
+    # tenant record — the sole authority, which `materialize` has just ensured exists.
+    with _log.run_context(run_dir.name, _tenant.read_tenant(run_dir.parent).tenant_id,
+                          logger=_logger):
         if ns.update_ticket:
             ticket_writer.open_case_ticket(run_dir)
 
