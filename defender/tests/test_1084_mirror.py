@@ -7,7 +7,8 @@ holds the units that need no driven run:
   in `tmp_path` — a main checkout (`.git` is a directory), a worktree (`.git` is a
   `gitdir:` file whose `commondir` names the main `.git`, by absolute and by relative
   gitdir), an image build (no `.git`), and a mismatched or malformed chain (fallback to
-  `start` plus a warning on stderr). This is O1/D3's and O2's default-path coverage: the
+  `start` plus a logged WARNING naming it — a `logging` record since #1110's review, where it
+  was a raw stderr write). This is O1/D3's and O2's default-path coverage: the
   resolution is exercised without ever rendering into the real root.
 - D4, the override (`DEFENDER_RUN_VISUALIZATIONS_DIR`), read at CALL time: it wins even over
   an explicit `start`, and setting it after import changes the answer.
@@ -22,6 +23,7 @@ collects against a tree that does not have the new names yet and each test is re
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import re
 from pathlib import Path
@@ -78,6 +80,21 @@ def _worktree(main: Path, wt: Path, *, relative: bool = False, name: str = "wt")
 def no_override(monkeypatch):
     """The D4 override removed, so the resolver's own order (2)/(3) is what answers."""
     monkeypatch.delenv(ENV, raising=False)
+
+
+@pytest.fixture
+def warned(caplog):
+    """The WARNING-or-worse records logged so far, as their messages (#1110 review: the
+    resolver's fallback notice is a `logging` WARNING, not a raw stderr write). Capture starts
+    at DEBUG so a notice logged at any level is SEEN — and then judged by its level here."""
+    caplog.set_level(logging.DEBUG)
+
+    def read() -> list[str]:
+        out = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        caplog.clear()
+        return out
+
+    return read
 
 
 # ---------------------------------------------------------------------------------------
@@ -138,19 +155,19 @@ def test_1084_the_override_is_read_at_call_time_not_at_import(tmp_path, monkeypa
 # ---------------------------------------------------------------------------------------
 
 
-def test_1084_a_main_checkout_resolves_to_its_own_top_level_folder(tmp_path, capsys, no_override):
+def test_1084_a_main_checkout_resolves_to_its_own_top_level_folder(tmp_path, warned, no_override):
     """`start/.git` is a directory → `start` is the main checkout → `start/run-visualizations`,
-    and nothing is written to stderr (a well-formed layout is not warned about)."""
+    and nothing is warned (a well-formed layout is not warned about)."""
     main = _checkout(tmp_path / "main")
     got = _renderer().mirror_root(start=main)
     assert got.name == MIRROR
     assert _same(got, main / MIRROR)
-    assert capsys.readouterr().err == ""
+    assert warned() == []
 
 
 @pytest.mark.parametrize("relative", [False, True], ids=["absolute-gitdir", "relative-gitdir"])
 def test_1084_a_worktree_resolves_to_the_main_checkouts_folder_not_its_own(
-        tmp_path, capsys, no_override, relative):
+        tmp_path, warned, no_override, relative):
     """D3: a worktree's `.git` is the file `gitdir: <main>/.git/worktrees/<name>` (absolute, or
     relative to the worktree); that dir's `commondir` (`../..`) names the main `.git`, whose
     parent is the main checkout. The page goes to `<main>/run-visualizations`, never
@@ -166,16 +183,16 @@ def test_1084_a_worktree_resolves_to_the_main_checkouts_folder_not_its_own(
     assert got.name == MIRROR
     assert _same(got, main / MIRROR), f"resolved {got}, not the main checkout's folder"
     assert not _same(got, wt / MIRROR)
-    assert capsys.readouterr().err == ""
+    assert warned() == []
 
 
-def test_1084_no_git_at_all_falls_back_to_start_without_a_warning(tmp_path, capsys, no_override):
+def test_1084_no_git_at_all_falls_back_to_start_without_a_warning(tmp_path, warned, no_override):
     """(3) an image build has no `.git`: the answer is `start/run-visualizations`, and that is
-    an expected layout, not a malformed one — stderr stays empty."""
+    an expected layout, not a malformed one — nothing is warned."""
     image = _checkout(tmp_path / "image", git_dir=False)
     got = _renderer().mirror_root(start=image)
     assert _same(got, image / MIRROR)
-    assert capsys.readouterr().err == ""
+    assert warned() == []
 
 
 def _break_commondir_target(main: Path, wt: Path, admin: Path) -> None:
@@ -222,25 +239,29 @@ def _break_commondir_undecodable(main: Path, wt: Path, admin: Path) -> None:
         "gitdir-points-nowhere", "commondir-missing", "commondir-names-elsewhere",
         "git-file-undecodable", "commondir-undecodable"])
 def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
-        tmp_path, capsys, no_override, breakage):
+        tmp_path, warned, no_override, breakage):
     """Positive control first, on the SAME layout: well-formed, the worktree resolves to the
-    main checkout with an empty stderr. Then one link of the chain is broken; the answer is
+    main checkout with nothing warned. Then one link of the chain is broken; the answer is
     `start/run-visualizations` (the worktree's own top level — never a folder with no
-    `defender/` beside it, never a raise) and a warning is written to stderr."""
+    `defender/` beside it, never a raise) and ONE `logging` WARNING names the folder it fell
+    back to (#1110 review: a raw `sys.stderr.write` bypassed the process's log format and its
+    run context)."""
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     admin = _worktree(main, wt)
     assert _same(vr.mirror_root(start=wt), main / MIRROR), "positive control: well-formed"
-    assert capsys.readouterr().err == "", "positive control: a well-formed chain is not warned"
+    assert warned() == [], "positive control: a well-formed chain is not warned"
 
     breakage(main, wt, admin)
     got = vr.mirror_root(start=wt)
     assert _same(got, wt / MIRROR), f"a broken chain resolved to {got}, not the fallback"
-    assert capsys.readouterr().err.strip(), "the fallback was taken silently"
+    notices = warned()
+    assert len(notices) == 1, f"the fallback was not ONE logged warning: {notices!r}"
+    assert str(wt) in notices[0], f"the warning does not name the fallback folder: {notices!r}"
 
 
-def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, capsys, no_override):
+def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, warned, no_override):
     """The worktree's `commondir` is READ, not assumed to be `../..`: pointed at a second,
     well-formed checkout, the answer is that checkout's folder, with no warning. Positive
     control on the same worktree: with git's own `../..`, the answer is the first checkout
@@ -255,7 +276,7 @@ def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, cap
     (admin / "commondir").write_text(f"{os.path.relpath(other / '.git', admin)}\n",
                                      encoding="utf-8")
     assert _same(vr.mirror_root(start=wt), other / MIRROR)
-    assert capsys.readouterr().err == ""
+    assert warned() == []
 
 
 def test_1084_the_resolver_does_not_ask_git(tmp_path, monkeypatch, no_override):

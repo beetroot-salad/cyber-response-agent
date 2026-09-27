@@ -81,7 +81,7 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
     `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
     run-scoped salt for a builder to originate."""
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "runs"))
-    return run_common.materialize_run_dir(golden / "alert.json", run_id)
+    return run_common.materialize_run(golden / "alert.json", run_id).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:
@@ -154,14 +154,17 @@ def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
 
     src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
-    # #1110: the body moved to `materialize_run` (which answers the handle) and
-    # `materialize_run_dir` wraps it — so both are walked, or the check would read only the
-    # wrapper and pass over the body it was written for.
+    # #1110: ONE builder, `materialize_run`, which answers the run's handle. The `.run_dir`-only
+    # wrapper it briefly kept is gone (the review: two builders are two places for the stamp and
+    # this very check to be forgotten), so the walk reads exactly one function — and a second
+    # `materialize_run*` def reappearing beside it is itself the finding.
     builders = [
         n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name in {"materialize_run", "materialize_run_dir"}
+        if isinstance(n, ast.FunctionDef) and n.name.startswith("materialize_run")
     ]
-    assert len(builders) == 2, "the builder and its run-dir wrapper were not both found"
+    assert [b.name for b in builders] == ["materialize_run"], (
+        f"run_common defines {[b.name for b in builders]} — the run has one builder, "
+        "`materialize_run`, and nothing that wraps it")
     mints = [
         n for builder in builders for n in ast.walk(builder)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
@@ -384,7 +387,7 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
 
     assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
     production_names = {p.name for p in prod_dir.iterdir()}
-    # `production_names` is `materialize_run_dir`'s snapshot, taken BEFORE
+    # `production_names` is `materialize_run`'s snapshot, taken BEFORE
     # `run_investigation` starts; `tool_trace.jsonl` and (#705)
     # `session_store_pointer.json` are both written by `run_investigation` itself, between
     # that snapshot and message 0 — present in a real run by the time the model sees the

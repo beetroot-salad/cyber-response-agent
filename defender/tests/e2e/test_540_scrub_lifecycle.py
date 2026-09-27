@@ -107,7 +107,7 @@ GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 
 
 def _clean_run_dir(tmp_path: Path) -> Path:
-    """A realistic FROZEN run dir: the artifacts `materialize_run_dir` + a real run leave
+    """A realistic FROZEN run dir: the artifacts `materialize_run` + a real run leave
     behind. Regular files and real directories only — the shape the scrub must pass."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
@@ -1485,7 +1485,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run_dir(alert, None)
+        run_common.materialize_run(alert, None)
     assert list(runs_base.iterdir()) == [], (
         "the hostile id created run artifacts before it was refused"
     )

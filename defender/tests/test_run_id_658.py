@@ -18,7 +18,7 @@ VALID_RUN_IDS = (
 )
 
 #: Grammar-valid but NOT case-stable (#1077 decision 20): the slug grammar admits them, and
-#: `materialize_run_dir` refuses them like every other constructor of a run directory — two
+#: `materialize_run` refuses them like every other constructor of a run directory — two
 #: spellings of one id are one directory wherever the filesystem folds case.
 MIXED_CASE_RUN_IDS = ("A_1", "Run-123", "20260101T000000Z-solo")
 
@@ -62,7 +62,7 @@ def test_materialize_rejects_an_invalid_explicit_run_id_before_writing(
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run_dir(alert, run_id)
+        run_common.materialize_run(alert, run_id)
 
     assert not runs_base.exists()
 
@@ -80,13 +80,13 @@ def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, mon
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
 
     with pytest.raises(SystemExit, match="invalid run id.*case-stable"):
-        run_common.materialize_run_dir(alert, run_id)
+        run_common.materialize_run(alert, run_id)
     assert not runs_base.exists()
     # The host's own mint never produces what its admission refuses.
     from defender._run_id import mint_run_id
     minted = mint_run_id("Fixture-Alert")
     assert minted == minted.casefold()
-    assert run_common.materialize_run_dir(alert, minted) == runs_base / minted
+    assert run_common.materialize_run(alert, minted).run_dir == runs_base / minted
 
 
 @pytest.mark.parametrize("run_id", VALID_RUN_IDS)
@@ -96,7 +96,7 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     runs_base = tmp_path / "runs"
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
 
-    run_dir = run_common.materialize_run_dir(alert, run_id)
+    run_dir = run_common.materialize_run(alert, run_id).run_dir
 
     assert run_dir == runs_base / run_id
     # THE ACCESSORS, not the filenames re-typed here: `_run_paths.PROVENANCE`'s own comment is
@@ -118,7 +118,7 @@ def test_materialize_cannot_create_a_run_outside_the_runs_base(tmp_path, monkeyp
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run_dir(alert, run_id)
+        run_common.materialize_run(alert, run_id)
 
     assert not runs_base.exists()
     assert not outside.exists()

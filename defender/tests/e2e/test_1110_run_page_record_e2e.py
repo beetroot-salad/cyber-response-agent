@@ -28,6 +28,13 @@ through the handle's own `io=` seam and the assertion is on the CALL it captured
 - O8: `python visualize_run.py <run_dir>` re-renders a finished run into its `runtime_html`
   record, and under `production` copies nothing; like the post-run step it writes through the
   handle, so a link planted at the record's name is refused, not followed (S2).
+- The #1110 review's boundaries: the step's two jobs fail DIFFERENTLY — a render failure's
+  `VisualizeFailed` says the page could not be RENDERED (and never says "sav…"), a record
+  failure's says the record could not be SAVED and names it; a success logs the saved record at
+  INFO (production included) and the copy's own line (`mirror_page` is called unconditionally
+  and decides for itself). `run.py main` logs a caught `VisualizeFailed` WITH its traceback. The
+  standalone re-render runs the step inside the run's log context (`run_id` on every line) and
+  answers a failed render with its traceback and exit 1.
 
 The #1084 copy mechanics under `dev` (O3/S3) are `test_1084_mirror_e2e.py`'s, migrated.
 
@@ -55,9 +62,10 @@ from defender._run_paths import RunPaths
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import (
+    _assert_one_warning_naming_the_destination_once,
     _assert_record_written,
-    _assert_warned,
     _defender_snapshot,
+    _infos_naming,
     _main_checkout_by_git,
     _stray_state,
     _warnings,
@@ -150,6 +158,61 @@ class _RecordReplacedAfterWriteIo(ArgRecordingIo):
 
 def _text(payload: str | bytes) -> str:
     return payload.decode("utf-8") if isinstance(payload, bytes) else payload
+
+
+def _assert_a_render_failure(failed, run_dir: Path) -> None:
+    """#1110 review: a RENDER failure's `VisualizeFailed` names the run dir and says the page
+    could not be RENDERED — and never says "sav…", which is what a SAVE failure says instead
+    (`_assert_a_save_failure`). The paths are masked before the words are read, so a folder
+    name can neither supply nor spoil them."""
+    message = str(failed.value)
+    assert str(run_dir) in message, f"the render failure does not name the run: {message!r}"
+    words = message.replace(str(run_dir), "<run>").lower()
+    assert "render" in words, f"the failure does not say the page was not rendered: {message!r}"
+    assert "sav" not in words, f"a render failure reads as a save failure: {message!r}"
+
+
+def _assert_a_save_failure(failed, run_dir: Path, record: Path) -> None:
+    """#1110 review: a failure to SAVE the rendered page as the run's record says so — "sav…"
+    (save/saved/saving) — and names the record it could not save, so an operator reading it
+    knows the render itself succeeded and where the refused name is."""
+    message = str(failed.value)
+    assert str(record) in message, f"the save failure does not name the record: {message!r}"
+    words = message.replace(str(record), "<record>").replace(str(run_dir), "<run>").lower()
+    assert "sav" in words, f"the failure does not say the record was not saved: {message!r}"
+
+
+def _chain(exc: BaseException | None) -> list[BaseException]:
+    seen: list[BaseException] = []
+    while exc is not None and exc not in seen:
+        seen.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    return seen
+
+
+def _assert_main_warned_with_the_chain(caplog, reaches: Callable[[BaseException], bool]) -> None:
+    """#1110 review: `run.py main` logs a caught `VisualizeFailed` as a WARNING WITH its
+    traceback — the record's `exc_info` is set, and its chain runs from the `VisualizeFailed`
+    down to the renderer's own exception, so the log says WHY the page is missing."""
+    carried = [r for r in caplog.records
+               if r.levelno == logging.WARNING and r.exc_info and r.exc_info[1] is not None]
+    chains = [_chain(r.exc_info[1]) for r in carried]
+    assert any(type(c[0]).__name__ == "VisualizeFailed" and any(reaches(e) for e in c)
+               for c in chains), (
+        "main did not log the failed render as a WARNING carrying its traceback down to the "
+        f"renderer's error; warnings with exc_info: "
+        f"{[[type(e).__name__ for e in c] for c in chains]!r}; all warnings: "
+        f"{[r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]!r}")
+
+
+def _json_lines(stderr: str) -> list[dict]:
+    """The child's structured log lines (`DEFENDER_LOG_FORMAT=json`): one JSON object per line;
+    anything else on the stream (a plain traceback) is skipped, not parsed."""
+    out = []
+    for line in stderr.splitlines():
+        if line.startswith("{"):
+            out.append(json.loads(line))
+    return out
 
 
 def _plant_crashing_row(run_dir: Path, row: dict) -> None:
@@ -348,36 +411,37 @@ def _changed(before: dict, after: dict) -> set[str]:
                                          if before[k] != after[k]}
 
 
-def _render_and_diff(run) -> list[str]:
+def _render_and_diff(run, own_tree: Path, override: Path) -> list[str]:
     """Render once through the post-run step, and answer every entry OUTSIDE the run's
-    records that the render created, changed or removed: under the test's temp base (the runs
-    base, the `sessions/` sibling, the conftest's copy override all live there), under this
-    checkout's `defender/`, and at a real checkout's top-level copy name for this run (#1084's
-    default resolutions: the main checkout, and the folder holding `defender/`)."""
-    base = run.run_dir.parent.parent
+    records that the render created, changed or removed: under THIS TEST's own tree
+    (`own_tree`: the runs base and its `sessions/` sibling — the caller puts the runs base
+    there), in the conftest's copy override, under this checkout's `defender/`, and at a real
+    checkout's top-level copy name for this run (#1084's default resolutions: the main
+    checkout, and the folder holding `defender/`).
+
+    Never the whole xdist worker's temp dir: other tests' files live there (their session
+    stores among them, whose `-wal`/`-shm` a checkpoint can move while this render runs), so a
+    snapshot of it flakes on writes this render never made. Leaks outside these roots are the
+    temp-dir/home and copy-root tests' (H5/H6)."""
+    assert run.runs_base.parent == own_tree, (
+        f"precondition: the runs base {run.runs_base} sits in this test's own tree {own_tree}")
     is_record = _records_of(run)
     strays = [root / "run-visualizations" / run.run_dir.name / PAGE
               for root in (run_common.REPO_ROOT, _main_checkout_by_git())]
 
-    tmp_before = _tree_snapshot(base, is_record)
+    own_before = _tree_snapshot(own_tree, is_record)
+    override_before = _tree_snapshot(override, is_record)
     code_before = _defender_snapshot()
     strays_before = [_stray_state(p) for p in strays]
 
     run_common.visualize(run)
 
-    tmp_after = _tree_snapshot(base, is_record)
-    code_after = _defender_snapshot()
-    changed = [*_changed(tmp_before, tmp_after)]
-    changed += [f"defender/{k}" for k in _changed(code_before, code_after)]
+    changed = [*_changed(own_before, _tree_snapshot(own_tree, is_record))]
+    changed += [*_changed(override_before, _tree_snapshot(override, is_record))]
+    changed += [f"defender/{k}" for k in _changed(code_before, _defender_snapshot())]
     changed += [str(p) for p, was in zip(strays, strays_before, strict=True)
                 if _stray_state(p) != was]
     return sorted(changed)
-
-
-def _base_holds(run_dir: Path, override: Path) -> bool:
-    """The snapshot's root (the test's temp base) holds the conftest's copy override — so a
-    copy that lands there is IN the diff rather than beside it."""
-    return run_dir.parent.parent in override.parents
 
 
 @pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
@@ -389,15 +453,14 @@ def test_1110_o2_s1_a_production_render_leaves_nothing_outside_the_runs_records(
     leg on the same render: the record itself IS written, with this run's page — so an empty
     diff is not a render that did nothing. The dev-side positive control for the snapshot is
     the next test."""
-    run_dir = driven_run(tmp_path)
+    run_dir = driven_run(tmp_path / "runs-base")
     run = tenant_run(run_dir)
     if deployment is None:
         assert DEPLOYMENT_ENV not in os.environ, "precondition: the conftest unsets it"
     else:
         monkeypatch.setenv(DEPLOYMENT_ENV, deployment)
-    assert _base_holds(run_dir, run_visualizations_dir), "precondition: the snapshot sees it"
 
-    outside = _render_and_diff(run)
+    outside = _render_and_diff(run, tmp_path, run_visualizations_dir)
 
     assert outside == [], f"a {deployment or 'unset'} render wrote outside the run's records: {outside}"
     assert sorted(run_visualizations_dir.iterdir()) == [], "a copy landed in the override"
@@ -411,11 +474,11 @@ def test_1110_o2_s1_positive_control_the_same_render_under_dev_shows_only_the_co
     `<override>/<run>/runtime.html`, byte-identical to the record. A snapshot that could not
     see the override, or a filter that dropped it, fails here rather than passing the
     production case vacuously."""
-    run_dir = driven_run(tmp_path)
+    run_dir = driven_run(tmp_path / "runs-base")
     run = tenant_run(run_dir)
     monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
 
-    outside = _render_and_diff(run)
+    outside = _render_and_diff(run, tmp_path, run_visualizations_dir)
 
     folder = run_visualizations_dir / run_dir.name
     assert outside == sorted([str(folder), str(folder / PAGE)]), (
@@ -455,7 +518,8 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
 
     _assert_record_written(run_dir)
     if fault == "unwritable-destination":
-        _assert_warned(caplog, str(blocker / "run-visualizations" / run_dir.name / PAGE))
+        _assert_one_warning_naming_the_destination_once(
+            caplog, blocker / "run-visualizations" / run_dir.name / PAGE)
         assert blocker.read_bytes() == b"a file, not a folder\n"
     else:
         warned = _warnings(caplog)
@@ -487,7 +551,7 @@ def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes
     with pytest.raises(run_common.VisualizeFailed) as failed:
         run_common.visualize(run)
 
-    assert str(run_dir) in str(failed.value), "the failure does not name the run it could not render"
+    _assert_a_render_failure(failed, run_dir)
     assert not record.exists(), "a refused render left a page behind for a reader to trust"
     assert io.writes_to(record) == [], "the record was written before the precondition refused"
 
@@ -524,6 +588,7 @@ def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_
     assert type(cause).__name__ == cause_type, (
         f"VisualizeFailed is not chained from the renderer's own error: {cause!r}")
     assert cause_text in str(cause), f"not the observed renderer crash: {cause!r}"
+    _assert_a_render_failure(failed, run_dir)
     assert not record.exists(), "a crashed render left a page behind"
 
 
@@ -549,6 +614,7 @@ def test_1110_o4_o7_a_renderer_that_cannot_be_imported_is_visualize_failed(tmp_p
 
     assert isinstance(failed.value.__cause__, ImportError), (
         f"VisualizeFailed is not chained from the import failure: {failed.value.__cause__!r}")
+    _assert_a_render_failure(failed, run_dir)
     assert not record.exists(), "a render that could not import its renderer left a page"
 
 
@@ -589,8 +655,9 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
     planted at `runtime.html` — a symlink to a file outside the run, or a non-empty directory
     — which the handle's write refuses (observed: `OSError` ELOOP, "refusing to write through
     a non-plain or aliased entry"). The post-run step raises `VisualizeFailed`, chained from
-    that refusal; nothing is written through the link (S2) and the directory keeps its
-    content.
+    that refusal, saying the RECORD could not be SAVED and naming it (#1110 review: not the
+    render failure's words — the page rendered fine); nothing is written through the link (S2)
+    and the directory keeps its content.
 
     Positive control on the same run: the squatter removed, the same call writes the record."""
     run_dir = driven_run(tmp_path)
@@ -609,6 +676,7 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
 
     assert getattr(failed.value.__cause__, "errno", None) == errno.ELOOP, (
         f"VisualizeFailed is not the handle's refusal: {failed.value.__cause__!r}")
+    _assert_a_save_failure(failed, run_dir, record)
     assert outside.read_bytes() == b"OUTSIDE\n", "the page was written through the planted link"
     if squatter == "link":
         assert record.is_symlink(), "the planted link was replaced"
@@ -662,18 +730,24 @@ def test_1110_o6_an_unrecognised_deployment_renders_the_record_makes_no_copy_and
 
 @pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
 def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
-        tmp_path, entrypoint_env, crash):
+        tmp_path, entrypoint_env, caplog, crash):
     """O7 through the entry point, everything real but the model and the preflight: `main`
     materializes the run, the lifecycle drives it and leaves a trace row the renderer crashes
     on (two rows, two exception classes), and the production `visualize` renders in-process.
     `main` returns 0 — the crash did not escape it — and no page record exists, which is what
-    makes the 0 mean something: the render really failed.
+    makes the 0 mean something: the render really failed. And the failure is not reduced to a
+    one-line message: `main` logs it as a WARNING carrying the traceback, whose chain reaches
+    the renderer's own `AttributeError`/`TypeError` (#1110 review).
 
     Positive control: `test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized`
     — the same entry point over the same replay without the row writes the record."""
-    lifecycle = _ReplayLifecycle(crash_row=CRASHING_TRACE_ROWS[crash][0])
+    row, cause_type, _cause_text = CRASHING_TRACE_ROWS[crash]
+    lifecycle = _ReplayLifecycle(crash_row=row)
+    caplog.set_level(logging.DEBUG)
 
     assert _main(lifecycle=lifecycle) == 0
+
+    _assert_main_warned_with_the_chain(caplog, lambda e: type(e).__name__ == cause_type)
 
     (run_dir,) = lifecycle.run_dirs
     assert run_dir.parent == entrypoint_env, "precondition: main built the run under the runs base"
@@ -682,7 +756,7 @@ def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
 
 
 def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
-        tmp_path, entrypoint_env, monkeypatch):
+        tmp_path, entrypoint_env, monkeypatch, caplog):
     """O7 through the entry point, for a renderer that fails AT IMPORT (#922 C12). The module is
     made unimportable once the investigation is over — the post-run step is the first thing
     that needs it — and `main` still returns 0, with no page record: the import failure is a
@@ -691,8 +765,11 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
     Positive control: `test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized`
     — the same entry point, the renderer importable, writes the record."""
     lifecycle = _ReplayLifecycle(after=lambda: _make_renderer_unimportable(monkeypatch))
+    caplog.set_level(logging.DEBUG)
 
     assert _main(lifecycle=lifecycle) == 0
+
+    _assert_main_warned_with_the_chain(caplog, lambda e: isinstance(e, ImportError))
 
     (run_dir,) = lifecycle.run_dirs
     assert not RunPaths(run_dir).runtime_html.exists(), (
@@ -742,8 +819,9 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
         tmp_path, run_visualizations_dir):
     """O8/S2 (and M6: the re-render goes through the same step, over a handle). A symlink is
     planted at `runtime.html`, aimed at a file OUTSIDE the run. The re-render must not write
-    through it: the handle's write refuses the link, the child exits non-zero (a refused record
-    is not a rendered run), the outside file is byte-for-byte unchanged, and the link is still
+    through it: the handle's write refuses the link, the child exits 1 (a refused record is not
+    a rendered run) having logged the `VisualizeFailed` with its traceback on a JSON line bound
+    to the run (`run_id`), the outside file is byte-for-byte unchanged, and the link is still
     the link it was. A re-render that wrote its own page with a plain `write_text` follows the
     link and overwrites the outside file.
 
@@ -755,10 +833,18 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     outside.write_bytes(b"OUTSIDE\n")
     os.symlink(outside, record)
 
-    child = _standalone(run_dir)
+    child = _standalone(run_dir, DEFENDER_LOG_FORMAT="json")
 
-    assert child.returncode != 0, (
-        f"the re-render reported success over a refused record: {child.stdout!r}")
+    assert child.returncode == 1, (
+        f"the re-render did not answer a refused record with exit 1 (got {child.returncode}): "
+        f"{child.stderr[-600:]!r}")
+    # #1110 review: the failure is LOGGED, with its traceback, inside the run's context — a
+    # structured line a collector can tie to the run, not a bare interpreter traceback.
+    carried = [line for line in _json_lines(child.stderr)
+               if "VisualizeFailed" in (line.get("exception") or "")]
+    assert carried, f"no JSON log line carries the VisualizeFailed traceback: {child.stderr!r}"
+    assert all(line.get("run_id") == run_dir.name for line in carried), (
+        f"the failure's log line is not bound to the run: {carried!r}")
     assert outside.read_bytes() == b"OUTSIDE\n", "the re-render wrote through the planted link"
     assert record.is_symlink(), "the planted link was replaced"
     assert os.readlink(record) == str(outside), "the planted link was re-aimed"
@@ -833,3 +919,89 @@ def test_1110_o2_a_production_render_does_not_create_the_copy_root(
     monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
     run_common.visualize(run)
     assert (root / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()
+
+
+# ---------------------------------------------------------------------------------------
+# The #1110 review — a success says so; the copy's decision is the copy's
+# ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("deployment", [None, "dev"], ids=["production", "dev"])
+def test_1110_a_saved_page_is_logged_and_so_is_what_the_copy_did(
+        tmp_path, monkeypatch, caplog, run_visualizations_dir, deployment):
+    """#1110 review. A render that saved its record says so: ONE INFO line naming the saved
+    record's path — in production too, where the review found a success logged nothing. And the
+    post-run step hands every page to `mirror_page`, which decides for itself: in production it
+    logs ONE INFO line saying the page was "not copied" under `DEFENDER_DEPLOYMENT`
+    (`production`) and copies nothing; under `dev` it logs ONE INFO line naming the copy it
+    made. Nothing is warned either way — the positive control for every "warned" test."""
+    run_dir = driven_run(tmp_path / "runs-base")
+    run = tenant_run(run_dir)
+    record = run.observability.runtime_html.path
+    if deployment is not None:
+        monkeypatch.setenv(DEPLOYMENT_ENV, deployment)
+    caplog.set_level(logging.DEBUG)
+
+    run_common.visualize(run)
+
+    _assert_record_written(run_dir)
+    everything = [r.getMessage() for r in caplog.records]
+    assert len(_infos_naming(caplog, str(record))) == 1, (
+        f"the saved record was not logged once at INFO naming {record}: {everything!r}")
+    copy = run_visualizations_dir / run_dir.name / PAGE
+    if deployment == "dev":
+        assert copy.read_bytes() == record.read_bytes()
+        assert len(_infos_naming(caplog, str(copy))) == 1, (
+            f"the landed copy was not logged once at INFO naming {copy}: {everything!r}")
+    else:
+        assert not copy.exists(), "a production render made the copy"
+        skipped = [m for m in _infos_naming(caplog, DEPLOYMENT_ENV)
+                   if "not copied" in m.lower() and "production" in m]
+        assert len(skipped) == 1, (
+            "the post-run step did not hand the page to the copy, or the copy skipped it "
+            f"silently: no single INFO saying it was not copied under production: {everything!r}")
+    assert _warnings(caplog) == [], f"a clean render was warned about: {_warnings(caplog)!r}"
+
+
+@pytest.mark.parametrize("deployment", [None, "staging"], ids=["unset", "unrecognised"])
+def test_1110_the_standalone_re_render_logs_inside_the_runs_context(
+        tmp_path, run_visualizations_dir, deployment):
+    """#1110 review. The standalone re-render runs the step inside the run's log context
+    (`_log.run_context(run_dir.name, …)`), so every line it writes carries `run_id` — read here
+    off the real child's JSON log (`DEFENDER_LOG_FORMAT=json`):
+
+    - `DEFENDER_DEPLOYMENT=staging`: the ERROR about the unrecognised value is on a line whose
+      `run_id` is this run's.
+    - unset: the skipped copy is not silent — an INFO line saying the page was "not copied",
+      naming `DEFENDER_DEPLOYMENT`, bound to this run; and the saved record's INFO line too.
+
+    Both exit 0 with the record written (the positive control that the child ran the step)."""
+    run_dir = driven_run(tmp_path / "runs-base")
+    record = RunPaths(run_dir).runtime_html
+    env = {"DEFENDER_LOG_FORMAT": "json"}
+    if deployment is not None:
+        env[DEPLOYMENT_ENV] = deployment
+
+    child = _standalone(run_dir, **env)
+
+    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
+    assert MARKER in record.read_text(encoding="utf-8")
+    lines = _json_lines(child.stderr)
+    about = [line for line in lines if DEPLOYMENT_ENV in str(line.get("message", ""))]
+    if deployment == "staging":
+        errors = [line for line in about if line.get("severity") == "ERROR"]
+        assert errors, f"no JSON ERROR line about {DEPLOYMENT_ENV}: {child.stderr!r}"
+        assert all(line.get("run_id") == run_dir.name for line in errors), (
+            f"the deployment error is not bound to the run {run_dir.name!r}: {errors!r}")
+    else:
+        skipped = [line for line in about if line.get("severity") == "INFO"
+                   and "not copied" in str(line.get("message", "")).lower()]
+        assert len(skipped) == 1, (
+            f"the skipped copy was not ONE INFO line saying so: {child.stderr!r}")
+        assert skipped[0].get("run_id") == run_dir.name, (
+            f"the not-copied line is not bound to the run: {skipped!r}")
+        saved = [line for line in lines if line.get("severity") == "INFO"
+                 and str(record) in str(line.get("message", ""))]
+        assert saved, f"no INFO line names the saved record {record}: {child.stderr!r}"
+        assert all(line.get("run_id") == run_dir.name for line in saved), saved
+    assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"

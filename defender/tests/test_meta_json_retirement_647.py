@@ -11,7 +11,7 @@ sweeps, and the env boundary. The driven-run demands (the origin pin, salt coher
 message-0 listing) live in `test_salt_origin_647.py` beside it.
 
 RED AGAINST HEAD IS THE EXPECTED STATE. `defender/runtime/untrusted.py` does not exist yet,
-`materialize_run_dir` still returns a bare `Path`, `RunPaths.meta` is still declared, and
+the run builder still returns a bare `Path`, `RunPaths.meta` is still declared, and
 `scripts/testing/gather_only.py` is still on disk. Each target import is done INSIDE the
 test that needs it, so a missing module reds exactly one demand instead of taking the whole
 module down at collection.
@@ -19,7 +19,7 @@ module down at collection.
 **Every repo-wide census here is DERIVED WITH A TOOL from the REPO ROOT** (`git grep`, and
 an AST walk over the deleted module as it stood at the base commit) — never from a list
 typed into this file. That is not stylistic: this change's enumeration was wrong on every
-hand-written attempt (`materialize_run_dir`'s caller set twice, the orphan-symbol count
+hand-written attempt (the run builder's caller set twice, the orphan-symbol count
 six→seven, the prose-site count four→nine), and the repo's own instruments are structurally
 blind to the misses — `pyrefly-refs` is rooted at `configDir: defender` and silently omits
 `scripts/`, `lint_stale_refs` drops identifiers under 8 characters and excludes `docs/`.
@@ -71,7 +71,7 @@ UNRELATED_TREES = (
 )
 # A lint baseline fingerprints its findings BY FILE AND SYMBOL, so it spells the names of
 # whatever the lint found there — #771's write-lint carries the legitimate
-# `run_common.py:materialize_run_dir` writer, and the vulture baseline carries an
+# `run_common.py` run-builder writer, and the vulture baseline carries an
 # `unused function` row for every corpse it accepts. Every such row is a record OF a
 # site, never a caller of one, and that holds for any baseline the suite grows, so it is a rule
 # rather than the growing list of one-offs it replaces. The lint SCRIPTS beside them stay in
@@ -165,8 +165,9 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     AMENDED BY #1110. The builder `run.py` calls is `run_common.materialize_run`, which returns
     the run's tenant-bound `Run` handle (whose `.run_dir` is the run dir) rather than the bare
     path — `main` keeps the handle, because the post-run page render saves the page through it.
-    `materialize_run_dir` survives as a `.run_dir` wrapper for its other callers. The single-name
-    bind this demand pins is unchanged: one value, never a tuple.
+    It is the ONE builder: the `.run_dir`-only wrapper it briefly kept is gone (#1110 review),
+    so every caller reads `materialize_run(...).run_dir`. The single-name bind this demand pins
+    is unchanged: one value, never a tuple.
 
     AMENDED BY #875. This demand was "binds BOTH elements of the returned pair in order — the
     run dir first, the salt second", the shape #647 introduced so that the run's ONE trust
@@ -480,7 +481,7 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
 
 
 #: Calls that make an accessor's path a WRITE TARGET rather than something read back.
-#: `meta.json` was written by `materialize_run_dir` and read by nothing, so a census that
+#: `meta.json` was written by the run builder and read by nothing, so a census that
 #: counts its writer as a consumer discharges the exact accessor #647 deleted — which is why
 #: the two are told apart here rather than merged into "is mentioned".
 _WRITE_RECEIVER_METHODS = frozenset({"mkdir", "write_text", "write_bytes", "touch", "unlink"})
@@ -583,7 +584,7 @@ def test_no_accessor_names_a_file_nothing_reads():
     wrong.
 
     A WRITE IS NOT A READ, and the distinction is the whole test: `meta.json`'s writer was
-    `materialize_run_dir`, which named the accessor, so a census that accepts any mention
+    the run builder in `run_common`, which named the accessor, so a census that accepts any mention
     passes the very accessor #647 deleted. `provenance` (#976) has exactly one real reader —
     `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it.
 
@@ -681,7 +682,7 @@ def test_no_module_outside_the_defender_package_imports_run_common():
         "run_common is imported from outside the defender package:\n" + "\n".join(outside)
     )
 
-    caller_hits = live_hits(repo_grep(r"\bmaterialize_run_dir\b"))
+    caller_hits = live_hits(repo_grep(r"\bmaterialize_run\b"))
     outside_callers = [
         h for h in caller_hits
         if not h.startswith("defender/")
@@ -855,7 +856,7 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     alert.write_text("{}", encoding="utf-8")
     os.environ["DEFENDER_RUNS_BASE"] = str(tmp_path / "runs")
     try:
-        run_dir = run_common.materialize_run_dir(alert, "env-boundary-647")
+        run_dir = run_common.materialize_run(alert, "env-boundary-647").run_dir
     finally:
         os.environ.pop("DEFENDER_RUNS_BASE", None)
 
@@ -866,7 +867,7 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     # run salt to leak into the environment or to recover from the run dir. The value-level
     # assertions this demand carried are replaced by the absence that subsumes them.
     from defender import run_common as _rc
-    assert "secrets" not in _rc.materialize_run_dir.__code__.co_names, \
+    assert "secrets" not in _rc.materialize_run.__code__.co_names, \
         "the builder mints a run-scoped token again — there is a value to leak once more"
 
 
