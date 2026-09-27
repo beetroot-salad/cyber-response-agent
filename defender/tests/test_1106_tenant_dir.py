@@ -317,6 +317,38 @@ def test_any_link_inside_a_tenant_folder_is_refused_not_only_the_required_files(
     assert str(own) in message, message
 
 
+def test_a_hard_linked_file_inside_a_tenant_folder_is_refused(tmp_path):
+    """A hard link is a second name for another tenant's file with no link to see: refused
+    all the same. Control: the tenant without it resolves (above)."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme")
+    T.plant_tenant(root, "bravo")
+    own = root / "acme" / "settings" / "systems" / "elastic" / "config.env"
+    own.parent.mkdir(parents=True, exist_ok=True)
+    if own.exists():
+        own.unlink()
+    theirs = root / "bravo" / "settings" / "verb-grants.yaml"
+    os.link(theirs, own)
+    message = _refusal(root, "acme")
+    assert "hard link" in message, message
+    assert str(own) in message, message
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 directory anyway")
+def test_a_directory_the_link_check_cannot_read_is_refused_not_skipped(tmp_path):
+    """Skipped silently, an unreadable directory would hide any link below it."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme")
+    hidden = root / "acme" / "settings" / "systems" / "hidden"
+    hidden.mkdir(parents=True)
+    hidden.chmod(0)
+    try:
+        message = _refusal(root, "acme")
+    finally:
+        hidden.chmod(0o755)
+    assert "could not be checked" in message, message
+
+
 def test_a_folder_named_default_is_not_a_tenant(tmp_path):
     """N10 on the resolver itself: the retired bootstrap id names no tenant even when a
     complete folder carries its name — so a run, a branch, an operator command and CI all

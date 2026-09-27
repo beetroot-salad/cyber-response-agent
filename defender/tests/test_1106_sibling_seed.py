@@ -295,7 +295,7 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B, marker="bravo")
     tenant = T.tenants().tenant_dir(tmp_path / "tenants", "bravo")
     ep = P.episode(tmp_path)
-    side = seams.adapter_seam(ep, tenant)
+    side = seams.adapter_seam(ep, T.run_tenant(tenant))
     assert {(s, v) for s, v, _ in side.registry.grant.entries} == set(T.GATHER_PAIRS_B)
     assert side.registry.decide("identity", "get-user").outcome == "GRANTED"
     denied = side.registry.decide("identity", "can-access")

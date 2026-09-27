@@ -127,7 +127,7 @@ def materialize_run_dir(
         tenant_record = _tenant.ensure_tenant(runs_base, tenant_id=tenant_id)
         chosen = tenant_id
     if expected_record is not None and tenant_record != expected_record:
-        raise ValueError(
+        raise _tenant.TenantRecordMismatch(
             f"the tenant record at {_tenant.record_path(runs_base)} changed after this run's "
             f"tenant was chosen from it (read {expected_record}, now {tenant_record}) — the "
             "run would be stamped with a record its settings were not resolved from")

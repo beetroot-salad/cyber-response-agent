@@ -143,8 +143,8 @@ def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
     THE EPISODE TENANT'S GATHER GRANT (#1106), which is the same grant every sibling serves
     through — `run.py` builds its registry from that tenant's table, and a review that could
     reach a verb no sibling can would be measuring a world through a door the family cannot
-    open. `tenant` is the episode's resolved `TenantDir`: its table gives the grant and its
-    `settings/` the context's config folder.
+    open. `tenant` is the episode's `RunTenant`, resolved once by the launcher: its grants give
+    the registry's grant (never re-read here) and its `settings/` the context's config folder.
 
     ONE registry and ONE context for the whole review, built here rather than per call.
     `review.verb_context` owns what that context is — including that it writes no query row
@@ -158,14 +158,11 @@ def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
     from defender.learning.branch.review import verb_context
     from defender._paths import adapters_under
     from defender.run_common import DEFENDER_DIR
-    from defender.runtime.run_tenant import table_pointer
-    from defender.runtime.verb_dispositions import run_grants
     from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 
-    grants = run_grants(tenant.settings)
     return EpisodeAdapters(
         registry=ModuleVerbRegistry(
-            read_roster(adapters_under(DEFENDER_DIR)), grants.gather,
-            grant_home=table_pointer(tenant.tenant_id)),
+            read_roster(adapters_under(DEFENDER_DIR)), tenant.grants.gather,
+            grant_home=tenant.table_pointer),
         ctx=verb_context(Path(episode_dir), tenant.settings),
     )

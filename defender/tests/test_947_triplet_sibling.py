@@ -368,6 +368,31 @@ def test_a_sibling_on_an_unseeded_runs_base_is_refused_not_run_as_the_bootstrap_
     assert list(unseeded.iterdir()) == []
 
 
+def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_refused(
+        tmp_path, monkeypatch):
+    """A sibling runs on the EPISODE's tenant — the source run's, read from its runs-base record.
+    Resumed by hand on a runs base whose record names another tenant, it must refuse naming
+    both, not run that tenant's grants and endpoints against the episode's staged corpus. The
+    control is the seeded resume above (the two records agree)."""
+    from defender import _tenant
+
+    base, src = T.runs_base(tmp_path)
+    assert _tenant.read_tenant(base).tenant_id == T1106.PLAYGROUND_ID
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    other = tmp_path / "other-runs"
+    _tenant.ensure_tenant(other, tenant_id="acme")
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(other))
+    lifecycle = _Recorder([])
+    with pytest.raises(SystemExit) as refused:
+        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
+                     "--tenants-root", str(T1106.TENANTS_ROOT)],
+                    lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
+    text = str(refused.value)
+    assert "'acme'" in text, text
+    assert repr(T1106.PLAYGROUND_ID) in text, text
+    assert lifecycle.order == []
+
+
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     """Every site that compares a world reads ONE spelling of the world token: the alias name's
     head, the world ledger's filename, the ledger rows a sibling writes, and the registry's own

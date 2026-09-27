@@ -105,8 +105,15 @@ def _check_id(tenant_id: str) -> None:
 
 
 def _refuse_links(folder: Path, tenant_id: str) -> None:
-    """Refuse any link anywhere inside a tenant folder, directories included (not followed)."""
-    for current, dirnames, filenames in os.walk(folder, followlinks=False):
+    """Refuse any link anywhere inside a tenant folder: a symlink (file or directory, never
+    followed) or a hard-linked file (a second name for another tenant's bytes). A directory the
+    walk cannot read is refused too — skipped, it would hide whatever links are below it."""
+
+    def unreadable(error: OSError) -> None:
+        raise TenantDirError(
+            f"tenant {tenant_id!r}'s folder could not be checked for links: {error}")
+
+    for current, dirnames, filenames in os.walk(folder, onerror=unreadable, followlinks=False):
         for name in (*dirnames, *filenames):
             entry = Path(current) / name
             if entry.is_symlink():
@@ -114,6 +121,12 @@ def _refuse_links(folder: Path, tenant_id: str) -> None:
                     f"tenant {tenant_id!r}'s folder must hold no links: {entry} is one (to "
                     f"{os.readlink(entry)}) — a link can hand this tenant another's settings "
                     "or knowledge while staying inside the tenants root"
+                )
+            if name in filenames and entry.lstat().st_nlink > 1:
+                raise TenantDirError(
+                    f"tenant {tenant_id!r}'s folder must hold no links: {entry} is a hard link "
+                    f"({entry.lstat().st_nlink} names for one file) — its bytes may be another "
+                    "tenant's"
                 )
 
 
@@ -174,8 +187,10 @@ def add_tenant_arguments(parser: argparse.ArgumentParser, *, reads: str) -> None
              "the checkout being the one the command's code tree sits in")
 
 
-def entry_tenant(defender_dir: Path, tenants_root: Path | None, tenant_id: str | None) -> TenantDir:
-    """An operator command's tenant, from its own arguments — or `TenantDirError`.
+def entry_tenant_args(
+    defender_dir: Path, tenants_root: Path | None, tenant_id: str | None,
+) -> tuple[Path, str]:
+    """An operator command's `(tenants root, tenant id)`, from its own arguments.
 
     ONE derivation for every such command: the tenants root defaults to the checkout that holds
     `defender_dir`, the code tree the command itself runs against, so a command pointed at a
@@ -185,7 +200,14 @@ def entry_tenant(defender_dir: Path, tenants_root: Path | None, tenant_id: str |
 
     root = tenants_root if tenants_root is not None else default_tenants_root(
         Path(defender_dir).parent)
-    return tenant_dir(root, tenant_id if tenant_id is not None else DEFAULT_TENANT_ID)
+    return root, tenant_id if tenant_id is not None else DEFAULT_TENANT_ID
+
+
+def entry_tenant(defender_dir: Path, tenants_root: Path | None, tenant_id: str | None) -> TenantDir:
+    """An operator command's tenant FOLDER (`entry_tenant_args`, then `tenant_dir`), or
+    `TenantDirError` — for a command that reads a file from it and needs nothing else checked.
+    A command that uses the tenant's grants goes through `run_tenant.resolve_tenant`."""
+    return tenant_dir(*entry_tenant_args(defender_dir, tenants_root, tenant_id))
 
 
 __all__ = [
@@ -198,6 +220,7 @@ __all__ = [
     "add_tenant_arguments",
     "default_tenants_root",
     "entry_tenant",
+    "entry_tenant_args",
     "tenant_dir",
     "template_dir",
 ]

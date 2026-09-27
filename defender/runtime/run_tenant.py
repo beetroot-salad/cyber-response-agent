@@ -34,7 +34,9 @@ def table_pointer(tenant_id: str) -> str:
     the resolved host path: the settings half is host-only, and the host's layout (and the
     prompt prefix built over it) must not change with the machine the run is on. Operator
     messages print `RunGrants.path` instead."""
-    return f"settings/verb-grants.yaml of tenant {tenant_id!r}"
+    from defender.runtime.verbs import TABLE_POINTER
+
+    return f"{TABLE_POINTER}, tenant {tenant_id!r}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +101,46 @@ def refusals() -> tuple[type[Exception], ...]:
     return (DispositionError, LeadZeroConfigError, CorrelationDispatchError, GrantError)
 
 
+class TenantRefused(Exception):
+    """The one refusal `resolve_tenant` raises: every reason a tenant cannot be used, from its
+    id and folder (`TenantDirError`) to its table and lead-zero config (`refusals()`), each
+    message naming the file an operator edits. Entry points catch THIS and report it."""
+
+
+def resolve_tenant(
+    tenants_root: Path, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
+    box_mounted: tuple[Path, ...] = (),
+) -> RunTenant:
+    """`tenant_id` under `tenants_root`, checked whole, or `TenantRefused`. @owns tenant acceptance
+
+    THE ONE FRAME every entry point accepts a tenant through — a run, a resumed sibling, the
+    branch launcher, `defender-policy` — so none can accept a tenant another refuses:
+      * the folder and id rules (`_tenants.tenant_dir`: grammar, the retired `default`, no link
+        anywhere inside);
+      * the folder is not inside a tree a box mounts — `defender_dir`, bound read-only into
+        every box, and whatever else the caller names in `box_mounted` (a run passes its runs
+        base, whose run dirs are the box's rw bind): the settings half is host-only, and a
+        tenants root placed there would hand the model every tenant's endpoints;
+      * the content rules (`resolve_run_tenant`)."""
+    from defender._tenants import TenantDirError, tenant_dir
+
+    try:
+        folder = tenant_dir(tenants_root, tenant_id)
+    except TenantDirError as refusal:
+        raise TenantRefused(str(refusal)) from refusal
+    for mounted in (Path(defender_dir), *box_mounted):
+        if folder.settings.is_relative_to(Path(mounted).resolve()):
+            raise TenantRefused(
+                f"tenant {tenant_id!r}'s folder {folder.settings.parent} is inside {mounted}, "
+                "which a box mounts — the settings half is host-only; keep the tenants root "
+                "outside the code tree and the runs base")
+    try:
+        return resolve_run_tenant(
+            folder, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
+    except refusals() as refusal:
+        raise TenantRefused(f"tenant {tenant_id!r}: {refusal}") from refusal
+
+
 def resolve_run_tenant(
     tenant: TenantDir, *, defender_dir: Path, dispatches_lead_zero: bool,
 ) -> RunTenant:
@@ -120,6 +162,8 @@ def resolve_run_tenant(
 
 __all__ = [
     "RunTenant",
+    "TenantRefused",
+    "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
     "refusals",

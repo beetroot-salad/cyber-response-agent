@@ -264,12 +264,6 @@ def _dispatched_lead(deps: Any) -> str:
     return deps.lead_id
 
 
-#: What a fault detail says in place of the run's tenant `settings/` folder: the folder is
-#: host-only (#1106), so its resolved path — the tenants root, the tenant layout — is not the
-#: model's to read. Worded like the permission table's pointer (`run_tenant.table_pointer`).
-_SETTINGS_MARK = "the tenant's settings/"
-
-
 def _model_visible(deps: Any, detail: str) -> str:
     """`detail` as the model may read it: staged names and world ids removed
     (`redact_model_visible`), and the run's tenant settings folder named, not located. Both
@@ -280,9 +274,11 @@ def _model_visible(deps: Any, detail: str) -> str:
     settings = getattr(deps, "settings_dir", None)
     if settings is None:
         return text
+    from .verbs import SETTINGS_POINTER
+
     for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
-        text = text.replace(spelling.rstrip("/") + "/", _SETTINGS_MARK).replace(
-            spelling, _SETTINGS_MARK.rstrip("/"))
+        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
+            spelling, SETTINGS_POINTER.rstrip("/"))
     return text
 
 

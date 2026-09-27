@@ -70,9 +70,14 @@ def is_system_name(name: str) -> bool:
 
 ADAPTER_SUFFIX = "_adapter.py"
 
+#: How MODEL-FACING text names a tenant's host-only `settings/` folder (#1106): by what it is,
+#: never by where it is on the host. The one spelling — the table's pointer below, the tenant-
+#: named pointer (`run_tenant.table_pointer`) and the query tool's fault redaction all build on it.
+SETTINGS_POINTER = "the tenant's settings/"
+
 #: A refusal's pointer at the verb-disposition table when no run handed its tenant's pointer in:
 #: the file's name and where it lives, so the reader still knows WHICH file fixes a grant.
-TABLE_POINTER = "the tenant's settings/verb-grants.yaml"
+TABLE_POINTER = f"{SETTINGS_POINTER}verb-grants.yaml"
 
 
 @model(frozen=True)
@@ -721,7 +726,7 @@ class VerbRegistry:
 
 class ModuleVerbRegistry(VerbRegistry):
 
-    def __init__(self, roster: RosterRead, grant: VerbGrant, *, grant_home: str | None = None):
+    def __init__(self, roster: RosterRead, grant: VerbGrant, *, grant_home: str = TABLE_POINTER):
         super().__init__(grant)
         # THE ROSTER, taken as a VALUE — the one `read_roster` produced where this process
         # started — never a directory to read here. A tree that cannot be read fails at that
@@ -751,10 +756,10 @@ class ModuleVerbRegistry(VerbRegistry):
         # Where a refusal says an ungranted verb is withheld: the run's tenant's table, named
         # for the model (`run_tenant.table_pointer`, #1106) when whoever built the grant hands
         # it in, else named generically — every grant this class serves a model is some
-        # tenant's table projection, so the pointer always names the file that fixes it. The two `DENY_ALL`
-        # callers (`_scaffold_rules`, `hooks/inject_system_skill_description`) never call
-        # `decide`, so they never render it.
-        self.grant_home = grant_home if grant_home is not None else TABLE_POINTER
+        # tenant's table projection, so the pointer always names the file that fixes it. The two
+        # `DENY_ALL` callers (`_scaffold_rules`, `hooks/inject_system_skill_description`) never
+        # call `decide`, so they never render it.
+        self.grant_home = grant_home
         offenders = [
             (s, v) for s, v, _ in grant.entries if v not in self._cold_verb_names(s)
         ]

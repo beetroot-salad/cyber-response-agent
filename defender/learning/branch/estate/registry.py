@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from defender.runtime.verbs import DENIED, ModuleVerbRegistry, VerbDecision
+from defender.runtime.verbs import DENIED, TABLE_POINTER, ModuleVerbRegistry, VerbDecision
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.adapters.confinement import (
     VIEW_NAMESPACE,
@@ -179,10 +179,12 @@ def refuse_a_foreign_world_view(
     the one the probe drove through to the transport unrefused.
 
     Both query languages are read through the STAGER's own source reader, because which of a
-    verb's parameters addresses a corpus is vendor knowledge and has one home. `ctx` is not
-    passed: an omitted index resolves to the run's configured default, which is a configured
-    pattern and cannot be a foreign view — so the config read is pure cost here, and skipping it
-    keeps this frame total. A body this seam cannot parse is left to `prepare`, which parses it
+    verb's parameters addresses a corpus is vendor knowledge and has one home. The reader is not
+    handed `ctx`: an omitted index resolves to the run's configured default, which is a configured
+    pattern and cannot be a foreign view — so a config read there would be pure cost. `ctx` is
+    read only by `_configured_for`, and only for a world whose family records no corpus patterns
+    (a world assembled without a manifest; every production world carries its manifest's set),
+    where it re-reads the tenant's config on each call. A body this seam cannot parse is left to `prepare`, which parses it
     again and raises the stager's own refusal for the world that stages; for a world that does
     not, it is a call that names no view and there is nothing here to answer.
     """
@@ -314,7 +316,7 @@ class WorldRegistry(ModuleVerbRegistry):
 
     def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
                  applier: Any = None, settings_dir: Path | None = None,
-                 grant_home: str | None = None):
+                 grant_home: str = TABLE_POINTER):
         # `settings_dir` is the episode tenant's folder (#1106), which the ticket-comment check
         # below reads the released status from; `None` (a registry no run built) can release
         # nothing, so such a world's comment patch is refused rather than judged against some

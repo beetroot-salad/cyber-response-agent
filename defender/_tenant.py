@@ -65,6 +65,12 @@ class TenantRecordCorrupt(ValueError):
     read-as-`None`: this record refuses the whole run rather than degrading."""
 
 
+class TenantRecordMismatch(ValueError):
+    """A runs base's record is not the one a run was resolved from — it names another tenant,
+    or it changed after the run's tenant was chosen from it. A run refuses rather than stamp a
+    record its settings did not come from."""
+
+
 def record_path(runs_base: Path) -> Path:
     return Path(runs_base) / TENANT_RECORD_NAME
 

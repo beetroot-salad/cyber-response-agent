@@ -309,3 +309,25 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
     assert text.startswith("defender-policy:"), text
     assert "verb-grants.yaml" in text, text
     assert "newco" in text, text
+
+
+@pytest.mark.parametrize("inside", ["code tree", "runs base"])
+def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
+    """The settings half is host-only: a tenants root placed in the code tree (bound read-only
+    into every box) or under the runs base (whose run dirs are the box's writable bind) would
+    hand the model every tenant's endpoints. `resolve_tenant` refuses it; the same tenant under
+    a root outside both resolves (the control)."""
+    rt = T.mod("runtime.run_tenant")
+    defender_dir = tmp_path / "repo" / "defender"
+    runs_base = tmp_path / "runs"
+    defender_dir.mkdir(parents=True)
+    runs_base.mkdir()
+    outside = tmp_path / "tenants"
+    T.plant_tenant(outside, "acme")
+    assert rt.resolve_tenant(outside, "acme", defender_dir=defender_dir,
+                             dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == "acme"
+    root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
+    T.plant_tenant(root, "acme")
+    with pytest.raises(rt.TenantRefused, match="which a box mounts"):
+        rt.resolve_tenant(root, "acme", defender_dir=defender_dir, dispatches_lead_zero=False,
+                          box_mounted=(runs_base,))

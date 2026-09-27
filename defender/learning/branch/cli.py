@@ -73,7 +73,8 @@ from defender._episode_paths import EpisodePaths
 from defender._io import guarded_mkdir, load_json_artifact, write_guarded
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
-from defender._tenants import TenantDir, TenantDirError, default_tenants_root, tenant_dir
+from defender._tenants import default_tenants_root
+from defender.runtime.run_tenant import RunTenant
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod
 from defender.learning.branch import timing as timing_mod
@@ -462,7 +463,7 @@ def _no_stamp(source_run_dir: Path) -> LauncherRefused:
         "stamp cannot anchor one")
 
 
-def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> TenantDir:
+def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
     """The episode's tenant: the SOURCE run's, resolved under the tenants root this launcher
     was handed — or the refusal, before anything is spent.
 
@@ -499,24 +500,18 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> TenantDir:
             f"{stamp.get('tenant_id')!r} but its runs base's record "
             f"({_tenant.record_path(Path(source_run_dir).parent)}) names {tenant_id!r} — the "
             "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
-    try:
-        folder = tenant_dir(tenants_root, tenant_id)
-    except TenantDirError as refusal:
-        raise LauncherRefused(f"[branch] the source run's tenant: {refusal}") from refusal
-    # THE SAME CONTENT RULES A SIBLING'S RUN START APPLIES (`run_tenant.resolve_run_tenant`),
+    # THROUGH THE ONE ACCEPTANCE FRAME a sibling's run start uses (`run_tenant.resolve_tenant`),
     # asked here — before the questioner is paid for, the review replays and any world is
-    # staged — so an episode on a tenant whose table no longer loads, or under which gather can
-    # query nothing, is refused once rather than by every sibling after the spend. A sibling
-    # dispatches no turn-0 lead, so the lead-zero agreement is not asked, as it is not there.
+    # staged — so a tenant a sibling would refuse is refused once, not by every sibling after the
+    # spend. The value is RETURNED and used (the review's grants come from it), not re-read. A
+    # sibling dispatches no turn-0 lead, so the lead-zero agreement is not asked, as there.
     from defender.runtime import run_tenant as run_tenant_mod
 
     try:
-        run_tenant_mod.resolve_run_tenant(
-            folder, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False)
-    except run_tenant_mod.refusals() as refusal:
-        raise LauncherRefused(
-            f"[branch] the source run's tenant {tenant_id!r}: {refusal}") from refusal
-    return folder
+        return run_tenant_mod.resolve_tenant(
+            tenants_root, tenant_id, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False)
+    except run_tenant_mod.TenantRefused as refusal:
+        raise LauncherRefused(f"[branch] the source run's tenant: {refusal}") from refusal
 
 
 def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
@@ -1546,7 +1541,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     ns: argparse.Namespace, *, source: Path, source_stamp: dict, episode_id: str,
     episode_dir: Path, token: str, patterns: Sequence[str], door: Any, questioner: Any,
     adapters: Any, invoke: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
-    teardown: Any = None, tenant: TenantDir, tenants_root: Path,
+    teardown: Any = None, tenant: RunTenant, tenants_root: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`, inside the teardown guard.
 
