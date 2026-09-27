@@ -246,7 +246,11 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
     system, verb, params = call
     if world is not None:
         refuse_a_foreign_world_view(world, system, verb, params)
-    context = ctx if ctx is not None else verb_context(episode_dir)
+    # `ctx=None` is a convenience for direct/test callers only — no production call site
+    # takes this branch (`review()` always resolves and threads one). Falling back to
+    # `episode_dir.parent` here would be exactly the un-derived runs base #1078 D4 retired, so
+    # a caller with no threaded base gets episode_dir's own (never a tenant's runs base).
+    context = ctx if ctx is not None else verb_context(episode_dir, runs_base=episode_dir.parent)
     book = ledger if ledger is not None else scratch_ledger(episode_dir)
     prepared = dict(params) if world is None else applier.prepare(
         system, verb, dict(params), world, context)

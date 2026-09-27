@@ -454,7 +454,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     # #1078: `ensure_tenant` is renamed `ensure_runs_base_record(runs_base, tenant_id)` — the
     # obstruction still fails loudly, as a ValueError subclass now (demand #0's one refusal
     # shape) rather than a bare OSError.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011 — the design names no subclass (demand #0)
         S.tenant().ensure_runs_base_record(base, "census-tenant")
 
 

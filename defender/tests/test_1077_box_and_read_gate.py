@@ -222,7 +222,7 @@ def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
     from defender.runtime.box._spec import BoxSpec
 
     runs_base = run_dir.parent
-    record = S.tenant().ensure_tenant(runs_base)
+    record = S.tenant().ensure_runs_base_record(runs_base, "census-tenant")
     record_path = S.tenant().record_path(runs_base)
     assert record.tenant_id
     assert record_path.parent == runs_base
