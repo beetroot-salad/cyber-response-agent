@@ -91,16 +91,7 @@ def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Path:
-    """`materialize_run`'s directory, for callers that only need where the run lives."""
-    return materialize_run(alert, run_id, model=model, world=world).run_dir
-
-
-def materialize_run(
-    alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None,
-) -> Run:
-    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE, and hand
-    the handle back — its address `(tenant_id, run_id)` is what the rest of the run is named by.
+    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -172,7 +163,7 @@ def materialize_run(
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
-    return run
+    return run_dir
 
 
 def _admit_run_id(alert: Path, run_id: str | None) -> str:

@@ -10,7 +10,12 @@ import contextlib
 import io
 import json
 import logging
+import subprocess
+import sys
+import threading
+import types
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -39,14 +44,20 @@ def emit():
 
 
 @pytest.fixture
-def restore_root():
-    """`configure` touches the process-wide root; put it back after."""
+def restore_root(capsys):
+    """`configure` touches process-wide state — the root's handlers, two loggers' levels, and
+    in JSON mode `sys.stderr` and the exception hooks; put all of it back after. Depends on
+    `capsys` so it is torn down FIRST: the `sys.stderr` it restores is capsys's own."""
     root = logging.getLogger()
-    saved = (list(root.handlers), root.level, logging.getLogger(_log.ROOT_LOGGER).level)
+    levels = {n: logging.getLogger(n).level for n in (_log.ROOT_LOGGER, _log.MAIN_LOGGER)}
+    saved = (list(root.handlers), root.level, sys.stderr, sys.excepthook, threading.excepthook,
+             _log._program)
     yield
     root.handlers[:] = saved[0]
     root.setLevel(saved[1])
-    logging.getLogger(_log.ROOT_LOGGER).setLevel(saved[2])
+    for name, level in levels.items():
+        logging.getLogger(name).setLevel(level)
+    sys.stderr, sys.excepthook, threading.excepthook, _log._program = saved[2:]
 
 
 def test_a_line_carries_exactly_the_core_and_always_on_fields(emit):
@@ -165,16 +176,48 @@ def test_extra_fields_are_emitted_but_cannot_replace_core_fields_or_the_tenant(e
     assert line["tenant_id"] == "bound", "one call must not file its line under another tenant"
 
 
-@pytest.mark.parametrize("value", [{(1, 2): "tuple key"}, float("nan")])
-def test_an_extra_json_cannot_hold_still_leaves_one_valid_line(emit, value):
-    """A non-string key or NaN in `extra=` degrades that field to its repr; the record is not
-    lost to logging's error handler, and the line stays strict JSON."""
-    logger, lines, buf = emit
-    logger.info("kept", extra={"odd": value, "lead_id": "L1"})
-    raw = buf.getvalue().strip()
-    [line] = [json.loads(raw, parse_constant=lambda c: pytest.fail(f"non-strict JSON: {c}"))]
+def _strict(raw: str) -> dict:
+    return json.loads(raw, parse_constant=lambda c: pytest.fail(f"non-strict JSON: {c}"))
+
+
+@pytest.mark.parametrize(("value", "as_json"), [
+    ({(1, 2): "tuple key"}, {"(1, 2)": "tuple key"}),
+    (float("nan"), "nan"),
+    (Path("/p"), "/p"),
+])
+def test_a_value_json_cannot_hold_is_made_holdable_before_encoding(emit, value, as_json):
+    """Values are made JSON-safe BEFORE encoding — in `extra=` and in the bound context alike
+    (`log_context` is typed `str | None`, nothing enforces it) — so encoding cannot fail, the
+    record is never lost to logging's error handler, and the line stays strict JSON."""
+    logger, _, buf = emit
+    with _log.log_context(run_id=value):  # type: ignore[arg-type]
+        logger.info("kept", extra={"odd": value})
+    line = _strict(buf.getvalue().strip())
     assert line["message"] == "kept"
-    assert line["odd"] == repr(value)
+    assert line["odd"] == as_json
+    assert line["run_id"] == as_json
+
+
+def test_a_stack_asked_for_is_kept(emit):
+    logger, lines, _ = emit
+    logger.info("where am I", stack_info=True)
+    [line] = lines()
+    assert "test_a_stack_asked_for_is_kept" in line["stack"]
+
+
+def test_text_and_json_file_a_line_under_the_same_run(restore_root, capsys):
+    """Both formats render ONE field set, so a run named on the line wins in text exactly as it
+    does in JSON, and every `extra=` field shows in both."""
+    got = {}
+    for fmt in ("json", "text"):
+        _log.configure(fmt=fmt, level="INFO")
+        capsys.readouterr()
+        with _log.log_context(run_id="ambient", tenant_id="t"):
+            logging.getLogger("defender.x").info("x", extra={"run_id": "named", "lead_id": "L3"})
+        got[fmt] = capsys.readouterr().err.strip()
+    line = _strict(got["json"])
+    assert (line["run_id"], line["lead_id"]) == ("named", "L3")
+    assert "[run_id=named tenant_id=t lead_id=L3] x" in got["text"]
 
 
 def test_context_refuses_a_core_field_name():
@@ -229,13 +272,86 @@ def test_an_unknown_setting_falls_back_and_says_so(monkeypatch, restore_root, ca
     assert json.loads(capsys.readouterr().err)["message"] == "still logging"
 
 
-@pytest.mark.parametrize("value", ["info", " Warning ", "CRITICAL"])
-def test_any_standard_level_name_is_accepted_in_any_case(monkeypatch, restore_root, capsys, value):
+@pytest.mark.parametrize(("value", "level"), [
+    ("info", logging.INFO), (" Warning ", logging.WARNING), ("warn", logging.WARNING),
+    ("FATAL", logging.CRITICAL), ("30", logging.WARNING),
+])
+def test_every_level_logging_accepts_is_accepted(monkeypatch, restore_root, capsys, value, level):
     monkeypatch.setenv(_log.LEVEL_ENV, value)
     capsys.readouterr()
     _log.configure_from_env()
     assert capsys.readouterr().err == "", "a valid level was reported as a bad one"
-    assert logging.getLogger(_log.ROOT_LOGGER).level == logging.getLevelName(value.strip().upper())
+    assert logging.getLogger(_log.ROOT_LOGGER).level == level
+
+
+def test_the_fallback_notice_cannot_be_hidden_by_the_level(monkeypatch, restore_root, capsys):
+    monkeypatch.setenv(_log.LEVEL_ENV, "CRITICAL")
+    monkeypatch.setenv(_log.FORMAT_ENV, "yaml")
+    capsys.readouterr()
+    _log.configure_from_env()
+    assert _log.FORMAT_ENV in _strict(capsys.readouterr().err)["message"]
+
+
+@pytest.mark.parametrize(("main", "name"), [
+    (types.SimpleNamespace(__spec__=types.SimpleNamespace(name="defender.learning.loop")),
+     "defender.learning.loop"),
+    (types.SimpleNamespace(__spec__=types.SimpleNamespace(name="defender.pkg.__main__")),
+     "defender.pkg"),
+    (types.SimpleNamespace(__spec__=None, __file__=str(Path(_log.__file__).with_name("run.py"))),
+     "defender.run"),
+    (types.SimpleNamespace(__spec__=None, __file__="/elsewhere/tool.py"), "__main__"),
+])
+def test_a_program_is_named_as_the_module_it_is(main, name):
+    assert _log.program_name(main) == name
+
+
+def test_a_program_s_own_info_lines_are_kept_and_named(restore_root, capsys):
+    """`__main__` gets the defender's level, so a program's own `getLogger(__name__)` lines
+    are not dropped — and they carry the program's real module name."""
+    _log.configure(fmt="json", level="INFO")
+    _log._program = "defender.some.program"
+    capsys.readouterr()
+    logging.getLogger("__main__").info("mine")
+    line = _strict(capsys.readouterr().err)
+    assert (line["logger"], line["message"]) == ("defender.some.program", "mine")
+
+
+def test_direct_stderr_writes_become_records_in_json_mode(restore_root, capsys):
+    """A stray print, written in pieces, becomes one WARNING record once its line ends."""
+    _log.configure(fmt="json", level="INFO")
+    capsys.readouterr()
+    print("[legacy] half", end="", file=sys.stderr)
+    assert capsys.readouterr().err == "", "a partial line was emitted before its newline"
+    print(" and the rest", file=sys.stderr)
+    line = _strict(capsys.readouterr().err)
+    assert (line["logger"], line["severity"], line["message"]) == (
+        "stderr", "WARNING", "[legacy] half and the rest")
+
+
+def test_the_wrapper_hands_anything_else_to_the_real_stream(restore_root, capsys):
+    _log.configure(fmt="json", level="INFO")
+    underlying = sys.stderr.underlying
+    assert sys.stderr.errors == underlying.errors
+    assert sys.stderr.buffer is underlying.buffer
+
+
+@pytest.mark.parametrize(("tail", "severity", "needle"), [
+    ('sys.exit("refused: bad input")', "WARNING", "refused: bad input"),
+    ('raise RuntimeError("boom")', "CRITICAL", "RuntimeError: boom"),
+])
+def test_a_program_s_stderr_is_all_json_even_when_it_exits_or_crashes(tail, severity, needle):
+    """The end-to-end guarantee, in a real process: an exit message and an uncaught traceback
+    each arrive as one JSON record, and nothing else reaches the stream."""
+    code = ("import sys, logging\nfrom defender._log import configure_from_env\n"
+            "configure_from_env()\nlogging.getLogger('defender.p').info('started')\n" + tail)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          encoding="utf-8", cwd=Path(_log.__file__).parent.parent, check=False,
+                          env={"PATH": "/usr/bin:/bin"})
+    lines = [_strict(ln) for ln in proc.stderr.splitlines()]
+    assert [ln["message"] for ln in lines][0] == "started"
+    [last] = lines[1:]
+    assert last["severity"] == severity
+    assert needle in last["message"] + last.get("exception", "")
 
 
 def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkeypatch):

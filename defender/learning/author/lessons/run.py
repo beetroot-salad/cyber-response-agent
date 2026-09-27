@@ -39,8 +39,9 @@ from defender.learning.core.config import (
 
 AuthorError = _shared.AuthorError
 
-# The ONE spelling of this drain's log prefix: `cfg.log_prefix` (and with it the drain's per-channel
-# logger) comes from it, so the envelope, the curator stage and this module cannot drift onto two.
+# The ONE spelling of this channel's name: `cfg.log_prefix` comes from it, and so do the envelope
+# and the drain's per-channel logger (`drain.channel_logger`, whose `repair` child the repair
+# pass logs under). This module's own lines log under its module name, like every other.
 _LOG_PREFIX = "author"
 
 
@@ -215,8 +216,7 @@ def write_held_report(
 
 
 # This drain's one diagnostic logger, built from the single prefix anchor at the top.
-# Named, not `__name__`: this module also runs as `python -m`, i.e. as `__main__`.
-_logger = logging.getLogger("defender.learning.author.lessons.run")
+_logger = logging.getLogger(__name__)
 
 
 def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:

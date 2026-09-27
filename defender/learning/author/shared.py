@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import logging
 import random
 import re
 from collections.abc import Iterator
@@ -324,13 +323,8 @@ def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        log=repair_logger(cfg),
+        log=_drain.channel_logger(cfg).getChild("repair"),
     )
-
-
-def repair_logger(cfg: Any) -> logging.Logger:
-    """The repair pass's logger — a child of the drain's per-channel one."""
-    return logging.getLogger(f"defender.learning.author.drain.{cfg.log_prefix}.repair")
 
 
 def verify_agent_state(

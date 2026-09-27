@@ -6,8 +6,9 @@ Status and diagnostics go through `logging` (`defender/_log.py`). A process that
 and silently drops every INFO line; and whatever the process logs is neither JSON nor stamped
 with a run. That is how a leaked-worktree line and a whole curator trace went missing (#1115).
 
-So a module with an `if __name__ == "__main__":` block must call `configure_from_env` inside
-one. Some programs must NOT: their stderr is read back by the model as a tool result, or they
+So a module with an `if __name__ == "__main__":` block must call `configure_from_env` as a
+statement of that block, before anything but imports — resolved to `defender._log`, not matched
+by name. Some programs must NOT: their stderr is read back by the model as a tool result, or they
 are a sandbox-side child that imports nothing from `defender`. Mark those on the `if` line with
 `# lint-log-setup: ok — <reason>`.
 
@@ -21,7 +22,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -29,29 +30,42 @@ BASELINE_PATH = Path(__file__).with_name("lint_log_setup_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "tests")
 SUPPRESS = "lint-log-setup: ok"
-SETUP = "configure_from_env"
+#: Where the setup call must LAND — resolved through `_astlib`, so an alias counts and an
+#: unrelated function that happens to share the name does not.
+SETUP = "defender._log.configure_from_env"
+
+
+def _is_name_is_main(test: ast.expr) -> bool:
+    """`__name__ == "__main__"`, written either way round."""
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)):
+        return False
+    sides = [test.left, *test.comparators]
+    return (any(isinstance(s, ast.Name) and s.id == "__name__" for s in sides)
+            and any(isinstance(s, ast.Constant) and s.value == "__main__" for s in sides))
 
 
 def _is_main_guard(node: ast.stmt) -> bool:
-    """`if __name__ == "__main__"`, alone or as one operand of an `and`."""
+    """A top-level `if` that runs only as a program: the test alone, or one operand of an
+    `and` (an `or` would run it on import too, so it is not a guard)."""
     if not isinstance(node, ast.If):
         return False
-    tests = node.test.values if isinstance(node.test, ast.BoolOp) else [node.test]
-    return any(
-        isinstance(t, ast.Compare)
-        and isinstance(t.left, ast.Name) and t.left.id == "__name__"
-        and any(isinstance(c, ast.Constant) and c.value == "__main__" for c in t.comparators)
-        for t in tests
-    )
+    test = node.test
+    if isinstance(test, ast.BoolOp):
+        return isinstance(test.op, ast.And) and any(_is_name_is_main(v) for v in test.values)
+    return _is_name_is_main(test)
 
 
-def _calls_setup(block: ast.If) -> bool:
-    for node in ast.walk(block):
-        if isinstance(node, ast.Call):
-            func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-            if name == SETUP:
+def _calls_setup(block: ast.If, env: ModuleEnv) -> bool:
+    """The setup is a STATEMENT OF THE GUARD ITSELF — not buried in a nested function, a
+    branch, or after the call that runs the program: it must come before the guard's first
+    statement that does anything but import."""
+    for stmt in block.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            if callee(stmt.value, env) == SETUP:
                 return True
+        if not isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            return False
     return False
 
 
@@ -65,7 +79,8 @@ def _scan() -> list[Finding]:
         text, tree = read_and_parse(path, rel)
         lines = text.splitlines()
         guards = [n for n in tree.body if _is_main_guard(n)]
-        if not guards or any(_calls_setup(g) for g in guards):
+        env = module_env(tree)
+        if not guards or any(_calls_setup(g, env) for g in guards):
             continue
         if any(SUPPRESS in lines[g.lineno - 1] for g in guards):
             continue

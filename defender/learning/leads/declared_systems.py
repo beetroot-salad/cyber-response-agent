@@ -45,7 +45,7 @@ class AdaptersUnreadable(LeadAuthorError, RegistryError):
     `RegistryError`, re-raised as this lane's `LeadAuthorError` with the message
     `test_hardening_772` binds on. BOTH bases are load-bearing: `LeadAuthorError` is what the
     lane's callers and pins name; `RegistryError` is what puts it in `faults.SYSTEMIC_FAULTS`,
-    so `run_or_dead_letter` re-raises it to `_run_stage`'s `[loop] FATAL:` + exit 2 instead
+    so `run_or_dead_letter` re-raises it to `_run_stage`'s CRITICAL line + exit 2 instead
     of filing a checkout nobody can read as the batch's own failure and spending every queued
     row's `attempts` on it, tick after tick, until the whole queue is in the graveyard."""
 
@@ -76,7 +76,7 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
     except RegistryError as e:
         # The primitive's message already names the directory (and the file, when the
         # fault was one file's); only the fault behind it (the `OSError`'s `strerror`) is
-        # carried, so the operator's `[loop] FATAL:` line names the path once. A cause with
+        # carried, so the operator's CRITICAL line names the path once. A cause with
         # no `strerror` (a symlink loop's `RuntimeError`) is carried whole.
         reason = getattr(e.__cause__, "strerror", None) or str(e.__cause__ or e)
         raise AdaptersUnreadable(

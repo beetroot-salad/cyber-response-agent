@@ -195,8 +195,7 @@ def commit_questioner_lessons(message: str, cfg: QuestionerAuthorConfig) -> str 
     return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
 
 
-# Named, not `__name__`: this module also runs as `python -m`, i.e. as `__main__`.
-_logger = logging.getLogger("defender.learning.author.questioner.run")
+_logger = logging.getLogger(__name__)
 
 
 def run_batch(

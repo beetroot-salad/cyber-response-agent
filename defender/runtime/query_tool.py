@@ -82,6 +82,8 @@ from .verbs import (
     validate_params,
 )
 
+_logger = logging.getLogger(__name__)
+
 TOOL_NAME = "query"
 
 CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -1338,8 +1340,6 @@ def _as_dict(v: Any) -> dict:
 
 from .tools import _bash_env, _format_bash_result  # noqa: E402
 from .tools_gather import _payload_note, _tripped_message  # noqa: E402
-
-_logger = logging.getLogger(__name__)
 
 
 __all__ = [

@@ -41,13 +41,6 @@ def _run():
     return T.mod("run")
 
 
-def _handle(run_dir):
-    """`materialize`'s return — the run handle, addressed by `(tenant_id, run_id)`."""
-    from defender._run_handle import Run
-
-    return Run.under(run_dir.parent, run_dir.name, tenant_id="tenant-947")
-
-
 def _resume_argv(manifest, world="b"):
     return ["--resume", str(manifest), "--world", world]
 
@@ -335,10 +328,13 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
+    # The faked builder skips the real one's tenant record, which `main` reads for its log
+    # context; create it here as the real builder would.
+    T.mod("_tenant").ensure_tenant(base)
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
                 preflight=lambda m: order.append("preflight") or 0,
                 materialize=lambda *a, **kw: order.append("materialize") or
-                _handle(T.sibling_run_dir(base, "b", stamp=False)))
+                T.sibling_run_dir(base, "b", stamp=False))
     assert order == ["preflight", "materialize", "lifecycle"]
 
 

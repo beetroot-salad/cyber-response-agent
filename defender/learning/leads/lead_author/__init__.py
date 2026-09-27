@@ -490,10 +490,6 @@ def main(argv: list[str]) -> int:
     return run(args.run_dir)
 
 
-if __name__ == "__main__":
-    from defender._log import configure_from_env
-    configure_from_env()
-    sys.exit(main(sys.argv[1:]))
 
 
 #: Everything imported above is a RE-EXPORT: the name's real home is the module it

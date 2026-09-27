@@ -365,6 +365,12 @@ def _bump_rows(
     return _Bumped(survivors=survivors, retired=retired)
 
 
+
+def channel_logger(cfg: CorpusAuthorConfig) -> logging.Logger:
+    """This curator channel's logger — one child of this module's per channel, since both
+    curators run this module's code; the repair pass logs under its `repair` child."""
+    return logging.getLogger(f"{__name__}.{cfg.log_prefix}")
+
 def run_batch(
     *, cfg: CorpusAuthorConfig, hold_committed: bool = False, box: Any = None
 ) -> int:
@@ -376,8 +382,7 @@ def run_batch(
     propagates."""
     if box is not None:
         cfg = replace(cfg, box=box)
-    # One child logger per curator channel: both curators run this module's code.
-    log = logging.getLogger(f"{__name__}.{cfg.log_prefix}")
+    log = channel_logger(cfg)
     channel = cfg.channel
 
     drain_fh = None

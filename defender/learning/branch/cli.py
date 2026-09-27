@@ -93,8 +93,7 @@ from defender.runtime.branch._family import (
     runnable_worlds,
 )
 
-# Named, not `__name__`: this file runs as `__main__`, which is outside the `defender` logger.
-_logger = logging.getLogger("defender.learning.branch.cli")
+_logger = logging.getLogger(__name__)
 
 #: The environment variable naming where episodes live. THERE IS NO DEFAULT DERIVATION, and the
 #: absence is the whole point (§7 round 2, F5-EPISODE-ROOT). Deriving this from the runs base is

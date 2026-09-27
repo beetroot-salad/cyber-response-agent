@@ -42,9 +42,9 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 
 from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
+from defender import _tenant  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -60,7 +60,7 @@ from defender._first_party_key import (  # noqa: E402,F401
     resolve_first_party_key,
 )
 
-_logger = logging.getLogger("defender.run")
+_logger = logging.getLogger(__name__)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -463,10 +463,10 @@ def _resume_target(ns: argparse.Namespace) -> Any:
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run(
+def _materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
-) -> Run:
-    """Build this run's directory and hand back its handle, stamped with the code and the model it will run on — and,
+) -> Path:
+    """Build this run's directory, stamped with the code and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
     the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
     path).
@@ -476,7 +476,8 @@ def _materialize_run(
     builder, which is what keeps "the run dir has a single origin" a property of this file rather
     than of whoever reads it — two call sites are two places for the stamp to be forgotten.
     """
-    return _run.materialize_run(alert, run_id, model=model, world=world)
+    run_dir = _run.materialize_run_dir(alert, run_id, model=model, world=world)
+    return run_dir
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
@@ -487,7 +488,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
-    materialize: Callable[..., Run] = _materialize_run,
+    materialize: Callable[..., Path] = _materialize_run_dir,
 ) -> int:
     # The tail's three UNDRIVABLE dependencies — the credentialed investigation lifecycle, the
     # HTML render, the case-ticket endpoint — take an injection seam, each defaulting to
@@ -533,12 +534,12 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run = materialize(alert, run_id, model=model, world=world)
-    run_dir = run.run_dir
+    run_dir = materialize(alert, run_id, model=model, world=world)
 
-    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN, by the handle's own address `(tenant_id,
-    # run_id)` — the tenant `materialize` took from the tenant record, the sole authority.
-    with _log.log_context(run_id=run_dir.name, tenant_id=run.tenant_id):
+    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN. The tenant comes from the tenant record — the
+    # sole authority, which `materialize` has just ensured exists beside the run dir.
+    with _log.log_context(run_id=run_dir.name,
+                          tenant_id=_tenant.read_tenant(run_dir.parent).tenant_id):
         if ns.update_ticket:
             ticket_writer.open_case_ticket(run_dir)
 
