@@ -851,7 +851,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
 
     assert record(run_dir, store) is None, f"{arm}: the fault escaped into the run"
     assert len(store.writes()) == 1, f"{arm}: the writer retried — D2 is one POST"
-    assert capsys.readouterr().err.count("[ticket_writer] WARN") <= 1, f"{arm}: warned twice"
+    assert capsys.readouterr().err.count("WARNING defender.scripts.case_history.ticket_writer") <= 1, f"{arm}: warned twice"
     assert (run_dir / "ticket_write.json").is_file(), (
         f"{arm}: no receipt was written — r1/c14 record the receipt on BOTH branches, which "
         "is what the `error` word and the `ok` boolean are for"
@@ -915,7 +915,7 @@ def test_767_failed_write_leaves_no_capture_record(tmp_path, monkeypatch, capsys
     )
     assert not (run_dir / "executed_queries.jsonl").exists(), "the queries table gained a row"
     assert not (run_dir / "gather_raw").exists(), "a raw payload was captured"
-    assert "[ticket_writer] WARN" in capsys.readouterr().err, (
+    assert "WARNING defender.scripts.case_history.ticket_writer" in capsys.readouterr().err, (
         "the failure left NO trace at all, so the assertions above prove nothing"
     )
     assert receipt(run_dir)["ok"] is False
@@ -938,7 +938,7 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
     store = FakeStore()
     assert record(run_dir, store) is None, "a receipt IO failure escaped into the run"
     assert store.comment_payloads, "the comment was skipped because of the receipt"
-    assert "[ticket_writer] WARN" in capsys.readouterr().err, "the IO failure was silent"
+    assert "WARNING defender.scripts.case_history.ticket_writer" in capsys.readouterr().err, "the IO failure was silent"
 
 
 @pytest.mark.parametrize(

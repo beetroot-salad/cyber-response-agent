@@ -435,6 +435,9 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
+    # The faked builder skips the real one's tenant record, which `main` reads for its log
+    # context; create it here as the real builder would.
+    T.mod("_tenant").ensure_tenant(base)
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
                 preflight=lambda m: order.append("preflight") or 0,
                 materialize=lambda *a, **kw: order.append("materialize") or

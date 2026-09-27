@@ -36,6 +36,7 @@ naming divergence in the impl fails only those two rather than the whole binding
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -118,7 +119,7 @@ def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
         effort="low",
         request_limit=250,
         timeout=180,
-        log=lambda *a, **k: None,
+        log=logging.getLogger("defender.test"),
         source_key=lambda model, label=None: None,
         run_author=lambda wiring, ctx, **kw: _AUTHOR_RESULT_OK,
     )
@@ -429,7 +430,7 @@ def test_trace_anchor_established_before_spawn(tmp_path):
 
 
 
-def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
+def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path, caplog):
     """ONE batch identity per spawn. `run_curator_stage` reads the batch off the wiring that
     already derived `trace_name` and `label` from it, so the log line, every AuthorError and
     the trace file cannot name different batches.
@@ -456,9 +457,9 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path):
     )
     assert from_builder.batch_id == "batch-Z"
     assert "batch-Z" in from_builder.trace_name
-    lines: list[str] = []
-    _stage(tmp_path, wiring=from_builder, log=lines.append)
-    assert any("batch-Z" in line for line in lines)
+    caplog.clear()
+    _stage(tmp_path, wiring=from_builder, log=logging.getLogger("defender.test"))
+    assert any("batch-Z" in line for line in caplog.messages)
 
 
 

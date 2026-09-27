@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import sys
 from pathlib import Path
@@ -13,7 +14,6 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import guarded_mkdir, write_atomic
-from defender.learning.core import config as _loop_config
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_DIR
 from defender.runtime.verbs import body_param_for, engine_for
@@ -21,7 +21,7 @@ from defender.runtime.verbs import body_param_for, engine_for
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
 
-_log = _loop_config.lead_author_log
+_logger = logging.getLogger(__name__)
 
 
 #: The sink-side hostile-id guard on a MODEL-COINED `query_id` segment, anchored with
@@ -307,7 +307,7 @@ def synthesize_drafts(
             # The host-side writer is reachable before the agent is ever spawned — a
             # mkdir+write from a model-supplied query_id — so an undeclared system is refused
             # here, and REPORTED rather than silently skipped.
-            _log(
+            _logger.warning(
                 f"synthesize_drafts: refused to mint a draft for {system!r} "
                 f"(query_id={qid!r}); not a declared system"
             )
@@ -342,6 +342,6 @@ def synthesize_drafts(
             # `guarded_mkdir` and `write_atomic` raise it to REFUSE a planted symlink or hard
             # link at the draft's name, and a refusal nothing prints reads from the outside
             # exactly like a tick that had no draft to mint.
-            _log(f"synthesize_drafts: could not write {draft} (query_id={qid!r}): {e}")
+            _logger.error(f"synthesize_drafts: could not write {draft} (query_id={qid!r}): {e}")
             continue
     return created

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +16,7 @@ from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_recor
 
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
 
-_log = _loop_config.lead_author_log
+_logger = logging.getLogger(__name__)
 
 
 def _spawn_author_agent(
@@ -50,7 +51,7 @@ def _spawn_author_agent(
             salt=salt,
         ),
         log_label=log_label,
-        log=_log,
+        log=_logger,
     )
 
 

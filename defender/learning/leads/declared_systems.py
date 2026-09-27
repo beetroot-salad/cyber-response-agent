@@ -19,6 +19,7 @@ adapter half alone, never consulting the marker source.
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -27,7 +28,6 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender import _git
 from defender._paths import DefenderPaths
-from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
 
@@ -37,7 +37,7 @@ from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, re
 ADAPTERS_REL = DefenderPaths.adapters_rel
 SKILLS_REL = DefenderPaths.skills_rel
 
-_log = _loop_config.lead_author_log
+_logger = logging.getLogger(__name__)
 
 
 class AdaptersUnreadable(LeadAuthorError, RegistryError):
@@ -45,7 +45,7 @@ class AdaptersUnreadable(LeadAuthorError, RegistryError):
     `RegistryError`, re-raised as this lane's `LeadAuthorError` with the message
     `test_hardening_772` binds on. BOTH bases are load-bearing: `LeadAuthorError` is what the
     lane's callers and pins name; `RegistryError` is what puts it in `faults.SYSTEMIC_FAULTS`,
-    so `run_or_dead_letter` re-raises it to `_run_stage`'s `[loop] FATAL:` + exit 2 instead
+    so `run_or_dead_letter` re-raises it to `_run_stage`'s CRITICAL line + exit 2 instead
     of filing a checkout nobody can read as the batch's own failure and spending every queued
     row's `attempts` on it, tick after tick, until the whole queue is in the graveyard."""
 
@@ -76,7 +76,7 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
     except RegistryError as e:
         # The primitive's message already names the directory (and the file, when the
         # fault was one file's); only the fault behind it (the `OSError`'s `strerror`) is
-        # carried, so the operator's `[loop] FATAL:` line names the path once. A cause with
+        # carried, so the operator's CRITICAL line names the path once. A cause with
         # no `strerror` (a symlink loop's `RuntimeError`) is carried whole.
         reason = getattr(e.__cause__, "strerror", None) or str(e.__cause__ or e)
         raise AdaptersUnreadable(
@@ -84,7 +84,7 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"({reason})"
         ) from e
     for name in roster.refused:
-        _log(
+        _logger.warning(
             f"declared_systems: refused anomalous adapter name {name!r} "
             f"from {adapters_dir} — it is not a name the dispatch seam resolves"
         )
@@ -140,7 +140,7 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
         if is_system_name(name):
             names.add(name)
         else:
-            _log(
+            _logger.warning(
                 f"declared_systems: refused shape-anomalous marker name {name!r} "
                 f"from {skills_dir}"
             )
@@ -160,7 +160,7 @@ def declared_systems_over(roster: RosterRead, repo_root: Path) -> frozenset[str]
     this is how it gets the union off that one read rather than a second."""
     union = frozenset(roster.accepted) | _marker_names(repo_root)
     if not union:
-        _log(
+        _logger.warning(
             f"declared_systems: no systems declared by either source "
             f"({roster.root} or {repo_root / SKILLS_REL})"
         )

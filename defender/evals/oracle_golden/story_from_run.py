@@ -125,5 +125,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # lint-log-setup: ok — stdlib-only: run by path with no `defender` on the import path, so it cannot import the setup
     sys.exit(main())

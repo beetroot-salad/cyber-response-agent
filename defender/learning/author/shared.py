@@ -4,7 +4,7 @@ import contextlib
 import json
 import random
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -323,14 +323,8 @@ def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
             salt=stage_salt,
         ),
         corpus_dir=cfg.corpus_dir,
-        log=make_repair_logger(cfg),
+        log=_drain.channel_logger(cfg).getChild("repair"),
     )
-
-
-def make_repair_logger(cfg: Any) -> Callable[[str], None]:
-    from defender.learning.core.config import make_logger
-
-    return make_logger(f"{cfg.log_prefix}.repair")
 
 
 def verify_agent_state(

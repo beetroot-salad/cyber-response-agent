@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -14,6 +15,8 @@ from pathlib import Path
 from _harness_util import find_venv_py, init_git, run as _run
 
 from defender import _git
+
+_logger = logging.getLogger(__name__)
 
 
 HERE = Path(__file__).resolve().parent
@@ -165,14 +168,12 @@ def main() -> int:
     try:
         run_dir = materialize(scenario, tmp)
         init_git(tmp)
-        print(f"[harness] running lead-author against {scenario.name}", file=sys.stderr)
+        _logger.info(f"running lead-author against {scenario.name}")
         proc = run_lead_author(tmp, run_dir)
         verdict, notes = _verdict(tmp, expect)
         out = capture(tmp, scenario.name, proc, verdict, notes)
-        print(f"[harness] rc={proc.returncode}  verdict={verdict}", file=sys.stderr)
-        for n in notes:
-            print(f"[harness]   - {n}", file=sys.stderr)
-        print(f"[harness] results: {out}", file=sys.stderr)
+        _logger.info(f"rc={proc.returncode}  verdict={verdict}", extra={"notes": notes})
+        _logger.info(f"results: {out}")
         return 0 if verdict in ("PASS", "WEAK-PASS") else 1
     finally:
         if not args.keep_tmp:
@@ -180,4 +181,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main())
