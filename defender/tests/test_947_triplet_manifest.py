@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
 
@@ -123,13 +124,15 @@ def test_947_validate_world_touches_takes_the_derived_set():
     derived from the overlay, and the workflow that used to declare systems on the command line
     still completes through the derived set instead."""
     registry = T.mod("learning.branch.estate.registry")
-    driver = T.mod("runtime.driver")
+    # #1106 M4: the gather grant is the run's tenant's (here the committed playground's), not a
+    # process-level `GATHER_DEF.verb_grant`.
+    gather_grant = T1106.playground_grants().gather
     fam = _family()
     ov = fam.parse_overlay(T.overlay(patches={"identity": {"web-1": {"owner": "p"}}}))
     derived = fam.touches_of(ov)
-    assert registry.validate_world_touches(derived, driver.GATHER_DEF.verb_grant) == derived
+    assert registry.validate_world_touches(derived, gather_grant) == derived
     with pytest.raises(registry.EstateError) as bad:
-        registry.validate_world_touches(("nosuchsystem",), driver.GATHER_DEF.verb_grant)
+        registry.validate_world_touches(("nosuchsystem",), gather_grant)
     assert "nosuchsystem" in str(bad.value)
 
 

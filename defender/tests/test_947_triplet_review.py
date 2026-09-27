@@ -32,6 +32,8 @@ exist (X16).
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 import pytest
 
 from defender.tests import _triplet_947 as T
@@ -58,7 +60,7 @@ def _run_review(episode_dir, *, adapters=None, door=None, invoke=None, doc=None,
     return _review().review(
         fam, episode_dir=episode_dir, adapters=adapters or T.FakeAdapters(),
         door=door or T.FakeDoor(counts={"logs-000001": 3}), invoke=invoke or T.FakeAgent("same"),
-        **kw)
+        **kw, settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
 
 # ---------------------------------------------------------------------------------------
@@ -85,13 +87,14 @@ def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, mon
     the runs base its adapter subprocesses inherit — never the episode dir's own parent, which
     after §7 round 2 is the EPISODES ROOT, a location that is not a runs base and that no
     runs-base walk may reach."""
-    base, _src, root = T.configured_layout(tmp_path, monkeypatch)
-    ep = T.episode(tmp_path, root=root)
     # #1078 D4 (review row, brief R2, settled s104): the base is THREADED — the launcher passes
     # `runs_base_for(T)` — never read off the (retired) `DEFENDER_RUNS_BASE` knob, whose stale
-    # configured value `configured_layout` still exports here.
+    # configured value `configured_layout` still exports here. Composed under the data root
+    # `d9_tenant` was created in, before `configured_layout` points the process at its own.
     runs_base = T.sym("_tenant", "runs_base_for")(d9_tenant)
-    ctx = _review().verb_context(ep, runs_base=runs_base)
+    base, _src, root = T.configured_layout(tmp_path, monkeypatch)
+    ep = T.episode(tmp_path, root=root)
+    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS, runs_base=runs_base)
     assert ctx.run_dir == ep
     assert ctx.capture is None
     assert ctx.env["DEFENDER_RUN_DIR"] == str(ep)
@@ -154,7 +157,7 @@ def test_947_an_uncaptured_key_does_reach_the_adapter(tmp_path):
     adapters = T.FakeAdapters()
     # #1078 D4: verb_context/replay_one take the runs base as a required keyword — a plain tmp
     # dir here, since this test is about the capture memo, not which base is threaded.
-    ctx = _review().verb_context(ep, runs_base=tmp_path / "runs")
+    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS, runs_base=tmp_path / "runs")
     _review().replay_one(("elastic", "esql", {"query": "FROM logs-* | LIMIT 1"}),
                          episode_dir=ep, adapters=adapters, ctx=ctx)
     assert ("elastic", "esql") in adapters.asked

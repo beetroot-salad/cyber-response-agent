@@ -22,7 +22,6 @@ from defender.runtime.verb_dispositions import (
     HEALTH_CHECK,
     Disposition,
     grant_for,
-    shipped_dispositions,
 )
 from defender.runtime.verb_grant import GrantError, VerbGrant
 
@@ -45,8 +44,8 @@ def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
     pair the template configured in `lead-zero.yaml` binds, and the run-start check in
     `_agreement` refuses a table that grants any other (#1003).
 
-    A function over rows, not only the constant below, because `shipped_dispositions` is
-    cached per process: a test that plants a table hands its rows here.
+    A function over rows, never a module constant (#1106): each run projects its OWN tenant's
+    table (`verb_dispositions.run_grants`), so there is no process-level grant to hold here.
     """
     return grant_for(CORRELATION_GRANT_HOLDER, rows)
 
@@ -78,28 +77,12 @@ def correlation_system(grant: VerbGrant) -> str | None:
     return systems[0]
 
 
-#: Item 3's grant and its dispatched system, projected ONCE at import from the table the rest
-#: of the runtime already reads (`driver/_build.py` loads and caches it before this package is
-#: ever imported, so a bad table stops the run there, not here). The grant is the authority —
-#: it is what `decide` consults — and `system` is only ever a rendering/routing key derived
-#: from it, so the two cannot drift. `None` means the table withheld the lead.
-#:
-#: What the table CAN drift from is the template the contract tells the lead to bind — the id
-#: in `lead-zero.yaml`, which is NOT read here: it is a per-tree fact with one consumer, the
-#: run-start check (`_agreement.resolve_correlation_dispatch`, run by the driver over the
-#: tree the run reads), which resolves it against that tree's catalog and refuses a table
-#: whose one query pair is not the template's (#1003). Whenever a dispatch happens, its
-#: system is the template's by that check, and the dispatch carries the resolved identity
-#: down (`CorrelationDispatch`) rather than re-deriving it from these constants.
-CORRELATION_GRANT = correlation_grant(shipped_dispositions())
-CORRELATION_SYSTEM: str | None = correlation_system(CORRELATION_GRANT)
-
-#: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
+#: Item 1's OWN system, and deliberately not the run's `correlation_system`. Every backend call item 1
 #: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +
 #: `query_id` + `raw_command`, `_breaker_failures`' per-system state read, `_CallLedger.call`'s
 #: registry lookup — so its `:L findings` row must be labelled from the SAME anchor. Labelling
 #: it from the correlation grant's derived system looks like a dedup while the two are the same
-#: string, and mislabels item 1's row the moment `CORRELATION_GRANT` names a different vendor.
+#: string, and mislabels item 1's row the moment the correlation grant names a different vendor.
 ITEM1_SYSTEM = "elastic"
 
 PROVENANCE_KEY = "provenance"

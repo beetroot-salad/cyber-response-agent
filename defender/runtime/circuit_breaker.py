@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 from pathlib import Path
 
 from defender._clock import now_iso
 from defender._io import TEXT_READ_ERRORS
 from defender._run_paths import RunPaths
 from defender.hooks._run_dir import update_json_locked
+
+_logger = logging.getLogger(__name__)
 
 PER_SYSTEM_FAIL_LIMIT = 2
 RUN_FAIL_KILL_LIMIT = 5
@@ -159,9 +161,8 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         #
         # NEVER SILENTLY, though: a refused write means infra failures stop being counted for
         # the rest of the run — no trip, no `RUN_FAIL_KILL_LIMIT`.
-        print(f"[circuit-breaker] outcome for {system!r} not recorded "
-              f"({type(e).__name__}: {e}); this run's failure count no longer advances",
-              file=sys.stderr)
+        _logger.warning(f"outcome for {system!r} not recorded "
+                        f"({type(e).__name__}: {e}); this run's failure count no longer advances")
         return {}
 
     if state.get("total_failures", 0) >= RUN_FAIL_KILL_LIMIT:

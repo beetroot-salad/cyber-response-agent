@@ -180,7 +180,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "resume-runs"))
     with pytest.raises(SystemExit) as refusal:
         run_py.main(["--resume", str(tmp_path / "family.yaml"), "--world", "b",
-                     "--update-ticket"])
+                     "--tenant", "playground", "--update-ticket"])
     assert "--update-ticket" in str(refusal.value), (
         "the resume path accepted the ticket flag: the two ticket calls are ordered around "
         "the curation marker, so accepting-and-ignoring breaks the pairing instead of the "

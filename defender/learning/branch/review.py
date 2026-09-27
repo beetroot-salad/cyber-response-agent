@@ -174,8 +174,12 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
     return book
 
 
-def verb_context(episode_dir: Path, *, runs_base: Path) -> VerbContext:
+def verb_context(episode_dir: Path, settings_dir: Path, *, runs_base: Path) -> VerbContext:
     """The host-side context the replay's adapter calls run under.
+
+    `settings_dir` is the EPISODE's tenant's `settings/` folder (#1106) — the source run's
+    tenant, resolved by the launcher from the source's runs-base record and handed down; the
+    replay reads that tenant's adapter config and nothing it finds for itself.
 
     `run_dir` is the EPISODE dir rather than any run dir, and `capture` is `None`: the replay
     writes no `executed_queries.jsonl` row anywhere, because a review is not a run and a row
@@ -193,7 +197,8 @@ def verb_context(episode_dir: Path, *, runs_base: Path) -> VerbContext:
     env = run_env(DEFENDER_DIR, episode_dir)
     env["DEFENDER_RUNS_BASE"] = str(runs_base)
     return VerbContext(
-        defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None)
+        defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None,
+        settings_dir=Path(settings_dir))
 
 
 @model(frozen=True)
@@ -244,13 +249,13 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
     the parameters straight back.
     """
     system, verb, params = call
+    if world is not None and ctx is None:
+        # The world arm stages and restores THROUGH the context (its tenant's patterns and
+        # config); there is no context this frame could build without the episode's tenant.
+        raise TypeError("replay_one(world=…) needs the review's verb context (`ctx=`)")
     if world is not None:
-        refuse_a_foreign_world_view(world, system, verb, params)
-    # `ctx=None` is a convenience for direct/test callers only — no production call site
-    # takes this branch (`review()` always resolves and threads one). Falling back to
-    # `episode_dir.parent` here would be exactly the un-derived runs base #1078 D4 retired, so
-    # a caller with no threaded base gets episode_dir's own (never a tenant's runs base).
-    context = ctx if ctx is not None else verb_context(episode_dir, runs_base=episode_dir.parent)
+        refuse_a_foreign_world_view(world, system, verb, params, ctx)
+    context = ctx
     book = ledger if ledger is not None else scratch_ledger(episode_dir)
     prepared = dict(params) if world is None else applier.prepare(
         system, verb, dict(params), world, context)
@@ -280,8 +285,8 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
 # ---------------------------------------------------------------------------------------
 
 
-def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
-           invoke: Any, runs_base: Path, write: Any = None) -> dict:
+def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # noqa: PLR0913 — the review's injected estate plus the episode's tenant folder and runs base
+           invoke: Any, settings_dir: Path, runs_base: Path, write: Any = None) -> dict:
     """Replay the capture through every world, judge each, and write `review.yaml`.
 
     THE CONTROL FIRST, always: the rest of the pass is defined against its result, and computing
@@ -297,11 +302,14 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,
     `write` is the whole-record write seam (#1007) — `write_guarded` by default, and a caller's
     own wrapper otherwise, so "review.yaml is written exactly once per pass" is observable
     without reaching around it with `monkeypatch.setattr`.
+
+    `settings_dir` is the episode's tenant's `settings/` folder (#1106): the replay's verb
+    context carries it, so every staged read and restore resolves that tenant's config.
     """
     write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
     episode_dir = Path(episode_dir)
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
-    context = verb_context(episode_dir, runs_base=runs_base)
+    context = verb_context(episode_dir, settings_dir, runs_base=runs_base)
     token = episode_token_for(family.episode_id)
     drifted = frozenset(_capture_drift(rows))
     scratch = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
@@ -762,7 +770,7 @@ def _world_arm(call: tuple[str, str, dict], *, world: Any, applier: Any, deps: _
     order are all still here; only the memo is gone.
     """
     system, verb, params = call
-    refuse_a_foreign_world_view(world, system, verb, params)
+    refuse_a_foreign_world_view(world, system, verb, params, deps.ctx)
     prepared = applier.prepare(system, verb, dict(params), world, deps.ctx)
     asked = dict(params) if prepared != params else None
     served = read(system, verb, **prepared)

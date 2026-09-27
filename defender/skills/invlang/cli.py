@@ -343,5 +343,5 @@ def _render_shape(out: dict) -> str:
     return header + "\n".join(body) + "\n"
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     raise SystemExit(main())

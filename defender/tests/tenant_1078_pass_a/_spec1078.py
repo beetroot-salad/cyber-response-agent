@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -50,6 +51,7 @@ from typing import Any
 import pytest
 
 from defender.tests import _spec1077 as S
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import D9_TENANT_ID, DATA_ROOT_ENV
 
@@ -226,7 +228,12 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     T.capture_call(src)
-    (src / "provenance.json").write_text(json.dumps(T.provenance_record()), encoding="utf-8")
+    # Stamped with the tenant its base's record names, when there is one — what materialize
+    # stamps every run with (#1077), and what the launcher holds the record to (#1106).
+    record = base / RECORD_NAME
+    stamped = json.loads(record.read_text(encoding="utf-8"))["tenant_id"] if record.is_file() else None
+    (src / "provenance.json").write_text(json.dumps(T.provenance_record(tenant_id=stamped)),
+                                         encoding="utf-8")
     T.seed_source_session(base, src)
     return src
 
@@ -390,11 +397,35 @@ class Recorder:
         return any(s in self.order for s in ("preflight", "materialize", "lifecycle"))
 
 
+def tenants_root_beside_data_root() -> Path:
+    """#1106's tenants root for this test: a sibling of its data root (never inside it — O10
+    refuses a stray entry there), holding a settings folder for every tenant whose row the data
+    root holds, each a copy of the committed `playground`'s. A run resolves its tenant's
+    settings under the tenants root once the row is accepted, so a scenario about the row, the
+    record or the request reaches the same frame it did before #1106 put settings per tenant."""
+    root = Path(os.environ[DATA_ROOT_ENV])
+    tenants = root.parent / f"{root.name}-tenants"
+    rows = sorted(root.glob("*/tenant.json")) if root.is_dir() else []
+    for row in rows:
+        folder = tenants / row.parent.name
+        if not folder.exists():
+            shutil.copytree(T1106.PLAYGROUND, folder)
+    return tenants
+
+
+def with_tenants_root(argv: list[str]) -> list[str]:
+    """`argv` plus `--tenants-root` at `tenants_root_beside_data_root()`, unless it names one
+    or no data root is set (the entry refuses that before it reads any tenant)."""
+    if "--tenants-root" in argv or not os.environ.get(DATA_ROOT_ENV):
+        return list(argv)
+    return [*argv, "--tenants-root", str(tenants_root_beside_data_root())]
+
+
 def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
     """Drive the REAL `run.main` over `argv` with every seam recorded. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
     try:
-        return run_py().main(argv, **rec.seams()), None
+        return run_py().main(with_tenants_root(argv), **rec.seams()), None
     except SystemExit as refused:
         return None, refused
 
@@ -419,7 +450,8 @@ CONTINUATION = "Continue from here."
 
 
 def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID) -> list[str]:
-    return [str(source), str(message_id), "--continuation-prompt", CONTINUATION]
+    return with_tenants_root(
+        [str(source), str(message_id), "--continuation-prompt", CONTINUATION])
 
 
 def drive_launch(source: Path, *, spawn: Any = None, **seams: Any) -> BaseException | int:

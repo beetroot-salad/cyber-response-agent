@@ -395,15 +395,17 @@ demands:
     run.py --resume <manifest> --world L --tenant U, where the source derives T != U, is refused before
     the preflight and materialize.
   source: 20-demands.md (demand ledger)
-- id: o5_resume_without_tenant_derives
+- id: o5_resume_without_tenant_refused
   kind: behavior
   form: test
   pass: A
   binds: [run.main, tenant_of_run_dir]
-  discharged_by: test_o5_resume_without_tenant_derives
+  discharged_by: test_o5_resume_without_tenant_refused
   seed_docstring: >-
-    run.py --resume with no --tenant is accepted and runs under the T that tenant_of_run_dir(family.source_run_dir)
-    derives.
+    run.py --resume with no --tenant is refused before the preflight and materialize — a sibling names
+    its tenant like every run (the request is where a tenant comes from, never a record; human ruling
+    2026-09-27, reversing this demand's earlier "derives" form); naming the T that
+    tenant_of_run_dir(family.source_run_dir) derives is accepted and runs under it.
   source: 20-demands.md (demand ledger)
 - id: o5_old_layout_refused_by_location
   kind: negative
@@ -843,9 +845,9 @@ demands:
   discharged_by: test_d3_materialize_seam_tenant
   seed_docstring: >-
     main calls the materialize seam with tenant_id=T as a keyword argument; _Investigate's parameters
-    are unchanged.
+    are unchanged by #1078 (the resolved RunTenant it takes is #1106's, merged alongside).
   rejected:
-  - nl: _Investigate gains a tenant parameter
+  - nl: _Investigate gains a tenant id parameter
   source: 20-demands.md (demand ledger)
   note: >-
     Re-addressed onto the materialize seam's payload (see o1_fresh_run_without_tenant_refused).

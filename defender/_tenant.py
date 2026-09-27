@@ -109,6 +109,11 @@ def refuse_bad_tenant_id(tenant_id: str) -> None:
 # The runs-base record (D2), kept from #1077, with the request deciding its tenant.
 # ==========================================================================================
 
+class TenantRecordMismatch(ValueError):
+    """A runs base's record names another tenant than the one a run is for. A run refuses
+    rather than stamp a record its settings did not come from."""
+
+
 def record_path(runs_base: Path) -> Path:
     return Path(runs_base) / TENANT_RECORD_NAME
 
@@ -408,7 +413,7 @@ def _create_once(path: Path, body: str) -> bool:
         fd = os.open(path.parent, os.O_TMPFILE | os.O_WRONLY, 0o644)
         try:
             os.fchmod(fd, 0o644)
-            _write_all(fd, body.encode("utf-8"))
+            _write_every_byte(fd, body.encode("utf-8"))
             os.fsync(fd)
             try:
                 return _link_tmpfile(fd, path)
@@ -427,7 +432,7 @@ def _create_once(path: Path, body: str) -> bool:
     return True
 
 
-def _write_all(fd: int, data: bytes) -> None:
+def _write_every_byte(fd: int, data: bytes) -> None:
     """`os.write` may write fewer bytes than asked (a short write — POSIX allows it on any fd,
     not only pipes/sockets); a single unchecked call could link a SHORT body into `path` under
     a name the complete-or-absent contract promises is never partial. Loop until every byte has

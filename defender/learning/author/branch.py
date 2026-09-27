@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import shutil
 from defender._model import model
 from pathlib import Path
@@ -10,10 +11,10 @@ from defender import _git
 from defender._git import REPO_ROOT, GitError
 from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
-from defender.learning.core.config import QUARANTINE_DIRNAME, make_logger
+from defender.learning.core.config import QUARANTINE_DIRNAME
 from defender.runtime.scrub import verdict_path
 
-_log = make_logger("branch")
+_logger = logging.getLogger(__name__)
 
 LESSONS_BRANCH_PREFIX = "lessons/"
 _BRANCH_BASE = "origin/main"
@@ -176,7 +177,7 @@ class AuthorBranch:
         try:
             _git.git_worktree_remove(self.repo_root, wt, force=True)
         except GitError as e:
-            _log(f"worktree cleanup failed: {e} — {wt} leaked")
+            _logger.error(f"worktree cleanup failed: {e} — {wt} leaked")
         # The verdict sidecar sits BESIDE `wt`, outside the tree the git remove above just
         # destroyed, so removing the tree never removes it. By now anything that needed the
         # verdict (`preserve_tainted_tree`'s manifest, on the taint path) has read it; left

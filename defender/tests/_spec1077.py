@@ -150,8 +150,9 @@ def branch_cli() -> Any:
 TENANT_RECORD_NAME = "_tenant.json"
 
 #: D2's creation-time bootstrap value. Settled premise s31: it is a bootstrap default, NOT an
-#: enforced constant — the record is the sole authority for the stamped tenant.
-DEFAULT_TENANT_ID = "default"
+#: enforced constant — the record is the sole authority for the stamped tenant. `"playground"`
+#: since #1106 D4 (the committed tenant a fresh runs base belongs to); it was `"default"`.
+DEFAULT_TENANT_ID = "playground"
 
 TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
 

@@ -46,7 +46,7 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
     episode_dir = episodes_root / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(manifest, "b")
+    world = H.run_py().resume_world(manifest, "b", settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run_dir(
         src / "alert.json", world.run_id, tenant_id=TENANT, world=world)
     return Path(run_dir), episode_dir

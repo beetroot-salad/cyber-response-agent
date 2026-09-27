@@ -9,6 +9,8 @@ RED AGAINST HEAD is the expected state: none of the fields these tests name exis
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
+
 from pathlib import Path
 
 import pytest
@@ -677,7 +679,7 @@ def test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejec
 
     review.review(family_mod.parse_family(doc), episode_dir=ep, adapters=adapters,
                   door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"),
-                  runs_base=ep.parent / "runs-base")
+                  settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
 
     block = W.review_doc(ep)["worlds"]["b"]["reachability"]
     for key in ("capture_replays", "capture_addressed", "reachable_by_capture"):

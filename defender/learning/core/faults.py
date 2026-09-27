@@ -8,7 +8,7 @@ from defender.runtime import box as box_mod
 from defender.runtime.verbs import RegistryError
 
 
-# `RunTainted` is here for TWO readers. `_run_stage` gives it `[loop] FATAL:` + exit 2
+# `RunTainted` is here for TWO readers. `_run_stage` logs it CRITICAL + exit 2
 # instead of a bare traceback, so the operator-facing failure mode does not depend on which
 # drain lane found it. And `run_or_dead_letter` re-raises rather than dead-letters it: the
 # taint is raised from `stop_and_scrub`, outside `do_work`, so it never meets that guard

@@ -22,6 +22,8 @@ RED against b8a63e66: none of the seams below exists, the launcher runs siblings
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant
+
 import contextlib
 import json
 
@@ -343,7 +345,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
         assert builder in src, f"the launcher never reaches {builder}"
 
     ep = T.episode(tmp_path)
-    assert callable(seams.adapter_seam(ep, runs_base=tmp_path / "runs")), "the review has no production adapter layer"
+    assert callable(seams.adapter_seam(ep, _tenants1106.playground_run_tenant(), runs_base=tmp_path / "runs")), "the review has no production adapter layer"
     assert callable(seams.model_seam(ep)), "the questioner has no production model call"
 
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half
@@ -567,14 +569,13 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
     SOURCE's own record it was anchored to (#976 M4/O5), and whether the dirty override was
     given — none sourced from another, so an override cannot be read out of the provenance
     half, and the anchor cannot be mistaken for the siblings' agreement or vice versa."""
-    base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    _cli().verify_family(ep, [T.sibling_run_dir(base, w) for w in T.WORLDS],
+    # The siblings' OWN runs base (`<episode>/runs`, §7 FORK-13), with no tenant record, so
+    # the stamp carries exactly its three roles (a seeded base adds `base_world_id`, #1106).
+    _cli().verify_family(ep, [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS],
                          source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
-    # #1078: `base` is now a real tenant runs base carrying a runs-base record, so
-    # `_family_base_world_id` finds one and the stamp gains `base_world_id` (#1077 O4).
-    assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id"}
+    assert set(stamp) == {"agreed", "allow_dirty", "source"}
     assert "allow_dirty" not in stamp["agreed"]
     assert "allow_dirty" not in stamp["source"]
     assert stamp["allow_dirty"] is False

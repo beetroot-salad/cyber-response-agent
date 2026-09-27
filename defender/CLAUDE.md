@@ -155,6 +155,7 @@ until then ran on the questioner's definition. `git show e9e11a48` is the deleti
 ## Conventions
 
 - Runs live outside the repo, under `$DEFENDER_DATA_ROOT/<tenant>/runs/` (`<T>/runs`), so transcripts stay out of git. There is no default data root (#1078) — every run and every `tenant.py setup` names one.
+- **Status and diagnostics go through logging, not `print`** (`_log.py`): `logging.getLogger(__name__)` everywhere — a program's own module included, since `configure` names `__main__` as the module it is — with the level chosen at each call. Every program's `__main__` block calls `configure_from_env()` first, or says why not with `# lint-log-setup: ok — <reason>` (a model tool whose stderr the model reads); `scripts/lint/lint_log_setup.py` gates it. Output is JSON on the error stream by default (`DEFENDER_LOG_FORMAT=text` for people, `DEFENDER_LOG_LEVEL`). Argparse usage errors, a `sys.exit("…")` refusal of a program's arguments, and a crash's traceback stay plain text; a run's own crash is logged inside its context by `_log.run_context`, which `run.main` uses. `_log.log_context(run_id=..., tenant_id=...)` stamps a run onto every line inside it; a thread-pool worker starts without it, so bind inside the worker or submit through `contextvars.copy_context().run`. The handler writes to whatever `sys.stderr` is at that moment and the test session configures logging once (`tests/conftest.py`), so `capsys` sees log lines as a terminal would. `print` stays for a command's own output (stdout) and for text a model reads back as a tool result. Logs go to stderr until #1114.
 - **In the devcontainer, set `DEFENDER_DATA_ROOT=/workspace/.defender-data`** (gitignored) — a data root outside the container's own tree that is not on any path this container shares with the docker daemon leaves the box unable to resolve its bind source, and `start_box` fails with a C46/DooD `BoxFault`.
 
 ## Lint gates
@@ -212,6 +213,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | No vendor- or environment-specific tokens outside the carved-out systems-skill dirs — `defender/` ships vendor-neutral | `# lint-shippable: ok` |
 | No hardcoded `/workspace` or `/tmp/defender` paths in shipping code; no bare `python3 x.py` in a hook `command:` (it gets system python); a hook matcher naming *both* `Task` and `Agent`, since production dispatches as both | `# lint-hygiene: ok` |
 | No reference left behind to a symbol or file the PR's own diff removed — the missed-callsite-after-rename class. Diffs against `$STALE_REF_BASE` (default `origin/main`) | `# lint-stale-ref: ok` |
+| Every program (`__main__` block) calls `_log.configure_from_env()` first — without it INFO lines vanish and nothing is JSON | `# lint-log-setup: ok` |
 | No newly-introduced dead code (wraps vulture) | baseline only |
 | Committed spec graphs passing the spec-flow checkers (`lint`/`gate`/`binds`/`claims`) — they used to run only at authoring time, so graphs merged carrying their findings | baseline only |
 

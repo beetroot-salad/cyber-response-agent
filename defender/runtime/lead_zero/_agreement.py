@@ -135,7 +135,7 @@ def resolve_correlation_dispatch(
         )
     template = matches[0]
 
-    from ..query_tool import resolve_query_id
+    from defender.scripts.gather_tools.record_query import resolve_query_id
 
     # THE bind-time rule, not a restatement of it: what the lead's `query` call does with a
     # `query_id`. Held against the system the file is FILED under, which is the system the

@@ -112,7 +112,7 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
     ep = episodes / T.EPISODE_ID
     if not (ep / "family.yaml").exists():
         T.episode(episodes.parent, doc=T.family_doc(source_run_dir=str(src)), root=episodes)
-    world = H.run_py().resume_world(ep / "family.yaml", label)
+    world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run_dir(
         src / "alert.json", world.run_id, tenant_id=TID, world=world)
     return ep, Path(run_dir), world
@@ -519,7 +519,7 @@ def test_episode_made_between_1077_and_pass_a(tmp_path, monkeypatch, data_root):
 
     resume_owner = H.owner_refusal(H.tenant_of_run_dir, old_src)
     rec = H.Recorder(tmp_path / "never")
-    rc, refused = H.drive_main(H.resume_argv(manifest), rec)
+    rc, refused = H.drive_main(H.resume_argv(manifest, "b", "--tenant", TID), rec)
     assert rc is None, "the by-hand resume of a pre-A manifest ran"
     assert refused is not None
     H.assert_verbatim(H.refusal_text(refused), resume_owner, entry="run.py --resume")
@@ -565,7 +565,8 @@ def test_d2_launcher_no_runs_base_export(tmp_path, monkeypatch):
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     ep = T.episode(tmp_path)
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["a", "b", "c"], spawn=spawn)
+    H.branch_cli().start_family(ep, ["a", "b", "c"], spawn=spawn, tenant_id=H.VALID_ID,
+                                tenants_root=H.T1106.TENANTS_ROOT)
     assert len(spawn.launches) == 3, "not every sibling was started"
     for launch in spawn.launches:
         assert T.RUNS_BASE_ENV not in launch["env"], (
@@ -576,7 +577,8 @@ def test_d2_launcher_no_runs_base_export(tmp_path, monkeypatch):
     stale = tmp_path / "stale-operator-runs"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(stale))
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["b"], spawn=spawn)
+    H.branch_cli().start_family(ep, ["b"], spawn=spawn, tenant_id=H.VALID_ID,
+                                tenants_root=H.T1106.TENANTS_ROOT)
     assert [la["env"].get(T.RUNS_BASE_ENV) for la in spawn.launches] == [str(stale)]
 
 
@@ -592,12 +594,14 @@ def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     ep = T.episode(tmp_path)
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["a", "b"], spawn=spawn)
+    H.branch_cli().start_family(ep, ["a", "b"], spawn=spawn, tenant_id=d9_tenant,
+                                tenants_root=H.T1106.TENANTS_ROOT)
     assert spawn.launches
     assert all(T.RUNS_BASE_ENV not in la["env"] for la in spawn.launches)
 
     runs_base = H.runs_base_for(d9_tenant)
-    ctx = H.mod("learning.branch.review").verb_context(ep, runs_base=runs_base)
+    ctx = H.mod("learning.branch.review").verb_context(
+        ep, H.T1106.PLAYGROUND_SETTINGS, runs_base=runs_base)
     assert ctx.env[T.RUNS_BASE_ENV] == str(runs_base)
     assert runs_base == current_data_root().resolve() / d9_tenant / "runs"
     assert ctx.env[T.RUNS_BASE_ENV] != str(ep.parent)

@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import functools
 from pathlib import Path
 from typing import Any
 
@@ -101,12 +102,20 @@ from defender.runtime.verbs import (  # noqa: E402
     wrapper_only_params,
 )
 from defender.tests._engine_helpers import fake_model  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 #: The estate a real branched run queries: the shipped adapters and the shipped gather grant.
 #: Read through `PATHS`, the same seam `build_agent_core` defaults to, so a tree that moves its
 #: adapters moves this with it.
 REAL_ADAPTERS = PATHS.adapters_dir
-GATHER_GRANT = driver.GATHER_DEF.verb_grant
+
+
+@functools.cache
+def _gather_grant():
+    """The shipped gather grant — the committed playground tenant's (#1106 M4: no grant is
+    fixed per process, so it is projected from a tenant's table, lazily)."""
+    return T1106.playground_grants().gather
+
 
 #: What the shipped grant covers today. Asserted rather than derived, so a grant that SHRINKS
 #: — a system quietly dropped out of the estate — fails here instead of making the structural
@@ -279,7 +288,8 @@ def fake_estate(tmp_path: Path) -> Path:
 def run_ctx(tmp_path: Path) -> VerbContext:
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={})
+    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={},
+                       settings_dir=tmp_path / "settings")
 
 
 def adapter_calls(ctx: VerbContext, verb: str | None = None) -> list[dict]:
@@ -313,7 +323,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
-        as_of=AS_OF,
+        as_of=AS_OF, settings_dir=T1106.PLAYGROUND_SETTINGS,
     )
 
 
@@ -325,8 +335,8 @@ def test_the_shipped_grant_still_spans_every_system():
     grant's own shape is pinned first — 30 entries across 8 systems (#983 added
     `tacit-knowledge`, and its `health-check` with it). Without this arm a grant
     that lost a system would make every sweep below cover one system less and stay green."""
-    assert len(GATHER_GRANT.entries) == GRANTED_ENTRIES
-    assert len(GATHER_GRANT.systems) == GRANTED_SYSTEMS
+    assert len(_gather_grant().entries) == GRANTED_ENTRIES
+    assert len(_gather_grant().systems) == GRANTED_SYSTEMS
 
 
 def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path):
@@ -337,11 +347,11 @@ def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path)
     class agreement (a `GrantError`, not a soft denial) and a wrapper that lost a verb name
     would answer UNDECLARED. Whole-grant rather than per-system spot checks, because the
     property is "no system is left out of the estate"."""
-    reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
 
     refused = [
         (system, verb, reg.decide(system, verb).outcome)
-        for system, verb, _ in GATHER_GRANT.entries
+        for system, verb, _ in _gather_grant().entries
         if reg.decide(system, verb).outcome != GRANTED
     ]
 
@@ -356,11 +366,11 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     silent-scenario-deletion hazard the ledger exists to make visible: it would be a response
     with no row. Pinned as `__wrapped__ is real`, so the wrapper is proven to be over THIS
     body rather than merely to be some other callable."""
-    reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     bare = []
-    for system, verb, _ in GATHER_GRANT.entries:
+    for system, verb, _ in _gather_grant().entries:
         real = plain.verbs(system)[verb]
         for route, fn in (("verbs", reg.verbs(system)[verb]), ("decide", reg.decide(system, verb).fn)):
             if fn is real or getattr(fn, "__wrapped__", None) is not real:
@@ -377,11 +387,11 @@ def test_the_wrapper_carries_the_decoration_the_seam_reads(tmp_path):
     the engine/body-param pair is how the query tool decides a payload's shape — the elastic
     `esql`/`query`/`alerts` verbs are the ones carrying non-default values, so they are the
     ones a `functools.wraps` regression would silently blank."""
-    reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     drifted = []
-    for system, verb, verb_class in GATHER_GRANT.entries:
+    for system, verb, verb_class in _gather_grant().entries:
         real, served = plain.verbs(system)[verb], reg.verbs(system)[verb]
         read = (verb_class_of(served), engine_of(served), body_param_of(served))
         want = (verb_class_of(real), engine_of(real), body_param_of(real))
@@ -404,11 +414,11 @@ def test_the_wrapper_keeps_the_keyword_only_signature_the_boundary_introspects(t
     They are one number: what a model is SHOWN and what the boundary ACCEPTS both come from
     `model_facing_params`, so a wrapper whose signature read differently would publish a
     surface the seam then refuses."""
-    reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
-    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), GATHER_GRANT)
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     drifted = []
-    for system, verb, _ in GATHER_GRANT.entries:
+    for system, verb, _ in _gather_grant().entries:
         real, served = plain.verbs(system)[verb], reg.verbs(system)[verb]
         for read in (declared_params, model_facing_params, wrapper_only_params):
             if read(served) != read(real):
@@ -425,7 +435,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
     `declared_params`) and model-facing NOTHING, so a wrapper that flattened the two reads into
     one would open a param whose only effect is to silently narrow a lead's read to closed
     tickets."""
-    reg = world_registry(REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
     served = reg.verbs("ticket")["list-tickets"]
 
     assert "require_closed" in declared_params(served)
@@ -441,7 +451,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
 def _built(logger, verbs):
     with override_allow_model_requests(False):
         return driver.build_agent_core(
-            driver.GATHER_DEF, deps_type=GatherDeps, instructions="x", logger=logger,
+            T1106.playground_gather_def(), deps_type=GatherDeps, instructions="x", logger=logger,
             agent_id="gather", verbs=verbs,
             make_model=fake_model(lambda messages, info: ModelResponse(
                 parts=[TextPart(content="ok")])),
@@ -475,7 +485,7 @@ def test_build_agent_core_accepts_a_world_registry(logger, tmp_path):
     The positive arm of the pair: without it, a check that refused EVERYTHING would satisfy
     the negative one, and the sibling run would have no way to query at all."""
     reg = world_registry(
-        REAL_ADAPTERS, GATHER_GRANT, tmp_path / "served.jsonl",
+        REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl",
         world=World("w1", touches=("elastic",)),
     )
 
@@ -860,7 +870,7 @@ def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_pa
     patch carrying `status: <released>` builds, because a released case IS served whole."""
     from defender.scripts.case_history import case_ticket
 
-    released = case_ticket.release_predicate().released_status
+    released = case_ticket.release_predicate(T1106.PLAYGROUND_SETTINGS).released_status
     # The recording adapter body declared under the ticket system's name, so the grant can
     # name it: which verbs it carries is beside the point here — the refusal is about the
     # PATCH TABLE, decided before any call is served.

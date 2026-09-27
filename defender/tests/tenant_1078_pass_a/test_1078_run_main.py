@@ -28,10 +28,11 @@ from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
-#: `_Investigate`'s parameters at base ed5386bc (run.py:230-233) — D3: "The `materialize` seam
-#: gains `tenant_id`; `_Investigate` does not."
+#: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
+#: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
+#: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "world"]
+                      "model_override", "box", "tenant", "world"]
 
 
 # ======================================================================================
@@ -42,7 +43,7 @@ def _main(argv: list[str], rec: H.Recorder, **override: Any) -> tuple[Any, BaseE
     """`H.drive_main`, with one seam replaced (a failing preflight, say)."""
     seams = {**rec.seams(), **override}
     try:
-        return H.run_py().main(argv, **seams), None
+        return H.run_py().main(H.with_tenants_root(argv), **seams), None
     except SystemExit as refused:
         return None, refused
 
@@ -189,11 +190,12 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
 
 def test_d3_materialize_seam_tenant(tmp_path, data_root):
     """main calls the materialize seam with T as its tenant_id keyword argument;
-    _Investigate's parameters are unchanged.
+    _Investigate's parameters are unchanged by #1078.
 
-    For a fresh run AND for a `--resume` sibling (whose T is derived, not given): the seam is
-    handed the tenant by keyword. `_Investigate` gains no tenant parameter — everything it
-    drives follows from `run_dir` (C24, C29)."""
+    For a fresh run AND for a `--resume` sibling (which names T too, checked against its
+    source's record): the seam is handed the tenant by keyword. `_Investigate` gains no tenant
+    id — everything it drives follows from `run_dir` (C24, C29); the resolved `RunTenant` it
+    takes is #1106's."""
     H.make_tenant(data_root, H.VALID_ID)
     alert = H.plant_alert(tmp_path / "in")
     fresh = _accepted([str(alert), "--tenant", H.VALID_ID], H.Recorder(tmp_path / "run"))
@@ -204,7 +206,8 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
     H.plant_record(base, H.VALID_ID)
     src = H.source_run(base)
     manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
-    sibling = _accepted(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"))
+    sibling = _accepted(H.resume_argv(manifest, "b", "--tenant", H.VALID_ID),
+                        H.Recorder(tmp_path / "sib"))
     assert sibling.get("tenant_id") == H.VALID_ID, sibling
 
     params = list(inspect.signature(H.run_py()._Investigate.__call__).parameters)
@@ -216,26 +219,30 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
 # ======================================================================================
 
 def test_o5_sibling_tenant_from_record(tmp_path, data_root):
-    """A sibling launched from <root>/T/runs/r1, whose runs-base record and stamp both carry
-    T, runs under T: its materialize receives T as its tenant_id."""
+    """A sibling requesting T, launched from <root>/T/runs/r1, whose runs-base record and stamp
+    both carry T, runs under T: its materialize receives T as its tenant_id."""
     src, manifest = _sibling(tmp_path, data_root, "acme")
     _stamp_tenant(src, "acme")
-    got = _accepted(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"))
+    got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
+                    H.Recorder(tmp_path / "sib"))
     assert got["tenant_id"] == "acme"
 
 
 def test_o5_forged_stamp_ignored(tmp_path, data_root):
     """With the source run's provenance.json rewritten to name tenant U, the sibling still
-    runs under T.
+    runs under T — the request names T, and the source's RECORD agrees; the stamp is not asked.
 
     U is made a REAL tenant (a hand-made second row, which N13 says nothing refuses), so a
-    sibling that read its tenant off the box-writable stamp would run — under U. The positive
-    control is `test_o5_sibling_tenant_from_record`: the same launch with an honest stamp."""
+    sibling that checked the request against the box-writable stamp would refuse T — and one
+    that took the stamp's word would accept U. The positive control is
+    `test_o5_sibling_tenant_from_record`: the same launch with an honest stamp."""
     src, manifest = _sibling(tmp_path, data_root, "acme")
     H.plant_row(data_root, "victim")
     _stamp_tenant(src, "victim")
-    got = _accepted(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"))
+    got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
+                    H.Recorder(tmp_path / "sib"))
     assert got["tenant_id"] == "acme", f"the sibling took its tenant from the stamp: {got}"
+    _refused(H.resume_argv(manifest, "b", "--tenant", "victim"), H.Recorder(tmp_path / "sib2"))
 
 
 def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
@@ -256,13 +263,18 @@ def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
     assert got["tenant_id"] == "acme"
 
 
-def test_o5_resume_without_tenant_derives(tmp_path, data_root):
-    """run.py --resume with no --tenant is accepted and runs under the T that
-    tenant_of_run_dir(family.source_run_dir) derives."""
+def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
+    """run.py --resume with no --tenant is refused before the preflight and materialize — a
+    sibling names its tenant like every run (the request is where a tenant comes from, never a
+    record). Naming the T that tenant_of_run_dir(family.source_run_dir) derives is accepted and
+    runs under it (the control)."""
     src, manifest = _sibling(tmp_path, data_root, "acme-corp")
     derived = H.tenant_of_run_dir(src)
     assert derived == "acme-corp"
-    got = _accepted(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"))
+    said = _refused(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
+    assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
+    got = _accepted(H.resume_argv(manifest, "b", "--tenant", derived),
+                    H.Recorder(tmp_path / "sib2"))
     assert got["tenant_id"] == derived
 
 
@@ -272,7 +284,8 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
     today (the resume path takes the sibling's id from the manifest)."""
     src, manifest = _sibling(tmp_path, data_root, "acme")
     H.plant_row(data_root, "victim")
-    world_run_id = H.run_py().resume_world(manifest, "a").run_id
+    world_run_id = H.run_py().resume_world(
+        manifest, "a", settings=lambda: H.T1106.PLAYGROUND_SETTINGS).run_id
     got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant_id"] == "acme"
@@ -284,14 +297,15 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
 
 def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root):
     """A row that becomes unreadable after the launcher's own derivation: every sibling
-    refuses at its own derivation (require_tenant) and none materializes; the
+    refuses at its own tenant check (require_tenant) and none materializes; the
     already-prepared episode dir may remain."""
     src, manifest = _sibling(tmp_path, data_root, "acme")
     assert H.tenant_of_run_dir(src) == "acme", "the launcher's own derivation must pass first"
     H.row_path(data_root, "acme").write_text("{torn", encoding="utf-8")
     owner = H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme")
     for world in ("a", "b", "c"):
-        said = _refused(H.resume_argv(manifest, world), H.Recorder(tmp_path / f"sib-{world}"))
+        said = _refused(H.resume_argv(manifest, world, "--tenant", "acme"),
+                        H.Recorder(tmp_path / f"sib-{world}"))
         H.assert_verbatim(said, owner, entry=f"sibling {world}")
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
@@ -311,7 +325,8 @@ def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypat
     monkeypatch.chdir(tmp_path)
     for spelling in (Path("episodes") / T.EPISODE_ID / "family.yaml",
                      link / T.EPISODE_ID / "family.yaml"):
-        got = _accepted(H.resume_argv(spelling), H.Recorder(tmp_path / "sib" / spelling.name))
+        got = _accepted(H.resume_argv(spelling, "b", "--tenant", "acme"),
+                        H.Recorder(tmp_path / "sib" / spelling.name))
         world = got["world"]
         assert Path(world.episode_dir).is_absolute(), f"{spelling}: {world.episode_dir}"
         assert Path(world.episode_dir) == episode, (
@@ -383,20 +398,17 @@ def test_shell_that_never_received_the_compose_variable(tmp_path, monkeypatch):
 
 
 def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
-    """After the data root moves: a fork of a run under the old root is refused by location
-    (O5); `--run-id X --tenant T` under the new root is refused by O2 until setup has run
-    there; setup into the new, empty root creates the row (O10); the old root's runs are
-    neither read, moved nor cleaned (N13: a second data root is unsupported)."""
+    """After the data root moves: `--run-id X --tenant T` under the new root is refused by O2
+    until setup has run there; setup into the new, empty root creates the row (O10); a fork of
+    a run under the old root — requesting that same, now-existing T — is refused by location
+    (O5); the old root's runs are neither read, moved nor cleaned (N13: a second data root is
+    unsupported)."""
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
     src, manifest = _sibling(tmp_path, old, "acme")
     (H.runs_dir(old, "acme") / "case-x").mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)
-
-    location = H.owner_refusal(H.tenant_of_run_dir, src)
-    said = _refused(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"))
-    H.assert_verbatim(said, location, entry="run.py --resume (old root)")
 
     alert = H.plant_alert(tmp_path / "in")
     argv = [str(alert), "--run-id", "case-x", "--tenant", "acme"]
@@ -406,6 +418,12 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
     assert H.row_path(new, "acme").is_file()
+
+    location = H.owner_refusal(H.tenant_of_run_dir, src)
+    said = _refused(H.resume_argv(manifest, "b", "--tenant", "acme"),
+                    H.Recorder(tmp_path / "sib"))
+    H.assert_verbatim(said, location, entry="run.py --resume (old root)")
+
     got = _accepted(argv, H.Recorder(tmp_path / "run2"))
     assert got["tenant_id"] == "acme"
     assert H.census(old) == old_census, "the old data root was touched"

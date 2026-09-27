@@ -1179,3 +1179,42 @@ def dead_end_reason(system: str, verb: str, trip: RepeatTrip, executed: int) -> 
     )
 
 
+#: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
+#: would walk the id out of the directory it names a file in. The last three are RENDER
+#: shapes: a catalog id is interpolated into markdown three offline collectors read, and a
+#: newline or a heading marker in it forges document structure inside the judge's per-lead
+#: comparison. Both families screen as one rule: a `query_id` is a catalog IDENTIFIER the
+#: collectors partition on, not free text.
+_QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
+
+#: The kebab half: the remainder after the first `.` in a coined `query_id`. No dot — a second
+#: dot lets `'system.foo.bar'` slip past a prefix-only check and become a SECOND unvalidated
+#: model-supplied path component at the host-side draft writer
+#: (`draft_synthesis._draft_candidate_segments`'s `split('.', 1)`).
+_KEBAB_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+
+
+def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
+    """The `query_id` a call is recorded under: the model's `{system}.{kebab-name}` when it is
+    well formed for `system`, else the untagged `{system}.{verb}`. Lives here, beside
+    `is_reserved_query_id`, so a pydantic-ai-free caller (the lead-zero agreement check the CI
+    census runs, #1106) applies the same bind-time rule the `query` tool does."""
+    # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
+    # through here) to mark a row whose ROUTING the offline collectors take on trust. A
+    # model-supplied `query_id` spelling one — or carrying a character `_screen` would reject —
+    # must not reach a real row through this path: the repeat-trip's own record sits ABOVE
+    # `_screen`, so nothing else screens it. Keyed on the whole PREFIX, not on each literal, so
+    # it cannot fall behind the set.
+    if (
+        model_query_id
+        and not is_reserved_query_id(model_query_id)
+        and not any(t in model_query_id for t in _QID_FORBIDDEN)
+    ):
+        # The WHOLE `{system}.{kebab-name}` shape, not only the prefix: the prefix must
+        # EXACTLY equal the dispatched system (no case folding, no NFC) and the remainder must
+        # be a single well-formed segment. A foreign prefix, a missing separator, an empty
+        # remainder, or a second `.` all fall back to the untagged value.
+        prefix, sep, remainder = model_query_id.partition(".")
+        if sep and prefix == system and remainder and _KEBAB_SEGMENT.match(remainder):
+            return model_query_id
+    return f"{system}.{verb}" if verb else f"{system}.ad-hoc"

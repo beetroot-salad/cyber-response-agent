@@ -48,6 +48,8 @@ entry — schema.md, "Coin ids from the code's name")
 """
 from __future__ import annotations
 
+from defender.tests import _tenants1106  # noqa: E402 — #1106: the run's tenant settings lead-0 reads
+
 import re
 from pathlib import Path
 
@@ -185,7 +187,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json",
+            alert_path=run_dir / "alert.json", settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
             verbs=elastic_backend(rec, **kw),
         ), rec
 

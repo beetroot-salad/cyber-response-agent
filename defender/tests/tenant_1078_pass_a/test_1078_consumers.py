@@ -292,16 +292,16 @@ def test_d4_review_env_threaded(tmp_path, monkeypatch):
 
     review = H.mod("learning.branch.review")
     seams = H.mod("learning.branch.seams")
-    ctx = review.verb_context(ep, runs_base=base)
+    ctx = review.verb_context(ep, H.T1106.PLAYGROUND_SETTINGS, runs_base=base)
     assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
     assert ctx.run_dir == ep, "the replay context stopped being the episode dir"
-    side = seams.adapter_seam(ep, runs_base=base)
+    side = seams.adapter_seam(ep, H.T1106.playground_run_tenant(), runs_base=base)
     assert side.ctx.env["DEFENDER_RUNS_BASE"] == str(base)
 
     with pytest.raises(TypeError):
-        review.verb_context(ep)
+        review.verb_context(ep, H.T1106.PLAYGROUND_SETTINGS)
     with pytest.raises(TypeError):
-        seams.adapter_seam(ep)
+        seams.adapter_seam(ep, H.T1106.playground_run_tenant())
 
 
 def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
@@ -318,7 +318,8 @@ def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
     ep = tmp_path / "old-episodes-base" / "src-run-n5"
     ep.mkdir(parents=True)
 
-    ctx = H.mod("learning.branch.review").verb_context(ep, runs_base=H.runs_base_for(TENANT))
+    ctx = H.mod("learning.branch.review").verb_context(
+        ep, H.T1106.PLAYGROUND_SETTINGS, runs_base=H.runs_base_for(TENANT))
     child = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
         [sys.executable, "-c", "import os; print(os.environ['DEFENDER_RUNS_BASE'])"],
         env=ctx.env, capture_output=True, text=True, check=True, timeout=60)
