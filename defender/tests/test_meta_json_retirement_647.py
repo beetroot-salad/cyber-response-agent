@@ -196,6 +196,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     assert target.id == "run_dir", f"the bound name must be run_dir; got {target.id}"
 
     from defender.run import _run_investigation_lifecycle
+    from defender.tests import _tenants1106
 
     arrived: dict = {}
 
@@ -207,6 +208,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
+        tenant=_tenants1106.playground_run_tenant(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,
@@ -822,7 +824,11 @@ def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
 
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    assert ticket_adapter._cli_context().run_dir == run_dir
+    # #1106: the CLI is handed its tenant's settings folder (parsed from `--tenant`).
+    from defender.tests import _tenants1106
+
+    assert ticket_adapter._cli_context(
+        DEFENDER, _tenants1106.PLAYGROUND_SETTINGS).run_dir == run_dir
 
 
 def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):

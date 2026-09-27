@@ -1,0 +1,62 @@
+# The template tenant's verb-disposition table (#1106 D1): it grants NOTHING.
+#
+# Creating a tenant means copying `knowledge/tenant-template/`. Every (system, verb) the shared
+# adapters declare has a row here, so the copy is total over the census (CI checks the template
+# like every committed tenant), and every row withholds the verb from every holder. A tenant
+# copied from here is refused at run start until an operator grants gather at least one verb:
+# an empty gather grant is a run that could query nothing.
+#
+# Read defender/runtime/verb_dispositions.py and the playground tenant's table before granting.
+
+dispositions:
+
+  change-mgmt:
+    active-changes: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    get-change: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-changes: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  cmdb:
+    get-host: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-hosts: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-roles: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  elastic:
+    alerts: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    esql: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    query: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  host-state:
+    authorized-keys: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    container-inspect: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    fim-checksum: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    package-list: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    passwd: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    proc-tree: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  identity:
+    can-access: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    get-user: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-authorized-hosts: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-roles: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-users: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  tacit-knowledge:
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    lookup: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  threat-intel:
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-indicators: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    lookup: {roles: [], reason: "template default: no operator has granted this verb yet"}
+
+  ticket:
+    case-opened-at: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    get-ticket: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    health-check: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    key-pattern: {roles: [], reason: "template default: no operator has granted this verb yet"}
+    list-tickets: {roles: [], reason: "template default: no operator has granted this verb yet"}

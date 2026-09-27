@@ -25,7 +25,8 @@ http://threat-intel:8080/...`. Bastion default `web-1`.
 
 ## Config
 
-`defender/knowledge/environment/systems/threat-intel/config.env`
+The run's tenant's `systems/threat-intel/config.env` (host-only, in the tenant's
+`settings/` folder — not readable from the box)
 declares `THREAT_INTEL_URL_BASE`, `THREAT_INTEL_BASTION_HOST`,
 `THREAT_INTEL_TIMEOUT_SEC`.
 

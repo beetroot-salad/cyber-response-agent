@@ -65,7 +65,8 @@ import pytest
 from defender._git import REPO_ROOT
 from defender.runtime import permission
 from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.runtime.driver import MAIN_DEF
+from defender.tests import _tenants1106
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verb_roster import generate_roster, load_roster, roster_path
 from defender.runtime.verbs import (
@@ -303,6 +304,7 @@ def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
     (`lint-monkeypatch`)."""
     return VerbContext(
         defender_dir=root, run_dir=tmp_path / "run", env={}, as_of=as_of,
+        settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
     )
 
 
@@ -415,7 +417,7 @@ def test_registry_lookup_is_a_rostered_gather_verb():
         "`VERBS` is read COLD off the AST — it has to be a dict literal with literal keys"
     )
 
-    grant: VerbGrant = GATHER_DEF.verb_grant
+    grant: VerbGrant = _tenants1106.playground_grants().gather
     assert (SYSTEM, LOOKUP, "r") in grant.entries, (
         "the lookup is not in gather's grant, so no lead can reach it"
     )
@@ -474,7 +476,8 @@ def test_no_run_path_writes_the_registry(tmp_path):
     (run_dir / "alert.json").write_text('{"rule": {"name": "probe"}}', encoding="utf-8")
 
     forged = "entries:\n  - id: tk-forged\n"
-    for defn, label in ((MAIN_DEF, "main"), (GATHER_DEF, "gather")):
+    gather_def = _tenants1106.playground_gather_def()
+    for defn, label in ((MAIN_DEF, "main"), (gather_def, "gather")):
         policy = compile_policy_for(defn, run_dir, defender_dir=DEFENDER)
         decision = permission.decide_write(
             target, forged, run_dir=run_dir, defender_dir=DEFENDER, policy=policy,
@@ -484,7 +487,7 @@ def test_no_run_path_writes_the_registry(tmp_path):
             f"its own authorization"
         )
 
-    assert compile_policy_for(GATHER_DEF, run_dir, defender_dir=DEFENDER).write_allow == (), (
+    assert compile_policy_for(gather_def, run_dir, defender_dir=DEFENDER).write_allow == (), (
         "gather grew a write scope; the lookup lane must stay read-only end to end"
     )
 

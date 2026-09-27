@@ -244,6 +244,11 @@ def parse_query_template(text: str, path: Path) -> tuple[QueryTemplate | None, s
     ), ""
 
 
+def query_catalog_dir(defender_dir: Path) -> Path:
+    """The query catalog of the tree at `defender_dir` — the one spelling of where it lives."""
+    return Path(defender_dir) / "skills" / "gather" / "queries"
+
+
 def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
     if not catalog_dir.is_dir():
         return

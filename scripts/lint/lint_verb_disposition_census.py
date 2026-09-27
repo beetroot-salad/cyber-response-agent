@@ -49,12 +49,26 @@ from defender.learning.leads.declared_systems import (  # noqa: E402
     read_adapters,
 )
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+from defender._corpus import QueryTemplate, is_established  # noqa: E402
+from defender._tenants import (  # noqa: E402
+    TenantDir,
+    TenantDirError,
+    default_tenants_root,
+    tenant_dir,
+    template_dir,
+)
+from defender.runtime import lead_zero as lead_zero_mod  # noqa: E402
+from defender.runtime.lead_zero._spec import correlation_grant  # noqa: E402
+from defender.runtime.lead_zero_config import LeadZeroConfigError  # noqa: E402
+from defender.runtime.run_tenant import catalog_templates, correlation_dispatch  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
     census_gaps,
     dispositions_path,
+    grant_for,
     load_dispositions,
 )
+from defender.runtime.verb_grant import GrantError  # noqa: E402
 from defender.runtime.verbs import RosterRead  # noqa: E402
 
 
@@ -85,7 +99,45 @@ def _unreadable_adapters(
     return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
 
 
-def main(argv: list[str]) -> int:
+def _tenant_folders(root: Path) -> list[tuple[str, TenantDir | TenantDirError]]:
+    """Every tenant folder the gate checks (#1106 M7): each committed tenant under
+    `knowledge/tenants/`, then the template — `(name, resolved tenant or the refusal)`, in a
+    stable order.
+
+    THROUGH THE RUN'S OWN RESOLVER (`tenant_dir`), so what CI accepts is what a run accepts: a
+    tenant with no `agent/` half (git keeps no empty directory, so a missing `.gitkeep` loses
+    it in every clone), a missing required file or a linked half is refused here exactly as
+    `run.py` would refuse it at start — not passed as clean because its table loads."""
+    tenants = default_tenants_root(root)
+    names = sorted(d.name for d in tenants.iterdir() if d.is_dir()) if tenants.is_dir() else []
+    template = template_dir(root)
+    folders: list[tuple[str, TenantDir | TenantDirError]] = []
+    for parent, name in [*((tenants, n) for n in names), (template.parent, template.name)]:
+        try:
+            folders.append((name, tenant_dir(parent, name)))
+        except TenantDirError as refusal:
+            folders.append((name, refusal))
+    return folders
+
+
+def _lead_zero_fault(settings: Path, rows: tuple, catalog: list[QueryTemplate]) -> str | None:
+    """Each folder's lead-zero config, checked in CI (#1106 M7): it names an ESTABLISHED
+    catalog template — whether or not the table grants the lead, since a withheld lead's id is
+    never consulted at run start and would otherwise surface only once an operator grants it —
+    and, when the table does grant the lead, that template's pair is the one granted (the
+    run-start agreement check itself, `run_tenant.correlation_dispatch`). `None` when both
+    hold. `catalog` is the tree's, walked once for every folder."""
+    try:
+        template_id = correlation_dispatch(settings, catalog, correlation_grant(rows)).template_id
+    except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError, GrantError) as e:
+        return str(e)
+    if not any(t.id == template_id and is_established(t) for t in catalog):
+        return (f"correlation_template {template_id!r} names no established template in the "
+                "catalog (the table withholds the lead, so no run consults it yet)")
+    return None
+
+
+def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every folder; each exit arm is a distinct verdict
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=str(REPO_ROOT), help="repo root to check")
     args = ap.parse_args(argv)
@@ -104,11 +156,6 @@ def main(argv: list[str]) -> int:
         systems = declared_systems_over(roster, root)
     except LeadAuthorError as e:
         print(f"lint_verb_disposition_census: cannot resolve systems: {e}", file=sys.stderr)
-        return 2
-    try:
-        rows = load_dispositions(dispositions_path(defender_dir))
-    except DispositionError as e:
-        print(f"lint_verb_disposition_census: {e}", file=sys.stderr)
         return 2
 
     walked = _walk(roster, systems)
@@ -131,33 +178,56 @@ def main(argv: list[str]) -> int:
                 )
         return 2
 
-    gaps = census_gaps(walked, rows)
-    if not gaps:
+    # EVERY TENANT AND THE TEMPLATE (#1106 M7). Grants describe the SHARED adapters, so each
+    # folder's table must be total over the one walked census; a folder whose table cannot even
+    # load is exit 2 for the same reason an unreadable adapter is.
+    worst = 0
+    catalog = catalog_templates(defender_dir)
+    for name, resolved in _tenant_folders(root):
+        if isinstance(resolved, TenantDirError):
+            print(f"lint_verb_disposition_census: {name}: a run would refuse this tenant at "
+                  f"start: {resolved}", file=sys.stderr)
+            worst = 2
+            continue
+        settings = resolved.settings
+        try:
+            rows = load_dispositions(dispositions_path(settings))
+        except DispositionError as e:
+            print(f"lint_verb_disposition_census: {name}: {e}", file=sys.stderr)
+            worst = 2
+            continue
+        table = dispositions_path(settings).relative_to(root)
+        gaps = census_gaps(walked, rows)
+        lead_zero_fault = _lead_zero_fault(settings, rows, catalog)
+        if not gaps and lead_zero_fault is None:
+            print(
+                f"lint_verb_disposition_census: {name}: clean — {len(rows)} dispositions "
+                f"cover {len(systems)} system(s) with no residue "
+                f"({len(grant_for('gather', rows).entries)} granted to gather)."
+            )
+            continue
+        worst = max(worst, 1)
+        for system, verb in gaps.undecided:
+            print(
+                f"{name}: {system}.{verb}: declared by an adapter, decided by nobody. Add a "
+                f"row to {table} granting it to a role, or `roles: []` with a reason if it is "
+                "deliberately reachable by no one."
+            )
+        for system, verb in gaps.phantom:
+            print(
+                f"{name}: {system}.{verb}: the table decides a verb no adapter declares. "
+                f"Remove the row from {table}, or restore the verb."
+            )
+        for system, verb in gaps.unreasoned:
+            print(f"{name}: {system}.{verb}: granted to nobody with no reason given.")
+        if lead_zero_fault is not None:
+            print(f"{name}: lead-zero: {lead_zero_fault}")
         print(
-            f"lint_verb_disposition_census: clean — {len(rows)} dispositions cover "
-            f"{len(systems)} system(s) with no residue."
+            f"lint_verb_disposition_census: {name}: {len(gaps.undecided)} undecided, "
+            f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned"
+            + (", and its lead-zero config disagrees." if lead_zero_fault is not None else ".")
         )
-        return 0
-
-    for system, verb in gaps.undecided:
-        print(
-            f"{system}.{verb}: declared by an adapter, decided by nobody. Add a row to "
-            f"{dispositions_path(defender_dir).relative_to(root)} granting it to a role, or "
-            "`roles: []` with a reason if it is deliberately reachable by no one."
-        )
-    for system, verb in gaps.phantom:
-        print(
-            f"{system}.{verb}: the table decides a verb no adapter declares. Remove the row, "
-            "or restore the verb."
-        )
-    for system, verb in gaps.unreasoned:
-        print(f"{system}.{verb}: granted to nobody with no reason given.")
-    print(
-        f"lint_verb_disposition_census: {len(gaps.undecided)} undecided, "
-        f"{len(gaps.phantom)} phantom, {len(gaps.unreasoned)} unreasoned."
-    )
-    return 1
-
+    return worst
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

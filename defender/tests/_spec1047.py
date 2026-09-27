@@ -329,11 +329,13 @@ class FakeTicketSystem:
     configured: bool = True
     calls: list[TicketCall] = field(default_factory=list)
 
-    def load_config(self) -> dict[str, str] | None:
+    def load_config(self, _settings_dir: Path) -> dict[str, str] | None:
+        # #1106: the writer hands its config loader the run's settings folder; this fake
+        # answers the lane's config whichever folder that is.
         return dict(TICKET_CONFIG) if self.configured else None
 
     def request(self, _config: dict[str, str], method: str, path: str,
-                body: dict | None = None) -> tuple[str | None, str]:
+                body: dict | None = None, *, settings_dir: Path) -> tuple[str | None, str]:
         self.calls.append(TicketCall(method, path, body))
         if method == "GET":
             # The writer's courtesy read-back before it comments (#767): an open, unreleased
@@ -375,6 +377,9 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
+    # #1106: the writer is handed the run's settings folder (its mapping); this lane reads the
+    # committed playground tenant's, as it read the checkout's own mapping before the move.
+    kw.setdefault("settings_dir", _playground_settings())
     mod("scripts.case_history.ticket_writer").record_case_ticket(
         Path(run_dir), fake.deps(), **kw)
     return fake
@@ -384,8 +389,15 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
-    mod("scripts.case_history.ticket_writer").open_case_ticket(Path(run_dir), fake.deps())
+    mod("scripts.case_history.ticket_writer").open_case_ticket(
+        Path(run_dir), fake.deps(), settings_dir=_playground_settings())
     return fake
+
+
+def _playground_settings() -> Path:
+    from defender.tests import _tenants1106
+
+    return _tenants1106.PLAYGROUND_SETTINGS
 
 
 def receipt(run_dir: Path) -> dict | None:

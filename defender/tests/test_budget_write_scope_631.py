@@ -50,10 +50,11 @@ from defender.runtime import driver, observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 from defender.tests.test_budget_seams_631 import ScriptedModel, drive_agent  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -378,13 +379,14 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
                                        "params": params,
                                        "query_id": "elastic.probe"})]])
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    gather_def = T1106.playground_gather_def()
     agent = driver.build_agent_core(
-        GATHER_DEF, deps_type=GATHER_DEF.deps_cls, instructions="probe",
+        gather_def, deps_type=gather_def.deps_cls, instructions="probe",
         logger=logger, agent_id="gather:l-001",
         make_model=lambda n, e: BuiltModel(FunctionModel(model), None),
         verbs=Verbs(), limits=DEFAULT_LIMITS,
     )
-    deps = replace(bind(GATHER_DEF, run_dir, defender_dir=DEFENDER),
+    deps = replace(bind(gather_def, run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
 
     async def _go():

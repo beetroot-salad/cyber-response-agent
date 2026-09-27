@@ -321,7 +321,8 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
         "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
         "SOC_PLAYGROUND_DOCKER_CONTEXT": "test-ctx",
     }
-    ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env)
+    ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env,
+                      settings_dir=tmp_path / "settings")
 
     rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])
 

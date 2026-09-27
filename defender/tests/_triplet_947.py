@@ -529,6 +529,9 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
         "as_of": as_of,
         "continuation_prompt": continuation_prompt,
         "base_story": "the captured story",
+        # #1106: the launcher records the tenant's configured corpus patterns in the manifest
+        # (the loader reads no settings), so the authored document carries them.
+        "configured_patterns": [EVENTS_PATTERN, ALERTS_PATTERN],
         "discriminator": {"predicate": "p", "holding_system": "elastic",
                           "envelope": {"system": "elastic", "verb": "esql",
                                        "params": {"query": f"FROM {EVENTS_PATTERN} | LIMIT 5"}}},
@@ -613,6 +616,12 @@ def branchable_investigation() -> str:
     return f"# investigation\n\n```invlang\n{bodies[0]}\n```\n"
 
 
+#: The tenant the fixture's SOURCE run was stamped with (#1077 stamps every run's tenant; #1106
+#: M2 seeds each sibling's runs base from it). The committed playground tenant, so a launch that
+#: resolves it against the checkout's default tenants root finds a complete tenant.
+SOURCE_TENANT = "playground"
+
+
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
@@ -638,7 +647,11 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Pa
     # place a run the box will execute is ever created, so a source run without one is not a run
     # any production path could have produced — and the containment walks read exactly this file
     # to tell an ordinary run from an episode's contents.
-    (src / "provenance.json").write_text(json.dumps(provenance_record()), encoding="utf-8")
+    (src / "provenance.json").write_text(
+        json.dumps(provenance_record(tenant_id=SOURCE_TENANT)), encoding="utf-8")
+    # ...and the runs base's own tenant record, which every ordinary run's base holds (run
+    # start creates it) and which the launcher reads the source's tenant from (#1106).
+    mod("_tenant").ensure_tenant(base, tenant_id=SOURCE_TENANT)
     seed_source_session(base, src)
     return base, src
 
@@ -727,7 +740,8 @@ GIT_UNAVAILABLE = "git unavailable: FileNotFoundError('git')"
 
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,
                       unavailable: str | None = None, model: str | None = "m-1",
-                      scope: str | None = "repo") -> dict:
+                      scope: str | None = "repo",
+                      tenant_id: str | None = None) -> dict:
     """One `provenance.json` document, in a shape `capture_tree` can produce.
 
     Four shapes and no others: the clean tree, the dirty tree, the git-status failure (a sha in
@@ -744,6 +758,11 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
     if dirty:
         doc["dirty_paths"] = ["defender/runtime/driver/__init__.py"]
         doc["dirty_path_count"] = 1
+    # #1106 M2: the stamp every run materialised since #1077 carries its tenant, and a branched
+    # episode seeds its siblings' tenant record FROM the SOURCE's. `None` (the default, so the
+    # sibling-stamp call sites that spell their own `tenant_id` keep doing so) omits the field.
+    if tenant_id is not None:
+        doc["tenant_id"] = tenant_id
     return doc
 
 
@@ -757,6 +776,9 @@ def source_stamp(src: Path, **overrides: Any) -> Path:
     symlinks the real path itself, because the fault has to be the real one.
     """
     path = Path(src) / "provenance.json"
+    # The source's tenant rides unless the scenario is ABOUT it (#1106 M2: a legacy stamp with
+    # no tenant — `tenant_id=None` — is the one the launcher refuses, N10).
+    overrides.setdefault("tenant_id", SOURCE_TENANT)
     path.write_text(json.dumps(provenance_record(**overrides)), encoding="utf-8")
     return path
 

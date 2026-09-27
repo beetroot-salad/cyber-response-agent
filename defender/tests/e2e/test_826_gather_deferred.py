@@ -21,7 +21,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  
 # import in `tools`. Reaching `tools_gather` FIRST from outside the package enters that cycle
 # at its unfinished end, so the driver (which pulls `tools` in properly) is imported ahead of
 # it — the same order every other suite that touches `_run_gather` arrives in.
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.runtime import circuit_breaker, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -155,7 +156,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
             deps, factory, 40,
-            GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
+            GatherRequest(lead, "elastic", "goal", ("what",)), T1106.playground_grants().gather,
             lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
         ))
         assert stamped[-1] == (f"gather:{lead}", expected)
@@ -181,7 +182,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         with pytest.raises(type(exc)):
             asyncio.run(tools_gather._run_gather(
                 deps, _factory_raising(exc), 40,
-                GatherRequest(lead, "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
+                GatherRequest(lead, "elastic", "goal", ("what",)), T1106.playground_grants().gather,
                 lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
             ))
         assert stamped[-1] == (f"gather:{lead}", expected), \
@@ -197,7 +198,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     before = len(stamped)
     asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: _Clean(), 40,
-        GatherRequest("l-009", "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
+        GatherRequest("l-009", "elastic", "goal", ("what",)), T1106.playground_grants().gather,
         lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
     ))
     assert len(stamped) == before, "a gather that finished was stamped as truncated"

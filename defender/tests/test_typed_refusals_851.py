@@ -30,7 +30,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import orient, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.box import BoxResult  # noqa: E402
@@ -44,6 +44,7 @@ from defender.tests._curator_691_harness import (  # noqa: E402
     rel,
 )
 from defender.tests._frames680 import Box, DEFENDER  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 #: A lone surrogate — not UTF-8-encodable, and reachable from a model tool-call JSON arg on a
 #: provider that hands `args` back as an already-parsed dict (`json.loads('"\\ud800"')`).
@@ -97,7 +98,7 @@ def test_f10_a_nul_in_an_opens_nothing_argv_is_denied_by_the_gate(command, tmp_p
     """The OPENS_NOTHING programs are the whole hole: `cat` was already saved by `_in_scope`'s
     resolve, and every other granted program was not. The gate must refuse them too, with a
     reason the model can act on rather than the fallthrough silence."""
-    deps, _run, _box = _box_scene(tmp_path, GATHER_DEF)
+    deps, _run, _box = _box_scene(tmp_path, T1106.playground_gather_def())
     d = permission.decide_bash(
         command, policy=deps.policy,
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
@@ -138,7 +139,7 @@ def test_f07_the_bash_tool_refuses_a_nul_command_without_reaching_the_box(comman
     `ModelRetry` (which pydantic-ai hands back to the model as a retryable denial), NOT a
     `ValueError` unwinding out of `run_investigation`. And the box is never called — the refusal
     is the gate's, so nothing unencodable is even offered to the wire."""
-    deps, _run, box = _box_scene(tmp_path, GATHER_DEF)
+    deps, _run, box = _box_scene(tmp_path, T1106.playground_gather_def())
     with pytest.raises(ModelRetry):
         _tool_bash(deps, command)
     assert box.calls == []
@@ -148,7 +149,7 @@ def test_f07_a_nul_in_a_LATER_pipeline_stage_is_refused_too(tmp_path):
     """The `cat | reducer` shape gather's own prompt tells it to use. Stage 0 opens a real
     payload and resolves clean; the NUL rides the reducer stage, where no `resolve()` ever ran —
     so a per-operand check alone would have let the frame through."""
-    deps, run, box = _box_scene(tmp_path, GATHER_DEF)
+    deps, run, box = _box_scene(tmp_path, T1106.playground_gather_def())
     payload = run / "gather_raw" / "l-001" / "1.json"
     with pytest.raises(ModelRetry):
         _tool_bash(deps, f"cat {payload} | grep -n a\x00b")
@@ -161,7 +162,7 @@ def test_f07_an_encoder_valueerror_becomes_a_retry_not_a_dead_run(tmp_path):
     `run_parsed`'s exception TYPE is deliberately left alone (`test_540_exec_seam.py` pins
     `pytest.raises(ValueError)` on it) — the mapping belongs at the tool seam."""
     deps, run, _box = _box_scene(
-        tmp_path, GATHER_DEF, result=ValueError("embedded null byte"),
+        tmp_path, T1106.playground_gather_def(), result=ValueError("embedded null byte"),
     )
     with pytest.raises(ModelRetry) as excinfo:
         _tool_bash(deps, f"cat {run}/alert.json")
@@ -171,7 +172,7 @@ def test_f07_an_encoder_valueerror_becomes_a_retry_not_a_dead_run(tmp_path):
 def test_f07_a_clean_command_still_runs(tmp_path):
     """Positive control: the NUL check is a check on ONE byte, not a new refusal of the bash
     lane. The same shapes without it reach the box and return its output."""
-    deps, run, box = _box_scene(tmp_path, GATHER_DEF)
+    deps, run, box = _box_scene(tmp_path, T1106.playground_gather_def())
     assert "ok" in _tool_bash(deps, f"cat {run}/alert.json")
     assert len(box.calls) == 1
 

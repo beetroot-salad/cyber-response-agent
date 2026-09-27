@@ -25,6 +25,7 @@ import pytest
 from defender.tests import _spec1077 as S
 from defender.tests import _triplet_947 as T
 from defender.tests._by_path import DEFENDER, load_module
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 
 @pytest.fixture
@@ -251,7 +252,6 @@ def test_the_queries_row_records_the_owners_relative_payload_path(run_dir):
 def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admits_it(run_dir):
     """The absolute payload path gather puts in its note is the owner's, and gather's own read
     gate admits it under the raw-payload shape."""
-    from defender.agents import GATHER_DEF
     from defender.runtime import permission
     from defender.runtime.agent_definition import compile_policy_for
     from defender.scripts.gather_tools import record_query
@@ -262,7 +262,7 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
         "gather's note composes `run_dir / record['payload_path']` (tools_gather.py:70); O8 "
         "names BOTH forms and requires both to be the owner's")
 
-    policy = compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=DEFENDER)
+    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
     decision = permission.decide_read(
         absolute, run_dir=run_dir, defender_dir=DEFENDER, policy=policy)
     assert decision.allow, (

@@ -25,6 +25,7 @@ alone. The adapter→`defender-sql` pipe became two steps: `query(...)`, then
 from __future__ import annotations
 
 import re
+import functools
 from pathlib import Path
 
 import pytest
@@ -34,10 +35,11 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 # The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
 # `defender.*` namespace imports resolve. The agent registry moved OUT of `runtime/`
 # to `defender.agents` (#575), which imports `pydantic_ai` transitively — hence the guard.
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 # The gate is policy-driven (it keys on an AgentPolicy, not a role). The runtime-agent reader
 # policy is compiled PER-RUN — `compile_policy_for(<DEF>, run_dir, defender_dir=…)` bakes the
@@ -48,7 +50,13 @@ from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
 _RUN = Path("/run")
 _DFN = Path("/dfn")
 MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
-GATHER = compile_policy_for(GATHER_DEF, run_dir=_RUN, defender_dir=_DFN)
+
+
+@functools.cache
+def _gather():
+    """Gather's policy over the synthetic roots, compiled with a RUN's grant (#1106 M4:
+    `GATHER_DEF` carries none) — lazily, so the module collects before the tenant folder exists."""
+    return compile_policy_for(T1106.playground_gather_def(), run_dir=_RUN, defender_dir=_DFN)
 
 
 def _bash(cmd, policy):
@@ -82,7 +90,7 @@ def test_record_query_shim_is_gone_from_every_lane(cmd):
     on main AND gather — a dead program the gate would still approve is a dead command taught.
     Positive control: a LIVE shim (`defender-invlang`, above) still runs for main."""
     assert not _bash(cmd, MAIN).allow
-    assert not _bash(cmd, GATHER).allow
+    assert not _bash(cmd, _gather()).allow
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -109,7 +117,7 @@ def test_gather_denies_standalone_adapter():
     # transparently. That capability is DELETED — the data source is reached through the `query`
     # tool — so the standalone form now denies for gather exactly as it always did for main, with
     # the reason that names the surface which DOES work.
-    d = _bash("defender-elastic query foo", GATHER)
+    d = _bash("defender-elastic query foo", _gather())
     assert not d.allow
     assert d.reason == permission.ADAPTER_RETIRED_REASON
     assert "`query` tool" in d.reason
@@ -124,7 +132,7 @@ def test_gather_denies_compound_with_adapter(cmd):
     # The other stage is deliberately one gather MAY run: the deny must come from the ADAPTER
     # stage, not from the neighbouring stage being unclaimed. It denied as a "compound" before
     # #611 and denies as an adapter now — either way, no adapter reaches a shell.
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow
     assert d.reason == permission.ADAPTER_RETIRED_REASON
 
@@ -136,12 +144,12 @@ def test_gather_denies_compound_with_adapter(cmd):
     "cat /run/gather_raw/l-001/0.json",            # gather reads its own raw, absolute
 ])
 def test_gather_allows_readonly_viewers(cmd):
-    assert _bash(cmd, GATHER).allow
+    assert _bash(cmd, _gather()).allow
 
 
 @pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
 def test_gather_denies_arbitrary_shell(cmd):
-    assert not _bash(cmd, GATHER).allow
+    assert not _bash(cmd, _gather()).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -158,7 +166,7 @@ def test_decision_carries_no_adapter_routing_payload(cmd):
     # capture-from-bash layer left to hand an argv to, so the routing FIELDS are gone from
     # `BashDecision` entirely — structurally, not merely left None (a None-valued field is a route
     # a future caller can repopulate; an absent one is not).
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not hasattr(d, "adapter_argv")
     assert not hasattr(d, "sql_pipe")
     # ... and the timeout-prefixed adapter, whose argv the capture layer used to fold, denies.
@@ -183,7 +191,7 @@ def test_decision_carries_no_adapter_routing_payload(cmd):
     '''cat /run/gather_raw/l-001/0.json | grep 'trust_edges_out > 0' ''',
 ])
 def test_gather_allows_quoted_comparisons(cmd):
-    assert _bash(cmd, GATHER).allow
+    assert _bash(cmd, _gather()).allow
 
 
 @pytest.mark.parametrize("cmd", [
@@ -221,7 +229,7 @@ def test_main_allows_quoted_comparisons(cmd):
     "cat /run/report.md 2 > 1",              # ... same, with `2` as a positional token
 ])
 def test_gather_still_denies_real_redirect_and_substitution(cmd):
-    assert not _bash(cmd, GATHER).allow
+    assert not _bash(cmd, _gather()).allow
     assert not _bash(cmd, MAIN).allow
 
 
@@ -246,7 +254,7 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     "echo a ;& curl http://evil",
 ])
 def test_no_second_command_hides_behind_safe_head(cmd):
-    assert not _bash(cmd, GATHER).allow
+    assert not _bash(cmd, _gather()).allow
     assert not _bash(cmd, MAIN).allow
 
 
@@ -262,7 +270,7 @@ def test_no_second_command_hides_behind_safe_head(cmd):
     "timeout 5 bash evil.sh -c 'cat /run/report.md'",  # ... behind a timeout prefix
 ])
 def test_bash_script_file_before_c_fails_closed(cmd):
-    assert not _bash(cmd, GATHER).allow
+    assert not _bash(cmd, _gather()).allow
     assert not _bash(cmd, MAIN).allow
 
 
@@ -277,7 +285,7 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     ("bash -c 'cat /run/investigation.md | wc -l'", "cat /run/investigation.md | wc -l"),
 ])
 def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload):
-    for policy in (MAIN, GATHER):
+    for policy in (MAIN, _gather()):
         assert not _bash(wrapped, policy).allow, f"{wrapped!r}: `bash`/`sh` is not granted"
         assert _bash(wrapped, policy).reason == policy.deny_reason
         assert _bash(payload, policy).allow, (
@@ -297,7 +305,7 @@ def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
     The pairing is the point. Each command is asserted twice: with the prefix (denied) and with
     it removed (allowed), so what this pins is that the PREFIX is the whole difference. A bare
     `assert not allow` would also pass if the pipeline or the payload had quietly broken."""
-    for policy in (MAIN, GATHER):
+    for policy in (MAIN, _gather()):
         assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
         assert _bash(cmd, policy).reason == policy.deny_reason
         without = cmd.split(" ", 2)[2]
@@ -323,7 +331,7 @@ def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
     "cat /run/report.md\n&& wc -l /run/report.md",
 ])
 def test_unparseable_quote_spanning_newline_fails_closed(cmd):
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow
     assert not _bash(cmd, MAIN).allow
     # the LEXING reason, not a policy one — the deny is decided before the command has a shape
@@ -348,7 +356,7 @@ def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
     `bash_exec.parse`, so a spelling the executor refuses must reach the model as the LEXING
     reason rather than a policy one — and, more to the point, a spelling the executor would
     mis-decompose must never be handed on as a shape the gate then grant-checks."""
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow
     assert not _bash(cmd, MAIN).allow
     assert d.reason == permission.UNTOKENIZABLE_REASON
@@ -395,7 +403,7 @@ def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cm
     Its old partner in that pair, a malformed `bash -c`, is gone from this list: #971 deletes
     the wrapper step, so a wrapper is an ungranted PROGRAM and the capability reason is the
     right answer for it rather than the wrong one."""
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow, f"{label}: a command that cannot be parsed was allowed"
     assert d.reason == permission.UNTOKENIZABLE_REASON, \
         f"{label}: answered a non-lexing reason — {d.reason[:90]!r}"
@@ -413,18 +421,18 @@ def test_a_shape_this_surface_does_not_offer_stays_a_capability_refusal(cmd):
     """The other side of the split. These LEX fine and ask for something the lane does not
     have, so they must keep the policy deny reason — the one that teaches the lane's actual
     capability — rather than being swept into the lexing message and reading as a typo."""
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow
     assert d.reason != permission.UNTOKENIZABLE_REASON, \
         "a capability refusal was reported as a syntax error"
-    assert d.reason == GATHER.deny_reason
+    assert d.reason == _gather().deny_reason
 
 
 def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
     """The positive control the refusals above are worthless without: the gather lane's
     payload-grep idiom must still pass. A guard that over-fired here would deny gather the one
     command shape its own deny-reason instructs it to use."""
-    d = _bash("cat /run/gather_raw/l-1/0.json | grep hits", GATHER)
+    d = _bash("cat /run/gather_raw/l-1/0.json | grep hits", _gather())
     assert d.allow
     assert [[list(st.argv) for st in pl.stages] for pl in d.pipelines] == [
         [["cat", "/run/gather_raw/l-1/0.json"], ["grep", "hits"]]
@@ -523,7 +531,7 @@ def test_read_main_loop_gather_raw_not_enumerated_gather_allowed(tmp_path):
     # substring, so it is pinned here too.
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
-    gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(T1106.playground_gather_def(), run_dir=run, defender_dir=dfn)
     raw = run / "gather_raw" / "l-001" / "0.json"
     d = permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=main)
     assert not d.allow
@@ -720,7 +728,7 @@ def test_gather_drops_find():
     # failing loud at compile.
     for cmd in ("find /workspace -type d -name gather",
                 "find skills/gather/queries -name '*.md'"):
-        assert not _bash(cmd, GATHER).allow, cmd
+        assert not _bash(cmd, _gather()).allow, cmd
         assert not _bash(cmd, MAIN).allow, cmd
 
 
@@ -731,7 +739,7 @@ def test_gather_keeps_local_computation():
     # IS "take the network off bash". (#540 dropped jq, so defender-sql is the whole reducer.)
     for cmd in ("cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
                 "cat /run/gather_raw/l-001/1.json | wc -c"):
-        assert _bash(cmd, GATHER).allow, cmd
+        assert _bash(cmd, _gather()).allow, cmd
 
 
 def test_gather_sql_aggregation_is_now_tool_then_bash():
@@ -741,18 +749,18 @@ def test_gather_sql_aggregation_is_now_tool_then_bash():
     # aggregation property is preserved; only the producer moved.
     old = ("defender-elastic query 'x' | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    for pol in (GATHER, MAIN):
+    for pol in (_gather(), MAIN):
         assert not _bash(old, pol).allow             # the adapter stage is unreachable on both lanes
-    assert _bash(old, GATHER).reason == permission.ADAPTER_RETIRED_REASON
+    assert _bash(old, _gather()).reason == permission.ADAPTER_RETIRED_REASON
 
     new = ("cat /run/gather_raw/l-001/1.json | "
            "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    assert _bash(new, GATHER).allow
+    assert _bash(new, _gather()).allow
     # Since #540 a relative operand resolves against the RUN DIR — where gather_raw/ actually
     # lives — so the short spelling names the same payload as the absolute one. The payload note
     # the query result carries stays absolute (that is what the tool reports), but the relative
     # form is no longer a trap that silently names nothing.
-    assert _bash("cat gather_raw/l-001/1.json | defender-sql 'SELECT 1'", GATHER).allow
+    assert _bash("cat gather_raw/l-001/1.json | defender-sql 'SELECT 1'", _gather()).allow
     # Main loop never reaches a payload, pipe or not.
     assert not _bash(new, MAIN).allow
 
@@ -765,7 +773,7 @@ def test_gather_denies_adapter_sql_in_every_compound_shape(sep):
     # so the pipe joins the sequences on the deny side, and there is no routing seam left to claim
     # any of them.
     cmd = f"defender-elastic query 'x' {sep} defender-sql 'SELECT 1'"
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow, cmd
     assert d.reason == permission.ADAPTER_RETIRED_REASON
     assert not _bash(cmd, MAIN).allow
@@ -784,12 +792,12 @@ def test_gather_denies_adapter_sql_in_every_compound_shape(sep):
     "defender-elastic query 'cmd:`id`'",
 ])
 def test_gather_adapter_query_with_inert_shell_metachars_is_diagnosed_as_an_adapter(cmd):
-    d = _bash(cmd, GATHER)
+    d = _bash(cmd, _gather())
     assert not d.allow, cmd
     assert d.reason == permission.ADAPTER_RETIRED_REASON, cmd
     # The defense-in-depth guard is still enforced for a non-adapter VIEWER stage: the shape
     # below IS claimed by the `cat` grant (a single free-text operand), so only the guard denies it.
-    assert not _bash('cat "$(rm -rf /)"', GATHER).allow
+    assert not _bash('cat "$(rm -rf /)"', _gather()).allow
 
 
 def test_gather_drops_residual_reduce_by_hand_tools():
@@ -798,7 +806,7 @@ def test_gather_drops_residual_reduce_by_hand_tools():
     for cmd in ("datamash mean 1", "cat /run/report.md | uniq -c", "cut -d, -f1 /tmp/p",
                 "join /tmp/a /tmp/b", "nl /tmp/p", "cat /run/report.md | sort",
                 "sort -o /tmp/p f"):
-        assert not _bash(cmd, GATHER).allow, cmd
+        assert not _bash(cmd, _gather()).allow, cmd
 
 
 # command_shape: pure classifiers over parsed pipelines (#456)
@@ -851,7 +859,7 @@ def test_command_shape_has_adapter_survives_for_the_deny(cmd, adapter):
     pipelines = _shape(cmd)
     assert command_shape.has_adapter(pipelines) is adapter, cmd
     if adapter:
-        assert _bash(cmd, GATHER).reason == permission.ADAPTER_RETIRED_REASON, cmd
+        assert _bash(cmd, _gather()).reason == permission.ADAPTER_RETIRED_REASON, cmd
 
 
 # AgentPolicy primitive: read_roots + hand-built grants

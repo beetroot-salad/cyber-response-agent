@@ -102,7 +102,9 @@ def _child_env(ctx: VerbContext) -> dict[str, str]:
 
 
 def _config_path(ctx: VerbContext, system: str) -> Path:
-    return ctx.defender_dir / "knowledge" / "environment" / "systems" / system / "config.env"
+    """`<the run's tenant settings>/systems/<system>/config.env` (#1106) — `ctx.settings_dir`,
+    never the code tree: the settings left `defender/` for the run's tenant folder."""
+    return Path(ctx.settings_dir) / "systems" / system / "config.env"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -120,10 +122,10 @@ def load_config(
     ctx: VerbContext, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
-    """Load `{ctx.defender_dir}/knowledge/environment/systems/{system}/config.env`.
+    """Load `{ctx.settings_dir}/systems/{system}/config.env`.
 
-    The tree comes from the RUN (`ctx.defender_dir`), not a module constant: a run anchored
-    on a worktree or an eval's tmp tree must read THAT tree's config.
+    The folder comes from the RUN (`ctx.settings_dir`, its tenant's `settings/` half, #1106),
+    not a module constant and not the code tree: each run reads its own tenant's config.
 
     The prefix namespaces the env-file keys (e.g. CMDB_URL_BASE, IDENTITY_BASTION_HOST);
     caller-friendly stripped keys come back as URL_BASE / BASTION_HOST / TIMEOUT_SEC. A
@@ -140,8 +142,8 @@ def load_config(
     path = _config_path(ctx, system)
     if not path.exists():
         raise ConfigFault(
-            f"config file not found: {path} — this file should ship with the "
-            f"defender-v2-env branch; if missing, restore from git."
+            f"config file not found: {path} — this tenant's settings do not configure "
+            "this system"
         )
 
     raw = _parse_env_file(path)

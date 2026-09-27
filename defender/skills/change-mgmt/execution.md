@@ -29,7 +29,8 @@ http://change-mgmt:8080/...`. Bastion default `web-1`.
 
 ## Config
 
-`defender/knowledge/environment/systems/change-mgmt/config.env`
+The run's tenant's `systems/change-mgmt/config.env` (host-only, in the tenant's
+`settings/` folder — not readable from the box)
 declares `CHANGE_MGMT_URL_BASE`, `CHANGE_MGMT_BASTION_HOST`,
 `CHANGE_MGMT_TIMEOUT_SEC`.
 

@@ -57,7 +57,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
-from defender.runtime.driver import GATHER_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DENIED,
@@ -396,7 +396,7 @@ def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_
     from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.query_tool import QueryCapture
 
-    policy = compile_policy_for(GATHER_DEF, run_dir=tmp_path, defender_dir=PATHS.defender_dir)
+    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=tmp_path, defender_dir=PATHS.defender_dir)
     ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
                  cwd_anchor=tmp_path, policy=policy)
     capture = QueryCapture(_registry(VerbRecorder()))
@@ -765,7 +765,7 @@ def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
     rec = VerbRecorder()
     reg = ScopedFakeVerbs(
         recording_table(rec, {"ticket": ("list-tickets", "get-ticket")}),
-        GATHER_DEF.verb_grant,
+        T1106.playground_grants().gather,
     )
     r = run_gather(tmp_path, verbs=reg, system="ticket",
                    turns=[q("ticket", "get-ticket", {"key": "SOC-1"}), DONE], run_id="d22")
@@ -796,7 +796,7 @@ def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
 
     table = recording_table(rec, {"ticket": ("get-ticket",)})
     table["ticket"]["list-tickets"] = list_tickets
-    reg = ScopedFakeVerbs(table, GATHER_DEF.verb_grant)
+    reg = ScopedFakeVerbs(table, T1106.playground_grants().gather)
     r = run_gather(tmp_path, verbs=reg, system="ticket",
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id="d34")
 
@@ -834,7 +834,7 @@ def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: P
         rec.record("list-tickets", ctx, {"status": status, "label": label, "q": q})
         return ticket_envelope(run_id, "SOC-777")
 
-    reg = ScopedFakeVerbs({"ticket": {"list-tickets": list_tickets}}, GATHER_DEF.verb_grant)
+    reg = ScopedFakeVerbs({"ticket": {"list-tickets": list_tickets}}, T1106.playground_grants().gather)
     r = run_gather(tmp_path / "envelope", verbs=reg, system="ticket",
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id=run_id)
 
@@ -855,7 +855,7 @@ def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: P
         shaped.record("list-tickets", ctx, params)
         return [{"key": run_id, "status": "open"}, {"key": "SOC-777", "status": "closed"}]
 
-    bare = ScopedFakeVerbs({"ticket": {"list-tickets": bare_list}}, GATHER_DEF.verb_grant)
+    bare = ScopedFakeVerbs({"ticket": {"list-tickets": bare_list}}, T1106.playground_grants().gather)
     b = run_gather(tmp_path / "bare", verbs=bare, system="ticket",
                    turns=[q("ticket", "list-tickets", {}), DONE], run_id="d23b")
 
