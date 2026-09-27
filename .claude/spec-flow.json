@@ -143,7 +143,7 @@
           "defender/runtime/selection.py::ingest",
           "defender/runtime/selection.py::fold",
           "defender/runtime/observe.py::write_trace",
-          "defender/scripts/visualize/visualize_run.py::render_and_mirror"
+          "defender/scripts/visualize/visualize_run.py::render_page"
         ],
         "grep": [
           "session_store",
@@ -198,7 +198,7 @@
           "defender/runtime/tools/_files.py::_tool_write_file",
           "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
-          "defender/scripts/visualize/visualize_run.py::render_and_mirror",
+          "defender/run_common.py::visualize",
           "defender/runtime/lead_zero/__init__.py::resolve_lead_zero",
           "defender/runtime/lead_zero/_items.py::dispatch_correlation",
           "defender/runtime/lead_zero/__init__.py::prepare_correlation_lead",

@@ -40,8 +40,7 @@
     "learning/leads/_lead_spine.py:_spawn_author_agent": "",
     "learning/leads/draft_synthesis.py:synthesize_drafts": "",
     "learning/leads/lead_author/__init__.py:_write_state": "",
-    "run_common.py:materialize_run_dir": "",
-    "runtime/verb_roster.py:generate_roster": "",
-    "scripts/visualize/visualize_run.py:render_and_mirror": ""
+    "run_common.py:materialize_run": "",
+    "runtime/verb_roster.py:generate_roster": ""
   }
 }

@@ -154,17 +154,21 @@ def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
 
     src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
-    builder = next(
+    # #1110: the body moved to `materialize_run` (which answers the handle) and
+    # `materialize_run_dir` wraps it — so both are walked, or the check would read only the
+    # wrapper and pass over the body it was written for.
+    builders = [
         n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "materialize_run_dir"
-    )
+        if isinstance(n, ast.FunctionDef) and n.name in {"materialize_run", "materialize_run_dir"}
+    ]
+    assert len(builders) == 2, "the builder and its run-dir wrapper were not both found"
     mints = [
-        n for n in ast.walk(builder)
+        n for builder in builders for n in ast.walk(builder)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and isinstance(n.func.value, ast.Name) and n.func.value.id == "secrets"
     ]
     assert not mints, (
-        "materialize_run_dir still mints a run-scoped token — #875 removed the run salt; a "
+        "the run builder still mints a run-scoped token — #875 removed the run salt; a "
         "token minted here can only be threaded to a party the frames it delimits are shown to"
     )
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import os
-import subprocess
 import sys
 import dataclasses as _dataclasses
 from pathlib import Path
@@ -16,18 +16,18 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io, _provenance, _tenant  # noqa: E402
+from defender import _env, _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
 
-VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
-
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
 
 DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
+
+_logger = logging.getLogger(__name__)
 
 
 def resolve_runs_base() -> Path:
@@ -88,7 +88,16 @@ def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Path:
-    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
+    """`materialize_run`, for a caller that needs only where the run lives."""
+    return materialize_run(alert, run_id, model=model, world=world).run_dir
+
+
+def materialize_run(
+    alert: Path, run_id: str | None, *, model: str | None = None,
+    world: ResumeWorld | None = None,
+) -> Run:
+    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE, and
+    return that tenant-bound handle — the one the run's later records are saved through.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -160,7 +169,7 @@ def materialize_run_dir(
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
-    return run_dir
+    return run
 
 
 def _admit_run_id(alert: Path, run_id: str | None) -> str:
@@ -283,20 +292,42 @@ def _prepend(head: str, tail: str | None) -> str:
 
 
 class VisualizeFailed(Exception):
-    """The visualizer subprocess exited non-zero; the caller must not treat the run dir
-    as rendered — a page left over from a prior render is not proof this one succeeded."""
+    """The run's page was not saved as its record — the render or the record write failed. A
+    page left over from a prior render is not proof this one succeeded. Never raised for the
+    dev-only copy: a record that was written is a rendered run, whatever became of the copy."""
 
 
-def visualize(run_dir: Path) -> None:
-    proc = subprocess.run(
-        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True, encoding="utf-8"
-    )
-    sys.stderr.write(proc.stdout)
-    if proc.returncode != 0:
-        sys.stderr.write(f"[run.py] visualize_run failed: {proc.stderr}")
-        raise VisualizeFailed(
-            f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
+def visualize(run: Run) -> None:
+    """The post-run step: render the run's page and save it as the run's `runtime_html`
+    record through `run` — so whatever backend the handle sits on receives it like every other
+    record — then, on a `dev` deployment only, copy it to the operator's folder (#1110).
+
+    Runs in the process holding the handle, after the sandbox has exited and the tree has been
+    scrubbed, so the model never had a chance to rewrite its own report. Any failure to render
+    or save is `VisualizeFailed` — the caller's single "not rendered" signal, which is also what
+    keeps a renderer crash from ever reaching the run's exit code. A failed copy is a warning.
+    """
+    try:
+        # Imported here, as `learning/branch/cli.py::_render_page` does for the episode page:
+        # the renderer reads its stylesheet at import time, and nothing but this step needs it
+        # loaded. Inside the `try`, so a renderer that cannot even load is a failed render too.
+        from defender.scripts.visualize import visualize_run as vr
+
+        page = vr.render_page(run.run_dir)
+        run.observability.runtime_html.write(page)
+    except Exception as e:
+        raise VisualizeFailed(f"the page for {run.run_dir} was not rendered: {e!r}") from e
+    if _env.deployment() != "dev":
+        return
+    try:
+        dest = vr.mirror_page(page, run.run_dir.name)
+    except Exception as e:
+        # The destination when one resolved (`MirrorWriteFailed` names it), else the
+        # resolver's own reason — `MirrorRootRefused` and its message.
+        _logger.warning("the page for %s was not copied: %s: %s",
+                        run.run_dir, type(e).__name__, e)
+    else:
+        print(f"[run.py] copied the run page to {dest}", file=sys.stderr)
 
 
 def cross_check_tables(run_dir: Path) -> None:

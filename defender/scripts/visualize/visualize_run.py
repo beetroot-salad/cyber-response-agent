@@ -73,6 +73,10 @@ class MirrorRootRefused(Exception):
     bypassed it, and would write into the operator's real folder. Refusing is the detector."""
 
 
+class MirrorWriteFailed(OSError):
+    """The mirror destination resolved and could not be written; the message leads with it."""
+
+
 def mirror_root(start: Path | None = None) -> Path:
     """Where run pages are mirrored: `<main checkout>/run-visualizations/`.
 
@@ -140,28 +144,32 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_and_mirror(run_dir: Path) -> list[Path]:
-    """Render the run's page, and refuse a directory that is not a run.
+def render_page(run_dir: Path) -> str:
+    """This run's page, generated and returned — nothing is written, and nothing here knows
+    where the page goes: the post-run step saves it as the run's record (#1110).
 
     The store resolve is a PRECONDITION, not a data dependency: nothing on the page reads
     the session store. It is here because a run dir relocated by an allowlist copy arrives
     without its pointer, and rendering one anyway hands the operator a page that looks
-    complete for a run whose own record could not be found. Fail before writing, so no page
-    is left behind for a reader to trust.
+    complete for a run whose own record could not be found. It raises before a page exists,
+    so none is saved for a reader to trust.
     """
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    src = RunPaths(run_dir).runtime_html
-    src.write_text(render_runtime_page(run_dir), encoding="utf-8")
-    if not src.is_file():
-        return []
+    return render_runtime_page(run_dir)
+
+
+def mirror_page(page: str, run_id: str) -> Path:
+    """Copy a rendered page to `<mirror root>/<run_id>/runtime.html`, written as the mirror
+    folder's owner (#1084), and return where it landed. Called only on a `dev` deployment."""
     root = mirror_root()
-    dest = RunPaths(root / run_dir.name).runtime_html
-    _mirror(src.read_bytes(), dest, root)
-    return [dest]
-
-
+    dest = RunPaths(root / run_id).runtime_html
+    try:
+        _mirror(page.encode("utf-8"), dest, root)
+    except Exception as e:
+        raise MirrorWriteFailed(f"{dest}: {e}") from e
+    return dest
 
 
 def render_header(case_id: str, byline: str, stats_html: str = "") -> str:
@@ -541,6 +549,10 @@ def render_runtime_page(run_dir: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7)."""
+    from defender import run_common
+    from defender._run_handle import Run
+
     if len(argv) != 2:
         print("usage: visualize_run.py <run_dir>", file=sys.stderr)
         return 64
@@ -548,10 +560,8 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    mirrored = render_and_mirror(run_dir)
+    run_common.visualize(Run.at(run_dir))
     print(f"wrote {RunPaths(run_dir).runtime_html}")
-    for dest in mirrored:
-        print(f"mirrored {dest}")
     return 0
 
 
