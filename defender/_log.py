@@ -28,6 +28,7 @@ a table — stdout), and text a model reads back as a tool result (those program
 """
 from __future__ import annotations
 
+import atexit
 import contextlib
 import contextvars
 import datetime as _dt
@@ -194,10 +195,13 @@ class TextFormatter(logging.Formatter):
 
 class _StderrToLog(io.TextIOBase):
     """`sys.stderr` in JSON mode: each whole line written to it becomes a record on the
-    `stderr` logger — at WARNING, because nothing says how bad an unstructured line is and
-    hiding one is worse — and a partial line waits for its newline. Our own handler writes to
-    `underlying`, and a write made while one of these records is being emitted (logging's own
-    error report) goes straight there too, so the two can never feed each other."""
+    `stderr` logger — at WARNING, because nothing says how bad an unstructured line is, and
+    the `stderr` logger follows the root's WARNING rather than `DEFENDER_LOG_LEVEL`, so such a
+    line is always shown: a `sys.exit("…")` refusal is exactly what an operator filtering to
+    ERROR still needs. A partial line waits for its newline, and whatever is still waiting at
+    exit is emitted then. Our own handler writes to `underlying`, and a write made while one of
+    these records is being emitted (logging's own error report) goes straight there too, so the
+    two can never feed each other."""
 
     def __init__(self, underlying: Any) -> None:
         super().__init__()
@@ -211,6 +215,16 @@ class _StderrToLog(io.TextIOBase):
             return int(self.underlying.write(s))
         with self._lock:
             *lines, self._pending = (self._pending + s).split("\n")
+        self._emit(lines)
+        return len(s)
+
+    def close_pending(self) -> None:
+        """Emit a trailing partial line — registered to run at exit."""
+        with self._lock:
+            lines, self._pending = [self._pending], ""
+        self._emit(lines)
+
+    def _emit(self, lines: list[str]) -> None:
         self._busy.on = True
         try:
             for line in lines:
@@ -218,7 +232,6 @@ class _StderrToLog(io.TextIOBase):
                     logging.getLogger(STDERR_LOGGER).warning(line)
         finally:
             self._busy.on = False
-        return len(s)
 
     def flush(self) -> None:
         self.underlying.flush()
@@ -300,6 +313,7 @@ def configure(*, fmt: str, level: int | str) -> None:
     if fmt == "json":
         if not isinstance(sys.stderr, _StderrToLog):
             sys.stderr = _StderrToLog(sys.stderr)
+            atexit.register(sys.stderr.close_pending)
         sys.excepthook = _log_uncaught
         threading.excepthook = _log_uncaught_in_thread
     elif isinstance(sys.stderr, _StderrToLog):

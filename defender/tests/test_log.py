@@ -338,6 +338,7 @@ def test_the_wrapper_hands_anything_else_to_the_real_stream(restore_root, capsys
 @pytest.mark.parametrize(("tail", "severity", "needle"), [
     ('sys.exit("refused: bad input")', "WARNING", "refused: bad input"),
     ('raise RuntimeError("boom")', "CRITICAL", "RuntimeError: boom"),
+    ('sys.stderr.write("no newline before exit")', "WARNING", "no newline before exit"),
 ])
 def test_a_program_s_stderr_is_all_json_even_when_it_exits_or_crashes(tail, severity, needle):
     """The end-to-end guarantee, in a real process: an exit message and an uncaught traceback
