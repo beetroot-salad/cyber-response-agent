@@ -25,6 +25,7 @@ C-R29..C-R33) and is not driven here.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import random
@@ -347,6 +348,76 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
                 child.stderr.close()
             torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
     assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
+
+
+def test_create_once_loops_on_a_short_write(tmp_path, monkeypatch):
+    """`os.write` may write fewer bytes than asked (POSIX permits a short write on any fd, not
+    only pipes/sockets); `_create_once`'s O_TMPFILE lane must not link a truncated body into
+    the record's name under the complete-or-absent contract J16/J63 demands. A real short write
+    is hard to provoke deterministically on a tmpfs, so this drives the fault directly: `os.write`
+    is wrapped to hand back fewer bytes than requested on every call, and the record on disk
+    must still be the FULL, valid body — never the first fragment a single unchecked write would
+    have linked in."""
+    import defender._tenant as tenant_mod
+
+    real_write = os.write
+    calls: list[int] = []
+
+    def short_write(fd: int, data: bytes) -> int:
+        calls.append(len(data))
+        if fd_target[0] is not None and fd == fd_target[0] and len(data) > 3:
+            return real_write(fd, data[:3])  # hand back a fragment, never the whole buffer
+        return real_write(fd, data)
+
+    # Only the tmpfile fd the create lane opens should be truncated — os.write is used all
+    # over the interpreter (including by pytest's own plumbing), so this must not touch fds
+    # this test did not open itself.
+    fd_target: list[int | None] = [None]
+    real_open = os.open
+
+    def tracking_open(path, flags, mode=0o777, *, dir_fd=None):
+        fd = real_open(path, flags, mode, dir_fd=dir_fd)
+        if flags & os.O_TMPFILE:
+            fd_target[0] = fd
+        return fd
+
+    monkeypatch.setattr(tenant_mod.os, "write", short_write)
+    monkeypatch.setattr(tenant_mod.os, "open", tracking_open)
+
+    root = tmp_path / "data"
+    row = tenant_mod.create_tenant(root, T_ID)
+    assert row.tenant_id == T_ID
+    on_disk = json.loads((root / T_ID / H.ROW_NAME).read_text(encoding="utf-8"))
+    assert on_disk["tenant_id"] == T_ID, (
+        f"the linked row is truncated: {on_disk!r} — a single unchecked os.write call would "
+        "have linked in only the first fragment the fault handed back")
+    assert len(calls) > 1, (
+        "the fault never fired (fd_target was never set), so this test proves nothing about "
+        "the loop — confirm the O_TMPFILE lane is still reached")
+
+
+def test_create_once_fallback_does_not_swallow_an_unrelated_failure(tmp_path, monkeypatch):
+    """The non-Linux `_io.write_guarded` fallback lane must tell a lost create race
+    (`FileExistsError`, or `write_guarded`'s own alias refusal — a symlink/hard link already at
+    the name) apart from a real, unrelated failure of the write itself (disk full, permission
+    denied, …): the first two mean 'something is already there, go read it', which is true; the
+    third means this call's own write never happened, and returning `False` for it would send
+    the caller off to read a winner's record that was never written, in place of the real
+    error. Forces the fallback lane by removing `os.O_TMPFILE` for the call — the fault this
+    pins is `except (FileExistsError, OSError)` swallowing everything alike, which a real
+    disk-full or permission error on THIS platform would never distinguish from a benign race."""
+    import defender._tenant as tenant_mod
+
+    monkeypatch.delattr(tenant_mod.os, "O_TMPFILE", raising=False)
+
+    def broken_write_guarded(path, body, mode="replace", **kw):
+        raise OSError(errno.ENOSPC, "No space left on device", str(path))
+
+    monkeypatch.setattr(tenant_mod._real_io, "write_guarded", broken_write_guarded)
+    with pytest.raises(OSError, match="No space left") as raised:
+        tenant_mod._create_once(tmp_path / "x.json", "{}\n")
+    assert raised.value.errno == errno.ENOSPC, (
+        f"a real write failure was swallowed as a benign 'already existed': {raised.value!r}")
 
 
 def test_runs_base_record_torn_read(tmp_path, monkeypatch):

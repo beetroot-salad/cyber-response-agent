@@ -11,9 +11,14 @@ only thing that makes it exist. `TenantPaths` is the one place the tenant's layo
 one path from `DEFENDER_DATA_ROOT` (no default) to an absolute, symlink-resolved root, and
 carries the widened learning-state-overlap refusal (O13/J24); `runs_base_for` composes the two.
 
-Demand #0 (F0/J29, human): every owner function here refuses through ONE `ValueError`
-subclass (`TenantRefused`), whose message names the refused value; every entry point passes
-that message through verbatim.
+Demand #0 (F0/J29, human): every owner function here refuses a caller-supplied value (a bad
+tenant id, a foreign data root, an unset `DEFENDER_DATA_ROOT`, a disagreeing record) through
+ONE `ValueError` subclass (`TenantRefused`), whose message names the refused value; every entry
+point passes that message through verbatim. `TenantRecordCorrupt` is a deliberate second
+subclass, scoped narrowly to the runs-base record's own content (`read_tenant`/
+`_parse_record`): decision 4's sole exception to read-as-`None` for a record that fails to
+parse or is missing/mistyped fields — a distinct failure mode from F0/J29's refusal, not a
+second spelling of it.
 
 §7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES): a concurrent reader of a create-lane artifact
 (the runs-base record, the tenant row) sees the name absent or the file complete, never empty
@@ -393,13 +398,17 @@ def _create_once(path: Path, body: str) -> bool:
     and never touches whatever already occupies `path`.
 
     Elsewhere: falls back to `_io.write_guarded(mode='create')` (today's one-`open` lane) — a
-    documented, weaker guarantee off Linux; CI runs Linux."""
+    documented, weaker guarantee off Linux; CI runs Linux. Only a lost race (`FileExistsError`)
+    or `write_guarded`'s own alias refusal (a symlink/hard link already at the name) reads as
+    "already existed"; any OTHER `OSError` (ENOSPC, EACCES, …) is a real failure of THIS call's
+    own write and must propagate rather than being told to the caller as "someone else won" —
+    which would send it off to read a record that was never written."""
     path = Path(path)
     if hasattr(os, "O_TMPFILE"):
         fd = os.open(path.parent, os.O_TMPFILE | os.O_WRONLY, 0o644)
         try:
             os.fchmod(fd, 0o644)
-            os.write(fd, body.encode("utf-8"))
+            _write_all(fd, body.encode("utf-8"))
             os.fsync(fd)
             try:
                 return _link_tmpfile(fd, path)
@@ -409,9 +418,23 @@ def _create_once(path: Path, body: str) -> bool:
             os.close(fd)
     try:
         _real_io.write_guarded(path, body, mode="create")
-    except (FileExistsError, OSError):
+    except FileExistsError:
         return False
+    except OSError as failed:
+        if failed.strerror == _real_io.ALIAS_READ_REFUSAL:
+            return False
+        raise
     return True
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """`os.write` may write fewer bytes than asked (a short write — POSIX allows it on any fd,
+    not only pipes/sockets); a single unchecked call could link a SHORT body into `path` under
+    a name the complete-or-absent contract promises is never partial. Loop until every byte has
+    landed."""
+    sent = 0
+    while sent < len(data):
+        sent += os.write(fd, data[sent:])
 
 
 _libc: Any = None

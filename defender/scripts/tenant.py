@@ -4,12 +4,16 @@
     python3 defender/scripts/tenant.py setup <tenant-id>
 
 `setup` is the ONLY production caller of `defender._tenant.create_tenant` (D10, driven by
-`test_d10_setup_only_production_caller`'s census): it is idempotent — a tenant already set up
-(its row exists and is valid) is a silent success, never a second write — and otherwise the
-owner's row-write, with the owner's own refusal (a bad grammar, a foreign data root, an unset
-`DEFENDER_DATA_ROOT`) printed VERBATIM and exit 1 (demand #0, F0/J29). Its writes go through
-`create_tenant` alone — no raw mkdir or write of its own (the ratcheted `lint_unguarded_tree_
-write` gate).
+`test_d10_setup_only_production_caller`'s census): a re-run against a data root that is
+otherwise still fresh (its own row exists and is valid, nothing foreign has landed beside it)
+is a silent success, never a second write. `refuse_foreign_data_root` runs on every call,
+before that reuse check — O10's "created only into a fresh data root" is not waived just
+because this tenant is already the one occupying it — so a data root that has picked up an
+unrelated entry since the first `setup` still refuses, even though the row is already there.
+Otherwise `setup` is the owner's row-write, with the owner's own refusal (a bad grammar, a
+foreign data root, an unset `DEFENDER_DATA_ROOT`) printed VERBATIM and exit 1 (demand #0,
+F0/J29). Its writes go through `create_tenant` alone — no raw mkdir or write of its own (the
+ratcheted `lint_unguarded_tree_write` gate).
 """
 from __future__ import annotations
 
@@ -32,9 +36,12 @@ from defender import _tenant  # noqa: E402
 
 
 def setup(tenant_id: str) -> int:
-    """Idempotent: a tenant already set up is a silent success. Otherwise create it, refusing
-    exactly as the owner does (O10's fresh-data-root check lives in `create_tenant` itself), and
-    print the owner's own refusal verbatim on failure."""
+    """A tenant already set up is a silent success ONLY while the data root stays otherwise
+    fresh — `refuse_foreign_data_root` runs first, unconditionally, so a foreign entry that
+    landed beside this tenant since its first `setup` still refuses the re-run (see
+    `test_something_other_than_the_tenant_appears_at_the_data_root_top_level`). Otherwise
+    create it, refusing exactly as the owner does, and print the owner's own refusal verbatim
+    on failure."""
     try:
         root = _tenant.resolve_data_root()
         _tenant.refuse_foreign_data_root(root, tenant_id)
