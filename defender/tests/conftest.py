@@ -95,6 +95,23 @@ def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     return mirror
 
 
+#: The deployment type (#1110 M4): `dev` turns the run page's local copy on; unset means
+#: `production`. Spelled here for the same reason as the override above — this conftest never
+#: imports `_env`.
+DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
+
+
+@pytest.fixture(autouse=True)
+def deployment_unset(monkeypatch) -> None:
+    """Every test starts `production` (#1110 M5): the variable is removed whether or not the
+    shell that launched pytest inherited the devcontainer's `DEFENDER_DEPLOYMENT: dev`. CI does
+    not use compose and the devcontainer does, so without this the copy-side behaviour of the
+    suite would depend on which of the two ran it. A test about the dev copy declares it with
+    its own `monkeypatch.setenv(DEPLOYMENT_ENV, "dev")`, which wins (same function-scoped
+    instance, later)."""
+    monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
+
+
 def _resolve_malloc_trim():
     """Bind glibc's `malloc_trim`, or a no-op off glibc (musl has no such symbol)."""
     try:

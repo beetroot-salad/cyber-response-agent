@@ -734,7 +734,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     AFTER the investigation (the tree is frozen, no live writer, so the check is TOCTOU-free)
     and BEFORE the first consumer of the tree, which is the artifact listing over
     `sorted(...iterdir())`. Every later consumer — the table cross-check, the learning enqueue,
-    the third-process visualizer — follows it too.
+    the post-run page render — follows it too.
 
     Two legs, one per half of the claim. (1) The REAP'S OWN order, bound to what EXECUTED
     rather than to statement position (#741): the recorded event log is what actually ran, so
@@ -796,7 +796,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     """d_no_consumer_runs_on_a_tainted_tree — a tainted tree stops the run: the taint signal
     propagates out of the entrypoint uncaught, so the artifact listing, the table cross-check,
-    the durable learning-state copy and the third-process visualizer never read the tree.
+    the durable learning-state copy and the post-run page render never read the tree.
 
     Three legs. (1) The signal really is raised by the real scrub on a real planted link, and
     it is not a subclass of any exception the entrypoint catches — a taint that lands in an

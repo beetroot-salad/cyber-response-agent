@@ -1,27 +1,39 @@
-"""#1084 — the run-page mirror, driven end to end over a REAL run.
+"""#1084 — the run-page mirror, driven end to end over a REAL run; since #1110, a `dev` extra.
 
 Every test here renders a run dir produced by the replay harness (`test_922_renderer.
 driven_run`: one hermetic run whose final turn is `MARKER`), through the production entry
-point `run_common.visualize` (the subprocess hop `run.py` takes) or, where the in-process
-return value is the thing pinned, `visualize_run.render_and_mirror` / `main`.
+point `run_common.visualize(run)` (the post-run step `run.py main` takes, over the run's
+tenant-bound handle — `test_922_renderer.tenant_run`) or, where the copy primitive's own return
+value or raise is the thing pinned, `visualize_run.mirror_page` / `main`.
+
+#1110 made the copy a convenience of `dev` deployments (O3): every test in this module declares
+`DEFENDER_DEPLOYMENT=dev` (the module's autouse fixture), and the copy mechanics pinned below
+are #1084's, unchanged. What changed is what a FAILED copy means (#1110 O4/O5): the run's page
+record is still written, the copy failure is a logged WARNING naming the destination (or, when
+none resolved, the resolver's reason), and `VisualizeFailed` is NOT raised — it means the record
+was not written, never that only the copy failed. The five tests that pinned "a failed copy
+fails the render" are re-pinned to that, and keep their copy-side guarantees (nothing written
+through a planted link, a folder the owner cannot write left untouched).
 
 - O2: a render writes nothing under `defender/` (a before/after snapshot of this checkout's
   `defender/` tree is identical), and the page is at `<override>/<run>/runtime.html`,
   byte-identical to the run's own page.
 - M2: an existing mirror page is REPLACED (stage + rename), never truncated in place; a failed
-  mirror write fails the render.
-- M3: `main` prints the mirror's ABSOLUTE path, so an override outside the running checkout
-  does not crash the render.
-- O3: a render under pytest with the override removed is refused, in-process and in the child.
-- D5/O1/O4 (root only): with the mirror's parent owned by a non-root uid, every path the render
+  mirror write raises out of `mirror_page` and is a warning of the post-run step.
+- M3: `mirror_page` answers the copy's ABSOLUTE path, so an override outside the running
+  checkout does not fail the copy.
+- O3: a render under pytest with the override removed is refused — by `mirror_page`, and as a
+  warning of the post-run step.
+- D5/O1/O4 (root only): with the mirror's parent owned by a non-root uid, every path the copy
   creates belongs to that uid; a link the user could plant at any of the three names, aimed at
-  a root-only target, fails the render and leaves the target untouched.
+  a root-only target, is refused and leaves the target untouched.
 
-The renderer is imported inside each test, so this file collects against the tree that does
-not have the new names yet.
+The renderer is imported inside each test, so this file collects against a tree that does not
+have the new names yet.
 """
 from __future__ import annotations
 
+import logging
 import os
 import pwd
 import shutil
@@ -35,15 +47,24 @@ from pathlib import Path
 import pytest
 
 from defender import _git, run_common
-from defender.tests.e2e.test_922_renderer import MARKER, driven_run
+from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
 
 ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
+DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
 PAGE = "runtime.html"
 #: Not part of the checkout's content: the venv (a symlink in a worktree), bytecode the child
 #: interpreter compiles as it imports, and tool caches. Pruned — neither descended nor recorded.
 _NOT_CONTENT = frozenset({".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+
+
+@pytest.fixture(autouse=True)
+def _dev_deployment(deployment_unset, monkeypatch):
+    """Every test in this module is about the copy, which only a `dev` deployment makes
+    (#1110 O3). Requests the conftest's `deployment_unset` by name, so this `setenv` lands after
+    its `delenv` whatever order pytest would otherwise pick."""
+    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
 
 
 def _renderer():
@@ -54,6 +75,31 @@ def _renderer():
 
 def _under(path: Path, root: Path) -> bool:
     return path.resolve().is_relative_to(root.resolve())
+
+
+def _warnings(caplog) -> list[str]:
+    """Every WARNING record captured, formatted WITH the exception it carried (if any): the
+    design names what the warning must say, not whether it rides in the message or the
+    attached exception."""
+    fmt = logging.Formatter()
+    return [fmt.format(r) for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def _assert_warned(caplog, needle: str) -> None:
+    """#1110 O5: a copy failure is a WARNING naming `needle` — the copy's destination when one
+    resolved."""
+    warned = _warnings(caplog)
+    assert any(needle in w for w in warned), (
+        f"the copy failed silently: no WARNING names {needle!r}; warnings were {warned!r}")
+
+
+def _assert_record_written(run_dir: Path) -> None:
+    """#1110 O4: the run's own page record exists and is THIS run's page — a failed copy is
+    never a failed render."""
+    record = run_dir / PAGE
+    assert record.is_file(), f"the page record {record} was not written"
+    assert MARKER in record.read_text(encoding="utf-8"), (
+        "the page record does not carry this run's own final turn")
 
 
 def _defender_snapshot() -> dict[str, tuple[int, int] | None]:
@@ -102,7 +148,7 @@ def _stray_state(page: Path) -> tuple | None:
 def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_override(
         tmp_path, run_visualizations_dir):
     """A snapshot of this checkout's `defender/` taken immediately before and after
-    `run_common.visualize(run_dir)` is identical — no mirror folder, no page, no touched file —
+    `run_common.visualize(run)` is identical — no mirror folder, no page, no touched file —
     with the D4 override pointing at a per-test tmp dir (the conftest's).
 
     Positive control on the new address: the page is at
@@ -110,6 +156,7 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
     carrying the run's own final turn — so an empty diff is not a render that wrote nothing.
     """
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     assert not _under(run_dir, run_common.DEFENDER_DIR), (
         "precondition: the run dir must not sit under defender/, or its own writes would be "
         "in the snapshot")
@@ -122,10 +169,13 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
     assert "run.py" in before, "positive control: the snapshot is not reading defender/"
     assert len(before) > 100, "positive control: the snapshot is not reading defender/"
 
-    run_common.visualize(run_dir)
+    run_common.visualize(run)
 
     after = _defender_snapshot()
-    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    # By key as well as by value: a directory's value is `None` (presence), so a value-only
+    # comparison would read a directory the render CREATED as unchanged.
+    changed = sorted((set(before) ^ set(after))
+                     | {k for k in set(before) & set(after) if before[k] != after[k]})
     assert changed == [], f"the render wrote under defender/: {changed}"
     assert [_stray_state(p) for p in strays] == strays_before, (
         "the render also wrote a copy at a real checkout's top-level mirror, bypassing the "
@@ -136,21 +186,24 @@ def test_1084_a_render_writes_nothing_under_defender_and_mirrors_into_the_overri
     assert MARKER in page.decode("utf-8"), "the page does not carry this run's own final turn"
 
 
-def test_1084_render_and_mirror_returns_the_path_under_mirror_root(tmp_path, run_visualizations_dir):
-    """In-process, `render_and_mirror(run_dir)` keeps its signature and returns exactly
-    `[mirror_root() / run_dir.name / "runtime.html"]` — here the override's page — and that
-    file holds the run's page."""
+def test_1084_mirror_page_returns_the_path_under_mirror_root(tmp_path, run_visualizations_dir):
+    """In-process, `mirror_page(page, run_id)` returns exactly
+    `mirror_root() / run_id / "runtime.html"` — here the override's page — and that file holds
+    the page it was handed, byte for byte (#1110 M3: the copy is of the in-memory page, which
+    `render_page` generated)."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     expected = vr.mirror_root() / run_dir.name / PAGE
     assert expected == run_visualizations_dir / run_dir.name / PAGE
+    page = vr.render_page(run_dir)
+    assert MARKER in page, "positive control: the page handed over is this run's"
 
-    assert vr.render_and_mirror(run_dir) == [expected]
-    assert expected.read_bytes() == (run_dir / PAGE).read_bytes()
+    assert vr.mirror_page(page, run_dir.name) == expected
+    assert expected.read_bytes() == page.encode("utf-8")
 
 
 # ---------------------------------------------------------------------------------------
-# M2 — replace, never truncate in place; a failed mirror write fails the render
+# M2 — replace, never truncate in place; a failed mirror write is a warning, the record kept
 # ---------------------------------------------------------------------------------------
 
 
@@ -158,16 +211,17 @@ def test_1084_an_existing_mirror_page_is_replaced_not_rewritten_in_place(
         tmp_path, run_visualizations_dir):
     """The page at the mirror is made a HARD LINK to an unrelated file before the render. A
     stage-then-rename writer swaps the name to a new inode and the other file keeps its bytes;
-    an open-truncate-write (`shutil.copyfile`, today's writer) writes the page INTO that other
-    file. Positive control: the mirror name does end up holding the run's page."""
+    an open-truncate-write (`shutil.copyfile`, the pre-#1084 writer) writes the page INTO that
+    other file. Positive control: the mirror name does end up holding the run's page."""
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     folder = run_visualizations_dir / run_dir.name
     folder.mkdir()
     bystander = tmp_path / "bystander.html"
     bystander.write_bytes(b"BYSTANDER\n")
     os.link(bystander, folder / PAGE)
 
-    run_common.visualize(run_dir)
+    run_common.visualize(run)
 
     assert (folder / PAGE).read_bytes() == (run_dir / PAGE).read_bytes(), (
         "positive control: the mirror does not hold the run's page")
@@ -176,79 +230,108 @@ def test_1084_an_existing_mirror_page_is_replaced_not_rewritten_in_place(
     assert os.lstat(folder / PAGE).st_ino != os.lstat(bystander).st_ino
 
 
-def test_1084_a_failed_mirror_write_fails_the_render(tmp_path, monkeypatch):
-    """The override is placed under a regular FILE, so no folder can be created there. The
-    in-process `render_and_mirror` raises an `OSError` out, and `run_common.visualize` raises
-    `VisualizeFailed` (the child exits non-zero) — a mirror that silently did not happen is
-    not a successful render. Positive control on the same run: pointed at a writable dir,
-    the same call succeeds and the page lands."""
+def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monkeypatch, caplog):
+    """RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render`. The override is placed under a
+    regular FILE, so no folder can be created there. The copy primitive `mirror_page` still
+    raises an `OSError` out — a copy that silently did not happen is not a successful copy —
+    but the post-run step `run_common.visualize` does NOT raise `VisualizeFailed`: the run's
+    page record is written, and the failed copy is a WARNING naming its destination. The
+    blocking file is untouched.
+
+    Positive control on the same run: pointed at a writable dir, the same call lands the copy
+    and warns nothing — so the warning above is about this fault, not a warning every render
+    emits."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     blocker = tmp_path / "blocker"
     blocker.write_bytes(b"a file, not a folder\n")
     monkeypatch.setenv(ENV, str(blocker / "run-visualizations"))
+    dest = blocker / "run-visualizations" / run_dir.name / PAGE
+    page = vr.render_page(run_dir)
 
     with pytest.raises(OSError):  # noqa: PT011 — the interface binds that it raises, not its words
-        vr.render_and_mirror(run_dir)
-    with pytest.raises(run_common.VisualizeFailed):
-        run_common.visualize(run_dir)
+        vr.mirror_page(page, run_dir.name)
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
+
+    _assert_record_written(run_dir)
+    _assert_warned(caplog, str(dest))
     assert blocker.read_bytes() == b"a file, not a folder\n"
 
     good = tmp_path / "good"
     monkeypatch.setenv(ENV, str(good))
-    run_common.visualize(run_dir)
+    caplog.clear()
+    run_common.visualize(run)
     assert (good / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()
+    assert _warnings(caplog) == [], "a copy that landed was warned about"
 
 
-def test_1084_a_mirror_write_that_fails_after_its_folder_exists_fails_the_render(
-        tmp_path, run_visualizations_dir):
-    """The fault is past the mkdir: the page NAME is a non-empty directory, so creating the
-    folders succeeds and only the final replace can fail — even as root. A writer that
-    swallows a fault around the stage/replace (#1084 adversary H4) passes the mkdir-only case
-    above and fails here. Positive control: with the name cleared, the same render lands."""
+def test_1084_a_mirror_write_that_fails_after_its_folder_exists_is_warned_and_the_record_kept(
+        tmp_path, run_visualizations_dir, caplog):
+    """RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render`. The fault is past the mkdir: the
+    page NAME is a non-empty directory, so creating the folders succeeds and only the final
+    replace can fail — even as root. A writer that swallows a fault around the stage/replace
+    (#1084 adversary H4) passes the mkdir-only case above and fails here: `mirror_page` must
+    still raise. The post-run step writes the record, warns naming the destination, and does
+    not raise; the directory squatting the name keeps its content.
+
+    Positive control: with the name cleared, the same render lands the copy."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     occupied = run_visualizations_dir / run_dir.name / PAGE
     occupied.mkdir(parents=True)
     (occupied / "keep").write_bytes(b"KEEP\n")
+    page = vr.render_page(run_dir)
 
     with pytest.raises(OSError):  # noqa: PT011 — the interface binds that it raises, not its words
-        vr.render_and_mirror(run_dir)
-    with pytest.raises(run_common.VisualizeFailed):
-        run_common.visualize(run_dir)
+        vr.mirror_page(page, run_dir.name)
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(run)
+
+    _assert_record_written(run_dir)
+    _assert_warned(caplog, str(occupied))
     assert (occupied / "keep").read_bytes() == b"KEEP\n"
 
     shutil.rmtree(occupied)
-    run_common.visualize(run_dir)
+    caplog.clear()
+    run_common.visualize(run)
     assert occupied.read_bytes() == (run_dir / PAGE).read_bytes()
+    assert _warnings(caplog) == [], "a copy that landed was warned about"
 
 
 # ---------------------------------------------------------------------------------------
-# M3 — the absolute path is printed; an outside override does not crash the render
+# M3 — the absolute path; an outside override does not fail the copy
 # ---------------------------------------------------------------------------------------
 
 
-def test_1084_the_render_names_the_mirror_by_its_absolute_path(tmp_path, capfd, monkeypatch):
-    """With the override OUTSIDE the running checkout, `run_common.visualize` succeeds (a
-    `dest.relative_to(<repo>)` would raise `ValueError` in the child and surface as
-    `VisualizeFailed`) and the child's stdout — forwarded to stderr — names the mirror's
-    absolute path. The in-process `main` prints the same absolute path on its own stdout."""
+def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_path(
+        tmp_path, monkeypatch, caplog):
+    """With the override OUTSIDE the running checkout, the post-run step lands the copy there
+    with no warning (a `dest.relative_to(<repo>)` would raise `ValueError` — a warned, missing
+    copy since #1110, where it used to be a failed render), and `mirror_page` answers the
+    copy's ABSOLUTE path. The standalone re-render (`visualize_run.main`) also exits 0.
+
+    DROPPED BY #1110: this test also pinned that the render PRINTED the mirror's path on
+    success (the renderer child's stdout, forwarded). The post-run step is in-process now and
+    the design gives a successful copy no output; what the operator is told about the copy is
+    the failure warning (O5)."""
+    vr = _renderer()
     run_dir = driven_run(tmp_path)
     outside = tmp_path / "pages"
     assert not _under(outside, run_common.REPO_ROOT), "precondition: outside the checkout"
     monkeypatch.setenv(ENV, str(outside))
     mirrored = outside / run_dir.name / PAGE
     assert mirrored.is_absolute()
-    capfd.readouterr()
 
-    run_common.visualize(run_dir)
-    forwarded = capfd.readouterr().err
-    assert str(mirrored) in forwarded, f"the render did not name {mirrored}: {forwarded!r}"
-    assert mirrored.is_file()
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(tenant_run(run_dir))
+    assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
+    assert _warnings(caplog) == [], f"the outside copy was warned about: {_warnings(caplog)!r}"
 
-    assert _renderer().main(["visualize_run.py", str(run_dir)]) == 0
-    printed = capfd.readouterr().out
-    assert str(mirrored) in printed, f"main did not print {mirrored}: {printed!r}"
+    assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == mirrored
+    assert vr.main(["visualize_run.py", str(run_dir)]) == 0
 
 
 # ---------------------------------------------------------------------------------------
@@ -256,29 +339,45 @@ def test_1084_the_render_names_the_mirror_by_its_absolute_path(tmp_path, capfd, 
 # ---------------------------------------------------------------------------------------
 
 
-def test_1084_a_render_under_pytest_without_the_override_is_refused(
-        tmp_path, monkeypatch, run_visualizations_dir):
-    """With the override removed, `render_and_mirror` raises `MirrorRootRefused` in-process,
-    and the child `run_common.visualize` spawns (which inherits `PYTEST_CURRENT_TEST`) fails
-    with `VisualizeFailed` — so the renderer reaches the refusing default resolution, not a
-    `start` passed explicitly around it. The bare resolver is asked first, so a resolver that
-    does not refuse stops the test before any render could reach a real checkout.
+def test_1084_a_render_under_pytest_without_the_override_is_refused_warned_and_the_record_kept(
+        tmp_path, monkeypatch, run_visualizations_dir, caplog):
+    """RE-PINNED BY #1110 (O4/O5) from `..._is_refused`. With the override removed,
+    `mirror_page` raises `MirrorRootRefused` — so the copy reaches the refusing default
+    resolution, not a `start` passed explicitly around it. The bare resolver is asked first, so
+    a resolver that does not refuse stops the test before any render could reach a real
+    checkout. The post-run step writes the record, does not raise, and warns with the
+    RESOLVER'S REASON (no destination resolved); a real checkout's top-level mirror page is
+    untouched.
 
-    Positive control: the override restored, the same run renders into it."""
+    Positive control: the override restored, the same run's copy lands in it, unwarned."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    page = vr.render_page(run_dir)
     monkeypatch.delenv(ENV)
     with pytest.raises(vr.MirrorRootRefused):
         vr.mirror_root()
-
     with pytest.raises(vr.MirrorRootRefused):
-        vr.render_and_mirror(run_dir)
-    with pytest.raises(run_common.VisualizeFailed):
-        run_common.visualize(run_dir)
+        vr.mirror_page(page, run_dir.name)
+
+    strays = [root / "run-visualizations" / run_dir.name / PAGE
+              for root in (run_common.REPO_ROOT, _main_checkout_by_git())]
+    strays_before = [_stray_state(p) for p in strays]
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(run)
+
+    _assert_record_written(run_dir)
+    warned = _warnings(caplog)
+    assert any("MirrorRootRefused" in w or "is unset under pytest" in w for w in warned), (
+        f"the refused copy was not warned with the resolver's reason; warnings were {warned!r}")
+    assert [_stray_state(p) for p in strays] == strays_before, (
+        "the refused copy still landed at a real checkout's top-level mirror")
 
     monkeypatch.setenv(ENV, str(run_visualizations_dir))
-    run_common.visualize(run_dir)
+    caplog.clear()
+    run_common.visualize(run)
     assert (run_visualizations_dir / run_dir.name / PAGE).is_file()
+    assert _warnings(caplog) == [], "a copy that landed was warned about"
 
 
 # ---------------------------------------------------------------------------------------
@@ -381,12 +480,12 @@ def test_1084_a_root_render_writes_the_mirror_as_the_checkouts_owner(tmp_path, o
     """(a) The mirror's parent belongs to a non-root uid and `run-visualizations/` does not
     exist yet. After a root render, `run-visualizations/`, `<run>/` and `<run>/runtime.html`
     all belong to that uid:gid, and the page is the run's own. This is also the positive
-    control for the planted-link cases below: unplanted, the same render succeeds."""
+    control for the planted-link cases below: unplanted, the same render lands the copy."""
     _lane_precondition(owned_tree)
     run_dir = driven_run(tmp_path)
     assert not owned_tree.mirror.exists()
 
-    run_common.visualize(run_dir)
+    run_common.visualize(tenant_run(run_dir))
 
     page = owned_tree.mirror / run_dir.name / PAGE
     for made in (owned_tree.mirror, page.parent, page):
@@ -409,7 +508,7 @@ def test_1084_a_root_render_replaces_a_root_owned_page_left_by_the_old_writer(tm
     stale.write_bytes(b"STALE\n")
     os.chmod(stale, 0o644)
 
-    run_common.visualize(run_dir)
+    run_common.visualize(tenant_run(run_dir))
 
     assert not stale.is_symlink()
     assert stale.read_bytes() == (run_dir / PAGE).read_bytes(), "the stale page was not replaced"
@@ -420,22 +519,26 @@ def test_1084_a_root_render_replaces_a_root_owned_page_left_by_the_old_writer(tm
 @root_only
 @pytest.mark.parametrize("site", ["run-visualizations", "run-visualizations/<run>",
                                   "run-visualizations/<run>/runtime.html"])
-def test_1084_a_link_planted_at_any_mirror_name_toward_a_root_only_target_fails_the_render(
-        tmp_path, owned_tree, site):
-    """O4. The user plants a symlink (lchowned to them — what they could make themselves) at
-    one of the three names, aimed OUTSIDE the checkout at a root-only folder (the two folder
-    names) or file (the page name). The render must FAIL (`VisualizeFailed`), the target must
-    be unchanged in content/listing, owner, mode and mtime, and the link must still be the
-    user's link to it.
+def test_1084_a_link_planted_at_any_mirror_name_toward_a_root_only_target_is_refused_and_warned(
+        tmp_path, owned_tree, site, caplog):
+    """O4 — RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render`. The user plants a symlink
+    (lchowned to them — what they could make themselves) at one of the three names, aimed
+    OUTSIDE the checkout at a root-only folder (the two folder names) or file (the page name).
+    The COPY must be refused: the target unchanged in content/listing, owner, mode and mtime,
+    and the link still the user's link to it. Since #1110 the refusal is a WARNING naming the
+    copy's destination, not a failed render: the run's own page record is written and
+    `VisualizeFailed` is not raised.
 
     For the page name this means the writer refuses a link sitting at `runtime.html` rather
-    than renaming over it: the design's O4 names all three sites as "the render must have
-    failed", and a rename-over alone would silently succeed there.
+    than renaming over it: #1084's O4 names all three sites as "the copy must have failed",
+    and a rename-over alone would silently succeed there — which the warning assertion, not
+    only the target's fingerprint, catches.
 
     Positive control: `test_1084_a_root_render_writes_the_mirror_as_the_checkouts_owner` —
-    the same render, unplanted, in this module — succeeds."""
+    the same render, unplanted, in this module — lands the copy."""
     _lane_precondition(owned_tree)
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     rel = site.replace("<run>", run_dir.name)
     link = owned_tree.checkout / rel
     for parent in reversed(link.relative_to(owned_tree.checkout).parents[:-1]):
@@ -445,9 +548,11 @@ def test_1084_a_link_planted_at_any_mirror_name_toward_a_root_only_target_fails_
     os.lchown(link, owned_tree.uid, owned_tree.gid)
     before = _fingerprint(target)
 
-    with pytest.raises(run_common.VisualizeFailed):
-        run_common.visualize(run_dir)
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(run)  # a refused copy is not a failed render: no VisualizeFailed
 
+    _assert_record_written(run_dir)
+    _assert_warned(caplog, str(owned_tree.mirror / run_dir.name / PAGE))
     assert _fingerprint(target) == before, f"the root-only target changed through {site}"
     assert link.is_symlink(), f"the link at {site} was replaced or removed"
     assert os.readlink(link) == str(target), f"the link at {site} was re-aimed"
@@ -466,7 +571,7 @@ def test_1084_a_users_own_link_at_run_visualizations_is_followed_as_the_user(tmp
     os.symlink(theirs, owned_tree.mirror)
     os.lchown(owned_tree.mirror, owned_tree.uid, owned_tree.gid)
 
-    run_common.visualize(run_dir)
+    run_common.visualize(tenant_run(run_dir))
 
     page = theirs / run_dir.name / PAGE
     assert page.read_bytes() == (run_dir / PAGE).read_bytes()
@@ -482,7 +587,7 @@ def test_1084_a_root_owned_checkout_is_written_in_process_as_root(tmp_path, owne
     os.chown(owned_tree.checkout, 0, 0)
     run_dir = driven_run(tmp_path)
 
-    run_common.visualize(run_dir)
+    run_common.visualize(tenant_run(run_dir))
 
     page = owned_tree.mirror / run_dir.name / PAGE
     for made in (owned_tree.mirror, page.parent, page):
@@ -492,17 +597,22 @@ def test_1084_a_root_owned_checkout_is_written_in_process_as_root(tmp_path, owne
 
 @root_only
 @pytest.mark.parametrize("shape", ["root-owned-0755", "users-own-0555"])
-def test_1084_a_mirror_folder_the_owner_cannot_write_fails_the_render_untouched(
-        tmp_path, owned_tree, shape):
-    """The checkout belongs to the uid, but its REAL (not linked) `run-visualizations/` is one
-    the uid cannot write: root:root 0755 (the state today's root-written pages leave behind),
-    or the uid's own folder at 0555. Written as the uid (D5), the render fails and the folder is
-    unchanged. A root writer that vets links and chowns afterwards (#1084 adversary H1), or one
-    that takes the owner from `run-visualizations/` rather than from its parent (H2), writes
-    into it — root ignores mode bits. Positive control: case (a), the same render into a
-    folder the uid can write, succeeds."""
+def test_1084_a_mirror_folder_the_owner_cannot_write_is_left_untouched_and_warned(
+        tmp_path, owned_tree, shape, caplog):
+    """RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render_untouched`. The checkout belongs
+    to the uid, but its REAL (not linked) `run-visualizations/` is one the uid cannot write:
+    root:root 0755 (the state pre-#1084 root-written pages leave behind), or the uid's own
+    folder at 0555. Written as the uid (D5), the copy fails and the folder is unchanged. A root
+    writer that vets links and chowns afterwards (#1084 adversary H1), or one that takes the
+    owner from `run-visualizations/` rather than from its parent (H2), writes into it — root
+    ignores mode bits. Since #1110 the failed copy is a WARNING naming its destination; the
+    run's page record is written and `VisualizeFailed` is not raised.
+
+    Positive control: case (a), the same render into a folder the uid can write, lands the
+    copy."""
     _lane_precondition(owned_tree)
     run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
     owned_tree.mirror.mkdir()
     if shape == "root-owned-0755":
         os.chmod(owned_tree.mirror, 0o755)
@@ -511,9 +621,11 @@ def test_1084_a_mirror_folder_the_owner_cannot_write_fails_the_render_untouched(
         os.chmod(owned_tree.mirror, 0o555)
     before = _fingerprint(owned_tree.mirror)
 
-    with pytest.raises(run_common.VisualizeFailed):
-        run_common.visualize(run_dir)
+    caplog.set_level(logging.DEBUG)
+    run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
 
+    _assert_record_written(run_dir)
+    _assert_warned(caplog, str(owned_tree.mirror / run_dir.name / PAGE))
     assert _fingerprint(owned_tree.mirror) == before, f"the {shape} mirror folder was written"
 
 
@@ -529,7 +641,7 @@ def test_1084_the_child_takes_the_checkouts_gid_not_the_uids_passwd_group(tmp_pa
     assert gid != owned_tree.gid, "precondition: 4242 must differ from the uid's passwd group"
     os.chown(owned_tree.checkout, owned_tree.uid, gid)
 
-    run_common.visualize(run_dir)
+    run_common.visualize(tenant_run(run_dir))
 
     page = owned_tree.mirror / run_dir.name / PAGE
     for made in (owned_tree.mirror, page.parent, page):

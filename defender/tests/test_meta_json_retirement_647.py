@@ -159,8 +159,14 @@ def module_level_names_at_base(repo_path: str) -> set[str]:
 
 
 def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
-    """`run.py`'s call to `materialize_run_dir` binds the run dir it returns and hands it
+    """`run.py`'s call to the run builder binds the one value it returns and hands the run dir
     onward to `run_investigation` (`run_dir=`).
+
+    AMENDED BY #1110. The builder `run.py` calls is `run_common.materialize_run`, which returns
+    the run's tenant-bound `Run` handle (whose `.run_dir` is the run dir) rather than the bare
+    path — `main` keeps the handle, because the post-run page render saves the page through it.
+    `materialize_run_dir` survives as a `.run_dir` wrapper for its other callers. The single-name
+    bind this demand pins is unchanged: one value, never a tuple.
 
     AMENDED BY #875. This demand was "binds BOTH elements of the returned pair in order — the
     run dir first, the salt second", the shape #647 introduced so that the run's ONE trust
@@ -182,18 +188,19 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
         if isinstance(n, ast.Assign)
         and isinstance(n.value, ast.Call)
         and isinstance(n.value.func, ast.Attribute)
-        and n.value.func.attr == "materialize_run_dir"
+        and n.value.func.attr == "materialize_run"
     ]
-    assert len(unpacks) == 1, f"expected exactly one materialize_run_dir call site, got {len(unpacks)}"
+    assert len(unpacks) == 1, f"expected exactly one materialize_run call site, got {len(unpacks)}"
     target = unpacks[0].targets[0]
-    # AMENDED BY #875: the builder returns ONLY the run dir. This demand pinned the
-    # `(run_dir, salt)` unpack #647 introduced; the run salt is gone — `wrap_fresh` mints each
-    # frame's delimiter after its content is in hand — so a single-name bind is the contract.
+    # AMENDED BY #875: the builder returns ONE value. This demand pinned the `(run_dir, salt)`
+    # unpack #647 introduced; the run salt is gone — `wrap_fresh` mints each frame's delimiter
+    # after its content is in hand — so a single-name bind is the contract. AMENDED BY #1110:
+    # that one value is the run's handle, bound as `run`.
     assert isinstance(target, ast.Name), (
-        "run.py still unpacks materialize_run_dir's result as a tuple — the builder returns "
-        "only the run dir now (#875 removed the run salt)"
+        "run.py still unpacks the builder's result as a tuple — the builder returns one value "
+        "(#875 removed the run salt)"
     )
-    assert target.id == "run_dir", f"the bound name must be run_dir; got {target.id}"
+    assert target.id == "run", f"the bound name must be run (the handle); got {target.id}"
 
     from defender.run import _run_investigation_lifecycle
 
