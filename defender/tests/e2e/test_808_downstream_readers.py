@@ -46,6 +46,7 @@ from defender.runtime import scrub as scrub_mod  # noqa: E402
 from defender.scripts.adapters.elastic_adapter import load_config  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     ALERTS_INDEX,
     EVENTS_INDEX,
@@ -291,7 +292,8 @@ def test_the_adapters_own_default_index_read_still_agrees_with_lead_zeros(tmp_pa
     res = run(tmp_path, run_id="lz808-coherence",
               alert=alert_doc(signal_index=ALERTS_INDEX), answer=answer_hits(DOCS))
 
-    config = load_config(VerbContext(defender_dir=defender_dir(), run_dir=res.run_dir, env={}))
+    config = load_config(VerbContext(defender_dir=defender_dir(), run_dir=res.run_dir, env={},
+                                     settings_dir=_tenants1106.PLAYGROUND_SETTINGS))
     assert config["ELASTIC_ALERTS_INDEX"] == ALERTS_INDEX, \
         "the adapter's configured alerts pattern moved out from under this fixture"
     assert config["ELASTIC_EVENTS_INDEX"] == EVENTS_INDEX

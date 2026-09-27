@@ -43,7 +43,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender import _run_paths  # noqa: E402
-from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import CLAIMED, LEAD_ID_RE, claim_lead  # noqa: E402
 from defender.learning.core import persist  # noqa: E402
 from defender.runtime import permission  # noqa: E402
@@ -51,6 +51,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     compile_policy_for,
 )
 from defender.scripts.gather_tools.record_query import persist_payload  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 #: A lead id the model is free to mint and never has: `LEAD_ID_RE` admits it, the documented
 #: spelling (`defender/SKILL.md`'s `lead_id="l-NNN"`, every invlang example `l-001`) does not,
@@ -87,7 +88,7 @@ def _read(env, path, policy, *, run_dir=None):
 
 
 def _gather(env):
-    return compile_policy_for(GATHER_DEF, run_dir=env.run, defender_dir=env.dfn)
+    return compile_policy_for(T1106.playground_gather_def(), run_dir=env.run, defender_dir=env.dfn)
 
 
 

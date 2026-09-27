@@ -28,7 +28,6 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
-from defender.agents import GATHER_DEF  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.box_codec import BoxResult  # noqa: E402
@@ -37,6 +36,7 @@ from defender.runtime.tools import _tool_bash  # noqa: E402
 from defender.scripts import policy_cli  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests import _baseline_959 as base  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 CR = base.CR
 NBSP = base.NBSP
@@ -88,7 +88,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     payload.write_text("{}", encoding="utf-8")
     box = Box(result)
     deps = dataclasses.replace(
-        bind(GATHER_DEF, run, defender_dir=dfn, box=box), lead_id=lead_id,
+        bind(T1106.playground_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
     )
     return deps, box, payload
 

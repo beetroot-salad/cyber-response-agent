@@ -100,7 +100,8 @@ UNAVAILABLE = "_(unavailable:"
 SHORTFALL = "_(incomplete:"     # K3 — `returned < len(ancestor_events)` or `truncated`
 ELIDED = "_(elided:"            # K17 — a per-document `message` over the rendering budget
 
-# Read off the tree, not restated: `knowledge/environment/systems/elastic/config.env`.
+# Read off the tree, not restated: the playground tenant's `settings/systems/elastic/config.env`
+# (`knowledge/tenants/playground/`, #1106).
 EVENTS_INDEX = "logs-*"
 ALERTS_INDEX = ".internal.alerts-security.alerts-default-*"
 
@@ -487,6 +488,8 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     stores: list | None = None,
     before: Callable[[Path], None] | None = None,
     defender_dir: Path | None = None,
+    tenant: Any = None,
+    grants: Any = None,
 ) -> Res:
     """Drive a REAL `run_investigation` over a synthesized alert.
 
@@ -507,6 +510,10 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     passed through only when supplied, so a scenario over a planted catalog (a template
     whose `verb:` disagrees with the shipped table) can drive the run-start check while every
     scenario before it keeps driving this checkout.
+
+    `tenant` / `grants` (#1106) are the run's `TenantDir` and `RunGrants` — where its
+    `lead-zero.yaml` and table come from now that neither lives in the tree. Passed through to
+    `drive` only when supplied; omitted, the run is the committed playground tenant's.
 
     MAIN's default script makes TWO requests (a read, then a text turn) because `d23`'s
     observable lives at the second one; the gather model answers item 3's dispatch with the
@@ -537,6 +544,10 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["store_factory"] = store_factory
     if defender_dir is not None:
         kw["defender_dir"] = defender_dir
+    if tenant is not None:
+        kw["tenant"] = tenant
+    if grants is not None:
+        kw["grants"] = grants
     out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
 

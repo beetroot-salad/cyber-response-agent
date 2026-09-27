@@ -40,7 +40,8 @@ from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     ToolSet, compile_policy_for,
 )
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 
 CAP = tools._read_char_cap()
@@ -52,7 +53,8 @@ def _main_policy(tmp: Path) -> AgentPolicy:
 
 
 def _gather_policy(tmp: Path) -> AgentPolicy:
-    return compile_policy_for(GATHER_DEF, run_dir=tmp / "run", defender_dir=_DEFENDER)
+    return compile_policy_for(
+        _tenants1106.playground_gather_def(), run_dir=tmp / "run", defender_dir=_DEFENDER)
 
 
 

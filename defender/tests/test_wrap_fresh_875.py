@@ -61,7 +61,8 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from defender import _untrusted  # noqa: E402
 from defender.runtime import permission, tools, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -128,7 +129,7 @@ def _drive(tmp_path: Path, lead_id: str = "l-001"):
     out = asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: agent, 40,
         tools_gather.GatherRequest(lead_id, "elastic", "who logged in", ("accepted vs failed",)),
-        GATHER_DEF.verb_grant, catalog=None,
+        T1106.playground_grants().gather, catalog=None,
     ))
     assert agent.calls == 1, "the gather agent never ran — the observation below is vacuous"
     assert HOST_NOTE in out, "the injected sentence never reached MAIN — nothing was tested"

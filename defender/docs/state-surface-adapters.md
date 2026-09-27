@@ -86,10 +86,10 @@ that need to match `elastic_adapter.py`:
   the `VERBS` registry's annotations are the authoritative surface (per the
   memory-recorded discipline in the elastic SKILL).
 
-Config at `defender/knowledge/environment/systems/{system}/config.env`
+Config at the tenant's `knowledge/tenants/<tenant>/settings/systems/{system}/config.env`
 declaring `{SYSTEM}_HOST=web-1`, `{SYSTEM}_URL_BASE=http://{system}:8080`,
-`{SYSTEM}_TIMEOUT_SEC=10`. The adapter loads via the same `DEFENDER_DIR /
-knowledge/environment/systems/{system}/config.env` pattern as
+`{SYSTEM}_TIMEOUT_SEC=10`. The adapter loads via the same `ctx.settings_dir /
+systems/{system}/config.env` pattern as
 elastic_adapter.
 
 ## Verbs (minimum viable surface)

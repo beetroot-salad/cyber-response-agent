@@ -26,6 +26,7 @@ import pytest
 
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -283,7 +284,7 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     directory rather than a policy that refuses everything.
     """
     pytest.importorskip("pydantic_ai")
-    from defender.agents import GATHER_DEF, MAIN_DEF
+    from defender.agents import MAIN_DEF
     from defender.runtime import permission
     from defender.runtime.agent_definition import compile_policy_for
 
@@ -301,7 +302,7 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     env = SimpleNamespace(
         run=run_dir, dfn=dfn,
         main=compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=dfn),
-        gather=compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=dfn))
+        gather=compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=dfn))
 
     for which in ("main", "gather"):
         policy = getattr(env, which)

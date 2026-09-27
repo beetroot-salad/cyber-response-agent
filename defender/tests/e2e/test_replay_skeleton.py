@@ -36,6 +36,7 @@ from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.tests import _tenants1106
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX
 from defender.runtime.run_end import sidecar_path
@@ -299,7 +300,8 @@ def test_role_flip_data_access_is_role_dependent():
     assert not permission.decide_bash(
         cmd, policy=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)).allow
     assert not permission.decide_bash(
-        cmd, policy=compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)).allow
+        cmd, policy=compile_policy_for(
+            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn)).allow
     assert GATHER_DEF.tools.query is True
     assert MAIN_DEF.tools.query is False
 
