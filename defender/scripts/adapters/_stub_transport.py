@@ -142,8 +142,8 @@ def load_config(
     path = _config_path(ctx, system)
     if not path.exists():
         raise ConfigFault(
-            f"config file not found: {path} — this file should ship with the "
-            f"defender-v2-env branch; if missing, restore from git."
+            f"config file not found: {path} — this tenant's settings do not configure "
+            "this system"
         )
 
     raw = _parse_env_file(path)

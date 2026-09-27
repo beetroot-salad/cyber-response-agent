@@ -284,7 +284,50 @@ def test_a_linked_directory_on_the_way_to_a_required_file_is_refused(tmp_path):
     systems = root / "acme" / "settings" / "systems"
     _swap_for_link(systems, Path("../../bravo/settings/systems"))
     message = _refusal(root, "acme")
-    assert "mapping.yaml" in message, message
+    assert str(systems) in message, message
+
+
+@pytest.mark.parametrize("linked", [
+    "settings/systems/elastic/config.env",
+    "settings/systems/elastic",
+    "agent/.gitkeep",
+])
+def test_any_link_inside_a_tenant_folder_is_refused_not_only_the_required_files(
+        tmp_path, linked):
+    """The link rule covers the whole folder, not a list of files: a system's `config.env` (or
+    its whole `systems/<sys>/` folder) linked to another tenant's copy hands this tenant that
+    tenant's endpoints, and a link in `agent/` would hand the model another tenant's knowledge
+    — all while staying inside the root. Control: the unlinked tenant resolves (above)."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme")
+    T.plant_tenant(root, "bravo")
+    own = root / "acme" / linked
+    theirs = root / "bravo" / linked
+    if own.is_dir():
+        _swap_for_link(own, Path(os.path.relpath(theirs, own.parent)))
+    else:
+        if not own.exists():
+            own.parent.mkdir(parents=True, exist_ok=True)
+            theirs.parent.mkdir(parents=True, exist_ok=True)
+            theirs.write_text("", encoding="utf-8")
+        else:
+            own.unlink()
+        os.symlink(os.path.relpath(theirs, own.parent), own)
+    message = _refusal(root, "acme")
+    assert str(own) in message, message
+
+
+def test_a_folder_named_default_is_not_a_tenant(tmp_path):
+    """N10 on the resolver itself: the retired bootstrap id names no tenant even when a
+    complete folder carries its name — so a run, a branch, an operator command and CI all
+    refuse it the same way. Control: the same folder under another name resolves."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "default")
+    T.plant_tenant(root, "acme")
+    tenant_dir, _ = _resolver()
+    assert tenant_dir(root, "acme").tenant_id == "acme"
+    message = _refusal(root, "default")
+    assert "retired" in message, message
 
 
 # ---- D2: the root is an input, and its default belongs to the entry point ---------------------

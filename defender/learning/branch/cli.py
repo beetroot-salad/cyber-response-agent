@@ -396,7 +396,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     """
     token = _episode_token(episode_id)
     # The EPISODE tenant's corpus patterns (#1106): `settings_dir` is the source run's tenant's
-    # folder, which `_episode_tenant` resolved from the source stamp.
+    # folder, which `_episode_tenant` resolved from the source's runs-base record.
     patterns = staging_mod.check_configured_patterns(configured_patterns(settings_dir))
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
@@ -500,9 +500,23 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> TenantDir:
             f"({_tenant.record_path(Path(source_run_dir).parent)}) names {tenant_id!r} — the "
             "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
     try:
-        return tenant_dir(tenants_root, tenant_id)
+        folder = tenant_dir(tenants_root, tenant_id)
     except TenantDirError as refusal:
         raise LauncherRefused(f"[branch] the source run's tenant: {refusal}") from refusal
+    # THE SAME CONTENT RULES A SIBLING'S RUN START APPLIES (`run_tenant.resolve_run_tenant`),
+    # asked here — before the questioner is paid for, the review replays and any world is
+    # staged — so an episode on a tenant whose table no longer loads, or under which gather can
+    # query nothing, is refused once rather than by every sibling after the spend. A sibling
+    # dispatches no turn-0 lead, so the lead-zero agreement is not asked, as it is not there.
+    from defender.runtime import run_tenant as run_tenant_mod
+
+    try:
+        run_tenant_mod.resolve_run_tenant(
+            folder, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False)
+    except run_tenant_mod.refusals() as refusal:
+        raise LauncherRefused(
+            f"[branch] the source run's tenant {tenant_id!r}: {refusal}") from refusal
+    return folder
 
 
 def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
@@ -1296,7 +1310,8 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--model", default=None)
     p.add_argument(
         "--tenants-root", type=Path, default=None,
-        help="the tenants root the episode's tenant (the source stamp's) is resolved under; "
+        help="the tenants root the episode's tenant is resolved under (the tenant the source "
+             "run's runs-base record names; the source's stamp must agree with it); "
              "default <this checkout>/knowledge/tenants. Handed to every sibling (#1106)")
     return p.parse_args(argv)
 
@@ -1834,7 +1849,7 @@ def _author(
         "configured_patterns": list(patterns),
     })
     family = parse_family(document, captured_patterns=captured,
-                          configured_patterns=tuple(patterns))
+                          configured_patterns=lambda: tuple(patterns))
     check_identities(family)
     _family.write_family(episode_dir, document)
     return family

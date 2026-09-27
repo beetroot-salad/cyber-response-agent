@@ -69,6 +69,14 @@ def record_path(runs_base: Path) -> Path:
     return Path(runs_base) / TENANT_RECORD_NAME
 
 
+def peek_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord | None:
+    """The record at `runs_base` if one is there — READ, never created (`None` when absent). A
+    corrupt or aliased record still refuses (`TenantRecordCorrupt`)."""
+    if not io.entry_present(record_path(runs_base)):
+        return None
+    return read_tenant(runs_base, io=io)
+
+
 def tenant_of_run(run_dir: Path, *, io: Any = _real_io) -> TenantRecord:
     """The tenant a finished run ran as: the record of the runs base it sits in (a run dir is
     `<runs_base>/<run_id>`), or `TenantRecordCorrupt`.

@@ -178,8 +178,8 @@ def verb_context(episode_dir: Path, settings_dir: Path) -> VerbContext:
     """The host-side context the replay's adapter calls run under.
 
     `settings_dir` is the EPISODE's tenant's `settings/` folder (#1106) — the source run's
-    tenant, resolved by the launcher from the source stamp and handed down; the replay reads
-    that tenant's adapter config and nothing it finds for itself.
+    tenant, resolved by the launcher from the source's runs-base record and handed down; the
+    replay reads that tenant's adapter config and nothing it finds for itself.
 
     `run_dir` is the EPISODE dir rather than any run dir, and `capture` is `None`: the replay
     writes no `executed_queries.jsonl` row anywhere, because a review is not a run and a row

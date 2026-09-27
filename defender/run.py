@@ -32,6 +32,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import functools  # noqa: E402
 import inspect  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
@@ -386,70 +387,82 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
-def _tenant_folder(tenants_root: Path, runs_base: Path, record: TenantRecord) -> TenantDir:
-    """The folder `record` names under `tenants_root`, or the refusal naming the record file."""
+def _tenant_id_of(record: TenantRecord | None) -> str:
+    """The tenant a run on this runs base is for: its record's, or — on a fresh base, whose
+    record the run-dir builder creates — the bridge's bootstrap tenant (#1106 D4, until #1078
+    puts the tenant on the request)."""
+    from defender import _tenant
+
+    return record.tenant_id if record is not None else _tenant.DEFAULT_TENANT_ID
+
+
+def _tenant_folder(tenants_root: Path, runs_base: Path, tenant_id: str) -> TenantDir:
+    """`tenant_id`'s folder under `tenants_root`, or the refusal naming the record it came from.
+    The id and folder rules (N10's retired `default` included) are the resolver's own."""
     from defender import _tenant
     from defender._tenants import TenantDirError, tenant_dir
 
-    if not _tenant.is_usable_tenant_id(record.tenant_id):
-        # Refused on the id (N10), not left to the folder lookup: a folder that happened to be
-        # named `default` must not turn the retired bootstrap value back into a tenant.
-        sys.exit(
-            f"[run.py] this run's tenant {record.tenant_id!r} (recorded in "
-            f"{_tenant.record_path(runs_base)}) is the retired bootstrap value — no tenant is "
-            "chosen for it; edit the record to name this runs base's tenant")
     try:
-        return tenant_dir(tenants_root, record.tenant_id)
+        return tenant_dir(tenants_root, tenant_id)
     except TenantDirError as refusal:
+        legacy = (
+            " — edit the record to name this runs base's tenant. Runs already made under "
+            "`default` stay unbranchable either way: their stamps name no tenant a family could "
+            "run on" if not _tenant.is_usable_tenant_id(tenant_id) else "")
         sys.exit(
-            f"[run.py] this run's tenant {record.tenant_id!r} (recorded in "
-            f"{_tenant.record_path(runs_base)}) cannot be used: {refusal}")
+            f"[run.py] this run's tenant {tenant_id!r} (from {_tenant.record_path(runs_base)}) "
+            f"cannot be used: {refusal}{legacy}")
 
 
-def _recorded_tenant(tenants_root: Path, runs_base: Path) -> TenantDir:
-    """A sibling's tenant folder, from the record the branching launcher seeded its runs base
-    with — READ, never minted: a sibling's tenant is the episode's, and a record this process
-    created would name the bootstrap tenant instead. Asked only to judge a manifest written
-    before #1106 (`resume_world`); `_resolve_run_tenant` reads the record again afterwards, as
-    `Run.for_tenant` does, and all three must agree."""
+def _record_reader(runs_base: Path, *, sibling: bool) -> Callable[[], TenantRecord | None]:
+    """This runs base's tenant record, read AT MOST ONCE for the process however many frames
+    ask (the old-manifest judge, the tenant resolution), and NEVER created here: the run-dir
+    builder creates a fresh base's record, so an invocation refused before then (a typo'd alert,
+    a missing model key, an undeclared world) leaves no tenant choice on disk.
+
+    A sibling's base must already hold one — the branching launcher seeds it with the episode's
+    tenant — so its absence is refused rather than read as "fresh": a sibling on the bootstrap
+    tenant would run another tenant's settings against the episode's staged corpus."""
     from defender import _tenant
 
-    try:
-        record = _tenant.read_tenant(runs_base)
-    except _tenant.TenantRecordCorrupt as refusal:
-        sys.exit(f"[run.py] a sibling's runs base carries the episode's tenant record, seeded "
-                 f"by the branching launcher: {refusal}")
-    return _tenant_folder(tenants_root, runs_base, record)
+    @functools.cache
+    def read() -> TenantRecord | None:
+        try:
+            if not sibling:
+                return _tenant.peek_tenant(runs_base)
+            return _tenant.read_tenant(runs_base)
+        except _tenant.TenantRecordCorrupt as refusal:
+            where = ("a sibling's runs base carries the episode's tenant record, seeded by the "
+                     "branching launcher" if sibling else "this runs base's tenant record")
+            sys.exit(f"[run.py] {where}: {refusal}")
+
+    return read
 
 
 def _resolve_run_tenant(
-    tenants_root: Path, *, defender_dir: Path, dispatches_lead_zero: bool,
-) -> tuple[TenantRecord, RunTenant]:
-    """This runs base's tenant record and the run's tenant, or the refusal — BEFORE the run dir,
-    the box and any model call (#1106 M5, D3). The record is returned so the run dir is stamped
-    with the SAME record the tenant was chosen by, rather than one read again later.
+    tenants_root: Path, runs_base: Path, tenant_id: str, *, defender_dir: Path,
+    dispatches_lead_zero: bool,
+) -> RunTenant:
+    """The run's tenant, or the refusal — BEFORE the run dir, the box and any model call (#1106
+    M5, D3).
 
-    The tenant is the one this runs base's `_tenant.json` records (D4 — minted as
-    `_tenant.DEFAULT_TENANT_ID` on a fresh base; #1078 moves it onto the request). Everything
-    `run_tenant.resolve_run_tenant` checks would otherwise fail later and quieter: an absent
-    folder or required file, a table gather can query nothing under, a lead-zero config the
-    catalog or table disagrees with. Every refusal names the file an operator edits; a missing
-    tenant also names the record it came from, which is the file to fix for a legacy `default`.
+    `tenant_id` is the one this runs base's `_tenant.json` records (`_record_reader`; the
+    bootstrap tenant on a fresh base). Everything `run_tenant.resolve_run_tenant` checks would
+    otherwise fail later and quieter: an absent folder or required file, a link inside the
+    folder, a table gather can query nothing under, a lead-zero config the catalog or table
+    disagrees with. Every refusal names the file an operator edits; a missing tenant also names
+    the record it came from, which is the file to fix for a legacy `default`.
 
     `dispatches_lead_zero` is False for a `--resume` sibling: a resumed world dispatches no
     turn-0 lead, so a template demoted since the source run must not refuse it."""
-    from defender import _tenant
     from defender.runtime import run_tenant as run_tenant_mod
 
-    runs_base = _run.resolve_runs_base()
-    record = _tenant.ensure_tenant(runs_base)
-    folder = _tenant_folder(tenants_root, runs_base, record)
+    folder = _tenant_folder(tenants_root, runs_base, tenant_id)
     try:
-        tenant = run_tenant_mod.resolve_run_tenant(
+        return run_tenant_mod.resolve_run_tenant(
             folder, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
     except run_tenant_mod.refusals() as refusal:
         sys.exit(f"[run.py] tenant {folder.tenant_id!r}: {refusal}")
-    return record, tenant
 
 
 def _announce_provenance(run_dir: Path) -> None:
@@ -497,8 +510,8 @@ def resume_world(manifest: Path, world_label: str, *, settings: Callable[[], Pat
     A manifest written before #1106 carries no `configured_patterns`, and its overlays were
     judged against the checkout's corpus config when it was authored. That config now lives in
     the tenant's `settings/`, so for such a manifest — and only for one — the loader asks
-    `settings` for the sibling's own tenant folder (the launcher seeded it from the source run's
-    stamp). A manifest that records its set is judged by the record, and no tenant is looked up.
+    `settings` for the sibling's own tenant folder (the record the launcher seeded its runs base
+    with, naming the source's tenant). A manifest that records its set is judged by the record, and no tenant is looked up.
     """
     from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the one stager import this path needs: the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
@@ -530,7 +543,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     return alert
 
 
-def _resume_target(ns: argparse.Namespace, *, tenants_root: Path) -> Any:
+def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> Any:
     """The world this process is, or `None` for an ordinary run — and the sibling's two refusals.
 
     BOTH BEFORE ANYTHING IS SPENT, which is the whole reason this sits ahead of the preflight
@@ -550,21 +563,20 @@ def _resume_target(ns: argparse.Namespace, *, tenants_root: Path) -> Any:
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        return resume_world(
-            ns.resume, ns.world,
-            settings=lambda: _recorded_tenant(tenants_root, _run.resolve_runs_base()).settings)
+        return resume_world(ns.resume, ns.world, settings=settings)
     except FamilyError as refusal:
         sys.exit(f"[run.py] {refusal}")
 
 
 def _materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
-    tenant_record: TenantRecord,
+    tenant_id: str, expected_record: TenantRecord | None,
 ) -> Path:
     """Build this run's directory, stamped with the code and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
     the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
-    path), and `tenant_record` the record `_resolve_run_tenant` chose this run's tenant by.
+    path), `tenant_id` the tenant `main` resolved, and `expected_record` the record it chose that
+    tenant by (`None` on a fresh base, whose record the builder creates).
 
     A one-line wrapper, and it earns its place twice. It is the seam `main` injects, so a test
     can observe run-dir creation without a real runs base; and it is the ONE site that names the
@@ -572,7 +584,8 @@ def _materialize_run_dir(
     than of whoever reads it — two call sites are two places for the stamp to be forgotten.
     """
     run_dir = _run.materialize_run_dir(
-        alert, run_id, model=model, world=world, tenant_record=tenant_record)
+        alert, run_id, model=model, world=world, tenant_id=tenant_id,
+        expected_record=expected_record)
     return run_dir
 
 
@@ -600,13 +613,18 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # this checkout's `knowledge/tenants` — and nothing below finds it for itself.
     tenants_root = (ns.tenants_root if ns.tenants_root is not None
                     else default_tenants_root(DEFENDER_DIR.parent))
+    # ...and the runs base's tenant record, read at most once and never created before the run
+    # dir is (`_record_reader`).
+    runs_base = _run.resolve_runs_base()
+    record_of = _record_reader(runs_base, sibling=ns.resume is not None)
 
     # THE SIBLING'S TWO REFUSALS, BOTH BEFORE ANYTHING IS SPENT. `--update-ticket` is refused
     # OUTRIGHT rather than accepted and ignored: the two ticket calls are ordered around the
     # curation marker, so suppressing one of them would break the pairing instead of the
     # obligation. And the world is resolved from the manifest before the run dir exists, so a
     # label the manifest does not declare costs nothing at all.
-    world = _resume_target(ns, tenants_root=tenants_root)
+    world = _resume_target(ns, settings=lambda: _tenant_folder(
+        tenants_root, runs_base, _tenant_id_of(record_of())).settings)
 
     # THE CASE INPUT IS RESOLVED AND SCREENED BEFORE ANYTHING IS SPENT, and before the
     # preflight rather than after it. A link planted at the source run's `alert.json` is a fact
@@ -621,9 +639,12 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         run_id = ns.run_id
 
     # THE RUN'S TENANT, resolved and checked BEFORE anything is spent (#1106 M5), and nothing
-    # below reads it again: the record it was chosen by is the one the run dir is stamped with.
-    tenant_record, tenant = _resolve_run_tenant(
-        tenants_root, defender_dir=DEFENDER_DIR, dispatches_lead_zero=world is None)
+    # below reads it again: the record it was chosen by is the one the run-dir builder holds
+    # the stamp to (and creates, on a fresh base).
+    tenant_record = record_of()
+    tenant = _resolve_run_tenant(
+        tenants_root, runs_base, _tenant_id_of(tenant_record), defender_dir=DEFENDER_DIR,
+        dispatches_lead_zero=world is None)
 
     model = driver.resolve_main_model(ns.model)
     # ONE provider-key pass: the all-roles preflight is a strict superset of the
@@ -640,7 +661,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, model=model, world=world, tenant_record=tenant_record)
+    run_dir = materialize(alert, run_id, model=model, world=world, tenant_id=tenant.tenant_id,
+                          expected_record=tenant_record)
 
     if ns.update_ticket:
         ticket_writer.open_case_ticket(run_dir, settings_dir=tenant.settings)

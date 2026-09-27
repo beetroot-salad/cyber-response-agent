@@ -11,6 +11,7 @@ from pathlib import Path
 
 from defender._io import write_guarded
 from defender._model import model
+from defender._paths import process_defender_dir
 from defender._run_paths import RunPaths
 from defender.run_common import run_env
 from defender.runtime import run_end
@@ -24,15 +25,14 @@ PREFIX = "CASE_HISTORY"
 _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
 
-#: The code tree this module ships in — the child env's PATH/PYTHONPATH root, and nothing
-#: else. The SETTINGS are never found from here (or from `$DEFENDER_DIR`): every leg is handed
-#: the run's tenant's `settings/` folder by `run.py` (#1106).
-_DEFENDER_DIR = Path(__file__).resolve().parents[2]
-
 def _verb_context(settings_dir: Path) -> VerbContext:
+    """The transport's context: the process's code tree (`process_defender_dir`, the child
+    env's PATH/PYTHONPATH root and nothing else) and the run's tenant `settings/` folder, which
+    every leg is handed by `run.py` (#1106) and never finds from the code tree."""
+    defender_dir = process_defender_dir()
     run_dir = Path.cwd()
     return VerbContext(
-        defender_dir=_DEFENDER_DIR, run_dir=run_dir, env=run_env(_DEFENDER_DIR, run_dir),
+        defender_dir=defender_dir, run_dir=run_dir, env=run_env(defender_dir, run_dir),
         settings_dir=Path(settings_dir),
     )
 

@@ -41,6 +41,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender._paths import process_defender_dir
 from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
@@ -210,11 +211,6 @@ def build_parser():
     return p
 
 
-def _cli_defender_dir() -> Path:
-    """The code tree this process runs against: `$DEFENDER_DIR`, else the tree this file is in."""
-    return Path(os.environ.get("DEFENDER_DIR", Path(__file__).resolve().parents[2]))
-
-
 def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
     """The CLI's own VerbContext: this is a PROCESS, so its tree and its env are the
     process's — `os.environ` here is the ambient env, which is exactly right for a
@@ -230,7 +226,7 @@ def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    defender_dir = _cli_defender_dir()
+    defender_dir = process_defender_dir()
     try:
         settings_dir = entry_tenant(defender_dir, args.tenants_root, args.tenant).settings
     except TenantDirError as refusal:

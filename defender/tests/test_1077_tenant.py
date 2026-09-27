@@ -114,13 +114,15 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(hosted, base, a
         "the stamp is written by the host before the box exists — the sentinel is planted later")
 
 
-def test_materialize_refuses_a_record_rewritten_after_the_tenant_was_chosen(
+def test_materialize_refuses_a_record_that_changed_after_the_tenant_was_chosen(
         hosted, base, alert):
     """#1106: `run.py` chooses the run's tenant (its settings, its grants) from the record
-    BEFORE the box and hands that same record to the builder. Rewritten in between, the
-    builder must not stamp the file's new tenant over a run using the old one's settings — it
-    refuses, naming both. Handed the record as it still stands, it stamps it (the control)."""
+    BEFORE the box and hands the builder both the tenant and that record. If the record is no
+    longer the one read — rewritten to another tenant, or re-created with a new base world —
+    the builder refuses rather than stamp a run whose settings came from the old one. Handed
+    the record as it still stands, it stamps it (the control)."""
     import dataclasses
+    import uuid
 
     import pytest
 
@@ -128,15 +130,19 @@ def test_materialize_refuses_a_record_rewritten_after_the_tenant_was_chosen(
 
     hosted(alert, "run-control")
     on_disk = _tenant.read_tenant(base)
-    same = hosted(alert, "run-same", tenant_record=on_disk)
+    same = hosted(alert, "run-same", tenant_id=on_disk.tenant_id, expected_record=on_disk)
     assert _stamp(same)["tenant_id"] == on_disk.tenant_id
+    assert _stamp(same)["world_id"] == on_disk.base_world_id
 
-    chosen = dataclasses.replace(on_disk, tenant_id="acme")
-    with pytest.raises(ValueError, match="disagrees with the tenant record") as caught:
-        hosted(alert, "run-rewritten", tenant_record=chosen)
-    assert "acme" in str(caught.value), caught.value
-    assert on_disk.tenant_id in str(caught.value), caught.value
-    assert _record(base)["tenant_id"] == on_disk.tenant_id, "the record itself is left alone"
+    # Rewritten to name another tenant than the one the run resolved.
+    with pytest.raises(ValueError, match="disagrees with the tenant record"):
+        hosted(alert, "run-other-tenant", tenant_id="acme", expected_record=on_disk)
+    # Same tenant, but not the record the caller read (a re-created base world).
+    read_earlier = dataclasses.replace(on_disk, base_world_id=uuid.uuid4().hex)
+    with pytest.raises(ValueError, match="changed after this run's tenant was chosen"):
+        hosted(alert, "run-recreated", tenant_id=on_disk.tenant_id,
+               expected_record=read_earlier)
+    assert _tenant.read_tenant(base) == on_disk, "the builder must not rewrite the record"
 
 
 def test_the_tenant_record_is_created_once_under_the_runs_base(hosted, base, alert):

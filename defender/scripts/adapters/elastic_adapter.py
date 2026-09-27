@@ -148,8 +148,8 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
     path = _config_path(ctx)
     if not path.exists():
         raise ConfigFault(
-            f"config file not found: {path} — this file should ship with the "
-            f"defender-v2-env branch; if missing, restore from git."
+            f"config file not found: {path} — this tenant's settings do not configure "
+            "this system"
         )
     config = config_from(path, ctx.env, expected=REQUIRED_CONFIG_KEYS)
     missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]

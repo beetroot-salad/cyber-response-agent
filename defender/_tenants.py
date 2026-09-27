@@ -20,14 +20,18 @@ ONE RESOLVER. `tenant_dir` is the one place a tenant id becomes a path, so both 
 closed here: the id's grammar (no separator, no `..`, no leading dot, not empty) and the link
 (the tenant folder must resolve under the root, each half must be a real directory whose
 resolved path is exactly `<resolved tenant>/<half>` — which catches `A/agent -> ../B/agent`
-and `A/agent -> ../settings`, both of which stay inside the root — and each required settings
-file must resolve to exactly its own place under that half). An absent folder, half or
-required file is a `TenantDirError` naming the path, with no fallback (D3).
+and `A/agent -> ../settings`, both of which stay inside the root — and NOTHING inside the
+folder may be a link at all: a linked `config.env`, `systems/<sys>/` or knowledge file would
+hand one tenant another's endpoints or knowledge while staying inside the root, and a rule
+that named the files it covers would miss the next one). The retired bootstrap id `default`
+names no tenant on any path (N10). An absent folder, half or required file is a
+`TenantDirError` naming the path, with no fallback (D3).
 """
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 from pathlib import Path
 
 #: D3's files required AT START, relative to a tenant's `settings/`. A system's `config.env`
@@ -88,6 +92,29 @@ def _check_id(tenant_id: str) -> None:
             f"tenant id {tenant_id!r} is not a single plain name (no path separator, no "
             "leading dot, not empty)"
         )
+    from defender._tenant import is_usable_tenant_id
+
+    if not is_usable_tenant_id(tenant_id):
+        # Refused on the id (N10), not left to the folder lookup: a folder that happens to be
+        # named `default` must not turn the retired bootstrap value back into a tenant — on
+        # a run, a branch, an operator command or in CI alike.
+        raise TenantDirError(
+            f"tenant id {tenant_id!r} is the retired bootstrap value (#1106 D4) and names no "
+            "tenant; name the tenant this runs base or command is for"
+        )
+
+
+def _refuse_links(folder: Path, tenant_id: str) -> None:
+    """Refuse any link anywhere inside a tenant folder, directories included (not followed)."""
+    for current, dirnames, filenames in os.walk(folder, followlinks=False):
+        for name in (*dirnames, *filenames):
+            entry = Path(current) / name
+            if entry.is_symlink():
+                raise TenantDirError(
+                    f"tenant {tenant_id!r}'s folder must hold no links: {entry} is one (to "
+                    f"{os.readlink(entry)}) — a link can hand this tenant another's settings "
+                    "or knowledge while staying inside the tenants root"
+                )
 
 
 def _half(tenant_real: Path, tenant_id: str, name: str) -> Path:
@@ -120,19 +147,16 @@ def tenant_dir(tenants_root: Path, tenant_id: str) -> TenantDir:
         )
     settings = _half(folder_real, tenant_id, SETTINGS_HALF)
     agent = _half(folder_real, tenant_id, AGENT_HALF)
+    _refuse_links(folder_real, tenant_id)
     for rel in REQUIRED_SETTINGS:
         path = settings / rel
         if not path.exists():
             raise TenantDirError(
                 f"tenant {tenant_id!r} is missing a required settings file: {path}"
             )
-        # The halves' rule, one level down: a required file (or a directory on the way to it)
-        # that is a link could name another tenant's copy — `A/settings/verb-grants.yaml ->
-        # ../../B/settings/verb-grants.yaml` stays inside the root and would hand A B's grants.
-        if not path.is_file() or path.resolve() != settings / rel:
+        if not path.is_file():
             raise TenantDirError(
-                f"tenant {tenant_id!r}'s required settings file must be a real file at {path}; "
-                f"it resolves to {path.resolve()}"
+                f"tenant {tenant_id!r}'s required settings file must be a regular file: {path}"
             )
     return TenantDir(tenant_id=tenant_id, settings=settings, agent=agent)
 

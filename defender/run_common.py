@@ -86,15 +86,19 @@ def _setup_state(run: Run) -> str:
 
 def materialize_run_dir(
     alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None, tenant_record: _tenant.TenantRecord | None = None,
+    world: ResumeWorld | None = None, tenant_id: str | None = None,
+    expected_record: _tenant.TenantRecord | None = None,
 ) -> Path:
     """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
 
-    `tenant_record` is the record the caller already chose this run's tenant by (`run.py`
-    reads it once, before the box, and resolves the tenant from it) — so the stamp names the
-    tenant whose settings the run actually used. A `_tenant.json` rewritten in between is
-    refused (`Run.for_tenant` holds the record it is given to the file), never stamped over a
-    run using the old tenant's settings. Omitted, it is read (and minted when absent) here.
+    `tenant_id` is the tenant the caller resolved this run for, and `expected_record` the
+    record it chose that tenant by (`run.py` reads it once, before the box; `None` when the
+    base had none). A caller that chose no tenant (`tenant_id=None`: a tool, a test) gets the
+    record's, which is the sole authority for the stamp. The record is created HERE when absent — the one place a runs base gets
+    its tenant choice, so an invocation refused earlier leaves none on disk — and then held to
+    both: a record naming another tenant (`Run.for_tenant`), or one that is no longer the
+    record the caller read (rewritten, or deleted and re-created with a new base world), is
+    refused, never stamped over a run using the settings the caller resolved.
 
     Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
     link the box may have planted under a reused id, and "resume" needs no ordering of checks:
@@ -116,9 +120,18 @@ def materialize_run_dir(
     # parse, or a write that fails (an alias planted at its name, a directory squatting it),
     # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
     # run — a run with a forged tenant is worse than no run (decision 4/7).
-    tenant_record = (  # lint-default: ok — DI seam owning its default: `run.py` hands the record it chose the run's tenant by; a direct caller (a test, a tool) has none and reads it here
-        tenant_record if tenant_record is not None else _tenant.ensure_tenant(runs_base))
-    run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
+    if tenant_id is None:
+        tenant_record = _tenant.ensure_tenant(runs_base)
+        chosen = tenant_record.tenant_id
+    else:
+        tenant_record = _tenant.ensure_tenant(runs_base, tenant_id=tenant_id)
+        chosen = tenant_id
+    if expected_record is not None and tenant_record != expected_record:
+        raise ValueError(
+            f"the tenant record at {_tenant.record_path(runs_base)} changed after this run's "
+            f"tenant was chosen from it (read {expected_record}, now {tenant_record}) — the "
+            "run would be stamped with a record its settings were not resolved from")
+    run = Run.for_tenant(chosen, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
 

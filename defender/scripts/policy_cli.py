@@ -99,19 +99,17 @@ def _definition(
     if role is not AgentRole.GATHER:
         return defn
     from defender._tenants import TenantDirError, entry_tenant
+    from defender.runtime import run_tenant as run_tenant_mod
     from defender.runtime.driver import gather_def_for
-    from defender.runtime.verb_dispositions import (
-        DispositionError,
-        require_gather_query,
-        run_grants,
-    )
 
+    refused: tuple[type[Exception], ...] = (TenantDirError, *run_tenant_mod.refusals())
     try:
-        grants = run_grants(entry_tenant(defender_dir, tenants_root, tenant).settings)
-        require_gather_query(grants)
-    except (TenantDirError, DispositionError) as refusal:
+        run = run_tenant_mod.resolve_run_tenant(
+            entry_tenant(defender_dir, tenants_root, tenant), defender_dir=defender_dir,
+            dispatches_lead_zero=False)
+    except refused as refusal:
         sys.exit(f"defender-policy: {refusal}")
-    return gather_def_for(grants.gather)
+    return gather_def_for(run.grants.gather)
 
 
 def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[str]:

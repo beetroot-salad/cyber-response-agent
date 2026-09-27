@@ -13,6 +13,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
+from defender._paths import process_defender_dir  # noqa: E402
 from defender._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
@@ -67,11 +68,6 @@ class Report:
         print(f"\n{len(self.rows)} checks: "
               f"{len(self.rows) - fails - warns} pass, {warns} warn, {fails} fail")
         raise SystemExit(1 if fails else 0)
-
-
-def _defender_dir() -> Path:
-    env = os.environ.get("DEFENDER_DIR")
-    return Path(env) if env else Path(__file__).resolve().parents[2]
 
 
 def check_registry(report: Report, defender: Path, system: str):
@@ -259,7 +255,7 @@ def main() -> None:
     add_tenant_arguments(ap, reads="holds the connected system's config.env")
     args = ap.parse_args()
     system = args.system
-    defender = _defender_dir()
+    defender = process_defender_dir()
     os.environ.setdefault("DEFENDER_DIR", str(defender))
 
     print(f"validate_scaffold: {system}\n")

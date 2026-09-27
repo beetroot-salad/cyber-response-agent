@@ -104,6 +104,36 @@ def test_a_query_verb_is_handed_the_runs_tenant_settings_folder(tmp_path):
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
 
 
+def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_host_path(
+        tmp_path):
+    """The settings half is host-only (#1106): a real adapter's `ConfigFault` for a missing
+    `config.env` carries the resolved path of the run's tenant folder, and the query tool's
+    model-visible channels (the gather model's tool result, the queries table's failure digest)
+    must name the folder, not locate it. The control is the lane test above: the same verb,
+    configured, answers."""
+    tenant, grants = _tenant(tmp_path, T.TABLE_A, "fault")
+    (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
+    transport = T.mod("scripts.adapters._stub_transport")
+
+    def get_host(ctx, *, host: str = "web-1") -> dict:
+        return transport.load_config(ctx, "cmdb", "CMDB")
+
+    run_dir, gather = _run(
+        tmp_path, tenant=tenant, grants=grants, system="cmdb",
+        verbs=FakeVerbs({"cmdb": {"get-host": get_host}}), run_id="q1106-fault",
+        gather_turns=[
+            Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
+                                        "params": {"host": "web-1"}})]),
+            DONE,
+        ])
+    after = "\n".join(gather.seen[1:])
+    assert "config file not found: the tenant's settings/systems/cmdb/config.env" in after, after
+    table = "\n".join(p.read_text(encoding="utf-8") for p in run_dir.rglob("*.jsonl"))
+    tenants_root = tenant.settings.parent.parent
+    for text in (after, table):
+        assert str(tenants_root) not in text, text
+
+
 @pytest.mark.parametrize(("own", "system", "reached", "withheld"), [
     ("A", "cmdb", ("cmdb", "elastic"), ("identity", "threat-intel")),
     ("B", "identity", ("identity", "threat-intel"), ("cmdb", "elastic")),

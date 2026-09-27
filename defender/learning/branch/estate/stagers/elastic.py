@@ -94,7 +94,7 @@ def configured_patterns(settings_dir: Path) -> tuple[str, ...]:
     """The two corpus patterns a tenant configures, in a stable order.
 
     `settings_dir` is that tenant's `settings/` folder (#1106), handed in by the caller — the
-    launcher resolved it from the source stamp, and a serving call carries it on its verb
+    launcher resolved it from the source's runs-base record, and a serving call carries it on its verb
     context. Nothing here finds a folder for itself.
 
     ONE reading of the pair the whole design keys on: the overlay-key gate, the staging

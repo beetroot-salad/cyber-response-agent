@@ -234,6 +234,41 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
     assert "_tenant.json" in text, text
 
 
+def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_questioner(
+        tmp_path, capsys):
+    """The launcher applies the run start's content rules to the episode's tenant: a table
+    that loads but grants gather only `health-check` is refused before the questioner is paid,
+    the review replays or any sibling starts — not by every sibling afterwards. The control is
+    `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant`."""
+    root = tmp_path / "tenants"
+    T.plant_tenant(root, "acme", table=(
+        "dispositions:\n"
+        "  cmdb:\n"
+        "    get-host: {roles: [], reason: \"withheld in this fixture\"}\n"
+        "    health-check: {roles: [gather]}\n"),
+        configs=T.config_texts("acme", events_index=P.EVENTS_PATTERN,
+                               alerts_index=P.ALERTS_PATTERN))
+    questioner = P.FakeAgent(P.family_doc(), P.world_doc("b"), P.world_doc("c"))
+    base, src = P.runs_base(tmp_path)
+    P.source_stamp(src, tenant_id="acme")
+    _tenant = T.mod("_tenant")
+    _tenant.record_path(base).unlink()
+    _tenant.ensure_tenant(base, tenant_id="acme")
+    spawn = SpawnRecorder()
+    with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
+        T.mod("learning.branch.cli").main(
+            [str(src), str(P.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
+             "--tenants-root", str(root)],
+            spawn=spawn, door=P.FakeDoor(), questioner=questioner,
+            adapters=P.FakeAdapters(), invoke=P.FakeAgent(*["same"] * 24),
+            preflight=P.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
+    text = f"{refused.value} {capsys.readouterr().err}"
+    assert "query" in text, text
+    assert "verb-grants.yaml" in text, text
+    assert spawn.launches == []
+    assert questioner.calls == 0, "the questioner was paid for before the refusal"
+
+
 def test_a_source_stamp_naming_a_tenant_absent_from_the_injected_root_refuses_before_any_sibling(
         tmp_path, capsys):
     """The stamp names `ghost`; the injected root holds only `acme` (and the checkout's own root

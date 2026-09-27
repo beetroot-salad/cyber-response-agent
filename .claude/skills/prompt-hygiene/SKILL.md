@@ -1,6 +1,6 @@
 ---
 name: prompt-hygiene
-description: "Audit a SKILL.md, agent prompt, or knowledge doc against the recurring prompt-hygiene corrections from past sessions. Flag violations and propose fixes. Use when editing files under defender/ — defender/SKILL.md, defender/skills/, or defender/knowledge/."
+description: "Audit a SKILL.md, agent prompt, or knowledge doc against the recurring prompt-hygiene corrections from past sessions. Flag violations and propose fixes. Use when editing defender/SKILL.md, defender/skills/, or a tenant's model-facing knowledge under knowledge/tenants/<id>/agent/ or knowledge/tenant-template/agent/."
 ---
 
 # Prompt Hygiene Audit

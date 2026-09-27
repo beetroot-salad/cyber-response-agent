@@ -344,6 +344,30 @@ def test_a_sibling_resumes_a_pre_1106_manifest_through_its_seeded_tenant_record(
     assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
 
 
+def test_a_sibling_on_an_unseeded_runs_base_is_refused_not_run_as_the_bootstrap_tenant(
+        tmp_path, monkeypatch):
+    """A sibling's tenant is the episode's, which only the branching launcher's seeded record
+    carries. Resumed by hand on a runs base nobody seeded, the sibling must refuse — naming the
+    record — rather than create a `playground` record and run that tenant's settings against the
+    episode's staged corpus. Nothing is written. The control is the seeded resume above."""
+    from defender import _tenant
+
+    base, src = T.runs_base(tmp_path)
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    unseeded = tmp_path / "unseeded-runs"
+    unseeded.mkdir()
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(unseeded))
+    lifecycle = _Recorder([])
+    with pytest.raises(SystemExit) as refused:
+        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
+                     "--tenants-root", str(T1106.TENANTS_ROOT)],
+                    lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
+    assert "seeded by the branching launcher" in str(refused.value), refused.value
+    assert lifecycle.order == []
+    assert not _tenant.record_path(unseeded).exists()
+    assert list(unseeded.iterdir()) == []
+
+
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     """Every site that compares a world reads ONE spelling of the world token: the alias name's
     head, the world ledger's filename, the ledger rows a sibling writes, and the registry's own

@@ -175,9 +175,11 @@ def test_a_legacy_default_record_refuses_even_when_a_default_folder_exists(world
 
 
 def test_a_fresh_runs_base_runs_as_playground_and_refuses_on_its_missing_mapping(world, capsys):
-    """O4's second named case, reached through D4's bridge: a FRESH runs base mints
+    """O4's second named case, reached through D4's bridge: a FRESH runs base runs as
     `playground`, the injected root's playground lacks `mapping.yaml`, and the run refuses
-    naming that file — rather than reaching the ticket screen's quiet "serve no comments"."""
+    naming that file — rather than reaching the ticket screen's quiet "serve no comments". And
+    refused, it leaves NO tenant record: a base gets its tenant choice only when a run dir is
+    actually built there (the run-dir builder creates it), never from a run that stopped."""
     T.plant_tenant(world["root"], T.PLAYGROUND_ID,
                    omit=("systems/case-history/mapping.yaml",))
     base = world["runs_base"](None)
@@ -185,7 +187,7 @@ def test_a_fresh_runs_base_runs_as_playground_and_refuses_on_its_missing_mapping
     assert _names(
         text, world["root"] / T.PLAYGROUND_ID / "settings" / "systems" / "case-history"
         / "mapping.yaml"), text
-    assert T.mod("_tenant").read_tenant(base).tenant_id == T.PLAYGROUND_ID
+    assert not T.mod("_tenant").record_path(base).exists(), "a refused run minted a record"
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
