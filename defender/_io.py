@@ -5,14 +5,15 @@ import dataclasses
 import errno
 import fcntl
 import json
+import math
 import os
 import re
 import secrets
 import stat
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, Literal
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -575,6 +576,39 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
         else:
             rows.append(row)
     return rows, unreadable
+
+
+def json_safe(value: Any, *, non_finite: Literal["text", "null"],
+              max_depth: int | None = None) -> Any:
+    """`value` as something `json.dumps(allow_nan=False)` always accepts: text keys, lists for
+    every sequence (a set sorted, so its order is stable), text for anything JSON has no type
+    for, and finite numbers.
+
+    THE ONE traversal (#1117); a caller states only what JSON forbids outright — a non-finite
+    float — and must say which way it goes: `"text"` keeps it, spelled as the Protocol Buffers
+    JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a reader diagnosing;
+    `"null"` makes it missing, for a reader computing over the field.
+    `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
+    def walk(v: Any, depth: int) -> Any:
+        if v is None or isinstance(v, (bool, int, str)):
+            return v
+        if isinstance(v, float):
+            if math.isfinite(v):
+                return v
+            if non_finite == "null":
+                return None
+            return "NaN" if math.isnan(v) else "Infinity" if v > 0 else "-Infinity"
+        if max_depth is not None and depth >= max_depth:
+            return repr(v)
+        if isinstance(v, Mapping):
+            return {k if isinstance(k, str) else str(k): walk(x, depth + 1)
+                    for k, x in v.items()}
+        if isinstance(v, (set, frozenset)):
+            return [walk(x, depth + 1) for x in sorted(v, key=str)]
+        if isinstance(v, (list, tuple)):
+            return [walk(x, depth + 1) for x in v]
+        return str(v)
+    return walk(value, 0)
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:

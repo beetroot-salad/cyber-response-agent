@@ -19,7 +19,6 @@ import contextvars
 import datetime as _dt
 import json
 import logging
-import math
 import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -27,6 +26,7 @@ from types import MappingProxyType, ModuleType
 from typing import Any
 
 from defender._env import env_choice, env_str
+from defender._io import json_safe
 
 #: Emitted on every line, `null` when unbound — one shape per line keeps log queries simple.
 ALWAYS_FIELDS = ("run_id", "tenant_id")
@@ -118,23 +118,6 @@ def _logger_name(name: str) -> str:
     return name
 
 
-def _jsonable(value: Any, depth: int = 0) -> Any:
-    """`value` as something `json.dumps(allow_nan=False)` always accepts, so a line is never lost
-    to what a caller put in `extra=` or the context."""
-    if value is None or isinstance(value, (bool, int, str)):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else repr(value)
-    if depth >= _MAX_DEPTH:
-        return repr(value)
-    if isinstance(value, Mapping):
-        return {k if isinstance(k, str) else repr(k): _jsonable(v, depth + 1)
-                for k, v in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_jsonable(v, depth + 1) for v in value]
-    return str(value)
-
-
 def record_fields(record: logging.LogRecord) -> dict[str, Any]:
     """A record as fields; both formatters render exactly this.
 
@@ -150,7 +133,11 @@ def record_fields(record: logging.LogRecord) -> dict[str, Any]:
     fields: dict[str, Any] = {**dict.fromkeys(ALWAYS_FIELDS), **current_context()}
     fields.update((k, v) for k, v in vars(record).items()
                   if k not in _RECORD_ATTRS and k not in BIND_ONLY_FIELDS)
-    out.update((k, _jsonable(v)) for k, v in fields.items() if k not in CORE_FIELDS)
+    # Made JSON-safe BEFORE encoding, so encoding cannot fail and a line is never lost to what
+    # one caller put in `extra=`. Non-finite stays text — a log is read to diagnose, and
+    # "infinite" must not read as "missing"; the depth cap because `extra=` takes any object.
+    out.update((k, json_safe(v, non_finite="text", max_depth=_MAX_DEPTH))
+               for k, v in fields.items() if k not in CORE_FIELDS)
     if record.exc_info:
         out["exception"] = _TRACES.formatException(record.exc_info)
     if record.stack_info:

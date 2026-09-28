@@ -177,7 +177,9 @@ def _strict(raw: str) -> dict:
 
 @pytest.mark.parametrize(("value", "as_json"), [
     ({(1, 2): "tuple key"}, {"(1, 2)": "tuple key"}),
-    (float("nan"), "nan"),
+    (float("nan"), "NaN"),
+    (float("inf"), "Infinity"),
+    (float("-inf"), "-Infinity"),
     (Path("/p"), "/p"),
 ])
 def test_a_value_json_cannot_hold_is_made_holdable_before_encoding(emit, value, as_json):

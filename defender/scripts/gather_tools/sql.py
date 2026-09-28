@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import shutil
 import sys
@@ -14,7 +13,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import use_utf8_stdio
+from defender._io import json_safe, use_utf8_stdio
 
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
@@ -30,18 +29,6 @@ _MAX_OBJECT_SIZE = 1 << 30
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.
 _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
-
-
-def _json_safe(value):
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(v) for v in value]
-    return value
-
-
 
 
 def _top_level_columns(con) -> list[str]:
@@ -218,7 +205,9 @@ def _run(sql: str) -> int:
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
         columns, renamed = _disambiguate_columns(columns)
-        rows = [_json_safe(dict(zip(columns, record, strict=True)))
+        # `null` for a non-finite float: the model computes over these rows, and a column that
+        # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
+        rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null")
                 for record in cursor.fetchall()]
         json.dump(rows, sys.stdout, default=str, allow_nan=False)
         sys.stdout.write("\n")

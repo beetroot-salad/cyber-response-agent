@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import math
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -22,27 +21,14 @@ if __name__ == "__main__":
 
 from defender._clock import z_seconds
 from defender._corpus import iter_lessons
-from defender._io import use_utf8_stdio
+from defender._io import json_safe, use_utf8_stdio
 
 
 def _json_safe(obj):
-    if isinstance(obj, dict):
-        # Keys too: YAML can type a key as `date` or `bytes`, which `json.dumps` rejects and
-        # would abort the whole build.
-        return {(k if isinstance(k, str) else str(_json_safe(k))): _json_safe(v)
-                for k, v in obj.items()}
-    if isinstance(obj, (set, frozenset)):
-        return [_json_safe(v) for v in sorted(obj, key=str)]
-    if isinstance(obj, (list, tuple)):
-        return [_json_safe(v) for v in obj]
-    if isinstance(obj, (_dt.date, _dt.datetime)):
-        return obj.isoformat()
-    if isinstance(obj, float) and not math.isfinite(obj):
-        # `json.dumps` emits bare `NaN`/`Infinity`, which strict JSON readers reject.
-        return None
-    if obj is None or isinstance(obj, (str, bool, int, float)):
-        return obj
-    return str(obj)
+    # `null` for a non-finite float: `lessons.json` is data a page computes over, and bare
+    # `NaN` from one lesson's YAML `.nan` would poison it for every strict reader. The rest —
+    # dates and `!!binary` as keys or values, sets — is the shared rule.
+    return json_safe(obj, non_finite="null")
 
 
 def _normalize(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import shlex
 import sys
@@ -15,7 +14,7 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
+from defender._io import guarded_mkdir, json_safe, read_jsonl_rows, write_guarded
 from defender._model import model
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
@@ -127,13 +126,10 @@ def _request_key(system: Any, verb: Any, params: Any) -> str:
 
 
 def _json_safe_params(value: Any) -> Any:
-    if isinstance(value, float) and not math.isfinite(value):
-        return repr(value)
-    if isinstance(value, dict):
-        return {k: _json_safe_params(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe_params(v) for v in value]
-    return value
+    # Text for a non-finite float: the record is what a reader diagnoses a query from, and a
+    # `threshold` of infinity is not a missing one. It is also the repeat key's input
+    # (`_request_key`), so what this returns is the identity two calls are compared on.
+    return json_safe(value, non_finite="text")
 
 
 def lead_rows(run_dir: Path, lead: str) -> list[dict]:
