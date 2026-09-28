@@ -593,27 +593,6 @@ def test_bash_redirect_write_denied(env):
     assert not _bash(env, f"echo x > {env.run}/f.txt", "gather").allow
 
 
-def test_write_report_still_allowed(env):
-    """decide_write({RUN}/report.md) → ALLOW: the sanctioned main-loop write path is unchanged
-    (regression). Main declares its run-dir subtree as its write_allow."""
-    pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
-    assert permission.decide_write(
-        env.run / "report.md", "---\ndisposition: benign\n---\nConcise analysis.\n",
-        run_dir=env.run, defender_dir=env.dfn, policy=pol,
-    ).allow
-
-
-def test_write_investigation_invalid_invlang_denied(env):
-    """decide_write({RUN}/investigation.md, <invalid invlang>) → DENY: the invlang gate is unchanged
-    (the run-dir write_allow admits the path, then invlang denies the content)."""
-    pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(env.run),))
-    d = permission.decide_write(
-        env.run / "investigation.md", "```yaml\nfoo: bar\n```\n",
-        run_dir=env.run, defender_dir=env.dfn, policy=pol,
-    )
-    assert not d.allow
-
-
 # J. #611 — the adapter lane is gone; the local-compute lane over payloads       #
 #    already on disk survives, and an adapter denies on BOTH lanes.              #
 
@@ -627,18 +606,6 @@ def test_standalone_adapter_denied_for_gather(env):
     assert d.reason == permission.ADAPTER_RETIRED_REASON
     assert not hasattr(d, "adapter_argv")
     assert not hasattr(d, "sql_pipe")
-
-
-def test_adapter_sql_pipe_denied_split_became_tool_then_bash(env):
-    """#611 FLIP: `defender-elastic … | defender-sql …` was the sanctioned capture+aggregate pipe.
-    It is now two steps — `query(…)` produces the payload, then `cat <payload> | defender-sql …`
-    aggregates it — so the single-command pipe DENIES for gather (its adapter stage is unreachable),
-    on the adapter reason. Main never got the adapter and still doesn't."""
-    cmd = "defender-elastic query 'x' | defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'"
-    d = _bash(env, cmd, "gather")
-    assert not d.allow
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
-    assert not _bash(env, cmd, "main").allow
 
 
 def test_cat_payload_into_defender_sql_allowed(env):

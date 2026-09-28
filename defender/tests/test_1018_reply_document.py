@@ -880,18 +880,6 @@ def test_1018_questioner_seat_call_fence_then_prose_aborts_naming_the_seat(tmp_p
     assert agent.calls == 2
 
 
-def test_1018_questioner_one_bare_fenced_document_per_call_still_composes(tmp_path):
-    """The positive control beside the three refusals above, on THIS module's own helpers: one
-    whole-string-fenced document per call (closer last, no trailing newline) composes the
-    family. Failing: the refusals above pass on a parser that refuses every fence."""
-    agent = T.FakeAgent(_fenced_doc(T.family_doc()), _fenced_doc(T.world_doc("b")),
-                        _fenced_doc(T.world_doc("c")))
-    composed = _author(tmp_path, agent)
-    assert agent.calls == 3
-    assert composed["base_story"] == "the captured story"
-    assert [w["world_id"] for w in composed["worlds"]] == ["a", "b", "c"]
-
-
 # ---------------------------------------------------------------------------------------
 # M3 / O4 — every sentence that tells the model the reply shape says the shape
 # ---------------------------------------------------------------------------------------

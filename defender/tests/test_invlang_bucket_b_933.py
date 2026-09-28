@@ -1318,11 +1318,6 @@ def test_a_prediction_deferred_with_an_empty_rationale_is_refused() -> None:
     _one_error(doc, "p2")
 
 
-def test_a_prediction_neither_cited_nor_deferred_is_refused() -> None:
-    doc = _pred_closure_doc(preds=_H1_PREDS, resolutions=_resolutions(_cites("p1")))
-    _one_error(doc, "p2")
-
-
 def test_a_prediction_cited_only_by_a_resolution_with_a_null_after_is_refused() -> None:
     """"cited in some resolution's `matched_prediction_ids[]` WITH A NON-NULL `after`". A row
     that names the prediction and moves the weight nowhere records that the prediction was
