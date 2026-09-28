@@ -282,6 +282,13 @@ def test_922_bind_is_still_the_sole_seam_for_every_registered_role(tmp_path):
         # whose capability is switched on past `AGENTS` disagrees with its own grant when bound
         # from the static bits, and refusing it here would file a live role as a carve-out.
         defn = dataclasses.replace(defn, tools=effective_tools_for(defn))
+        # #1106 M4: a verb-bearing role's grant is a RUN's, projected from its tenant's table —
+        # the registered definition carries none. Bound here the way a run binds it, so the role
+        # stays under the front-door rule rather than filing as a carve-out.
+        if (defn.tools.query or defn.tools.list_verbs) and not defn.verb_grant.entries:
+            from defender.tests import _tenants1106
+
+            defn = dataclasses.replace(defn, verb_grant=_tenants1106.playground_grants().gather)
         try:
             deps = bind(defn, run_dir, defender_dir=defender_dir, scope=scope)
         except (ValueError, TypeError):

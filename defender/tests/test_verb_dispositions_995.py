@@ -42,10 +42,14 @@ from defender.tests._dispositions995 import (
     write_table,
 )
 from defender.tests._repo import HOSTILE_NAMES, plant_named_dirs, seed_repo
+from defender.tests import _tenants1106 as T1106
 
 REPO_ROOT = PATHS.repo_root
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
+#: The committed tenant's settings folder — where the shipped table lives since #1106 moved it
+#: out of `defender/knowledge/environment/` (the repo-root `knowledge/tenants/playground/`).
+SETTINGS = T1106.PLAYGROUND_SETTINGS
 
 #: A minimal well-formed row, for tests whose subject is some OTHER row's malformation.
 OK = {"roles": ["gather"]}
@@ -129,7 +133,7 @@ def test_the_shipped_table_is_total_over_the_real_tree():
     from defender.learning.leads.declared_systems import declared_systems
 
     systems = tuple(sorted(declared_systems(REPO_ROOT)))
-    gaps = census_gaps(_walk(DEFENDER, systems), load_dispositions(dispositions_path(DEFENDER)))
+    gaps = census_gaps(_walk(DEFENDER, systems), load_dispositions(dispositions_path(SETTINGS)))
     assert not gaps.undecided, f"shipped systems with no disposition: {sorted(gaps.undecided)}"
     assert not gaps.phantom, f"dispositions naming no declared verb: {sorted(gaps.phantom)}"
     assert not gaps.unreasoned, f"withheld with no reason: {sorted(gaps.unreasoned)}"
@@ -153,7 +157,7 @@ def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
     victim = "host-state"
     deleted = {(victim, v) for v in walked[victim]}
 
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     survivors = tuple(r for r in rows if r.system != victim)
     assert len(survivors) < len(rows), "the fixture deleted nothing"
 
@@ -175,7 +179,7 @@ def test_the_census_is_a_function_of_the_row_values_alone():
 
     systems = tuple(sorted(declared_systems(REPO_ROOT)))
     walked = _walk(DEFENDER, systems)
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
 
     assert type(rows) is tuple, (
         f"the loader returned {type(rows).__name__}, not a plain tuple — a subclass can carry "
@@ -245,7 +249,7 @@ def test_the_shipped_table_loads_without_a_health_check_warning():
     """The real table against the rule. This is the state the code rule used to guarantee."""
     with warnings.catch_warnings():
         warnings.simplefilter("error", DispositionWarning)
-        load_dispositions(dispositions_path(DEFENDER))
+        load_dispositions(dispositions_path(SETTINGS))
 
 
 def test_the_census_gate_says_nothing_about_health_check():
@@ -255,8 +259,10 @@ def test_the_census_gate_says_nothing_about_health_check():
     gate walks a tree, so it only ever runs here, which is where the mistake cannot be made.
     Re-adding it there would make the shipped repo the only place the rule is enforced."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
-    write_table(
-        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
+    # #1106 M7: the gate walks every tenant folder plus the template, so the table is planted
+    # where it now reads it (with the lead-zero config and catalog template M7 also checks).
+    T1106.plant_census_settings(
+        repo,
         {
             ("alpha", "lookup"): OK,
             ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
@@ -279,9 +285,8 @@ def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     point does not propagate it — probed by running the gate as CI runs it, against a planted
     repo whose table is silent about a system that repo declares."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup", "beta": "lookup"})
-    write_table(
-        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
-        {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
+    T1106.plant_census_settings(
+        repo, {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
     )
     seed_repo(repo, add="-A", message="table")
     gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
@@ -313,7 +318,7 @@ def test_the_lint_gate_is_clean_on_the_real_tree_and_says_what_it_covered():
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
 
     out = proc.stdout + proc.stderr
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     why = ("the gate reported success without saying what it covered, so it cannot be "
            f"distinguished from one that checked nothing: {out}")
     assert str(len(rows)) in out, why
@@ -347,9 +352,8 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
     `declared_systems`."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
     plant_named_dirs(repo / "defender" / "skills", HOSTILE_NAMES)
-    write_table(
-        repo / "defender" / "knowledge" / "environment" / "verb-grants.yaml",
-        {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
+    T1106.plant_census_settings(
+        repo, {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
     )
     seed_repo(repo, add="-A", message="hostile")
     from defender.learning.leads.declared_systems import declared_systems
@@ -408,7 +412,7 @@ def test_a_withheld_pair_with_a_reason_loads():
 def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
     """Live, on the deployment. Checked separately from totality because a table can be total
     and still withhold three verbs for no stated cause."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     withheld = {(r.system, r.verb): r for r in rows if not r.roles}
     assert set(withheld) == set(WITHHELD_CENSUS), (
         "the set of pairs granted to nobody changed; if that is intended, update "
@@ -439,7 +443,7 @@ def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     role the projection is ASKED for, and an empty grant is indistinguishable at every reader
     from a deliberate withholding: every verb then decides UNDECLARED with "this role holds no
     grant reaching it", which is #995's original symptom applied product-wide."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     with pytest.raises(DispositionError) as caught:
         grant_for("gathr", rows)
     assert "gathr" in str(caught.value), "the refusal must name the role it was handed"
@@ -466,7 +470,7 @@ def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
     those tests never touch, and passed both. This closes it by construction: the projection
     is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
     breaks the equality."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
         {(r.system, r.verb) for r in rows if role in r.roles}
 
@@ -479,7 +483,7 @@ def test_the_projected_gather_grant_is_exactly_the_historical_census():
     """The refactor's whole risk is that it quietly widens or narrows access. Compared against
     a census written independently in `_dispositions995.py` from the grants as they stood
     before the move, not against the file under test."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     granted = {(s, v) for s, v, _ in grant_for("gather", rows).entries}
     assert granted == set(GATHER_CENSUS), (
         f"gained={sorted(granted - GATHER_CENSUS)} lost={sorted(GATHER_CENSUS - granted)}"
@@ -492,20 +496,20 @@ def test_the_shipped_definitions_carry_the_projected_grants():
     the projection, so a leftover hardcoded literal that happens to agree today would still be
     caught the first time the table changes — and is caught now by the phantom/undecided
     gates, which a literal cannot satisfy."""
-    from defender.runtime.driver import GATHER_DEF
-    from defender.runtime.lead_zero import CORRELATION_GRANT
-
-    rows = load_dispositions(dispositions_path(DEFENDER))
-    assert set(GATHER_DEF.verb_grant.entries) == set(grant_for("gather", rows).entries)
+    # #1106 M4: the grants are per RUN, projected from the run's tenant table — no longer
+    # module constants on `GATHER_DEF` / `lead_zero`. The wiring is `run_grants`.
+    grants = T1106.run_grants(SETTINGS)
+    rows = load_dispositions(dispositions_path(SETTINGS))
+    assert set(grants.gather.entries) == set(grant_for("gather", rows).entries)
     # The second grant the table projects (#999): the turn-zero correlation lead's.
-    assert set(CORRELATION_GRANT.entries) == set(grant_for("lead-zero-correlation", rows).entries)
+    assert set(grants.correlation.entries) == set(grant_for("lead-zero-correlation", rows).entries)
 
 
 def test_every_projected_pair_survives_registry_construction():
     """The existing cross-check, still holding after the move: a grant naming a verb no
     adapter declares raises at construction. This is the positive control proving the
     projection produces real pairs rather than an empty grant that trivially passes."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     grant = grant_for("gather", rows)
     assert grant.entries, "an empty grant would pass every phantom check vacuously"
     ModuleVerbRegistry(read_roster(ADAPTERS), grant)  # raises GrantError if any pair is phantom
@@ -706,7 +710,7 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
     # And the oracle agrees the SHIPPED table is clean, so the agreement above is not two
     # things both refusing everything.
     yaml.load(
-        dispositions_path(DEFENDER).read_text(encoding="utf-8"), Loader=_NoDupes,
+        dispositions_path(SETTINGS).read_text(encoding="utf-8"), Loader=_NoDupes,
     )  # noqa: S506
 
 
@@ -771,7 +775,7 @@ def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
 def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_one():
     """The third case, which the two above do not cover between them: an unreal verb on a
     system the grant DOES reach. It must not borrow the ungranted-system wording either."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     near_miss = reg.decide("cmdb", "list-hostz")
     assert near_miss.outcome == "UNDECLARED"
@@ -780,7 +784,7 @@ def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_on
 
 def test_a_withheld_verb_on_a_granted_system_is_still_denied():
     """Unchanged behaviour, pinned so the O2 fix does not reshuffle the existing taxonomy."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("cmdb", "list-roles").outcome == "DENIED"
 
@@ -788,7 +792,7 @@ def test_a_withheld_verb_on_a_granted_system_is_still_denied():
 def test_an_unknown_system_entirely_is_still_undeclared():
     """The boundary of the O2 change: a system with no adapter at all must not be reported as
     'denied', which would tell a caller it exists."""
-    rows = load_dispositions(dispositions_path(DEFENDER))
+    rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("nosuchsystem", "anything").outcome == "UNDECLARED"
 
@@ -893,7 +897,7 @@ def test_the_table_loads_from_a_read_only_file():
     """Read-only by construction, not by convention. If any load path writes — a cache, a
     normalisation, an 'autoheal' — this raises instead of silently succeeding on a tree where
     the file happens to be writable."""
-    src = dispositions_path(DEFENDER).read_bytes()
+    src = dispositions_path(SETTINGS).read_bytes()
     ro = _tmp_dir() / "verb-grants.yaml"
     ro.write_bytes(src)
     ro.chmod(0o444)

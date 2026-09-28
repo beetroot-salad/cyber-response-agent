@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import replace
@@ -244,7 +245,7 @@ def run_curator_stage(
     wiring: StageWiring,
     ctx: StageContext,
     corpus_dir: Path,
-    log: Callable[[str], None],
+    log: logging.Logger,
     source_key: Callable[..., object] = config.source_first_party_key,
     run_author: Callable[..., str] = _run_curator_pydantic,
 ) -> dict:
@@ -268,7 +269,7 @@ def run_curator_stage(
             "curator stage needs a wiring built by StageWiring.for_batch: its log line and "
             "its AuthorErrors name the same batch its trace file is keyed on"
         )
-    log(
+    log.info(
         f"spawn curator {batch_id} in-process (model={wiring.model}, "
         f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
     )
@@ -342,7 +343,7 @@ def run_repair_stage(
     wiring: StageWiring,
     ctx: StageContext,
     corpus_dir: Path,
-    log: Callable[[str], None],
+    log: logging.Logger,
     run_repair: Callable[..., str] = _run_repair_pydantic,
 ) -> dict:
     """M4's one bounded repair spawn: same shape as `run_curator_stage`, minus the
@@ -353,7 +354,7 @@ def run_repair_stage(
         raise ValueError(
             "repair stage needs a wiring built by StageWiring.for_batch"
         )
-    log(
+    log.info(
         f"spawn repair {batch_id} in-process (model={wiring.model}, "
         f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
     )

@@ -41,7 +41,8 @@ from pydantic_ai.messages import (  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.runtime import (  # noqa: E402
     circuit_breaker,
@@ -149,7 +150,7 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
 
     return asyncio.run(tools_gather._run_gather(
         deps, factory, ceiling, GatherRequest(LEAD, "elastic", "measure this lead", ("auth",)),
-        GATHER_DEF.verb_grant,
+        T1106.playground_grants().gather,
         (lambda agent_id, reason: stamps.append((agent_id, reason))) if stamps is not None
         else None,
         catalog=None,
@@ -207,7 +208,7 @@ def test_a_bound_gather_deps_carries_no_stop_record(tmp_path):
     such deps unwinds as the exception it always was. `_run_gather` is the one place that
     makes one. The ceiling is not a deps field at all — it is the run's `UsageLimits`."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    deps = bind(GATHER_DEF, run_dir, defender_dir=DEFENDER)
+    deps = bind(T1106.playground_gather_def(), run_dir, defender_dir=DEFENDER)
     assert deps.stop is None
     assert not hasattr(deps, "request_limit")
 

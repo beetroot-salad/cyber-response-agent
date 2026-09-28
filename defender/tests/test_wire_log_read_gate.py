@@ -41,7 +41,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.agents import CORPUS_AUTHOR_DEF, GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.agents import CORPUS_AUTHOR_DEF, MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106  # noqa: E402
 from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -74,7 +75,8 @@ def env(tmp_path):
     return SimpleNamespace(
         run=run, dfn=dfn, wire=wire,
         main=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn),
-        gather=compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn),
+        gather=compile_policy_for(
+            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn),
     )
 
 

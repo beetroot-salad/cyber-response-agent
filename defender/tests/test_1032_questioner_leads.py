@@ -77,10 +77,10 @@ from defender.tests.test_1017_row_schema import (
 #: and the marker checks below are made on that text, not on the render's return value.
 SECTION_TITLE = "The joined leads at the branch point"
 
-#: The stderr line `_joined_leads`'s `except` arm prints, as two fixed halves around the
+#: The line `_joined_leads`'s `except` arm logs, as two fixed halves around the
 #: exception's repr. Both halves are asserted, so a rewording that kept "could not join" and
 #: dropped what the questioner is then shown would not pass.
-LINE_HEAD = "[branch] could not join the source's leads ("
+LINE_HEAD = "could not join the source's leads ("
 LINE_TAIL = "); the questioner is shown none"
 
 

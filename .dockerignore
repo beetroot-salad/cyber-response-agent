@@ -20,6 +20,10 @@
 # JS deps
 **/node_modules
 
+# Tenant data (#1106): each tenant's settings and knowledge are deployment data, mounted into
+# the runtime container at run time and never baked into an image.
+knowledge/
+
 # Transient / large local state — never needed to build the agent
 defender/learning/runs
 defender/run-transcripts

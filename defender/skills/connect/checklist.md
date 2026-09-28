@@ -3,7 +3,7 @@
 The mechanical bar is automated. Run:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant}
 ```
 
 and fix every FAIL before going further. What it checks, and at which

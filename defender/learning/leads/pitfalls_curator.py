@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import logging
 import re
 import sys
 from collections.abc import Callable
@@ -24,7 +25,6 @@ from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
-    _log,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
@@ -41,6 +41,8 @@ from defender.learning.leads.path_validation import (
     SKILLS_REL,
     _is_system_execution_md,
 )
+
+_logger = logging.getLogger(__name__)
 
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
@@ -553,7 +555,7 @@ def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
             f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems; "
             "refusing to run the pitfalls lane against an empty declared set"
         )
-        _log(message)
+        _logger.error(message)
         raise LeadAuthorError(message)
     return systems
 
@@ -688,7 +690,7 @@ def run_pitfalls(
     threshold = _loop_config.pitfalls_threshold()
     if not _loop_persist.pitfalls_lane_is_open(records, threshold):
         if records:
-            _log(
+            _logger.info(
                 f"pitfalls queue below threshold (n={len(records)} distinct mistake(s) "
                 f"in {len(rows)} row(s), threshold={threshold}) — skipping curation"
             )
@@ -724,7 +726,7 @@ def run_pitfalls(
         # Named, never dropped quietly: a batch that silently loses a system reads exactly
         # like one that had nothing to teach it. Names the ONE source this lane consulted —
         # never the marker source, which this lane never reads.
-        _log(
+        _logger.warning(
             f"pitfalls: dropped {len(dropped)} queued system(s) not in the declared adapter "
             f"set ({repo_root / ADAPTERS_REL}): {dropped}"
         )
@@ -735,7 +737,7 @@ def run_pitfalls(
         _, dropped_ids, _ = _split_batch_by_membership(
             rows, batch_ids, kept, reducer_offered=reducer_offered, changed=[],
         )
-        _log(
+        _logger.warning(
             f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
             f"system the adapter set at {repo_root / ADAPTERS_REL} declares — dropping"
         )
@@ -750,7 +752,7 @@ def run_pitfalls(
     # same number and only one of them costs a pass over the records. The SURFACES are named
     # rather than counted: a reducer-only tick is systemless by construction, so a line built
     # from attributed system names alone would tell an operator nothing happened (FK-6).
-    _log(
+    _logger.info(
         f"pitfalls curation: {len(records)} distinct mistake(s) "
         f"({len(rows)} failure(s)) offered across {len(handoffs)} surface(s): "
         f"{[h['path'] for h in handoffs]}"
@@ -775,7 +777,7 @@ def run_pitfalls(
             _pitfalls_commit_message(changed),
         )
     else:
-        _log("pitfalls curator made no corpus edits (valid no-edit tick)")
+        _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # AFTER the commit, not before it: FK-7's criterion for a reducer row is the handoff AND
     # the confirmed edit, and `changed` is the only place the second conjunct exists.
     committed_ids, dropped_ids, held_ids = _split_batch_by_membership(
@@ -797,7 +799,7 @@ def run_pitfalls(
         on_curated(disposition)
         # Said as what this tick DID, not what it will consume: the rotation and the decline
         # bump belong to whoever judges the commit sound.
-        _log(
+        _logger.info(
             f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
             f"taught {len(changed)} surface(s): {changed}, "
             f"{len(set(dropped_ids))} unattributable row(s) rotated out; "
@@ -812,7 +814,7 @@ def run_pitfalls(
     rotated = set(committed_ids) | set(dropped_ids)
     # The retired rows LEFT on this tick, so they are not also "held for a later tick" — the
     # two numbers partition the held set rather than overlapping it.
-    _log(
+    _logger.info(
         f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
         f"taught {len(changed)} surface(s): {changed}, "
         f"rotated {len(rotated) + retired} row(s) out of the queue "

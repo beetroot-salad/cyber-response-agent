@@ -22,6 +22,7 @@ re-implementation.
 """
 from __future__ import annotations
 
+import logging
 import ast
 import os
 from dataclasses import replace
@@ -355,7 +356,7 @@ def _spawn_curator(**over):
         effort="low",
         request_limit=250,
         timeout=60,
-        log=lambda *a, **k: None,
+        log=logging.getLogger("defender.test"),
         source_key=lambda model, label=None: None,
         run_author=lambda *a, **kw: "",
     )

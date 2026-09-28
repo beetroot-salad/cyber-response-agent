@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import datetime as _dt
 import io
+import logging
 import os
 import shutil
 import sys
@@ -15,6 +16,8 @@ from _harness_util import init_git
 
 from defender import _git
 from defender._model import model
+
+_logger = logging.getLogger(__name__)
 
 
 HERE = Path(__file__).resolve().parent
@@ -127,12 +130,10 @@ def main() -> int:
         materialize(scenario, tmp)
         init_git(tmp)
         effort = os.environ.get("LEARNING_AUTHOR_EFFORT", "(default)")
-        print(f"[harness] running author against {scenario.name} effort={effort}",
-              file=sys.stderr)
+        _logger.info(f"running author against {scenario.name} effort={effort}")
         proc, wall = run_author(tmp)
         out = capture_results(tmp, scenario.name, proc, wall_seconds=wall)
-        print(f"[harness] rc={proc.returncode} wall={wall:.1f}s  results: {out}",
-              file=sys.stderr)
+        _logger.info(f"rc={proc.returncode} wall={wall:.1f}s  results: {out}")
         return proc.returncode
     finally:
         if not args.keep_tmp:
@@ -140,4 +141,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
     sys.exit(main())

@@ -357,7 +357,7 @@ class Run:
         if io.entry_present(_tenant.record_path(runs_base)):
             record = _tenant.read_tenant(runs_base, io=io)
             if record.tenant_id != tenant_id:
-                raise ValueError(
+                raise _tenant.TenantRecordMismatch(
                     f"tenant_id {tenant_id!r} disagrees with the tenant record at "
                     f"{runs_base} ({record.tenant_id!r}) — for_tenant is an enforcement "
                     "point, not a migration"

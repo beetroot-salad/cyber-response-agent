@@ -66,10 +66,10 @@ RULE_ID = "v2-sshd-success-after-failures"
 #: Not mirrored into the planted tree: the venv, caches, this suite, the replay goldens —
 #: nothing a run reads, and the first two are large.
 _NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e"})
-#: Copied for real rather than symlinked: the two trees a scenario edits. `skills/` holds
-#: the catalog, `knowledge/` the config (and the table, which the run does not read from the
-#: tree — it is process-level — so editing it here changes nothing, deliberately).
-_COPIED = frozenset({"skills", "knowledge"})
+#: Copied for real rather than symlinked: the tree a scenario edits. `skills/` holds the
+#: catalog. The config and the table are NOT in the tree since #1106 — they are the run's
+#: TENANT's (`drive(tenant=…, grants=…)`), so a scenario varying the config plants a tenant.
+_COPIED = frozenset({"skills"})
 
 ANCESTORS = [
     hit(ts="2026-05-25T15:26:10.000Z", user="dev.dana", ip="172.18.0.15", host="office-ws-1"),
@@ -80,7 +80,7 @@ ANCESTORS = [
 def planted_defender(root: Path) -> Path:
     """A defender tree the run can be pointed at whose CATALOG and CONFIG are editable: every
     top-level entry of this checkout symlinked (adapters, prompts, the package itself), and
-    `skills/` and `knowledge/` copied for real. `<root>/repo/defender`, so
+    `skills/` copied for real. `<root>/repo/defender`, so
     `defender_dir.parent` is a repo root the way the catalog's repo-relative locators expect."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
@@ -222,14 +222,16 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
 
 
 def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
-    """The id comes from the RUN's `lead-zero.yaml`, not from a process-cached read of this
-    checkout's (H1, left open by the first cut). The planted tree carries a SECOND
+    """The id comes from the RUN's `lead-zero.yaml` (its tenant's, #1106), not from a
+    process-cached read of this checkout's (H1, left open by the first cut). The planted tree
+    carries a SECOND
     established `alerts` template and a config naming it; the shipped template stays beside
     it, so a run reading the checkout's config would resolve the shipped id and dispatch on
     it just the same — the discriminator is the id the lead's contract names. Positive
     control: the sidecar's goal names the planted id and not the shipped one. Negative
     control on the same tree: the config removed refuses the run naming the tree's path."""
     from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
+    from defender.tests import _tenants1106 as T1106
 
     tree = planted_defender(tmp_path / "second")
     shipped = tree / TEMPLATE_REL
@@ -239,12 +241,18 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
         shipped.read_text(encoding="utf-8").replace(f"id: {SHIPPED_TEMPLATE_ID}\n", f"id: {planted_id}\n", 1),
         encoding="utf-8",
     )
-    config = lead_zero_config_path(tree)
-    assert config.is_file(), "the planted tree carries no config"
-    assert not config.is_symlink(), "the config must be the tree's own copy"
-    config.write_text(f"correlation_template: {planted_id}\n", encoding="utf-8")
+    # #1106: the config is the RUN's tenant's, handed in — a tenant planted outside the tree
+    # whose table grants the lead `elastic.alerts` and whose config names the planted id.
+    T1106.plant_tenant(tmp_path / "tenants", "acme",
+                       lead_zero=f"correlation_template: {planted_id}\n")
+    tenant = T1106.tenants().tenant_dir(tmp_path / "tenants", "acme")
+    grants = T1106.run_grants(tenant.settings)
+    config = lead_zero_config_path(tenant.settings)
+    assert config.is_file(), "the planted tenant carries no config"
+    assert not config.is_symlink(), "the config must be the tenant's own copy"
 
-    res = run(tmp_path / "second", run_id="lz1003-second", answer=answer_hits(ANCESTORS), defender_dir=tree)
+    res = run(tmp_path / "second", run_id="lz1003-second", answer=answer_hits(ANCESTORS),
+              defender_dir=tree, tenant=tenant, grants=grants)
     assert res.has_sidecar(L3), f"the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
     goal = res.sidecar(L3)["goal"]
     assert f"`{planted_id}`" in goal, goal
@@ -257,7 +265,8 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     with pytest.raises(LeadZeroConfigError) as caught:
         drive(run_dir, run_id="lz1003-noconfig", main=ReplayFn([Turn(text="never")]),
               gather=ReplayFn([Turn(text=CORRELATION_SUMMARY)]),
-              verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), defender_dir=tree)
+              verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), defender_dir=tree,
+              tenant=tenant, grants=grants)
     assert str(config) in str(caught.value), str(caught.value)
     assert not (run_dir / "budget.json").exists(), "the budget opened before the config was read"
 

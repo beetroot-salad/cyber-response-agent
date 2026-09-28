@@ -85,7 +85,7 @@ directly. No network, no key, no fault-injection fakes (the entry points are pur
 """
 from __future__ import annotations
 
-from defender.agents import GATHER_DEF, LEAD_AUTHOR_DEF, MAIN_DEF, VERIFY_DEF  # noqa: E402
+from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF, VERIFY_DEF  # noqa: E402
 
 import os
 import re
@@ -108,6 +108,7 @@ from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
 from defender.runtime.tools import AgentDeps, _tool_write_file  # noqa: E402
 
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     ResolvedRoots,
@@ -502,7 +503,7 @@ def test_d3_main_gather_non_paths_defender_dir(tmp_path):
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
     probe = wtd / "lessons" / "a.md"
-    for defn in (MAIN_DEF, GATHER_DEF):
+    for defn in (MAIN_DEF, T1106.playground_gather_def()):
         deps = bind(defn, run, defender_dir=wtd)
         assert permission.decide_read(probe, run_dir=run, defender_dir=wtd, policy=deps.policy).allow
         assert permission.decide_bash(f"cat {probe}", policy=deps.policy, run_dir=run, defender_dir=wtd).allow
@@ -550,9 +551,13 @@ def test_d3_gather_threads_not_restamps():
     The `defender_dir` half of the demand is untouched — that argument was always about the
     policy anchor and never about the salt."""
     src = (PATHS.repo_root / "defender" / "runtime" / "tools_gather.py").read_text()
-    assert re.search(r"bind\(\s*GATHER_DEF[^)]*defender_dir\s*=", src), \
+    # #1106 M4: gather is bound from the RUN's grant, so the first argument may be a
+    # gather definition carrying it (`replace(GATHER_DEF, verb_grant=…)` or a name holding
+    # that) rather than the bare `GATHER_DEF` — the demand is on what else `bind` is handed.
+    gather_bind = r"bind\(\s*(?:replace\(\s*GATHER_DEF[^()]*\)|GATHER_DEF\b|\w*gather\w*)"
+    assert re.search(gather_bind + r"[^)]*defender_dir\s*=", src), \
         "the gather dispatch must thread defender_dir into bind(GATHER_DEF, …)"
-    assert not re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=", src), \
+    assert not re.search(gather_bind + r"[^)]*salt\s*=", src), \
         "the gather dispatch must pass NO salt into bind(GATHER_DEF, …) — handing a subagent " \
         "the delimiter of the frame its own output returns inside is #875 F-1"
     assert "defender_dir=deps.defender_dir, lead_id=" not in src, \

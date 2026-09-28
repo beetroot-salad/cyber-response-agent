@@ -68,6 +68,7 @@ from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind, effective_tools_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -690,6 +691,9 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
     assert bash_roles, "the registry reports no bash-enabled role — the census cannot be empty"
 
     for defn in bash_roles:
+        if defn.role is AgentRole.GATHER:
+            # #1106 M4: gather binds with a RUN's grant (its definition carries none).
+            defn = T1106.playground_gather_def()
         tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
         if defn.requires_explicit_tree:
             tree.mkdir(parents=True, exist_ok=True)

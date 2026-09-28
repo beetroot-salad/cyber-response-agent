@@ -58,6 +58,7 @@ import json
 from defender._frontmatter import split_frontmatter
 from defender.runtime import close_tool
 from defender.tests import _tacit983 as scene
+from defender.tests._tenants1106 import PLAYGROUND_SETTINGS
 
 #: The second baseline in the two-row fixture: a different anchor id, a different window and a
 #: different count. Everything the render is asserted to carry differs between the two rows, so
@@ -290,7 +291,9 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     (run_dir / "report.md").write_text(report, encoding="utf-8")
     (run_dir / "investigation.md").write_text(BENIGN_DOC, encoding="utf-8")
 
-    payload = case_ticket.case_record_to_comment(case_ticket.read_case_record(run_dir))
+    payload = case_ticket.case_record_to_comment(
+        case_ticket.read_case_record(run_dir, settings_dir=PLAYGROUND_SETTINGS),
+        settings_dir=PLAYGROUND_SETTINGS)
     wire = json.dumps(payload, sort_keys=True)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
         assert crossed in wire, (

@@ -361,10 +361,12 @@ def test_d_block_scalar_multiparagraph_green(tmp_path):
 
 
 def test_d_catalog_survival():
-    from defender.runtime.driver import GATHER_DEF
+    from defender.tests import _tenants1106 as T1106
 
     hook = _hook()
-    out = hook.descriptor_catalog(hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), GATHER_DEF.verb_grant)
+    # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
+    out = hook.descriptor_catalog(
+        hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.playground_grants().gather)
     assert out is not None
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(

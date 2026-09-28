@@ -962,9 +962,21 @@ class _HostContext:
 
     env: dict[str, str]
     defender_dir: Path
+    #: The episode tenant's `settings/` folder (#1106) — where the door reads the cluster's
+    #: address. Never looked up: the launcher resolved the tenant and hands it in.
+    settings_dir: Path
 
 
-def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -> _Door:
+def host_context(settings_dir: Path) -> _HostContext:
+    """The launcher's context for the door, before any run exists: the process env, the code
+    tree the transport's child env is rooted in, and the episode tenant's settings folder."""
+    from defender._paths import PATHS
+
+    return _HostContext(env=dict(os.environ), defender_dir=PATHS.defender_dir,
+                        settings_dir=Path(settings_dir))
+
+
+def write_door_from_env(ctx: Any, *, transport: Any = docker_exec_curl) -> _Door:
     """The write door this deployment's configuration describes.
 
     ONE reading of where the cluster is, shared by the sweep, staging and teardown, so a
@@ -975,9 +987,11 @@ def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -
 
     The credential is expanded INSIDE the container, exactly as the read path does it: the
     `${…}` reaches the container's own shell, so the secret is never on this host's argv.
-    """
-    from defender._paths import PATHS
 
+    `ctx` carries the episode tenant's `settings_dir` (#1106) — a `VerbContext`, or the
+    launcher's `host_context(settings_dir)` before any run exists. The config is read from
+    THAT folder and nowhere else.
+    """
     # `is not None`, never `or` (`defender/CLAUDE.md`: "Prefer `is not None` over `or`"), and
     # here it is load-bearing rather than stylistic: `_HostContext(env={}, ...)` is the ordinary
     # construction for a hermetic caller, and an empty-but-PRESENT env read as absent sent this
@@ -985,8 +999,6 @@ def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -
     # handed the caller's own empty-env ctx — the config half and the transport half addressing
     # two different clusters, which is the failure the paragraph below says this function exists
     # to prevent.
-    ctx_dir = getattr(ctx, "defender_dir", None)
-    defender_dir = PATHS.defender_dir if ctx_dir is None else ctx_dir
     ctx_env = getattr(ctx, "env", None)
     env: dict[str, str] = dict(os.environ if ctx_env is None else ctx_env)
     # THE READ ADAPTER'S OWN PARSE, AND ITS OWN PRECEDENCE — one call rather than a third copy
@@ -996,9 +1008,9 @@ def write_door_from_env(ctx: Any = None, *, transport: Any = docker_exec_curl) -
     # sibling's READ adapter queried the cluster the operator named — a family staged on one
     # cluster and measured on another, which is invisible from either side.
     values = elastic_config_from(
-        elastic_config_path(Path(defender_dir)), env, expected=_DOOR_CONFIG_KEYS)
+        elastic_config_path(Path(ctx.settings_dir)), env, expected=_DOOR_CONFIG_KEYS)
     return write_door(
-        ctx=ctx if ctx is not None else _HostContext(env=env, defender_dir=Path(defender_dir)),
+        ctx=ctx,
         container=env.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch"),  # lint-shippable: ok — the container the read adapter execs into
         transport=transport,
         base_url=values.get("ELASTICSEARCH_URL", "https://localhost:9200"),  # lint-shippable: ok — the per-vendor config key

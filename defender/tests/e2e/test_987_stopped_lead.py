@@ -42,6 +42,7 @@ No `monkeypatch.setattr`: the model enters through `make_model`, the verb regist
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -62,7 +63,8 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.hooks import budget_enforcer  # noqa: E402
@@ -195,7 +197,9 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     ones."""
     run_dir = materialize(root, GOLDEN_AB3)
     budget_enforcer.open_budget(run_dir, budget_enforcer.DEFAULT_LIMITS)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    # #1106: a run hands MAIN's deps its tenant's settings folder, which every lead inherits.
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+                   settings_dir=T1106.PLAYGROUND_SETTINGS)
     rec = VerbRecorder()
     model = GatherModel(responses)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
@@ -206,6 +210,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
             make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
             verbs=verbs if verbs is not None else elastic_ok(rec),
             extra_capabilities=extra, session_id=session_id,
+            verb_grant=T1106.playground_grants().gather,
         )
 
     try:
@@ -214,7 +219,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
                 deps, factory, ceiling,
                 GatherRequest(LEAD, "elastic", "measure this lead",
                               ("which hosts dev.dana reached",)),
-                GATHER_DEF.verb_grant,
+                T1106.playground_grants().gather,
                 (lambda agent_id, reason: stamps.append((agent_id, reason)))
                 if stamps is not None else None,
                 catalog=None,

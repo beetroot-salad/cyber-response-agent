@@ -114,6 +114,7 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._lifecycle import (
+    TENANT_AGENT_TARGET,
     _check_mount_sentinel,
     _create_argv,
     _did_not_run_for_request,
@@ -136,6 +137,7 @@ from ._lifecycle import (
 #: Everything imported above is a RE-EXPORT: the name's real home is the module it
 #: comes from. Kept because a reader already imports it from here.
 __all__ = [
+    "TENANT_AGENT_TARGET",
     "ALIAS_PROFILE_PATH",
     "AliasBanNotInForce",
     "BANNED_SHAPES",

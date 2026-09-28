@@ -52,7 +52,8 @@ how it works, read that skill (`skills/connect/SKILL.md`, rationale in
 
 Adding an adapter-backed system is files dropped into the per-system
 locations plus **exactly one shared edit**: its verbs need rows in the
-verb-disposition table (`knowledge/environment/verb-grants.yaml`). An
+verb-disposition table (each tenant's `settings/verb-grants.yaml`, under
+`knowledge/tenants/<tenant>/` at the repo root). An
 MCP-reached system declares no verbs to the registry and takes no rows, so
 for it the claim still holds outright. Nothing else either way — no loop
 change, no gather-subagent change, no signature catalog,
