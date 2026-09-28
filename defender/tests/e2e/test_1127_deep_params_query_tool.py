@@ -408,11 +408,15 @@ def test_a_budget_of_too_deep_calls_ends_the_lead_exactly_as_shallow_rejections_
     held to the same oracle: the terminator, the budget phrase on the trip row, main's
     summary, the replay's verdict, and the valid call after the stop never running.
 
+    The deep lead also sends one more too-deep call AFTER its door closed: the refusal reuses
+    the schema-rejection path, door included, so that call is neither rowed nor retried — the
+    count stays exactly `B`.
+
     Today the deep rows are unreadable, the budget never counts them, and the lead runs on."""
     assert_regime(shape)
     deep, deep_rec = drive(tmp_path, "deep", [
         *[deep_call(shape, system=f"ghost{i}") for i in range(B)],
-        q("elastic", "query", VALID), DONE])
+        deep_call(shape, system="ghostafter"), q("elastic", "query", VALID), DONE])
     shallow, shallow_rec = drive(tmp_path, "shallow", [
         *[_bad_args(f"ghost{i}") for i in range(B)],
         q("elastic", "query", VALID), DONE])
