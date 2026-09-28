@@ -40,12 +40,12 @@ def _materialize(alert: Path, run_id: str | None, tenant_id: str, **kw):
 
 def _refused(fn) -> str:
     """Drive `fn` and hand back its refusal's text — a `sys.exit(msg)` or the owner's
-    `ValueError` propagating. Anything else escaping (or nothing raised) fails the test."""
+    `TenantRefused` propagating. Anything else escaping (or nothing raised) fails the test."""
     try:
         fn()
     except SystemExit as exc:
         return H.refusal_text(exc)
-    except ValueError as exc:
+    except H.tenant().TenantRefused as exc:
         return str(exc)
     raise AssertionError("materialize_run_dir was not refused")
 

@@ -226,7 +226,7 @@ def main(argv: list[str]) -> int:
             _tenant.refuse_bad_tenant_id(ns.tenant)
             root = _tenant.resolve_data_root()
             _tenant.require_tenant(root, ns.tenant)
-        except ValueError as refused:
+        except _tenant.TenantRefused as refused:
             print(f"[held_out] {refused}", file=sys.stderr)
             return 2
         runs_dir = _tenant.runs_base_for(ns.tenant)

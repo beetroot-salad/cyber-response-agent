@@ -98,7 +98,7 @@ def _definition(
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
-    from defender._tenants import TenantDirError, entry_tenant_args
+    from defender._tenants import entry_tenant_args
     from defender.runtime import run_tenant as run_tenant_mod
     from defender.runtime.driver import gather_def_for
 
@@ -106,7 +106,7 @@ def _definition(
         run = run_tenant_mod.resolve_tenant(
             *entry_tenant_args(defender_dir, tenants_root, tenant), defender_dir=defender_dir,
             dispatches_lead_zero=False)
-    except (TenantDirError, run_tenant_mod.TenantRefused) as refusal:
+    except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"defender-policy: {refusal}")
     return gather_def_for(run.grants.gather)
 

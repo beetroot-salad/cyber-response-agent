@@ -103,7 +103,9 @@ demands:
     the row's; tenant_of_run_dir returns the tenant id as a str; create_tenant returns the TenantRow it
     wrote; TenantPaths accessors return absolute Paths under .dir. The owner functions (TenantPaths, create_tenant,
     require_tenant, tenant_of_run_dir, ensure_runs_base_record, resolve_data_root, refuse_bad_tenant_id)
-    refuse by raising one ValueError subclass whose message names the refused value; run.py main surfaces
+    refuse by raising one refusal class, TenantRefused, whose message names the refused value (it derives
+    from Exception, not ValueError — human ruling 2026-09-28, following #1067's _model.py convention that a
+    validator's ValueError is wrapped by pydantic; every other tenant refusal subclasses it); run.py main surfaces
     a tenant refusal as SystemExit carrying a '[run.py] ...' message before the preflight, exactly as
     _resume_target does today; the branch launcher surfaces it as LauncherRefused; tenant.py setup returns
     0 when every kind of its pass adopted, was already in place, or had nothing to adopt, and 1 when any

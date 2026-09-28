@@ -270,7 +270,7 @@ def test_d1_create_exclusive(tmp_path):
 
     Sequential (the second call meets the first's row) and concurrent (N callers released
     together onto one empty root): exactly one returns, every other one REFUSES — the owner's
-    ValueError, not an escaping FileExistsError (§7 J12: the loser refuses naming that the
+    TenantRefused, not an escaping FileExistsError (§7 J12: the loser refuses naming that the
     row exists) — and the row on disk is the winner's."""
     root = tmp_path / "seq"
     first = H.create_tenant(root, "playground")
@@ -299,7 +299,7 @@ def test_d1_create_exclusive(tmp_path):
         for t in threads:
             t.join(timeout=60)
         assert len(won) == 1, f"trial {trial}: {len(won)} creates of one id succeeded"
-        assert all(isinstance(e, ValueError) for e in lost), (
+        assert all(isinstance(e, H.tenant().TenantRefused) for e in lost), (
             f"trial {trial}: a loser escaped with {[type(e).__name__ for e in lost]} rather "
             "than the owner's refusal")
         on_disk = json.loads(H.row_path(root, "playground").read_text(encoding="utf-8"))

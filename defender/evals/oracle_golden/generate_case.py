@@ -476,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         _tenant.refuse_bad_tenant_id(ns.tenant)
         root = _tenant.resolve_data_root()
         _tenant.require_tenant(root, ns.tenant)
-    except ValueError as refused:
+    except _tenant.TenantRefused as refused:
         print(f"[generate_case] {refused}", file=sys.stderr)
         return 2
     print("!! generate_case.py cannot assemble a case: the assembler retired with the "

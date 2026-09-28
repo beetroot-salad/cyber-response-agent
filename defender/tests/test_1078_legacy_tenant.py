@@ -158,7 +158,7 @@ def test_the_tenant_record_is_written_through_write_guarded_and_read_through_rea
     other.write_text("{}\n", encoding="utf-8")
     (base / H.RECORD_NAME).unlink()
     (base / H.RECORD_NAME).symlink_to(other)
-    with pytest.raises((OSError, ValueError)):  # noqa: PT011 — refused, whichever frame names it
+    with pytest.raises(S.tenant().TenantRefused):
         S.tenant().ensure_runs_base_record(base, T_ID)
     assert other.read_text(encoding="utf-8") == "{}\n", "the create followed the alias"
 
@@ -445,7 +445,7 @@ def test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_
     base.mkdir(parents=True, exist_ok=True)
     target = base / H.RECORD_NAME
     target.mkdir()
-    with pytest.raises((OSError, ValueError)):
+    with pytest.raises(S.tenant().TenantRefused):
         S.tenant().ensure_runs_base_record(base, T_ID)
     assert target.is_dir(), "the create replaced a non-regular entry instead of refusing"
 
@@ -453,7 +453,7 @@ def test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_
     elsewhere = base.parent / "planted.json"
     elsewhere.write_text('{"tenant_id": "attacker"}\n', encoding="utf-8")
     target.symlink_to(elsewhere)
-    with pytest.raises((OSError, ValueError)):
+    with pytest.raises(S.tenant().TenantRefused):
         S.tenant().ensure_runs_base_record(base, T_ID)
     assert json.loads(elsewhere.read_text(encoding="utf-8"))["tenant_id"] == "attacker", (
         "the create wrote through the link")
@@ -474,7 +474,7 @@ def test_a_failed_tenant_or_stamp_write_fails_the_run_loudly_and_is_never_retrie
     base.mkdir(parents=True, exist_ok=True)
     (base / H.RECORD_NAME).mkdir()
     recorder = S.RecordingIo()
-    with pytest.raises((OSError, ValueError)):  # noqa: PT011 — the real primitive picks the error, not us
+    with pytest.raises(S.tenant().TenantRefused):
         S.tenant().ensure_runs_base_record(base, T_ID, io=recorder)
     attempts = [op for op in recorder.ops if op.startswith("write")]
     assert len(attempts) == 1, (

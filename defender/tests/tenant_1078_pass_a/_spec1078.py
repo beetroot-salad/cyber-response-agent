@@ -21,7 +21,8 @@ write-code-from-spec renames anything, it renames it HERE, never through a `conc
 entry (which silently disables `check_binds`' prose-not-in-binds scan for the concept).
 
 THE REFUSAL SHAPE (demand #0, §7 F0/J29, human): every owner function refuses by raising ONE
-`ValueError` subclass whose message names the refused value, and every entry passes the
+class, `TenantRefused` (an `Exception`, not a `ValueError`), whose message names the refused
+value, and every entry passes the
 owner's message through VERBATIM. So "refused by X" is observed here as: the entry's refusal
 text CONTAINS `str(X's own refusal)`, which this suite obtains by calling X directly on the
 same input (`owner_refusal`). That makes "which guard fired" an observation, not a guess at a
@@ -279,15 +280,13 @@ def entries(root: Path) -> list[str]:
 
 
 # ======================================================================================
-# The refusal shape (#0, F0/J29): one ValueError subclass, passed through verbatim.
+# The refusal shape (#0, F0/J29): one refusal class, passed through verbatim.
 # ======================================================================================
 
-def owner_refusal(fn: Callable[..., Any], *args: Any, **kw: Any) -> ValueError:
-    """Call an OWNER function and hand back its refusal — asserting it IS one: a `ValueError`
-    (the design's "one ValueError subclass"), never a bare `OSError`/`KeyError` escaping."""
-    # Deliberately the base class: #0 fixes "one ValueError subclass" without naming it, and
-    # which subclass it is, is asserted where it matters (test_d0_return_contract).
-    with pytest.raises(ValueError) as refused:  # noqa: PT011 — the design names no subclass
+def owner_refusal(fn: Callable[..., Any], *args: Any, **kw: Any) -> Exception:
+    """Call an OWNER function and hand back its refusal — asserting it IS one: the one tenant
+    refusal class, `TenantRefused` (#0), never a bare `OSError`/`KeyError` escaping."""
+    with pytest.raises(tenant().TenantRefused) as refused:
         fn(*args, **kw)
     return refused.value
 

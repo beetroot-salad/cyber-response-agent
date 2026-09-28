@@ -34,6 +34,8 @@ import dataclasses
 import os
 from pathlib import Path
 
+from defender._tenant import TenantRefused
+
 #: D3's files required AT START, relative to a tenant's `settings/`. A system's `config.env`
 #: is deliberately not here: some adapters need none, and its absence stays the per-call
 #: `ConfigFault` (exit 2, which trips the breaker).
@@ -51,9 +53,10 @@ AGENT_HALF = "agent"
 TEMPLATE_DIRNAME = "tenant-template"
 
 
-class TenantDirError(ValueError):
+class TenantDirError(TenantRefused):
     """A tenant id or folder this resolver will not stand behind: a malformed id, an escape
-    through a link, or an absent folder, half or required file. Always names the id or path."""
+    through a link, or an absent folder, half or required file. Always names the id or path.
+    One of the tenant refusals (`_tenant.TenantRefused`), which every entry point catches."""
 
 
 @dataclasses.dataclass(frozen=True)

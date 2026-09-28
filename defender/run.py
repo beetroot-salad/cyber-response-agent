@@ -431,7 +431,7 @@ def _sibling_tenant_agrees(world: Any, tenant_id: str) -> None:
         return
     try:
         source_tenant = _tenant.tenant_of_run_dir(Path(world.family.source_run_dir))
-    except ValueError as refused:
+    except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] {refused}")
     if source_tenant != tenant_id:
         sys.exit(f"[run.py] the requested tenant {tenant_id!r} disagrees with the source run's "
@@ -564,7 +564,7 @@ def _materialize_run_dir(
     try:
         run_dir = _run.materialize_run_dir(alert, run_id, tenant_id=tenant_id, model=model,
                                            world=world)
-    except (_tenant.TenantRefused, _tenant.TenantRecordMismatch) as refusal:
+    except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run_dir
 
@@ -584,7 +584,7 @@ def _resolve_tenant_id(ns: argparse.Namespace) -> str:
         _tenant.refuse_bad_tenant_id(ns.tenant)
         _tenant.require_tenant(_tenant.resolve_data_root(), ns.tenant)
         return ns.tenant
-    except ValueError as refused:
+    except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] {refused}")
 
 

@@ -565,13 +565,13 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
 
     base = _tenant.runs_base_for(d9_tenant)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(base))
-    with pytest.raises(ValueError):  # noqa: PT011 — the owner's one ValueError-subclass refusal (#1078 d0); the design names no narrower class
+    with pytest.raises(_tenant.TenantRefused):  # the owner's one refusal class (#1078 d0)
         _tenant.runs_base_for(d9_tenant)
 
     alias = tmp_path / "alias"
     alias.symlink_to(data_root)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
-    with pytest.raises(ValueError):  # noqa: PT011 — as above
+    with pytest.raises(_tenant.TenantRefused):
         _tenant.runs_base_for(d9_tenant)
 
     learn = tmp_path / "learn"

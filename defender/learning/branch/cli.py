@@ -468,7 +468,7 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
         # whose row exists (#1078 D3/O5) — a source anywhere else is refused, never trusted,
         # and before its box-writable stamp is read at all.
         tenant_id = _tenant.tenant_of_run_dir(source_run_dir)
-    except ValueError as refusal:
+    except _tenant.TenantRefused as refusal:
         raise LauncherRefused(
             f"[branch] source run {source_run_dir}'s tenant: its runs base's record is the "
             f"authority for it, and {refusal}") from refusal

@@ -218,7 +218,7 @@ def test_o3_record_read_grammar(tmp_path, monkeypatch):
     base = tmp_path / "data" / T_ID / "runs"
     H.plant_record(base, "../../x")
     tenant = H.tenant()
-    with pytest.raises(ValueError, match=r"\.\./\.\./x|tenant"):
+    with pytest.raises(H.tenant().TenantRefused, match=r"\.\./\.\./x|tenant"):
         tenant.read_tenant(base)
     H.owner_refusal(H.ensure_runs_base_record, base, T_ID)
     H.set_data_root(monkeypatch, tmp_path / "data")
@@ -317,7 +317,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
         with _Bystander(root / T_ID / H.ROW_NAME, row_fields) as reader:
             results, errors = _race(6, lambda r=root: H.create_tenant(r, T_ID))
         assert len(results) == 1, f"trial {trial}: {len(results)} creates of one row succeeded"
-        assert all(isinstance(e, ValueError) for e in errors), (
+        assert all(isinstance(e, H.tenant().TenantRefused) for e in errors), (
             f"trial {trial}: a losing create escaped with {[type(e).__name__ for e in errors]}")
         assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
         assert os.listdir(root) == [T_ID], f"trial {trial}: stray entries in the root"
@@ -473,7 +473,7 @@ def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
     base = tmp_path / "runs"
     H.plant_record(base, "someone-else")
     before = H.census(tmp_path)
-    with pytest.raises(ValueError, match="someone-else"):
+    with pytest.raises(H.tenant().TenantRefused, match="someone-else"):
         Run.for_tenant(T_ID, "r1", runs_base=base)
     assert H.census(tmp_path) == before, "the refused Run.for_tenant wrote something"
     same = tmp_path / "same"
@@ -493,5 +493,5 @@ def test_g_r7_for_tenant_rekey_coherence(tmp_path):
     minted = H.ensure_runs_base_record(base, T_ID)
     assert minted.tenant_id == T_ID != "default", "the record was not minted from the request"
     assert Run.for_tenant(T_ID, "r1", runs_base=base).run_dir == base / "r1"
-    with pytest.raises(ValueError, match="someone-else|disagree"):
+    with pytest.raises(H.tenant().TenantRefused, match="someone-else|disagree"):
         Run.for_tenant("someone-else", "r1", runs_base=base)

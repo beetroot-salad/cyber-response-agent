@@ -440,7 +440,7 @@ def test_generate_case_for_a_tenant_with_no_row(tmp_path, monkeypatch, capsys):
     H.assert_verbatim(out, owner, entry="generate_case")
 
     runner = FakeRunner(H.runs_dir(root, "acme"))
-    with pytest.raises((SystemExit, ValueError)) as refused:
+    with pytest.raises((SystemExit, H.tenant().TenantRefused)) as refused:
         _generate_case().investigate(H.plant_alert(tmp_path / "a"), "golden-c1",
                                      tenant_id="acme", run=runner)
     H.assert_verbatim(H.refusal_text(refused.value), owner, entry="generate_case.investigate")
@@ -519,7 +519,7 @@ def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
     assert status not in (0, None), out
     assert H.DATA_ROOT_ENV in out, out
     runner = FakeRunner(tmp_path / "nowhere")
-    with pytest.raises((SystemExit, ValueError)) as refused:
+    with pytest.raises((SystemExit, H.tenant().TenantRefused)) as refused:
         _generate_case().investigate(H.plant_alert(tmp_path / "a"), "golden-c3",
                                      tenant_id=TENANT, run=runner)
     assert H.DATA_ROOT_ENV in H.refusal_text(refused.value)

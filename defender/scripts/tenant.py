@@ -39,26 +39,23 @@ def setup(tenant_id: str) -> int:
     """A tenant already set up is a silent success ONLY while the data root stays otherwise
     fresh — `refuse_foreign_data_root` runs first, unconditionally, so a foreign entry that
     landed beside this tenant since its first `setup` still refuses the re-run (see
-    `test_something_other_than_the_tenant_appears_at_the_data_root_top_level`). Otherwise
-    create it, refusing exactly as the owner does, and print the owner's own refusal verbatim
-    on failure."""
+    `test_something_other_than_the_tenant_appears_at_the_data_root_top_level`). A row already
+    there is checked, and its own refusal (corrupt, naming another tenant) reported rather than
+    read as "already exists". Otherwise create it. The id is checked BEFORE anything under the
+    data root is looked at, so a path-shaped id never reaches a listing. Every refusal is the
+    owner's `TenantRefused`, printed verbatim, exit 1."""
     try:
+        _tenant.refuse_bad_tenant_id(tenant_id)
         root = _tenant.resolve_data_root()
         _tenant.refuse_foreign_data_root(root, tenant_id)
-    except ValueError as refused:
+        if os.path.lexists(_tenant.TenantPaths(root, tenant_id).row):
+            _tenant.require_tenant(root, tenant_id)
+        else:
+            _tenant.create_tenant(root, tenant_id)
+    except _tenant.TenantRefused as refused:
         print(f"[tenant.py] {refused}", file=sys.stderr)
         return 1
-    try:
-        _tenant.require_tenant(root, tenant_id)
-        return 0
-    except ValueError:
-        pass
-    try:
-        _tenant.create_tenant(root, tenant_id)
-        return 0
-    except ValueError as refused:
-        print(f"[tenant.py] {refused}", file=sys.stderr)
-        return 1
+    return 0
 
 
 def main(argv: list[str]) -> int:

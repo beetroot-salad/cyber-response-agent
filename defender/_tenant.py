@@ -13,12 +13,11 @@ carries the widened learning-state-overlap refusal (O13/J24); `runs_base_for` co
 
 Demand #0 (F0/J29, human): every owner function here refuses a caller-supplied value (a bad
 tenant id, a foreign data root, an unset `DEFENDER_DATA_ROOT`, a disagreeing record) through
-ONE `ValueError` subclass (`TenantRefused`), whose message names the refused value; every entry
-point passes that message through verbatim. `TenantRecordCorrupt` is a deliberate second
-subclass, scoped narrowly to the runs-base record's own content (`read_tenant`/
-`_parse_record`): decision 4's sole exception to read-as-`None` for a record that fails to
-parse or is missing/mistyped fields — a distinct failure mode from F0/J29's refusal, not a
-second spelling of it.
+ONE refusal class (`TenantRefused`), whose message names the refused value; every entry point
+catches it and passes that message through verbatim. `TenantRecordCorrupt` (the runs-base
+record's own content fails to parse or is missing/mistyped fields — decision 4's sole
+exception to read-as-`None`) and `TenantRecordMismatch` are subclasses, so a caller that needs
+to tell them apart can, and one that does not catches the one class.
 
 §7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES): a concurrent reader of a create-lane artifact
 (the runs-base record, the tenant row) sees the name absent or the file complete, never empty
@@ -64,9 +63,13 @@ _LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 _GRAMMAR = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 
 
-class TenantRefused(ValueError):
-    """The one refusal shape (#0, F0/J29) for every owner function in this module: the
-    message names the value that was refused, and every entry surfaces it verbatim."""
+class TenantRefused(Exception):
+    """The one refusal shape (#0, F0/J29) for every tenant owner — this module, the settings
+    folder resolver (`_tenants.TenantDirError`) and the run's grants (`run_tenant`): the
+    message names the value that was refused, and every entry catches THIS and surfaces it
+    verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
+    wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
+    `except TenantRefused` would silently miss it."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,7 +79,7 @@ class TenantRecord:
     created_at: str
 
 
-class TenantRecordCorrupt(ValueError):
+class TenantRecordCorrupt(TenantRefused):
     """The runs-base record fails to parse, or parses but is missing a required field, carries
     the wrong type, or names an off-grammar tenant id. Decision 4's sole exception to
     read-as-`None`: this record refuses the whole run rather than degrading."""
@@ -106,7 +109,7 @@ def refuse_bad_tenant_id(tenant_id: str) -> None:
 # The runs-base record (D2), kept from #1077, with the request deciding its tenant.
 # ==========================================================================================
 
-class TenantRecordMismatch(ValueError):
+class TenantRecordMismatch(TenantRefused):
     """A runs base's record names another tenant than the one a run is for. A run refuses
     rather than stamp a record its settings did not come from."""
 

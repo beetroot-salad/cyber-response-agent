@@ -58,9 +58,12 @@ def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_p
     assert (td.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_A
 
 
-def test_the_tenant_dir_error_is_a_value_error():
+def test_the_tenant_dir_error_is_a_tenant_refusal():
+    """The folder resolver's refusal is one of the tenant refusals every entry catches (#1078's
+    one refusal class) — and not a `ValueError`, which pydantic would wrap inside a validator."""
     _, error = _resolver()
-    assert issubclass(error, ValueError)
+    assert issubclass(error, T.mod("_tenant").TenantRefused)
+    assert not issubclass(error, ValueError)
 
 
 def test_the_required_settings_are_exactly_d3s_three_files():

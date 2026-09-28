@@ -429,6 +429,29 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     assert H.census(old) == old_census, "the old data root was touched"
 
 
+@pytest.mark.parametrize("body", ["{torn", '{"tenant_id": "../x", "base_world_id": "w", "created_at": "t"}'])
+def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path, data_root,
+                                                                         body):
+    """A runs-base record that does not parse, or names an off-grammar tenant, reaches the
+    operator as ONE `[run.py] ...` line naming the record — the owner's `TenantRecordCorrupt`
+    is a `TenantRefused`, which the entry's run-dir builder catches — never a traceback. The
+    control: the same call over a sound record builds the run dir."""
+    H.make_tenant(data_root, H.VALID_ID)
+    base = H.runs_dir(data_root, H.VALID_ID)
+    base.mkdir(parents=True)
+    (base / H.RECORD_NAME).write_text(body, encoding="utf-8")
+    alert = H.plant_alert(tmp_path / "in")
+    with pytest.raises(SystemExit) as refused:
+        H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+    said = H.refusal_text(refused.value)
+    assert said.startswith("[run.py] "), said
+    assert str(base / H.RECORD_NAME) in said, said
+
+    (base / H.RECORD_NAME).unlink()
+    run_dir = H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+    assert Path(run_dir).is_dir()
+
+
 def test_unknown_tenant_with_a_pinned_run_id(tmp_path, data_root):
     """`--run-id X --tenant acme` with no row, but a hand-made <root>/acme/runs/X/: refused by
     O2 before materialize; nothing under acme/ is read, written or changed."""
