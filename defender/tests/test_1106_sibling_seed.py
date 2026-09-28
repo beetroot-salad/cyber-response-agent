@@ -348,7 +348,8 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
             alert_path=src / "alert.json", run_dir=src, run_id=src.name,
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=T.run_tenant(tenant, grants=grants),
-            world=run.resume_world(ep / "family.yaml", "b", settings=lambda t=tenant: t.settings),
+            world=run.resume_world(Episode.open(ep), "b", settings=lambda t=tenant: t.settings),
+            episode=Episode.open(ep),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)

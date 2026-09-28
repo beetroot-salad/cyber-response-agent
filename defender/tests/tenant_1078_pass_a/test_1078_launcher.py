@@ -113,7 +113,7 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
     ep = episodes / T.EPISODE_ID
     if not (ep / "family.yaml").exists():
         T.episode(episodes.parent, doc=T.family_doc(source_run_dir=str(src)), root=episodes)
-    world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(Episode.open(ep), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run(
         src / "alert.json", world.run_id, tenant_id=TID, world=world).run_dir
     return ep, Path(run_dir), world

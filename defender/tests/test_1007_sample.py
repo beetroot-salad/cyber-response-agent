@@ -713,7 +713,9 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
         calls it "an INJECTION SEAM rather than a module lookup" for exactly this caller.
         Rev 2 (#1133): the seam is handed the `Episode`, not the primed base's path."""
         primed.append((source, episode))
-        episode.served_base.create("")
+        # Overwrites the base the killed attempt left, as this fake always has: the test is
+        # about adoption, not about the primer's own exclusive create.
+        (episode.dir / "served" / "base.jsonl").write_text("", encoding="utf-8")
         return capture.PrimeReport(primed=1)
 
     # `prepare_episode` now returns an `Episode` context manager, not a bare path (#1133 rev 2).
