@@ -32,6 +32,7 @@ from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
     ABOVE_GUARD_QUERY_ID,
     DENIED_QUERY_ID,
+    PARAMS_NESTING_LIMIT,
     REPEAT_ESCAPE,
     REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
@@ -39,6 +40,7 @@ from defender.scripts.gather_tools.record_query import (
     RepeatTrip,
     _json_safe_params,  # noqa: F401 — re-export: test_repeat_breaker_807 imports it from here
     append_query_row,
+    call_args_too_deep,
     dead_end_reason,
     _QID_FORBIDDEN,
     resolve_query_id,
@@ -132,6 +134,13 @@ UNDECLARED_SYSTEM_DETAIL = "unresolvable: " + UNDECLARED_SYSTEM
 #: Hand-copied from `register_query_tool`'s closure, so it can drift; `_coarse_schema_detail`
 #: also excludes `extra_forbidden` so a stale entry degrades rather than leaks.
 DECLARED_ARGS = frozenset({"system", "verb", "params", "query_id"})
+
+#: What the model is told, and the row records, for a call whose arguments nest too deep to
+#: store. Fixed host text: pydantic's own error would echo the input.
+PARAMS_TOO_DEEP = (
+    f"params nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a query record can "
+    "carry — the call was not run. Send flatter params."
+)
 
 def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
@@ -376,8 +385,14 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        # Too deep to store is a schema rejection whether or not pydantic refused it; judged on
+        # the call as sent, since text too deep to decode would read as `{}` once decoded.
+        too_deep = call_args_too_deep(args)
         try:
-            return await handler(args)
+            validated = await handler(args)
+            if too_deep:
+                raise ModelRetry(PARAMS_TOO_DEEP)
+            return validated
         except (ValidationError, ModelRetry) as e:
             # After the door closed, a schema-refused call is neither retried (that would charge
             # the retry budget on a stopped lead) nor rowed.
@@ -385,17 +400,21 @@ class QueryCapture(AbstractCapability[Any]):
                 raise ToolFailed(QUERY_NOT_RUN) from e
             raw = _raw_args(args)
             # Raw arguments, since validation failed. A non-dict `params` becomes `{}`, matching
-            # what the row stores, so live and replayed counts agree.
+            # what the row stores, so live and replayed counts agree. Too-deep params become
+            # `{}` before the guard too: the guard's identity is then the stored one (keying the
+            # deep value itself can exhaust the stack), and the row stays readable.
             raw_system = as_str(raw.get("system"))
             verb = as_str(raw.get("verb"))
-            params = _as_dict(raw.get("params"))
+            params = {} if too_deep else _as_dict(raw.get("params"))
             system, system_key = self._coarsen(raw_system)
             trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
             # `str(e)` carries model text, so a coarsened row gets a host-composed detail.
-            rejection = (
-                self._coarse_schema_detail(e)
-                if self._was_coarsened(system) else str(e)
-            )
+            if too_deep:
+                rejection = PARAMS_TOO_DEEP
+            elif self._was_coarsened(system):
+                rejection = self._coarse_schema_detail(e)
+            else:
+                rejection = str(e)
             # The trip phrase wraps the already-coarsened detail, so the coarsening also holds on
             # the trip row. `rejection_detail` dispatches over both guards' trip types.
             detail = rejection if trip is None else rejection_detail(trip, rejection)
@@ -414,6 +433,9 @@ class QueryCapture(AbstractCapability[Any]):
                     target=self._undeclared_target(recorded=system, raw=raw_system),
                     verb=verb,
                 )) from e
+            if too_deep:
+                # Replaces pydantic's error, whose text echoes the input.
+                raise ModelRetry(PARAMS_TOO_DEEP) from e
             raise
 
     async def _record_denied(

@@ -43,6 +43,7 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
+from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT, params_too_deep
 
 #: The base world's role: the control every other world is compared against. Exactly one world
 #: claims it.
@@ -497,6 +498,12 @@ def parse_family(
     discriminator = doc.get("discriminator")
     if not isinstance(discriminator, dict) or not discriminator:
         raise FamilyError("the manifest's discriminator must be a non-empty mapping")
+    envelope = discriminator.get("envelope")
+    # The envelope is a model-authored call the review runs before any ledger could refuse it.
+    if isinstance(envelope, dict) and params_too_deep(envelope.get("params")):
+        raise FamilyError(
+            "the manifest's discriminator.envelope.params nest deeper than "
+            f"{PARAMS_NESTING_LIMIT} levels, the most a recorded call can carry")
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"))
     # The document's own record first: only the authoring call, which has no record yet, relies

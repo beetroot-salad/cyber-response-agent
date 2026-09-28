@@ -22,10 +22,14 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
-from defender._io import append_jsonl, read_jsonl_rows
+from defender._io import append_jsonl, parse_jsonl_row, read_jsonl_rows
 from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
-from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
+from defender.scripts.gather_tools.record_query import (
+    PARAMS_NESTING_LIMIT,
+    _json_safe_params,
+    _request_key,
+)
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
@@ -345,6 +349,13 @@ class Ledger:
         # with no row behind it, served without an adapter call.
         # Serialise outside the lock; only the write needs mutual exclusion.
         row = call.row()
+        # A row this table's reader skips would be an answer served with no record behind it.
+        # `LedgerError`, not `RuntimeError`: `_served` re-raises the table's own refusal, where
+        # any other exception would be re-filed as a FAULT row carrying the same params.
+        if parse_jsonl_row(json.dumps(row)) is None:
+            raise LedgerError(
+                f"{call.system}.{call.verb} was not recorded: its row could not be read back "
+                f"(params nested past {PARAMS_NESTING_LIMIT})")
         key = call.key
         with self._lock:
             append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
