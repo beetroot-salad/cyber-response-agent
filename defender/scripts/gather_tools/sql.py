@@ -60,6 +60,71 @@ def _error_note(message: str) -> str:
     return ""
 
 
+#: What an arrow's JSON source may be, as duckdb's parse names it: a column or struct field, a
+#: position (`v[2]`), a function call, a cast, a constant, a subquery, a CASE or COALESCE, or
+#: another arrow (`->` parses as a LAMBDA). An operator expression is not on it — see `_arrow_refusal`.
+_JSON_SOURCE_CLASSES = frozenset({"COLUMN_REF", "CONSTANT", "CAST", "SUBQUERY", "CASE", "LAMBDA"})
+_JSON_SOURCE_OPERATORS = frozenset({"ARRAY_EXTRACT", "OPERATOR_COALESCE"})
+_NAMED_FUNCTION = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+_MISBOUND = (
+    "defender-sql: query error: `->>` binds more loosely than the operators before it (`=`, "
+    "`<>`, AND, OR, NOT, `||` …), so here it takes that whole expression as its JSON — which "
+    "errors on some rows and answers a silent, wrong count on others. Parenthesise every `->>`: "
+    "`(v[1]->>'$') = '<value>' AND (v[2]->>'$') = '<value>'`. (An expression you mean as the "
+    "JSON goes in `CAST(<expression> AS JSON)->>'<path>'`.)"
+)
+_UNCHECKABLE = (
+    "defender-sql: query error: a query with `->>` must be a single SELECT (or several), which is "
+    "what the tool can check for a misbound arrow; rewrite it without CREATE, PIVOT or the like."
+)
+
+
+def _json_source(node: dict) -> bool:
+    cls = node.get("class")
+    if cls == "FUNCTION":
+        name = node.get("function_name", "")
+        return name == "->>" or bool(_NAMED_FUNCTION.fullmatch(name))
+    if cls == "OPERATOR":
+        return node.get("type") in _JSON_SOURCE_OPERATORS
+    return cls in _JSON_SOURCE_CLASSES
+
+
+def _arrow_refusal(con, sql: str) -> str | None:
+    """Why the query must not run, if one of its `->>` arrows is misbound; else None.
+
+    duckdb binds `->>` more loosely than the operators written before it, so
+    `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `((v[1]->>'$') = 'x' AND v[2]) ->> '$' = 'y'`
+    and `'x' = v[1]->>'$'` as `('x' = v[1]) ->> '$'`. Depending on the values that errors or
+    answers a silent, wrong count — the fake absence a lead cannot tell from a real one. Each
+    arrow's source is read off duckdb's own parse and must be something that can hold JSON. The
+    parse keeps no parentheses, so a deliberate `(a || b)->>'$'` is refused with it; the refusal
+    names the CAST that says so. Only SELECT statements have a parse to read, so any other
+    statement holding an arrow is refused too.
+    """
+    if "->>" not in sql:
+        return None
+    try:
+        tree = json.loads(con.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
+    except Exception:  # noqa: BLE001 — advisory only; the query itself reports what is wrong with it
+        return None
+    if tree.get("error"):
+        # Only a statement duckdb parsed but will not describe is unchecked; a syntax error is
+        # left to the query, whose own message names the spot.
+        return _UNCHECKABLE if "Only SELECT" in tree.get("error_message", "") else None
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if (node.get("class") == "FUNCTION" and node.get("function_name") == "->>"
+                    and not _json_source((node.get("children") or [{}])[0])):
+                return _MISBOUND
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return None
+
+
 def _shape_hint(con, message: str) -> str:
     try:
         cols = _top_level_columns(con)
@@ -84,7 +149,7 @@ def _shape_hint(con, message: str) -> str:
         idiom = (
             "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
             f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unpack the JSON: "
-            "`v[2]->>'$' = '<value>'`."
+            "`(v[2]->>'$') = '<value>'`."
         )
     else:
         idiom = ("flat/array shape — the payload's keys ARE `data`'s columns; "
@@ -210,6 +275,10 @@ def _run(sql: str) -> int:
         con.execute("SET TimeZone='UTC'")
         con.execute("SET enable_external_access=false")
         con.execute("SET lock_configuration=true")
+
+        if refusal := _arrow_refusal(con, sql):
+            print(f"{refusal}{_shape_hint(con, refusal)}", file=sys.stderr)
+            return EXIT_QUERY_ERROR
 
         # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
         try:
