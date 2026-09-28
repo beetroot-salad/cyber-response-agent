@@ -83,9 +83,10 @@ def test_a_tenant_without_any_config_env_still_resolves(tmp_path):
 
 # ---- O5: the id ----------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bad_id", ["../x", "a/b", ".hidden", "", "..", "."])
+@pytest.mark.parametrize("bad_id", ["../x", "a/b", ".hidden", "", "..", ".", "Acme_Corp"])
 def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, bad_id):
-    """An id with a path separator, `..`, a leading dot, or no name at all is refused — and
+    """An id with a path separator, `..`, a leading dot, no name at all, or anything else
+    outside the one tenant-id grammar a run is held to (`Acme_Corp`) is refused — and
     refused even when the place it would reach EXISTS and is a complete tenant, so the refusal
     is the id's grammar and not an accident of what is on disk. The positive control is the
     same plant reached by a plain id."""
@@ -95,6 +96,7 @@ def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, ba
     T.plant_tenant(tmp_path, "x")                       # root/../x
     T.plant_tenant(root / "a", "b")                     # root/a/b
     T.plant_tenant(root, ".hidden")                     # root/.hidden
+    T.plant_tenant(root, "Acme_Corp")                   # root/Acme_Corp
     T.plant_tenant(root, "acme")
     message = _refusal(root, bad_id)
     if bad_id:

@@ -114,6 +114,37 @@ def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
     assert row["tenant_id"] == TID
 
 
+def test_setup_refuses_a_path_shaped_id_before_looking_under_the_data_root(tmp_path):
+    """`setup ../<dir>` is refused on the id's grammar, before anything under the data root is
+    named with it — so the refusal never lists the contents of a directory outside the data
+    root, and nothing is written. The control: a well-formed id into the same root succeeds."""
+    root = tmp_path / "data"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret-name").write_text("x", encoding="utf-8")
+    proc = H.run_setup(root, "../outside")
+    H.assert_setup_ran(proc)
+    said = H.setup_output(proc)
+    assert proc.returncode == 1, said
+    assert "not a valid tenant id" in said, said
+    assert "secret-name" not in said, f"the refusal listed a directory outside the root: {said}"
+    assert not root.exists() or list(root.iterdir()) == []
+    assert H.run_setup(root, H.VALID_ID).returncode == 0
+
+
+def test_setup_reports_a_corrupt_row_instead_of_already_exists(tmp_path):
+    """A row that is already there but corrupt is reported as what is wrong with it — the
+    owner's `require_tenant` refusal, verbatim — not folded into "already exists"."""
+    root = tmp_path / "data"
+    assert H.run_setup(root, H.VALID_ID).returncode == 0
+    H.row_path(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
+    proc = H.run_setup(root, H.VALID_ID)
+    said = H.setup_output(proc)
+    assert proc.returncode == 1, said
+    assert "not valid JSON" in said, said
+    assert "already exists" not in said, said
+
+
 def test_o10_rerun_no_second_row(tmp_path):
     """A re-run of setup with the same id, where the root's only entry is <id>/ holding a valid
     row, succeeds and leaves that row byte-identical."""

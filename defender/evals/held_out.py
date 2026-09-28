@@ -223,13 +223,11 @@ def main(argv: list[str]) -> int:
         from defender import _tenant
 
         try:
-            _tenant.refuse_bad_tenant_id(ns.tenant)
-            root = _tenant.resolve_data_root()
-            _tenant.require_tenant(root, ns.tenant)
+            tenant_id = _tenant.request_tenant(ns.tenant)
         except _tenant.TenantRefused as refused:
             print(f"[held_out] {refused}", file=sys.stderr)
             return 2
-        runs_dir = _tenant.runs_base_for(ns.tenant)
+        runs_dir = _tenant.runs_base_for(tenant_id)
     else:
         runs_dir = Path(ns.runs_dir)
     if not runs_dir.is_dir():

@@ -45,13 +45,13 @@ def setup(tenant_id: str) -> int:
     data root is looked at, so a path-shaped id never reaches a listing. Every refusal is the
     owner's `TenantRefused`, printed verbatim, exit 1."""
     try:
-        _tenant.refuse_bad_tenant_id(tenant_id)
+        tid = _tenant.TenantId(tenant_id)
         root = _tenant.resolve_data_root()
-        _tenant.refuse_foreign_data_root(root, tenant_id)
-        if os.path.lexists(_tenant.TenantPaths(root, tenant_id).row):
-            _tenant.require_tenant(root, tenant_id)
+        _tenant.refuse_foreign_data_root(root, tid)
+        if os.path.lexists(_tenant.TenantPaths(root, tid).row):
+            _tenant.require_tenant(root, tid)
         else:
-            _tenant.create_tenant(root, tenant_id)
+            _tenant.create_tenant(root, tid)
     except _tenant.TenantRefused as refused:
         print(f"[tenant.py] {refused}", file=sys.stderr)
         return 1

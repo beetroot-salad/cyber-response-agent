@@ -70,7 +70,7 @@ def _setup_state(run: Run) -> str:
 
 
 def materialize_run_dir(
-    alert: Path, run_id: str | None, *, tenant_id: str, model: str | None = None,
+    alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Path:
     """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.

@@ -323,7 +323,9 @@ def synthesise_alert(meta: dict, out_path: Path) -> dict:
     return alert
 
 
-def investigate(alert: Path, run_id: str, *, tenant_id: str, run: Runner = subprocess.run) -> Path:
+def investigate(
+    alert: Path, run_id: str, *, tenant_id: object, run: Runner = subprocess.run,
+) -> Path:
     """One defender investigation — the LLM cost floor, and the envelope source.
 
     `run.py` refuses to reuse an existing run dir, so a retried cell picks the next free
@@ -338,16 +340,15 @@ def investigate(alert: Path, run_id: str, *, tenant_id: str, run: Runner = subpr
     """
     from defender import _tenant
 
-    root = _tenant.resolve_data_root()
-    _tenant.require_tenant(root, tenant_id)
-    env_base = _tenant.runs_base_for(tenant_id)
+    tenant = _tenant.request_tenant(tenant_id)
+    env_base = _tenant.runs_base_for(tenant)
     candidate, attempt = run_id, 1
     while (env_base / candidate).exists():
         attempt += 1
         candidate = f"{run_id}-{attempt}"
     proc = run(
         [sys.executable, DEFENDER_RUN, str(alert), "--run-id", candidate,
-         "--tenant", tenant_id, "--no-learn"],
+         "--tenant", tenant, "--no-learn"],
         capture_output=True, text=True, encoding="utf-8", timeout=3600, cwd=REPO_ROOT,
         check=False)
     if proc.returncode != 0:
@@ -473,9 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     from defender import _tenant
 
     try:
-        _tenant.refuse_bad_tenant_id(ns.tenant)
-        root = _tenant.resolve_data_root()
-        _tenant.require_tenant(root, ns.tenant)
+        _tenant.request_tenant(ns.tenant)
     except _tenant.TenantRefused as refused:
         print(f"[generate_case] {refused}", file=sys.stderr)
         return 2

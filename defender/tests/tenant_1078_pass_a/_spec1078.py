@@ -12,7 +12,7 @@ NONE of the new names exists at base ed5386bc. Every import goes through `mod()`
 collection error that hides every other assertion in the file.
 
 COINED NAMES LIVE HERE AND NOWHERE ELSE. The design names every new owner function
-(`is_valid_tenant_id`, `refuse_bad_tenant_id`, `TenantPaths`, `create_tenant`, `require_tenant`,
+(`is_valid_tenant_id`, `TenantId`, `TenantPaths`, `create_tenant`, `require_tenant`,
 `tenant_of_run_dir`, `ensure_runs_base_record`, `resolve_data_root`, `runs_base_for`), and §7
 J06 places them all in `defender/_tenant.py`. What it does NOT name is the setup command's
 Python entry; the tests therefore drive it as the operator does, as a PROCESS

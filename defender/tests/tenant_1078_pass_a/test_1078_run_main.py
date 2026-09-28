@@ -133,7 +133,7 @@ def test_fresh_run_order(tmp_path, data_root):
     own refusal; an existing tenant with a failing preflight never reaches materialize; and the
     passing preflight reaches it, in that order."""
     alert = H.plant_alert(tmp_path / "in")
-    grammar = H.owner_refusal(H.tenant().refuse_bad_tenant_id, "Acme")
+    grammar = H.owner_refusal(H.tenant().TenantId, "Acme")
     said = _refused([str(alert), "--tenant", "Acme"], H.Recorder(tmp_path / "r1"))
     H.assert_verbatim(said, grammar, entry="run.py main (grammar first)")
 
@@ -472,7 +472,7 @@ def test_tenant_grammar_vs_data_root_validity_order(tmp_path, monkeypatch):
     H.set_data_root(monkeypatch, "relative/root")
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(tmp_path)
-    grammar = H.owner_refusal(H.tenant().refuse_bad_tenant_id, "../x")
+    grammar = H.owner_refusal(H.tenant().TenantId, "../x")
     said = _refused([str(alert), "--tenant", "../x"], H.Recorder(tmp_path / "run"))
     H.assert_verbatim(said, grammar, entry="run.py main")
     assert H.census(tmp_path) == before

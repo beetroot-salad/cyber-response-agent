@@ -687,7 +687,7 @@ def sibling_runs_base(episode_dir: Path) -> Path:
 
 
 def sibling_argv(
-    episode_dir: Path, world_label: str, *, tenant_id: str, model: str | None = None,
+    episode_dir: Path, world_label: str, *, tenant_id: _tenant.TenantId, model: str | None = None,
     tenants_root: Path | None = None,
 ) -> list[str]:
     """One sibling's command line: the manifest, which arm of it this process is, its tenant
@@ -730,7 +730,7 @@ SPAWN_FAILED_EXIT = 70
 def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every arm runs on
     episode_dir: Path, world_labels: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
-    tenant_id: str | None, tenants_root: Path,
+    tenant_id: _tenant.TenantId | None, tenants_root: Path,
 ) -> dict[str, int]:
     """Start every accepted sibling TOGETHER, and wait for all of them.
 

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender._corpus import QueryTemplate, iter_query_templates, query_catalog_dir
-from defender._tenant import TenantRefused
+from defender._tenant import TenantId, TenantRefused
 from defender._tenants import TenantDir
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import VerbGrant
@@ -54,7 +54,7 @@ class RunTenant:
     correlation: CorrelationDispatch | None
 
     @property
-    def tenant_id(self) -> str:
+    def tenant_id(self) -> TenantId:
         return self.dir.tenant_id
 
     @property

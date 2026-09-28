@@ -498,7 +498,7 @@ def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     for bad in ("../x", "acme"):
-        owner = (H.owner_refusal(H.tenant().refuse_bad_tenant_id, bad) if bad == "../x"
+        owner = (H.owner_refusal(H.tenant().TenantId, bad) if bad == "../x"
                  else H.owner_refusal(H.require_tenant, root, bad))
         status, out = _drive_held_out(["--tenant", bad, "--fixtures-dir", str(fixtures)], capsys)
         assert status not in (0, None), out

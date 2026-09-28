@@ -102,7 +102,7 @@ demands:
     require_tenant returns a TenantRow whose tenant_id equals the requested id and whose created_at is
     the row's; tenant_of_run_dir returns the tenant id as a str; create_tenant returns the TenantRow it
     wrote; TenantPaths accessors return absolute Paths under .dir. The owner functions (TenantPaths, create_tenant,
-    require_tenant, tenant_of_run_dir, ensure_runs_base_record, resolve_data_root, refuse_bad_tenant_id)
+    require_tenant, tenant_of_run_dir, ensure_runs_base_record, resolve_data_root, TenantId)
     refuse by raising one refusal class, TenantRefused, whose message names the refused value (it derives
     from Exception, not ValueError — human ruling 2026-09-28, following #1067's _model.py convention that a
     validator's ValueError is wrapped by pydantic; every other tenant refusal subclasses it); run.py main surfaces
@@ -316,11 +316,11 @@ demands:
   kind: seam
   form: test
   pass: A
-  binds: [is_valid_tenant_id, refuse_bad_tenant_id]
+  binds: [is_valid_tenant_id, TenantId]
   discharged_by: test_o3_grammar_seam
   seed_docstring: >-
     is_valid_tenant_id returns True exactly when re.fullmatch('^[a-z][a-z0-9-]{0,62}$', id) matches, and
-    refuse_bad_tenant_id raises on exactly the ids it returns False for.
+    constructing a TenantId raises TenantRefused on exactly the ids it returns False for.
   source: 20-demands.md (demand ledger)
 - id: o4_materialize_layout
   kind: behavior
@@ -2920,10 +2920,12 @@ structure:
     frame: leg
     provenance: design
     where: defender/_tenant.py
-  - id: refuse_bad_tenant_id
+  - id: TenantId
     frame: leg
     provenance: design
-    where: defender/_tenant.py
+    where: >-
+      defender/_tenant.py — the validated tenant-id type (a str subtype); constructing one IS the grammar
+      check, replacing refuse_bad_tenant_id (human ruling 2026-09-28)
   - id: resolve_data_root
     frame: leg
     provenance: design
@@ -3758,8 +3760,8 @@ structure:
   - {from: runs_base_for, to: TenantPaths, provenance: design, multiplicity: serial}
   - {from: require_tenant, to: TenantPaths, provenance: design, multiplicity: serial}
   - {from: create_tenant, to: TenantPaths, provenance: design, multiplicity: serial}
-  - {from: TenantPaths, to: refuse_bad_tenant_id, provenance: design, multiplicity: serial}
-  - {from: refuse_bad_tenant_id, to: is_valid_tenant_id, provenance: design, multiplicity: serial}
+  - {from: TenantPaths, to: TenantId, provenance: design, multiplicity: serial}
+  - {from: is_valid_tenant_id, to: TenantId, provenance: design, multiplicity: serial}
   - {from: tenant.setup, to: resolve_data_root, provenance: design, multiplicity: serial}
   - {from: tenant.setup, to: create_tenant, provenance: design, multiplicity: serial}
   - from: branch.cli.main

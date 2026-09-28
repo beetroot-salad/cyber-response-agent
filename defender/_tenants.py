@@ -34,7 +34,7 @@ import dataclasses
 import os
 from pathlib import Path
 
-from defender._tenant import TenantRefused
+from defender._tenant import TenantId, TenantRefused
 
 #: D3's files required AT START, relative to a tenant's `settings/`. A system's `config.env`
 #: is deliberately not here: some adapters need none, and its absence stays the per-call
@@ -63,7 +63,7 @@ class TenantDirError(TenantRefused):
 class TenantDir:
     """One tenant's two halves, both RESOLVED paths under `<root>/<tenant_id>/`."""
 
-    tenant_id: str
+    tenant_id: TenantId
     settings: Path
     agent: Path
 
@@ -81,20 +81,13 @@ def template_dir(repo_root: Path) -> Path:
     return Path(repo_root) / "knowledge" / TEMPLATE_DIRNAME
 
 
-def _check_id(tenant_id: str) -> None:
-    if (
-        not isinstance(tenant_id, str)
-        or not tenant_id
-        or tenant_id.startswith(".")
-        or "/" in tenant_id
-        or "\\" in tenant_id
-        or "\0" in tenant_id
-        or Path(tenant_id).name != tenant_id
-    ):
-        raise TenantDirError(
-            f"tenant id {tenant_id!r} is not a single plain name (no path separator, no "
-            "leading dot, not empty)"
-        )
+def _check_id(tenant_id: object) -> TenantId:
+    """The id as a `TenantId` — O3's one grammar, the same one a run and the records hold it
+    to (it admits no separator, dot or empty name) — or `TenantDirError` naming it."""
+    try:
+        return TenantId(tenant_id)
+    except TenantRefused as bad:
+        raise TenantDirError(str(bad)) from bad
 
 
 def _refuse_links(folder: Path, tenant_id: str) -> None:
@@ -135,9 +128,9 @@ def _half(tenant_real: Path, tenant_id: str, name: str) -> Path:
     return half
 
 
-def tenant_dir(tenants_root: Path, tenant_id: str) -> TenantDir:
+def tenant_dir(tenants_root: Path, tenant_id: object) -> TenantDir:
     """Resolve `tenant_id` under `tenants_root` to its two halves, or refuse (O4, O5, D3)."""
-    _check_id(tenant_id)
+    tenant_id = _check_id(tenant_id)
     root = Path(tenants_root)
     folder = root / tenant_id
     if not folder.exists():

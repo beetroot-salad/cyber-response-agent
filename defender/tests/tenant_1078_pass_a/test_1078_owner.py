@@ -33,15 +33,15 @@ GRAMMAR = re.compile(H.GRAMMAR)
 ])
 def test_o3_grammar_seam(candidate):
     """is_valid_tenant_id returns True exactly when re.fullmatch('^[a-z][a-z0-9-]{0,62}$', id)
-    matches, and refuse_bad_tenant_id raises on exactly the ids it returns False for."""
+    matches, and constructing a TenantId raises on exactly the ids it returns False for."""
     tenant = H.tenant()
     expected = GRAMMAR.fullmatch(candidate) is not None
     assert tenant.is_valid_tenant_id(candidate) is expected, (
         f"is_valid_tenant_id({candidate!r}) disagrees with re.fullmatch of the grammar")
     if expected:
-        tenant.refuse_bad_tenant_id(candidate)  # accepted: returns without raising
+        tenant.TenantId(candidate)  # accepted: returns without raising
     else:
-        refusal = H.owner_refusal(tenant.refuse_bad_tenant_id, candidate)
+        refusal = H.owner_refusal(tenant.TenantId, candidate)
         assert str(refusal), "the grammar refusal carries no message"
 
 
@@ -56,7 +56,7 @@ def test_o3_trailing_newline_refused(tmp_path, monkeypatch):
     tenant = H.tenant()
     root = tmp_path / "root"
     assert tenant.is_valid_tenant_id("acme\n") is False
-    H.owner_refusal(tenant.refuse_bad_tenant_id, "acme\n")
+    H.owner_refusal(tenant.TenantId, "acme\n")
     H.owner_refusal(H.TenantPaths, root, "acme\n")
     H.owner_refusal(H.create_tenant, root, "acme\n")
     H.owner_refusal(H.require_tenant, root, "acme\n")
@@ -416,7 +416,7 @@ def test_widened_refusal_meets_the_pass_c_layout_early(tmp_path, monkeypatch):
 # ======================================================================================
 
 def _common_refusal_class(refusals: dict[str, BaseException]) -> type:
-    """The most specific class every refusal is an instance of, below `ValueError`."""
+    """The most specific class every refusal is an instance of, below `Exception`."""
     first = next(iter(refusals.values()))
     for cls in type(first).__mro__:
         if cls in (ValueError, Exception, BaseException, object):
@@ -424,7 +424,7 @@ def _common_refusal_class(refusals: dict[str, BaseException]) -> type:
         if all(isinstance(e, cls) for e in refusals.values()):
             return cls
     raise AssertionError(
-        "the owner functions do not refuse through ONE ValueError subclass: "
+        "the owner functions do not refuse through ONE refusal class: "
         + ", ".join(f"{k} raised {type(v).__mro__[:3]}" for k, v in refusals.items()))
 
 
@@ -433,8 +433,8 @@ def test_d0_return_contract(tmp_path, monkeypatch):
     created_at is the row's; tenant_of_run_dir returns the tenant id as a str; create_tenant
     returns the TenantRow it wrote; TenantPaths accessors return absolute Paths under .dir.
     The owner functions (TenantPaths, create_tenant, require_tenant, tenant_of_run_dir,
-    ensure_runs_base_record, resolve_data_root, refuse_bad_tenant_id) refuse by raising one
-    ValueError subclass whose message names the refused value; run.py main surfaces a tenant
+    ensure_runs_base_record, resolve_data_root, TenantId) refuse by raising one
+    refusal class, TenantRefused, whose message names the refused value; run.py main surfaces a tenant
     refusal as SystemExit carrying a '[run.py] ...' message before the preflight, exactly as
     _resume_target does today; the branch launcher surfaces it as LauncherRefused; tenant.py
     setup returns 0 when every kind of its pass adopted, was already in place, or had nothing
@@ -468,11 +468,11 @@ def _d0_return_values(root: Path) -> None:
     (base / "r1").mkdir()
     derived = H.tenant_of_run_dir(base / "r1")
     assert derived == "playground"
-    assert type(derived) is str
+    assert isinstance(derived, H.tenant().TenantId)  # a str subtype: the id, parsed
 
 
 def _d0_owner_refusals(tmp_path: Path, root: Path, monkeypatch) -> dict:
-    """#0's refusal half: every owner function refuses through ONE ValueError subclass, and
+    """#0's refusal half: every owner function refuses through ONE refusal class, and
     each refusal names the value it refused. Returns `{owner: (refusal, named value)}`."""
     old_base = tmp_path / "old-runs"
     H.plant_record(old_base, "playground")
@@ -480,7 +480,7 @@ def _d0_owner_refusals(tmp_path: Path, root: Path, monkeypatch) -> dict:
     other_base = tmp_path / "other-base"
     H.plant_record(other_base, "someone-else")
     refusals = {
-        "refuse_bad_tenant_id": (H.owner_refusal(H.tenant().refuse_bad_tenant_id, "../x"),
+        "TenantId": (H.owner_refusal(H.tenant().TenantId, "../x"),
                                  "../x"),
         "TenantPaths": (H.owner_refusal(H.TenantPaths, root, "Acme-Corp"), "Acme-Corp"),
         "create_tenant": (H.owner_refusal(H.create_tenant, tmp_path / "x", "a/b"), "a/b"),

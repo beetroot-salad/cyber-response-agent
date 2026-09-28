@@ -394,7 +394,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 
 def _resolve_run_tenant(
-    tenants_root: Path, tenant_id: str, *, runs_base: Path, defender_dir: Path,
+    tenants_root: Path, tenant_id: _tenant.TenantId, *, runs_base: Path, defender_dir: Path,
     dispatches_lead_zero: bool,
 ) -> RunTenant:
     """The run's tenant's settings, or the refusal — BEFORE the run dir, the box and any model
@@ -418,7 +418,7 @@ def _resolve_run_tenant(
         sys.exit(f"[run.py] this run's tenant {tenant_id!r} cannot be used: {refusal}")
 
 
-def _sibling_tenant_agrees(world: Any, tenant_id: str) -> None:
+def _sibling_tenant_agrees(world: Any, tenant_id: _tenant.TenantId) -> None:
     """A sibling runs on the EPISODE's tenant, which is the source run's — read from the
     source's HOST-ONLY runs-base record (`tenant_of_run_dir`), never from its box-writable
     stamp — and the request must name that same tenant (#1078 O5). No world (an ordinary run):
@@ -545,7 +545,8 @@ def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> A
 
 
 def _materialize_run_dir(
-    alert: Path, run_id: str | None, *, tenant_id: str, model: str | None, world: Any = None,
+    alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None,
+    world: Any = None,
 ) -> Path:
     """Build this run's directory, stamped with the code and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
@@ -569,21 +570,19 @@ def _materialize_run_dir(
     return run_dir
 
 
-def _resolve_tenant_id(ns: argparse.Namespace) -> str:
+def _resolve_tenant_id(ns: argparse.Namespace) -> _tenant.TenantId:
     """The request's tenant, or the refusal — surfaced as `[run.py] ...`, before the preflight
     (#1078 D3, O1, O2). EVERY run names its tenant with `--tenant`, a sibling included: the
     tenant comes from the request (for a platform, the acting user's authentication context),
     never from a record or a stamp, and there is no default. It is checked against the grammar
-    and the row here; a sibling's is also checked against its source's record once the
-    manifest is resolved (`_sibling_tenant_agrees`)."""
+    and the row here (`request_tenant`); a sibling's is also checked against its source's
+    record once the manifest is resolved (`_sibling_tenant_agrees`)."""
     try:
         if ns.tenant is None:
             raise _tenant.TenantRefused(
                 "--tenant is required: every run names its tenant, a sibling included, and "
                 "there is no default")
-        _tenant.refuse_bad_tenant_id(ns.tenant)
-        _tenant.require_tenant(_tenant.resolve_data_root(), ns.tenant)
-        return ns.tenant
+        return _tenant.request_tenant(ns.tenant)
     except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] {refused}")
 
