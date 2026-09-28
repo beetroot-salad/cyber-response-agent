@@ -458,7 +458,7 @@ def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
     return OutboundBody({"query": bounded_esql(ctx, query)})
 
 
-@verb(engine="esql", body_param="query")
+@verb(engine="esql", body_param="query", aggregates=True)
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"

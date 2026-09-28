@@ -95,6 +95,7 @@ _ENGINE_ATTR = "__verb_engine__"
 _BODY_PARAM_ATTR = "__verb_body_param__"
 _VERB_CLASS_ATTR = "__verb_class__"
 _WRAPPER_ONLY_ATTR = "__verb_wrapper_only__"
+_AGGREGATES_ATTR = "__verb_aggregates__"
 
 _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
     ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
@@ -105,7 +106,7 @@ _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
 
 def verb(
     *, engine: str = "none", body_param: str | None = None, verb_class: str = "r",
-    wrapper_only: tuple[str, ...] = (),
+    wrapper_only: tuple[str, ...] = (), aggregates: bool = False,
 ) -> Callable[[Verb], Verb]:
     """`wrapper_only` names params a first-party wrapper binds and no model may.
 
@@ -150,6 +151,7 @@ def verb(
         setattr(fn, _BODY_PARAM_ATTR, body_param)
         setattr(fn, _VERB_CLASS_ATTR, verb_class)
         setattr(fn, _WRAPPER_ONLY_ATTR, reserved)
+        setattr(fn, _AGGREGATES_ATTR, aggregates)
         return fn
 
     return decorate
@@ -161,6 +163,10 @@ def engine_of(fn: Verb) -> str:
 
 def body_param_of(fn: Verb) -> str | None:
     return getattr(fn, _BODY_PARAM_ATTR, None)
+
+
+def aggregates_of(fn: Verb) -> bool:
+    return getattr(fn, _AGGREGATES_ATTR, False)
 
 
 def verb_class_of(fn: Verb) -> str:

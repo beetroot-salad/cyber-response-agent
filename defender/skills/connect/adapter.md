@@ -102,9 +102,15 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   put in-body `${…}` substitutions into the query text — a param-only verb requires
   every `${…}` to be a *declared param*, so an undeclared body placeholder makes
   `validate_scaffold` reject the template. `elastic_adapter.py`'s `esql`
-  (`@verb(engine="esql", body_param="query")`) and `query`/`alerts`
+  (`@verb(engine="esql", body_param="query", aggregates=True)`) and `query`/`alerts`
   (`@verb(engine="lucene", body_param="native_query")`) are the exemplars;
   `get-host` above is param-only and carries no decoration.
+- **A verb whose language aggregates says so: `aggregates=True`.** Rung 1 of the
+  ladder above (filter, `GROUP BY`/`STATS … BY`, `COUNT`/`MIN`/`MAX` in the query
+  itself). When such a verb's result is too large for gather's view, the view
+  sends the lead back to narrow the query instead of offering `defender-sql` over
+  the saved file. A filter-only language (Lucene) leaves it unset, so its large
+  results keep the `defender-sql` route.
 - **A verb RETURNS its payload** — a dict or list of the upstream JSON,
   unmodified. It does not print and it does not exit. The query tool
   captures the returned value by-ref under `gather_raw/`.

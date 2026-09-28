@@ -431,7 +431,9 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
 
 # The view.
 
-def _prose(comp: Completeness, elisions: list[Elision], size: int, span) -> list[str]:
+def _prose(
+    comp: Completeness, elisions: list[Elision], size: int, span, *, aggregating: bool = False,
+) -> list[str]:
     """The prose lines. What the server did and what this view did are separate sentences, so
     a lead neither hunts for rows that are on disk nor reports a total it never saw."""
     lines: list[str] = []
@@ -467,19 +469,33 @@ def _prose(comp: Completeness, elisions: list[Elision], size: int, span) -> list
     else:
         lines.append(f"[record_query] {size} bytes.")
     if elisions:
+        # An aggregating language computes over every match; a reduction of the file cannot.
+        reduce = "re-run the query narrowed" if aggregating else "compute them over the file"
         lines.append(
             f"[record_query] this VIEW is bounded and does not show all of it. Each region it "
             f"dropped is marked `{ELISION_PREFIX} …>>` exactly where it was dropped — those "
             f"elements are absent from THIS TEXT ONLY and are present in full on disk. Read "
-            f"counts off the payload's own fields, or compute them over the file."
+            f"counts off the payload's own fields, or {reduce}."
         )
     return lines
 
 
-def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[str]:
+def _footer(
+    payload_rel: str | None, run_dir: Path, comp: Completeness, *, aggregating: bool = False,
+) -> list[str]:
     if payload_rel is None:
         return []
     abs_payload = run_dir / payload_rel
+    if aggregating:
+        # #1138: offered `defender-sql`, leads reduced the file with work the query language
+        # does itself, over every match rather than over the rows this file happens to hold.
+        return [
+            f"[record_query] payload on disk: {abs_payload}",
+            "→ this verb's query language aggregates: to reach rows this view dropped, or to "
+            "count or group them, re-run the query narrowed — filter it, group by the field you "
+            "need, or keep fewer columns — so the server computes over every match. A count "
+            "over this file counts only the rows the FILE holds.",
+        ]
     if comp.state == "capped":
         # The file holds the server's slice, so no `count(*)` example: it would return the cap.
         return [
@@ -511,10 +527,12 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
 
 
 def render(
-    text: str, payload_rel: str | None, run_dir: Path, *, ceiling: int | None = None
+    text: str, payload_rel: str | None, run_dir: Path, *, ceiling: int | None = None,
+    aggregating: bool = False,
 ) -> str:
     """The model-visible view of one captured payload. Under the ceiling (~94% of the recorded
-    corpus) it is returned verbatim."""
+    corpus) it is returned verbatim. `aggregating` is the producing verb's own declaration
+    (`@verb(aggregates=True)`), never read off the payload."""
     cap = passthrough_max_bytes() if ceiling is None else ceiling
     if len(text) <= cap:
         return text
@@ -537,5 +555,9 @@ def render(
             body = _dumps(clipped)
             elisions = [*elisions, Elision("", "text", len(clipped), len(_dumps(obj)))]
     return "\n".join(
-        [*_prose(comp, elisions, len(text), span), body, *_footer(payload_rel, run_dir, comp)]
+        [
+            *_prose(comp, elisions, len(text), span, aggregating=aggregating),
+            body,
+            *_footer(payload_rel, run_dir, comp, aggregating=aggregating),
+        ]
     )

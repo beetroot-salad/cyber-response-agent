@@ -76,6 +76,7 @@ from .verbs import (
     VerbContext,
     _ann_name,
     _resolved_hints,
+    aggregates_of,
     SYSTEM_MAX_LEN,
     is_system_name,
     model_facing_params,
@@ -629,7 +630,9 @@ class QueryCapture(AbstractCapability[Any]):
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
         )
-        return self._model_view(deps, row, text, exit_code, detail)
+        return self._model_view(
+            deps, row, text, exit_code, detail, aggregating=aggregates_of(decision.fn),
+        )
 
     async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
@@ -671,7 +674,10 @@ class QueryCapture(AbstractCapability[Any]):
         circuit_breaker.record_outcome(run_dir, system, exit_code)
         return row, text
 
-    def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
+    def _model_view(
+        self, deps, row: dict, text: str, exit_code: int, detail: str, *,
+        aggregating: bool = False,
+    ) -> str:
         note = _payload_note(deps, row)
         # Computed for failures too: a lead repeating a failing call is the most likely to loop.
         repeat = repeat_note(
@@ -688,7 +694,7 @@ class QueryCapture(AbstractCapability[Any]):
             body = visible if repeat is None else f"{repeat}\n{visible}"
             return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # `render` decides whether the payload fits; callers do not.
-        view = _render_payload(text, row["payload_path"], deps.run_dir)
+        view = _render_payload(text, row["payload_path"], deps.run_dir, aggregating=aggregating)
         if repeat is not None:
             view = f"{repeat}\n{view}"
         return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
