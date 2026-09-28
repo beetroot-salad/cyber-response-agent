@@ -76,6 +76,14 @@ box = [
     # duckdb's undeclared import for zoned timestamps — see `runtime` (#1126).
     "pytz",
 ]
+# The platform HTTP API (`defender/api/`, #1131): the stub endpoints over in-memory fakes. Its
+# own extra because the API is its own program — it never loads the investigation or learning
+# modules, and neither the runtime nor the box image needs a web framework.
+api = [
+    "fastapi>=0.115",
+    # The ASGI server behind `api/serve.py`, the local dev entry point.
+    "uvicorn>=0.30",
+]
 dev = [
     "pytest>=8.0",
     # CI runs the suite under `-n auto --dist loadfile`. `loadfile`, not the default
@@ -88,6 +96,10 @@ dev = [
     # tests/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
     # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.
     "markdown-it-py",
+    # tests/test_api_*.py drive the `api` extra's app through starlette's TestClient, which
+    # imports httpx. The `runtime` extra happens to carry it (anthropic -> httpx); a dev-only
+    # sync does not.
+    "httpx",
     "coverage",
     "ruff",
     "vulture",

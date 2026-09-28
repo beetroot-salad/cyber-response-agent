@@ -63,7 +63,9 @@ jobs:
       # with a misleading remedy instead of a sync-step failure.
       - name: Sync defender venv
         working-directory: defender
-        run: uv sync --extra dev --extra runtime --locked
+        # --extra api: the platform API stub (`defender/api/`, #1131) and its tests, which
+        # `importorskip` fastapi and would otherwise skip here silently.
+        run: uv sync --extra dev --extra runtime --extra api --locked
 
       # The #540 boundary suite drives a REAL container: the mounts and --network=none are the
       # boundary, so a fake cannot pin them. gVisor is the default runtime behind the knob, and
@@ -461,7 +463,9 @@ jobs:
         # unchecked — defeating the #403 mypy gate there. The Anthropic+MCP stack
         # is the cost; the `code-smells` job stays dev-only (its AST gates don't
         # import the tree).
-        run: uv sync --extra dev --extra runtime
+        # --extra api: the same argument for `defender/api/`, whose FastAPI types would
+        # otherwise collapse to `Any`.
+        run: uv sync --extra dev --extra runtime --extra api
 
       # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
       # clean repo-wide; extra rule sets are reported in the code-smells job.

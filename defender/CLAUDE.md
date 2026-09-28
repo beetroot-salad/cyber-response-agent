@@ -45,6 +45,8 @@ defender/
                     #   ledger.py records every response the estate served with the decision behind it;
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
                     #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
+  api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports, over in-memory fakes;
+                    #   never imports runtime/ or learning/. `api/serve.py` runs it locally (`--extra api`)
   evals/            # metrics + harness-on-the-harness (scenarios/)
   lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
   lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
@@ -69,6 +71,7 @@ python3 defender/scripts/tenant.py setup playground    # once, before the first 
 python3 defender/run.py <alert.json> --tenant playground   # one investigation → run dir under $DEFENDER_DATA_ROOT/playground/runs/; --no-learn skips curation enqueue
 python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>   # fork a finished run into a family of worlds and grade it
 python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
+python3 defender/api/serve.py                         # the stub platform API on 127.0.0.1:8000 (needs `uv sync --extra api`); demo tokens in api/demo.py
 ```
 
 Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
