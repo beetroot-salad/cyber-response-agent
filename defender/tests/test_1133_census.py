@@ -1,60 +1,82 @@
-"""#1133 D6 — the census: every write into an episode tree goes through the `Episode` handle,
-and the handle writes only through the rooted core (O1).
+"""#1133 D6' — the census, rev 2: every write into an episode tree goes through the `Episode`
+handle, the handle reaches the core only by `hold` / `hold_new` and the `Held` verbs, and (O5)
+no function takes a path to something below the episode dir.
 
-An AST scan of the modules D6 names collects every CALL to, and every other REFERENCE to, a
-write-capable callee. D6's pinned vocabulary, widened (#1133 §3) to an allowlist over all
-write-capable I/O, so a migrated site reverted to a link-following write cannot stay green:
+**The first scan** (D6, whose allowlist and vocabulary stand) collects, across D6's modules plus
+`run.py`, `learning/branch/episode.py` and `learning/judge/{family,render,run}.py` (D6'), every
+CALL to and every other REFERENCE to a write-capable callee:
 
 * the path seams `write_guarded`, `read_guarded`, `read_bytes_guarded`, `read_plain`,
   `read_plain_bytes`, `locked_for_rewrite`, `guarded_mkdir`, `open_guarded`, `write_atomic`,
   `append_jsonl`, and `stage_trace_path` — bare, through an `as` alias, or as an attribute of
   any receiver (`_io.write_guarded`, `self.io.write_guarded`);
-* every `defender._io` writer the seams are built on: any `rooted_*` (from `_io`, or as an
-  attribute of any receiver), `open_nofollow_fd`, `open_unnamed`, `open_unnamed_at`,
-  `sweep_staged`, and any private `_io._<name>`;
+* every `defender._io` writer: any `rooted_*`, rev 2's `hold` and `hold_new` (a module that
+  holds a root itself is a second handle), `open_nofollow_fd`, `open_unnamed`,
+  `open_unnamed_at`, `sweep_staged`, and any private `_io._<name>`;
 * builtin `open`, `io.open`, `codecs.open` — any call, whatever its mode;
 * `os.open`, `os.makedirs`, `os.mkdir`, `os.write`, `os.fdopen`, `os.link`, `os.symlink`,
   `os.rename`, `os.renames`, `os.replace`, `os.unlink`, `os.remove`, `os.removedirs`,
   `os.rmdir`, `os.truncate`, `os.mkfifo`, `os.mknod` (through any alias of `os`);
 * `shutil.<anything>`;
-* `getattr(<_io, os or shutil>, ...)` and `vars(<the same>)` — a callee named by string — and
-  `importlib.import_module` / `__import__` of one of those modules (or `io`, `codecs`), a module
-  bound where no import names it;
+* `getattr(<_io, os or shutil>, ...)`, `vars(<the same>)`, and `importlib.import_module` /
+  `__import__` of one of those modules (or `io`, `codecs`);
 * the `Path` attribute calls `.open`, `.mkdir`, `.write_text`, `.write_bytes`, `.unlink`,
   `.rmdir`, `.touch`, `.symlink_to`, `.hardlink_to`, on any receiver, and `.rename` /
-  `.replace` called with ONE argument (`Path.rename(target)`; `str.replace(old, new)` takes
-  two and is not I/O);
-* the link-following reads `.read_text` and `.read_bytes` on any receiver: O1 moves the
-  path-seam reads of episode records onto the handle (or a `Bound`), so a record read that
-  follows a link is as much a census hit as a write. The few such reads left are of things
-  that are not episode records, each named in the residue.
+  `.replace` called with ONE argument;
+* the link-following reads `.read_text` and `.read_bytes` on any receiver.
 
-A reference is anything that is not a call's callee: a module-level alias (`_put =
-write_guarded`, whose later `_put(...)` calls are then resolved to `write_guarded` in the
-function that makes them), a keyword or default value (`write=write_guarded`), a branch of an
-expression (`w if w is not None else write_guarded`). A seam held is a seam used, so a
-reference is keyed exactly as a call is.
+A reference is anything that is not a call's callee (a module-level alias, a keyword or default
+value, a branch of an expression) and is keyed exactly as a call is. Each hit is keyed
+`(module, enclosing scope, callee)`, never by line. The collected set must EQUAL the residue:
+the queue writer (N-d), the archive's copy lane (N-a), the review's temp-dir cleanup, and the
+link-following reads of things that are not episode records. D6' removes `scratch_ledger`'s
+`.mkdir` / `.write_text` (the scratch base is `served_base.create("")` on a scratch `Episode`)
+and `Ledger._append`'s `rooted_*` (every `Ledger` is built by `for_world` or `scratch_ledger`,
+so it appends through its episode's record).
 
-Each hit is keyed `(module, enclosing scope, callee)`, never by line: the module relative to
-the `defender` package, dotted; the enclosing `def`s (and classes) joined with `.`, or
-`<module>`; the callee as spelled above (`os.unlink`, `.mkdir`, `shutil.copy2`,
-`builtins.open`, `write_guarded`, `rooted_write`, `getattr(defender._io)`). The collected set
-must EQUAL D6's residue: the queue writer (N-d), the archive's copy lane (N-a), the review's
-scratch ledger and its temp-dir cleanup, and D3's one deliberate bypass — a directly
-constructed `Ledger` (no episode behind it) appends through the rooted core itself. A residue
-entry the final tree no longer has is removed from `RESIDUE`, never kept.
+**The handle scan** holds `defender/_episode_handle.py` to D1'/D2': it reaches the core only
+through `hold` and `hold_new` (its `io=` seam), and does I/O only through the `Held` it gets
+back — `held.mkdir(rel)` / `held.unlink(rel)` (a call carrying the name positionally is a
+`Held` verb; `Path.mkdir()` / `Path.unlink()` take no positional name, and their positional
+`mode` / `missing_ok` is a non-string constant) and `read` / `write` /
+`view` / `close`, none of which is vocabulary. No `rooted_*`, no path seam, no raw `os` /
+`shutil` / builtin `open`, no `Path` I/O method, no other I/O-doing `_io` function; and it does
+call `hold` and `hold_new`, so the check is not vacuous.
 
-A second scan holds `defender/_episode_handle.py` to D1: it calls or references no
-vocabulary entry but the rooted core's own (`rooted_*`, through its `io=` seam), no raw `os` /
-`shutil` / builtin `open`, no `Path` I/O method, and no `_io` function but the rooted ones —
-and it does call `rooted_read`, `rooted_write`, `rooted_mkdir` and `rooted_unlink`.
+**The O5 scan** (D6') covers every function, public or private, of the same modules:
 
-A module that is missing or does not parse fails the scan.
+* *Parameters.* A parameter named `path`, `*_path`, `manifest`, `draw_dir` or `world_dir`, or
+  annotated with a path type, and not named `episode_dir` / `episodes_root` / `source*` /
+  `run_dir*`, must be on `PARAM_ALLOWLIST` `(module, function, parameter, reason)`. The rule is
+  read as O5 is narrowed — "a path to something BELOW the episode dir":
+  - a path type is a concrete `Path` / `PosixPath` / `os.PathLike` / `StrPath`, optionally
+    unioned with `str` / `bytes` / `None`; a pure path (`PurePath`, `PurePosixPath`) is a
+    relative name resolved under a held or bound root, which is the handle's own model, and a
+    container or callable of paths is not itself a path;
+  - a NAMED parameter whose annotation names neither a path type nor `str` / `bytes`
+    (`manifest: dict[str, Any]`, a parsed document) is not a path;
+  - a path-typed parameter named for a root outside every episode tree (`OUTSIDE_EPISODE`:
+    the sibling runs base, settings, tenants, lessons, the judge queue, the repository) is not
+    below an episode dir.
+  The allowlist is the O5 carve-outs plus the path-typed functions that do no episode write
+  (D3' "stay path-typed"): an HTTP request path, a path inside a git revision, the queue
+  writer's files (N-d), the investigation's alert input. Every row must still be flagged on the
+  tree (a row the tree no longer has is removed, never kept); `PARAM_TOLERATED` rows may be
+  present or not.
+* *Calls.* `EpisodePaths(`, `base_file(` and `staged_path(` are called only in `NB_READERS`:
+  the root-binding readers and path-typed functions D3' names, and the O5 carve-outs.
+* *Doors.* `Episode.open` / `Episode.create` are called only in the doors D3' names
+  (`DOORS`) plus `review.review` / `replay_one` for the scratch; and each door in
+  `DOORS_REQUIRED` does call its verb, so the scan is not vacuous.
 
-Red before #1133: the migrated modules still make the path-seam and raw calls the handle
-replaces, and `_episode_handle.py` does not exist. The widened vocabulary is red against an
-implementation that reverts a migrated site to builtin `open` / `os.makedirs`, or keeps a path
-seam under an alias or as a default value.
+Every scan is self-tested on synthetic source: each violating shape is collected, each compliant
+shape is not. A module that is missing or does not parse fails the scan.
+
+Red on rev 1: `_episode_handle.py` still calls the `rooted_*` core and never `hold` /
+`hold_new`; `scratch_ledger` and `Ledger._append` still write around the handle; path-typed
+writers and readers (`merge_review(path)`, `teardown(review_path=)`, `prime_base(base_path)`,
+`draws_on_disk(draw_dir)`, `load_family(path)`, ...) and `EpisodePaths(` calls in writers
+remain; and no door calls `Episode.open` / `Episode.create`.
 """
 from __future__ import annotations
 
@@ -72,7 +94,8 @@ from defender import _io
 #: The `defender` package's own directory (a namespace package: located through a module in it).
 PACKAGE = Path(_io.__file__).resolve().parent
 
-#: D6's module list.
+#: D6's module list, plus `run.py` and the readers D6' adds to the O5 scan (the census scans
+#: them too: none may make an episode write around the handle).
 MODULES = (
     "learning/branch/cli.py",
     "learning/branch/staging.py",
@@ -85,7 +108,14 @@ MODULES = (
     "learning/judge/enqueue.py",
     "runtime/branch/_family.py",
     "scripts/visualize/visualize_episode.py",
+    "run.py",
+    "learning/branch/episode.py",
+    "learning/judge/family.py",
+    "learning/judge/render.py",
+    "learning/judge/run.py",
 )
+#: The O5 scan's modules: the same set (D6').
+O5_MODULES = MODULES
 
 #: D6's pinned vocabulary: the path seams, spelled by their own name wherever they come from.
 PATH_SEAMS = frozenset({
@@ -93,8 +123,11 @@ PATH_SEAMS = frozenset({
     "locked_for_rewrite", "guarded_mkdir", "open_guarded", "write_atomic", "append_jsonl",
     "stage_trace_path",
 })
-#: The `_io` writers beneath the seams (plus any `rooted_*` and any private `_io._<name>`).
-IO_WRITERS = frozenset({"open_nofollow_fd", "open_unnamed", "open_unnamed_at", "sweep_staged"})
+#: The `_io` writers beneath the seams (plus any `rooted_*` and any private `_io._<name>`),
+#: rev 2's held-root core among them.
+CORE = frozenset({"hold", "hold_new"})
+IO_WRITERS = frozenset({"open_nofollow_fd", "open_unnamed", "open_unnamed_at", "sweep_staged",
+                        *CORE})
 _IO = "defender._io"
 RAW_OS = frozenset({
     "open", "makedirs", "mkdir", "write", "fdopen", "link", "symlink", "rename", "renames",
@@ -116,7 +149,7 @@ _GETATTR_MODULES = frozenset({_IO, "os", "shutil"})
 _DYNAMIC_MODULES = frozenset({*_GETATTR_MODULES, "io", "codecs"})
 _DYNAMIC_IMPORTS = frozenset({"importlib.import_module", "builtins.__import__"})
 
-#: D6's residue, exactly, re-derived on the final tree.
+#: The residue D6' leaves, exactly, re-derived on the final tree.
 RESIDUE = frozenset({
     # The queue writer (N-d: learning state, #1134/#1135).
     ("learning.judge.enqueue", "_append_validated_rows", "guarded_mkdir"),
@@ -126,14 +159,10 @@ RESIDUE = frozenset({
     ("learning.branch.archive", "_screen_destinations", ".unlink"),
     ("learning.branch.archive", "archive_episode", "shutil.copy2"),
     ("learning.branch.archive", "archive_episode", "shutil.copytree"),
-    # The review's scratch ledger, a fresh system temp tree, and its cleanup.
-    ("learning.branch.review", "scratch_ledger", ".mkdir"),
-    ("learning.branch.review", "scratch_ledger", ".write_text"),
+    # The cleanup of the review's fresh system temp tree, which holds its scratch `Episode`
+    # (D4'). The scratch ledger itself now writes through that `Episode`, and `Ledger._append`
+    # through its episode's record: D6' removes both from the residue.
     ("learning.branch.review", "review", "shutil.rmtree"),
-    # D3's one deliberate bypass: a `Ledger` constructed directly (no episode behind it, tests
-    # only) appends through the rooted core rather than through the handle.
-    ("learning.branch.ledger", "Ledger._append", "rooted_mkdir"),
-    ("learning.branch.ledger", "Ledger._append", "rooted_write"),
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
@@ -154,8 +183,10 @@ _PATH_IO = frozenset({"read_text", "read_bytes", "exists", "is_file", "is_dir", 
                       "hardlink_to", "rename", "replace", "chmod", "samefile", "readlink"})
 #: `os` functions that touch no file.
 _OS_PURE = frozenset({"os.fspath", "os.fsdecode", "os.fsencode"})
-#: What the handle must call (through its `io=` seam).
-_ROOTED_REQUIRED = frozenset({"rooted_read", "rooted_write", "rooted_mkdir", "rooted_unlink"})
+#: The `Held` verbs that share a name with a `Path` I/O method: a call carrying the name
+#: positionally (`held.mkdir(rel)`, `held.unlink(rel)`) is the verb, since `Path.mkdir()` and
+#: `Path.unlink()` take no positional name.
+_HELD_NAMED_VERBS = frozenset({"mkdir", "unlink"})
 _BUILTINS = frozenset(dir(builtins))
 
 
@@ -359,9 +390,9 @@ def test_d6_the_scanner_sees_every_vocabulary_spelling_including_aliases():
     an attribute of any receiver, through an `import ... as` or `from ... import ... as` alias,
     through a module-level assignment alias, as a non-call reference (a keyword or default
     value, a branch of an expression), as a `getattr` / `vars` on `_io` or `os`, through a
-    dynamic import — is collected with its
-    enclosing scope; a non-vocabulary call is not, nor `str.replace`'s two-argument shape, nor a
-    local value that shadows an imported name."""
+    dynamic import, rev 2's `hold` / `hold_new` — is collected with its enclosing scope; a
+    non-vocabulary call is not, nor `str.replace`'s two-argument shape, nor a local value that
+    shadows an imported name."""
     source = '''
 import codecs
 import importlib
@@ -369,6 +400,7 @@ import os as _os
 import shutil as sh
 from os import replace as swap
 from defender._io import write_guarded as wg, guarded_mkdir, rooted_write, read_guarded
+from defender._io import hold as grab
 from defender import _io
 from defender.runtime.observe import stage_trace_path
 
@@ -438,9 +470,18 @@ def raw(p):
     importlib.import_module("json")
 
 
-def shadowed(open, rooted_write):
+def holds(p, ctx):
+    grab(p)
+    _io.hold_new(p, "n")
+    ctx.io.hold(p)
+    opener = _io.hold
+    return opener
+
+
+def shadowed(open, rooted_write, hold):
     open(1)
     rooted_write(2)
+    hold(3)
 
 
 _os.open("x", 0)
@@ -469,6 +510,9 @@ _os.open("x", 0)
         ("m", "raw", ".rename"), ("m", "raw", ".replace"), ("m", "raw", "rooted_write"),
         ("m", "raw", "getattr(defender._io)"), ("m", "raw", "vars(os)"),
         ("m", "raw", "_io._replace_at"), ("m", "raw", "import_module(shutil)"),
+        # Rev 2's held-root core, bare through an alias, as a module attribute, on any receiver,
+        # and as a value.
+        ("m", "holds", "hold"), ("m", "holds", "hold_new"),
     }, sorted(got)
 
 
@@ -486,6 +530,13 @@ def test_d6_the_migrated_modules_make_no_episode_io_but_the_declared_residue():
     assert not missing, report
 
 
+
+
+# ---------------------------------------------------------------------------------------------
+# The handle scan (D1' / D2'): the core only by `hold` / `hold_new`, I/O only through `Held`
+# ---------------------------------------------------------------------------------------------
+
+
 def _io_functions() -> frozenset[str]:
     return frozenset(
         name for name, obj in vars(_io).items()
@@ -493,42 +544,634 @@ def _io_functions() -> frozenset[str]:
         and not name.startswith("_"))
 
 
-def test_d6_the_episode_handle_does_io_only_through_the_rooted_core():
-    """D1 / D6's second assertion: `_episode_handle.py` calls or references no vocabulary entry
-    but the rooted core's own `rooted_*` (reached through its `io=` seam), no `os.*` or
-    `shutil.*` operation, no builtin `open`, no filesystem method of a `Path`, and no `_io`
-    function except the rooted ones; and it does call `rooted_read`, `rooted_write`,
-    `rooted_mkdir` and `rooted_unlink`, so the check is not vacuous."""
-    path = PACKAGE / "_episode_handle.py"
-    tree = _parse(path)
-    vocabulary = {hit for hit in census_of("_episode_handle", tree)
-                  if not hit[2].startswith("rooted_")}
-    assert vocabulary == set(), f"the handle makes path-seam or raw calls: {sorted(vocabulary)}"
+def _is_held_verb(call: ast.Call, env: Any) -> bool:
+    """`<value>.mkdir(rel)` / `<value>.unlink(rel)`: a `Held` verb, not `Path` I/O. A first
+    positional that is a non-string constant is `Path`'s `mode` / `missing_ok`
+    (`p.mkdir(0o755)`, `p.unlink(True)`), not a name."""
+    f = call.func
+    if not (isinstance(f, ast.Attribute) and f.attr in _HELD_NAMED_VERBS and call.args):
+        return False
+    first = call.args[0]
+    if isinstance(first, ast.Constant) and not isinstance(first.value, str):
+        return False
+    return _astlib().callee(call, env) is None
 
+
+def _raw_io(call: ast.Call, env: Any, io_funcs: frozenset[str]) -> str | None:
+    """Beyond the vocabulary: any `os` / `shutil` operation, builtin `open`, an I/O-doing `_io`
+    function other than the core, or a filesystem method of a `Path`."""
+    f = call.func
+    origin = _astlib().callee(call, env)
+    name = (origin.rsplit(".", 1)[-1] if origin is not None
+            else f.attr if isinstance(f, ast.Attribute) else None)
+    if name is None:
+        return None
+    if origin is not None and (origin == "builtins.open" or (
+            origin.split(".")[0] in ("os", "shutil")
+            and not (origin.startswith("os.path.") or origin in _OS_PURE))):
+        return origin
+    if name in io_funcs and name not in _IO_PURE and name not in CORE and (
+            origin is None or origin.startswith(_io.__name__ + ".")):
+        return name
+    if origin is None and name in _PATH_IO and not (
+            name in _ONE_ARG_ONLY and len(call.args) != 1):
+        return f".{name}"
+    return None
+
+
+def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
+    """The handle module's I/O outside `Held` and its core, and the core calls it makes.
+
+    Returns `(violations, core)`: `violations` are `(scope, callee)` pairs, `core` the subset of
+    `CORE` the module calls."""
     env = _astlib().module_env(tree)
+    aliases = module_aliases(tree, env)
     io_funcs = _io_functions()
-    calls = _Scoped()
-    calls.visit(tree)
-    violations, rooted = [], set()
-    for where, call in calls.calls:
-        f = call.func
-        origin = _astlib().callee(call, env)
-        name = (origin.rsplit(".", 1)[-1] if origin is not None
-                else f.attr if isinstance(f, ast.Attribute) else None)
-        if name is None:
+    seen = _Scoped()
+    seen.visit(tree)
+    violations: list[tuple[str, str]] = []
+    core: set[str] = set()
+    for where, call in seen.calls:
+        if _is_held_verb(call, env):
             continue
-        if name.startswith("rooted_"):
-            rooted.add(name)
-        elif origin is not None and (origin == "builtins.open" or (
-                origin.split(".")[0] in ("os", "shutil")
-                and not (origin.startswith("os.path.") or origin in _OS_PURE))):
-            violations.append((where, origin))
-        elif name in io_funcs and name not in _IO_PURE and (
-                origin is None or origin.startswith(_io.__name__ + ".")):
-            violations.append((where, name))
-        elif origin is None and name in _PATH_IO:
-            violations.append((where, f".{name}"))
-    assert not violations, f"the handle does I/O outside the rooted core: {violations}"
-    assert rooted >= _ROOTED_REQUIRED, (
-        f"the handle never calls {sorted(_ROOTED_REQUIRED - rooted)} — its verbs must reach "
-        "the rooted core")
+        key = _call_key(call, env, aliases)
+        if key in CORE:
+            core.add(key)
+            continue
+        raw = key if key is not None else _raw_io(call, env, io_funcs)
+        if raw is not None:
+            violations.append((where, raw))
+    for where, node in seen.refs:
+        key = _ref_key(node, env, aliases)
+        if key is not None and key not in CORE:
+            violations.append((where, key))
+    return violations, core
+
+
+def test_d6_the_handle_scan_sees_io_around_held_and_passes_a_held_only_handle():
+    """The handle scan's own controls. A handle that opens through `io.hold` / `io.hold_new`
+    and does everything else through the `Held` it gets back — `read`, `write`, `mkdir(rel)`,
+    `unlink(rel)`, `view`, `close` — is clean and is seen calling both core functions. Each I/O
+    shape around `Held` is a violation, including the `Path` shapes of the two shared names
+    (`.mkdir()` with no positional name or a positional mode, `.unlink(missing_ok=True)` or
+    `.unlink(True)`), rev 1's `rooted_*`, a path
+    seam, `bind` (a second handle), raw `os` / builtin `open`, and a `Path` read."""
+    compliant = '''
+from pathlib import Path
+from defender import _io as _real_io
+
+
+class Record:
+    def __init__(self, held, rel):
+        self._held, self._rel = held, rel
+
+    def read(self):
+        return self._held.read(self._rel)
+
+    def write(self, text):
+        self._held.write(self._rel, text, mode="replace")
+
+    def delete(self):
+        return self._held.unlink(self._rel)
+
+    def ensure(self):
+        self._held.mkdir(self._rel)
+
+    def ensure_served(self):
+        self._held.mkdir("served")
+
+
+class Episode:
+    @classmethod
+    def open(cls, episode_dir, *, io=_real_io):
+        return cls(io.hold(Path(episode_dir)))
+
+    @classmethod
+    def create(cls, episode_dir, *, io=_real_io):
+        d = Path(episode_dir)
+        return cls(io.hold_new(d.parent, d.name))
+
+    def view(self):
+        return self._held.view()
+
+    def close(self):
+        self._held.close()
+
+    def label(self, text):
+        return text.replace("-", "_")
+'''
+    violations, core = handle_scan(ast.parse(compliant))
+    assert violations == [], violations
+    assert core == set(CORE), core
+
+    violating = '''
+import os
+import shutil
+from pathlib import Path
+from defender import _io
+from defender._io import rooted_write
+
+
+class Episode:
+    def a(self, p):
+        p.mkdir(parents=True, exist_ok=True)
+
+    def b(self, p):
+        p.unlink(missing_ok=True)
+
+    def c(self, p):
+        rooted_write(p, "n", "x", mode="append")
+
+    def d(self, p):
+        self.io.rooted_mkdir(p, "n")
+
+    def e(self, p):
+        _io.write_guarded(p, "x")
+
+    def f(self, p):
+        return _io.bind(p)
+
+    def g(self, p):
+        os.mkdir(p)
+
+    def h(self, p):
+        return open(p)
+
+    def i(self, p):
+        return p.read_text()
+
+    def j(self, p):
+        return p.exists()
+
+    def k(self, p):
+        shutil.rmtree(p)
+
+    def l(self, p):
+        return _io.read_plain(p)
+
+    def m(self, p):
+        os.unlink(p)
+
+    def n(self, p):
+        p.mkdir(0o755)
+
+    def o(self, p):
+        p.unlink(True)
+'''
+    violations, core = handle_scan(ast.parse(violating))
+    assert core == set(), core
+    assert sorted(violations) == sorted([
+        ("Episode.a", ".mkdir"), ("Episode.b", ".unlink"), ("Episode.c", "rooted_write"),
+        ("Episode.d", "rooted_mkdir"), ("Episode.e", "write_guarded"), ("Episode.f", "bind"),
+        ("Episode.g", "os.mkdir"), ("Episode.h", "builtins.open"), ("Episode.i", ".read_text"),
+        ("Episode.j", ".exists"), ("Episode.k", "shutil.rmtree"), ("Episode.l", "read_plain"),
+        ("Episode.m", "os.unlink"), ("Episode.n", ".mkdir"), ("Episode.o", ".unlink"),
+    ]), sorted(violations)
+
+
+def test_d6_the_episode_handle_does_io_only_through_hold_and_its_held():
+    """D1' / D2' / D6': `_episode_handle.py` reaches the core only through `hold` and
+    `hold_new` (its `io=` seam) and does I/O only through the `Held` they return: no `rooted_*`,
+    no path seam, no `bind`, no `os.*` / `shutil.*` operation, no builtin `open`, no filesystem
+    method of a `Path`, no other I/O-doing `_io` function. It does call `hold` and `hold_new`,
+    so the check is not vacuous."""
+    violations, core = handle_scan(_parse(PACKAGE / "_episode_handle.py"))
+    assert not violations, (
+        f"the handle does I/O around its held root: {sorted(set(violations))}")
+    assert core == set(CORE), (
+        f"the handle never calls {sorted(CORE - core)} — `Episode.open` is one `io.hold`, "
+        "`Episode.create` one `io.hold_new`")
+
+
+# ---------------------------------------------------------------------------------------------
+# The O5 scan (D6'): no function takes a path below the episode dir
+# ---------------------------------------------------------------------------------------------
+
+#: O5's exemptions by name, as D6' words them: the episode dir itself, the episodes root, a
+#: source run, a run dir.
+_O5_EXEMPT_EXACT = frozenset({"episode_dir", "episodes_root"})
+_O5_EXEMPT_PREFIX = ("source", "run_dir")
+#: O5's named parameters.
+_O5_NAMED = frozenset({"path", "manifest", "draw_dir", "world_dir"})
+#: Path-typed parameters named for a root outside every episode tree: the sibling runs base,
+#: the tenant's settings, the tenants root, the lessons folder, the judge queue, the defender
+#: checkout, a git work tree. None is below an episode dir.
+OUTSIDE_EPISODE = frozenset({"runs_base", "settings_dir", "tenants_root", "lessons_dir",
+                             "queue_dir", "defender_dir", "cwd"})
+#: Concrete, I/O-capable path types (a `PurePath` is a relative name, not a path to open).
+_PATH_TYPES = frozenset({"Path", "PosixPath", "PathLike", "StrPath"})
+_TEXT_TYPES = frozenset({"str", "bytes"})
+
+#: D6' parameter allowlist `(module, function, parameter, reason)`: the O5 carve-outs, and the
+#: path-typed functions D3' keeps that do no episode write. Every row must still be flagged.
+_CARVE_READ = "O5 carve-out: a path-taking reader of a run-shaped tree or a base file"
+_CARVE_ARITH = ("O5 carve-out: the judge's pointer-containment arithmetic, which resolves a "
+                "model-cited pointer and reads nothing")
+_GIT = "a path inside a git revision (`git show <rev>:<path>`), not a file on disk"
+_QUEUE = "N-d: the judge queue writer's own files (learning state, not the episode)"
+_ALERT = "the investigation's alert input, a run file read before any episode exists"
+PARAM_ALLOWLIST = frozenset({
+    ("learning.branch.episode", "_answers", "path", _CARVE_READ),
+    ("learning.branch.ledger", "Ledger._absorb", "path", _CARVE_READ),
+    ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
+    ("learning.judge.run", "_resolves", "world_dir", _CARVE_ARITH),
+    ("learning.judge.run", "_draw_document", "world_dir", _CARVE_ARITH),
+    ("learning.branch.staging", "_Door._call", "path",
+     "the host staging door's HTTP request path, not a file"),
+    ("learning.judge", "_memoized_show.invoke", "path", _GIT),
+    ("learning.judge.render", "_git_show_default", "path", _GIT),
+    ("learning.judge.enqueue", "_append_validated_rows", "lock_file", _QUEUE),
+    ("learning.judge.enqueue", "_append_validated_rows", "pending_file", _QUEUE),
+    ("learning.judge.enqueue", "_queue_trust_root", "pending_file", _QUEUE),
+    ("run", "_Investigate.__call__", "alert_path", _ALERT),
+    ("run", "_drive_investigation", "alert_path", _ALERT),
+    ("run", "_materialize_run", "alert", _ALERT),
+})
+#: Rows that may be present or not: D3' leaves the sibling's `resume_world` shape open (its door
+#: `run.main` opens the episode from the manifest's parent; `resume_world` may keep taking the
+#: manifest path it refuses by name, or take the `Episode`).
+PARAM_TOLERATED = frozenset({
+    ("run", "resume_world", "manifest"),
+})
+
+#: Where `EpisodePaths(`, `base_file(` and `staged_path(` may be called, `(module, function)`
+#: (a nested scope counts as its enclosing function): the readers that bind at the episode root
+#: (O3 / N-b), the functions D3' keeps path-typed, and the O5 carve-outs.
+NB_READERS = frozenset({
+    # D3' "stay path-typed": pre-door, or the episode dir itself.
+    ("learning.branch.cli", "preflight_episode"),
+    ("learning.branch.cli", "refuse_claimed_episode"),
+    ("learning.branch.cli", "episode_dir_for"),
+    ("learning.branch.cli", "sibling_runs_base"),
+    ("learning.branch.cli", "sibling_argv"),
+    ("learning.branch.staging", "sweep"),
+    ("learning.branch.staging", "staged_path"),
+    ("learning.branch.review", "verb_context"),
+    ("learning.branch.review", "replay_one"),
+    ("learning.branch.review", "_review_world"),
+    ("runtime.branch._family", "resume_world_from"),
+    ("run", "main"),
+    # The root-binding readers (O3, N-b).
+    ("learning.judge", "read_grade"),
+    ("learning.judge", "_existing_grade"),
+    ("learning.judge", "_grade_from_document"),
+    ("learning.judge.enqueue", "enqueue"),
+    ("learning.judge.enqueue", "enqueue_report"),
+    ("learning.judge.family", "raw_manifest"),
+    ("learning.judge.family", "grade_family"),
+    ("learning.judge.family", "_grade_world"),
+    ("learning.judge.family", "_repository_leads"),
+    ("learning.judge.render", "render"),
+    ("learning.judge.render", "_render_bound_world"),
+    ("scripts.visualize.visualize_episode", "load_episode"),
+    ("scripts.visualize.visualize_episode", "_read_grade"),
+    ("scripts.visualize.visualize_episode", "_Episode"),
+    # The O5 carve-outs: `read_jsonl_rows_report(base_file(...))` (the review's capture read),
+    # the stale-`served/*.jsonl` glob (the launcher's door), `base_file` itself, the path-taking
+    # readers and their one caller each, the containment arithmetic, and `episode.py`'s reader
+    # of a world's served file (`EpisodePaths(dir).at(LAYOUT.served_world(token))`, D3').
+    ("learning.branch.review", "review"),
+    ("learning.branch.cli", "prepare_episode"),
+    ("learning.branch.ledger", "base_file"),
+    ("learning.branch.ledger", "Ledger._absorb"),
+    ("learning.branch.episode", "_answers"),
+    ("learning.branch.episode", "delta_o"),
+    ("learning.judge.family", "leads_by_id"),
+    ("scripts.visualize.visualize_episode", "_load_world_leads"),
+    ("learning.judge.run", "_resolves"),
+    ("learning.judge.run", "_draw_document"),
+})
+_O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
+
+#: The doors D3' names, and the review's scratch: where `Episode.open` / `Episode.create` may be
+#: called. `grade_episode`'s one orchestration body `_grade_episode` (where its `bind` is today)
+#: counts as the door.
+DOORS = frozenset({
+    ("learning.branch.cli", "prepare_episode"),
+    ("run", "main"),
+    ("learning.judge", "grade_episode"),
+    ("learning.judge", "_grade_episode"),
+    ("scripts.visualize.visualize_episode", "render_episode"),
+    ("learning.branch.review", "review"),
+    ("learning.branch.review", "replay_one"),
+})
+#: Callers D3' does not place but whose callees take the `Episode`: `delta_o` hands its episode
+#: to `load_family` / `Ledger.for_world`, and the page script's `main` to `_write_page`. Each
+#: may open its own.
+DOORS_TOLERATED = frozenset({
+    ("learning.branch.episode", "delta_o"),
+    ("scripts.visualize.visualize_episode", "main"),
+})
+#: What the doors must call, so the scan is not vacuous: `(module, function-or-alternatives,
+#: verb)`.
+DOORS_REQUIRED = (
+    ("learning.branch.cli", ("prepare_episode",), "create"),
+    ("run", ("main",), "open"),
+    ("learning.judge", ("grade_episode", "_grade_episode"), "open"),
+    ("scripts.visualize.visualize_episode", ("render_episode",), "open"),
+    ("learning.branch.review", ("review",), "create"),
+)
+
+
+class _Functions(ast.NodeVisitor):
+    """Every `def` with its qualified name (enclosing classes and `def`s joined with `.`)."""
+
+    def __init__(self) -> None:
+        self.stack: list[str] = []
+        self.defs: list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    def _def(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.stack.append(node.name)
+        self.defs.append((".".join(self.stack), node))
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_FunctionDef = _def
+    visit_AsyncFunctionDef = _def
+
+
+def _annotation(node: ast.expr | None) -> ast.expr | None:
+    """A parameter's annotation as an expression (a quoted one parsed)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return ast.parse(node.value, mode="eval").body
+        except SyntaxError:
+            return None
+    return node
+
+
+def _members(node: ast.expr) -> list[ast.expr]:
+    """A union's members, `None` dropped (`X | None`, `Optional[X]`, `Union[X, Y]`)."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _members(node.left) + _members(node.right)
+    if isinstance(node, ast.Subscript):
+        head = _type_name(node.value)
+        if head in ("Optional", "Union"):
+            inner = node.slice
+            parts = inner.elts if isinstance(inner, ast.Tuple) else [inner]
+            return [m for p in parts for m in _members(p)]
+    if isinstance(node, ast.Constant) and node.value is None:
+        return []
+    if isinstance(node, ast.Name) and node.id == "None":
+        return []
+    return [node]
+
+
+def _type_name(node: ast.expr) -> str | None:
+    """A member's outer type name: `Path`, `os.PathLike[str]` -> `PathLike`, `dict[...]` ->
+    `dict`."""
+    if isinstance(node, ast.Subscript):
+        return _type_name(node.value)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _path_typed(ann: ast.expr | None) -> bool:
+    """A concrete path type, optionally unioned with `str` / `bytes` / `None`."""
+    if ann is None:
+        return False
+    names = [_type_name(m) for m in _members(ann)]
+    return (bool(names) and all(n in _PATH_TYPES | _TEXT_TYPES for n in names)
+            and any(n in _PATH_TYPES for n in names))
+
+
+def _names_no_path(ann: ast.expr | None) -> bool:
+    """An annotation that names neither a path type nor `str` / `bytes` anywhere at its top
+    level (`dict[str, Any]`, `Held`): the named parameter is not a path."""
+    if ann is None:
+        return False
+    names = [_type_name(m) for m in _members(ann)]
+    return bool(names) and not any(n in _PATH_TYPES | _TEXT_TYPES for n in names)
+
+
+def _o5_flagged(name: str, ann: ast.expr | None) -> bool:
+    if name in _O5_EXEMPT_EXACT or name.startswith(_O5_EXEMPT_PREFIX):
+        return False
+    named = name in _O5_NAMED or name.endswith("_path")
+    if named and not _names_no_path(ann):
+        return True
+    return _path_typed(ann) and name not in OUTSIDE_EPISODE
+
+
+def o5_params(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
+    """Every `(module, function, parameter)` O5's parameter rule flags."""
+    found = _Functions()
+    found.visit(tree)
+    out = set()
+    for qual, node in found.defs:
+        a = node.args
+        params = [*a.posonlyargs, *a.args, *a.kwonlyargs,
+                  *([a.vararg] if a.vararg else []), *([a.kwarg] if a.kwarg else [])]
+        for arg in params:
+            if _o5_flagged(arg.arg, _annotation(arg.annotation)):
+                out.add((module, qual, arg.arg))
+    return out
+
+
+def _scoped_calls(tree: ast.Module) -> list[tuple[str, ast.Call]]:
+    seen = _Scoped()
+    seen.visit(tree)
+    return seen.calls
+
+
+def o5_calls(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
+    """Every `(module, scope, name)` call of `EpisodePaths` / `base_file` / `staged_path`,
+    resolved through import aliases, as a module attribute, bare, or on any receiver."""
+    env = _astlib().module_env(tree)
+    out = set()
+    for where, call in _scoped_calls(tree):
+        origin = _astlib().callee(call, env)
+        f = call.func
+        name = (origin.rsplit(".", 1)[-1] if origin is not None
+                else f.id if isinstance(f, ast.Name)
+                else f.attr if isinstance(f, ast.Attribute) else None)
+        if name in _O5_CALLS:
+            out.add((module, where, name))
+    return out
+
+
+def o5_doors(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
+    """Every `(module, scope, verb)` call of `Episode.open` / `Episode.create`, resolved through
+    import aliases and module attributes."""
+    env = _astlib().module_env(tree)
+    out = set()
+    for where, call in _scoped_calls(tree):
+        origin = _astlib().callee(call, env)
+        dotted = origin if origin is not None else (
+            ast.unparse(call.func) if isinstance(call.func, ast.Attribute) else "")
+        parts = dotted.split(".")
+        if len(parts) >= 2 and parts[-2] == "Episode" and parts[-1] in ("open", "create"):
+            out.add((module, where, parts[-1]))
+    return out
+
+
+def _within(where: str, function: str) -> bool:
+    return where == function or where.startswith(function + ".")
+
+
+def _allowed(hit: tuple[str, str, str], allowed: Iterable[tuple[str, str]]) -> bool:
+    return any(hit[0] == module and _within(hit[1], fn) for module, fn in allowed)
+
+
+def _o5_collect(scan: Any) -> set[tuple[str, str, str]]:
+    found: set[tuple[str, str, str]] = set()
+    for rel in O5_MODULES:
+        found |= scan(_module_name(rel), _parse(PACKAGE / rel))
+    return found
+
+
+def test_o5_the_parameter_scan_flags_paths_below_the_root_and_passes_the_rest():
+    """The parameter rule's own controls, on synthetic source: each violating shape — a named
+    parameter unannotated or `str`- / `Path`-typed, a `Path`- / `Optional[Path]` / quoted /
+    `os.PathLike` / `str | Path`-typed one of any name, in a function, a method, a nested
+    `def`, keyword-only or variadic — is flagged; each compliant shape is not: the design's
+    exempt names, a named parameter annotated as a mapping or a handle, a pure path, a container
+    or callable of paths, a root outside every episode tree, an `Episode`."""
+    source = '''
+import os
+from pathlib import Path, PurePath, PurePosixPath
+from typing import Any, Callable, Optional
+
+
+def writer(path, review_path: Path | None = None, *, draw_dir: Path): ...
+def reader(world_dir, manifest: Path, base_path: str): ...
+def typed(root: Path, other: Optional[Path], quoted: "Path", like: os.PathLike[str],
+          either: str | Path, *rest: Path, **more: Path): ...
+
+
+class Holder:
+    def method(self, target: Path): ...
+
+    def outer(self):
+        def inner(leaf_path): ...
+        return inner
+
+
+def exempt(episode_dir: Path, episodes_root: Path, source_run_dir: Path, source: Path,
+           run_dir: Path, run_dirs: list[Path], runs_base: Path, settings_dir: Path,
+           tenants_root: Path, lessons_dir: Path, queue_dir: Path | None, defender_dir: Path,
+           cwd: Path): ...
+def fine(manifest: dict[str, Any], world_dir: "Bound", name: str | PurePath,
+         rel: PurePosixPath, present: set[Path], prime: Callable[[Path], None],
+         episode: "Episode", label: str, count: int): ...
+'''
+    got = o5_params("m", ast.parse(source))
+    assert got == {
+        ("m", "writer", "path"), ("m", "writer", "review_path"), ("m", "writer", "draw_dir"),
+        ("m", "reader", "world_dir"), ("m", "reader", "manifest"), ("m", "reader", "base_path"),
+        ("m", "typed", "root"), ("m", "typed", "other"), ("m", "typed", "quoted"),
+        ("m", "typed", "like"), ("m", "typed", "either"), ("m", "typed", "rest"),
+        ("m", "typed", "more"),
+        ("m", "Holder.method", "target"), ("m", "Holder.outer.inner", "leaf_path"),
+    }, sorted(got)
+
+
+def test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist():
+    """O5 / D6' (parameters): across the O5 modules, every flagged parameter is on
+    `PARAM_ALLOWLIST` (or tolerated), and every allowlist row is still flagged on the tree. A
+    writer takes the `Episode`, a path-seam reader the `Episode` or a view."""
+    found = _o5_collect(o5_params)
+    allowed = {row[:3] for row in PARAM_ALLOWLIST}
+    extra = sorted(found - allowed - PARAM_TOLERATED)
+    stale = sorted(allowed - found)
+    report = ("O5's parameter scan differs from its allowlist.\n"
+              + "".join(f"  takes a path below the episode dir (take the Episode or a view): "
+                        f"{e}\n" for e in extra)
+              + "".join(f"  allowlist row gone (remove it from PARAM_ALLOWLIST): {m}\n"
+                        for m in stale))
+    assert not extra, report
+    assert not stale, report
+
+
+def test_o5_the_call_and_door_scans_see_every_spelling():
+    """The call and door scans' own controls, on synthetic source: `EpisodePaths(` /
+    `base_file(` / `staged_path(` are collected bare, through an import alias, as a module
+    attribute, on any receiver, and in a nested scope; `Episode.open` / `Episode.create` bare,
+    through an import alias and as a module attribute. A different callee sharing a verb name
+    (`bound.open(...)`, `Path.open()`, `record.create(...)`) is not a door, a mention that is not
+    a call is not collected, and the containment check scopes a nested `def` to its function."""
+    source = '''
+import defender._episode_handle
+from defender._episode_handle import Episode
+from defender._episode_handle import Episode as Handle
+from defender import _episode_handle as handles
+from defender._episode_paths import EpisodePaths as Paths
+from defender.learning.branch import ledger as ledger_mod
+from defender.learning.branch.staging import staged_path
+
+
+def uses(d, owner):
+    Paths(d).family
+    ledger_mod.base_file(d)
+    staged_path(d)
+    owner.base_file(d)
+    base_file(d)
+
+
+def outer(d):
+    def inner():
+        return Paths(d)
+    return inner
+
+
+def opens(d, bound, record):
+    Episode.open(d)
+    Handle.create(d)
+    handles.Episode.open(d)
+    defender._episode_handle.Episode.create(d)
+    bound.open("x")
+    d.open()
+    record.create("x")
+    kinds = (Paths, Episode.open)
+    return kinds
+
+
+def base_file(d):
+    return d
+'''
+    tree = ast.parse(source)
+    assert o5_calls("m", tree) == {
+        ("m", "uses", "EpisodePaths"), ("m", "uses", "base_file"),
+        ("m", "uses", "staged_path"), ("m", "outer.inner", "EpisodePaths"),
+    }, sorted(o5_calls("m", tree))
+    assert o5_doors("m", tree) == {("m", "opens", "open"), ("m", "opens", "create")}, (
+        sorted(o5_doors("m", tree)))
+    assert _allowed(("m", "outer.inner", "EpisodePaths"), {("m", "outer")})
+    assert not _allowed(("m", "outer_more", "EpisodePaths"), {("m", "outer")})
+    assert not _allowed(("n", "outer", "EpisodePaths"), {("m", "outer")})
+
+
+def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_readers():
+    """O5 / D6' (calls): `EpisodePaths(`, `base_file(` and `staged_path(` are called only in
+    `NB_READERS`. A writer reaches a path through the `Episode`'s own records (`.path`), and a
+    judge or page reader through the view it was handed."""
+    found = _o5_collect(o5_calls)
+    extra = sorted(hit for hit in found if not _allowed(hit, NB_READERS))
+    assert not extra, (
+        "names a path below the episode dir outside a root-binding reader (take the Episode's "
+        "record, or a view):\n" + "".join(f"  {e}\n" for e in extra))
+
+
+def test_o5_only_the_doors_open_or_create_an_episode():
+    """O5 / D3' / D6' (doors): `Episode.open` / `Episode.create` are called only in the doors
+    (plus the review's scratch, and the tolerated callers D3' does not place); and
+    `cli.prepare_episode` creates, `run.main`, `grade_episode` and `render_episode` open, and
+    `review.review` creates its scratch, so the scan is not vacuous."""
+    found = _o5_collect(o5_doors)
+    extra = sorted(hit for hit in found if not _allowed(hit, DOORS | DOORS_TOLERATED))
+    missing = [
+        (module, fns, verb) for module, fns, verb in DOORS_REQUIRED
+        if not any(hit[0] == module and hit[2] == verb and any(_within(hit[1], fn) for fn in fns)
+                   for hit in found)]
+    assert not extra, (
+        "opens or creates an Episode outside a door (take the door's Episode instead):\n"
+        + "".join(f"  {e}\n" for e in extra))
+    assert not missing, f"a door that must open or create its Episode does not: {missing}"

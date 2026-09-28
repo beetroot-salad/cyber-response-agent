@@ -1,46 +1,50 @@
-"""#1133 — each migrated write, through its real entry point, refuses a planted link and writes
-nothing where it points (O1, O2, O3, O4, D1, D3).
+"""#1133 — each migrated write, through its real entry point and its rev-2 signature (D3'),
+refuses a planted link and writes nothing where it points (O1, O2, O3, O4, D1', D2', D3').
 
 `test_1133_episode_handle.py` pins the handle's guard matrix on the handle itself; this suite
 pins that each MIGRATED SITE still reaches it. A site silently reverted to a link-following
 write (builtin `open(path, "w")`, `os.makedirs`) passes every handle test, so each site is driven
 here through the smallest real entry point, with its own injection seams (`cli.main`'s
 `questioner=` / `door=` / `adapters=` / `invoke=` / `spawn=`, `start_family`'s `spawn=`,
-`prepare_episode`'s `prime=`, `grade_episode`'s `judge=`, `record_staged`'s `io=`) and never
+`prepare_episode`'s `prime=`, `grade_episode`'s `judge=`, the `Episode`'s `io=`) and never
 `monkeypatch.setattr`. Every plant is a real filesystem entry, and every negative is paired with
 a positive control on the same address.
 
+The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
+`verify_family(episode, ...)`, `archive_episode(episode, run_dirs)`,
+`record_staged(episode, row)`, `prime_base(source_run_dir, episode)`,
+`load_family(episode)` / `manifest_digest(episode)` / `check_manifest_digest(episode, digest)`;
+`prepare_episode(...)` returns the `Episode`. The doors keep their path signatures:
+`cli.main`, `grade_episode(episode_dir, ...)`.
+
 Every link is planted twice over: pointing at a host folder OUTSIDE the episode, and at a folder
-elsewhere INSIDE the episode. The owner accessors (`EpisodePaths` / `WorldPaths`) resolve a
-path and refuse one that lands outside the episode, so a site reverted to `open(<accessor>)` or
-`os.makedirs(<accessor>)` is still stopped by an outside link — only the inside one reaches the
-reverted write, and only the handle's no-follow walk refuses both.
+elsewhere INSIDE the episode. An owner accessor's containment resolve stops an outside link, so
+only the inside one reaches a reverted write, and only the handle's no-follow walk refuses both.
 
 - H1 the migrated sites: a symlink at a folder the site ensures, or at a holding folder of it;
   a symlink (live or dangling) at a record the site writes. The entry point refuses (or, where
   the site is best-effort, contains the refusal), what the link reaches is unchanged, and the
-  plant is left in place: `cli.start_family`'s `runs.ensure()` (the siblings' runs base),
-  `cli.verify_family`'s `worlds.ensure()` and family stamp, the rejected episode's
-  `worlds.ensure()` in `cli._run_episode`, `archive.archive_episode`'s `world.dir.ensure()` and
-  run-dir pointer, the judge's two `draws.ensure()`, its draw write, its framed wire log
-  (contained) and `judge.yaml`.
-- H2 `review.review`'s default `write=` (no seam injected) is the episode's `review` record: a
-  link planted at `review.yaml` ends the review step and nothing lands where it points.
-- H3 `staging.record_staged` is D1's `staged: append_durable`: through the `io=` seam, its one
-  write is `rooted_write(<episode>, LAYOUT.staged, <row>, mode="append", durable=True)`,
-  preceded by the episode dir's creation from its parent.
-- H4 the priming claim alone keeps a second launcher out while the first primes (its primer
-  never runs); the primed base alone refuses a base that appears while the capture is read.
-- H5 the manifest readers (`load_family`, `manifest_digest`, `check_manifest_digest`) refuse a
-  symlink or a hard link at `family.yaml` without reading what it reaches.
+  plant is left in place: `cli.start_family`'s `runs.ensure()`, `cli.verify_family`'s
+  `worlds.ensure()` and family stamp, the rejected episode's `worlds.ensure()`,
+  `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
+  `draws.ensure()`, its draw write, its framed wire log (contained) and `judge.yaml`.
+- H2 `review.review`'s default write (no seam injected) is the episode's `review` record.
+- H3 `staging.record_staged(episode, row)` is D1's `staged: append_durable`: through the `io=`
+  seam, its ONE held call is `write(LAYOUT.staged, <row>, mode="append", durable=True)`, on the
+  episode the caller holds (no second `hold`).
+- H4 the priming claim alone keeps a second launcher out while the first primes; the primed base
+  alone refuses a rival base that lands just before its create (a recording `Held` plants it,
+  then delegates the create — D7' replaces rev 1's FIFO interleaving, S3).
+- H5 the manifest readers (`load_family`, `manifest_digest`, `check_manifest_digest`), handed the
+  `Episode`, refuse a symlink or a hard link at `family.yaml` without reading what it reaches.
 - H7 `defender._io.Bound`'s public surface is exactly `read`, `read_jsonl`, `entries`, `under`,
-  `close` (O3): the judge's read view grows no writer.
+  `close` (O3) — for a `bind` and for `episode.view()`.
 
-The census that holds every migrated module to the handle (aliases and non-call references
-included) is `test_1133_census.py`; the priming claim's release in `finally` is parametrized over
-every refusal it can raise in `test_1133_o4.py`'s O4.5 section.
+The census that holds every migrated module to the handle is `test_1133_census.py`.
 
-H3 is red until `record_staged` takes the `io=` seam D1's `Episode(..., io=)` offers.
+Red before rev 2: every site handed an `Episode` (rev 1's signatures take paths), H3, H4's
+returned `Episode` and the H4 base test. Green today and pinned to stay: the sites driven through
+`cli.main` / `grade_episode` (H1 launcher and judge rows, H2).
 """
 from __future__ import annotations
 
@@ -53,7 +57,7 @@ import os
 import shutil
 import stat
 import threading
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -62,7 +66,6 @@ import yaml
 from defender._episode_paths import LAYOUT
 from defender._run_paths import WIRE_LOG_NAMES
 from defender.tests import _judge_921 as J
-from defender.tests import _spec1077
 from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
@@ -181,20 +184,8 @@ def assert_real_folder(path: Path) -> None:
     assert path.is_dir(), f"{path} is not a folder"
 
 
-def refusal_in(exc: BaseException | None) -> OSError | None:
-    """The first `OSError` carrying an errno in `exc`'s cause chain, or `None`."""
-    seen: set[int] = set()
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        if isinstance(exc, OSError) and exc.errno is not None:
-            return exc
-        exc = exc.__cause__ or exc.__context__
-    return None
-
-
-def warned(caplog, *needles: str) -> list[str]:
-    return [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.WARNING and any(n in r.getMessage() for n in needles)]
+refusal_in = S.refusal_in
+warned = S.warned
 
 
 def branch_cli() -> Any:
@@ -238,8 +229,10 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     before, host_before = planted.state(), S.census(host)
     spawn = Spawned()
 
-    raised = S.raised_by(lambda: cli.start_family(
-        ep, ["b", "c"], spawn=spawn, tenant_id="acme", tenants_root=tmp_path / "tenants"))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: cli.start_family(
+            episode, ["b", "c"], spawn=spawn, tenant_id="acme",
+            tenants_root=tmp_path / "tenants"))
 
     assert_folder_refusal(raised, planted, where="start_family over a linked runs/")
     assert spawn.argvs == [], f"a sibling started over a linked runs base: {spawn.argvs}"
@@ -248,8 +241,9 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     planted.assert_left()
 
     planted.remove()
-    exits = cli.start_family(ep, ["b", "c"], spawn=spawn, tenant_id="acme",
-                             tenants_root=tmp_path / "tenants")
+    with S.open_episode(ep) as episode:
+        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme",
+                                 tenants_root=tmp_path / "tenants")
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
@@ -275,7 +269,9 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     planted = link_folder(ep / "worlds", reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
-    raised = S.raised_by(lambda: cli.verify_family(ep, dirs, source=T.provenance_record()))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: cli.verify_family(episode, dirs,
+                                                       source=T.provenance_record()))
 
     assert_folder_refusal(raised, planted, where="verify_family over a linked worlds/")
     assert planted.state() == before, "verify_family wrote into the folder worlds/ reaches"
@@ -283,7 +279,8 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     planted.assert_left()
 
     planted.remove()
-    report = cli.verify_family(ep, dirs, source=T.provenance_record())
+    with S.open_episode(ep) as episode:
+        report = cli.verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == ("accepted" if scrub_ran else "incomplete")
     assert_real_folder(ep / "worlds")
     if scrub_ran:
@@ -308,8 +305,9 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     planted = link_file(ep / "provenance.json", kind, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
-    raised = S.raised_by(lambda: cli.verify_family(ep, dirs,
-                                                   source=T.provenance_record(commit="cafe1")))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: cli.verify_family(
+            episode, dirs, source=T.provenance_record(commit="cafe1")))
 
     S.assert_refusal(refusal_in(raised), kind, where="the family stamp over a link")
     assert planted.state() == before, "the family stamp was written through the link"
@@ -317,7 +315,8 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     planted.assert_left()
 
     planted.remove()
-    cli.verify_family(ep, dirs, source=T.provenance_record(commit="cafe1"))
+    with S.open_episode(ep) as episode:
+        cli.verify_family(episode, dirs, source=T.provenance_record(commit="cafe1"))
     stamp = ep / "provenance.json"
     assert_plain_file(stamp)
     assert json.loads(stamp.read_text(encoding="utf-8"))["agreed"]["commit"] == "cafe1"
@@ -430,7 +429,8 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     planted = link_folder(ep / at, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
-    raised = S.raised_by(lambda: archive.archive_episode(ep, {"b": run_dir}))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: archive.archive_episode(episode, {"b": run_dir}))
 
     assert_folder_refusal(raised, planted, where=f"the archive over a link at {at}")
     assert planted.state() == before, f"the archive wrote through the link at {at}"
@@ -438,7 +438,8 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     planted.assert_left()
 
     planted.remove()
-    archived = archive.archive_episode(ep, {"b": run_dir})
+    with S.open_episode(ep) as episode:
+        archived = archive.archive_episode(episode, {"b": run_dir})
     world = ep / "worlds" / "b"
     assert archived == {"b": world}
     assert_real_folder(world)
@@ -462,7 +463,8 @@ def test_h1_the_archive_refuses_a_link_at_the_run_dir_pointer(tmp_path, host, ki
     planted = link_file(ep / "worlds" / "b" / "run_dir", kind, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
-    raised = S.raised_by(lambda: archive.archive_episode(ep, {"b": run_dir}))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: archive.archive_episode(episode, {"b": run_dir}))
 
     S.assert_refusal(refusal_in(raised), kind, where="the archive's run_dir pointer over a link")
     assert planted.state() == before, "the run_dir pointer was written through the link"
@@ -470,7 +472,8 @@ def test_h1_the_archive_refuses_a_link_at_the_run_dir_pointer(tmp_path, host, ki
     planted.assert_left()
 
     planted.remove()
-    archive.archive_episode(ep, {"b": run_dir})
+    with S.open_episode(ep) as episode:
+        archive.archive_episode(episode, {"b": run_dir})
     pointer = ep / "worlds" / "b" / "run_dir"
     assert_plain_file(pointer)
     assert pointer.read_text(encoding="utf-8") == f"{run_dir}\n"
@@ -779,44 +782,32 @@ def test_h2_the_reviews_default_write_lands_a_plain_record(tmp_path, roots):
 # H3 — the staging record's durable append
 # =======================================================================================
 
-def test_h3_record_staged_is_one_durable_append_through_the_handle_after_the_episode_dir(
-        tmp_path):
-    """D1's row `staged: create, append_durable`: through the `io=` seam (a pass-through
-    recorder over the real core, never `monkeypatch.setattr`), `record_staged` first makes the
-    episode dir from its parent (`rooted_mkdir(<episodes root>, <episode id>)`, N-g), and its
-    ONE write is `rooted_write(<episode dir>, LAYOUT.staged, <the row as a YAML list item>,
-    mode="append", durable=True)` — synced to disk before it returns, since this row is the
-    only record that a cluster name is about to exist. Every call it makes is a rooted one, and
-    the row is on disk afterwards.
-
-    Red until `record_staged` takes `io=` (and hands it to its `Episode`)."""
+def test_h3_record_staged_is_one_durable_append_on_the_episode_the_caller_holds(tmp_path):
+    """D1's row `staged: create, append_durable`: `record_staged(episode, row)` makes ONE call
+    on the held root — `write(LAYOUT.staged, <the row as a YAML list item>, mode="append",
+    durable=True)`, synced to disk before it returns, since this row is the only record that a
+    cluster name is about to exist — and opens nothing itself (the episode it was handed is the
+    only `hold_new` / `hold`). The row is on disk afterwards."""
     staging = T.mod("learning.branch.staging")
-    episodes = tmp_path / "episodes"
-    ep = episodes / EPISODE_ID
-    rec_io = _spec1077.RecordingIo()
+    ep = tmp_path / "episodes" / EPISODE_ID
+    rec_io = S.RecordingIo()
     row = {"name": "wv-e1133.b-logs-x", "kind": "index", "world": "b"}
 
-    got = staging.record_staged(ep, row, io=rec_io)
+    with S.create_episode(ep, io=rec_io) as episode:
+        mark = len(rec_io.calls)
+        got = staging.record_staged(episode, row)
+        calls = rec_io.calls[mark:]
 
-    calls = [(op, _spec1077.bound_arguments(op, a, kw)) for op, a, kw in rec_io.invocations]
-    ops = [op for op, _ in calls]
-    assert ops, "record_staged made no io call at all"
-    assert all(op.startswith("rooted_") for op in ops), ops
-    writes = [i for i, op in enumerate(ops) if op not in ("rooted_mkdir", "rooted_read")]
-    assert len(writes) == 1, f"record_staged made {len(writes)} writes: {ops}"
-    op, args = calls[writes[0]]
-    assert op == "rooted_write", ops
-    assert Path(args["root"]) == ep, args["root"]
-    assert PurePosixPath(str(args["name"])) == LAYOUT.staged, args["name"]
-    assert args["mode"] == "append", args["mode"]
-    assert args["durable"] is True, "the staging row is appended without a sync"
-    assert yaml.safe_load(args["text"]) == [row]
-    made = [i for i, (o, a) in enumerate(calls[:writes[0]])
-            if o == "rooted_mkdir" and Path(a["root"]) == episodes
-            and str(a["folder_name"]) == EPISODE_ID]
-    assert made, f"the episode dir was not made from its parent before the append: {calls}"
+    assert [c.method for c in calls] == ["write"], f"record_staged made {calls}"
+    [call] = calls
+    assert call.name == LAYOUT.staged, call.name
+    assert call.kwargs.get("mode") == "append", call.kwargs
+    assert call.kwargs.get("durable") is True, "the staging row is appended without a sync"
+    assert yaml.safe_load(call.text) == [row]
+    assert rec_io.opened == [("hold_new", (ep.parent, EPISODE_ID))], (
+        f"record_staged opened the episode again: {rec_io.opened}")
     assert got == row
-    assert (ep / "staged.yaml").read_text(encoding="utf-8") == args["text"]
+    assert (ep / "staged.yaml").read_text(encoding="utf-8") == call.text
 
 
 # =======================================================================================
@@ -828,9 +819,10 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     """Two launchers on one episode. The first holds the claim and its primer waits until the
     second has finished (the primer writes no base, so nothing but the claim stands between
     them): the second is the "another launcher is priming" `LedgerError` and its primer never
-    runs. The first then completes and releases the claim.
+    runs. The first then completes, releases the claim and returns its `Episode`.
 
-    Control on the same address: once released, the next launcher's primer runs."""
+    Control on the same address: once released, the next launcher's primer runs, handed the
+    episode `prepare_episode` returns."""
     cli = branch_cli()
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
@@ -841,7 +833,7 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     priming, second_done = threading.Event(), threading.Event()
     first: dict[str, Any] = {}
 
-    def waits_for_the_second(_source: Path, _base_path: Path) -> Any:
+    def waits_for_the_second(_source: Path, _episode: Any) -> Any:
         priming.set()
         if not second_done.wait(WAIT):
             raise AssertionError("the second launcher never finished")
@@ -868,85 +860,69 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
         second_done.set()
         thread.join(WAIT)
     assert not thread.is_alive()
-    assert first == {"value": ep}, first
+    assert "error" not in first, first
+    assert isinstance(first["value"], S.Episode()), (
+        f"prepare_episode returned {first['value']!r}, not the Episode it opened")
+    with first["value"] as held:
+        assert Path(held.dir) == ep
     assert not os.path.lexists(claim), "the first launcher did not release its claim"
 
     third: list[Any] = []
 
-    def records(source: Path, base_path: Path) -> Any:
-        third.append(base_path)
+    def records(_source: Path, episode: Any) -> Any:
+        third.append(episode)
         return capture.PrimeReport(primed=1)
 
-    assert cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=records) == ep
-    assert third == [ep / "served" / "base.jsonl"]
+    with cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=records) as got:
+        assert Path(got.dir) == ep
+        assert third == [got], "the primer was not handed the episode prepare_episode returns"
 
 
-def test_h4_the_primed_base_alone_refuses_a_rival_base_that_appears_while_the_capture_is_read(
+def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_its_create(
         tmp_path):
-    """`prime_base` checks for a base, reads the whole capture, then writes the base with ONE
-    exclusive create. A rival base that appears while the capture is being read (here: the
-    captured payload is a FIFO, whose writer creates the rival before handing over the payload
-    — a real interleaving, no seam) is the "already primed" `LedgerError` from that create, and
-    the rival keeps its bytes. A check-then-write (or a replace) would clobber it.
+    """`prime_base(source_run_dir, episode)` reads the whole capture, then writes the base with
+    ONE exclusive create — the create itself is the check. A recording `Held` behind the
+    episode's `io=` seam plants a rival base (a plain file, by path) just before it delegates
+    that create: the create's collision is the "already primed" `LedgerError`, and the rival
+    keeps its bytes. A check-then-write, a replace or an append would clobber it.
 
-    Control on the same address: with no rival, the same capture primes the base."""
+    Control on the same address: with no rival, the same capture primes the base, by one
+    `create` and nothing else."""
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     run_dir = source_run(tmp_path)
-    row = append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                      None)
-    sidecar = run_dir / str(row["payload_path"])
-    sidecar.parent.mkdir(parents=True, exist_ok=True)
-    os.mkfifo(sidecar)
+    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
+                json.dumps({"owner": "estate", "role": "canary"}))
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
     base = ep / "served" / "base.jsonl"
     rival = b'{"rival": "a base primed by someone else"}\n'
-    payload = json.dumps({"owner": "estate", "role": "canary"}).encode("utf-8")
+    planted: list[bool] = []
 
-    def prime_while(before_payload: Any) -> BaseException | None:
-        fed: dict[str, Any] = {}
+    def plant_rival(method: str, args: tuple, kwargs: dict) -> None:
+        name = args[0] if args else kwargs.get("name")
+        if method == "write" and S.as_rel(name) == LAYOUT.served_base:
+            base.parent.mkdir(parents=True, exist_ok=True)
+            base.write_bytes(rival)
+            planted.append(True)
 
-        def feed() -> None:
-            try:
-                # Blocks until the primer opens the sidecar to read it.
-                fd = os.open(sidecar, os.O_WRONLY)
-                try:
-                    before_payload()
-                    os.write(fd, payload)
-                finally:
-                    os.close(fd)
-            except BaseException as e:  # noqa: BLE001 — handed back to the test's thread
-                fed["error"] = e
+    rec_io = S.RecordingIo(before=plant_rival)
+    with S.open_episode(ep, io=rec_io) as episode:
+        raised = S.raised_by(lambda: capture.prime_base(run_dir, episode))
 
-        feeder = threading.Thread(target=feed, daemon=True)
-        feeder.start()
-        try:
-            return S.raised_by(lambda: capture.prime_base(run_dir, base), fifo=sidecar)
-        finally:
-            if feeder.is_alive():
-                # The primer never opened the sidecar: open its read end so the feeder returns.
-                with contextlib.suppress(OSError):
-                    os.close(os.open(sidecar, os.O_RDONLY | os.O_NONBLOCK))
-            feeder.join(WAIT)
-            assert not feeder.is_alive()
-            assert "error" not in fed, fed
-
-    def plant_rival() -> None:
-        base.parent.mkdir(parents=True, exist_ok=True)
-        base.write_bytes(rival)
-
-    raised = prime_while(plant_rival)
-
+    assert planted, "prime_base never wrote the base through the episode's held root"
     assert isinstance(raised, ledger.LedgerError), (
-        f"a base that appeared mid-prime was not refused: {raised!r}")
+        f"a base that landed just before the create was not refused: {raised!r}")
     assert "already holds a primed base" in str(raised)
     assert base.read_bytes() == rival, "the rival base was overwritten or appended to"
     assert os.lstat(base).st_nlink == 1
 
     base.unlink()
-    raised = prime_while(lambda: None)
-    assert raised is None, raised
+    rec_io = S.RecordingIo()
+    with S.open_episode(ep, io=rec_io) as episode:
+        capture.prime_base(run_dir, episode)
+    writes = [c for c in rec_io.calls if c.method == "write" and c.name == LAYOUT.served_base]
+    assert [c.kwargs.get("mode") for c in writes] == ["create"], writes
     rows = [json.loads(line) for line in base.read_text(encoding="utf-8").splitlines()]
     assert [r["source"] for r in rows] == [ledger.CAPTURED]
 
@@ -962,7 +938,7 @@ def _readers(fam: Any, digest: str) -> dict[str, Any]:
     return {
         "load_family": fam.load_family,
         "manifest_digest": fam.manifest_digest,
-        "check_manifest_digest": lambda p: fam.check_manifest_digest(p, digest),
+        "check_manifest_digest": lambda episode: fam.check_manifest_digest(episode, digest),
     }
 
 
@@ -970,11 +946,11 @@ def _readers(fam: Any, digest: str) -> dict[str, Any]:
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
 def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it(
         tmp_path, entry, kind):
-    """`load_family`, `manifest_digest` and `check_manifest_digest` read `family.yaml` as the
-    episode's `family` record, which follows nothing below the episode dir and refuses a hard
-    link: over a symlink to a host file holding a valid manifest, or a hard link whose other
-    name is that host file, each raises `FamilyError`, returns nothing (no family, no digest,
-    no clean check), and never reads what the link reaches — the host manifest's text appears
+    """`load_family(episode)`, `manifest_digest(episode)` and `check_manifest_digest(episode,
+    digest)` read `family.yaml` as the episode's `family` record, which follows nothing below
+    the episode dir and refuses a hard link: over a symlink to a host file holding a valid
+    manifest, or a hard link whose other name is that host file, each raises `FamilyError`,
+    returns nothing, and never reads what the link reaches — the host manifest's text appears
     in no message.
 
     Control on the same address: the same bytes as a plain `family.yaml` load, digest to the
@@ -985,7 +961,8 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
     ep = T.episode(tmp_path, doc=doc)
     manifest = ep / "family.yaml"
     good = manifest.read_bytes()
-    digest = fam.manifest_digest(manifest)
+    with S.open_episode(ep) as episode:
+        digest = fam.manifest_digest(episode)
     call = _readers(fam, digest)[entry]
 
     host = tmp_path / "host"
@@ -999,7 +976,8 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
         os.link(other, manifest)
 
     answered: list[Any] = []
-    raised = S.raised_by(lambda: answered.append(call(manifest)))
+    with S.open_episode(ep) as episode:
+        raised = S.raised_by(lambda: answered.append(call(episode)))
     assert answered == [], f"{entry} answered {answered!r} over a {kind} at family.yaml"
     assert isinstance(raised, fam.FamilyError), f"{entry} over a {kind}: {raised!r}"
     text = "".join(str(e) for e in (raised, raised.__cause__) if e is not None)
@@ -1009,7 +987,8 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
 
     manifest.unlink()
     manifest.write_bytes(good)
-    got = call(manifest)
+    with S.open_episode(ep) as episode:
+        got = call(episode)
     if entry == "load_family":
         assert [w.story for w in got.worlds][1] == MARKER
     elif entry == "manifest_digest":
@@ -1023,14 +1002,18 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
 # =======================================================================================
 
 def test_h7_bounds_public_surface_is_exactly_its_readers_and_close(tmp_path):
-    """O3: the judge's one read handle per pass stays write-free. The public attributes of a
-    `Bound` (from `bind(root)`) are exactly `read`, `read_jsonl`, `entries`, `under` and
-    `close` — a `write` (or any other verb) added to it would put a writer in every read site
-    that holds one."""
+    """O3: a read view stays write-free by type. The public attributes of a `Bound` — from
+    `bind(root)`, and from `episode.view()` over the same held handle the episode writes
+    through — are exactly `read`, `read_jsonl`, `entries`, `under` and `close`."""
     from defender._io import bind
 
     root = tmp_path / "root"
     root.mkdir()
+    want = {"read", "read_jsonl", "entries", "under", "close"}
     with bind(root) as bound:
         public = {name for name in dir(bound) if not name.startswith("_")}
-    assert public == {"read", "read_jsonl", "entries", "under", "close"}, sorted(public)
+    assert public == want, sorted(public)
+    with S.open_episode(root) as episode:
+        view = episode.view()
+        public = {name for name in dir(view) if not name.startswith("_")}
+    assert public == want, sorted(public)
