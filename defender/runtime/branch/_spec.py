@@ -1,19 +1,4 @@
-"""Resume a finished investigation from one of its own messages, in a sibling world.
-
-The turn-N branch (`docs/learning-architecture-redesign.md` §The turn-N branch) forks a real
-run at the moment its evidence is in hand and continues it under a world that differs from the
-one it actually ran in. This module owns the two things that makes possible: WHICH message may
-be branched from, and WHERE the forked session lives.
-
-`session_store.fork()` is not touched. It is correct — it seeds the child's `last_render_len`
-to the SEND-role length of the inherited prefix, and `test_session_head_fork_754.py` pins that.
-What was missing is the CALLER contract: a fresh `agent.iter` starts the framework's message
-list empty, so the prefix has to be handed back as `message_history` or `selection.ingest`
-underflows against a store that was already right. `driver.run_investigation` does that by
-hydrating the fork it just opened; the symmetry is exact rather than approximate, because
-`fork` and `hydrate(role="send")` truncate through the same `_complete_prefix_len`.
-
-What a branch request IS, and opening the store it reads from.
+"""What a turn-N branch request is, and opening the store it reads from.
 
 Imports none of its siblings.
 """
@@ -44,19 +29,12 @@ class BranchError(Exception):
 class BranchSpec:
     """One resume: which run, which message, and what to say on arrival.
 
-    `continuation_prompt` is a PARAMETER rather than something this module composes, and that
-    is deliberate — the 2026-08-16 experiment's own caveat was that its continuation wording
-    ("close it when the evidence supports a disposition") biased the run toward closing over
-    gathering. The prompt is part of the measured instrument, so it belongs to whoever is
-    running the measurement, not to the seam.
+    `continuation_prompt` is a parameter because its wording biases the run (e.g. toward
+    closing over gathering); it is part of the measured instrument, owned by the caller.
 
-    `as_of` is the branch point's own moment — the time the sibling is resuming INTO. It is
-    REQUIRED rather than defaulted, because the one wrong answer is the silent one: a spec that
-    fell back to "now" would let every sibling stamp its payloads with the afternoon it
-    executed, which is exactly the defect the field exists to remove, arriving through the
-    field itself. `branch_point_time` derives it from the source store; `validate` refuses a
-    spec whose value disagrees with that derivation, so a hand-written or copy-pasted spec
-    cannot carry another branch point's clock into this episode.
+    `as_of` is the branch point's own moment. Required, not defaulted to "now", which would
+    stamp every sibling's payloads with execution time. `validate` refuses a value that
+    disagrees with `branch_point_time`.
     """
 
     source_run_dir: Path
@@ -64,16 +42,9 @@ class BranchSpec:
     continuation_prompt: str
     as_of: datetime
 
-    # #1067: strict validation refuses a mistyped field at CONSTRUCTION, as pydantic's
-    # `ValidationError` — a class none of this spec's callers name. `learning/branch/cli.py`
-    # builds the spec inside `except BranchError → LauncherRefused`, and `run_investigation`'s
-    # store-setup handler names `BranchError` alone (any other class escapes it, leaving the
-    # sqlite connection open and the wire log registered). So EVERY field's type is checked
-    # here first, ahead of pydantic's own check, and refused as `BranchError`; a domain
-    # exception raised from a validator propagates unconverted — `_model`'s documented
-    # convention. `bool` is excluded from `int` for the same reason: pydantic's strict `int`
-    # refuses `True` too, but as `ValidationError`, and this arm exists to name the class the
-    # handlers catch for an `int` that names no message.
+    # Type-check every field before pydantic does and raise `BranchError`, the class callers
+    # catch; pydantic's own `ValidationError` would escape their handlers. `bool` is refused as
+    # an `int` for the same reason.
     @model_validator(mode="before")
     @classmethod
     def _fields_are_typed(cls, value: Any) -> Any:
@@ -91,10 +62,8 @@ class BranchSpec:
         return given
 
 
-#: What a wrongly-typed value of each field would have meant — the one part of the refusal
-#: that is hand-written. The TYPES are read off the class, so a field added to `BranchSpec`
-#: without a line here fails at import (`_field_types` below) rather than silently reopening
-#: the `ValidationError` escape the validator closes.
+#: What a wrongly-typed value of each field would have meant. Types are read off the class; a
+#: new field without an entry here fails at import.
 _WHY: dict[str, str] = {
     "source_run_dir": "a spelling of a path is not the path the store is opened from",
     "branch_message_id":
@@ -108,8 +77,7 @@ _WHY: dict[str, str] = {
 def _field_types() -> dict[str, type]:
     """`BranchSpec`'s field name -> the runtime class its annotation names, resolved once.
 
-    Every field is a plain class today; a union or generic would need its own `isinstance`
-    arm, so one arriving here is refused at import rather than mis-checked.
+    A union or generic annotation is refused at import rather than mis-checked.
     """
     hints = get_type_hints(BranchSpec)
     out: dict[str, type] = {}
@@ -129,40 +97,18 @@ _FIELD_TYPES = _field_types()
 
 
 def open_source_store(run_dir: Path) -> Any:
-    """The finished run's OWN store, opened for writing.
+    """The finished run's own store, opened for writing.
 
-    A sibling gets a fresh run dir for its own artifacts but forks INTO the source database:
-    the prefix rows live there, and `fork` walks parents inside one transaction, so a child in
-    any other file would inherit nothing. The case pointer is what makes the source store
-    findable from a run dir alone.
-
-    `runs_base` is derived the way the WRITER derived it — `run_dir.parent`, exactly as
-    `driver._default_store_factory` did when this store was created — and then CHECKED against
-    the path the writer recorded. The check is not defensive noise: `store_path_for` resolves
-    to a sessions dir beside `runs_base`, so a `runs_base` off by one directory level still names
-    a well-formed path, and `open_store` creates-if-missing. A wrong derivation therefore
-    returns a live handle over an EMPTY database and the fault surfaces far away, as
-    `main_session_id` finding no root session in a store that was never the right one.
-
-    Both sides are RESOLVED before they are compared, because `Path.__eq__` compares spellings
-    and the two sides are spelled by different callers. The writer recorded whatever
-    `runs_base` its run was handed; this reads whatever `source_run_dir` the branch was handed.
-    A caller that normalises — `Path(x).resolve()`, a relative path, a `..` component, or the
-    symlinked `/tmp` the default runs base lives under on macOS (`open_store`'s own comment
-    names that one) — otherwise gets this refusal for the RIGHT database, with a message
-    naming the opposite cause.
+    A sibling forks into the source database, where the prefix rows live. `runs_base` is
+    derived as the writer did (`run_dir.parent`) and checked against the path the pointer
+    recorded: `open_store` creates-if-missing, so a wrong derivation would silently open an
+    empty database. Both sides are resolved before comparing, since callers spell paths
+    differently (relative, `..`, symlinked `/tmp` on macOS).
     """
-    # RESOLVED FIRST, because `runs_base` is derived from `.parent` and `Path("run-x").parent`
-    # is `Path(".")` — a one-component relative run dir would derive the store under the
-    # PROCESS's cwd and be refused with a message naming the opposite cause. Resolving after
-    # the derivation, as the comparison below does, cannot recover the parent that was lost.
+    # Resolve first: `Path("run-x").parent` is `.`, which would derive the store under the cwd.
     run_dir = Path(run_dir).resolve()
-    # ONE read of the pointer, and every way it can be malformed lands as `BranchError` — the
-    # class the driver's store-setup handler catches. A bare `KeyError`/`JSONDecodeError` from
-    # here escapes that handler and takes the process down with the wire log still registered.
-    # `store_path_for` is INSIDE it too: a pointer whose `case_id` is malformed, case-unstable
-    # or not a string raises `InvalidCaseId`, and a resume over a bad pointer is a refused
-    # branch, reported as one — not a store fault on the source run's database.
+    # Every malformed-pointer failure (including `store_path_for`'s `InvalidCaseId`) becomes
+    # `BranchError`, which the driver's store-setup handler catches.
     try:
         pointer = json.loads(
             RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
@@ -182,12 +128,8 @@ def open_source_store(run_dir: Path) -> Any:
 
 
 def store_factory_for(spec: BranchSpec):
-    """A `driver.StoreFactory` that hands back the source run's store.
-
-    Signature is the factory's, `(case_id, run_dir)`, and BOTH arguments are ignored: a resumed
-    run does not mint a case, it joins one. Taking them anyway is what lets the resume ride the
-    seam `run_investigation` already has instead of growing a second one.
-    """
+    """A `driver.StoreFactory` that hands back the source run's store; both arguments are
+    ignored because a resume joins the source case rather than minting one."""
     def factory(case_id: str, run_dir: Path) -> Any:  # noqa: ARG001 — the factory's shape
         return open_source_store(spec.source_run_dir)
 

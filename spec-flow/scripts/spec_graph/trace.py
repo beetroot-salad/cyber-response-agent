@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 """spec-graph trace — derive the grounding censuses from the code, not from recall.
 
-Two reverse-BFS queries over one statically derived reference graph (#635, split as
-#644/#645). Both answer the question the write-tests grounding leaf previously answered
-by recall — the single point of failure schema.md names ("extraction completeness is the
-gate's single point of failure. No mechanical cross-check exists yet"):
+Two reverse-BFS queries over one statically derived reference graph, so the write-tests
+grounding leaf does not have to answer them from recall:
 
-* **drivers** (T1, #644) — anchor the changed modules (`git diff <base>...HEAD`), close
-  over referrers transitively to the entrypoint frontier: the execution contexts that
-  reach the change. The import graph, entrypoint census, and subprocess arm are
-  `check_actors`' own (one engine, two consumers) — this is the same census emitted as
-  a table for the grounding brief instead of diffed against a graph.
-* **resource** (T2, #645) — anchor a declared resource's sink symbols
-  (`specGraph.resources` in the project profile), take their referrers split by sink
-  kind: the resource's writers and readers, each with the call-site path expression
-  (the template the axes are read off). A tool, not a gate: a floor over
-  runtime-composed paths cannot soundly fail a graph.
+* **drivers**: anchor the changed modules (`git diff <base>...HEAD`) and close over
+  referrers to the entrypoint frontier: the execution contexts that reach the change.
+  Uses `check_actors`' census, emitted as a table instead of diffed against a graph.
+* **resource**: anchor a declared resource's sink symbols (`specGraph.resources`) and
+  list their referrers split into writers and readers, each with the call-site path
+  expression. A tool, not a gate: runtime-composed paths cannot soundly fail a graph.
 
-**The honest floor** (NON-1): a static pass sees reference edges, not runtime edges.
-Reported, never silently dropped — subprocess re-exec edges (from `check_actors`' arm),
-in-process dynamic dispatch (`importlib.import_module`, registry lookups), files the
-census could not parse, and grep-only hits the resolver could not tie to an import. A
-module with no path found is *unreached by any resolved edge*, never proven unreachable.
+**The floor**: a static pass sees reference edges, not runtime edges. What it cannot
+resolve is reported, never dropped: subprocess re-exec edges, dynamic dispatch
+(`importlib.import_module`, registry lookups), unparseable files, and grep-only hits. A
+module with no path found is unreached by any resolved edge, not proven unreachable.
 
 `specGraph.resources` shape (mirrors `entrypointStems`):
 
@@ -55,8 +48,7 @@ import check_actors
 
 
 def _floor_dynamic(texts: dict[Path, str], root: Path) -> list[str]:
-    """In-process dynamic dispatch sites — no static edge exists, so any reach through
-    them is invisible to the walk. Floor, not resolution (NON-1 ii)."""
+    """In-process dynamic dispatch sites: reach through them is invisible to the walk."""
     hits: list[str] = []
     for f, text in sorted(texts.items()):
         if "import_module" not in text and "__import__" not in text:
@@ -68,12 +60,7 @@ def _floor_dynamic(texts: dict[Path, str], root: Path) -> list[str]:
 
 
 def drivers(base: str, cfg: dict) -> int:
-    # Verify the base ref FIRST: `git diff` against a nonexistent/unfetched ref exits 128 with
-    # EMPTY stdout. `check_actors._changed_paths` now carries the same preflight and its `_sh`
-    # reads the return code, so this is no longer the only thing standing between a bad ref and
-    # an "answered" census — it survives to name the REF rather than the diff command, and to
-    # say so before the census spends a repo walk. rev-parse is the cheap oracle for "does this
-    # ref name a commit here".
+    # Check the base ref first, so the error names the ref and comes before the repo walk.
     probe = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
         cwd=_config.repo_root(), capture_output=True, text=True, encoding="utf-8", check=False,
@@ -88,16 +75,14 @@ def drivers(base: str, cfg: dict) -> int:
         return 2
     census = check_actors._Census(base, cfg)
     root = census.root
-    census_files = set(census.files)  # hoisted: inside the genexp this rebuilt per changed path
+    census_files = set(census.files)
     changed = sorted(p for p in census.changed if p in census_files)
     if not changed:
         print(f"[trace drivers] no changed census modules against base={base} — nothing to anchor.")
         return 0
-    # Forward reach from each entrypoint, inverted into per-changed-module driver lists —
-    # the same closure check_actors gates on, reported as the census itself.
+    # Forward reach from each entrypoint, inverted into per-changed-module driver lists.
     reach = {e: check_actors._reach(e, census.edges) for e in census.entrypoints}
-    # Scanned once per entrypoint, not once per (changed module × entrypoint) pair: the
-    # regex sweeps each entrypoint's whole source, and it does not vary with `mod`.
+    # Once per entrypoint; the scan does not depend on `mod`.
     subproc_stems = {
         e: check_actors._subprocessed_py_stems(census.texts.get(e, ""))
         for e in census.entrypoints
@@ -125,10 +110,8 @@ def drivers(base: str, cfg: dict) -> int:
             print("  no resolved driver — UNREFUTED, not proven unreachable (see floor below)")
     gaps = census.load_bearing_gaps()
     dynamic = _floor_dynamic(census.texts, root)
-    # A subprocess re-exec issued from a NON-entrypoint module (cli.py → runner.py →
-    # re-execs a changed module) emits no driver edge above — the subproc scan covers only
-    # entrypoints — so the relocated-PATHS class would escape silently. Floor, not
-    # resolution (NON-1): the walk cannot say which driver reaches the re-exec site.
+    # A re-exec from a non-entrypoint module produces no driver edge above, and the walk
+    # cannot say which driver reaches it, so report it as floor.
     entry_set = set(census.entrypoints)
     reexec = [
         f"{f.relative_to(root)}: names {sorted(stems)} as subprocess target(s) — subprocess "
@@ -153,11 +136,9 @@ def _sink_calls(
 ) -> tuple[list[str], list[str]]:
     """(resolved call sites, grep floor) for one sink symbol.
 
-    Resolved: the file imports the sink's module (any form the import graph resolves) or
-    imports the symbol itself, AND calls the symbol — reported with the call's first
-    argument's source text, which is the path template the identity axes are read off.
-    Floor: the symbol's name occurs in a file the resolver could not tie to the sink —
-    a string-composed or dynamically dispatched use the brief must judge, not drop."""
+    Resolved: the file imports the sink's module and calls the symbol, reported with the
+    first argument's source text (the path template). Floor: the name occurs in a file the
+    resolver could not tie to the sink."""
     resolved: list[str] = []
     floor: list[str] = []
     for f, text in sorted(texts.items()):
@@ -184,8 +165,7 @@ def _sink_calls(
         if calls and imports_sink:
             resolved.extend(calls)
         else:
-            # Called without a resolvable import (re-export, dynamic), or named but never
-            # called (aliased, passed as a value, quoted) — the walk can't classify it.
+            # Called without a resolvable import, or named but never called.
             floor.append(
                 f"{f.relative_to(root)}: names `{symbol}` but the walk cannot tie it to "
                 f"{sink_file.relative_to(root)} — classify by hand"
@@ -196,11 +176,8 @@ def _sink_calls(
 def _resource_texts(root: Path) -> dict[Path, str]:
     """Every *.py under the repo root, pruning only `_config._PRUNE` dirs — read utf-8.
 
-    Deliberately WIDER than the execution-context census: that census excludes tests/ and
-    anything outside codeRoots, but a writer in `tests/conftest.py` or an eval harness
-    outside the codeRoots still mutates the shared resource — dropping it from the sink
-    scan and the grep floor violates NON-1 ("Reported, never silently dropped"). `drivers`
-    stays on the census, because its contract IS the execution-context census."""
+    Wider than the execution-context census: a writer in `tests/conftest.py` or outside the
+    codeRoots still mutates the shared resource."""
     files = sorted(f for f in _config._walk(root) if f.suffix == ".py")
     return check_actors._read_texts(files)
 
@@ -220,7 +197,7 @@ def resource(names: list[str], cfg: dict) -> int:
               file=sys.stderr)
         return 2
     root = _config.repo_root()
-    texts = _resource_texts(root)  # repo-wide, not the codeRoots census — see _resource_texts
+    texts = _resource_texts(root)
     unresolved: list[str] = []
     for name in names or sorted(declared):
         spec = declared[name] or {}
@@ -242,7 +219,7 @@ def resource(names: list[str], cfg: dict) -> int:
         for literal in spec.get("grep", []) or []:
             for f, text in sorted(texts.items()):
                 if literal not in text:
-                    continue  # containment first: splitlines over every file is the hot loop
+                    continue  # cheap containment check before splitlines
                 for i, line in enumerate(text.splitlines(), 1):
                     if literal in line:
                         print(f"  floor [literal `{literal}`] {f.relative_to(root)}:{i}: "
@@ -251,8 +228,7 @@ def resource(names: list[str], cfg: dict) -> int:
     print("[trace resource] writers/readers are RESOLVED call sites; every `floor` line is "
           "reach the walk could not classify — the brief carries it, never drops it.")
     if unresolved:
-        # A census whose sink never resolved looked at NOTHING for that sink — exit 2, not 0:
-        # "could not answer" must never present as an answered census (the script contract).
+        # An unresolved sink was never looked at: exit 2, not 0.
         print(f"trace resource: {len(unresolved)} sink(s) UNRESOLVED ({unresolved}) — the "
               f"census could not look; fix the config entries and re-run.", file=sys.stderr)
         return 2
@@ -267,11 +243,7 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
     cfg = _config.load(opts["config"])
-    # The profile's branch, the same source `check_actors.main` reads (#949). `drivers` carries
-    # the same hard rev-parse preflight, so a hardcoded "main" here is not a quiet wrong answer
-    # any more — it is a mandatory `--base` on every invocation in any repo whose default branch
-    # is named something else, which is the failure the config key exists to prevent. Two
-    # spellings of one fact would let the sibling subcommands disagree about the same repo.
+    # The profile's branch, as in `check_actors.main`; an unresolvable base is a hard exit 2.
     base = opts["base"] or cfg["defaultBranch"]
     try:
         if args[0] == "drivers":

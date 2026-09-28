@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Name and build the owned box image (#1092, M3 revised).
+"""Name and build the owned box image.
 
-STDLIB-ONLY, python3 >= 3.11 (the resolver reads the lock with `tomllib` — #1097): this
-script runs on a bare CI runner `python3` (`box-dood`'s runner has no uv and no venv) and on
-a developer's devcontainer `python3`. It never `import defender...` — it
-loads `runtime/box/_image.py` BY FILE PATH, the same door the running package uses only once
-pydantic is on `BoxSpec`'s closure (an ordinary package import would then pull pydantic in,
-which this script cannot assume is installed).
+Stdlib-only, python3 >= 3.11 (`tomllib`): it runs on a bare CI runner `python3` with no uv or
+venv, and on a devcontainer `python3`. It never imports `defender...`; it loads
+`runtime/box/_image.py` by file path, since a package import would pull in pydantic.
 
     python3 defender/scripts/box_image.py tag    # print the image name for THIS tree
     python3 defender/scripts/box_image.py build  # `docker build` it, tagged with that name
@@ -51,20 +48,17 @@ def _cmd_build(image: ModuleType) -> int:
         "docker", "build",
         "-f", str(dockerfile),
         "-t", tag,
-        # The context is `defender/`, not the repo root: the recipe COPYs only two files from
-        # it, so no root `.dockerignore` has to keep enumerating large local directories (#1098).
+        # The context is `defender/`, not the repo root: the recipe copies only two files, so
+        # no root `.dockerignore` has to exclude large local directories.
         str(_DEFENDER_DIR),
     ]
-    # This is the ONE place the recipe is built, so the builder it needs is pinned here: the
-    # recipe's `RUN --mount` (uv lent to the sync step, never a layer) is BuildKit syntax,
-    # which the legacy builder rejects. Docker >= 23 defaults to BuildKit; the variable makes
-    # an older daemon's CLI use it too instead of failing on the first `--mount`.
+    # The recipe's `RUN --mount` needs BuildKit; Docker >= 23 defaults to it, and this makes an
+    # older CLI use it too.
     env = dict(os.environ, DOCKER_BUILDKIT="1")
     try:
-        proc = subprocess.run(argv, env=env)  # noqa: S603 — the whole point of this command
+        proc = subprocess.run(argv, env=env)  # noqa: S603 — running docker is this command's job
     except OSError as e:
-        # No `docker` on PATH (or one that cannot be exec'd): this CLI's own one line and
-        # exit 1, the same surface as every other failure of the build, not a traceback.
+        # No usable `docker`: one line and exit 1, like any other build failure.
         print(f"box_image.py: could not run docker: {e}", file=sys.stderr)
         return 1
     return proc.returncode
@@ -87,11 +81,11 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_tag(image)
         return _cmd_build(image)
     except image.ImageInputError as e:
-        # The tree's fault, in the resolver's own words — the class is the loaded module's,
-        # so no name-matching stands between the raise and this arm.
+        # The tree's fault, in the resolver's own words; the exception class comes from the
+        # loaded module itself.
         print(str(e), file=sys.stderr)
         return 1
 
 
-if __name__ == "__main__":  # lint-log-setup: ok — stdlib-only by contract (#1092): it builds the image before any defender environment exists, and imports nothing from the package
+if __name__ == "__main__":  # lint-log-setup: ok — stdlib-only: it builds the image before any defender environment exists, and imports nothing from the package
     sys.exit(main())

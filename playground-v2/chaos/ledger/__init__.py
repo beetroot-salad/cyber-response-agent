@@ -1,12 +1,10 @@
-"""O5 — the scorer's ground truth: one JSON file per activation.
+"""The scorer's ground truth: one JSON file per activation (gitignored).
 
-Gitignored, devcontainer-side (`chaos/ledger/*.json` — see the sibling
-`.gitignore`). A record is written *before* the first mutation reaches the
-stack (status `pending`, carrying the before-state of every resource it is
-about to touch) and rewritten as each resource lands, so at no moment is
-there a live fault with no record pointing at it. `chaos.ctl.revert` stamps
-`reverted_at` onto the same file rather than appending a second one, so a
-ledger_ref always resolves to exactly one record.
+A record is written before the first mutation reaches the stack and rewritten
+as each resource lands, so there is never a live fault with no record. Revert
+stamps `reverted_at` onto the same file, so a ledger_ref resolves to exactly
+one record.
+
 
 Writes are atomic (temp file + rename): an interrupted write can leave the
 previous version of a record, never a truncated one.

@@ -1,23 +1,17 @@
 """The two-pass judge: measure the envelope, then grade the projection against it.
 
-The passes are separate calls and the split is load-bearing. The LABEL pass answers
-"what did this envelope actually do?" from telemetry alone — it is shown neither the
-story nor the oracle's projection. The VERDICT pass answers "did the projection
-faithfully represent that?" and receives the label pass's output as the measurement of
-record. Merging them would let a confident projection colour the measurement, and the
-label pass's calibration set (hand-derived labels, none of them produced with a
-projection in view) would stop being like-for-like.
+The LABEL pass answers "what did this envelope actually do?" from telemetry alone, shown
+neither the story nor the projection. The VERDICT pass answers "did the projection
+faithfully represent that?" given the label as the measurement of record. Separate calls,
+so a confident projection cannot colour the measurement, and the label pass stays
+comparable with its hand-labelled calibration set.
 
-The judge is `claude-opus-5`, deliberately not the oracle's own `glm-5.2`: a same-model
-judge shares the failure modes this suite exists to catch — inferring suppression from
-absence, accepting a plausible-shaped event the telemetry does not carry.
+The judge is `claude-opus-5`, not the oracle's own `glm-5.2`: a same-model judge shares
+the failure modes this suite exists to catch. It runs through `claude -p` (see
+`call_model`).
 
-It is reached through `claude -p` rather than the Anthropic API — see `call_model` for
-what that changes and what keeps it honest.
-
-Because the judge runs at score time, the score is non-deterministic and the judge is
-part of the tag: `tag_suffix()` carries the resolved model, the effort, and a hash over
-BOTH prompts, so editing either is a new tag requiring a re-score.
+The judge is part of the score tag: `tag_suffix()` carries the resolved model, the effort,
+and a hash over both prompts, so editing either requires a re-score.
 """
 from __future__ import annotations
 
@@ -39,13 +33,11 @@ LABEL_PROMPT = GOLDEN_DIR / "prompts" / "label.md"
 VERDICT_PROMPT = GOLDEN_DIR / "prompts" / "verdict.md"
 
 DEFAULT_JUDGE_MODEL = "claude-opus-5"
-#: `high` is already Opus 5's default. Pinned explicitly anyway so the effort that ran
-#: is recorded in the tag and cannot drift under us if a default changes.
+#: Pinned (though it is the default) so the tag records it and it cannot drift.
 DEFAULT_JUDGE_EFFORT = "high"
 
-#: Rows kept per payload before the rest is declared away. A judge that silently
-#: received a slice would infer absence from it; the prompts forbid that only because
-#: `truncated` tells them a slice is what they got.
+#: Rows kept per payload. Cut payloads are flagged `truncated` so the judge does not infer
+#: absence from a slice.
 MAX_ROWS_PER_PAYLOAD = 40
 
 LABEL_KINDS = frozenset(
@@ -68,18 +60,13 @@ class GrammarError(ValueError):
     """The model's output did not parse as the closed grammar its prompt mandates."""
 
 
-# lint-dup: ok — same names as learning/core/config.py, deliberately NOT shared. That judge is
-# the learning loop's outcome classifier; this one is the calibration judge, picked to be off
-# the oracle's own lineage. This pair also feeds `prompts_sha8` into the score tag, so
-# importing the learning config would let a change there silently re-tag every committed
-# score.
+# lint-dup: ok — same names as learning/core/config.py but a different judge (the calibration
+# judge, not the loop's classifier), and its values feed the score tag, so a change there must
+# not re-tag committed scores.
 #
-# THE ENV VARS ARE THE SAME TWO NAMES. `JUDGE_MODEL` and `JUDGE_EFFORT` are read here AND by
-# `learning/core/config.py`, with different defaults, so setting either for this harness also
-# retargets the family judge — and, since #1008 registered that judge, aborts every ordinary
-# investigation at `run.py`'s all-roles preflight if the value names a model no provider
-# routes. What is NOT shared is the CODE, for the reasons above; the NAMES are shared, and
-# separating them is a deliberate change with fixtures behind it.
+# The env var names ARE shared with `learning/core/config.py` (different defaults): setting
+# either here also retargets the family judge, and an unroutable model then fails `run.py`'s
+# all-roles preflight.
 def judge_model() -> str:  # lint-dup: ok — see the note above
     return os.environ.get("JUDGE_MODEL") or DEFAULT_JUDGE_MODEL
 
@@ -89,7 +76,7 @@ def judge_effort() -> str:  # lint-dup: ok — see the note above
 
 
 def prompts_sha8() -> str:
-    """A hash over BOTH prompts — editing either is a new tag."""
+    """A hash over both prompts; editing either is a new tag."""
     digest = hashlib.sha256()
     for path in (LABEL_PROMPT, VERDICT_PROMPT):
         digest.update(path.read_bytes())
@@ -97,9 +84,8 @@ def prompts_sha8() -> str:
 
 
 def tag_suffix(model: str, effort: str) -> str:
-    """The judge half of a score tag. Callers pass the RESOLVED model, never the
-    configured default — two machines must not produce identically-named tags from
-    different judges."""
+    """The judge half of a score tag. Callers pass the resolved model, never the configured
+    default, so two machines cannot mint the same tag from different judges."""
     return f"judge-{model}-{effort}_{prompts_sha8()}"
 
 
@@ -111,9 +97,7 @@ class LeadInputs:
 
     case_id: str
     lead_id: str
-    #: The lead as a MODEL sees it — `lead_for_model`, not the raw `leads.jsonl` row.
-    #: Both prompt builders are its only readers, which is what makes that projection
-    #: safe to take once here rather than at each `_block("lead", ...)`.
+    #: The lead as a model sees it (`lead_for_model`), not the raw `leads.jsonl` row.
     lead: dict
     sample: str
     observed: list[dict]
@@ -125,11 +109,8 @@ class LeadInputs:
 def _bounded(payload: Any) -> tuple[Any, bool]:
     """Bound an ES|QL payload's rows; return `(payload, was_cut)`.
 
-    Only the ES|QL `{query, columns, row_count, values}` shape has a row array to bound — many
-    payloads are a lookup system's own response instead (a cmdb host record, an identity user,
-    a threat-intel verdict, a bare list), and one carries its own `truncated` flag from the
-    source. Those pass through untouched: they are small, and rewriting a shape we do not model
-    is how a judge ends up grading our edit.
+    Only the ES|QL `{query, columns, row_count, values}` shape is bounded. Other payloads
+    (lookup-system responses) are small and pass through untouched.
     """
     if not isinstance(payload, dict):
         return payload, False
@@ -139,16 +120,13 @@ def _bounded(payload: Any) -> tuple[Any, bool]:
     return {
         **payload,
         "values": values[:MAX_ROWS_PER_PAYLOAD],
-        # The TRUE count survives the cut — the prompts forbid inferring absence from a
-        # slice, which only means anything if the full size is still visible.
+        # Keep the true count so the full size stays visible.
         "row_count": payload.get("row_count", len(values)),
     }, True
 
 
-#: What a payload file that was never written looks like to the judge. The assembler copied
-#: the run's raw payloads verbatim, so a zero-byte file means the capture never recorded that
-#: query's result. Rendering it as an empty result set would ask the judge to infer absence
-#: from a missing measurement, which is the error class this suite exists to catch.
+#: Shown for a zero-byte or unparseable payload: the capture never recorded that result, and
+#: presenting it as an empty result set would invite inferring absence.
 UNREADABLE_NOTE = (
     "this query's payload was never recorded by the capture. It is NOT an empty result "
     "set and carries no evidence either way"
@@ -158,9 +136,8 @@ UNREADABLE_NOTE = (
 def _payload_entry(path: Path) -> dict:
     """One observed payload as the judge sees it: `payload` plus the flags about it.
 
-    `truncated` sits BESIDE the payload rather than inside it — one source system emits
-    its own `truncated` field, and overwriting that would tell the judge our bound was
-    the source's.
+    `truncated` sits beside the payload, not inside it: one source system emits its own
+    `truncated` field.
     """
     raw = path.read_text(encoding="utf-8")
     if not raw.strip():
@@ -181,8 +158,7 @@ def _control(record: dict) -> dict:
     control = {
         "name": record.get("name"),
         "window": record.get("window"),
-        # The load-bearing bit: an empty window that was never live means "not
-        # measured", not "nothing routine happens here".
+        # An empty window that was never live means "not measured", not "nothing routine".
         "window_live": record.get("live"),
         "payload": payload,
     }
@@ -194,10 +170,8 @@ def _control(record: dict) -> dict:
 def lead_systems(lead: dict) -> set[str]:
     """The systems a lead's queries read, from their `query_id` prefixes.
 
-    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so a lead's systems are a
-    property of the envelope rather than an attribution anyone made. Both the label
-    pass's calibration (`audit_judge`) and the report's slice axis (`score.system_of`)
-    key off this, and they must not drift apart.
+    `query_id` is `{system}.{kebab-name}`. Shared by `audit_judge` and `score.system_of` so
+    calibration and report slices agree.
     """
     return {(q.get("query_id") or "").split(".")[0] for q in lead.get("queries") or []}
 
@@ -207,19 +181,15 @@ def load_case_leads(case_dir: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-#: The lead fields a judge pass may reason about. An ALLOWLIST, so a field added to
-#: `leads.jsonl` for plumbing cannot reach a model prompt by default. The failure it prevents
-#: is silent: a prompt that gains a line is a different measurement taken under an unchanged
-#: `prompts_sha8` and an unchanged `labels/<judge-suffix>.json` cache key, so a rebuilt case
-#: would be labelled from a different input shape than its siblings under one tag. `seq` is
-#: exactly such a field — the queries-table key pairing a control with its observed payload,
-#: of no use to the judge.
+#: The lead fields a judge pass may reason about. An allowlist, so a plumbing field (e.g.
+#: `seq`) added to `leads.jsonl` cannot reach a prompt: that would change the measurement
+#: under an unchanged `prompts_sha8` and label cache key, so a rebuilt case
+#: would be labelled from a different input shape than its siblings under one tag.
 #:
-#: #1054 is an accepted, deliberate instance of exactly that: `hidden/`'s ES|QL payloads
-#: were re-encoded to production's positional shape under an unchanged tag, so two cases
-#: with no label cache (`case-006-authorized-keys-db1`, `case-007-lotl-web1`) would be
-#: labelled from a different encoding than the other 85 leads under this tag. See
-#: `audits/README.md`'s 2026-09-19 note.
+#: #1054 is an accepted instance: `hidden/`'s ES|QL payloads were re-encoded to the
+#: positional shape under an unchanged tag, so `case-006-authorized-keys-db1` and
+#: `case-007-lotl-web1` (no label cache) would be labelled from a different encoding than
+#: the other leads. See `audits/README.md`'s 2026-09-19 note.
 MODEL_LEAD_FIELDS = ("lead_id", "goal", "what_to_summarize", "queries")
 MODEL_QUERY_FIELDS = ("query_id", "params")
 
@@ -256,10 +226,8 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
 
     sample_path = case_dir / "oracle_visible" / "samples" / f"{lead_id}.txt"
     env_path = case_dir / "environment.yaml"
-    # A mapping by contract — `validate_cases.check_environment` reads `capture_environment`
-    # and `unstable_identifiers.columns` off it — and `LeadInputs.environment_notes: dict`
-    # checks that since #1067. A list- or scalar-rooted file is refused here, naming the file,
-    # rather than as a `ValidationError` from the record's constructor a few lines down.
+    # Must be a mapping; refused here so the error names the file rather than surfacing as a
+    # `ValidationError` from `LeadInputs`.
     environment_notes = yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
     if not isinstance(environment_notes, dict):
         raise ValueError(
@@ -285,8 +253,7 @@ def _block(name: str, body: Any) -> str:
 
 
 def label_user_prompt(inputs: LeadInputs) -> str:
-    """The measurement pass's payload. Carries NEITHER the story nor the projection —
-    see the module docstring; this exclusion is the whole point of the split."""
+    """The measurement pass's payload. Carries neither the story nor the projection."""
     return "\n\n".join([
         _block("lead", inputs.lead),
         _block("sample", inputs.sample),
@@ -315,8 +282,7 @@ def verdict_user_prompt(inputs: LeadInputs, projection: Any, measurement: dict) 
 
 def _document(raw: str) -> dict:
     text = raw.strip()
-    # The prompts forbid a fence; a model that adds one anyway has produced a
-    # readable document, and rejecting it would charge the oracle for the judge's slip.
+    # The prompts forbid a fence, but a fenced document is still readable.
     if text.startswith("```"):
         lines = [ln for ln in text.splitlines() if not ln.strip().startswith("```")]
         text = "\n".join(lines).strip()
@@ -332,15 +298,9 @@ def _document(raw: str) -> dict:
 def parse_label(raw: str) -> dict:
     doc = _document(raw)
     kind = doc.get("delta_kind")
-    # `isinstance` FIRST at every one of this file's four closed vocabularies: they are
-    # `frozenset`s and `doc` is the model's own parsed YAML, so a field spelled as a list or a
-    # mapping raises `TypeError: unhashable type` instead of the `GrammarError` this branch
-    # exists to raise — and `_pass`'s retry loop catches only `GrammarError`, so the crash
-    # skips all three attempts and unwinds out of the batch, discarding every lead measured
-    # beside it. The tri-state tests below need `isinstance(x, bool)` rather than membership
-    # in a tuple: a tuple never hashes, but `in` compares with `==`, and `0 == False` /
-    # `1 == True`, so a YAML integer would pass the vocabulary check and then miss every
-    # `is False` / `is True` branch downstream.
+    # `isinstance` before each frozenset membership test: an unhashable list/mapping would
+    # raise `TypeError`, which `_pass`'s retry loop does not catch. Tri-states use
+    # `isinstance(x, bool)` because `0 == False` would let a YAML integer through.
     if not isinstance(kind, str) or kind not in LABEL_KINDS:
         raise GrammarError(f"delta_kind {kind!r} not in {sorted(LABEL_KINDS)}")
     reason = doc.get("undecidable_reason")
@@ -400,9 +360,8 @@ def parse_verdict_reply(raw: str) -> dict:
 class CallResult:
     """What one judge call produced, plus who actually produced it.
 
-    `model` is read back from the runner rather than echoed from the request: the
-    design's rule is that a tag records the RESOLVED judge, so that two machines cannot
-    mint identically-named tags from different models.
+    `model` is read back from the runner, not echoed from the request, so a tag records the
+    judge that actually ran.
     """
 
     text: str
@@ -417,9 +376,8 @@ CallFn = Callable[[str, str, str, str], CallResult]
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or "claude"
 CALL_TIMEOUT_SECONDS = 900
 
-#: Every tool the runner would otherwise offer. A judge that can read the filesystem can
-#: read `expected.yaml`, and a measurement that consulted the answer key is not one. The
-#: empty allowlist is the guard; this denylist is the belt to its braces.
+#: Every tool the runner would otherwise offer, denied as a backstop to the empty allowlist: a
+#: judge that can read the filesystem can read `expected.yaml`.
 _DENIED_TOOLS = (
     "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit,"
     "BashOutput,KillShell,SlashCommand,Skill"
@@ -429,21 +387,16 @@ _DENIED_TOOLS = (
 def call_model(instructions: str, user: str, model: str, effort: str) -> CallResult:
     """One single-turn, tool-free judge call, through `claude -p`.
 
-    NOT a bare API call, and the difference is worth stating: the judge runs inside the
-    Claude Code harness, so ~11k tokens of runner scaffolding precede our instructions.
-    That prefix is byte-identical across every lead, so it is created once and read from
-    cache thereafter (~$0.006/call) — but it is there, and a prompt-level finding about
-    this judge is a finding about the judge-inside-the-runner.
+    Not a bare API call: ~11k tokens of runner scaffolding (identical across leads, so
+    cached) precede our instructions, and findings about this judge are about the
+    judge-inside-the-runner.
 
-    Three things keep it honest:
-
-    * **No tools.** An empty allowlist plus an explicit denylist. Verified: asked to read
-      a file, it answers that it has no file-reading tool.
-    * **A neutral working directory.** Run from an empty temp dir, so no CLAUDE.md, git
-      status or repo listing is discovered — which both stabilises the cacheable prefix
-      and keeps the case tree out of the judge's reach by a second route.
-    * **No inherited API key.** `ANTHROPIC_API_KEY` is dropped from the child's
-      environment so the runner uses its own credentials.
+    * **No tools**: an empty allowlist plus an explicit denylist.
+    * **A neutral working directory**: an empty temp dir, so no CLAUDE.md, git status or
+      repo listing is discovered; stabilises the cached prefix and keeps the case tree out
+      of reach.
+    * **No inherited API key**: `ANTHROPIC_API_KEY` is dropped so the runner uses its own
+      credentials.
     """
     with tempfile.TemporaryDirectory(prefix="oracle-judge-") as neutral:
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -469,8 +422,7 @@ def call_model(instructions: str, user: str, model: str, effort: str) -> CallRes
     if report.get("is_error") or report.get("subtype") != "success":
         raise RuntimeError(f"judge call failed: {report.get('result') or report}")
 
-    # Read the model back rather than trusting the request. A run that silently fell
-    # back to another model must not be ledgered under the tag we asked for.
+    # A silent fallback to another model must not be filed under the requested tag.
     used = [name for name in report.get("modelUsage") or {} if name == model]
     if not used:
         raise RuntimeError(
@@ -485,14 +437,10 @@ GRAMMAR_ATTEMPTS = 3
 
 
 def _reparse_note(error: Exception) -> str:
-    """The only thing a retry adds: a complaint about the ENVELOPE, never the judgement. A
-    retry is for a malformed envelope around a real judgement, not for a verdict we dislike, so
-    nothing here describes the telemetry, the projection, or what a good answer looks like — it
-    names the parse failure and the YAML rule that avoids it.
+    """What a retry appends: a complaint about the envelope's form, never the judgement.
 
-    A byte-identical re-send is not enough: a `rationale` written as a plain scalar containing
-    `pam_unix(sshd:auth): authentication failure` cannot parse (a plain YAML scalar cannot
-    carry `: `), and identical attempts reproduce it.
+    A byte-identical re-send would reproduce the commonest failure (a plain scalar containing
+    `: `), so it names the parse error and the YAML rule that avoids it.
     """
     return (
         "\n\n<retry>\n"
@@ -509,8 +457,7 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
           call: CallFn) -> dict:
     """Run one pass, re-asking on a grammar failure until `GRAMMAR_ATTEMPTS` are spent.
 
-    Only the envelope complaint changes between attempts — see `_reparse_note`. The
-    payload the judgement is made from is byte-identical every time.
+    Only the appended `_reparse_note` changes between attempts.
     """
     instructions = prompt_path.read_text(encoding="utf-8")
     payload = user
@@ -523,8 +470,7 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
             if attempt == GRAMMAR_ATTEMPTS - 1:
                 raise
             payload = user + _reparse_note(exc)
-    # Provenance, not grammar: which judge actually answered, recorded per lead so the
-    # committed artifact can be checked against the tag it was filed under.
+    # Per-lead provenance, so the artifact can be checked against its tag.
     return {**parsed, "judge_model": result.model, "judge_effort": result.effort,
             "cost_usd": result.cost_usd}
 
@@ -532,17 +478,9 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
 def sole_judge(answers: Iterable[dict], *, what: str) -> str:
     """The one judge that answered all of `answers`, or a `RuntimeError` naming the set.
 
-    The counterpart to the provenance `_pass` stamps: reading `judge_model` back off every
-    reply catches a run that silently fell back mid-sweep and filed two judges' answers under
-    one tag. Shared by all three callers (the label cache and both audit sweeps), because the
-    check is only worth anything applied everywhere a batch is summarized under one name.
-
-    `what` names the batch in the message, because "more than one judge" is not actionable
-    without knowing which sweep produced it.
-
-    An EMPTY batch is its own message. It is reachable — a sweep whose entry set came out empty
-    (every case defective or derived) asks this of nothing — and "ran on more than one judge:
-    []" is the one reading of that state a reader cannot act on.
+    Catches a run that silently fell back mid-sweep and would file two judges' answers under
+    one tag. `what` names the batch in the message. An empty batch (reachable when every case
+    is defective or derived) gets its own message.
     """
     resolved = {answer["judge_model"] for answer in answers}
     if not resolved:
@@ -555,9 +493,7 @@ def sole_judge(answers: Iterable[dict], *, what: str) -> str:
 def total_cost(answers: Iterable[dict]) -> float | None:
     """What a batch of replies cost, or `None` if no reply priced itself.
 
-    `None` is not zero and must not round to it: a call seam that reports no price (a stub,
-    or a provider whose response carried no usage) means the figure is unknown, and a
-    summary printing `$0.0` for it would read as free."""
+    `None` means unknown, and must not be reported as `$0.0`."""
     priced = [answer["cost_usd"] for answer in answers if answer.get("cost_usd") is not None]
     return round(sum(priced), 4) if priced else None
 

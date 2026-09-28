@@ -58,11 +58,10 @@ def acquire_flock(path: Path) -> Any | None:
 def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
     """Retried until a deadline; `None` once it expires.
 
-    The drain's wait on a channel's APPEND lock. `acquire_flock` gives up instantly, making
-    an appender's ordinary hold look permanent; a plain blocking acquisition would let one
-    channel's stuck appender hold the repo lock — and therefore every sibling channel's
-    tick — indefinitely. The deadline is the caller's configured repo-lock wait, so the two
-    bounds cannot drift. `None` rather than raising: a busy channel is not a fault."""
+    The drain's wait on a channel's append lock. Giving up instantly would make an ordinary
+    append look permanent; blocking would let one stuck appender hold the repo lock, and so
+    every channel's tick, indefinitely. `None` rather than raising: a busy channel isn't a
+    fault."""
     fh = _flock.open_lock(path)
     try:
         taken = _flock.take(fh, timeout_seconds=timeout_seconds)
@@ -75,9 +74,8 @@ def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
     return fh
 
 
-#: The repo lock and the channel locks release identically — one `flock(LOCK_UN)` and a
-#: close. The second name is an alias, so `acquire_repo_lock`'s callers read with a
-#: matching verb.
+#: The repo lock and the channel locks release identically; the second name matches
+#: `acquire_repo_lock`.
 release_flock = _flock.release
 release_repo_lock = _flock.release
 
@@ -100,15 +98,11 @@ def without_consumed_category(rec: dict) -> dict:
 
 
 def existing_finding_ids(cfg: Any) -> set[str]:
-    """Every queue-row id THIS corpus already attributes a lesson to — the pre-author
-    idempotency read, shared by every corpus-author direction.
+    """Every queue-row id this corpus already attributes a lesson to — the pre-author
+    idempotency read, shared by every corpus-author channel.
 
-    ONE HOME (`defender/CLAUDE.md`: "One home for a helper, not the same `def` in two or more
-    modules"). It reads only `CorpusAuthorConfig`'s own two fields — `corpus_dir` and
-    `channel.id_key` — which is why it takes the base rather than either direction's subclass,
-    and why a second direction needs no second copy. The spelling of the frontmatter list comes
-    from `provenance_field`, the same derivation the drain's attribution gate reads: a file
-    attributable there but invisible here is authored again on every following tick.
+    Uses `provenance_field`, the same derivation the drain's attribution gate reads; if they
+    disagreed a file would be re-authored every tick.
     """
     from defender.learning.core.config import provenance_field
 
@@ -175,8 +169,7 @@ def result_list(result: dict, key: str) -> list[Any]:
 
 def commit_message(result: dict, noun: str) -> str:
     msg = result.get("commit_message")
-    # A commit message that renders as nothing is no message at all — this gate is what
-    # stands between the loop and committing a lesson edit unexplained.
+    # Refuse to commit a lesson edit with a message that renders as nothing.
     if not isinstance(msg, str) or is_content_less(msg):
         raise AuthorError(
             f"AUTHOR_RESULT reported committed {noun} without a non-empty "
@@ -202,8 +195,8 @@ def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
     return rid
 
 
-#: Fields an AUTHOR_RESULT may carry beyond its declared buckets — advisory prose read
-#: elsewhere (`commit_message`) or left deliberately unread (`observability_gaps`, N3).
+#: Fields an AUTHOR_RESULT may carry beyond its declared buckets: `commit_message`, read
+#: elsewhere, and `observability_gaps`, intentionally unread.
 _NON_BUCKET_RESULT_KEYS = frozenset({"commit_message", "observability_gaps"})
 
 
@@ -215,14 +208,10 @@ def validate_agent_result_partition(
     buckets: tuple[str, ...],
     noun: str,
 ) -> None:
-    """§7 FK-29: an AUTHOR_RESULT carrying any key outside its declared buckets (plus the
-    non-bucket fields above) fails explicitly — an EXPLICIT reject, not the allow-list this
-    used to be, which would let a stale bucket key (like the retired `held_forward_bad`)
-    through unnoticed once it stops being a recognized bucket.
+    """Validate the AUTHOR_RESULT's buckets against the batch: no unknown ids, no id in two
+    buckets, and no unrecognized bucket-shaped key (e.g. a stale or invented bucket name).
 
-    A row `to_author` never mentions in ANY bucket is left OUT of this check entirely (C3):
-    it is neither unknown nor incomplete, and the tick's own downstream logic (#773 O5) is
-    what leaves it queued, untouched, whatever bucket the model did or did not use."""
+    A row in no bucket is not an error; downstream leaves it queued."""
     expected = {row[id_key] for row in to_author}
     occurrences: dict[str, list[str]] = {}
     for bucket in buckets:
@@ -241,11 +230,9 @@ def validate_agent_result_partition(
             f"author result classified {noun} more than once: "
             + json.dumps(repeated, sort_keys=True)
         )
-    # A stray key is rejected only when its VALUE is bucket-shaped (a list of row-like
-    # dicts) — indistinguishable from a curator naming a bucket that no longer exists (the
-    # retired `held_forward_bad`) or one it invented. A scalar or a list of plain strings in
-    # an unrecognized key is adversarial noise no code reads (O5) — never a bucket a human
-    # would mistake for real, so it is tolerated rather than faulting the tick over it.
+    # A stray key is rejected only when bucket-shaped (a list of row-like dicts), since that
+    # looks like a real bucket. Scalars or string lists under unknown keys are unread noise
+    # and tolerated.
     allowed_keys = set(buckets) | _NON_BUCKET_RESULT_KEYS
     stray_bucket_keys = sorted(
         k for k, v in result.items()
@@ -278,33 +265,28 @@ def commit_corpus(
 def commit_corpus_paths(
     message: str, cfg: Any, approved_paths: list[str], deletion_paths: list[str],
 ) -> str | None:
-    """#773 M5: the drain's own explicit-list commit. A NEW, SEPARATE function — `commit_fn`
-    and `_git.git_commit` are byte-for-byte unchanged and keep their own seams (§7 FK-1);
-    the drain's M5 step calls this directly, never through `cfg.commit_fn`.
+    """The drain's explicit-path-list commit, called directly rather than via `cfg.commit_fn`.
 
-    @owns committed_paths — the ONE function that decides which paths land in this tick's
-    corpus commit. Every other consumer of "what this tick committed" reads it off HEAD
-    afterward, never re-derives the list.
+    @owns committed_paths — the one function that decides which paths land in this tick's
+    corpus commit; other consumers read it off HEAD afterward.
     """
     paths = sorted(set(approved_paths) | set(deletion_paths))
     return _git.git_commit_paths(cfg.repo_root, paths, message)
 
 
 def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
-    """The shipped default for `cfg.invoke_repair` (M4): spawns the one bounded repair
-    curator through `curator_engine.CORPUS_REPAIR_DEF`, handing it the drain-built prompt.
+    """The default `cfg.invoke_repair`: spawns the bounded repair curator
+    (`curator_engine.CORPUS_REPAIR_DEF`) with the drain-built prompt.
 
-    Lazy import, like `lessons_run.invoke_agent`'s own: `curator_engine`/`drain` pull in the
-    pydantic-ai stack, and `drain` importing this module at its own top level means this
-    module cannot import `drain` back at ITS top level without a cycle."""
+    Imports lazily: `curator_engine` pulls in the pydantic-ai stack, and `drain` imports this
+    module, so a top-level import would cycle."""
     from defender.learning.author import curator_engine
     from defender.learning.author import drain as _drain
     from defender.learning.core.config import StageContext, StageWiring, author_request_limit
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, mirrors lessons_run.invoke_agent's own call
     stage_salt = uuid4().hex
-    # The shipped default when `cfg.repair_prompt` is unset (M4's own distinguished `None`
-    # member): a `repair.md` beside this channel's own curator prompt.
+    # `repair_prompt=None` means `repair.md` beside this channel's curator prompt.
     prompt_path = cfg.repair_prompt if cfg.repair_prompt is not None else (
         cfg.author_prompt.parent / "repair.md"
     )
@@ -357,9 +339,8 @@ def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: li
 def verify_agent_report(
     repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str,
 ) -> None:
-    """The agent's self-report against the tree, one bit each way: `committed` non-empty
-    with a clean corpus, or `committed` empty with a dirty one, is a spawn whose word and
-    work disagree, and the tick refuses to start believing the tree on its say-so."""
+    """Refuse a spawn whose report and tree disagree: `committed` non-empty with a clean
+    corpus, or empty with a dirty one."""
     committed = result_list(result, "committed")
     corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
     if committed and not corpus_dirty:
@@ -432,23 +413,17 @@ def build_curator_user_prompt(
 def write_disposition_report(
     report: Path, pending_dir: Path, *, batch_id: str, groups: dict[str, list[dict]],
 ) -> None:
-    """One line per tick naming what the tick DECLINED, under one label per reason.
+    """One line per tick naming what the tick declined, under one label per reason.
 
-    THE ONE WRITER FOR BOTH CURATORS. It used to be lessons-local, so the questioner channel —
-    which declares a `consumed_skip` bucket like its sibling — rotated every skipped row off
-    the queue permanently with no written trace anywhere. A skip is terminal: the row is gone,
-    and without this line an operator has no way to learn a finding was ever seen.
+    Shared by both curators: a skip is terminal, so this line is the only trace that a
+    skipped finding was ever seen. Labels are the caller's and never merged, since each
+    implies a different recovery. Counts first, then ids, in the caller's order.
 
-    LABELS ARE THE CALLER'S, never merged: the reasons a row is declined differ per channel and
-    per bucket, and an operator reading one label for another reads the wrong recovery. Counts
-    first, then ids, in the caller's own order.
-
-    Nothing is written when the tick declined nothing — a report that gains a line per tick
-    names nothing.
+    Nothing is written when the tick declined nothing.
     """
     if not any(groups.values()):
         return
-    pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side `_pending` state root, outside every box mount; the same call this moved from, and the report file beside it is appended by the host alone
+    pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side `_pending` state root, outside every box mount; the report beside it is appended by the host alone
     counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
     ids = " ".join(
         f"{label}_ids={[r.get('finding_id') for r in rows]}" for label, rows in groups.items())

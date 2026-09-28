@@ -1,87 +1,61 @@
 #!/usr/bin/env python3
-"""Hand-rolled name resolution — flag an AST check that decides WHICH function, class or
-import a piece of source refers to by comparing a name against a literal, instead of asking
+"""Hand-rolled name resolution: flag an AST check that decides which function, class or import
+a piece of source refers to by comparing a name against a literal, instead of asking
 ``_astlib``'s scope-aware resolver.
 
-THE BUG CLASS, and it is one this repo has now shipped four times in three rounds of review
-on a single PR (#1008). A check reads ``node.func.id == "run_stage"`` and calls that "the
-call to run_stage". It is not. It is *a call spelled* ``run_stage``, and Python resolves
-names in a way the string cannot see:
+``node.func.id == "run_stage"`` matches a call spelled ``run_stage``, not the call to
+``run_stage``. Python resolves names in ways the string cannot see:
 
   * ``import ... as`` — ``from x import run_stage as _rs`` then ``_rs(...)`` is the same
-    function under a name the check does not match. SHIPPED: a module-level helper handed
-    every production judge draw a read AND bash lane while the census that existed to count
-    exactly those calls reported 1 of 2, with 225 tests green.
-  * the ATTRIBUTE form — ``stage_mod.run_stage(...)`` is the same call with ``.func.id``
-    absent entirely. SHIPPED: the module under test spells every cross-module call this way,
-    so the widening call written like its neighbours was invisible.
-  * SHADOWING — an honest module-level ``from a.b import JudgeDeps`` plus a function-local
-    ``from c.d import Other as JudgeDeps`` at the line that constructs it. Python resolves at
-    the SITE; a walk that asks "is there an honest import anywhere in this file" says yes.
-    SHIPPED, and it put every draw back under the wrong compiled policy.
-  * REBINDING that is not an import at all — ``for JudgeDeps in (Other,):``, a ``with ... as``,
-    a tuple unpack, a walrus. A hand-written binding sweep enumerated ImportFrom and Assign
-    and saw none of these.
+    function under a name the check does not match.
+  * the attribute form — ``stage_mod.run_stage(...)`` has no ``.func.id`` at all.
+  * shadowing — a module-level ``from a.b import JudgeDeps`` plus a function-local
+    ``from c.d import Other as JudgeDeps``: Python resolves at the site, while "is there an
+    honest import anywhere in this file" says yes.
+  * rebinding that is not an import — ``for JudgeDeps in (Other,):``, ``with ... as``, a
+    tuple unpack, a walrus.
 
-Each miss looked like a one-line oversight and each was the same mistake: THE NAME IS NOT THE
-BINDING. That is not a thing to remember harder — it is a thing to stop hand-writing.
-``scripts/lint/_astlib.py`` builds the real scope tree and answers with the resolved dotted
-origin, so all four shapes above give a different answer than the expected one; it is the
-declared owner of this question (see its module docstring) and six gates and seven suites
-already go through it.
+Each of these has caused a live policy miss with tests green. The name is not the binding, so
+stop hand-writing it: ``scripts/lint/_astlib.py`` builds the real scope tree and answers with
+the resolved dotted origin (``callee``, ``origin``, ``owner_derived``). It is the declared
+owner of this question.
 
-WHAT THIS FLAGS — one exact, two-part condition, not a similarity search:
+What this flags — one exact, two-part condition:
 
-  a module that PARSES SOURCE IT READ OFF DISK (``ast.parse`` over a ``.read_text()``, i.e. it
-  is making a claim about a real shipped file), that decides what a name REFERS TO by matching
-  the spelling, and that does not go through ``_astlib`` at all.
+  a module that parses source it read off disk (``ast.parse`` over a ``.read_text()``, i.e.
+  a claim about a real shipped file), decides what a name refers to by matching the spelling,
+  and does not go through ``_astlib`` at all.
 
-The three spellings it looks for, each a shape that has shipped a live miss:
+The three spellings it looks for:
 
   - callee-by-name    a comparison against ``<...>.func.id`` / ``<...>.func.attr``, including
                       ``getattr(node.func, "id", None) == X``. Use ``_astlib.callee``.
-  - alias-by-hand     a read of ``.asname``. The only reason to look at an import's alias is to
-                      decide what a name is bound to. Use ``_astlib.origin``.
+  - alias-by-hand     a read of ``.asname``; the only reason to read an alias is to decide
+                      what a name is bound to. Use ``_astlib.origin``.
   - import-module     a comparison against ``<...>.module`` where the module mentions
                       ``ast.ImportFrom``. Same question at the import site.
 
-A fourth legitimate entry point joined the resolver at #1077 D6(b): ``_astlib.owner_derived``
-answers "is this value derived from a name owner (``RunPaths``/``EpisodePaths``)?" the same
-scope-aware way ``callee``/``origin`` answer their questions, and ``lint_run_records.py`` uses
-it rather than re-deriving owner-instance tracking by hand — the same shared-infrastructure
-move this gate exists to enforce.
+Why "does not reach the resolver" is part of the condition: the resolver returns ``None`` for
+a duck-typed method on a value (``registry.verbs(system)``, ``p.open()``), and gates
+legitimately match those by name. So the question is whether the module asked the owner, not
+whether it compared a name.
 
-WHY THE "DOES NOT REACH THE RESOLVER" HALF IS THE GATE, rather than flagging every site. The
-resolver answers for names ROOTED AT AN IMPORT and returns ``None`` for a duck-typed method on
-a value — ``registry.verbs(system)``, ``p.open()``. Several gates here legitimately match such
-a method by name because there is nothing to resolve, and flagging those would be a gate that
-fails for a reason other than the one it names. So the exact question is not "did you compare
-a name" but "did you ASK THE OWNER" — and a module that never imports the resolver has not.
-That mirrors the ``@owns`` gate: the machine-checkable half of an ownership decision, with the
-judgment left where a human can see it.
+What it does not flag — none of these is name resolution:
 
-WHAT IT DOES NOT FLAG, deliberately — none of these is name resolution:
-
-  - DEFINITIONS by name: ``FunctionDef.name``, ``ClassDef.name``, ``arg.arg``. Finding the
-    function called ``foo`` in a file is a lexical question with a lexical answer.
+  - definitions by name: ``FunctionDef.name``, ``ClassDef.name``, ``arg.arg``.
   - keyword arguments: ``keyword.arg == "tools"`` is part of the callee's signature.
-  - synthetic source: a module that only ever parses string literals it wrote itself is making
-    a claim about its own fixture, where the spelling IS the fact.
-  - ``scripts/lint/_astlib.py``, which IS the resolver and must read these fields.
+  - synthetic source: a module that only parses string literals it wrote itself, where the
+    spelling is the fact.
+  - ``scripts/lint/_astlib.py``, which is the resolver.
 
 Mark a deliberate exception with ``# lint-ast-resolve: ok — <reason>`` on the flagged line.
-The reason must NAME WHAT MAKES THE LEXICAL ANSWER SUFFICIENT here ("the source is synthetic
-and declared inline", "this reports a spelling, and the binding is asserted separately") —
-a destination the next reader can check, not an assertion that this case is fine. That
-mirrors the ``@owns`` gate's suppression rule and the invlang fence rule.
+The reason must name what makes the lexical answer sufficient ("the source is synthetic and
+declared inline", "this reports a spelling, and the binding is asserted separately").
 
 Pre-existing sites are ratcheted via ``lint_hand_rolled_name_resolution_baseline.json``; the
-gate fails only on a NEW file+shape+function fingerprint. ``require_reasons`` is OFF here, and
-that is a deliberate difference from ``lint_unowned_field``: that gate's baseline starts empty,
-so every entry is a decision someone made, whereas this one opens with real pre-existing debt
-that nobody has triaged yet. Demanding a sentence per entry up front would buy a wall of
-identical prose. The entries ARE annotated with what they are; the point of the ratchet here is
-that the NEXT one has to be looked at.
+gate fails only on a new file+shape+function fingerprint. ``require_reasons`` is off, unlike
+``lint_unowned_field``: this baseline opened with untriaged pre-existing debt, and the ratchet's
+job is that the next entry gets looked at.
 
 Run from repo root:  python scripts/lint/lint_hand_rolled_name_resolution.py
 Regenerate the baseline:  python scripts/lint/lint_hand_rolled_name_resolution.py --update-baseline
@@ -106,8 +80,7 @@ LABEL = "lint_hand_rolled_name_resolution"
 EXCLUDED_DIRS = (".venv", "__pycache__", "node_modules")
 SUPPRESS_MARKER = "lint-ast-resolve: ok"
 
-#: The resolver itself. It must read `.func.id`, `.asname` and `.module` — that is what it is
-#: for — so it is the one module this gate cannot apply to.
+#: The resolver itself, which must read `.func.id`, `.asname` and `.module`.
 OWNER = REPO_ROOT / "scripts" / "lint" / "_astlib.py"
 
 
@@ -117,18 +90,16 @@ def _in_scope(path: Path) -> bool:
 
 def _reaches_the_resolver(text: str) -> bool:
     """Whether this module goes through `_astlib` at all — directly, or via the test helper
-    (`tests/_by_path.import_lint_lib`) that is the only sanctioned way to reach it from a
-    suite. This is the half of the condition that makes the gate an OWNERSHIP check rather
-    than a name-comparison ban."""
+    `tests/_by_path.import_lint_lib`. This half makes the gate an ownership check rather than
+    a name-comparison ban."""
     return "_astlib" in text
 
 
 def _parses_real_source(tree: ast.AST) -> bool:
-    """Whether the module parses source it READ OFF DISK, rather than a string it wrote itself.
+    """Whether the module parses source it read off disk, rather than a string it wrote.
 
-    The discriminator between "asserting something about a shipped file" and "checking a
-    fixture". A claim about a real module's behaviour has to survive how that module actually
-    spells things; a claim about synthetic source written three lines up does not.
+    A claim about a real module must survive how that module actually spells things; a claim
+    about synthetic source written three lines up need not.
     """
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and _attr_chain(node.func) is not None):
@@ -138,8 +109,7 @@ def _parses_real_source(tree: ast.AST) -> bool:
             if any(isinstance(sub, ast.Attribute) and sub.attr in ("read_text", "read_bytes")
                    for arg in node.args for sub in ast.walk(arg)):
                 return True
-        # `_astlib.read_and_parse(path, rel)` is the same act through the owner's own helper;
-        # a module using it already reaches the resolver, so this only matters for the report.
+        # `_astlib.read_and_parse(path, rel)` is the same act through the owner's helper.
         if chain and chain[-1] == "read_and_parse":
             return True
     return False
@@ -198,11 +168,8 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
 
 
 def _findings_for(tree: ast.Module, text: str, rel: str) -> list[Finding]:
-    """The sites, but only for a module that both parses real source and skips the resolver.
-
-    Both halves are checked before any site is reported, so a gate that legitimately matches a
-    duck-typed method by name — the resolver returns None for those, there is nothing to ask —
-    is never flagged for it, and neither is a suite checking synthetic source it wrote itself.
+    """The sites, but only for a module that both parses real source and skips the resolver
+    (so duck-typed method matches and synthetic-source suites are never flagged).
     """
     if _reaches_the_resolver(text) or not _parses_real_source(tree):
         return []

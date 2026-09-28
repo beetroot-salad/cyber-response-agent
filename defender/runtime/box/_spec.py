@@ -35,15 +35,9 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 
 
-# `@model(frozen=True)` (#1067, M7): pydantic is available to this module — the owned image
-# installs it (O2), and this port is the live pin of that. What #1096 then established is
-# narrower and is NOT a licence to import this module from inside a box: nothing in a box
-# loads it any more (the in-box entrypoint imports `box_codec`, the alias probe is a
-# stdlib-only script), and the door's import is the expensive one precisely because of the
-# pydantic pulled in on this line. `rootfs` is `str | None`, defaulting to unset: an unset
-# value is resolved to `_image.image_tag(tree)` by each `docker run` argv builder, never read
-# here (M3 revised) — evaluating `DEFAULT_SPEC = BoxSpec()` below must still read nothing off
-# the tree it names (#1092 d5, pinned by a live audit-hook test).
+# This module is host-only (it pulls in pydantic); nothing inside a box imports it. An unset
+# `rootfs` is resolved to `_image.image_tag(tree)` by each `docker run` argv builder, so
+# constructing a `BoxSpec` reads nothing off the tree.
 @model(frozen=True)
 class BoxSpec:
 
@@ -85,9 +79,7 @@ class BoxRequest:
     mounts: tuple[Mount, ...] = ()
     workdir: Path = Path(".")
     env: dict[str, str] = field(default_factory=dict)
-    # Same lever as start_box's run_dir path: unset anchors to the dataclass default, runsc.
-    # A request carries its own spec, so resolving it anywhere but here would leave the
-    # BoxRequest callers pinned to runsc with the env var silently ignored.
+    # Resolved here so BoxRequest callers honour DEFENDER_BOX_RUNTIME too.
     spec: BoxSpec = field(default_factory=lambda: BoxSpec.from_env(os.environ))
 
 
@@ -111,8 +103,7 @@ class BoxExecutor:
 
     @property
     def sandboxed(self) -> bool:
-        # Derived from the transport (M5/O5), never independently settable: only a
-        # transport that actually confines a process may claim the boundary.
+        # Derived, never settable: only a confining transport may claim the boundary.
         return isinstance(self.transport, _DockerTransport)
 
     def run_parsed(
@@ -136,15 +127,9 @@ class BoxExecutor:
     run = run_parsed
 
 
-# `@runtime_checkable` (#1067): `AgentDeps.box` is a STRICT pydantic field typed `BoxLike`, and
-# pydantic validates it by `isinstance(value, BoxLike)`. The only thing production code ever
-# calls on `deps.box` (`runtime/tools/_bash.py`) is `run_parsed(...)` — the real contract was
-# always structural, a concrete `BoxExecutor` was just the one implementation that existed.
-# Typed `BoxExecutor` itself, the field refused every test double that duck-types the box
-# (`run_parsed` alone, no real `transport`/`spec`). Defined HERE because this is where the
-# executor and the transports it discriminates on are declared. Note for anyone pruning this
-# module for import cost: it is the HOST's, not the box's — since #1096 nothing inside a box
-# imports it, and the module that does ride in is `box_codec`.
+# `@runtime_checkable` because pydantic validates the strict `AgentDeps.box` field with
+# `isinstance`. The contract is structural (`run_parsed` is all production calls), so test
+# doubles need not be a `BoxExecutor`.
 @runtime_checkable
 class BoxLike(Protocol):
 
@@ -161,13 +146,11 @@ def _text(raw: bytes) -> str:
 
 DEFAULT_SPEC = BoxSpec()
 
-#: M1 — the alias-ban seccomp profile, resolved ONCE so every box lane attaches the identical
-#: value. Denies exactly the six shapes `BANNED_SHAPES` names. Ships under `runtime/`, outside
-#: every box's writable mount: a box that could rewrite the file it is banned by would leave
-#: the NEXT box unbanned.
-#: `parent.parent`, not `parent`: this module sits in `runtime/box/` while the profile it
-#: names stayed at `runtime/seccomp/`. A self-relative path is the one thing a package
-#: move silently breaks — the box would start with no alias ban and no error.
+#: The alias-ban seccomp profile (denies exactly `BANNED_SHAPES`), resolved once so every box
+#: lane attaches the same value. It lives outside every box's writable mount, or a box could
+#: unban the next one. The path is relative to this module; a package move breaks it silently
+#: (the box would start with no alias ban).
+
 ALIAS_PROFILE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "seccomp" / "alias-deny.json"
 )

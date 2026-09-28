@@ -25,19 +25,11 @@ _logger = logging.getLogger(__name__)
 
 
 class RoleDeps(Protocol):
-    """What this module actually needs of a deps object: a TYPE that names its role.
+    """What this module needs of a deps object: a type that names its role.
 
-    `AgentDeps` was the annotation, and it is too narrow for the deny-all roles — #947's
-    questioner, and the family judge that took its own key in #1008. `AgentDeps` IS the run
-    scope — run dir, compiled policy, box executor, cwd anchor — and both of those deliberately
-    carry none of it: their whole input is inlined in one user message by the host, so a deps
-    object with eleven handles on a tree it may not touch is the thing those classes exist not
-    to be. Nothing below reads any of those fields. `build_stage_agent` reads `deps_type.role`
-    to find the definition, and `agent.run` hands the object to tools these roles do not have.
-
-    So the annotation says that and no more. Every existing caller still satisfies it — each
-    `AgentDeps` subclass declares `role` — and a deps class that names no role is refused at the
-    type level rather than at `AGENTS[...]` with a `KeyError`.
+    Not `AgentDeps`: that is the run scope (run dir, policy, box executor), which the deny-all
+    roles (questioner, judge) deliberately do not carry. `build_stage_agent` reads only
+    `deps_type.role`; every `AgentDeps` subclass declares it too.
     """
 
     role: ClassVar[AgentRole]
@@ -108,13 +100,9 @@ def run_stage(
     """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
     this spawn is about."""
     label = wiring.label
-    # `<root>/wire_logs/<trace>`, never the root itself: this stream is the stage's whole
-    # context verbatim, and learning run dirs are SHARED — both legs of an `inconclusive` case
-    # run concurrently against one dir, and a re-LEARN reopens it. The gray-box actor reads
-    # that root with NO shape filter, so a judge trace at the root would hand it the
-    # UNREDACTED payload exemplars (the old pipeline judge's) that `decide_read`'s
-    # gather_raw deny withholds. `files.names_wire_log_dir` refuses the read; this puts the
-    # file where it can.
+    # Under `wire_logs/`, never the run dir root: the trace is the stage's whole context
+    # verbatim, learning run dirs are shared, and readers of the root are not shape-filtered.
+    # The wire-log policy denial (`files.names_wire_log_dir`) only covers this subdirectory.
     logger = observe.RequestLogger(
         observe.stage_trace_path(ctx.learning_run_dir, wiring.trace_name)
     )

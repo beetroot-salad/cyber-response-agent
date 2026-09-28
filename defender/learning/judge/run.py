@@ -1,49 +1,22 @@
 """The judge's model call: the correlating prompt, lenient parse / strict validate, evidence
-grounding, and one write per (world, draw) (#921 M2, D2, D3, D4, O1, O8, O9).
+grounding, and one write per (world, draw).
 
-D2 — the judge runs under ITS OWN `AgentRole.JUDGE`, declared here as `JUDGE_DEF` with
-`agent_id` prefix `"judge:"`. It borrowed the questioner's definition until #1008: the registry
-admits one definition per key (`agent_definition.build_registry`) and the key was held by the
-OLD pipeline's judge, so a second definition could not register beside it. #922 retired that
-pipeline and freed the word; the family judge is a different role that wanted the same one.
+The judge runs under its own deny-all `AgentRole.JUDGE` (`JUDGE_DEF`, `agent_id` prefix
+`"judge:"`). One deny-all key per package: a grant added to `QUESTIONER_DEF` cannot reach the
+judge, and granting the judge anything must be said in this file. `agent_id` partitions traces,
+never policies, so the separation has to be the key. (The two policies differ only in
+`deny_reason`, which only the bash gate reads, so the judge never actually sees it.)
 
-WHAT THE OWN KEY BUYS, stated carefully because the easy version of this sentence is false.
-The two policies are NOT identical: they are empty on every grant surface and differ in
-`deny_reason`. But that one differing field has a single runtime reader — the bash gate — and
-a role registering no tools never produces a gate decision at all, so the refusal text is a
-fact about the compiled object rather than something this judge will ever be shown.
+Model and effort are read at call time from `config.judge_model()`/`judge_effort()` and threaded
+into the `StageWiring`. `JUDGE_DEF` names the same accessors for builds outside that wiring, but
+its `effort` is a plain string evaluated once at import, so it is only a default.
 
-The benefit that actually holds is PROSPECTIVE: a grant added to `QUESTIONER_DEF` cannot reach
-the judge, and the diff that would grant the judge something has to say so in the judge's own
-file. `agent_id` partitions traces, never policies (`runtime/agent_role.py` states that rule),
-so the separation had to be the key. The enum's own comment carries the general form: one
-deny-all key per PACKAGE, which is why the branch package's comparator stays under QUESTIONER
-while this package holds its own.
-
-Model and effort come from `learning.core.config.judge_model()`/`judge_effort()` — read at call
-time in `learning/judge/__init__.py` and threaded into the `StageWiring` the orchestration
-builds, never from `questioner_model()`. `JUDGE_DEF` names the same two accessors so that a
-build made OUTSIDE that wiring reaches the judge's knobs rather than another role's; but only
-`model` is a thunk. `effort` is a plain string field, so `judge_effort()` runs once at import
-and a later `JUDGE_EFFORT` cannot move it — which is why the wiring, not the definition, is
-what the driven path reads, and why the definition's effort is a default for out-of-band
-readers rather than a live one.
-
-`JUDGE_MODEL` AND `JUDGE_EFFORT` ARE NOT THIS JUDGE'S ALONE, and the collision is live rather
-than historical. #922 retired the OLD pipeline judge that used to share them, but
-`evals/oracle_golden/judge.py` still reads both env vars directly, with DIFFERENT defaults
-(`claude-opus-5` / `high` against this module's `kimi-k3` / `medium`) and folds the resolved
-model into the tag it scores golden cases under. So setting either knob for this judge re-tags
-that harness's scores, and setting it for the harness retargets this judge.
-
-Registering this definition widened that blast radius one step further, and it is worth knowing
-before touching either name: `run.py`'s all-roles preflight iterates EVERY registered
-definition's model config at INVESTIGATION startup, so a `JUDGE_MODEL` naming a model no
-provider routes now exits an ordinary alert run — and every `--resume` sibling — with rc 2,
-before any judge is reached. That is a property of registration, shared with `QUESTIONER_MODEL`
-and not new in kind; what IS new is that this knob has a second reader outside the loop.
-Separating them means a knob NAME of this judge's own, which is a deliberate change with
-fixtures behind it, not a side effect of reading the env twice.
+`JUDGE_MODEL` and `JUDGE_EFFORT` are shared: `evals/oracle_golden/judge.py` reads both with
+different defaults (`claude-opus-5` / `high` vs `kimi-k3` / `medium`) and tags its scores with the
+resolved model, so setting either knob affects both. And `run.py`'s all-roles preflight checks
+every registered definition's model at investigation startup, so a `JUDGE_MODEL` no provider
+routes makes every alert run (and `--resume` sibling) exit rc 2. Separating them needs a knob
+name of the judge's own.
 """
 
 from __future__ import annotations
@@ -68,29 +41,12 @@ from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 from defender.runtime.agent_definition import AgentDefinition
 from defender.runtime.agent_role import AgentRole
 
-#: The judge's refusal text, carried on its compiled policy.
+#: The judge's refusal text, carried on its compiled policy. Only the bash gate reads it, which
+#: this tool-less role never invokes, so it surfaces to operators rather than to a draw.
 #:
-#: WHO READS THIS, stated plainly because the comment here used to imply the model does. It
-#: does not: `deny_reason` reaches only `AgentPolicy` and from there the bash gate, which a
-#: role registering no bash tool never invokes. The module docstring above says the same. So
-#: this string is a property of the compiled object and of the operator surface that prints
-#: it — which is why the judge holding its OWN is worth having, and also why its benefit is
-#: prospective rather than something a draw will ever be shown.
-#:
-#: A deny reason is PROMPT SURFACE wherever it IS shown, so it names no program and no
-#: capability this role lacks: a reason mentioning a command or a tool this lane denies
-#: teaches a dead one. The grant gate sweeps every registered policy for the program half
-#: (g1, in the #575 gate suite); the tool half it cannot see, so it is a rule kept by hand.
-#:
-#: AND IT IS WRITTEN, not derived from the questioner's by substitution. An earlier draft was
-#: that role's sentence with three noun phrases swapped and the closing clauses byte-identical
-#: — which passes every "is it the same string" check while being, in the only sense that
-#: matters, the same refusal.
-#:
-#: WHAT IT CLAIMS IS WHAT THE PROMPT ACTUALLY HOLDS. A draft said "every world's record ... the
-#: sibling run dirs" were framed into the prompt; `render.render` builds the input for ONE
-#: non-control world plus the control it is compared against, so the wider claim was false in
-#: the very string whose purpose is to stop the model reaching for more.
+#: Where a deny reason is shown it is prompt surface, so it names no program or capability the
+#: role lacks (that would teach a dead one). The grant gate checks programs; tools are kept out
+#: by hand. It describes exactly what the prompt holds: one world plus its control.
 _JUDGE_DENY_REASON = (
     "Blocked: nothing is reachable from a judge draw. This episode was archived before the "
     "call began, and the world under grading — with the control it is compared against — was "
@@ -103,31 +59,19 @@ _JUDGE_DENY_REASON = (
 
 @model(frozen=True)
 class JudgeDeps:
-    """Frozen, and carrying NOTHING but its role — zero fields, on purpose.
+    """Zero fields: a field would be a channel to state this deny-all role must not have, since
+    everything the judge reads is inlined by the host in one user message. `role` is a
+    `ClassVar`, which is how `build_stage_agent` finds the definition.
 
-    Modelled on `QuestionerDeps` and for the same reason: a field here would be a channel. An
-    episode dir, a world label or an archived trajectory reachable from inside a deny-all call
-    is exactly the state this role is defined not to have — everything the judge reads is
-    joined and inlined in one user message by the host before the call is made. `role` is a
-    `ClassVar`, so it is not a field either; it is how `build_stage_agent` finds the definition
-    (`learning/_pydantic_stage.py`) and how the trace names the call.
-
-    It does NOT subclass `AgentDeps`, and that departure is the point. `AgentDeps` IS the run
-    scope — run dir, compiled policy, box executor, cwd anchor — so inheriting it would hand
-    this role a handle on every tree it may not touch. Nothing binds it either:
-    `bind(JUDGE_DEF, ...)` refuses BY NAME (`agent_definition.bind`), because there is no run
-    for a role whose entire input arrived in one prompt.
+    Not an `AgentDeps` subclass: that is the run scope (run dir, policy, box executor), and
+    `bind(JUDGE_DEF, ...)` refuses by name, as there is no run for this role.
     """
 
     role: ClassVar[AgentRole] = AgentRole.JUDGE
 
 
-#: The family judge's whole policy. Every grant surface `AgentDefinition` carries is an
-#: OMISSION over its deny-all default — no tool set, no bash shape, no write shape, no verb
-#: grant — rather than an empty grant line, which a one-word edit reopens while the diff still
-#: reads as a tweak. That includes the tool set, which the questioner does spell out as an
-#: empty one: the field default already IS empty, so spelling it buys nothing but a place to
-#: type a capability into.
+#: The family judge's whole policy. Every grant surface is omitted (deny-all default) rather
+#: than spelled as an empty grant, which a one-word edit would reopen.
 JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
     model=judge_model,
@@ -136,20 +80,13 @@ JUDGE_DEF = AgentDefinition(
     deny_reason=_JUDGE_DENY_REASON,
 )
 
-#: The judge's own reply-level outcome vocabulary — NOT `_vocab.JUDGE_OUTCOME_ENUM`. That
-#: vocabulary is the FAMILY's word (`caught|survived|undecidable|discard|corpus-contradiction`,
-#: shared by the queue row, the family record and the curator gate); a raw reply never emits
-#: `caught`/`survived`/`undecidable` (only the mechanical pass computes those), and it CAN emit
-#: `gradable`, which is not a family word at all. Local because nothing else has to agree with
-#: it — `_vocab.py`'s own admission rule.
+#: The judge's reply-level outcome vocabulary — not `_vocab.JUDGE_OUTCOME_ENUM`, which is the
+#: family's word. A reply never emits `caught`/`survived`/`undecidable` (the mechanical pass
+#: computes those) and can emit `gradable`, which is not a family word.
 _REPLY_OUTCOME_ENUM = frozenset({"gradable", "discard", "corpus-contradiction"})
 
-#: What each reply-level outcome MEANS, keyed by the word itself — so the prompt spells every
-#: member exactly once and a member added to the enum above cannot reach the model as a bare
-#: word with no criterion. Naming them a second time in prose was how the first version of this
-#: guidance was written, and a hand-typed list beside a rendered one is the drift the rendering
-#: was there to prevent: `_outcome_guidance` refuses when the two sets disagree, so a new
-#: outcome fails loudly here rather than silently arriving unexplained.
+#: What each reply-level outcome means, keyed by the word, so every member reaches the prompt
+#: with a criterion; `_outcome_guidance` refuses if the two sets disagree.
 _OUTCOME_GUIDANCE: dict[str, str] = {
     "gradable": (
         "this world ran and its record can be judged. THIS IS THE ORDINARY ANSWER, and it is "
@@ -174,9 +111,8 @@ _OUTCOME_GUIDANCE: dict[str, str] = {
 def _outcome_guidance() -> str:
     """The episode-outcome words and their criteria, one line each.
 
-    Refuses rather than rendering a partial list: an outcome the validator accepts and the
-    prompt cannot explain is one the model chooses by guessing, and a live draw that guessed
-    wrote five sound findings and then discarded all of them by choosing a degenerate word.
+    Refuses rather than rendering a partial list: an unexplained outcome is chosen by guessing,
+    and a wrong guess can discard every finding in the draw.
     """
     missing = sorted(_REPLY_OUTCOME_ENUM - set(_OUTCOME_GUIDANCE))
     if missing:
@@ -187,44 +123,30 @@ def _outcome_guidance() -> str:
         f"- `{word}` — {_OUTCOME_GUIDANCE[word]}.\n" for word in sorted(_REPLY_OUTCOME_ENUM)
     )
 
-#: The two `subject` literals (#1007 O1/M6). Exactly two string literals — no case-fold and no
-#: trim anywhere, which is what makes this selector and the appender's own guard agree by
-#: construction rather than by convention.
+#: The two `subject` literals. Matched exactly everywhere (no case-fold, no trim), so this
+#: selector and the appender's guard agree by construction.
 SUBJECT_DEFENDER = "defender"
 SUBJECT_WORLD = "world"
 
-#: The four names that reach the prompt as EXAMPLES of a world-subject bucket — never a closed
-#: set (R2/G-3): `validate_reply` refuses no bucket string outside this tuple.
+#: Examples of a world-subject bucket shown in the prompt — not a closed set.
 EXAMPLE_WORLD_BUCKETS = (
     "unreachable-difference", "shape-invention", "story-overlay-gap", "undiscriminating-family",
 )
 
 
 class _OpenBucketVocabulary:
-    """The world lane's bucket vocabulary (#1007 R2, accepted gap G-3): every STRING is a
-    member, and nothing else is. Deliberately open — the design's example names
-    (`unreachable-difference`, `shape-invention`, `story-overlay-gap`, `undiscriminating-family`)
-    are PROMPT EXAMPLES, not a closed set, so a model's own novel reading of a world is admitted
-    rather than rejected. `isinstance` alone, never truthiness: an empty or whitespace-only
-    bucket is still a string and is admitted, stored verbatim — the drift a human declined to
-    filter out before it can be observed."""
+    """The world lane's bucket vocabulary: every string is a member, nothing else is.
+
+    Open so a model's novel reading of a world is admitted. Empty and whitespace-only buckets
+    are admitted too, stored verbatim, so that drift stays observable."""
 
     def __contains__(self, item: object) -> bool:
         return isinstance(item, str)
 
 
-#: The finding bucket vocabulary, SELECTED BY SUBJECT (#1007 O8/M10 + R2): the defender arm is
-#: the queue's own closed set — NEVER coerced to the nearest member (a lookalike is rejected,
-#: not rounded) — and the world arm is open. ONE lookup, so the two arms cannot drift into
-#: disagreeing about which subject they are validating.
-#:
-#: THE DEFENDER ARM IS THE QUEUE'S OWN SET, not a fifth hand-typed copy of the same five words.
-#: Every defender finding this validator admits becomes a queue row whose `type` is that
-#: bucket, and `enqueue._validate_row` accepts it against `QUEUEABLE_FINDING_TYPES` — so the two
-#: must be the same set or the pair disagrees in one direction or the other. Spelled here,
-#: adding a sixth family bucket to `config.FAMILY_ONLY_FINDING_TYPES` widened the queue and left
-#: this validator refusing every reply that used it, counted as a malformed reply, with the draw
-#: file removed and no error above `malformed_replies`.
+#: The finding bucket vocabulary, selected by subject. The defender arm is the queue's own
+#: `QUEUEABLE_FINDING_TYPES` (never coerced to a nearest member), so the validator and
+#: `enqueue._validate_row` accept the same set; the world arm is open.
 _BUCKET_ENUM: dict[str, Any] = {
     SUBJECT_DEFENDER: frozenset(QUEUEABLE_FINDING_TYPES),
     SUBJECT_WORLD: _OpenBucketVocabulary(),
@@ -232,10 +154,8 @@ _BUCKET_ENUM: dict[str, Any] = {
 
 _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 
-#: Each rendered section's own heading, in the order the prompt presents them. The four the
-#: task sentence calls "the joined views" keep the numbering the measured arm used, so a reader
-#: of the reply can name which view a finding came from; the manifest, the document and the
-#: report are the graded world's own bytes and are titled for what they are.
+#: Each rendered section's heading. The four "joined views" are numbered so a reply can name
+#: which view a finding came from.
 SECTION_TITLES: dict[str, str] = {
     "manifest": "THE FAMILY MANIFEST (the graded world last; every other world counterfactual)",
     "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
@@ -273,9 +193,8 @@ class Finding:
     topic: str
     evidence: list[str] = field(default_factory=list)
     discriminator_related: bool = False
-    #: World-lane-only content (#1007 M6/A3): carried through so the pass can build a
-    #: questioner-channel row, but IDENTITY (which world) is never taken from here — the pass
-    #: stamps its own `world` from the draw's own world directory, never the model's claim.
+    #: World-lane-only content, carried to build a questioner-channel row. `world` is never
+    #: trusted as identity; the pass stamps its own.
     pattern: str | None = None
     holding_system: str | None = None
     world: str | None = None
@@ -307,28 +226,21 @@ def _require_list(doc: dict[str, Any], key: str) -> list[Any]:
     return value
 
 
-def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C901 — the field checks, subject partition and family-scope rules are one demand over one raw finding
+def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C901 — one set of checks over one raw finding
     if not isinstance(raw, dict):
         raise JudgeRefused(f"finding[{index}] is not a mapping")
     for key in ("bucket", "subject", "claim", "root_cause", "anchor", "topic", "evidence"):
         if key not in raw:
             raise JudgeRefused(f"finding[{index}] is missing {key!r}")
-    # A PRESENT-AND-NULL KEY IS A MISSING ONE. `key not in raw` is satisfied by `anchor:` with
-    # nothing after it, and the coercion below then turns `None` into the four-character string
-    # `"None"` — which is not content-less, so `enqueue._validate_row`'s "subject_anchor must be
-    # a non-empty string" guard passes it, and a twelve-key row whose subject is the word None
-    # reaches the shared queue and the curator. The queue's rule cannot be enforced downstream
-    # of a coercion that manufactures content, so the refusal is here, where the value is still
-    # the model's own.
+    # Present-and-null is missing: `str(None)` below would manufacture the content "None",
+    # which downstream non-empty checks cannot catch.
     for key in ("claim", "root_cause", "anchor", "topic"):
         if raw[key] is None:
             raise JudgeRefused(
                 f"finding[{index}].{key} is null — a null is refused rather than rendered as "
                 "the string 'None', which reads downstream as content the model never wrote")
-    # `subject` (#1007 O1/M6): the partition itself. NO CASE-FOLD, NO TRIM — a near-miss
-    # (`"World"`, `" world"`, `"defender\n"`) is refused exactly like a bucket lookalike, so the
-    # validator and the appender's own guard cannot come to disagree about which channel a row
-    # belongs on.
+    # Exact match: a near-miss (`"World"`, `" world"`) is refused, so the validator and the
+    # appender's guard cannot disagree about the channel.
     subject = raw["subject"]
     if subject not in (SUBJECT_DEFENDER, SUBJECT_WORLD):
         raise JudgeRefused(
@@ -336,10 +248,8 @@ def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C90
             f"{sorted((SUBJECT_DEFENDER, SUBJECT_WORLD))!r} — no case-fold and no trim, so a "
             "finding whose subject nobody stated exactly is a finding no channel can route")
     if scope == "family":
-        # M5/A1: the family reply is itself `subject: world` in its entirety, and may name no
-        # world — the pass owns identity for a family-level observation (`world: null`), and a
-        # model attributing one to whichever world it found memorable is refused here rather
-        # than silently overridden.
+        # The family reply is entirely `subject: world` and may name no world; a model naming
+        # one is refused rather than silently overridden.
         if subject != SUBJECT_WORLD:
             raise JudgeRefused(
                 f"finding[{index}].subject={subject!r} — the family call may emit only "
@@ -371,29 +281,20 @@ def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C90
 
 
 def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
-    """Read `text` as ONE BARE DOCUMENT (#1018) and validate STRICTLY: nothing is read off the
-    reply before this returns.
+    """Read `text` as one bare document and validate strictly: nothing is read off the reply
+    before this returns.
 
-    `scope` (#1007 M4/M5) is which call this reply came from: `"world"` (the default) is a
-    per-world draw, which may emit either subject; `"family"` is the family-level draw, which
-    may emit only `subject: world` findings naming no world (M5/A1).
+    `scope` is which call the reply came from: `"world"` may emit either subject; `"family"`
+    may emit only `subject: world` findings naming no world.
 
-    The shape rule is `reply_document_text`'s: the reply is exactly one document — bare, or
-    inside exactly one code fence with nothing before or after it — or it is refused as this
-    draw's own failure, never guessed at (a reply carrying two candidate documents yields no
-    verdict, not the first one)."""
+    The shape rule is `reply_document_text`'s: exactly one document (bare, or in exactly one
+    code fence), else refused — never guessed at."""
     import yaml
 
     from defender._yaml import safe_load
 
-    # A NON-STRING REPLY IS THIS DESIGN'S REFUSAL, not an `AttributeError`. The seam is
-    # `judge: Any` — the design's own injection point — so a seam that returns `None` on a
-    # refusal (or a result object, or a dict) is a live shape, and `reply_document_text`'s
-    # first act is `text.replace(...)`. The draw loop contains `JudgeRefused` and nothing else, and
-    # `grade_episode`'s conversion set names neither `AttributeError` nor `TypeError` — so one
-    # such reply took the WHOLE pass down: every already-completed world's draws thrown away
-    # and no `judge.yaml` written, which is the blast radius the malformed-reply arm exists to
-    # eliminate.
+    # An injected seam may return a non-string; refuse it as this draw's failure rather than
+    # raising an `AttributeError` the draw loop does not contain.
     if not isinstance(text, str):
         raise JudgeRefused(
             f"the judge seam returned {type(text).__name__}, not the reply text this design "
@@ -403,12 +304,9 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
     except MalformedReply as shape:
         raise JudgeRefused(f"the judge's reply is not one bare document: {shape}") from shape
     try:
-        # `_yaml.safe_load`, not PyYAML's: it converts a `RecursionError` (a reply nested too
-        # deeply) and a constructor `ValueError` (an out-of-range implicit timestamp) into
-        # `yaml.YAMLError`, and neither is a `YAMLError` on its own. The reply is MODEL-authored,
-        # so both are shapes to meet — and neither is in `grade_episode`'s conversion set either,
-        # so one such reply took the whole pass down as a bare interpreter error rather than
-        # costing its own draw.
+        # `_yaml.safe_load` converts `RecursionError` (deep nesting) and constructor
+        # `ValueError`s (e.g. out-of-range timestamps) into `yaml.YAMLError`, so a bad reply
+        # costs only its draw.
         doc = safe_load(cleaned)
     except yaml.YAMLError as bad:
         raise JudgeRefused(f"the judge's reply is not valid YAML: {bad}") from bad
@@ -435,42 +333,30 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
 
 
 def _world_evidence_files() -> tuple[str, ...]:
-    """S7: the exactly-three episode-level files a `subject: world` evidence pointer may ALSO
-    name — an allowlist of resolved TARGETS (bare names only, never a prefix a traversal could
-    dress up to pass), never a widen of the whole episode dir. The defender arm is unchanged:
+    """The three episode-level files a `subject: world` evidence pointer may also name, by
+    bare name only (never a prefix a traversal could pass). Defender findings stay
     world-subtree-only.
 
-    A FUNCTION, not a module-level tuple (#1077 D7): a tuple built at import holds a COPY of
-    three record names, and a copy is what survives a rename of the record it names. Asked of
-    the owner per call, this allowlist cannot fall out of step with the files it admits.
+    A function rather than an import-time tuple, so it follows renames of the records.
     """
     return tuple(str(name) for name in (LAYOUT.samples, LAYOUT.review, LAYOUT.judge))
 
 
 def _family_evidence_files() -> tuple[str, ...]:
-    """The subset of the above the FAMILY-level call is actually shown. `_build_family_prompt`
-    renders the manifest, the review record and every world's mechanical row — and no sample
-    at all — so advertising the samples document to that call invited a citation of a document
-    it never saw, which `enqueue_report`'s family lane then refuses under A1(b). Derived from
-    the allowlist it narrows, so the two cannot drift."""
+    """The subset the family-level call is actually shown: no samples document, since that
+    call is never rendered a sample."""
     samples = str(LAYOUT.samples)
     return tuple(n for n in _world_evidence_files() if n != samples)
 
 
 def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
               scope: str = "world") -> bool:
-    """J13(a): does this evidence pointer resolve inside the GRADED WORLD's own subtree — never
-    a sibling's archive, whatever bytes exist at the target. For a `subject: world` finding
-    ONLY, S7 widens this to also admit the episode-level files named above, by NAME — never a
-    directory prefix, never the episode dir wholesale.
+    """Does this evidence pointer resolve inside the graded world's own subtree (never a
+    sibling's archive)? For a `subject: world` finding only, the episode-level allowlist is
+    also admitted, by name.
 
-    `scope` NARROWS that widening to what the call was actually SHOWN. The family-level call
-    (M5) is rendered the manifest, the review record and every world's mechanical row — and no
-    sample at all — so `samples.yaml` from THAT call cites a document the judge never saw. It
-    used to resolve anyway, and the family lane runs no A1(b) citation screen, so a fabricated
-    shape-invention claim grounded in an unseen document reached the questioner curator intact.
-    Refused where the pointer is resolved instead, which is the one place both lanes pass
-    through."""
+    `scope` narrows that allowlist to what the call was shown: the family call sees no sample,
+    and this is the one place both lanes pass through, so the refusal lives here."""
     if not isinstance(pointer, str) or not pointer:
         return False
     path_part = pointer.split("#", 1)[0]
@@ -480,47 +366,30 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
         root = world_dir.resolve()
         candidate = (world_dir / path_part).resolve()
         candidate.relative_to(root)
-    # `_run_paths._RESOLVE_ERRORS`' OWN THREE CLASSES, not two of them. `resolve()` on a hostile
-    # operand raises `RuntimeError` for a symlink cycle — and the graded world's subtree is a
-    # box's rw bind, so a pointer aimed at one is an ordinary shape to meet. `RuntimeError` is in
-    # neither this frame's handler nor `grade_episode`'s conversion set, so it escaped the whole
-    # pass as a bare traceback AFTER every world's model calls had been paid for.
+    # `RuntimeError`: `resolve()` raises it on a symlink cycle, which a box-writable subtree
+    # can contain.
     except (OSError, RuntimeError, ValueError):
         pass
     else:
         if artifact_file(candidate):
             return True
-    # NO EXISTENCE CHECK on the widened branch, deliberately: `judge.yaml` is the pass's OWN
-    # output, written only after every world's draws complete, so an evidence pointer citing it
-    # from INSIDE the very draw that is producing it can never find it on disk yet — the
-    # allowlist is by NAME (`path_part in _world_evidence_files()`, `Path(path_part).name ==
-    # path_part` already refuses every traversal shape in the negative test, since a hostile
-    # operand's `.name` is never equal to the whole pointer), never by a stat this pass cannot
-    # honestly perform on its own future output.
+    # No existence check here: `judge.yaml` is written after the draws, so a pointer to it can
+    # never exist yet. The bare-name test refuses every traversal shape.
     allowed = _family_evidence_files() if scope == "family" else _world_evidence_files()
     return subject == SUBJECT_WORLD and path_part in allowed \
         and Path(path_part).name == path_part
 
 
 def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -> bool:
-    """A1(b): does this finding's evidence cite `samples.yaml`, BY NAME, for a pattern this
-    world's row says was UNAVAILABLE?
+    """Does this finding's evidence cite `samples.yaml` for a pattern this world's row says had
+    no sample?
 
-    Anchored on the EVIDENCE rather than on the `shape-invention` bucket literal, because R2's
-    world vocabulary is open (G-3) — a refusal keyed on one string is evadable by a model that
-    spells the same claim differently. A world whose row reads `sample_unavailable` refuses
-    every finding this returns `True` for and keeps every other one, whatever its bucket
-    (#1007, `test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket`).
+    Keyed on the evidence, not the bucket, since the world vocabulary is open and a bucket
+    check is evadable by rewording.
 
-    `unavailable_patterns` (#1007 O5, the multi-pattern fix) is the row's own
-    `sample_unavailable_patterns` — the SPECIFIC staged patterns with no sample, not the
-    blanket "was anything unavailable" fact. A citation naming a pattern that WAS available is
-    admitted even when a sibling staged pattern's sample was not (a two-pattern world's finding
-    about the pattern it WAS shown must not be refused for a gap in the pattern it wasn't). A
-    citation with no fragment at all names no particular pattern, so it is refused exactly when
-    `unavailable_patterns` is non-empty — the old blanket rule, preserved for the ambiguous
-    case. `unavailable_patterns=None` (the default) keeps the OLD blanket behavior in full —
-    any `samples.yaml` citation refused — for a caller that has not been updated to pass it."""
+    `unavailable_patterns` is the row's `sample_unavailable_patterns`: a citation of an
+    available pattern is admitted; one with no fragment is refused iff any pattern was
+    unavailable; `None` (never recorded) refuses every `samples.yaml` citation."""
     for pointer in finding.get("evidence") or ():
         if not isinstance(pointer, str):
             continue
@@ -540,16 +409,12 @@ def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -
 
 def _draw_document(reply: JudgeReply, *, world_dir: Path,
                    scope: str = "world") -> dict[str, Any]:
-    """O1: a finding with no resolving pointer is dropped and the drop is counted; a finding
-    with one resolving pointer stands, with its unresolved pointers recorded on it.
-
-    `scope` is the call this reply came from, passed straight to `_resolves` — the family-level
-    call may cite a narrower set of episode-level files, because it is shown fewer of them."""
+    """The draw document: a finding with no resolving pointer is dropped and counted; one with
+    any resolving pointer stands, with its unresolved pointers recorded. `scope` goes to
+    `_resolves`."""
     kept: list[dict[str, Any]] = []
     dropped = 0
     for finding in reply.findings:
-        # ONE resolution pass per pointer: "did any resolve" and "which did not" are two reads
-        # of the same answer, and asking twice `stat`s every pointer of every finding twice.
         unresolved = [p for p in finding.evidence
                      if not _resolves(p, world_dir, subject=finding.subject, scope=scope)]
         if len(unresolved) == len(finding.evidence):
@@ -571,16 +436,12 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path,
 
 
 def _build_prompt(judge_input: JudgeInput) -> str:
-    """D4: the correlating prompt, parameterised by the graded world's label. Wording names
-    hand-offs, never entities or systems; keeps the 20-row cap and the quote-any-colon rule
-    that made 15/15 replies parse strictly (C12).
+    """The correlating prompt for the graded world. Wording names hand-offs, never entities
+    or systems; the 20-row cap and the quote-any-colon rule are what make replies parse
+    strictly.
 
-    THE LABEL COMES OFF THE RENDERED INPUT, and there is no keyword to override it with.
-    `JudgeInput.world_label` is the world `render` actually assembled these views for; taking it
-    a second time as a keyword gave one value two carriers with nothing holding them in
-    agreement — a caller could render `b` and prompt for `c` and no type, test or assertion
-    would notice — and no caller in this repo ever passed it (`defender/CLAUDE.md`: resolve an
-    optional input once at the boundary, never re-coalesce it in the body)."""
+    The label comes off the rendered input only, so the prompt cannot name a different world
+    from the one rendered."""
     label = judge_input.world_label
     task = (
         f"World {label} has run; grade it.\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
@@ -590,17 +451,9 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "plus the trial spread. Every OTHER world is marked counterfactual: withhold its "
         "overlay from your reasoning and never cite its facts as facts about the graded "
         "world.\n\n"
-        # #860 O2/M5 — what a `refused:` entry MEANS, stated in host text. Without this the
-        # line is bytes the model can still read as absence: a lead that tried the holding
-        # system and was turned away by the harness rendered as `params: None`, `payload: []`,
-        # and a live draw concluded the defender never queried it — a `lead-set` finding the
-        # lessons curator folded into a lesson telling the runtime to run a query the role is
-        # not granted. The polarity (`external=true` -> observability, never lead-set) is the
-        # whole of the rule, spelled the way `family.render_refused` prints it; the rest says
-        # where the evidence pointer goes and ties VIEW 2's `source: refused` to it: the
-        # sibling's registry files a denial there too (`WorldRegistry.decide_call`), beside
-        # the seam's own refusal, and both count as having queried — the model must not read
-        # that row as a query that ran, nor as a second refusal.
+        # What a `refused:` entry means, in host text. Otherwise a harness refusal reads as
+        # "never queried", yielding a `lead-set` lesson telling the defender to run a query it
+        # is not granted. Spelled the way `family.render_refused` prints it.
         "READ A LEAD'S `refused:` LINE BEFORE GRADING ITS COVERAGE. Each entry there is an "
         "attempt that reached NO system — it is not a query, and it is not the absence of "
         "one. `external=true` means the harness or the estate withheld it (a verb the "
@@ -624,26 +477,15 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "defender actually read, or invented.\n\n"
         "Cap any table at 20 rows. Quote any YAML scalar containing a colon — that is what "
         "made every reply of the correlating prompt's own trial parse strictly.\n\n"
-        # THE VALIDATOR'S OWN SET, rendered — the same treatment the bucket enum below already
-        # gets, and for the same reason. The three words were DESCRIBED rather than written
-        # ("the discard word", "the two-word corpus/world contradiction outcome"), so the model
-        # had to guess both the literal strings and, with nothing said at all about when each
-        # applies, the criteria. It guessed the strings right and the criteria wrong: a live
-        # draw wrote five sound findings about the defender's gathering and then chose
-        # `corpus-contradiction`, which discards every one of them (O7), over an episode its own
-        # note described as the defender never pulling the payload — which is `gradable`.
+        # The validator's own outcome set, rendered with criteria below, so the model neither
+        # guesses the literals nor picks a discarding outcome for a defender failure.
         f"Reply as one YAML mapping, bare — not inside a code fence, with nothing before or "
         f"after it: episode_outcome (exactly one of "
         f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), "
         "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket, "
         f"subject [{SUBJECT_DEFENDER}|{SUBJECT_WORLD}], claim, "
-        # THE VALIDATOR'S OWN SET, rendered — not a sixth hand-typed copy of the same five
-        # words. `_BUCKET_ENUM[SUBJECT_DEFENDER]` is derived from `QUEUEABLE_FINDING_TYPES`, so
-        # a bucket added there widened what a reply may carry and was never named to the model,
-        # and a bucket removed there left the prompt advertising one every reply using it is
-        # refused for — counted as a malformed reply, with the draw file removed and no error
-        # above `malformed_replies`. THE WORLD VOCABULARY IS DELIBERATELY OPEN (R2): the four
-        # names below are EXAMPLES, not an enum, so no exhaustive list is rendered for it.
+        # The validator's own defender bucket set, rendered so prompt and validator agree. The
+        # world vocabulary is open, so only examples are shown for it.
         f"a subject: {SUBJECT_DEFENDER} finding's bucket is one of "
         f"[{'|'.join(sorted(_BUCKET_ENUM[SUBJECT_DEFENDER]))}]; a subject: {SUBJECT_WORLD} "
         f"finding's bucket is your own free text naming what is wrong with the WORLD itself "
@@ -653,26 +495,15 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         f"{SUBJECT_WORLD} finding is about the instrument itself — an invented shape, a story "
         "the overlay does not back, or (family call only) that the family failed to "
         "discriminate at all — and is never authored as a lesson for the defender.\n\n"
-        # THE TWO WORLD-LANE KEYS THE APPENDER REQUIRES, NAMED. `enqueue._validate_world_row`
-        # refuses a questioner-channel row whose `pattern` or `holding_system` is not a
-        # non-empty string, and neither field was in the field list above — so every
-        # model-drawn world finding was built with `pattern: None`, refused one row at a time,
-        # and filed under `unqueueable_findings` where it reads as a model defect rather than
-        # as a prompt that never asked. (The pass fills either in from the graded world's own
-        # row when a reply still omits it, but the reply is where they belong.)
+        # `enqueue._validate_world_row` requires both; the pass can fill them in from the row,
+        # but the reply is where they belong.
         f"A subject: {SUBJECT_WORLD} finding MUST also carry `pattern` (the staged corpus "
         "pattern the observation is about, copied verbatim from the manifest overlay or the "
         "sample header — never invented) and `holding_system` (the discriminator's own holding "
         "system). Both are non-empty strings; a world finding without them cannot be "
         "routed.\n\n"
-        # THE SHAPE OF `evidence`, stated. The field list above names it and stops, so a model
-        # that reads "evidence" writes the English sense of the word — a sentence quoting what
-        # it saw. The reply validator requires a LIST and refuses the reply outright, which
-        # counts a malformed reply, deletes the draw and grades the world on nothing; and a
-        # list of prose would then have been dropped one step later by `_draw_document`, which
-        # discards any finding whose pointers all fail to resolve. Both failures are silent
-        # above `malformed_replies`, so the judge produced no findings at all and said only
-        # that its own reply was malformed.
+        # The shape of `evidence`, stated: otherwise a model writes prose, which either fails
+        # validation or is discarded as unresolvable, silently losing every finding.
         "`evidence` IS A LIST OF POINTERS INTO THE GRADED WORLD'S OWN FILES, never prose and "
         "never a quotation. Each entry is a path RELATIVE to that world's directory, "
         "optionally with a `#fragment` naming what in the file you mean — for example "
@@ -689,37 +520,22 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "in the archive, never as a comment on how the defender performed.\n"
     )
     sections = judge_input.as_prompt_sections()
-    # ITERATE THE SECTIONS, not the titles. `as_prompt_sections` owns the set (and `_cap_sections`
-    # charges the payload cap over it), so driving the assembly from `SECTION_TITLES` made a view
-    # added there but not here rendered, capped, charged its equal share of the operator's
-    # `JUDGE_PAYLOAD_CAP` — and then silently never sent, with no exception and no log line. A
-    # section with no title of its own is titled by its key rather than dropped; the reverse
-    # mistake (a title with no section) was a bare `KeyError` out of the whole pass.
+    # Iterate the sections, not the titles: `as_prompt_sections` owns the set the payload cap
+    # is charged over, so a section is never capped and then silently not sent. An untitled
+    # section is titled by its key.
     titled = [titled_section(SECTION_TITLES.get(name, name.upper()), body)
               for name, body in sections.items()]
     salt = message_salt(task, *titled)
-    # ONE tag, `UNTRUSTED_TAG`, on every section: the reader contract names sections by their
-    # run-salted frame, not by tag, and the suite's own frame regex (`_triplet_947.
-    # UNTRUSTED_FRAME`) matches only `-untrusted` — a per-section tag name would silently
-    # leave every body outside what the suite recognises as an untrusted frame at all.
-    #
-    # SO THE SECTION'S NAME IS ITS TITLE, INSIDE THE FRAME. The arm this prompt is ported from
-    # headed each view (`## VIEW 1 — PER-LEAD CHAIN …` through `## VIEW 4 — TRIAL SPREAD …`),
-    # and the port dropped them: eight identically-tagged bodies concatenated with no names,
-    # under a task that says "compare it against the four joined views below". Coverage rows,
-    # sibling rows and spread rows are all bullet lists, so they ran together indistinguishably.
-    # The title goes INSIDE the frame (`_prompt.titled_section`, the questioner's own spelling)
-    # because a heading in the host region beside a framed body is one an attacker can imitate
-    # from inside the body.
+    # One tag on every section: sections are identified by their salted frame, and the frame
+    # regex matches only `-untrusted`. Each section is named by its title inside the frame,
+    # since a heading outside it could be imitated from inside a body.
     body = stage_user_message(salt, *(wrap(section, UNTRUSTED_TAG, salt) for section in titled))
     return task + body
 
 
 def _render_family_manifest(manifest: dict[str, Any]) -> str:
-    """Every world's story, axis, declared disposition and overlay — WITHHOLDING NONE. The
-    per-world call's whole point is that a sibling's overlay must never reach it (O5/J14); the
-    family call's whole question is whether the SET separates, so withholding a member here
-    makes that question unanswerable (#1007, `test_the_family_call_is_shown_every_world`)."""
+    """Every world's story, axis, declared disposition and overlay, withholding none: unlike
+    the per-world call, the family call asks whether the whole set separates."""
     from defender.learning.judge.family import _control_declared
 
     lines = [f"discriminator: {manifest.get('discriminator')}",
@@ -736,8 +552,7 @@ def _render_family_manifest(manifest: dict[str, Any]) -> str:
 
 
 def _render_family_mechanical_rows(grade: Any) -> str:
-    """Every world's mechanical row (M3) — the same facts the per-world call sees about itself,
-    joined here across the whole family, plus each world's completed-draw verdict."""
+    """Every world's mechanical row, joined across the family, with each world's verdict."""
     worlds = grade["worlds"] if isinstance(grade, dict) else grade.worlds
     lines = []
     for row in worlds:
@@ -753,22 +568,15 @@ def _render_family_mechanical_rows(grade: Any) -> str:
 
 def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
                          review: dict[str, Any]) -> str:
-    """M5: one call per draw, judging what no single world can — whether the FAMILY separates
-    on the discriminator. Shown every world's overlay, the review record and every mechanical
-    row; withholds none (unlike the per-world call, which withholds every sibling's).
+    """The family-level prompt: whether the family separates on the discriminator. Shown every
+    world's overlay, the review record and every mechanical row.
 
-    The reply is `subject: {SUBJECT_WORLD!r}` in its entirety (A1: the family reply IS a world-
-    subject reply, never a defender one) and may name no `world` — a family-level observation is
-    about the set, not about any one member of it."""
+    The reply is entirely `subject: world` and may name no `world`."""
     import yaml
 
     task = (
-        # THE ROLE PROMPT IS THE PER-WORLD ONE (`_ROLE_PROMPT`, shared by both calls), and it
-        # opens "you grade one archived, branched world" and "treat [every other world's]
-        # overlay as withheld". Both sentences are false of THIS call, and a task that did not
-        # say so left the model holding two contradictory instructions about the only input it
-        # is given. Overridden here, in the user message, because the role file is the
-        # per-world contract and #1008 pins its text.
+        # The shared role prompt is written for the per-world call; its one-world framing and
+        # withheld-sibling rule are overridden here, since the role file's text is pinned.
         "This is the FAMILY-LEVEL call. The role prompt's \"one archived, branched world\" "
         "framing and its withheld-sibling rule DO NOT APPLY here: you are shown every world "
         "deliberately, and citing one world's overlay while reasoning about another is the "
@@ -790,12 +598,8 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
         "`pattern` (a staged corpus pattern this family is about) and `holding_system` (the "
         "discriminator's own holding system), both non-empty strings: the questioner channel's "
         "appender refuses a row without them.\n\n"
-        # THE EVIDENCE CONTRACT, which the per-world prompt states at length and this one
-        # omitted entirely. `_draw_document` resolves a family finding's pointers against
-        # `worlds/family/` — a directory holding only this call's own draw files — so every
-        # pointer naming a world archive or the manifest fails, and A FINDING WHOSE POINTERS
-        # ALL FAIL TO RESOLVE IS DISCARDED, silently, above `malformed_replies`. The only
-        # pointers this call can resolve are the episode-level files S7 allowlists.
+        # Family pointers resolve against `worlds/family/`, which holds only draw files, so
+        # only the allowlisted episode-level files can resolve.
         "`evidence` IS A LIST OF POINTERS, never prose and never a quotation. A family-level "
         f"finding may cite ONLY these episode-level files by bare name: "
         f"{', '.join(f'`{name}`' for name in _family_evidence_files())}, optionally with a "

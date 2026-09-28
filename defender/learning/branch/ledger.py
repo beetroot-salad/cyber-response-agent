@@ -1,20 +1,16 @@
 """What the estate served, one row per call.
 
-Every response the defender sees in a branched run passes the estate seam, and every one of
-them lands here with the DECISION that produced it. That is the batch's central safety
-property, and it is the inverse of the one the issue was filed with: under staging a query
-reaching a real adapter is the design, so the hazard is a response reaching the defender
-WITHOUT passing the applier — silent scenario deletion, a run that looks fine and measures
-nothing (#845).
+Every response the defender sees in a branched run passes the estate seam and lands here with
+the decision that produced it. Under staging, a query reaching a real adapter is expected; the
+hazard is a response reaching the defender without passing the applier — silent scenario
+deletion, a run that looks fine and measures nothing.
 
 `passthrough` is therefore a decision, not an absence. A served response with no row is the
 failure this table exists to make visible.
 
-NO `query_id` COLUMN, deliberately. The seam sits BELOW `QueryCapture`, which is where a
-model-supplied `query_id` is resolved — the registry genuinely cannot see one. The run's own
-`executed_queries.jsonl` records it against the same `(system, verb, params)`, so the
-correlation is a join, and a second copy written from a frame that has to guess would only
-drift from the one that knows.
+There is no `query_id` column: the seam sits below `QueryCapture`, where a model-supplied
+`query_id` is resolved. The run's `executed_queries.jsonl` records it against the same
+`(system, verb, params)`, so correlation is a join.
 """
 
 from __future__ import annotations
@@ -31,61 +27,39 @@ from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
 
-#: What produced a served payload. A row carrying anything else is a writer that has invented
-#: a decision class, which is the same failure as a row nobody wrote.
+#: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
 STAGED = "staged"
 PATCHED = "patched"
 PASSTHROUGH = "passthrough"
-#: The call reached the seam and was REFUSED — a world whose corpus this query cannot be
-#: pointed at. Its own class because the alternative is silence: a refusal that writes no row
-#: is "a served response with no row", which is the exact state this table exists to make
-#: visible, and a reader counting evidence would see the sibling simply never asking.
+#: The call reached the seam and was refused (e.g. this world's corpus cannot be targeted).
+#: Recorded so a refusal does not read as the sibling never asking.
 REFUSED = "refused"
-#: The call reached the seam, was pointed at this world, and the ESTATE faulted — the adapter
-#: body raised, or the applier did. Its own class for the same reason `refused` is one: the
-#: query tool turns that exception into a fault row the model reads, so the defender HAS seen a
-#: response, and a seam that wrote nothing would leave "a served response with no row" behind
-#: the one failure this table exists to make visible. Distinct from `refused` because the two
-#: name different faults — a world that cannot be staged is the harness's, an estate that is
-#: down is the environment's, and the circuit breaker already tells them apart by exit code.
+#: The call was pointed at this world and the estate faulted (adapter or applier raised). The
+#: model sees a fault row, so the table must too. Distinct from `refused`: a world that cannot
+#: be staged is the harness's fault, an estate that is down is the environment's.
 FAULT = "fault"
-#: The payload came from the SOURCE RUN's capture, primed before any sibling forked. Its own
-#: class because `base` no longer means what it meant: #920 defines the base world as "whatever
-#: the real adapters returned during the real run", and a row read live by whichever sibling
-#: asked first is the estate NOW, not the estate as captured. The two are the same only on a
-#: quiet estate, and nothing in a table that could not tell them apart would ever say so.
+#: The payload came from the source run's capture, primed before any sibling forked. Distinct
+#: from `base`, which is a live read of the estate now rather than the estate as captured.
 #:
-#: Only the primer writes it, and the primer does not go through `record` — see the refusal
-#: there. A row a sibling could stamp `captured` would be a live read wearing capture
-#: provenance, which every downstream reader would believe.
+#: Only the primer writes it, bypassing `record` (which refuses it): a served call labelled
+#: `captured` would be a live read wearing capture provenance.
 CAPTURED = "captured"
 SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH, REFUSED, FAULT, CAPTURED})
-#: The two labels that belong to the FAMILY tier — the rows every sibling replays, spelled
-#: `world_id=None`. `captured` is the capture; `base` is now the narrower thing it always
-#: honestly was, a live read of a key the capture never recorded, which only happens because a
-#: sibling asks questions its source never did. Counting `base` rows across a family therefore
-#: measures exactly that residual, which is the one part of the estate a primed base cannot
-#: make deterministic.
+#: The family-tier labels — rows every sibling replays, with `world_id=None`. `base` is a live
+#: read of a key the capture never recorded, so counting `base` rows measures the residual a
+#: primed base cannot make deterministic.
 FAMILY_SOURCES = frozenset({BASE, CAPTURED})
-#: The subset an APPLIER may name. `base` is the family TIER's label, not a decision — it is
-#: written by `_base_payload` alone, against `world_id=None` — and `refused`/`fault` are the
-#: seam's own, written when nothing got as far as a decision. Naming the three that are really
-#: an applier's is what keeps "the vocabulary is closed" from reading as "any applier may claim
-#: any label in it", including the one that means "this is the recording your siblings replay".
+#: The labels an applier may name. `base` is written only by `_base_payload`; `refused`/`fault`
+#: are the seam's own, written when nothing reached a decision.
 APPLIER_DECISIONS = frozenset({STAGED, PATCHED, PASSTHROUGH})
 
 
 def normalized_source(value: Any) -> str | None:
-    """The owner's answer to "is `value` a member of `SOURCES`, and what does it normalize
-    to" — every other module reading a served-row's `source` column calls this instead of
-    importing `SOURCES` and re-deriving the membership test itself (#785's shape: one parser,
-    N interpreters, some of which disagree on the same bytes).
+    """`value` if it is exactly a member of `SOURCES`, else `None`.
 
-    A ledger row's `source` is written by this module's own callers, never typed by a model or
-    an operator, so there is no casefold/strip normalization to do here — a value is either
-    exactly one of `SOURCES`'s members or it is not a member at all. Returns the value
-    unchanged (never a case-folded or stripped variant) when it is a member, `None` otherwise.
+    Other modules call this rather than re-deriving membership. No case/whitespace folding:
+    `source` is written by code, never typed by a model or operator.
     """
     return value if isinstance(value, str) and value in SOURCES else None
 
@@ -94,46 +68,27 @@ class LedgerError(Exception):
     """A served response that cannot be honestly recorded."""
 
 
-#: The directory, under an episode, that holds the family's base and every world's own rows.
-# `SERVED_DIRNAME`/`BASE_FILENAME` are the owner's (`_episode_paths`, #1077 D1); `base_file`
-# below reaches the join through `EpisodePaths.served_base`.
-#: The family's capture, inside `SERVED_DIRNAME`. Named here because the primer writes it and
-#: every `Ledger` reads it, and a second spelling is how one starts writing where the other is
-#: not looking — with the run still green, because a missing base is indistinguishable from a
-#: key nobody asked.
-
-
 def base_file(episode_dir: Path) -> Path:
-    """The family's capture under `episode_dir`.
-
-    The JOIN, not just the leaf name. `BASE_FILENAME` and `SERVED_DIRNAME` were extracted here
-    because "a second spelling is how one starts writing where the other is not looking", and
-    then the composition of the two was left to each caller to write out — three copies of
-    `episode / SERVED_DIRNAME / BASE_FILENAME` across the primer's caller and this module. One
-    home for the path the primer writes and every `Ledger` reads.
+    """The family's capture under `episode_dir`: the one path the primer writes and every
+    `Ledger` reads.
     """
     return EpisodePaths(Path(episode_dir)).served_base
 
 
 def payload_text(payload: Any) -> str:
-    """The canonical bytes for a payload, and the ONE spelling of them.
+    """The canonical bytes for a payload; the only spelling of them.
 
-    `sort_keys` is what makes two dumps of one answer compare equal, so a reader that spells
-    this differently does not merely look untidy — it produces a key that never matches. The
-    primer is the reason this lives here rather than beside its first caller: the source run's
-    captured sidecars were written WITHOUT `sort_keys`, so priming must load and re-dump through
-    exactly this, and a near-copy in a third module would make every primed row a permanent
-    miss with nothing red to show for it.
+    `sort_keys` makes two dumps of one answer compare equal. The source run's captured sidecars
+    were written without it, so priming must re-dump through this; any near-copy would make
+    every primed row a silent miss.
 
-    `default=str` keeps a value JSON has no spelling for — a `datetime`, a `Decimal`, a tuple —
-    from raising mid-serve, and it is applied on BOTH sides of that round trip, so the capture
-    and a live read degrade the same way.
+    `default=str` stops a `datetime`, `Decimal` or tuple raising mid-serve, and applies on both
+    the capture and live sides so they degrade the same way.
     """
     return json.dumps(payload, sort_keys=True, default=str)
 
 
 def _is_json(text: str) -> bool:
-    """Is this row's payload something `base_payload`'s caller can actually `loads`?"""
     try:
         json.loads(text)
     except ValueError:
@@ -144,36 +99,23 @@ def _is_json(text: str) -> bool:
 def request_key(system: str, verb: str, params: Any) -> str:
     """The canonical identity of one question.
 
-    `record_query._request_key`'s FUNCTION, not its spelling. A key that sorts its params is
-    stable against a dict built in a different order, and two spellings of "the same question"
-    would split one memo into two — and a hand-identical copy in a module that does not import
-    the original is how the two learn different rules. It is also what makes the correlation
-    this table's docstring promises an actual join: `executed_queries.jsonl` keys the same
-    `(system, verb, params)` through this call.
-
-    `_json_safe_params` rides with it for the same reason it does there. Without it a
-    non-finite float keys as the bare token `Infinity` — which `json.dumps` will happily write
-    into the row too, producing a line no JSON reader but Python's own will parse — while
-    `record_query` keys the same call as `"inf"`, so the join silently misses.
+    Delegates to `record_query._request_key` so this table and `executed_queries.jsonl` key the
+    same `(system, verb, params)` identically and can be joined. `_json_safe_params` is applied
+    for the same reason: otherwise a non-finite float keys as `Infinity` here and `"inf"` there.
     """
     return _request_key(
         system, verb, _json_safe_params(params) if isinstance(params, dict) else {})
 
 
 def correlation_key_of(row: Any) -> str | None:
-    """One RECORDED row's comparison identity — `ServedCall.correlation_key`, read off disk.
+    """One recorded row's comparison identity — `ServedCall.correlation_key`, read off disk.
 
-    THE DERIVATION, not a column read. `ServedCall.row()` does not write `correlation_key`: it
-    is a property, and the columns it serialises are `system`/`verb`/`params`/`payload_text`/
-    `source`/`world_id` plus `asked_params` when staging rewrote the call. So a reader that
-    asked the row for the column got `None` on every row a real `prime_base` wrote, and every
-    key of a whole capture collapsed onto one — which is a pairing that cannot tell any two
-    questions apart. Recorded is still honoured first, so a row written by a later writer that
-    DOES carry the column keys on what it says rather than on what this frame re-derives.
+    Derived, not read as a column: `ServedCall.row()` does not write `correlation_key`, so
+    reading the column would collapse every row onto one key. A recorded value is still honoured
+    first.
 
-    `None` when the row cannot say which call it is (a torn row with no system or verb); the
-    caller decides whether that is a skipped row or a recorded fault, because the two readers
-    of this mean different things by it.
+    `None` when the row cannot say which call it is (no system or verb); the caller decides
+    whether that is a skipped row or a fault.
     """
     if not isinstance(row, Mapping):
         return None
@@ -190,72 +132,55 @@ def correlation_key_of(row: Any) -> str | None:
 
 @model(frozen=True)
 class ServedCall:
-    """One served call, under BOTH the question asked and the question run.
+    """One served call, under both the question asked and the question run.
 
-    They differ exactly when a world stages: `prepare` rewrites the call to point at that
-    world's corpus, which is what staging IS. So the two identities answer two different
-    questions and neither can do the other's job.
+    They differ exactly when a world stages (`prepare` rewrites the call to its corpus).
 
-    `key` — the form that RAN. What the family tier memoizes on, and it must stay the prepared
-    form: keyed on the asked form instead, a sibling would replay another world's answer, read
-    off that world's staged corpus. That is contamination, strictly worse than re-reading.
+    `key` is the form that ran, and is what the family tier memoizes on. Keying the memo on the
+    asked form would replay another world's staged answer to a sibling.
 
-    `correlation_key` — the form ASKED. What a cross-world comparison pairs on. Without it
-    `ΔO` is computed over `keys(A) ∩ keys(B)`, and on a staged system that intersection is
-    EMPTY — A recorded `FROM …-w-A` and B recorded `FROM …-w-B`, so no row of A's ever meets a
-    row of B's and the difference between them reads as no difference at all. Silent, and
-    silent on the event stream, which is where most of a run's evidence lives.
+    `correlation_key` is the form asked, and is what cross-world comparison pairs on. On a
+    staged system the ran forms never match across worlds, so pairing on them would report no
+    difference at all on the event stream.
 
-    `payload_text` — the answer, AS ASKED. The identity a world staged is taken back out before
-    the row is written (`WorldApplier.restore`), because the response echoes it: `query`/
-    `alerts` return the index they read and `esql` returns the query text, so an unrestored
-    payload differs base-vs-sibling in a field NO WORLD TOUCHED, and ΔO over the event stream
-    is non-zero on every row regardless of what the world did.
-
-    That the KEYS are keyed on params and the PAYLOAD reads as asked is not a split brain: the
-    keys answer "which call is this", and `params` above still holds the form that ran, so what
-    actually reached the corpus is one column over and nothing is lost. It is also what makes
-    the payload safe to hand back to a model — the memo arm deserializes this text and serves
-    it, so a recording carrying a view name would put a corpus the model never wrote into the
-    next sibling's context, where re-binding it stages the staged name a second time.
+    `payload_text` is the answer with the world's staged identity restored out
+    (`WorldApplier.restore`), because responses echo it (`query`/`alerts` return the index,
+    `esql` the query text); otherwise every event-stream row would differ base-vs-sibling in a
+    field no world touched. It is also served back to models from the memo, where a view name
+    would leak and get re-staged. `params` still holds what actually ran.
     """
 
     system: str
     verb: str
     params: dict
-    #: The answer with the world's own corpus identity taken back out — see the class
-    #: docstring. `params` above is where the form that RAN is kept.
+    #: The answer with the world's own corpus identity taken back out.
     payload_text: str
     source: str
     world_id: str | None
-    #: What the model asked, when staging rewrote it. `None` means nothing was rewritten, so
-    #: the two identities coincide — the ordinary case for the six unstaged systems.
+    #: What the model asked, when staging rewrote it. `None` means nothing was rewritten.
     asked_params: dict | None = None
-    #: M2's witness (#1007, O3): whether a live read of the un-rewritten base pattern differed
-    #: from what this world was served, beyond formatting. `None` means unmeasured (no witness
-    #: taken, or the witness read faulted) — never "no difference". Written only on a `staged`
-    #: row, following `asked_params`' own precedent, because only that decision takes a witness.
+    #: Whether a live read of the un-rewritten base pattern differed from what this world was
+    #: served, beyond formatting. `None` means unmeasured, never "no difference". Only a
+    #: `staged` row takes a witness.
     differs_from_base: bool | None = None
     #: `sha256` of the base pattern's own canonicalised text — see `differs_from_base`.
     base_pattern_digest: str | None = None
 
     @property
     def key(self) -> str:
-        """The memo identity: the call as it RAN."""
+        """The memo identity: the call as it ran."""
         return request_key(self.system, self.verb, self.params)
 
     @property
     def correlation_key(self) -> str:
-        """The comparison identity: the call as it was ASKED."""
+        """The comparison identity: the call as it was asked."""
         return request_key(
             self.system, self.verb,
             self.params if self.asked_params is None else self.asked_params)
 
     def row(self) -> dict:
-        # `_json_safe_params`, because `append_jsonl` dumps with the stdlib defaults: a param
-        # the key already coerced would otherwise reach the file as `Infinity`/`NaN` — tokens
-        # no JSON reader outside Python parses — or raise `TypeError` mid-serve on a value
-        # `default=str` would have carried.
+        # `_json_safe_params` because `append_jsonl` dumps with stdlib defaults: otherwise a
+        # param reaches the file as `Infinity`/`NaN` or raises `TypeError` mid-serve.
         row = {
             "system": self.system, "verb": self.verb,
             "params": _json_safe_params(self.params),
@@ -263,21 +188,13 @@ class ServedCall:
             "world_id": self.world_id,
         }
         if self.asked_params is not None:
-            # Written only when it says something. An absent column reads as "nothing was
-            # rewritten", which is true of every unstaged call and is the honest default; a
-            # column echoing `params` on every row would make the two identities look like one.
+            # Absent means "nothing was rewritten"; echoing `params` on every row would make
+            # the two identities look like one.
             row["asked_params"] = _json_safe_params(self.asked_params)
         if self.source == STAGED:
-            # WRITTEN WHENEVER THIS ROW IS STAGED, whatever `differs_from_base` holds — `None`
-            # is itself a fact (the witness was not measured), so omitting the key on that value
-            # would make it indistinguishable from a pre-#1007 row that never took a witness at
-            # all. ONE READER decides what the pair MEANS: `judge/family._grade_world`'s own
-            # `is not False`, which answers "shown" for both, deliberately leaning toward not
-            # excusing the defender rather than withholding a real finding. There used to be a
-            # second, exported `episode.difference_shown` answering `None` (unmeasured) for the
-            # same pair — no production caller, an `__all__` entry advertising it as THE reader,
-            # and the opposite answer. Deleted rather than reconciled: a future author reaching
-            # for the public name would have flipped every unmeasured episode's decision.
+            # Written on every staged row even when `None`: `None` (unmeasured) must be
+            # distinguishable from a row that never took a witness. The meaning of the pair
+            # is decided by `judge/family._grade_world` alone.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
         return row
@@ -287,23 +204,16 @@ class ServedCall:
 class Ledger:
     """The append-only record of one world's served calls, and the family's shared base.
 
-    Two tiers, and they are now two FILES rather than two `world_id` values in one. `base_path`
-    is the family's capture, primed before any sibling forked and read-only for the whole run;
-    `path` is this world's own rows, and it has exactly one writer. The tiering is what makes a
-    difference between siblings READABLE: everything off a world's staged set is literally the
-    same bytes, so a comparison only ever runs over rows that are supposed to differ.
+    Two files: `base_path` is the family's capture, primed before any sibling forks and
+    read-only for the run; `path` is this world's own rows, with exactly one writer. Rows off a
+    world's staged set are therefore byte-identical across siblings.
 
-    ONE WRITER PER FILE is the whole reason for the split, and it buys two things a shared file
-    could not. Siblings run in PARALLEL, and `append_jsonl` opens in text mode: a
-    multi-hundred-KB row is several `write()` calls, so two PROCESSES appending interleave into
-    a torn line that `read_jsonl_rows` then silently drops — the family's recording vanishing
-    with nothing in the table to show it. And the check-then-act race this class used to concede
-    ("both miss, both read live") cannot happen for a captured key at all, because nothing
-    writes the base tier while the run is in progress.
+    One writer per file matters because siblings run in parallel and `append_jsonl` writes a
+    large row in several `write()` calls; two processes appending would tear lines that
+    `read_jsonl_rows` silently drops. It also removes any check-then-act race for captured keys.
 
-    What the split does NOT close, stated so nobody reads more into it: a key the source run
-    never asked has no captured row, so each world reads it live and records its own `base` row.
-    Those rows are the residual, and counting them is how big it is.
+    Not closed: a key the source run never asked has no captured row, so each world reads it
+    live and records its own `base` row. Counting those rows sizes that residual.
     """
 
     path: Path
@@ -313,19 +223,11 @@ class Ledger:
     def for_world(cls, episode_dir: Path, world_id: str) -> Ledger:
         """This world's ledger under `episode_dir`, over the family's primed base.
 
-        A FACTORY rather than two paths at the call site, because "one writer per file" is the
-        property the whole split rests on and it is only true if two worlds can never be handed
-        the same path. Deriving it from the world id makes that structural.
+        Deriving the path from the world id makes "two worlds never share a file" structural.
 
-        The id is validated AS A FILENAME COMPONENT, which nothing upstream does: the registry
-        checks it is a non-empty string, and a stager checks it can name a corpus — and only
-        for a world that touches a staged system. Neither refuses `../base`, which would write
-        outside the episode entirely.
-
-        THAT CHECK IS NOT WHAT KEEPS A WORLD OFF THE CAPTURE, and reading it as such is how the
-        bare id `base` got through: it needs no separator, passes every rule here, and names
-        `BASE_FILENAME` exactly. The collision is refused by `__post_init__` on the property
-        itself (`path == base_path`), where the direct constructor cannot route around it.
+        The id is validated as a single filename component (nothing upstream refuses `../base`).
+        That check does not stop the bare id `base` from naming the capture; `__post_init__`
+        refuses that collision on the resulting paths.
         """
         if not isinstance(world_id, str) or not world_id:
             raise LedgerError(
@@ -339,25 +241,16 @@ class Ledger:
         return cls(path=base.parent / f"{world_id}.jsonl", base_path=base)
 
     def declare(self) -> Ledger:
-        """Create this world's ledger EMPTY if it is not there yet, and return the ledger.
+        """Create this world's ledger empty if it is not there yet, and return the ledger.
 
-        WRITE-AHEAD, the posture `staged.yaml` already takes toward a cluster name: the record
-        exists from the moment the world starts, so its ABSENCE means the world never started —
-        never "the world ran and served nothing". One missing file cannot carry both, and it was
-        carrying both: J5's tier rule reads an absent ledger as an incomplete archive and
-        refuses to grade the world, which is right, while a sibling that answered every question
-        from the replayed capture produced exactly that state by running perfectly. The strongest
-        finding this design can make — a defender that closed without ever consulting the world
-        it was given — was arriving as "unjudgeable". With the file declared up front it arrives
-        as an EMPTY ledger, which the grader already buckets `lead-set`.
+        Write-ahead, so an absent ledger means the world never started, never "ran and served
+        nothing". A sibling that answered everything from the replayed capture then reads as an
+        empty ledger (graded `lead-set`) rather than an incomplete, ungradable archive.
 
-        Called by the sibling as it builds its registry, and by nothing that reads: `for_world`
-        is also the factory a derived reader names the path with, so creating the file there
-        would have every read of an episode mint the artifact it came to read.
+        Called only by the sibling building its registry; `for_world` is also used by readers,
+        and creating the file there would mint the artifact being read.
 
-        APPEND, never a truncating mode: this runs once at world setup, but `record` may already
-        be appending for a gather lead dispatched in parallel, and a create that truncated would
-        drop rows the table exists to hold.
+        Opens in append mode: `record` may already be appending from a parallel gather lead.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount, exactly as `record`'s own append below  # noqa: E501
         with self.path.open("a", encoding="utf-8"):  # lint-unguarded-tree-write: ok — same tree and same rationale as `record`; opened in append so a concurrent writer's rows survive  # noqa: E501
@@ -365,34 +258,17 @@ class Ledger:
         return self
 
     def __post_init__(self) -> None:
-        #: THE FAMILY TIER ONLY, keyed by request key. `base_payload` is the sole reader and
-        #: only ever asks for a `world_id is None` row, so memoizing a world's own rows kept a
-        #: full copy of every payload the run ever served — the table's own comment sizes those
-        #: at 52KB each — for the life of the process, with nothing able to read them back.
+        #: Family tier only, keyed by request key: `base_payload` never reads a world's own
+        #: rows, so memoizing them would only hold every served payload in memory.
         self._memo: dict[str, str] = {}
-        #: `served` runs under `asyncio.to_thread`, and this ONE world's gather leads dispatch
-        #: in parallel — so several threads reach `record` at once even though only one world
-        #: writes this file. Splitting the tiers closed the cross-PROCESS half of the tearing
-        #: problem; this is the cross-THREAD half, and it is untouched by the split.
+        #: `served` runs under `asyncio.to_thread` and one world's gather leads run in
+        #: parallel, so several threads reach `record` at once.
         self._lock = threading.Lock()
-        # A WORLD'S FILE IS NEVER THE FAMILY'S. Stated as the property rather than as a rule
-        # about ids, because the id rule is a PROXY for it and missed the one spelling that
-        # needs no separator: `for_world(episode, "base")` names `base.jsonl`, which IS
-        # `BASE_FILENAME`, so that world's rows were appended into the capture its siblings
-        # replay — one world's live read served to every sibling AS THE ESTATE, and the file's
-        # "read-only for the whole run" invariant false for the episode. Checked HERE so the
-        # direct constructor (which the tests and every later reader use) cannot reach it
-        # either; `for_world`'s component check stays, because it refuses a different thing —
-        # a write outside the episode.
-        # CASE-FOLDED, because the collision being refused is between two FILENAMES and the
-        # filesystem is what decides whether they are one. `is_valid_run_id` admits upper case,
-        # so `for_world(episode, "Base")` names `served/Base.jsonl` — a different string from
-        # `BASE_FILENAME` and, on macOS (where the default runs base lives for every developer
-        # on one; `_io.guarded_mkdir` names the same platform for the same reason), the SAME
-        # FILE. That is the bare-`base` hole below in the one spelling an exact compare cannot
-        # see, and it arrives through the id rule that was supposed to be a proxy for it.
-        # Refused on a case-sensitive host too: the safe direction here is to refuse a world
-        # that MIGHT be writing the capture, not to make the guard depend on the host.
+        # A world's file must never be the family's (e.g. `for_world(episode, "base")`), or its
+        # live reads would be served to every sibling as the estate. Checked here so the direct
+        # constructor cannot bypass it.
+        # Case-folded because the filesystem decides whether two names are one file: on macOS
+        # `Base.jsonl` is `base.jsonl`. Refused on case-sensitive hosts too, the safe direction.
         if (self.path.parent, self.path.name.casefold()) == (
                 self.base_path.parent, self.base_path.name.casefold()):
             raise LedgerError(
@@ -400,83 +276,46 @@ class Ledger:
                 f"({self.base_path}, compared without case) — the base is primed once before "
                 "any sibling forks and is read-only for the run, so a world writing there "
                 "serves its own live reads to every sibling as the estate")
-        # THE BASE MUST ALREADY EXIST, and that refusal is the ordering guarantee. Priming runs
-        # once, before any sibling forks; a `Ledger` built against a missing base is a sibling
-        # that started early, and letting it through would mean every key missed the family tier
-        # and read the live estate — the run green, the episode worthless, and nothing in the
-        # record to say which. #920's fourth trap is this exact shape: "the seam fails open
-        # today", and a missed hook answering from the real estate instead of the capture.
-        # `artifact_file`, not `is_file()`: the latter stats THROUGH a link, so a symlink
-        # wearing the capture's own name passed this check and `_absorb` then read its target
-        # as the family's estate — with `captured` provenance, the one label `record` refuses
-        # to let any serving path mint. The primer already refuses to WRITE through a link
-        # here (`prime_base` tests `exists() or is_symlink()`); this is the same rule on the
-        # reading side, and the same `lstat` posture the evidence copy uses.
+        # The base must already exist: that is the ordering guarantee. A `Ledger` built without
+        # it is a sibling that started before priming, and every key would silently read live.
+        # `artifact_file` (lstat), not `is_file()`, so a symlink with the capture's name is not
+        # followed and absorbed with `captured` provenance.
         if not artifact_file(self.base_path):
             raise LedgerError(
                 f"no primed base at {self.base_path} — the family's capture is written once, "
                 "before any sibling forks, and a world serving without it reads the live estate "
                 "for every key while every row it writes still reads correctly")
-        # BASE FIRST, then this world's own, both first-row-wins: a captured answer outranks a
-        # live one left behind by a crashed earlier attempt at the same episode.
+        # Base first, both first-row-wins: a captured answer outranks a live one left by a
+        # crashed earlier attempt at this episode.
         self._absorb(self.base_path)
         self._absorb(self.path)
 
     def base_payload(self, system: str, verb: str, params: Any) -> str | None:
         """The family's recorded answer for this key, if there is one.
 
-        A hit means NO adapter call. For a CAPTURED key that is now a guarantee rather than a
-        race won: the base tier was primed before any sibling forked and nothing writes it while
-        the run is in progress, so every sibling replays the same bytes and there is no
-        check-then-act to lose. That is what the file split bought, and it is why this method no
-        longer re-reads anything.
-
-        For a key the capture never recorded — one a sibling invented, which it will, because a
-        sibling is continuing an investigation — there is no hit and no shared answer to have.
-        Each world reads live and records its own `base` row in its own file. Two worlds asking
-        the same invented question therefore get two live reads, which may differ; that residual
-        is real, it is not closed here, and the count of `base` rows across a family is its size.
+        A hit means no adapter call. For a captured key every sibling replays the same bytes.
+        A key the capture never recorded gets a live read per world, which may differ.
         """
         return self._memo.get(request_key(system, verb, params))
 
     def _absorb(self, path: Path) -> None:
-        """Fold one file's FAMILY-tier rows into the memo, first row wins.
+        """Fold one file's family-tier rows into the memo, first row wins.
 
-        THE ONE memo-building loop, run over the base and then over this world's own file.
-        First-row-wins is the append-only reading of "recorded once", and running one loop is
-        what stops two copies resolving a duplicate key in opposite directions — which they did,
-        one keeping the last row and one the first, so two siblings reading one file served
-        different base payloads for the same question.
+        The single memo-building loop (for both files), so a duplicate key always resolves the
+        same way.
         """
         for row in read_jsonl_rows(path):
-            # `str(...)`, not a cast: a torn or hand-edited row can carry anything, and the
-            # tolerant reader's job is to hand back what is there rather than to vouch for it.
-            # Keying on the coerced spelling keeps a malformed row addressable instead of
-            # crashing the replay that has to notice it.
+            # Coerce with `str(...)` below: a torn or hand-edited row can carry anything, and
+            # a malformed row should stay addressable rather than crash the replay.
             text = row.get("payload_text")
             if row.get("world_id") is not None or row.get("source") not in FAMILY_SOURCES:
-                # A world's OWN row, which nothing reads back: this memo answers the family tier
-                # and only the family tier. Absorbing it doubled the memo in payload bytes to
-                # answer a question no caller has.
-                #
-                # BOTH HALVES OF `record`'s TIER RULE, not just the `world_id` one. The reader
-                # was the fail-open side of a seam whose writer refuses: `record` rejects a
-                # family-tier row whose source is not `base`/`captured`, but this loop asked
-                # only about the owner — so a `fault` or `refused` row carrying `world_id: null`
-                # (a hand edit, a torn line that still parses, a future writer that skips
-                # `record`) was memoized as the family's ANSWER, and its `payload_text` is an
-                # error digest like `"exit=1; HTTP 404 …"`. Served to the applier as a
-                # successful response, that is the silent scenario injection `_captured_call`
-                # refuses to commit on the writing side.
+                # Skip a world's own row, and also a `world_id: null` row whose source is not a
+                # family label (e.g. a hand-edited `fault` row): memoizing it would serve an
+                # error digest to the applier as a successful response. Mirrors `record`'s rule.
                 continue
-            # A row with no payload is not an ANSWER, and memoizing it as `""` would make
-            # `base_payload` report a hit that `json.loads` then dies on — moving the crash one
-            # frame down instead of tolerating the row. Nor is a row whose payload is not JSON:
-            # a torn line reaches `json.loads` inside the served verb body, where the resulting
-            # `JSONDecodeError` is not an `AdapterFault` and the query tool's catch-all files it
-            # as exit 2 — an INFRA code, so one torn row counts against the circuit breaker.
-            # Skipped either way, so the key falls through to the live adapter, which is the
-            # honest reading of "nothing recorded".
+            # Skip a row with no payload or a non-JSON payload: `json.loads` inside the served
+            # verb would raise a non-`AdapterFault`, filed as an infra exit that counts against
+            # the circuit breaker. The key falls through to the live adapter instead.
             if not isinstance(text, str) or not text or not _is_json(text):
                 continue
             row_key = request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
@@ -488,11 +327,9 @@ class Ledger:
                 f"{call.system}.{call.verb} was served with source {call.source!r}, which is "
                 f"not one of {sorted(SOURCES)} — a response with no honest decision behind it "
                 "is the silent-scenario-deletion hazard this table exists to catch")
-        # THE TWO TIERS AGREE, ALWAYS. `base` means "the family's recording, replayed by every
-        # sibling", and `world_id is None` is how that is spelled — so a `base` row owned by a
-        # world would put one world's answer in the slot its siblings read, and a world row with
-        # no owner would be a difference nobody can attribute. That is the silent scenario
-        # INJECTION the registry's own `world_id` check guards, arriving through the other door.
+        # Family-tier sources and `world_id is None` must agree: a `base` row owned by a world
+        # would put its answer in the slot siblings replay, and a world row with no owner is
+        # an unattributable difference.
         if (call.source in FAMILY_SOURCES) != (call.world_id is None):
             raise LedgerError(
                 f"{call.system}.{call.verb} was recorded as {call.source!r} for world "
@@ -500,37 +337,22 @@ class Ledger:
                 "spelled `world_id=None`; the two say the same thing and a row where they "
                 "disagree is either one world's answer offered as the shared recording, or a "
                 "difference with no owner")
-        # CAPTURE PROVENANCE IS NOT A CLAIM A SERVED CALL MAY MAKE. `captured` asserts the
-        # payload came from the source run's own capture, and the only thing that can honestly
-        # assert that is the primer — which writes the base file directly, before any world
-        # exists, and never comes through here. Reachable this way, a live read would wear the
-        # one label that tells a reader "this was not read from the estate you are measuring",
-        # and every reader downstream would believe it.
+        # Only the primer may claim capture provenance, and it writes the base file directly.
         if call.source == CAPTURED:
             raise LedgerError(
                 f"{call.system}.{call.verb} was recorded as {CAPTURED!r} through the serving "
                 "path — only the primer may claim capture provenance, and it writes the base "
                 "file directly. A live read labelled `captured` is unfalsifiable downstream")
-        # PERSIST FIRST, memoize only on success. Memoizing first meant a failed append left
-        # the family's base payload live in memory with no row behind it: every later call for
-        # that key took the hit, issued no adapter call, and served a payload the table cannot
-        # account for — "a served response with no row", the one state this table exists to
-        # make visible. A later sibling rebuilding the memo from the file would find nothing,
-        # re-ask the live estate and get different bytes, so the pair's invariance would be
-        # gone with nothing in the record to show it.
-        # SERIALISED OUTSIDE THE LOCK. `row()` re-walks the params and `append_jsonl` re-escapes
-        # a multi-hundred-KB payload string, and neither needs mutual exclusion — only the write
-        # does. Built inside, every parallel sibling gather thread blocked through the dump.
+        # Persist first, memoize only on success: otherwise a failed append leaves a memo hit
+        # with no row behind it, served without an adapter call.
+        # Serialise outside the lock; only the write needs mutual exclusion.
         row = call.row()
         key = call.key
         with self._lock:
             append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
                 self.path, [row])
             if call.world_id is None:
-                # FIRST ROW WINS, the rule `_absorb` folds a file under, and the same rule here
-                # because there is only one. This world's live read of a key the capture never
-                # held is recorded once and replayed by this world for the rest of the run;
-                # overwriting would let a second read of the same question answer differently
-                # mid-run, with both rows reading honestly.
+                # First row wins, as in `_absorb`, so a repeated question answers the same way
+                # for the rest of the run.
                 self._memo.setdefault(key, call.payload_text)
         return call

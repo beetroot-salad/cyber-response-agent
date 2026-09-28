@@ -56,14 +56,11 @@ def _alert_label(alert: Path) -> str:
 
 
 def _setup_state(run: Run) -> str:
-    """What is under this run id already: `absent`, `setup` (only what setup itself writes —
-    an interrupted or completed setup, resumable: decision 3) or `ran` (anything else — a
-    run has been in this tree, and it is NEVER materialised into a second time: #771's
-    stale-mount premise, the sidecars' attribution, the tables' append-only history).
+    """What is under this run id already: `absent`, `setup` (only what setup writes; resumable)
+    or `ran` (a run has been in this tree; never materialised into again).
 
-    Judged by name, without following anything: the directory itself must be a real
-    directory (a link at the run id is refused), the listing is `_io.bind`'s (lstat), and the
-    run-end sidecar beside the directory counts as the run's own trace."""
+    Judged by name without following links: a link at the run id is refused, and any sidecar
+    beside the directory counts as the run's trace."""
     run_dir = run.run_dir
     if not _io.entry_present(run_dir):
         return "absent"
@@ -73,14 +70,12 @@ def _setup_state(run: Run) -> str:
         listing = tree.entries()
     if listing.reason is not None:
         sys.exit(f"{run_dir} could not be listed ({listing.reason}) — refusing to resume it")
-    # What setup writes, and ALL it writes, spelled by the owner: anything else — a table, a
-    # wire log, a report — is a directory a run has been in.
+    # Everything setup writes; anything else means a run has been here.
     paths = RunPaths(run_dir)
     setup_names = {paths.alert.name, paths.gather_raw.name, paths.provenance.name}
     extra = sorted(set(listing.entries or {}) - setup_names)
-    # ANY sidecar beside the directory is a run's trace: the scrub verdict is written at box
-    # START (`scrub.write_did_not_run`), so a box that started and died before its first write
-    # into the tree still left one — and the box sentinel does not survive a successful probe.
+    # The scrub verdict is written at box start, so even a box that died before writing into
+    # the tree leaves a sidecar.
     sidecars = (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path)
     if extra or any(_io.entry_present(p) for p in sidecars):
         return "ran"
@@ -92,37 +87,25 @@ def materialize_run_dir(
     world: ResumeWorld | None = None, tenant_id: str | None = None,
     expected_record: _tenant.TenantRecord | None = None,
 ) -> Path:
-    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
+    """Build (or finish building) the run directory for `run_id` through the handle.
 
-    `tenant_id` is the tenant the caller resolved this run for, and `expected_record` the
-    record it chose that tenant by (`run.py` reads it once, before the box; `None` when the
-    base had none). A caller that chose no tenant (`tenant_id=None`: a tool, a test) gets the
-    record's, which is the sole authority for the stamp. The record is created HERE when absent — the one place a runs base gets
-    its tenant choice, so an invocation refused earlier leaves none on disk — and then held to
-    both: a record naming another tenant (`Run.for_tenant`), or one that is no longer the
-    record the caller read (rewritten, or deleted and re-created with a new base world), is
-    refused, never stamped over a run using the settings the caller resolved.
+    `tenant_id` is the tenant the caller resolved, and `expected_record` the tenant record it
+    resolved it from (`None` if the base had none); with no `tenant_id` the record decides.
+    The record is created here when absent, then a record naming another tenant or differing
+    from `expected_record` is refused rather than stamped.
 
-    Every write is one of the handle's guarded, write-once verbs, so nothing here follows a
-    link the box may have planted under a reused id, and "resume" needs no ordering of checks:
-    a fact is written when absent, kept when present and equal, refused when present and
-    different. `world` is the sibling's own `ResumeWorld` when this process is a fork —
-    handed in by the launcher that already loaded the manifest, never re-derived from the
-    runs base's path (decision 15(1): 'forked' means 'has a family record', and the record is
-    the manifest).
+    Every write is a guarded write-once verb (written when absent, kept when equal, refused
+    when different), so resuming needs no ordering of checks and follows no planted link.
+    `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     run_id = _admit_run_id(alert, run_id)
     runs_base = resolve_runs_base()
-    # The runs base is the trust root — host-controlled, created plainly (`guarded_mkdir` on
-    # its own anchor creates the anchor and judges nothing above it).
+    # The runs base is the host-controlled trust root; nothing above it is judged.
     guarded_mkdir(runs_base, base=runs_base)
-    # THE TENANT RECORD, created once when absent (#1077 D2) — BEFORE the provenance stamp,
-    # which must equal its values, and BEFORE the box exists. A tenant record that fails to
-    # parse, or a write that fails (an alias planted at its name, a directory squatting it),
-    # PROPAGATES: unlike the provenance stamp below, this is never swallowed into a degraded
-    # run — a run with a forged tenant is worse than no run (decision 4/7).
+    # The tenant record comes before the provenance stamp (which must match it) and before the
+    # box exists. Unlike the stamp, its failures propagate: a forged tenant is worse than no run.
     if tenant_id is None:
         tenant_record = _tenant.ensure_tenant(runs_base)
         chosen = tenant_record.tenant_id
@@ -146,35 +129,15 @@ def materialize_run_dir(
             "setup writes is resumed)")
     if state == "absent":
         _clear_stale_sidecars(run)
-    # The two directories, judged component by component below the runs base — a link at the
-    # run id or at `gather_raw` is refused, not descended (`guarded_mkdir`, B8/B10).
+    # Judged component by component: a link at the run id or `gather_raw` is refused.
     guarded_mkdir(paths.gather_raw, base=runs_base)
     _write_alert_once(run, alert)
-    # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
-    # caller can forget — a branched family's siblings are `run.py --resume` PROCESSES, each of
-    # which reaches this call and stamps itself, and `learning/branch/cli.verify_family` is
-    # what compares those per-process stamps against each other and against the source run's
-    # (#976). Captured BEFORE the box exists and before any agent is alive, because the run dir
-    # is the box's rw bind and a stamp written later is a stamp the run could have moved.
-    #
-    # RE-STAMPED on a resumed setup: the earlier attempt's stamp names the commit and model of
-    # a process that never ran anything, and this one is about to. The stamp is the host's and
-    # no box has been in this directory (state `setup`), so replacing it replaces nothing a
-    # run produced.
-    #
-    # NOT every run-dir-shaped bundle: the branch archive (`learning/branch/archive.py`)
-    # copies each sibling's stamp into `worlds/<X>/` rather than materialising through here,
-    # because the stamp of the archive directory itself would name whenever the archive
-    # happened to be taken rather than what the investigation executed. Nothing else copies a
-    # stamp — in particular the learning loop's own `learning/core` writes none.
-    #
-    # EVERY RUN CAPTURES ITS OWN, and there is no seam for a caller to hand one in: the branch
-    # launcher does NOT take one capture for all N worlds — a launcher-moment record could only
-    # ever describe the launcher's process, and the family stamp is a conclusion about the
-    # siblings' own per-process records, anchored to the source's.
+    # Every executed run is stamped here, by its own process (branched siblings each reach
+    # this, and `verify_family` compares their stamps), before the box exists: the run dir is
+    # the box's rw bind, so a later stamp could have been moved by the run. There is no seam to
+    # hand a stamp in. A resumed setup is re-stamped, since no box has run in it yet.
     if state == "setup":
-        # Whatever else stands at the stamp's name (a directory a crashed attempt left) is not
-        # removed here; the guarded write below refuses it and `_stamp` says so.
+        # Anything else at the stamp's name is left for the guarded write to refuse.
         with contextlib.suppress(OSError):
             paths.provenance.unlink()
     _stamp(
@@ -189,15 +152,12 @@ def materialize_run_dir(
 def _admit_run_id(alert: Path, run_id: str | None) -> str:
     """The run id this call will materialise, or the refusal — minted from the alert when the
     operator pinned none."""
-    # THE EXPLICIT COLLISION GUARD FIRST (decision 13): it is the rule, and the run-id grammar
-    # that also happens to refuse the record's leading underscore (claim C18) is a coincidence.
+    # The explicit collision guard first; the run-id grammar refusing `_` is a coincidence.
     if run_id is not None:
         collision = _tenant.refuse_colliding_run_id(run_id)
         if collision is not None:
             sys.exit(str(collision))
-    # ONE admission rule for a run id, shared with the handle's constructors — the id minted
-    # here is one `Run.for_tenant` admits, and an operator-pinned `--run-id` is held to the
-    # same rule (case-stable, so two spellings cannot become one directory).
+    # The same admission rule as the handle's constructors, for minted and pinned ids alike.
     try:
         if run_id is None:
             run_id = mint_run_id(_alert_label(alert))
@@ -208,10 +168,8 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
 
 
 def _clear_stale_sidecars(run: Run) -> None:
-    """A previous attempt under this run id (its dir removed, its id reused) may have left its
-    sidecars beside the dir it no longer has (#1047) — ALL THREE, exact-run-id-keyed, never a
-    glob over the runs base (#1077 decision 3). Only when the dir is ABSENT: a present dir
-    with a sidecar beside it is a run that ended, and is refused."""
+    """Remove sidecars a previous attempt under this reused run id left beside its removed dir
+    — exact-run-id-keyed, never a glob. Only called when the dir is absent."""
     for sidecar in (
         run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
     ):
@@ -224,9 +182,8 @@ def _clear_stale_sidecars(run: Run) -> None:
 
 
 def _write_alert_once(run: Run, alert: Path) -> None:
-    """THE ALERT IS WRITE-ONCE: absent, it is written (through the guarded, exclusive lane — a
-    planted entry at the name is refused, never followed); present, it must be THIS alert
-    byte for byte, or the id is being reused for a different case."""
+    """The alert is write-once: written through the guarded exclusive lane when absent;
+    when present it must match byte for byte, or the id is being reused for another case."""
     alert_bytes = alert.read_bytes()
     existing, reason = _io.read_bytes_guarded(run.facts.alert.path)
     if existing is None and _io.entry_present(run.facts.alert.path):
@@ -246,31 +203,16 @@ def _stamp(
     tenant_id: str | None = None, world_id: str | None = None,
     parent_run_id: str | None = None, fork_turn: int | None = None,
 ) -> None:
-    """Write the run's stamp, and NEVER take the run down doing it.
-
-    `capture_tree` goes to some length never to raise; a write that raised beside it would
-    hand that promise straight back. The failure is real and unexceptional — ENOSPC on the runs
-    base, a read-only remount, an alias planted where a previous run left one — and it arrives
-    AFTER the run dir exists. (Before #1077 an escaping `OSError` also burned the run id —
-    `materialize_run_dir` refused a dir that already existed; decision 3 made an interrupted
-    setup resumable, so a retry now finishes what the first call left undone and re-stamps.)
-
-    The asymmetry with the alert write above is the point, not an oversight. A run without its
-    alert has no case to investigate and must die. A run without its stamp is a run nobody can
-    later prove the code for — worth a loud error in the log and worth nothing more, because
-    `read` already answers "no usable record" for a file that is not there, and an operator
-    who needs the guarantee has the announce line saying it is missing."""
+    """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
+    a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
+    be proven later, so it is logged loudly and the run continues."""
     path = run.facts.provenance.path
     try:
         record = _provenance.capture_tree(REPO_ROOT)
-        # THE MODEL RIDES WITH THE COMMIT, and is set here rather than by a second write: the
-        # stamp is written once, before the box exists, and a model recorded afterwards would
-        # be a model recorded into the box's own rw bind. `None` leaves the field absent, which
-        # is what every non-branched caller means.
+        # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
-        # #1077 O4 — both stamp fields equal the tenant record's values, never `None`, for
-        # every run the host materialises; D3/D4 — a fork's lineage rides beside them.
+        # Tenant fields equal the tenant record's values; a fork's lineage rides beside them.
         record = _dataclasses.replace(
             record, tenant_id=tenant_id, world_id=world_id,
             parent_run_id=parent_run_id, fork_turn=fork_turn)
@@ -290,13 +232,9 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    # PREPENDED, not assigned: this env also drives the adapter/query/orient host
-    # subprocesses, which inherit whatever PYTHONPATH the operator's shell set; clobbering it
-    # would silently drop those entries.
+    # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
-    # JF3: this is a HOST lane — it never carries the in-box mark, whatever the shell it
-    # inherited from set. Popped rather than never-copied: `dict(os.environ)` above already
-    # took it if the operator's own shell had it set.
+    # A host lane never carries the in-box mark, even if the operator's shell set it.
     env.pop("DEFENDER_BOX", None)
     return env
 
@@ -384,26 +322,22 @@ def learning_refusal_gate(
     fixtures_dir: Path = HELD_OUT_FIXTURES,
     truncated_by: str | None = None,
 ) -> str | None:
-    """The ONE refusal predicate both the learning enqueue and the curation enqueue consult.
-    Returns the reason a run must be refused, or `None` if it clears every net.
+    """The refusal predicate every learning enqueue consults: the reason a run must not feed
+    a corpus, or `None`.
 
-    Held out is checked by CONTENT DIGEST *and* by path containment, because neither net alone
-    is the whole set: the digest catches a copy of a fixture taken outside `fixtures_dir`
-    (containment misses it by construction), and containment catches anything inside the
-    fixture tree that the digest walk never reads — it only digests `<slug>/alert.json`."""
+    Held-out fixtures are checked by content digest (catches copies outside `fixtures_dir`)
+    and by path containment (catches files the digest walk, which reads only
+    `<slug>/alert.json`, never sees)."""
     if truncated_by is not None:
         return f"run was truncated (truncated_by={truncated_by!r}) — a truncated " \
             "investigation must not train the corpus"
-    # BOTH nets, not the digest alone — see the docstring; dropping either one narrows the guard.
     if is_held_out_fixture(alert, fixtures_dir) or is_held_out_alert_copy(alert, fixtures_dir):
         return f"{alert} is a held-out eval fixture (or a copy of one) — its findings must " \
             "never feed a corpus it is scored against"
     from defender.runtime import scrub as _scrub
 
     if not _scrub.tree_verified(run_dir):
-        # §7 D2/D9: a tree carrying no scan verdict, or one recording that the walk never ran,
-        # is not fed to the learning loop — that crash path is the one most likely to hold what
-        # a box planted.
+        # No completed scan verdict: the crash path most likely to hold what a box planted.
         return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \
             "must not feed the corpus"
     return None
@@ -418,10 +352,8 @@ def enqueue_curation(
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
-    """Catalog curation's own trigger, at the investigation boundary — welded to the shared
-    refusal predicate rather than left to caller discipline, because this is the caller that
-    hands attacker-influenced content (the investigation's goal text, bound parameters,
-    rendered queries) to the lead-author curator."""
+    """Enqueue catalog curation for a run, through `learning_refusal_gate` — this hands
+    attacker-influenced content (goal text, bound params, rendered queries) to the curator."""
     reason = learning_refusal_gate(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
@@ -433,9 +365,7 @@ def enqueue_curation(
     from defender.learning.core.config import LoopPaths, _env_state_dir
 
     paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
-    # The case-key derivation is inside the guard with the write it feeds: it reads the alert
-    # off disk, and an alert the operator moved mid-run would otherwise take the
-    # investigation's exit status down with it — for a lane already declared cheap to lose.
+    # Reading the alert is inside the guard too: a moved alert must not fail the run.
     try:
         case_id = case_ref(alert.read_bytes())
         _markers.enqueue_case_for_curation(case_id, run_dir, paths)

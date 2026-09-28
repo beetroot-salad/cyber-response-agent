@@ -1,13 +1,11 @@
 """The exec seam's contract: a payload, or an exception. Never a status code.
 
-Every call the controller makes into the stack (`cmdb_request`, `es_request`,
-`read_container_file`) either returns what the backend answered or raises
-one of these. There is no third outcome for a caller to interpret, so "the
-backend was down" can never be mistaken for "nothing there", and an HTTP
-error body can never be recorded as a success. `chaos/tests/_fakes.py`'s
-fake seam honours the same contract, which is what lets the unit suite pin
-the failure paths the real seam takes.
+Every call the controller makes into the stack either returns what the
+backend answered or raises one of these, so "backend down" can never be
+mistaken for "nothing there", nor an error body for success. The test fake
+honours the same contract.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

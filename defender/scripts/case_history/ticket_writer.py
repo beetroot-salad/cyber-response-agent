@@ -28,9 +28,8 @@ _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
 
 def _verb_context(settings_dir: Path) -> VerbContext:
-    """The transport's context: the process's code tree (`process_defender_dir`, the child
-    env's PATH/PYTHONPATH root and nothing else) and the run's tenant `settings/` folder, which
-    every leg is handed by `run.py` (#1106) and never finds from the code tree."""
+    """The transport's context: the process's code tree (`process_defender_dir`) and the run's
+    tenant `settings/` folder, which `run.py` hands every leg."""
     defender_dir = process_defender_dir()
     run_dir = Path.cwd()
     return VerbContext(
@@ -66,8 +65,7 @@ def _request(
     config: dict[str, str], method: str, path: str, body: dict | None = None,
     *, settings_dir: Path,
 ) -> tuple[str | None, str]:
-    """One call to the store. `settings_dir` is the run's tenant folder — the one `config` was
-    read from — handed in by the caller, so the transport's verb context names that tenant."""
+    """One call to the store. `settings_dir` is the tenant folder `config` was read from."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
@@ -86,9 +84,8 @@ def _request(
 
 @model(frozen=True)
 class TicketWriterDeps:
-    #: Both are handed the run's tenant `settings/` folder (#1106): `load_config` reads the
-    #: case-history store's address from it, and `request` (keyword `settings_dir`) builds the
-    #: transport's verb context over the same folder.
+    #: Both are handed the run's tenant `settings/` folder (`request` as keyword
+    #: `settings_dir`).
     load_config: Callable[[Path], dict[str, str] | None] = _load_config
     request: Callable[..., tuple[str | None, str]] = _request
 
@@ -99,9 +96,8 @@ DEFAULT_DEPS = TicketWriterDeps()
 def open_case_ticket(
     run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, settings_dir: Path,
 ) -> None:
-    """Open the case for this run. `settings_dir` is the run's tenant's folder (#1106): the
-    store's address (`case-history/config.env`) and the payload's shape (`mapping.yaml`) are
-    both that tenant's."""
+    """Open the case for this run. `settings_dir` is the run's tenant folder, holding both the
+    store's address and the payload mapping."""
     try:
         config = deps.load_config(settings_dir)
         if config is None:
@@ -126,11 +122,9 @@ def open_case_ticket(
         _logger.warning(f"open raised, ignored: {e!r}")
 
 
-#: The receipt words. `commented` is the record (#767 D2) and `escalated` the cut-short note
-#: (#1047 O2) — the two comments the host can make; `refused-released` is a record the writer
-#: declined because a person had already released the case; `error` is a call that failed.
-#: There is no `closed`: the host never transitions a case, so a receipt claiming it would
-#: record a false event.
+#: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
+#: comments the host can make; `refused-released` means a person had already released the case;
+#: `error` is a failed call. There is no `closed`: the host never transitions a case.
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_REFUSED_RELEASED = "refused-released"
@@ -141,13 +135,12 @@ _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 def _build_comment_payload(
     run_dir: Path, case_id: str, truncated_by: str | None, settings_dir: Path,
 ) -> tuple[dict, str]:
-    """The outbound `{author, body}` for `record_case_ticket` and its receipt word. §7 R10: an
-    unreadable report takes the FIXED unreadable-branch sentence, never a second, bespoke
-    emptiness check — `case_ticket.ReportNotParsable` is `read_case_record`'s own signal for
-    exactly that case. #1047 F-K: for a forced-close-set exit that same signal means the
-    host's own forced close failed, so there is no verdict to propose and the escalation note
-    goes instead. Any other `CaseTicketError` (a bad mapping, a broken template) propagates
-    to the caller's refusal branch — no POST, a warning and an `error` receipt (§7 R1/FAM-1)."""
+    """The outbound `{author, body}` for `record_case_ticket` and its receipt word.
+
+    An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
+    on a forced-close exit, the escalation note, since the host's own forced close failed and
+    there is no verdict. Any other `CaseTicketError` propagates to the caller's refusal branch
+    (no POST, a warning, an `error` receipt)."""
     try:
         rec = replace(case_ticket.read_case_record(run_dir, settings_dir=settings_dir),
                       case_id=case_id)
@@ -163,18 +156,13 @@ def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded 
     config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
     settings_dir: Path,
 ) -> bool | None:
-    """Read the case back and answer whether a person has released it — `None` when that
-    cannot be established (the read failed, the reply is not a ticket object, or the mapping
-    cannot say what "released" is spelled).
+    """Whether a person has released the case — `None` when that cannot be established (read
+    failed, not a ticket object, or the mapping cannot say what "released" is).
 
-    A person's close is a statement about the comments ON THE TICKET WHEN THEY CLOSED IT, so
-    the writer looks before it appends and declines when the case is already released.
-    This is a COURTESY, not the gate: it is one read followed by one write, and a close that
-    lands between the two still gets the comment. What makes `closed` mean "a person did this"
-    is that the host cannot transition a case at all — this module has no transition call, and
-    `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
-    the direction that writes nothing. The released status's spelling is the mapping's, read
-    through the same predicate the screen decides with (O5)."""
+    A courtesy, not the gate: a close landing between this read and the write still gets the
+    comment. What makes `closed` mean "a person did this" is that the host has no transition
+    call at all (`test_767_writer.py` keeps it that way). Undecidable is treated as not
+    recordable. Uses the same release predicate as the screen."""
     status, body = deps.request(config, "GET", f"/tickets/{quoted}", settings_dir=settings_dir)
     if status is None or not status.startswith("2"):
         _logger.warning(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
@@ -195,41 +183,36 @@ def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded 
         return None
 
 
-def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
+def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record
     run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, settings_dir: Path,
     key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
-    """D2: the host RECORDS its investigation into the case rather than closing it — at most
-    one `POST /tickets/{key}/comments`, never a transition. Closing is a person's act; the
-    host's client has no transition call, which is what lets the store's own `closed` mean
-    "a person reviewed this" to every later reader (#767 O1/O2).
+    """Record the investigation into the case, never close it: at most one
+    `POST /tickets/{key}/comments`, no transition. Closing is a person's act, which is what lets
+    the store's `closed` mean "a person reviewed this".
 
-    #1047 O2 — WHICH comment is decided per exit class, taken as an IN-PROCESS PARAMETER from
-    `run.py` (fork F3 reading A), never read off anything inside the run dir:
+    Which comment depends on the exit class, passed in-process from `run.py` (never read from
+    the run dir):
 
         aborted                        -> the escalation note: no verdict, a person escalates
         request-limit, retry-exhausted -> the record, proposing the host's own forced
                                           `unresolved`; no usable report (the forced close
-                                          itself failed, fork F-K) -> the escalation note
+                                          itself failed) -> the escalation note
         budget, store                  -> no call at all, no receipt
         anything else (None, a real
         vocabulary member with no arm, an out-of-vocabulary string)
                                         -> the record, proposing the report's disposition
 
-    `closed_before_cut` (fork F-A reading B) makes the two no-verdict arms (`aborted`,
-    `budget`/`store`) defer to a genuine model verdict instead: a run whose model had already
-    decided when the cut landed records off its own report exactly as an ordinary run would.
+    `closed_before_cut` makes the no-verdict arms (`aborted`, `budget`/`store`) record off the
+    model's own report instead, when it had already decided before the cut.
 
-    §7 R6/FAM-3: a failed or colliding open does NOT suppress this attempt (the two post-steps
-    are independent statements under one flag); every write fault is caught, warned once, and
-    leaves the run's exit code exactly what it would have been (O7). `key` is a parameter (§7
-    R8/FK04) so a vendor-minted, pre-existing key on a later deployment is a call-site edit —
-    today's deployment keeps `case_id = run_dir.name`. Keyword-only, so a bare string in the
-    second position cannot bind as `deps` and vanish into the catch-all. The key is the
-    case's identity EVERYWHERE this write names it: the two paths, the receipt and the
-    rendered `{case_id}`."""
+    A failed open does not suppress this attempt; every write fault is caught and warned once,
+    leaving the run's exit code unchanged. `key` is a parameter so a vendor-minted key is a
+    call-site edit (today `run_dir.name`), and it names the case everywhere: both paths, the
+    receipt and the rendered `{case_id}`. Keyword-only, so a stray string cannot bind as
+    `deps`."""
     try:
-        truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
+        truncated_by = run_end.normalized_truncated_by(truncated_by)  # first, before any branch
         config = deps.load_config(settings_dir)
         if config is None:
             return
@@ -247,8 +230,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                 payload, word = _build_comment_payload(
                     run_dir, case_id, truncated_by, settings_dir)
         except case_ticket.CaseTicketError as e:
-            # The mapping (or a template in it) refused: no POST, but the receipt still says
-            # so — a WARN, a receipt and a return on every arm that meant to call out.
+            # The mapping refused: no POST, but still a warning and a receipt.
             _logger.warning(f"record {case_id}: {e}; not recording")
             _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
             return
@@ -261,9 +243,8 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
     payload: dict, word: str, settings_dir: Path,
 ) -> None:
-    """The one write the host makes to a case: look (`_ticket_is_released`), then one
-    `POST /tickets/{key}/comments`, then the receipt on every branch (fork F-L: a failed call
-    never breaks the run and its outcome lands in the receipt)."""
+    """The one write the host makes to a case: check `_ticket_is_released`, one
+    `POST /tickets/{key}/comments`, and a receipt on every branch."""
     quoted = urllib.parse.quote(case_id, safe="")
     released = _ticket_is_released(config, deps, case_id, quoted, settings_dir)
     if released is None:
@@ -292,9 +273,7 @@ def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: 
         "ok": status in _RECEIPT_OK,
     }
     try:
-        # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam
-        # like every other host write into it, so a link planted at its name is refused, not
-        # followed.
+        # The run dir is box-writable: the guarded write refuses a planted link.
         write_guarded(RunPaths(run_dir).ticket_write, json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _logger.warning(f"could not write receipt: {e}")

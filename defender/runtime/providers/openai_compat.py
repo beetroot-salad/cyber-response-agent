@@ -11,10 +11,7 @@ if TYPE_CHECKING:
     from pydantic_ai.settings import ModelSettings
 
 _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "none", "default")
-#: What a THINKING-ONLY model answers a `reasoning_effort` of `none` with. Not a preference:
-#: the API refuses the request outright ("GLM-5.3 is a thinking-only model; disabling thinking
-#: is not supported"), so the run dies on its first dispatch to that lane with an HTTP 400
-#: naming the model rather than the mismatch. `low` is the cheapest thinking such a model has.
+#: The effort a thinking-only model gets instead of `none`, which its API refuses with a 400.
 _THINKING_ONLY_FLOOR = "low"
 _MAIN_EFFORT_ENV = "DEFENDER_MAIN_REASONING_EFFORT"
 _GATHER_EFFORT_ENV = "DEFENDER_GATHER_REASONING_EFFORT"
@@ -34,9 +31,7 @@ class OpenAICompatProvider:
         self.aliases = {k.lower(): v for k, v in aliases.items()}
         self.prefixes = prefixes if prefixes is not None else (f"{id}:",)
         self._effort = {AgentRole.MAIN: main_effort, AgentRole.GATHER: gather_effort}
-        #: Resolved model IDs — the alias map's VALUES — because that is what `_model_id`
-        #: answers and what the API sees; keying on the alias would miss every `fireworks:`
-        #: passthrough spelling of the same model, which is exactly how #1023 reached it.
+        #: Resolved model IDs (alias values), so `fireworks:` passthrough spellings match too.
         self.thinking_only = thinking_only
 
     def _model_id(self, name: str) -> str:
@@ -72,18 +67,12 @@ class OpenAICompatProvider:
         )
 
     def effort_for_role(self, name: str, role: AgentRole) -> str | None:
-        """The role's effort for THIS model — a provider preference clamped to a model
+        """The role's effort for this model — a provider preference clamped to a model
         capability.
 
-        Keyed on the model and not just the role because `gather_effort="none"` is one value
-        the provider states for every model it serves, and `none` is not a thing every model
-        can do. The shipped default is a PREFERENCE ("gather wants the cheapest thinking on
-        offer") and the floor is a CAPABILITY, so clamping one to the other changes nothing
-        the operator asked for.
-
-        An EXPLICIT env request is different and is refused rather than clamped: an operator
-        who typed `none` for a thinking-only model has named something the model cannot do,
-        and answering `low` would hide the one thing they wrote."""
+        A default `none` on a thinking-only model is clamped to the floor. An explicit env
+        request for `none` is refused instead, so the operator's choice is not silently
+        overridden."""
         import os
 
         is_gather = role is AgentRole.GATHER
@@ -115,14 +104,9 @@ class OpenAICompatProvider:
     def cache_affinity(self, settings: ModelSettings | None, key: str) -> ModelSettings | None:
         """Attach `key` as the request's `prompt_cache_key`.
 
-        Fireworks prompt caching is on by default and needs no opt-in. What it cannot do by
-        itself is ROUTING: cached prefixes are local to a replica, so a conversation whose
-        turns land on different replicas re-pays for a prefix already warm elsewhere. The key
-        is the documented affinity hint for that, in the OpenAI spelling Fireworks reads.
-
-        A `None` settings object is the common case (the review lenses and any role at
-        `default` effort resolve to no settings), so the key must be able to CREATE the
-        settings rather than only merge into them.
+        Fireworks caches prefixes per replica; the key is its documented routing hint so a
+        conversation's turns land where the prefix is warm. Creates settings when `None` (the
+        common case).
         """
         from pydantic_ai.models.openai import OpenAIChatModelSettings
 

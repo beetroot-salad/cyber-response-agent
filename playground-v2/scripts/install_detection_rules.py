@@ -102,7 +102,7 @@ def install_rule(password: str, rule: dict, dry_run: bool) -> bool:
         print(f"  DRY-RUN would install rule_id={rule_id} ({name!r})")
         return True
 
-    # 1) delete any existing rule with this rule_id (idempotency); 404 is fine
+    # Delete any existing rule with this rule_id first (idempotency); 404 is fine
     code, body = docker_curl(
         password, "DELETE",
         f"/api/detection_engine/rules?rule_id={rule_id}",
@@ -114,7 +114,6 @@ def install_rule(password: str, rule: dict, dry_run: bool) -> bool:
         )
         return False
 
-    # 2) POST the rule body
     code, body = docker_curl(
         password, "POST",
         "/api/detection_engine/rules",

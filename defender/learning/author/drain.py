@@ -1,39 +1,21 @@
-"""The one corpus-author drain body, and the one retire seam.
+"""The corpus-author drain body and its retire seam.
 
-Every corpus-author channel reaches its batch through `run_batch` here. Since #922 that
-is ONE channel — findings; the three observation channels lost their producer with the
-old pipeline. The parameterisation stays because it is the batch driver's contract with
-its config, not because a second channel is pending: what varies per direction
-(pre-author gate, AUTHOR_RESULT buckets, row key, the queue's two locks, commit trailers,
-the lessons-only held report) is a field on the config, and the batch body (read,
-partition, author, verify, commit, project, rotate, log) is this module.
+Every corpus-author channel reaches its batch through `run_batch`. What varies per channel
+(pre-author gate, AUTHOR_RESULT buckets, row key, the queue's locks, commit trailers, the held
+report) is a field on the config; the batch body (read, partition, author, verify, commit,
+project, rotate, log) is this module.
 
-**Retirement is reachable only from `RETIRE_SET`.** A fault whose class is not in that
-tuple never reaches the retire seam: it leaves its row queued — stuck, recoverable, and
-recorded in the channel's stuck-row file. The accepted trade is that a novel exception
-class returns to unbounded retry rather than being counted toward a ceiling and
-permanently deleted.
+Retirement is reachable only from `RETIRE_SET`. A fault whose class is not in it leaves its row
+queued — stuck, recoverable, and recorded in the channel's stuck-row file — so a novel exception
+class retries unboundedly rather than being counted toward a ceiling and deleted. The authoring
+region's cleanup is class-blind: it restores the worktree, then retires or re-raises.
 
-The one class-blind clause is the authoring region's CLEANUP, which puts the worktree back
-and then either retires (member) or re-raises unchanged. Disposition is still decided by
-one `isinstance`.
+A `GitError` is a member only where the commit failed. Git reads of repo state (worktree status,
+HEAD) go through `_git_read`, which re-raises as the non-member `GitProbeError`: index-lock
+contention on a busy repo records a stuck tick instead of burning one of the batch's attempts.
 
-`GitError` and `ModelRetry` are the two members the obvious `except AuthorError` spelling
-would silently drop, reverting a commit-time git failure and an externally killed boxed
-command back to "wedges the channel" and "reports success".
-
-**A `GitError` is a member only where it means the COMMIT failed.** The drain also reads
-repo state — the worktree status either side of the agent call, and HEAD — and a git
-failure there is contention on a busy repo, not a defect in the batch. Those reads go
-through `_git_read`, which re-raises as `GitProbeError`: not a member, so the batch keeps
-its attempt count and the tick is recorded as stuck instead. Otherwise an index-lock
-collision during a read-only probe burns an attempt against work that was fine, and three
-collisions over a queue's life delete it.
-
-SCOPE: the set governs the AUTHOR channel. The pitfalls and lead-author legs keep
-`core/faults.run_or_dead_letter`'s own re-raise set, which CONTAINS `GitError` — so a
-commit-time `GitError` retires here and kills the drain there. One class, two
-classifications, by channel: deliberate, and left for a follow-up.
+The pitfalls and lead-author legs use `core/faults.run_or_dead_letter`'s re-raise set, which
+contains `GitError`, so a commit-time `GitError` retires here but kills the drain there.
 """
 from __future__ import annotations
 
@@ -81,44 +63,40 @@ from defender.learning.core.config import (
 
 AuthorError = author_shared.AuthorError
 
-#: #773 M6's ledger file name, under the host-side pending dir (S5/G6).
+#: The forward-check gap ledger, under the host-side pending dir.
 GAP_LEDGER_NAME = "findings.forward_bad.jsonl"
-#: The reasoning prefix a doubly-failed pair's recorded BAD carries (M3.3, §7 FK-10).
+#: Reasoning prefix on the BAD recorded for a pair whose check failed twice.
 ERROR_PREFIX = "forward_check_error: "
-#: M6's commit-message block header — advisory prose beside the ledger, the authoritative
-#: record (§7 FK-15).
+#: Header of the commit-message block naming terminal findings. Advisory; the gap ledger is
+#: the authoritative record.
 TERMINAL_BLOCK_HEADER = "Forward-check terminal:"
-#: §7 FK-17: a deferral that reaches the ceiling is greppable apart from a fault's.
+#: Graveyard reason for a deferral that hit the ceiling, distinguishable from a fault's.
 DEFERRED_CEILING_REASON = "deferred_ceiling"
-#: git status codes for an UNMERGED path (§7 FK-33) — refused loudly before vouching, since
-#: the drain now reads the whole corpus tree and must have an opinion about one not in a
-#: normal state.
+#: git status codes for an unmerged path, refused before vouching rather than handed to the
+#: verifier as ordinary text.
 _UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 
-#: Spelled as a literal enumeration on purpose: it is NOT `faults.SYSTEMIC_FAULTS` (which
-#: exists to keep `GitError` OUT of retirement, the opposite of what a commit-time git
-#: failure must do here), and it is not narrowable to `AuthorError` alone (which drops the
-#: other two members).
+#: Not `faults.SYSTEMIC_FAULTS`, which keeps `GitError` out of retirement — the opposite of what
+#: a commit-time git failure needs here. Nor just `AuthorError`: without `GitError` a commit-time
+#: git failure would wedge the channel, and without `ModelRetry` an externally killed boxed
+#: command would report success.
 RETIRE_SET: tuple[type[BaseException], ...] = (AuthorError, GitError, ModelRetry)
 
 _T = TypeVar("_T")
 
 
 class GitProbeError(RuntimeError):
-    """A git command the drain used to READ repo state failed.
+    """A git command that reads repo state failed.
 
-    Deliberately not a `GitError` subclass and deliberately absent from `RETIRE_SET`: the
-    ceiling bounds work that keeps failing, and a `git status` that lost a race for the
-    index lock says nothing about the work, so it must not spend one of its three lives.
-    The tick is stuck and loud instead."""
+    Not a `GitError` subclass and not in `RETIRE_SET`: a `git status` that lost a race for the
+    index lock says nothing about the batch, so it must not spend an attempt. The tick is
+    recorded as stuck instead."""
 
 
 def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
-    """Run a call that READS repo state, converting its git failure to a non-member.
+    """Run a step that reads repo state, re-raising its `GitError` as `GitProbeError`.
 
-    Wraps whole steps rather than bare git calls, so a step that both probes git and
-    raises `AuthorError` on what it finds keeps the second half intact: only the
-    `GitError` is reclassified, and the batch's own faults still retire."""
+    Wraps whole steps, so an `AuthorError` the step raises on what it finds still retires."""
     try:
         return fn(*args)
     except GitError as e:
@@ -127,14 +105,11 @@ def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
 
 @model(frozen=True)
 class PairVerdict:
-    """#773's Data model: one (changed corpus file, this-batch cited finding) pair's
-    outcome, minted by the drain and by nothing else (O5).
+    """One (changed corpus file, cited finding from this batch) pair's forward-check outcome.
 
-    `rel_path` per §7 FK-14 — carried on every entry, not just the record's own top-level
-    field, so a finding refused on two differently-named files across the two passes is
-    still fully recoverable from its one gap-ledger record. `lesson_text` rides along so
-    M4's repair prompt can be rebuilt from the pair alone, after the file itself has been
-    restored away."""
+    `rel_path` is on every entry so a finding refused on differently-named files across the two
+    passes is recoverable from its one gap-ledger record. `lesson_text` lets the repair prompt
+    be rebuilt from the pair after the file itself has been restored."""
 
     rel_path: str
     finding_id: str
@@ -146,10 +121,9 @@ class PairVerdict:
 
 
 def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
-    """§7 FK-5: a non-`.md` file left under the corpus is reverted as a stray BEFORE
-    vouching, in both passes — vouching only ever sees `*.md` under the corpus. A non-lesson
-    file has no citations by construction, so leaving it to the vouching gate converts an
-    ordinary cleanup case into a tick-wide fault."""
+    """Revert non-`.md` files under the corpus before vouching. They cite nothing by
+    construction, so leaving them to the vouching gate would turn a cleanup into a tick-wide
+    fault."""
     for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True):
         if not rel.endswith(".md") and "D" not in xy:
             _put_back(cfg.repo_root, rel)
@@ -165,10 +139,8 @@ def _put_back(repo_root: Path, rel: str) -> None:
 
 
 def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
-    """§7 FK-33: an UNMERGED status code under the corpus refuses the tick loudly, before
-    vouching — the same instinct as FK-4: the drain now reads the whole corpus tree and must
-    have an opinion about a tree not in a normal state, rather than handing conflict markers
-    to the verifier as ordinary text."""
+    """Refuse the tick on an unmerged path under the corpus, rather than handing conflict
+    markers to the verifier as ordinary text."""
     for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True):
         if xy in _UNMERGED_XY:
             raise AuthorError(
@@ -177,48 +149,36 @@ def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
             )
 
 
-#: The acquisition order, declared in exactly one place so no call site can invent its own.
-#: Drain lock first, because a contended tick must skip BEFORE it takes the globally
-#: serialising repo lock; the append lock last and briefly, so an appender never waits on
+#: Lock acquisition order. Drain lock first, so a contended tick skips before taking the
+#: globally serialising repo lock; append lock last and briefly, so an appender never waits on
 #: the agent call.
 LOCK_ORDER: tuple[str, ...] = ("drain_lock", "repo_lock", "append_lock")
 
 
 def graveyard_file(channel: QueueChannel) -> Path:
-    """The channel's retirement record. Advisory: the queue rewrite is authoritative. Its one
-    reader is the queue page (`frontend/serialize_queues.py`, #903), which shows every record
-    to a human; nothing in the drains reads it back."""
+    """The channel's retirement record. Advisory: the queue rewrite is authoritative. Read only
+    by the queue page (`frontend/serialize_queues.py`); the drains never read it back."""
     return channel.file.with_suffix(".deadletter.jsonl")
 
 
 def retirement_stamp() -> dict[str, str]:
     """@owns retired_at — when a graveyard record was written, on every writer's record.
 
-    Three writers append dead letters (`_bump_rows` — for `retire` and the deferral fold —,
-    `_retire_unkeyable`, and the pitfalls curator's `_graveyard_dropped_rows`) and none
-    carried a time until #903: the page that
-    reads them can sort on nothing else, and a row a human cannot place against anything else
-    that happened is a row they cannot triage. One spelling, one clock, here."""
+    Shared by every dead-letter writer (`_bump_rows`, `_retire_unkeyable`, the pitfalls
+    curator's `_graveyard_dropped_rows`); the queue page sorts and places records by it."""
     return {"retired_at": now_iso()}
 
 
 def stuck_report_file(channel: QueueChannel) -> Path:
-    """The channel's stuck-row record — the externally visible trace of a fault whose class
-    is NOT in `RETIRE_SET`, since such a row stays queued. One record per non-retiring tick,
-    naming the fault class, the stalled rows and how many consecutive ticks they have been
-    stuck.
+    """The channel's stuck-row record: the visible trace of a fault outside `RETIRE_SET`, whose
+    row stays queued. One record per non-retiring tick, naming the fault class, the stalled
+    rows and how many consecutive ticks they have been stuck.
 
-    "Never reaches the graveyard" holds for every leg but the two that retire. BOTH
-    `_retire_unkeyable` and `retire` append their dead letters BEFORE the rotation that
-    removes the rows from the queue, and both release the append lock between the two — so a
-    rotation that expires against an appender arriving in that window leaves a row both
-    graveyarded AND queued, plus a further duplicate dead letter on every stuck tick after
-    it. (`retire`'s own docstring names the same window from the crash side.) The stuck
-    record is what says the two files disagree on purpose.
-
-    A stalled row with no id under its channel's key is named by a content fingerprint —
-    `_stuck_row_ids` owns that spelling — so the keyless leg's records are still tellable
-    apart from one another."""
+    A row can be both graveyarded and queued: `_retire_unkeyable` and `retire` append dead
+    letters before the rotation that removes the rows, releasing the append lock in between, so
+    a rotation that times out against an appender (or a crash) in that window leaves the row in
+    both, plus a duplicate dead letter each later stuck tick. Keyless rows are named by a
+    content fingerprint (`_stuck_row_ids`)."""
     return channel.file.with_suffix(".stuck.jsonl")
 
 
@@ -237,19 +197,13 @@ class DrainOutcome:
     batch_id: str
     commit_sha: str | None
     committed: list[dict]
-    #: @owns held["forward_bad_terminal"], held["deferred"] — the two #773 keys this dict
-    #: carries beyond the AUTHOR_RESULT bucket names; `_author_and_rotate` is the ONE site
-    #: that assembles this dict and is where both are produced (terminal_rows/deferred_held
-    #: + deferred_consumed respectively).
+    #: @owns held["forward_bad_terminal"], held["deferred"] — the two keys beyond the
+    #: AUTHOR_RESULT bucket names, both assembled in `_author_and_rotate`.
     held: dict[str, list[dict]]
     consumed: dict[str, list[dict]]
-    #: The PRE-AUTHOR gate's holds, as its own field rather than a key in `held` (#881/O3).
-    #: `held` is the AUTHOR_RESULT buckets, keyed by bucket name — rows the agent returned a
-    #: verdict on. A gate hold never reached the agent, so folding it in there would report a
-    #: row the forward check never saw as a forward-check verdict. These are also the holds
-    #: that are PERMANENT: the bucket holds are one agent's opinion of one batch, while a gate
-    #: hold waits on a fact with no writer, so the operator's report needs them most and had
-    #: them not at all.
+    #: The pre-author gate's holds. Kept out of `held` (the AUTHOR_RESULT buckets, rows the
+    #: agent judged) because these never reached the agent. They are also the permanent holds —
+    #: they wait on a fact with no writer — so the operator report needs them most.
     gate_held: list[dict]
 
 
@@ -264,34 +218,25 @@ def retire(
 ) -> RetireOutcome:
     """Bump every named row by one; retire the rows now at or over the ceiling.
 
-    The count is a LIFETIME count on the row — no reset on an intervening success, none on
-    a requeue — and the ceiling is consulted only here, i.e. only after an observed
-    failure. A row that arrives already over the ceiling rides through a clean tick
-    untouched.
+    The count is a lifetime count on the row — never reset by a success or a requeue — and the
+    ceiling is consulted only here, after an observed failure, so a row already over the
+    ceiling rides through a clean tick untouched.
 
-    `counter_key` NAMES WHAT IS BEING COUNTED, because one channel has two independent
-    reasons to bump a row. `attempts` — the default, and every caller's answer but one —
-    counts FAULTS: ticks that raised. The pitfalls lane also bounds a row the curator was
-    OFFERED and declined, which is no fault at all, and folding both into `attempts` makes
-    each ceiling arrive early in the other's traffic: two infra-faulting ticks spend a
-    freshly-queued row's whole offer budget, so its FIRST decline retires it terminally with
-    its lesson never taught. Two counters, two ceilings, one primitive; the graveyard's own
-    `attempts` slot reports whichever count drove the retirement, so the record keeps its ONE
-    shape and the other counter rides along inside `row`.
+    `counter_key` names what is counted. `attempts` (the default) counts faulting ticks; the
+    pitfalls lane also counts offers the curator declined, which are not faults. One shared
+    counter would make each ceiling arrive early under the other's traffic: two infra faults
+    would spend a fresh row's offer budget and its first decline would retire it untaught. The
+    graveyard's `attempts` slot reports whichever count drove the retirement; the other rides
+    inside `row`.
 
-    The graveyard entry lands FIRST, then the row is written into the consumed ledger by
-    the same locked rotation that rewrites the queue. The ledger write is what makes
-    retirement terminal — the observation append path reads it to dedup — so a crash
-    between the two costs one duplicate advisory record and nothing else.
+    The graveyard entry lands first, then the locked rotation writes the row into the consumed
+    ledger, which makes retirement terminal (the append path dedups against it). A crash
+    between the two costs one duplicate advisory record.
 
-    `timeout_seconds` bounds BOTH append-lock windows below and is required of any caller
-    that holds the repo lock — i.e. the corpus drain, which passes its configured wait.
-    That lock serialises every channel, so an unbounded wait here would let one channel's
-    wedged appender stall all four indefinitely. Expiry raises `TimeoutError`: the batch
-    is not bumped, and the tick surfaces as stuck. The pitfalls leg passes the same
-    configured wait through `PitfallsDisposition.apply` (#952): it retires from the
-    lead-author drain tick, which holds that tick's locks while it waits, and a wedged
-    appender must not hold it open indefinitely either; by hand it passes none."""
+    `timeout_seconds` bounds both append-lock waits and is required of any caller holding the
+    repo lock (the corpus drain; the pitfalls leg via `PitfallsDisposition.apply`): that lock
+    serialises every channel, so an unbounded wait would let one wedged appender stall them
+    all. Expiry raises `TimeoutError`; the batch is not bumped and the tick surfaces as stuck."""
     ids = {str(i) for i in batch_ids}
     key = channel.id_key
 
@@ -332,10 +277,8 @@ class _Bumped:
 def _bump_rows(
     channel: QueueChannel, rows: list[dict], *, counter_key: str, max_attempts: int, reason: str,
 ) -> _Bumped:
-    """Bump `counter_key` on every row by one and partition at the ceiling; the rows that
-    crossed it get their graveyard entry here. The one bump-and-partition, shared by the
-    fault retirement (`retire`, `attempts`) and the deferral fold (`deferrals`) — two
-    counters, two ceilings, one primitive."""
+    """Bump `counter_key` on every row and partition at the ceiling, graveyarding the rows that
+    crossed it. Shared by fault retirement (`attempts`) and the deferral fold (`deferrals`)."""
     key = channel.id_key
     survivors: list[dict] = []
     retired: list[dict] = []
@@ -349,14 +292,13 @@ def _bump_rows(
             [
                 {
                     key: rec[key],
-                    # Whichever count reached ITS ceiling, under the slot every channel's
-                    # reader already knows. A row bumped on the other counter too keeps
-                    # that one inside `row`, where it is provenance rather than the verdict.
+                    # Whichever count reached its ceiling, under the slot every reader knows;
+                    # the other counter stays inside `row` as provenance.
                     "attempts": rec[counter_key],
                     "deadletter_reason": reason,
                     **retirement_stamp(),
-                    # Nested rather than spread, so a graveyard entry has ONE shape on
-                    # every channel and is readable without knowing its queue.
+                    # Nested rather than spread, so a graveyard entry has one shape on every
+                    # channel and is readable without knowing its queue.
                     "row": {k: v for k, v in rec.items() if k != counter_key},
                 }
                 for rec in retired
@@ -406,8 +348,8 @@ def run_batch(
                 )
             except AuthorError as e:
                 log.critical(f"{e}")
-                # §7 FK-4: a NAMED, REPORTED disposition — an already-dirty corpus at tick
-                # start is loud, not a silent skip an operator has no way to see.
+                # An already-dirty corpus at tick start is recorded as stuck, not skipped
+                # silently.
                 try:
                     _record_stuck(channel, e, [])
                 except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
@@ -438,23 +380,12 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         log.info("queue empty — nothing to author")
         return 0
     if unreadable:
-        # NOT an early return, and that is the whole point. The wake gate counts an
-        # unreadable line as work (`core/drains._pending_queue_counts`), so returning here
-        # left it counted and uncleared: the gate re-fired on the same junk every tick,
-        # fetching, minting a worktree and starting a box to read the same unparseable
-        # bytes, forever. A line the tolerant reader could not turn into a row cannot be
-        # graveyarded — there is no row to write — but every rotation rewrites this file from
-        # the rows it CAN read, so falling through is what clears it. Said out loud, because
-        # that rewrite is otherwise a silent deletion.
-        # THE NEXT ROTATION, not the closing one: `persist._rewrite_queue` re-reads through
-        # the same tolerant reader whoever calls it, so `_retire_unkeyable`'s own rotation —
-        # which runs before the gate — drops these lines too, as does `retire`'s on the
-        # retiring leg. Naming one of the three would send an operator looking for bytes a
-        # different one had already taken.
-        # "WILL drop", not "drops": several exits sit between here and every rotation — a
-        # fault in the retirement, in the gate, or in the authoring region — and on each of
-        # them the lines are still there next tick, printing this same line again. This is
-        # the only trace the deletion leaves, so it must not claim to be one.
+        # Fall through rather than return: the wake gate (`core/drains._pending_queue_counts`)
+        # counts an unreadable line as work, so returning would re-fire on the same junk every
+        # tick. Such a line can't be graveyarded (there is no row), but any rotation rewrites
+        # the queue from the rows it can read, so whichever rotation runs next drops it. This
+        # warning is the deletion's only trace; a fault before any rotation leaves the lines
+        # for the next tick.
         log.warning(
             f"{unreadable} unreadable line(s) in the queue — the next rotation this tick "
             "reaches, if it reaches one, will drop them"
@@ -464,18 +395,10 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
     unkeyable: list[dict] = []
     for row in batch:
         (keyed if _row_id(row, key) else unkeyable).append(row)
-    # ONE stuck-recording guard around the whole tick body, with `stuck_rows` naming the rows
-    # the phase in flight is stuck on. It was three copies of one handler, and the copy the
-    # unkeyable retirement never got is #881/O4: that retirement takes the append lock again
-    # for its own rotation — after `_tick` released it ten lines up — so an ordinary appender
-    # arriving in that window makes the rotation raise `TimeoutError`, a class deliberately
-    # outside `RETIRE_SET` (a busy lock is not the batch's fault). Nothing retired, the row
-    # stayed queued, and the fault escaped `run_batch` leaving no stuck record: the channel
-    # wedged in silence, against this module's own contract that a non-`RETIRE_SET` fault is
-    # always visible somewhere. A guard the next phase added here has to REMEMBER is the
-    # shape that produced that hole, so there is no longer a per-phase guard to forget — and
-    # the two lines between the gate and the authoring region, which no copy covered, are
-    # inside it now too.
+    # One stuck-recording guard around the whole tick body, with `stuck_rows` naming the rows
+    # the phase in flight is stuck on, so no phase can lack one. E.g. `_retire_unkeyable`
+    # retakes the append lock for its own rotation, and an appender in that window raises
+    # `TimeoutError` (outside `RETIRE_SET`), which must still leave a stuck record.
     stuck_rows = unkeyable
     try:
         _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
@@ -488,14 +411,9 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
             f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
         )
-        # `to_author` NAMES THE AUTHORING REGION, but this same call also runs the closing
-        # rotation, which writes the gate's held rows back — and on a tick the gate held or
-        # consumed whole, `to_author` is `[]`. An empty list is a foldable dedup key in
-        # `_record_stuck`, so a rotation that expires against a busy appender there would
-        # record `row_ids: []`: none of the rows actually stuck named, and every such tick
-        # folding into one rising count whatever queue it was about. `keyed` is what is still
-        # in flight when nothing was admitted — the rows the rotation was writing — so the
-        # record names them instead of nothing.
+        # This call also runs the closing rotation, which writes the gate's held rows back.
+        # When the gate held or consumed everything, `to_author` is `[]` and a rotation fault
+        # would record no rows, so name `keyed` — what the rotation was writing.
         stuck_rows = to_author or keyed
         return _author_and_rotate(
             cfg=cfg,
@@ -509,17 +427,10 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         )
     except BaseException as e:
         if not isinstance(e, RETIRE_SET):
-            # The recorder must never REPLACE the fault it records. It appends to a file, so
-            # a full disk or an unwritable queue dir would otherwise hand the caller the
-            # WRITER's `OSError` — the real fault surviving only as `__context__`, and the
-            # `raise` below never reached. `Exception`, not `BaseException`, so an interrupt
-            # arriving mid-record still leaves at once.
-            #
-            # LOGGED, NOT SWALLOWED. A silent suppression voids this module's own contract
-            # that a non-`RETIRE_SET` fault is "always visible somewhere": the record is the
-            # only external trace of a stuck row, so a channel that cannot write one — an
-            # unwritable queue dir, or a defect inside the recorder itself — must still say
-            # so, or it wedges in exactly the silence O4 was filed against.
+            # The recorder must never replace the fault it records (a full disk would surface
+            # the writer's `OSError` instead). `Exception`, not `BaseException`, so an
+            # interrupt mid-record still leaves at once. Logged rather than swallowed: the
+            # record is a stuck row's only external trace.
             try:
                 _record_stuck(channel, e, stuck_rows)
             except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
@@ -528,14 +439,10 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
 
 
 def _verifier_key_preflight(cfg: CorpusAuthorConfig) -> None:
-    # O10: the verifier-key preflight, moved OUT of the curator stage and ahead of the
-    # first spawn — a keyless host must not pay for a spawn it cannot check. Gated on
-    # `forward_check is not None` (§7 FK-27): a channel that never wanted a check (the
-    # questioner's) must never meet this requirement. Runs unconditionally (not gated on
-    # provider match) because the curator spawn this key would otherwise ride behind is
-    # `cfg.invoke_agent`, an injection seam the drain does not control the internals of —
-    # sourcing it here is the only place the property "checked before the first spawn"
-    # is actually observable.
+    # Source the verifier key before the first spawn, so a keyless host doesn't pay for a
+    # spawn it cannot check. Only channels with a forward check need it. Not gated on provider
+    # match: the curator spawn is `cfg.invoke_agent`, an injection seam whose internals the
+    # drain doesn't control, so this is the only place "checked before the first spawn" holds.
     if cfg.forward_check is not None and cfg.forward_check.prompt_path is not None:
         cfg.source_key(
             config.verifier_model(), label=f"verify:{cfg.forward_check.error_prefix}"
@@ -544,10 +451,8 @@ def _verifier_key_preflight(cfg: CorpusAuthorConfig) -> None:
 
 @model(frozen=True)
 class _PreState:
-    """The worktree's shape just before the agent runs, so a fault after it can put the
-    worktree back the way the agent found it. Otherwise the agent's edits stay
-    uncommitted, the next tick's cleanliness gate aborts before reaching any queue, and
-    the channel wedges instead of retrying."""
+    """The worktree just before the agent runs, so a fault after it can restore it. Leftover
+    uncommitted edits would fail the next tick's cleanliness gate and wedge the channel."""
 
     snapshot: dict[str, bytes] | None
     baseline_stray: list[str]
@@ -565,20 +470,17 @@ def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
 
 
 # ---------------------------------------------------------------------------
-# The authoring region. ONE truth — the corpus tree as it stands after the last spawn —
-# and everything else computed from it once: which files changed, what each cites, every
-# (file, finding) verdict, which files are approved, what lands in the commit, and what
-# becomes of every row the batch read. A spawn's own account of itself is read for exactly
-# two things (the skip reasons and the commit message) plus one cross-check (an id it
-# CLAIMS to have committed that no file cites is a deferral, not a commit).
+# The authoring region. One truth — the corpus tree after the last spawn — from which every
+# decision is computed once: changed files, citations, verdicts, approvals, the commit, and
+# each row's fate. A spawn's own report is read only for skip reasons and the commit message,
+# plus one cross-check: an id it claims committed that no file cites is deferred.
 # ---------------------------------------------------------------------------
 
 
 @model(frozen=True)
 class _Tree:
-    """The corpus after a spawn has been settled (`_settle_tree`): the repo-relative paths
-    whose bytes differ from HEAD, and the paths deleted. The one input every later step
-    reads the corpus through."""
+    """The corpus after `_settle_tree`: repo-relative paths whose bytes differ from HEAD, and
+    paths deleted. Every later step reads the corpus through this."""
 
     changed: tuple[str, ...]
     deleted: tuple[str, ...]
@@ -587,25 +489,20 @@ class _Tree:
 def _settle_tree(
     cfg: CorpusAuthorConfig, state: _PreState, *, honoured_deletions: tuple[str, ...] | None,
 ) -> _Tree:
-    """THE post-spawn normaliser, run identically after the curator spawn and after the
-    repair spawn. One body, so the second spawn can never be held to a shorter rule than
-    the first; in order:
+    """The post-spawn normaliser, shared by the curator and repair spawns so the repair is held
+    to the same rule. In order:
 
-    1. a non-`.md` file under the corpus is reverted (§7 FK-5) — it has no citations by
-       construction, so it is a cleanup, not a fault, and it goes BEFORE the stray check
-       that would otherwise refuse the tick over it;
-    2. a change OUTSIDE the corpus (beyond what was already dirty at tick start) refuses
-       the tick — `AuthorError`, so the batch retires under `attempts`;
-    3. an unmerged path under the corpus refuses the tick (§7 FK-33);
-    4. a record byte-identical to HEAD (a mode-only change) is put back — it is not content
-       the check must judge, and left alone it would still be dirty after the commit and
-       wedge the next tick's cleanliness gate;
-    5. a deletion: the curator spawn's are honoured (`honoured_deletions is None`) and ride
-       the commit list (M5/N6); the repair spawn has no delete capability at all, so any
-       deletion beyond the honoured set is restored from the tick-start snapshot.
+    1. non-`.md` files under the corpus are reverted — they cite nothing, so this is cleanup,
+       and it must precede the stray check that would otherwise refuse the tick;
+    2. a change outside the corpus (beyond tick-start dirt) raises `AuthorError`;
+    3. an unmerged path under the corpus raises;
+    4. a mode-only change (bytes identical to HEAD) is put back — it isn't content to judge,
+       and would stay dirty after the commit and wedge the next tick's cleanliness gate;
+    5. deletions: the curator spawn's are honoured (`honoured_deletions is None`) and
+       committed; the repair spawn cannot delete, so any deletion beyond the honoured set is
+       restored from the tick-start snapshot.
 
-    Every git read here goes through `_git_read`: a git failure is the host's, not the
-    batch's, and must not spend one of its lives."""
+    Git reads go through `_git_read`: a git failure here is the host's, not the batch's."""
 
     def settle() -> _Tree:
         _revert_non_md_strays(cfg)
@@ -631,11 +528,11 @@ def _settle_tree(
 
 @model(frozen=True)
 class _Judged:
-    """One judgement of the tree: every (finding, file) verdict for the CURRENT bytes of the
-    files judged, and what each of those files cites from this batch."""
+    """One judgement of the tree: every (finding, file) verdict on the files' current bytes,
+    and what each file cites from this batch."""
 
-    #: (finding_id, rel_path) -> its verdict on the file's current bytes — plus, on the
-    #: judgement after a repair, the FK-6 BAD for a citation the repair dropped.
+    #: (finding_id, rel_path) -> its verdict on the file's current bytes; after a repair, also
+    #: the BAD for a citation the repair dropped.
     pairs: dict[tuple[str, str], PairVerdict]
     #: rel_path -> the this-batch ids the file's current bytes cite.
     cites: dict[str, frozenset[str]]
@@ -648,11 +545,9 @@ _JUDGE_ROUNDS = 4
 
 
 if TYPE_CHECKING:
-    #: `itertools.count` is generic to a type checker and a plain class at runtime, where
-    #: `itertools.count[int]` raises `TypeError: not subscriptable` — and a pydantic dataclass
-    #: EVALUATES its field annotations at decoration time (#1067), where `from __future__ import
-    #: annotations` no longer hides that. The alias keeps the `[int]` parameter for mypy and
-    #: hands pydantic the bare class, which `arbitrary_types_allowed` checks with `isinstance`.
+    #: `itertools.count[int]` raises `TypeError` at runtime, and a pydantic dataclass evaluates
+    #: its field annotations at decoration time despite `from __future__ import annotations`.
+    #: The alias gives mypy the `[int]` and pydantic the bare class (checked with `isinstance`).
     CheckCounter = itertools.count[int]
 else:
     CheckCounter = itertools.count
@@ -662,16 +557,15 @@ else:
 class _Judgement:
     """The verdict memo for one tick.
 
-    @owns PairVerdict — the ONE constructor of `PairVerdict` instances (GOOD/BAD via
-    `_verdict_for_pair`, EXEMPT via `cfg.exempt` or a channel with no check, and the FK-6
+    @owns PairVerdict — the one constructor of `PairVerdict` instances (GOOD/BAD via
+    `_verdict_for_pair`, EXEMPT via `cfg.exempt` or a channel with no check, and the
     dropped-citation BAD).
 
-    Memoised by (file, content digest, finding): the same bytes get the same verdict, so
-    judging the tree again after the repair spawn re-submits exactly the pairs whose bytes
-    moved (§7 FK-7 — an untouched file's verdict is never re-rolled), and a file the repair
-    spawn rewrote back to its pre-repair bytes keeps its pre-repair verdict. `history` holds
-    every verdict ever minted this tick in mint order, which is what a gap record carries
-    (§7 FK-13: the FILE's whole history, sibling findings included)."""
+    Memoised by (file, content digest, finding): re-judging after the repair re-submits only
+    pairs whose bytes moved, so an untouched file's verdict is never re-rolled, and a file
+    rewritten back to its pre-repair bytes keeps its verdict. `history` holds every verdict
+    minted this tick in order; a gap record carries the file's whole history, sibling findings
+    included."""
 
     cfg: CorpusAuthorConfig
     rows: dict[str, dict]
@@ -685,17 +579,14 @@ class _Judgement:
     def judge(
         self, files: tuple[str, ...], pass_no: int, *, before: _Judged | None = None,
     ) -> _Judged:
-        """Judge the tree as it stands: every this-batch id each of `files` cites, on the
-        bytes the file holds NOW. O1 — "the bytes a verdict judged are the bytes that land
-        in HEAD" — is a loop, not a check: after a round the files are read again, and a
-        file that moved while it was being judged is judged again on what it holds now,
-        until a round ends with nothing moved.
+        """Judge every this-batch id each of `files` cites, on the bytes the file holds now.
+        Rounds repeat until nothing moved during one, so the bytes a verdict judged are the
+        bytes that land in HEAD.
 
-        `before` is the judgement the repair spawn was answering. A finding it cited that
-        NO file cites any more had its lesson dropped by the rewrite — §7 FK-6: terminal for
-        that finding, recorded as a BAD on the file that dropped it, and nothing tick-wide
-        about it. The pair rides in `pairs` (so the finding's fate reads it) but not in
-        `cites` (so the file's approval does not)."""
+        `before` is the judgement the repair spawn answered. A finding it cited that no file
+        cites any more had its lesson dropped by the rewrite: terminal for that finding, and
+        recorded as a BAD on the file that dropped it. That pair goes in `pairs` (the
+        finding's fate reads it) but not `cites` (the file's approval doesn't)."""
         field_name = provenance_field(self.cfg.channel.id_key)
         texts: dict[str, str] = {}
         for _ in range(_JUDGE_ROUNDS):
@@ -741,7 +632,7 @@ class _Judgement:
         return _Judged(pairs=pairs, cites=cites)
 
     def mint(self, jobs: list[tuple[str, str, str]], pass_no: int) -> None:
-        """Fan the pairs out under `verify_batch_workers()` (the Scale section's own bound)."""
+        """Judge the pairs concurrently, bounded by `verify_batch_workers()`."""
         if not jobs:
             return
 
@@ -774,24 +665,22 @@ def _digest(text: str) -> str:
 
 @model(frozen=True)
 class _Fates:
-    """Every row the batch read, sorted into exactly one ending (O9's conservation)."""
+    """Every row the batch read, sorted into exactly one ending."""
 
     #: ids an approved file cites, every citing file approved.
     committed: list[str]
-    #: id -> the files it cites, for an id whose every pair is BAD (M6's terminal ending).
+    #: id -> the files it cites, for an id whose every pair is BAD.
     terminal: dict[str, list[str]]
-    #: ids that could not land through no fault of their own (M7).
+    #: ids that could not land through no fault of their own.
     deferred: set[str]
 
 
 def _decide_fates(
     batch_ids: set[str], judged: _Judged, approved: set[str], claimed_committed: set[str],
 ) -> _Fates:
-    """Each batch row's ending, read off the judged tree. An id some file cites takes its
-    fate from its pairs — the curator's buckets are consulted only for an id NO file cites,
-    and there the one thing read off the curator's word is the cross-check: an id it CLAIMS
-    committed with no file behind it is deferred (O4), never consumed. An id in no bucket
-    that no file cites is left queued exactly as it was (C3)."""
+    """Each batch row's ending, read off the judged tree. An id some file cites takes its fate
+    from its pairs. For an id no file cites, the curator's word is only cross-checked: claimed
+    committed means deferred, never consumed; otherwise the row is left queued as it was."""
     committed: list[str] = []
     terminal: dict[str, list[str]] = {}
     deferred: set[str] = set()
@@ -806,8 +695,7 @@ def _decide_fates(
         elif all(pv.rel_path in approved for pv in own):
             committed.append(fid)
         else:
-            # §7 FK-2: cited by files that disagree about approval this tick — neither
-            # committed nor refused, and the drain never guesses between the two.
+            # Its citing files disagree on approval; the drain never guesses between the two.
             deferred.add(fid)
     return _Fates(committed=committed, terminal=terminal, deferred=deferred)
 
@@ -858,9 +746,8 @@ def _author_batch(
         touched |= set(tree.changed)
         judged = judgement.judge(tree.changed, pass_no=2, before=judged)
 
-    # M3.4: a file is approved when it cites something from this batch and every citing
-    # pair is GOOD or EXEMPT. A changed file citing nothing (the repair spawn's drive-by,
-    # or its rewrite that dropped every citation) is simply not approved.
+    # Approved: cites something from this batch and every citing pair is GOOD or EXEMPT. A
+    # changed file citing nothing is not approved.
     approved = {
         rel for rel, ids in judged.cites.items()
         if ids and all(judged.pairs[(fid, rel)].verdict in ("GOOD", "EXEMPT") for fid in ids)
@@ -869,8 +756,7 @@ def _author_batch(
         batch_ids, judged, approved,
         claimed_committed=set(author_shared.result_list(result, "committed")),
     )
-    # FK-21: every changed-but-unapproved file goes back to its tick-start bytes BEFORE the
-    # commit list is built, so a restore failure can never coexist with a commit.
+    # Before the commit, so a restore failure can never coexist with a commit.
     _restore_unapproved_files(cfg, state.snapshot, touched - approved)
 
     message = (
@@ -907,9 +793,9 @@ def _author_batch(
 
 
 def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str) -> None:
-    """M4: the one bounded, write-only repair spawn, handed every BAD pair of this tick. A
-    repair prompt that is CONFIGURED but missing is O10's fatal-config path (§7 FK-28);
-    `None` is the shipped default, resolved inside `invoke_repair`."""
+    """The one bounded, write-only repair spawn, handed every BAD pair of this tick. A
+    configured but missing repair prompt is fatal config; `None` means the shipped default,
+    resolved inside `invoke_repair`."""
     if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
         raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
     cfg.invoke_repair(bad, batch_id, cfg)
@@ -927,11 +813,9 @@ def _handle_retire(
         max_attempts=cfg.max_attempts,
         timeout_seconds=cfg.repo_lock_wait_seconds,
     )
-    # A NAMED, REPORTED disposition for a row that SURVIVES the bump (§7 FK-4's own
-    # instinct, applied to every gate this delta reads the whole corpus tree
-    # through) — `retire`'s own graveyard entry already names the reason for a row
-    # that crossed the ceiling, so recording it again there would fire the signal on
-    # every retiring fault and make it noise rather than a stuck-tick marker.
+    # Only rows that survive the bump are recorded as stuck: a retired row's graveyard entry
+    # already names the reason, and recording it too would make the signal fire on every
+    # retiring fault.
     survivors = [row for row in to_author if row[key] not in outcome.retired]
     if survivors:
         try:
@@ -944,11 +828,10 @@ def _handle_retire(
 def _fold_deferrals(
     cfg: CorpusAuthorConfig, deferred_ids: set[str], all_rows: dict[str, dict]
 ) -> tuple[list[dict], list[dict]]:
-    """M7 — the deferral bump, folded into THIS SAME closing rotation (§7 FK-23): one
-    write, so a deferred row's incremented counter cannot be lost to a lock-wait timeout
-    between two separate rotations.
+    """Bump deferred rows for the closing rotation to write — one write, so the increment
+    cannot be lost to a lock timeout between two rotations.
 
-    @owns deferrals — the ONE function that increments a queued row's `deferrals` counter."""
+    @owns deferrals — the one function that increments a queued row's `deferrals` counter."""
     bumped = _bump_rows(
         cfg.channel, [all_rows[fid] for fid in sorted(deferred_ids)],
         counter_key="deferrals", max_attempts=cfg.max_attempts, reason=DEFERRED_CEILING_REASON,
@@ -982,9 +865,8 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
         try:
             outcome = _author_batch(cfg, to_author, batch_id, state, all_rows)
         except BaseException as e:
-            # Cleanup runs for EVERY fault, member or not: a stuck tick leaves the same
-            # edits behind a retiring one does, and leaving them wedges the channel. The
-            # membership test below still decides disposition.
+            # Clean up on every fault, member or not: a stuck tick leaves the same edits a
+            # retiring one does, and leaving them wedges the channel.
             _undo_agent_edits(cfg, state.snapshot, state.baseline_stray, state.head_before)
             if not isinstance(e, RETIRE_SET):
                 raise
@@ -1042,10 +924,8 @@ def _corpus_relative(cfg: CorpusAuthorConfig, rel: str) -> str:
 def _restore_unapproved_files(
     cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: set[str],
 ) -> None:
-    """§7 FK-21: put every file this tick changed but did NOT approve back the way the
-    TICK-START snapshot had it — unlinked if the tick created it, restored to its pre-tick
-    bytes if it already existed. Runs BEFORE the approved list is computed, so a restore
-    failure can never coexist with a commit."""
+    """Put every file this tick changed but did not approve back to its tick-start bytes, or
+    unlink it if the tick created it."""
     if snapshot is None:
         return
     for rel in rels:
@@ -1053,9 +933,8 @@ def _restore_unapproved_files(
         target = cfg.corpus_dir / corpus_rel
         pre = snapshot.get(corpus_rel)
         if pre is None:
-            # Anything left at this path — including something that is not a plain file
-            # any more — is a failed restore, not a no-op: `unlink()` raises its own
-            # `IsADirectoryError` rather than this silently leaving a corrupted entry.
+            # Anything left here, even a non-file, must go: `unlink()` raises (e.g.
+            # `IsADirectoryError`) rather than silently leaving a corrupted entry.
             if target.exists() or target.is_symlink():
                 target.unlink()
             continue
@@ -1067,9 +946,8 @@ def _restore_unapproved_files(
 def _restore_from_snapshot(
     cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: list[str],
 ) -> None:
-    """N6/M4: a deletion the repair spawn is not allowed to make is put back from the
-    TICK-START snapshot. A path the snapshot never held (created and then removed inside
-    this same tick, before repair) is left as it is: there is nothing to restore it to."""
+    """Restore, from the tick-start snapshot, deletions the repair spawn may not make. A path
+    the snapshot never held has nothing to restore to and is left alone."""
     if snapshot is None:
         return
     for rel in rels:
@@ -1083,10 +961,9 @@ def _restore_from_snapshot(
 
 
 def _append_terminal_block(message: str, terminal_ids: list[str]) -> str:
-    """M6: the drain's own commit-message block, naming exactly this tick's terminal
-    findings — advisory prose beside the gap ledger, the authoritative record (§7 FK-15).
-    Appended LAST, so a curator-authored line shaped like this header can never be mistaken
-    for the drain's own: `message.split(TERMINAL_BLOCK_HEADER)[-1]` is always this block."""
+    """Append the block naming this tick's terminal findings to the commit message. Appended
+    last, so `message.split(TERMINAL_BLOCK_HEADER)[-1]` is always this block even if the
+    curator wrote a line shaped like the header."""
     if not terminal_ids:
         return message
     block = TERMINAL_BLOCK_HEADER + " " + ", ".join(terminal_ids)
@@ -1096,13 +973,11 @@ def _append_terminal_block(message: str, terminal_ids: list[str]) -> str:
 def _append_gap_record(
     cfg: CorpusAuthorConfig, batch_id: str, row: dict, key: str, pvs: list[PairVerdict],
 ) -> None:
-    """M6: one durable record per terminal finding, written BEFORE the queue rotation (O3)
-    — a crash in that window costs one duplicate record on replay, never a silent
-    consumption.
+    """Append one durable record per terminal finding, before the queue rotation — a crash in
+    between costs a duplicate record on replay, never a silent consumption.
 
-    @owns findings.forward_bad.jsonl row shape — the ONE function that produces a gap-ledger
-    record. Every field, including `verdicts` (the file's full `PairVerdict` history, not just
-    the terminal finding's own pairs — §7 FK-13), is built here."""
+    @owns findings.forward_bad.jsonl row shape — the one producer of a gap-ledger record.
+    `verdicts` is the file's full `PairVerdict` history, not just the terminal finding's."""
     last = pvs[-1]
     record = {
         "finding_id": row[key],
@@ -1132,9 +1007,9 @@ def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> li
 def _project(
     result: dict, all_rows: dict[str, dict], cfg: CorpusAuthorConfig, *, exclude: set[str],
 ) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
-    """The curator's held/consumed buckets as queue rows, minus `exclude` — the ids the tree
-    already gave a fate, which outranks anything the curator filed them under. The
-    `committed` bucket is not projected: what committed is read off the tree (O4)."""
+    """The curator's held/consumed buckets as queue rows, minus `exclude` — ids the tree
+    already gave a fate, which outranks the curator's filing. The `committed` bucket is not
+    projected: what committed is read off the tree."""
     key = cfg.channel.id_key
     bucket_held: dict[str, list[dict]] = {}
     bucket_consumed: dict[str, list[dict]] = {}
@@ -1163,19 +1038,12 @@ def _project(
 def _assert_corpus_attributable(
     cfg: CorpusAuthorConfig, changed: tuple[str, ...], ids: set[str],
 ) -> None:
-    """M3.2: every file the CURATOR spawn changed in the corpus must be vouched for by THIS
-    BATCH — a citation of an id this tick actually read, WHATEVER bucket the curator reported
-    that finding under (O5). Unconditional (§7's own correction, G13): the drain reads the
-    whole corpus tree on every tick and must have an opinion about every file it changed,
-    not only the self-reported ones.
+    """Every corpus file the curator spawn changed must cite, under the channel's provenance
+    key, an id this batch read — whatever bucket the curator reported it under.
 
-    This is the FIRST spawn's rule only. After the repair spawn the drain already knows
-    which findings each file owned, so an unvouched file there is refused per file
-    (`_Judgement.judge`'s FK-6 pair, and no approval) rather than per tick.
-
-    Attribution is per FILE and by the channel's OWN provenance key. Raising `AuthorError`
-    routes through `_undo_agent_edits` -> `_restore_corpus`: the tick unwinds, the batch is
-    bumped and stays queued, the tick returns 2."""
+    First spawn only: after the repair the drain knows which findings each file owned, so an
+    unvouched file is refused per file (no approval) rather than per tick. The `AuthorError`
+    unwinds the tick via `_undo_agent_edits`; the batch is bumped and stays queued."""
     field = provenance_field(cfg.channel.id_key)
     unattributed = [
         rel for rel in changed if not (_cited_ids(cfg.repo_root / rel, field) & ids)
@@ -1191,12 +1059,9 @@ def _assert_corpus_attributable(
 def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
     """`(status, repo-relative path)` for everything git reports under the corpus.
 
-    The corpus is CLEAN at the top of every tick (`assert_clean_corpus_dir` refuses to
-    author otherwise), so what git reports dirty under it is exactly what this tick's
-    spawns wrote or removed. `no_renames=True` (§7 FK-32): a rename decomposes into its
-    `D`/`A` halves before anything downstream sees it, rather than one `R` record naming
-    two paths. `_settle_tree` is the one reader, and it sorts the records into the changed
-    set, the deletion list, and the mode-only changes it puts back."""
+    The corpus is clean at tick start (`assert_clean_corpus_dir`), so this is exactly what the
+    spawns wrote or removed. `no_renames=True` splits a rename into its `D`/`A` halves rather
+    than one `R` record naming two paths."""
     return sorted(
         _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True),
         key=lambda rec: rec[1],
@@ -1204,11 +1069,8 @@ def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
 
 
 def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
-    """RAW byte comparison, not text: `git_show_file`/`read_text` both decode with
-    universal-newline translation, which makes CRLF and LF compare equal even though the
-    bytes genuinely differ — a real content change (and, per `_changed_corpus_records`'s own
-    contract, one that IS "content the check must judge") that a text-mode comparison would
-    silently drop (#773 claims-adversary finding)."""
+    """Raw byte comparison: text decoding applies universal-newline translation, so a CRLF-only
+    rewrite would compare equal and a real content change would escape judgement."""
     head_bytes = _git.git_show_file_bytes(repo_root, "HEAD", rel)
     if head_bytes is None:
         return False
@@ -1220,9 +1082,8 @@ def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
 
 
 def _cited_ids(path: Path, field: str) -> set[str]:
-    """The queue-row ids one corpus file claims as its source. A file whose frontmatter
-    cannot be read cites nothing — malformed is unattributable, which is the disposition it
-    should have had anyway."""
+    """The queue-row ids one corpus file claims as its source. A file whose frontmatter cannot
+    be read cites nothing, so it is unattributable."""
     try:
         text = read_text_utf8(path)
     except TEXT_READ_ERRORS:
@@ -1249,10 +1110,9 @@ def _read_or_empty(path: Path) -> str:
 
 
 def _resolves_inside_runs_dir(runs_dir: Path, source_id: str) -> bool:
-    """§7 FK-30: the queue-side twin of O5 — a traversal-shaped `run_id` must resolve to a
-    path INSIDE `runs_dir` when the check opens it. A provenance argument alone ("the id
-    comes from the row, never the model") holds only as far as the row itself is validated,
-    and the queue is written by a producer, not by a human."""
+    """Whether `source_id` resolves inside `runs_dir`. The id comes from a queue row, not the
+    model, but rows are machine-written and unvalidated, so a traversal-shaped `run_id` is
+    possible."""
     runs_root = runs_dir.resolve()
     resolved = (runs_dir / source_id).resolve()
     return resolved == runs_root or runs_root in resolved.parents
@@ -1263,12 +1123,9 @@ def _attempt_pair(
 ) -> tuple[str, str]:
     """One attempt at one pair: build the `CheckContext` and call the check.
 
-    Raises `VerdictError` for a content-shaped local failure — no/malformed `run_id`, a
-    `run_id` that resolves outside `runs_dir` — the SAME class M3.3's retry-once handler
-    catches for an unparseable verifier reply, so a malformed queue row takes the identical
-    disposition (retry once, then BAD). `StageAbort`/`FatalConfigError`/any other exception
-    propagate unchanged — a call that never COMPLETED is a different failure kind entirely
-    (§7 FK-9) and is never retried here."""
+    A missing, malformed or escaping `run_id` raises `VerdictError` — the class an unparseable
+    verifier reply raises — so a malformed row gets the same retry-once-then-BAD disposition.
+    Any other exception (a call that never completed) propagates unretried."""
     try:
         source_id = row["run_id"]
     except KeyError as e:
@@ -1277,9 +1134,7 @@ def _attempt_pair(
         raise VerdictError(f"forward_check: row's run_id is not a usable string: {source_id!r}")
     if not _resolves_inside_runs_dir(cfg.runs_dir, source_id):
         raise VerdictError(f"forward_check: run_id resolves outside runs_dir: {source_id!r}")
-    # Only ever called from `_Judgement.mint`, which routes a pair here only once it has
-    # checked `cfg.forward_check is not None` — narrowed here for mypy, not a new runtime
-    # check.
+    # `_Judgement.mint` only routes here when a check is configured; narrowed for mypy.
     assert cfg.forward_check is not None
     idx = next(counter)
     ctx = CheckContext(
@@ -1301,11 +1156,9 @@ def _attempt_pair(
 def _verdict_for_pair(
     cfg: CorpusAuthorConfig, counter: Any, rel: str, row: dict, path: Path, lesson_text: str,
 ) -> tuple[str, str]:
-    """M3.3: a `VerdictError` (or a local content-shaped failure treated identically) is
-    re-run exactly once; the second failure records BAD with `forward_check_error:`-prefixed
-    reasoning that concatenates both attempts' text (§7 FK-10). Any other exception —
-    `StageAbort`/`FatalConfigError` included — propagates on the FIRST attempt, never
-    retried, and mints no `PairVerdict` at all (§7 FK-9)."""
+    """Retry a `VerdictError` once; a second one records BAD with `ERROR_PREFIX` reasoning
+    carrying both attempts' text. Any other exception propagates on the first attempt and
+    mints no verdict."""
     try:
         return _attempt_pair(cfg, counter, rel, row, path, lesson_text)
     except VerdictError as e1:
@@ -1318,9 +1171,9 @@ def _verdict_for_pair(
 def build_repair_user_prompt(
     pairs: list[PairVerdict], cfg: CorpusAuthorConfig, *, salt: str | None = None,
 ) -> str:
-    """M4/S4: the repair spawn's user turn, one section-triple per BAD pair — the finding's
-    own identity, the file's CURRENT (pre-repair) text and the verifier's reasoning — each
-    inside its OWN `wrap()` envelope, since all three are model-authored (S4)."""
+    """The repair spawn's user turn: per BAD pair, the finding's identity, the file's
+    pre-repair text and the verifier's reasoning, each in its own `wrap()` envelope since all
+    three are model-authored."""
     from uuid import uuid4
 
     stage_salt = salt if salt is not None else uuid4().hex
@@ -1340,20 +1193,15 @@ def build_repair_user_prompt(
 def _retire_unkeyable(
     channel: QueueChannel, rows: list[dict], log, timeout_seconds: int
 ) -> None:
-    """A row carrying no value under its channel's id field is bad data, not a broken
-    system: it retires immediately as a per-item failure and its well-formed batch-mates
-    are authored on the same tick.
+    """Retire rows with no id under the channel's key at once, on their own rotation; their
+    well-formed batch-mates are authored this tick.
 
-    IMMEDIATELY means on its own rotation, not on the tick's closing one. A keyless row
-    cannot be matched by id, so the closing rotation would remove it by putting `None` in
-    the processed set — swallowing any keyless row appended while the agent ran, with no
-    graveyard entry — and that rotation never runs on a retiring or stuck tick, leaving the
-    row queued to be graveyarded again every following tick.
+    Not left to the closing rotation: a keyless row can't be matched by id, so that rotation
+    would remove it via `None` in the processed set — swallowing any keyless row appended
+    meanwhile, with no graveyard entry — and it never runs on a retiring or stuck tick.
 
-    The record is FLAT — the row's whole content spread at the top level, not nested under
-    `row` the way `retire` writes it. There is no id to reference such a row by, so the
-    content IS the record; a consumer of this file must branch on the presence of `row`
-    rather than assume one shape."""
+    The record is flat (row content at top level, not nested under `row` as `retire` writes
+    it), since there is no id to reference; consumers must branch on the presence of `row`."""
     if not rows:
         return
     reason = f"row carries no value under {channel.id_key!r}"
@@ -1378,11 +1226,8 @@ def _retire_unkeyable(
 def _row_id(row: dict, key: str) -> str | None:
     """This row's id under its channel's key, or `None` where it has none.
 
-    THE ONE PREDICATE. `_tick` splits the batch on it and `_stuck_row_ids` names rows by it,
-    and the two disagreeing is not cosmetic: a bare `if rid:` says yes to a truthy non-string
-    id, so a row filed as unkeyable on one side is named as though it had a real id on the
-    other — the fold collision `_stuck_row_ids`' fingerprint exists to prevent, by a route
-    no test takes."""
+    Shared by `_tick` (to split the batch) and `_stuck_row_ids` (to name rows): if they
+    disagreed, a truthy non-string id filed as unkeyable would be named as a real id."""
     rid = row.get(key)
     return rid if isinstance(rid, str) and rid else None
 
@@ -1390,23 +1235,11 @@ def _row_id(row: dict, key: str) -> str | None:
 def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
     """@owns row_ids — how a stuck record names the rows a tick is stuck on.
 
-    A row's own id where it has one. A row that has NONE is named by a fingerprint of its
-    content instead, because the alternative is naming nothing: the unkeyable leg (#881/O4)
-    hands this function rows whose whole defect is a missing id, and dropping them left the
-    record with an empty list — which reads to `_record_stuck`'s dedup as "the same rows as
-    last time" for every keyless tick, folding two unrelated poison rows into one count that
-    looks like one problem getting worse, and leaving the operator no way to tell WHICH rows
-    the channel is stuck on.
-
-    Canonical JSON so the same row fingerprints the same across ticks and processes, and
-    prefixed so a fingerprint can never be mistaken for a real id."""
+    A row's own id where it has one; otherwise a prefixed fingerprint of its canonical JSON,
+    stable across ticks and processes. Naming nothing would make `_record_stuck` fold
+    unrelated keyless ticks into one rising count and hide which rows are stuck."""
     named: list[str] = []
     for row in rows:
-        # `_row_id`, the SAME function `_tick` split on, not a second spelling of it. A
-        # second spelling said yes to a truthy non-string id — a row `_tick` had already
-        # filed as unkeyable — and named it `str(rid)`: unprefixed, indistinguishable from a
-        # real id, and identical for two different rows that happen to share it, which is the
-        # fold collision the fingerprint below exists to prevent.
         rid = _row_id(row, channel.id_key)
         if rid is not None:
             named.append(rid)
@@ -1419,30 +1252,19 @@ def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
 
 
 def record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
-    """THE public spelling of "record this fault on the channel's stuck report".
-
-    `drains._drain_one_curator` is a second frame that catches faults this module raises, and
-    it was reaching into `_record_stuck` directly — a private name whose signature could change
-    under it with no lint and no test coupling. Same body, one supported entry point.
-    """
+    """Record this fault on the channel's stuck report (the public entry point, used by
+    `drains._drain_one_curator`)."""
     _record_stuck(channel, exc, rows)
 
 
 def stuck_record_count(channel: QueueChannel) -> int:
     """How many records the channel's stuck report holds right now.
 
-    The instrument a second frame uses to ask whether THIS tick's fault has already been
-    recorded, without guessing from the exception. `_record_stuck` folds `consecutive_ticks`
-    only when the previous record's fault class AND row ids both match — so two records per
-    tick, written by two frames holding two different row sets, meant the next tick's record
-    matched neither and the count reset to 1 forever. A permanently wedged channel emitted an
-    endless run of `consecutive_ticks: 1` and an operator paging on "stuck for N ticks" never
-    fired, which is the exact silence the counter exists against.
-
-    ASKED OF THE FILE, never of the exception. Marking the exception itself would look simpler
-    and is wrong: nothing stops a raiser reusing one exception instance across ticks (this
-    suite's own `raising()` fake does), and a mark that outlives its tick suppresses every
-    record after the first.
+    Lets a second frame ask whether this tick's fault is already recorded: `_record_stuck`
+    folds `consecutive_ticks` only when fault class and row ids both match, so two records per
+    tick with different row sets would reset the count to 1 forever. Asked of the file rather
+    than marked on the exception, because a raiser may reuse one exception instance across
+    ticks.
     """
     path = stuck_report_file(channel)
     return len(read_jsonl_rows(path)) if path.is_file() else 0
@@ -1451,28 +1273,17 @@ def stuck_record_count(channel: QueueChannel) -> int:
 def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
     """@owns recorded_at — the operator signal for a stuck tick, and when it was written.
 
-    The file is append-only and nothing clears it, so the queue page (#903) can only ever say
-    "last faulted at", never "stuck right now" — and without this stamp it could not say
-    which of those it was showing.
-
-    The operator signal for a stuck tick. The count is per TICK, not per row — a
-    non-retiring row must stay byte-identical, so the counter cannot live on it the way
-    `attempts` does, which is why the last record is read back before appending."""
+    The file is append-only and never cleared, so the stamp is what lets the queue page say
+    "last faulted at". The count is per tick, not per row: a non-retiring row must stay
+    byte-identical, so the last record is read back instead."""
     fault_class = type(exc).__name__
     ids = _stuck_row_ids(channel, rows)
     path = stuck_report_file(channel)
     previous = read_jsonl_rows(path)
     consecutive = 1
-    # AN EMPTY LIST IS A ROW SET, not a missing one. `_stuck_row_ids` names every row it is
-    # handed — a keyless one by its fingerprint — so `ids == []` now means one thing only:
-    # the phase that faulted had NO rows in flight. That is the authoring leg on a tick whose
-    # gate held or consumed the whole batch, and two such ticks failing with one fault class
-    # ARE the same problem recurring, which is what `consecutive_ticks` exists to say.
-    # Refusing to fold there pinned the count at 1 forever for exactly the queue this issue
-    # is about — a permanently gate-held one — so an operator paging on "stuck for N ticks"
-    # saw N one-off faults and never fired. The collapse that guard was reaching for is the
-    # one the fingerprint above already closed: two DIFFERENT poison rows reading as the same
-    # rows, which cannot happen once every row is named.
+    # An empty id list is a row set too: the faulting phase had no rows in flight (e.g. the
+    # gate held the whole batch). Consecutive such ticks with one fault class are the same
+    # problem recurring, so they fold.
     if previous:
         last = previous[-1]
         same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
@@ -1508,25 +1319,21 @@ def _undo_agent_edits(
 ) -> None:
     """Put the worktree back the way the agent found it after a faulted tick.
 
-    THE CORPUS HALF IS SKIPPED ONCE THE COMMIT HAS LANDED. `git_commit` reads HEAD after
-    committing, so a git failure at that last step arrives with the lessons already in
-    history — and an unconditional restore would delete exactly those files, leave the
-    next tick staring at a corpus full of deletions, and wedge the channel. When git cannot
-    say whether HEAD moved, nothing is deleted: the only thing this test gates is a
-    deletion, so it fails toward keeping files.
+    The corpus is restored only if the commit did not land: `git_commit` reads HEAD after
+    committing, so a git failure there arrives with the lessons already in history, and
+    restoring would delete them and wedge the channel. When git can't say whether HEAD moved,
+    nothing is deleted.
 
-    THE STRAY HALF IS UNCONDITIONAL, because the commit is pathspec-limited to the corpus
-    and can never have captured a file outside it. Without it a file the agent wrote
-    outside the corpus survives the fault and is folded into the NEXT tick's baseline, so
-    the out-of-scope-write guard treats it as pre-existing dirt — fires once, then stays
-    disarmed for the life of the worktree."""
+    Strays outside the corpus are always reverted (the commit is pathspec-limited, so it
+    can't have captured them); otherwise they fold into the next tick's baseline and disarm
+    the out-of-scope-write guard."""
     if not _commit_landed(cfg.repo_root, head_before):
         _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot)
     _revert_strays(cfg.repo_root, cfg.corpus_dir_rel, baseline_stray)
 
 
 def _commit_landed(repo_root: Path, head_before: str) -> bool:
-    """Did HEAD move? Answers TRUE when git cannot say — see `_undo_agent_edits`."""
+    """Whether HEAD moved; True when git cannot say, so nothing gets deleted."""
     try:
         return author_shared.git_head_sha(repo_root) != head_before
     except GitError:
@@ -1534,12 +1341,10 @@ def _commit_landed(repo_root: Path, head_before: str) -> bool:
 
 
 def _revert_strays(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
-    """Undo what the agent wrote OUTSIDE the corpus during this tick.
+    """Undo what the agent wrote outside the corpus this tick, leaving pre-existing dirt alone.
 
-    Scoped to the difference against the pre-agent status, so pre-existing dirt the drain
-    did not cause is left exactly where it was. Best-effort by design: this runs while a
-    fault is already propagating, and a second failure here would replace the diagnosis
-    the caller is carrying with a worse one."""
+    Best-effort: it runs while a fault is propagating, and a second failure would replace that
+    diagnosis."""
     try:
         strays = sorted(
             set(author_shared.changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
@@ -1555,11 +1360,9 @@ def _restore_corpus(
 ) -> None:
     """Put the corpus back to its pre-agent contents.
 
-    The content restore is filesystem-only on purpose: the failure this exists for is a
-    git one, and a git-based restore would need the very index lock that failed. The
-    unstage is best-effort for the other shape of commit failure — a rejected commit,
-    where the add DID land — and is allowed to fail silently, since the case it cannot
-    reach is the case where nothing was staged."""
+    The content restore is filesystem-only: the failure it handles is usually git's, and a git
+    restore would need the index lock that failed. The unstage is best-effort, for a rejected
+    commit where the add did land."""
     if snapshot is None:
         return
     _git.git(["reset", "-q", "--", str(corpus_dir)], cwd=repo_root, check=False)

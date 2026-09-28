@@ -1,63 +1,50 @@
 #!/usr/bin/env python3
-"""Unaccounted selection — flag code under ``defender/`` that selects a subset of an
-invlang document by grammar and drops the rest in silence.
+"""Unaccounted selection: flag code under ``defender/`` that selects a subset of an invlang
+document by grammar and drops the rest in silence.
 
-ONE RULE, TWO ARMS. Whenever a reader splits invlang bytes into "the part I want" and "the
-rest", the rest has to go somewhere a reader can name — another rule that owns it, a
-diagnostic, or an answer that changes because the selection came back empty. Discarding it
-is not neutral; it makes content that was WRITTEN indistinguishable from content that was
-never there, and every downstream rule is universally quantified, so what vanishes is not
-merely unchecked — it is un-refusable.
+One rule, two arms. Whenever a reader splits invlang bytes into "the part I want" and "the
+rest", the rest has to go somewhere nameable — another rule that owns it, a diagnostic, or an
+answer that changes because the selection came back empty. Discarding it makes written content
+indistinguishable from absent content, and since downstream rules are universally quantified,
+what vanishes is not merely unchecked but un-refusable.
 
-Both arms exist because the same defect shipped twice at different scales (#932).
+Arm 1 — the document. Walking ``INVLANG_FENCE_RE`` matches while dropping the complement means
+rows written outside a fence (e.g. a ``## PLAN`` section after a closed fence) never reach the
+tokenizer, cannot raise a ``ParseWarning``, and every hypothesis-side rule passes over an empty
+collection. ``parser.scan_fences`` is the one reader of the pattern and returns what the fences
+orphan alongside what they hold.
 
-ARM 1 — THE DOCUMENT. ``INVLANG_FENCE_RE`` matches ```invlang…``` pairs and three readers
-walked its matches while dropping the complement: the tokenizer, the frontier's prefix
-rebuild, and the turn-N seed slicer. A run closed its ORIENT fence, wrote prose, then
-continued with ``## PLAN`` and all its ``:H`` rows without reopening one. Rows outside a
-fence never reach the tokenizer, so they cannot even raise a ``ParseWarning``; the companion
-came back with no hypotheses and every hypothesis-side rule passed over an empty collection.
-``parser.scan_fences`` is now the one reader of the pattern and returns what the fences
-ORPHAN alongside what they hold.
+Arm 2 — the cell. The same shape one level down: a mixed column (``:L findings``' ``tests``
+holds hypotheses and commitments) read with ``[t for t in tested if SOME_ID_RE.fullmatch(t)]``
+per kind skips a token in neither namespace (e.g. the qualified ``h-001.ac1``), so it reaches
+no rule. Classify exhaustively and report the residue.
 
-ARM 2 — THE CELL. The same shape one level down. ``:L findings``' ``tests`` column is mixed
-(hypotheses and the commitments a lead was run for), and both readers of it SELECTED their
-kind with ``[t for t in tested if SOME_ID_RE.fullmatch(t)]``. A token in neither namespace
-was skipped by both and validated clean — including ``h-001.ac1``, the qualified spelling
-spec rule #7 blesses, which a live run wrote as its ENTIRE tests cell. That lead's whole
-column reached no rule at all. The fix was to classify exhaustively and report the residue.
+What arm 2 flags: a call to a ``*_RE``-suffixed regex — ``match`` / ``fullmatch`` /
+``search`` — inside a comprehension's ``if``, not under a ``not``:
 
-WHAT ARM 2 FLAGS: a call to a ``*_RE``-suffixed regex — ``match`` / ``fullmatch`` /
-``search`` — inside a comprehension's ``if``, where the call is NOT under a ``not``.
-Non-negated is the whole distinction and it is load-bearing:
+    [t for t in xs if ID_RE.fullmatch(t)]          # keeps matches, drops the rest  -> flagged
+    [err(t) for t in xs if not ID_RE.fullmatch(t)] # reports non-matches            -> clean
 
-    [t for t in xs if ID_RE.fullmatch(t)]          # KEEPS matches, drops the rest  -> flagged
-    [err(t) for t in xs if not ID_RE.fullmatch(t)] # REPORTS non-matches            -> clean
+The second shape is how the id rules in ``validate.py`` are written, and it is correct.
 
-The second shape is how the four id rules in ``validate.py`` are written and it is correct;
-without the negation test this gate would flag all of them and read as noise.
+The ``*_RE`` suffix is a convention, not a resolved type; a regex that does not follow it is
+invisible here — the price of not requiring type inference.
 
-The ``*_RE`` suffix is a CONVENTION, not a resolved type — every regex in this package
-follows it, and one that does not is invisible here. That is the arm's known hole and it is
-the price of not requiring type inference.
+What neither arm sees — read before treating a green run as proof:
 
-WHAT NEITHER ARM SEES — read before treating a green run as proof:
-
-- ``getattr(parser, "INVLANG_" + "FENCE_RE")`` and other computed access; the gate reads
-  names, not values.
+- ``getattr(parser, "INVLANG_" + "FENCE_RE")`` and other computed access.
 - A split done with ``str.split`` or ``find``/``index`` arithmetic rather than a regex.
-- A filter written as a ``for`` loop with a bare ``continue`` rather than a comprehension.
-  ``lint_silent_row_drop`` covers that shape where a ``ParseWarning`` is owed.
-- Whether a caller that DOES use ``scan_fences`` reads ``orphaned_headers`` at all, or
-  whether a residue rule someone adds actually reports. Nothing structural can ask that.
+- A filter written as a ``for`` loop with a bare ``continue`` (``lint_silent_row_drop``
+  covers that shape where a ``ParseWarning`` is owed).
+- Whether a ``scan_fences`` caller reads ``orphaned_headers``, or whether a residue rule
+  actually reports.
 
-So a clean run means "no reader selects by grammar without saying where the rest went, in
-the two shapes mechanized here" — not "every complement is accounted for".
+So a clean run means "no reader selects by grammar without saying where the rest went, in the
+two shapes mechanized here" — not "every complement is accounted for".
 
-THE BASELINE SHIPS EMPTY. Arm 1's five sites were folded into ``scan_fences``; arm 2's four
-surviving sites are correct and carry an inline marker SAYING SO, which is the documentation
-this gate exists to force. Mark a deliberate site with ``# lint-selection: ok — <reason>``
-on the flagged line or anywhere in the flagged node's span.
+The baseline ships empty; correct arm-2 sites carry an inline marker saying why, which is the
+documentation this gate exists to force. Mark a deliberate site with
+``# lint-selection: ok — <reason>`` on the flagged line or anywhere in the flagged node's span.
 """
 
 
@@ -77,11 +64,9 @@ BASELINE_PATH = Path(__file__).with_name("lint_unaccounted_selection_baseline.js
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-selection: ok",)
 
-#: The modules that OWN the split. `_tokenize` holds the fence grammar and must use the
-#: regex; `parser` is the facade that re-exports the name, which reads as an `import`
-#: finding but adds no second reader. Exempted by full relative path, not basename: a
-#: basename match would wave through any new `parser.py` anywhere under the scope — i.e. a
-#: verbatim second copy of the grammar, which is the one thing this gate exists to stop.
+#: The modules that own the split: `_tokenize` holds the fence grammar, and `parser` is the
+#: facade re-exporting the name. Exempted by full relative path, not basename, so a verbatim
+#: second copy named `parser.py` elsewhere is not waved through.
 CANONICAL_MODULES = (
     "skills/invlang/parser/_tokenize.py",
     "skills/invlang/parser/__init__.py",
@@ -94,9 +79,8 @@ _RE_FUNCTIONS = (
     "compile", "search", "match", "fullmatch", "finditer", "findall", "split", "sub", "subn",
 )
 
-#: Arm 2. The regex methods that ANSWER a shape question, and so can stand as a
-#: comprehension's filter. `sub`/`split`/`findall` transform rather than test and cannot
-#: appear in an `if` position meaningfully, so they are not listed.
+#: Arm 2: regex methods that answer a shape question and so can stand as a comprehension
+#: filter. `sub`/`split`/`findall` transform rather than test.
 _PREDICATE_METHODS = ("match", "fullmatch", "search")
 
 _ADVICE = {
@@ -121,10 +105,8 @@ _FIX = {
 def _negated_within(cond: ast.expr, call: ast.Call) -> bool:
     """True when `call` sits under a `not` inside the comprehension condition `cond`.
 
-    THE DISTINCTION ARM 2 RESTS ON. `if RE.fullmatch(t)` keeps the matches and discards
-    everything else; `if not RE.fullmatch(t)` turns every non-match into the finding. The
-    second is how `validate.py`'s four id-structure rules are written, and flagging them
-    would make this gate noise."""
+    `if RE.fullmatch(t)` keeps matches and discards the rest; `if not RE.fullmatch(t)` turns
+    every non-match into the finding, which is correct and must not be flagged."""
     for sub in ast.walk(cond):
         if isinstance(sub, ast.UnaryOp) and isinstance(sub.op, ast.Not):
             if any(inner is call for inner in ast.walk(sub.operand)):
@@ -143,8 +125,8 @@ def _grammar_filter_calls(node: ast.AST) -> list[ast.Call]:
                 if sub.func.attr not in _PREDICATE_METHODS:
                     continue
                 base = sub.func.value
-                # `ID_RE.fullmatch(...)` and `parser.ID_RE.fullmatch(...)` alike — the name
-                # carrying the convention is the one immediately left of the method.
+                # `ID_RE.fullmatch(...)` or `parser.ID_RE.fullmatch(...)`: the name carrying
+                # the convention is the one immediately left of the method.
                 name = getattr(base, "id", None) or getattr(base, "attr", None)
                 if not (isinstance(name, str) and name.endswith("_RE")):
                     continue
@@ -179,7 +161,7 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
 
 def _kind(node: ast.AST, env: ModuleEnv) -> str | None:
     if isinstance(node, (ast.Import, ast.ImportFrom)):
-        # `as` name is irrelevant — what is bound is the same object under another label.
+        # The `as` name is irrelevant; the bound object is the same.
         if any(alias.name == FENCE_CONST for alias in node.names):
             return "import"
         return None
@@ -204,14 +186,12 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
         kind = _kind(node, env)
-        # Arm 1 exempts the module that OWNS the fence split — it must use the regex. Arm 2
-        # does not: a silent grammar filter inside the parser is the same defect it is
-        # anywhere else, and three of the four sites this gate documents live there.
+        # Arm 1 exempts the modules that own the fence split. Arm 2 does not: a silent
+        # grammar filter inside the parser is the same defect there.
         if kind in ("import", "attribute", "regex") and rel in CANONICAL_MODULES:
             kind = None
         if kind and not _suppressed(node, lines):
-            # Fingerprint carries no line number, so moving the offending call within its
-            # function does not read as a new finding — same convention as the sibling gates.
+            # No line number, so moving the call within its function is not a new finding.
             fingerprint = f"{rel}:{func_name}:{kind}"
             if fingerprint not in seen:
                 seen.add(fingerprint)
@@ -230,8 +210,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    """Findings under ``root``, fingerprints relative to it — so the gate is drivable on an
-    injected tmp tree, not just the repo checkout."""
+    """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
@@ -268,9 +247,8 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean".
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

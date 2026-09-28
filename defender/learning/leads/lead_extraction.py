@@ -40,9 +40,8 @@ class ExecutedLead:
     payload_status: str
     payload_digest: str
     error_class: str | None
-    #: `QueryRow.is_sentinel`, carried through so downstream collectors partition on the SAME
-    #: predicate the projection did rather than each re-deriving it from the `query_id`
-    #: string. Defaults `False` so a hand-built row in a test is an ordinary query.
+    #: `QueryRow.is_sentinel`, carried so collectors partition on the projection's predicate
+    #: rather than re-deriving it from `query_id`. Defaults `False` for hand-built rows.
     is_sentinel: bool = False
 
 
@@ -61,10 +60,9 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
     for entry_idx, jl in enumerate(joined_leads):
         goal = jl.goal or ""
         wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
-        # `.rows` — the WHOLE table for this lead, sentinels included, in the table's own seq
-        # order. This is the one reader that must not take the sentinel split: `query_index`
-        # keys `pitfall_id`, and `collect_general_failures` below is exactly the collector the
-        # `∅.bash-shim` row was minted for. Agent-facing projections read `.queries` instead.
+        # `.rows`, sentinels included, in seq order: `query_index` keys `pitfall_id`, and
+        # `collect_general_failures` needs the `∅.bash-shim` rows. Agent-facing projections
+        # read `.queries` instead.
         rows = jl.rows
         is_multi = len(rows) > 1
         for q_idx, q in enumerate(rows):
@@ -99,14 +97,12 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
 
 
 def _is_reducer_failure(lead: ExecutedLead) -> bool:
-    """#870 M5′ — is this row the REDUCER's mistake rather than a system's?
+    """Is this row the reducer's mistake rather than a system's?
 
-    EQUALITY with the reserved sentinel, never a suffix, a substring or `is_sentinel` alone:
-    `resolve_query_id` returns a well-formed `<system>.bash-shim` verbatim (C15), so a model
-    that spells a near miss must not be able to route its own row onto the reducer surface
-    (U3). `is_sentinel` rides along because it is the projection's own verdict
-    on the row (#841) — the collectors partition on the SAME predicate the split did rather
-    than each re-deriving one from the string.
+    Exact equality with the reserved sentinel, never a suffix or substring:
+    `resolve_query_id` passes a well-formed `<system>.bash-shim` through verbatim, so a model
+    must not be able to route its own row onto the reducer surface. `is_sentinel` is the
+    projection's own verdict on the row.
     """
     return lead.is_sentinel and lead.query_id == BASH_SHIM_QUERY_ID
 
@@ -117,23 +113,17 @@ def collect_general_failures(
 ) -> list[dict]:
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
-    # The SAME "is this identity already answered" set `synthesize_drafts` mints against
-    # (`answered_identities`: ids UNION `covers:`), not a second copy keyed on ids alone. This
-    # is the ONE partition deciding whether an `agent-fixable` failure becomes a draft or
-    # pitfalls residue, and a row the mint calls answered while this calls it draftable lands
-    # in neither.
+    # The same answered set `synthesize_drafts` mints against, so every `agent-fixable`
+    # failure lands as either a draft or pitfalls residue, never neither.
     by_id = answered_identities(catalog)
     out: list[dict] = []
     for lead in executed:
         if lead.error_class != "agent-fixable":
             continue
-        # #870 M5′: the reducer lane, tested BEFORE the systemless guard below. A failed
-        # `… | defender-sql …` reduce belongs to `defender-sql`, not to whichever system's
-        # payload it happened to open, so the row is admitted on the sentinel id alone and its
-        # `system` is normalized to `""` HERE, at collection — which is what makes three
-        # attributed rows carrying one diagnosis ONE record under `pitfall_key` (F2/C8)
-        # instead of three bullets of one lesson. The infra guard above still runs first (N9):
-        # a broken deployment is not a lesson any corpus file should carry.
+        # Reducer rows are tested before the systemless guard: a failed `defender-sql` reduce
+        # belongs to `defender-sql`, not the system whose payload it opened, so `system` is
+        # normalized to `""` here and attributed rows sharing a diagnosis merge into one
+        # record. The infra guard above still runs first.
         is_reducer = _is_reducer_failure(lead)
         if not is_reducer and not (lead.system or "").strip():
             continue

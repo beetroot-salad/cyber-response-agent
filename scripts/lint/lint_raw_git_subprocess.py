@@ -2,32 +2,27 @@
 """Raw git-subprocess smell — flag hand-rolled ``git`` subprocess calls under
 ``defender/`` that bypass the shared ``defender._git`` facade.
 
-The "run a git argv, check rc, return stdout" primitive (plus ``git status
---porcelain`` parsing and worktree add/remove/prune) was reinvented ~8× across
-``learning/``, ``evals/``, ``scripts/`` and ``run.py`` (#460). Each copy re-derived
-the rc check, the error message, and (for status) the porcelain parsing — and the
-non-``-z`` copies mis-handled spaced paths. The single surface is
-``defender/_git.py`` (``git`` / ``git_status`` / ``git_commit`` / ``git_worktree_*`` /
-``GitError``); route every git invocation through it.
+Hand-rolled copies of "run a git argv, check rc, return stdout" (plus ``git status
+--porcelain`` parsing and worktree add/remove/prune) each re-derive the rc check, the error
+message and the porcelain parsing, and non-``-z`` parsing mis-handles spaced paths. The
+single surface is ``defender/_git.py`` (``git`` / ``git_status`` / ``git_commit`` /
+``git_worktree_*`` / ``GitError``); route every git invocation through it.
 
 What this flags: any call whose first positional argument is a **list literal
 starting with the string** ``"git"`` — e.g. ``subprocess.run(["git", "status", …])``,
 ``subprocess.check_output(["git", …])``, or a local wrapper ``run(["git", …])`` /
-``_run(["git", …])``. The list-first-element shape catches the wrapper indirections
-too, and never matches the facade's own ``_git.git(["status", …])`` (those lists start
-with the *subcommand*, not ``"git"``).
+``_run(["git", …])``. This catches wrapper indirections too, and never matches the facade's
+own ``_git.git(["status", …])`` (whose lists start with the subcommand).
 
-What it does NOT flag: calls through ``defender._git`` (the facade itself, which is
-out of scope below); a git argv built in a variable rather than an inline list (rare;
-not statically matchable); and **test modules** — ``tests/`` fixtures legitimately
-build throwaway repos with raw ``git init``/``commit`` (the sanctioned real-tmp-repo
-testing pattern, #389/#460), so the whole test category is exempt.
+What it does not flag: calls through ``defender._git``; a git argv built in a variable rather
+than an inline list (not statically matchable); and test modules, whose fixtures legitimately
+build throwaway repos with raw ``git init``/``commit``.
 
 The one sanctioned subprocess site is ``defender/_git.py`` itself (excluded from
 scope). Mark any other deliberate exception with ``# lint-git: ok — <reason>`` on the
 call's line span. Pre-existing sites are ratcheted via
 ``lint_raw_git_subprocess_baseline.json`` (see scripts/lint/_baseline.py); the gate
-fails only on a NEW file+function pair.
+fails only on a new file+function pair.
 
 Run from repo root:  python scripts/lint/lint_raw_git_subprocess.py
 Regenerate the baseline:  python scripts/lint/lint_raw_git_subprocess.py --update-baseline
@@ -57,9 +52,7 @@ def _in_scope(path: Path) -> bool:
 
 
 def _is_test_module(rel: str) -> bool:
-    """A ``tests/`` dir or a flat ``test_*.py`` / ``*_test.py`` / ``conftest.py``.
-    Test fixtures build throwaway repos with raw git on purpose (the sanctioned
-    real-tmp-repo pattern), so the whole category is exempt."""
+    """A ``tests/`` dir or a flat ``test_*.py`` / ``*_test.py`` / ``conftest.py``."""
     p = Path(rel)
     return (
         "tests" in p.parts
@@ -147,9 +140,8 @@ def main(argv: list[str]) -> int:
     if not SCOPE.is_dir():
         print(f"defender/ not found at {SCOPE}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:

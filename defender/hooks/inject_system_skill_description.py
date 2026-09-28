@@ -39,17 +39,11 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
 def descriptor_catalog(
     skills_dir: Path, roster: RosterRead, grant: VerbGrant,
 ) -> str | None:
-    # DENY_ALL, not `grant`: this registry only enumerates real systems and probes whether each
-    # adapter IMPORTS (the `except` below); narrowing to the caller's grant happens after,
-    # against `grant.systems`. Constructing with `grant` would run ModuleVerbRegistry's load
-    # check against these REAL adapters, which a grant naming a system/verb this tree doesn't
-    # declare would fail for a reason unrelated to which systems the catalog describes.
-    #
-    # Over the ROSTER `run_investigation` read once at run start, not a directory: the read
-    # that can fail (`RegistryError`, #1031) happened there, at the entry point's own frame,
-    # so this cannot raise for the tree. Not memoised: its one production caller
-    # (`driver._dispatch_catalogs`) builds each catalog once per run and hands the string
-    # down, so a cache here would only ever hold a run's roster past the run.
+    # DENY_ALL, not `grant`: the registry only enumerates systems and probes that each adapter
+    # imports; narrowing to `grant.systems` happens below. Constructing with `grant` would run
+    # the registry's load check, which a grant naming an undeclared system/verb would fail for a
+    # reason unrelated to the catalog. The roster was read (and could fail) at run start, so
+    # this cannot raise for the tree.
     registry = ModuleVerbRegistry(roster, DENY_ALL)
     lines = []
     for system in registry.systems():

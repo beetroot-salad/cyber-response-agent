@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """The questioner curator: folds `subject: world` findings into `defender/lessons-questioner/`.
 
-#1007 M7/N1. A second `CorpusAuthorConfig`, drained by the SAME tick as the defender lessons
-curator (A2/R1 — one worktree, one box, one branch, one PR lease, per-curator consumption and
-per-curator corpus scoping) but its own corpus and its own queue channel.
+Drained in the same tick as the defender lessons curator (one worktree, box, branch and PR
+lease) but with its own corpus and queue channel.
 
-Its pre-author gate is IDEMPOTENCY ONLY (`_gate_questioner`): a world finding has no defender
-ground truth to check disposition against, so the defender gate's `source_refs.yaml`/family
-partition does not apply here at all. #773 M2: its config carries no drain-run check at all
-(the base config's own unset default) — there is no defender behaviour a world lesson could
-re-verify against — so the drain's verdict step and repair pass are both skipped for this
-channel; the unconditional file-vs-batch attribution check still runs, same as the sibling
-channel's.
+Its pre-author gate is idempotency only: a world finding has no defender ground truth to
+gate on. Its config sets no drain-run check, since there is no defender behaviour a world
+lesson could regress, so the verdict step and repair pass are skipped; the file-vs-batch
+attribution check still runs.
 """
 from __future__ import annotations
 
@@ -53,12 +49,8 @@ class QuestionerAuthorConfig(CorpusAuthorConfig):
     """The questioner curator's drain config: the shared corpus-author core, its own skip
     report, and the same env-backed model knobs the defender curator carries.
 
-    NO HOLD REPORT, and a SKIP report all the same — the distinction the field's absence used
-    to blur. This channel's gate is idempotency only, so it genuinely never holds and a hold
-    report would explain nothing. But `QUESTIONER_BUCKETS` declares `consumed_skip`, and a skip
-    is TERMINAL: the agent's verdict consumes the row, the rotation removes it, and with no
-    line written anywhere an operator has no way to learn the finding was ever seen, let alone
-    why it was declined."""
+    No hold report, since the idempotency-only gate never holds; but a skip report, because a
+    `consumed_skip` is terminal and this line is the only trace the finding was seen."""
 
     skip_report: Path
     manifest_seed: str | None = None
@@ -91,33 +83,23 @@ def build_questioner_config(
         max_attempts=author_max_attempts(),
         manifest_seed=manifest_seed,
         box=box,
-        # #773 M2/O7: this channel registers no drain-run check at all — the base config's
-        # own unset default is left as-is — because there is no defender behaviour a world
-        # lesson could re-verify against. `exempt` is unreachable while that stays unset,
-        # but is `True` for a channel whose every row is, in spirit, out of scope.
+        # No drain-run check (the base default): a world lesson has no defender behaviour to
+        # re-verify. `exempt` is unreachable while that holds, but every row is out of scope.
         exempt=lambda row: True,
     )
 
 
 def questioner_existing_finding_ids(cfg: QuestionerAuthorConfig) -> set[str]:
-    """The SAME idempotency read `lessons/run.py`'s own `existing_finding_ids` makes, over THIS
-    corpus and THIS channel's id key — and now literally the same function: `shared.
-    existing_finding_ids` takes `CorpusAuthorConfig`, the base both configs subclass, and reads
-    only its `corpus_dir`/`channel.id_key`. A second body here was a duplicate the NAME-keyed
-    helper lint could not see, so any change to how a lesson attributes its source rows had to
-    be made twice or this corpus would silently re-author every row on every tick."""
+    """This channel's name for `shared.existing_finding_ids`, over this corpus and id key."""
     return _shared.existing_finding_ids(cfg)
 
 
 def _gate_questioner(
     batch: list[dict], cfg: QuestionerAuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """#1007 N1: IDEMPOTENCY ONLY. A world finding carries no defender disposition and no
-    `run_id` a family partition could key on, so nothing here holds a row — every row not
-    already attributed to a lesson in this corpus is admitted for authoring.
-
-    Returns `(held, consumed_pre, to_author)` — `CorpusAuthorConfig.gate`'s own documented
-    order, the one `drain.run_batch` unpacks (`held, consumed_pre, to_author = cfg.gate(...)`)."""
+    """Idempotency only: a world finding carries no defender disposition to gate on, so every
+    row not already attributed to a lesson in this corpus is authored. Returns
+    `(held, consumed_pre, to_author)`."""
     existing_ids = questioner_existing_finding_ids(cfg)
     consumed_idempotent: list[dict] = []
     to_author: list[dict] = []
@@ -144,11 +126,10 @@ def build_questioner_user_prompt(
 
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfig) -> dict:
-    """N1/#773 M1: no check wired — see the module docstring. The curator writes and
-    self-reports only; there is no tool call and no config to build for it any more."""
+    """Spawn the curator to author the batch and self-report."""
     from defender.learning.author import curator_engine
 
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, never a box-writable or model-authored tree; the sibling `lessons/run.py::invoke_agent` makes the same call
+    cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, never a box-writable or model-authored tree
     stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
         wiring=StageWiring.for_batch(
@@ -172,9 +153,8 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
 def _write_skip_report_after_rotate(outcome, cfg: QuestionerAuthorConfig) -> None:
     """The tick's closing edge — after both the corpus commit and the queue rotation.
 
-    `gate_held` is carried too even though this channel's gate is idempotency-only: the field
-    exists on every outcome, and a row appearing there would be a gate this config does not
-    think it has. Better named in the report than invisible."""
+    `gate_held` is reported too, though this gate never holds: a row there would reveal a gate
+    this config doesn't know it has."""
     _shared.write_disposition_report(
         cfg.skip_report, cfg.pending_dir, batch_id=outcome.batch_id,
         groups={"skipped": outcome.consumed.get("consumed_skip", []),

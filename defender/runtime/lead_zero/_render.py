@@ -1,18 +1,7 @@
-"""Harness-executed lead-0.
+"""Lead-0: turning captured documents into the section the model reads.
 
-Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
-and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
-run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
-the review gate cite them like any model-dispatched lead.
-
-This module owns every backend call, run-dir write and dispatch those two items add;
-``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
-returned block as one more ORIENT section.
-
-Turning captured documents into the section the model reads.
-
-Everything here is elision and ordering: what to show, in what order, and how to say a
-thing was not available without asserting an absence the backend never confirmed.
+Elision and ordering, and saying a thing was unavailable without asserting an absence the
+backend never confirmed.
 """
 from __future__ import annotations
 
@@ -23,12 +12,11 @@ from ._capture import _sanitize
 
 
 def _elide(value: Any, lead_id: str, seq: int) -> str:
-    """Bound ONE rendered leaf, with a pointer to the payload that holds it whole.
+    """Bound one rendered leaf, with a pointer to the payload that holds it whole.
 
-    `seq` is the QUERIES-TABLE seq of the call that returned the document (`_last_row_seq`),
-    never the document's position in the block — those are different numbers. A negative `seq`
-    means the call wrote no row at all (screened, or the table write failed), and the note then
-    says so rather than naming a payload that was never persisted."""
+    `seq` is the queries-table seq of the returning call, not the document's position. A
+    negative `seq` means no row was written, and the note says so instead of naming a payload
+    that was never persisted."""
     if not isinstance(value, str) or len(value) <= MESSAGE_CHAR_BUDGET:
         return value if isinstance(value, str) else str(value)
     where = (
@@ -39,15 +27,10 @@ def _elide(value: Any, lead_id: str, seq: int) -> str:
 
 
 def _flatten_doc(doc: dict) -> dict[str, Any]:
-    """A document's leaves, keyed by their DOTTED ECS path.
+    """A document's leaves, keyed by their dotted ECS path.
 
-    The adapter hands `_source` back UNMODIFIED, and real ECS `_source` is NESTED
-    (`{"host": {"name": …}}`, with per-source namespaces two or three levels deeper) while the
-    alerting namespace arrives as flat dotted keys. Rendering the top level alone prints a
-    nested document as one line per top-level object holding a PYTHON DICT REPR — `host:
-    {'name': 'ws-1'}` — which is not a field name anything can be queried on. This block is
-    the correlation lead's whole entity evidence and it is asked to name the field each entity
-    came from, so a repr is not good enough."""
+    `_source` arrives nested, and the correlation lead must name the queryable field each
+    entity came from, which a rendered dict repr does not give it."""
     out: dict[str, Any] = {}
 
     def walk(node: Any, prefix: str) -> None:
@@ -56,11 +39,8 @@ def _flatten_doc(doc: dict) -> dict[str, Any]:
                 key = f"{prefix}.{k}" if prefix else str(k)
                 walk(v, key)
         elif isinstance(node, list) and any(isinstance(x, dict) for x in node):
-            # An ARRAY OF OBJECTS is the same defect one level down, and not exotic: every
-            # Kibana alert document carries `kibana.alert.ancestors`, and on the group-id path
-            # the documents this block renders ARE alert documents. Indexed (`…ancestors.0.id`)
-            # so two elements' same-named leaves stay distinguishable; an array of SCALARS
-            # stays whole, since `['a', 'b']` already reads as the multi-valued field it is.
+            # Arrays of objects (e.g. `kibana.alert.ancestors`) are indexed so same-named
+            # leaves stay distinct; arrays of scalars stay whole.
             for i, item in enumerate(node):
                 walk(item, f"{prefix}.{i}" if prefix else str(i))
         elif prefix:
@@ -79,19 +59,12 @@ def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
     for key in sorted(flat):
         if key in ("@timestamp", "message"):
             continue
-        # A null leaf is DROPPED, not rendered: `_sanitize(None)` is the literal string
-        # `"None"`, and this block is what the correlation lead picks its axes off —
-        # `host.name: None` reads as a bindable value and invites `host.name:"None"`, a
-        # predicate that matches nothing and reports as a real zero. An absent field and a null
-        # one are the same thing to the index anyway.
+        # Null leaves are dropped: `host.name: None` would invite the lead to bind
+        # `host.name:"None"`, which matches nothing and reads as a real zero.
         if flat[key] is None:
             continue
-        # The field NAME as well as its value: an attacker-influenced document whose KEY
-        # carries a `<run-…-…>`-shaped delimiter would otherwise end the untrusted frame early.
-        #
-        # EVERY leaf is elided, not just `message`: flattening makes every leaf of every
-        # namespace its own line, and a captured command line or a rule's stored query is
-        # exactly as unbounded as a message.
+        # Keys are attacker-influenced too, so they are sanitized. Every leaf is elided, since
+        # a command line or stored query is as unbounded as a message.
         lines.append(f"  {_sanitize(key)}: {_sanitize(_elide(flat[key], lead_id, seq))}")
     if flat.get("message") is not None:
         lines.append(f"  message: {_sanitize(_elide(flat['message'], lead_id, seq))}")
@@ -99,15 +72,14 @@ def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
 
 
 def _sort_chrono(docs: list[tuple[dict, int]]) -> list[tuple[dict, int]]:
-    """Chronological by each document's own `@timestamp`. Each entry is `(doc, seq)` — the
-    queries-table seq of the call that returned it, which the elision pointer names."""
+    """Sort `(doc, seq)` entries chronologically by the document's `@timestamp`."""
     def key(entry: tuple[dict, int]) -> str:
         return str(entry[0].get("@timestamp") or "")
     return sorted(docs, key=key)
 
 
 def _unavailable(reason: str) -> str:
-    """The reason is SANITIZED: `_unavailable(f"{e!r}")` interpolates the repr of an exception
-    whose message can carry attacker-influenced text, and the note lands INSIDE the untrusted
-    frame with everything else."""
+    """An unavailability note. The reason is sanitized because it may be an exception repr
+    carrying attacker-influenced text."""
+
     return f"{UNAVAILABLE} {_sanitize(reason)})"

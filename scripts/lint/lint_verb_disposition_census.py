@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
-"""Verb-disposition census — every verb the tree declares has a decision, and every decision
+"""Verb-disposition census: every verb the tree declares has a decision, and every decision
 names a verb the tree declares.
 
-WHAT THIS CLOSES (#995). The gather grant was a hand-written list of `(system, verb)` pairs,
-and the thing that looked like it guarded that list compared it against a SECOND hand-written
-copy in the test suite. Two copies agreeing catches one of them being edited wrongly. It
-cannot catch a system missing from both — which is exactly the reported defect: a system
-connected by `/connect`, absent from the grant, silently unreachable, and reporting its real
-verbs as if they were typos.
-
-So the check that matters is not "do the two lists agree" but "does the authored table have an
-opinion about everything that exists". This gate supplies the walked census to
+Comparing a hand-written grant against a second hand-written copy catches one copy being edited
+wrongly, but not a system missing from both — which leaves a connected system silently
+unreachable. The check that matters is whether the authored table has an opinion about
+everything that exists: this gate supplies the walked census to
 `verb_dispositions.census_gaps` and fails on residue in either direction.
 
-WHY THIS IS NOT "DERIVE THE GRANT FROM THE ADAPTERS". That repair would mean dropping an
-adapter file into the tree grants it access. Nothing here writes a grant; the gate only
-refuses to let a decision go unmade. A new system still grants itself nothing — it just can no
-longer be ungranted by accident rather than on the record.
+It does not derive the grant from the adapters: then dropping an adapter file into the tree
+would grant it access. Nothing here writes a grant; a new system still grants itself nothing,
+but cannot be left ungranted by accident, only on the record.
 
-NOT BASELINE-RATCHETED, unlike most gates here. A ratchet exists to let a pre-existing
-population of findings be paid down over time; this gate's finding population is empty by
-construction the moment it lands, and its whole value is that the NEXT system cannot slip
-through. A baseline would be a list of systems allowed to stay silently unreachable, which is
-the defect wearing the fix's clothes. The residue this gate does admit — a verb granted to
-nobody — lives in the table itself with a written reason, where a reviewer reads it beside the
-grant it qualifies.
+Not baseline-ratcheted: the finding population is empty by construction, and a baseline would
+be a list of systems allowed to stay silently unreachable. The residue it does admit — a verb
+granted to nobody — lives in the table with a written reason, beside the grant it qualifies.
 
 Run: defender/.venv/bin/python scripts/lint/lint_verb_disposition_census.py [--root <repo>]
 """
@@ -36,10 +26,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The resolver and the loader are IMPORTED, never reimplemented. A gate that re-derived "which
-# systems exist" with its own glob would be a fifth hand-maintained answer to the question this
-# gate exists to stop having several answers to — and `lint_shared_oracle` refuses that shape
-# for tests for the same reason it is wrong here.
+# The resolver and loader are imported, never reimplemented: a gate re-deriving "which
+# systems exist" with its own glob would be one more hand-maintained answer to the question
+# this gate exists to unify.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -79,35 +68,31 @@ def _walk(roster: RosterRead, systems: frozenset[str]) -> dict[str, frozenset[st
 def _unreadable_adapters(
     roster: RosterRead, walked: dict[str, frozenset[str]]
 ) -> tuple[str, ...]:
-    """Systems that HAVE an adapter the walk read no verb out of — the gate's fail-open hole.
+    """Systems that have an adapter the walk read no verb out of — the gate's fail-open hole.
 
     The roster's cold read answers `frozenset()` for an adapter it cannot see into: a source
-    that does not parse, or a `VERBS` that is not a top-level dict LITERAL (`VERBS: dict[str,
-    Verb] = {...}` is an `AnnAssign` and declares nothing to it, and neither does a table
-    assembled in a loop). That polarity is right for `ModuleVerbRegistry`, where an
-    unreadable table refuses every grant; it is exactly backwards here, where an empty walk
-    yields no `undecided` and the gate prints "clean ... with no residue" over a system
-    nobody has decided anything about — #995's own defect wearing this gate's clothes. So an
-    adapter that exists and declares nothing is exit 2: the census over it was never taken.
+    that does not parse, or a `VERBS` that is not a top-level dict literal (an annotated
+    `VERBS: dict[str, Verb] = {...}` or a table built in a loop declares nothing). That is
+    right for `ModuleVerbRegistry`, where an unreadable table refuses every grant, but here an
+    empty walk yields no `undecided` and would print "clean" over an undecided system. So an
+    adapter that exists and declares nothing is exit 2.
 
-    Adapter PRESENCE (`roster.accepted`) is what separates the two, which is why this is not
-    simply "walked to an empty set". An MCP-path system is declared by its committed
-    `execution.md` marker and has no adapter module by design (`skills/connect/mcp.md`); it
-    is out of this census's reach either way, and failing on it would block a legitimate
-    integration.
+    Adapter presence (`roster.accepted`) separates this from an MCP-path system, which is
+    declared by its committed `execution.md` marker and has no adapter module by design; it is
+    out of this census's reach, and failing on it would block a legitimate integration.
     """
     return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
 
 
 def _tenant_folders(root: Path) -> list[tuple[str, TenantDir | TenantDirError]]:
-    """Every tenant folder the gate checks (#1106 M7): each committed tenant under
-    `knowledge/tenants/`, then the template — `(name, resolved tenant or the refusal)`, in a
+    """Every tenant folder the gate checks — each committed tenant under
+    `knowledge/tenants/`, then the template — as `(name, resolved tenant or the refusal)`, in a
     stable order.
 
-    THROUGH THE RUN'S OWN RESOLVER (`tenant_dir`), so what CI accepts is what a run accepts: a
-    tenant with no `agent/` half (git keeps no empty directory, so a missing `.gitkeep` loses
-    it in every clone), a missing required file or a linked half is refused here exactly as
-    `run.py` would refuse it at start — not passed as clean because its table loads."""
+    Resolved through the run's own resolver (`tenant_dir`), so what CI accepts is what a run
+    accepts: a tenant with no `agent/` half (git keeps no empty directory, so a missing
+    `.gitkeep` loses it in every clone), a missing required file or a linked half is refused
+    here as `run.py` would refuse it at start."""
     tenants = default_tenants_root(root)
     names = sorted(d.name for d in tenants.iterdir() if d.is_dir()) if tenants.is_dir() else []
     template = template_dir(root)
@@ -121,12 +106,12 @@ def _tenant_folders(root: Path) -> list[tuple[str, TenantDir | TenantDirError]]:
 
 
 def _lead_zero_fault(settings: Path, rows: tuple, catalog: list[QueryTemplate]) -> str | None:
-    """Each folder's lead-zero config, checked in CI (#1106 M7): it names an ESTABLISHED
-    catalog template — whether or not the table grants the lead, since a withheld lead's id is
-    never consulted at run start and would otherwise surface only once an operator grants it —
-    and, when the table does grant the lead, that template's pair is the one granted (the
-    run-start agreement check itself, `run_tenant.correlation_dispatch`). `None` when both
-    hold. `catalog` is the tree's, walked once for every folder."""
+    """Each folder's lead-zero config, checked in CI: it names an established catalog
+    template — even when the table withholds the lead, since a withheld lead's id is never
+    consulted at run start and would surface only once an operator grants it — and, when the
+    lead is granted, that template's pair is the one granted (the run-start agreement check,
+    `run_tenant.correlation_dispatch`). `None` when both hold. `catalog` is walked once for
+    every folder."""
     try:
         template_id = correlation_dispatch(settings, catalog, correlation_grant(rows)).template_id
     except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError, GrantError) as e:
@@ -144,13 +129,9 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every
     root = Path(args.root).resolve()
     defender_dir = root / "defender"
 
-    # Exit 2, not 1, when the gate could not RUN. An unreadable source or an unloadable table
-    # means the census was never taken, and a gate that prints "0 findings" because it scanned
-    # nothing is categorically not clean (#618/#621/#652). ONE roster read for this gate — the
-    # resolver's own (`read_adapters`, which raises this lane's `LeadAuthorError` for a tree
-    # it cannot read) — and both the system set and the verb walk below are that one value:
-    # two reads would let a tree that changed between them score one read's systems against
-    # the other's verbs.
+    # Exit 2, not 1, when the census was never taken (unreadable source or table). One
+    # roster read serves both the system set and the verb walk, so a tree changing between
+    # two reads cannot score one read's systems against the other's verbs.
     try:
         roster = read_adapters(adapters_under(defender_dir))
         systems = declared_systems_over(roster, root)
@@ -178,9 +159,8 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912 — one gate over every
                 )
         return 2
 
-    # EVERY TENANT AND THE TEMPLATE (#1106 M7). Grants describe the SHARED adapters, so each
-    # folder's table must be total over the one walked census; a folder whose table cannot even
-    # load is exit 2 for the same reason an unreadable adapter is.
+    # Every tenant and the template. Grants describe the shared adapters, so each folder's
+    # table must be total over the one walked census; an unloadable table is exit 2.
     worst = 0
     catalog = catalog_templates(defender_dir)
     for name, resolved in _tenant_folders(root):

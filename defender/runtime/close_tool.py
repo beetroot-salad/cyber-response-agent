@@ -1,19 +1,13 @@
-"""The close tool: the ONLY writer of report.md, and the seam through which every disposition
-but the host's own `unresolved` passes the live write-time challenge gate before it commits —
-a confident disposition against its conclusion, `inconclusive` (#992) against its ceiling
-claim.
+"""The close tool: the only writer of report.md. Every disposition but the host's own
+`unresolved` passes the live write-time challenge gate before it commits (a confident one
+against its conclusion, `inconclusive` against its ceiling claim).
 
-`close_investigation(deps, disposition, *, stages, bounds=None) -> CloseResult` is the SYNC
-host-level close (what a test, or any synchronous host caller, drives directly).
-`_tool_close_investigation` is its ASYNC model-facing adapter — the two share
-`_close_investigation_async`, so `close_investigation` is never called from inside a running
-event loop (it would raise) and the tool body never blocks on a nested `asyncio.run`.
+`close_investigation` is the sync host-level close; `_tool_close_investigation` is the async
+model-facing adapter. Both share `_close_investigation_async`, so the tool never nests
+`asyncio.run` inside a running loop.
 
-`register_close_tool` registers the tool at MAIN's composition root ONLY; a verb grant cannot
-express this, since verbs are data-source operations and a non-empty grant on any other role
-fails policy compile. Role admission is ALSO checked host-side, in
-`_close_investigation_async` itself, so the negative holds even for a direct call that never
-goes through tool registration at all.
+The tool is registered at MAIN's composition root only (a verb grant cannot express this), and
+role admission is also checked host-side, so a direct call from another role is refused too.
 """
 
 from __future__ import annotations
@@ -32,14 +26,11 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender._artifact_schema import validate_artifact
 from defender._untrusted import wrap_fresh
-# The vocabulary from its OWNER, not second-hand through the report schema: a module that USES
-# the vocabulary imports it from the owner, so a consumer's import list never doubles as
-# someone else's distribution channel. Both halves are used — the set for the exact membership
-# test in `_close_investigation_async`, the ordered tuple for the argument schema below.
+# The set is for the exact membership test, the ordered tuple for the argument schema.
 from defender._vocab import (
     CEILING_DISPOSITION, DISPOSITION_ENUM, DISPOSITION_VALUES, HOST_ONLY_DISPOSITION,
 )
-from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
+from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
 from defender.skills.invlang.validate import (
@@ -61,83 +52,58 @@ from .tools import AgentDeps
 
 _logger = logging.getLogger(__name__)
 
-# THE TWO OUTCOME VOCABULARIES, deliberately not one.
-#
-# `CLOSE_RETURNS` answers what a close ATTEMPT did — the tool's return and the numbered review
-# record's `verdict`. `COMMITTED_OUTCOMES` answers what a COMMIT recorded — report.md. The
-# challenged path returns before the write, so its value is structurally incapable of reaching
-# disk; spanning both sinks with one enum makes every reader carry in its head which members
-# its own sink cannot hold.
+# Two outcome vocabularies: `CLOSE_RETURNS` is what a close attempt did (the tool's return and
+# the review record's `verdict`); `COMMITTED_OUTCOMES` is what report.md can record. The
+# challenged path returns before the write, so it never reaches disk.
 
 #: The investigation continues: nothing is committed and the discriminating material comes back.
 CHALLENGED = "challenged"
 #: The drafted disposition is committed unchanged — the gate never ran, or it ran and the
 #: counter-story did not survive, or the challenger declined to argue one.
 STANDS = "stands"
-#: The drafted disposition — confident or `inconclusive` — is overridden to the HOST's own
-#: `unresolved` (#923; the OUTCOME keeps its name, which is the value fleet queries and the
-#: run pages key on). Every way the gate can refuse to let a finding stand lands here; WHICH
-#: way is the cause's job.
+#: The drafted disposition is overridden to the host's own `unresolved`. (The value's name is
+#: kept because fleet queries and run pages key on it.) The cause says which refusal it was.
 FORCED_INCONCLUSIVE = "forced-inconclusive"
 
 CLOSE_RETURNS: tuple[str, ...] = (CHALLENGED, STANDS, FORCED_INCONCLUSIVE)
 COMMITTED_OUTCOMES: tuple[str, ...] = (STANDS, FORCED_INCONCLUSIVE)
 
-#: The one UNCERTAIN verdict the live review is never spent on — the host's own `unresolved`
-#: (#923). #992 puts the model's own `inconclusive` through the same review every confident
-#: close passes: it asserts a ceiling claim ("nothing further could be measured"), and that
-#: claim is exactly what the review can judge. `unresolved` alone stays out — it is evidence
-#: about the RUN (cut short, overruled, machinery broke), never a claim about the world.
-#: Matched by VALUE over the whole vocabulary, not by `forced`; see the dispatch site for why
-#: keying it on the flag instead was rejected.
+#: Dispositions never reviewed: only the host's own `unresolved`, which describes the run (cut
+#: short, overruled, machinery broke) rather than claiming anything about the world.
+#: `inconclusive` is reviewed, since its ceiling claim is something the review can judge.
+#: Matched by value, not by `forced` (see the dispatch site).
 NO_REVIEW_DISPOSITIONS: tuple[str, ...] = (HOST_ONLY_DISPOSITION,)
 
-# HOW THE REVIEW FAILED — the typed, countable half of "why". The cause cannot do this job: it
-# is a sentence whose wording nothing promises to keep stable, and a fleet query counting
-# broken reviews cannot key on prose.
-#
-# Absent (`None`) whenever the review did not fail. An override the EVIDENCE produced is a
-# finding about the case, not a failure — fold that in and the field is set on every close,
-# which makes counting by it count everything.
-#
-# Three members, each earning its place by a DIFFERENT RESPONSE rather than by naming a
-# different condition.
+# How the review failed: the typed, countable half of "why" (the cause is prose and not
+# stable enough to count on). `None` whenever the review did not fail, including an override
+# the evidence produced. Each member corresponds to a different response.
 
 #: A stage was still pending at its deadline. Capacity: move the bound, or chase the
-#: provider's latency. The one member whose right response may be to do nothing.
+#: provider's latency.
 TIMEOUT = "timeout"
 #: A stage call raised, or no reviewer was bound to call. A defect, with a traceback or a
 #: missing composition root to chase.
 STAGE_ERROR = "error"
-#: A stage ANSWERED, outside its own output contract: a reply that will not parse, rows
-#: missing the fields the reader reads, or identifiers naming something the investigation
-#: never produced. Nothing is down — the prompt or the contract is what needs work. An
-#: unreadable reply and a hallucinated identifier are ONE member on purpose: different
-#: conditions, same response.
+#: A stage answered outside its output contract: an unparseable reply, missing fields, or
+#: identifiers the investigation never produced. The prompt or contract needs work.
 UNREADABLE = "unreadable"
 
 FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE)
 
-# THE CAUSE — the close's OWN sentences, and the only strings the frontmatter's `cause` may
-# be. report.md rides VERBATIM into the judge LLM's prompt and its body rides out through the
-# ticket bridge's HTTP egress, and every review stage composes its reply after reading
-# attacker-influenced alert data. So the cause is composed by the HOST from this closed set;
-# the stage-derived diagnostic is `CloseResult.detail` and lives on the numbered review
-# record, which no prompt reads verbatim.
+# The cause: the only strings the frontmatter's `cause` may be. report.md goes verbatim into the
+# judge LLM's prompt and out through the ticket bridge, and review stages read
+# attacker-influenced data, so the host picks the cause from this closed set. Stage-derived
+# diagnostics go in `CloseResult.detail` on the review record, which no prompt reads verbatim.
 #
-# Strictly COARSER than the conditions that reach it. The rule that bounds the set is ONE
-# DISTINCTION, ONE FIELD — where the typed failure kind already separates two conditions, the
-# sentence must not separate them again, or the prose becomes an unversioned second copy of a
-# key something counts.
+# Coarser than the conditions: where `failure_kind` already separates two conditions, the
+# sentence does not separate them again.
 
 CAUSE_NOT_REVIEWED = "the disposition was recorded without a challenge review"
 CAUSE_STORY_SETTLED = (
     "the challenge review ran and left nothing about the finding unsettled"
 )
-#: THREE conditions share this one: a stage that raised or timed out, a stage reply the gate
-#: cannot read or that named something the investigation never produced, and a bundle whose
-#: stages are not bound. They are told apart by `failure_kind` in the same frontmatter and by
-#: the record's `detail` — never by a second sentence here.
+#: Shared by a stage that raised or timed out, an unreadable stage reply, and unbound stages;
+#: `failure_kind` and the record's `detail` tell them apart.
 CAUSE_REVIEW_INCOMPLETE = "the challenge review did not complete"
 CAUSE_EVIDENCE_CANNOT_DISCRIMINATE = (
     "the evidence gathered cannot discriminate what the challenge review left unsettled"
@@ -148,11 +114,8 @@ CAUSE_TURN_BUDGET_SPENT = (
 CAUSE_NOTHING_LEFT_TO_ASK = (
     "nothing discriminating remains that the investigation was not already asked for"
 )
-#: §7 FK-10 (human, against the judge): the SEVENTH member — the ceiling-held arm's OWN
-#: sentence. A composer `holds` on an `inconclusive` close judges the CEILING claim, not a
-#: verdict, so it earns a sentence distinct from `CAUSE_STORY_SETTLED` (which stays the
-#: confident `holds` arm's alone) — "the finding follows" and "nothing further could be
-#: measured" are different claims about different questions.
+#: A composer `holds` on an `inconclusive` close judges the ceiling claim, not a verdict, so it
+#: gets its own sentence distinct from `CAUSE_STORY_SETTLED`.
 CAUSE_CEILING_EXAMINED = (
     "the challenge review examined the ceiling claim and found nothing further measurable"
 )
@@ -167,18 +130,12 @@ REPORT_CAUSES: tuple[str, ...] = (
     CAUSE_CEILING_EXAMINED,
 )
 
-#: The challenged attempt commits nothing, so it has no cause to write. Spelled as a constant
-#: rather than left as a bare literal at the one site that produces it, so "no report, no
-#: cause" reads as the deliberate state it is rather than as a forgotten field.
+#: The challenged attempt commits nothing, so it has no cause.
 NO_CAUSE = ""
 
-#: The artifact validator the close is HANDED, defaulted to the real one. The seam exists
-#: because the ordinary close renders its own body and passes no evidence, so nothing it
-#: produces is content the schema would refuse — a test can observe that a refusal HAPPENED but
-#: never that the validator RAN on the ordinary path, which is the difference between a
-#: validator guarding every commit and one gated on the evidence argument. The default is the
-#: FUNCTION, never `None`: with `None` the same gap survives, spelled "validate only when an
-#: optional argument happens to be supplied".
+#: The artifact validator the close is handed, defaulting to the real one. Injectable so a test
+#: can prove the validator runs on every commit, not only those carrying evidence; the default
+#: is the function rather than `None` so validation is never optional.
 ArtifactValidator = Callable[[str, str, str | None], str | None]
 
 
@@ -186,9 +143,8 @@ ArtifactValidator = Callable[[str, str, str | None], str | None]
 class RecommendedLead:
     """One thing the review wants measured before the close can stand.
 
-    `target` is deliberately not `lead_id`: an ask names an entity, an edge, a lead OR a
-    hypothesis (`reply.citable_refs` is the set it is checked against), so a field spelled
-    `lead_id` would claim a kind the contract does not guarantee."""
+    `target` may name an entity, edge, lead or hypothesis (checked against
+    `reply.citable_refs`), hence not `lead_id`."""
 
     target: str
     ask: str
@@ -199,9 +155,8 @@ class RecommendedLead:
 class CloseResult:
     """What one close attempt did.
 
-    `cause` is the HOST'S OWN sentence and is what report.md carries. `detail` is the
-    DIAGNOSTIC — it may quote a stage's own words and therefore never reaches report.md; it is
-    kept, framed, on the numbered review record instead of being dropped."""
+    `cause` is the host's own sentence and is what report.md carries. `detail` is the
+    diagnostic, which may quote a stage, so it goes on the review record, never report.md."""
 
     outcome: str
     message: str
@@ -218,79 +173,37 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     evidence: str | None = None, ceiling_test: tuple[CeilingReceipt, ...] = (),
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
 ) -> str:
-    """RS12. The body is HOST-RENDERED from typed arguments — the tool accepts no
-    model-supplied body.
+    """Render report.md from typed, host-chosen arguments; there is no model-supplied body.
 
-    All four values are chosen by the host from a closed set: the disposition is validated
-    against its enum before any gate work, `outcome` and `failure_kind` are typed vocabularies,
-    and `cause` is one of the close's OWN published sentences. None can carry a review stage's
-    prose, which is what keeps this file — it rides verbatim into the judge's prompt and out
-    through the ticket bridge — inside the 512-byte frontmatter cap and out of the raw-render
-    exposure.
+    `disposition`, `outcome`, `failure_kind` and `cause` all come from closed vocabularies, so
+    no review stage's prose reaches this file, which goes verbatim into the judge's prompt and
+    out through the ticket bridge. `failure_kind` is omitted, not written empty, when the
+    review did not fail, so a count can filter on its presence.
 
-    `failure_kind` is OMITTED when the review did not fail rather than written empty: absence
-    is the fifth state of that vocabulary, and an always-present key is one a count cannot
-    filter on.
+    Two companion-derived exceptions, both model-chosen structure rather than model-authored
+    prose: `ceiling_test` receipts (a priced `inconclusive` close's `ref`/`state`/`cap`, ids
+    already verified against the run's `:L findings`) go into the frontmatter, and
+    `runtime_evidence` (the recorded baseline consultations, with a host-parsed window) goes
+    into the body so a reader can see whether the alerted pattern recurs in this estate. The
+    frontmatter carries nothing the host has not checked.
 
-    TWO companion-derived exceptions to "no model-supplied body" — `ceiling_test` (#923, §7
-    round 4's receipt redesign) and `runtime_evidence` (#983 mechanism A) — and both are
-    model-CHOSEN structure, not model-authored prose. A priced `inconclusive` close carries the
-    `ceiling_test` receipts it just paid its entry price with into the committed frontmatter as
-    `ref`/`state`/`cap` — a closed vocabulary plus an id the host already verified against this
-    run's own `:L findings` table, never free text. `runtime_evidence` carries the baseline
-    consultations the run recorded — the anchor kind, the grounding, the entry id, the owning
-    lead and a window the host PARSED and held against the alerted event — into the BODY, so a
-    human reading a closed case can see whether the alerted pattern is recognized as recurring
-    in this estate. It is model text in a host-owned FILE, but not in a host-owned FIELD:
-    `disposition`, `outcome` and `cause` stay exactly as chosen above, and the frontmatter
-    carries nothing the host did not already check.
+    Free text for the analyst (a receipt's `note`, a baseline's `result`/`reasoning`) goes in
+    the body only. The whole file is still capped and may not contain `</report>`, so the write
+    gate refuses the delimiter in those cells and bounds both body blocks; the bounds together
+    keep the file cap unreachable by notes alone. The blocks are rendered by the price gate's
+    own renderers so its byte bounds measure exactly what is written here.
 
-    The free text FOR THE HUMAN ANALYST — a `ceiling_test` receipt's `note`, a baseline's
-    `result` and `reasoning` — decides nothing about the verdict and rides into the BODY, one
-    line per receipt, never the frontmatter. That keeps it out of the 512-byte FRONTMATTER cap, and out of it
-    alone: `_artifact_schema.validate_report` also caps the WHOLE FILE and refuses a literal
-    `</report>` anywhere in it, so body text can strand a run just as a frontmatter cap could —
-    on an append-only companion, permanently. Both hazards are therefore charged at the write
-    gate, against the bytes THIS function writes: `_gating` refuses the delimiter in every
-    baseline cell that rides into this body (`_RENDERED_BASELINE_CELLS`) the way it already did
-    in a `ceiling_test` note, and bounds the rendered baseline block.
-
-    BOTH body families are bounded (§7 R6, #992): the baseline block always was, and the
-    accumulated `ceiling_test` note text now is too — `_MAX_CEILING_NOTE_BYTES`, charged at the
-    entry-price gate beside `_MAX_CEILING_FRONTMATTER_BYTES`'s cap on the frontmatter triples —
-    on the older argument that "a size cap on ungated text is itself a gate", refuted by a
-    9000-byte note that used to pass this gate and strand the run at
-    `_artifact_schema.REPORT_FILE_MAX` after the review was already spent. `inconclusive` is the
-    one disposition that renders both families at once, and both bounds together are sized to
-    leave that whole-file cap unreachable by notes alone.
-
-    The frontmatter block is built by the gate that PRICED these receipts (`ceiling_test_block`)
-    rather than interpolated here — ONE renderer for both, because the bound the price gate
-    charges is only a bound on what ships if it measures the bytes this function writes.
-
-    THE CAUSE IS A FRONTMATTER KEY AND NOT ALSO A BODY SENTENCE. The judge's invocation builder
-    feeds this whole file, frontmatter included, verbatim into its prompt, so the key already
-    reaches a consumer; duplicating it into the body buys one further egress and a second place
-    for the same sentence to be read from. The cost is the ticket bridge's closing comment,
-    which carries the disposition and the outcome without the sentence explaining them.
+    The cause is a frontmatter key only, not repeated in the body, to avoid a further egress.
     """
     kind_line = f"failure_kind: {failure_kind}\n" if failure_kind is not None else ""
     ceiling_block = ceiling_test_block(ceiling_test)
     body = f"Disposition recorded by the close gate. outcome={outcome}."
     if evidence:
         body += f" {evidence}"
-    # The note is FOR THE HUMAN ANALYST and decides nothing about the verdict (see this
-    # function's docstring) — it lives here, in the body, never in the frontmatter block above.
-    # Through the OWNER's renderer, so the byte bound the price gate charges on the notes is a
-    # bound on the bytes written here.
+    # Analyst notes go in the body, never the frontmatter.
     body += ceiling_note_block(ceiling_test)
-    # #983 mechanism A, O3. ONE line per baseline, from the SAME receipts the projection
-    # accepted (`conclude_runtime_evidence_rows`) — never a second reading of the companion, so
-    # a row the guard refused cannot reach a reader here. Body-only for the same reason the
-    # note above is: `result` carries the occurrence count and the actor/host scope as free
-    # text (`:R consultations` gains no columns), and free text under a 512-byte frontmatter
-    # cap is a size cap acting as a gate. Through the OWNER's renderer, so the byte bound that
-    # gate charges is a bound on the bytes written here.
+    # One line per baseline from the receipts the projection accepted, never a second reading
+    # of the companion, so a row the guard refused cannot appear. Body-only: free text.
     body += runtime_evidence_block(runtime_evidence)
     return (
         "---\n"
@@ -305,18 +218,13 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
 
 
 def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: AgentDeps) -> str:
-    """The challenged arm's hand-back, which ALWAYS carries a lead: an attempt whose
-    discriminating leads were all already raised does not take this arm at all, it closes on
-    what it has."""
+    """The challenged arm's hand-back, which always carries at least one measurement."""
     assert material, "the challenged arm never returns without discriminating material"
     lines = [f"- {item.target}: {item.ask}" for item in material]
-    # The discriminating material is derived from a payload-influenced role's output, so it
-    # returns inside an untrusted frame — with a FRESH salt, minted after this content is in
-    # hand, so no party has seen the delimiter, the review role included.
+    # Derived from a payload-influenced role's output, so framed as untrusted with a fresh salt
+    # no party (the review role included) has seen.
     framed = wrap_fresh("\n".join(lines), "untrusted")
-    # "measurement", not "lead": the ask names the entity, edge, lead or hypothesis to measure
-    # and the DIMENSION to measure it on, and the investigation chooses the lead. Calling a
-    # vertex a lead here tells the model a `v-` id is something it can go run.
+    # "measurement", not "lead": the target may be a vertex, which is not something to run.
     return (
         f"The gate challenged this close — {len(material)} measurement(s) remain before it "
         f"can stand. Investigate further before re-closing:\n{framed}"
@@ -326,19 +234,11 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
 def _record_dict(
     verdict: challenge_gate.GateVerdict, disposition: str, *, reviewed: bool,
 ) -> dict:
-    """The numbered review record. `detail` is here and NOT on report.md by decision: the
-    diagnostic may quote a stage's own words, and this is the one artifact no prompt reads
-    verbatim. It is framed rather than dropped, so the words survive somewhere a human can
-    read them off the run.
+    """The numbered review record, built by one function for both bypass and reviewed sites.
 
-    `reviewed` is WRITTEN, by the one site that knows, rather than left for a reader to infer.
-    Every reader of this record used to reconstruct "did a review run?" from something beside
-    it — the disposition's membership in the bypass set, then (#992) whether a trace file
-    happened to carry a row for the round — and each reconstruction broke the moment what it
-    keyed on moved (a reviewed and a bypassed `inconclusive` share one disposition string; a run
-    dir written before the traces moved under `wire_logs/` has no row to find). The record is
-    the attempt's own account; it says whether the gate ran. ONE builder for both sites, so
-    the bypass record and the reviewed record cannot drift into two shapes."""
+    `detail` lives here, framed, rather than on report.md: it may quote a stage, and no prompt
+    reads this record verbatim. `reviewed` is written explicitly because readers cannot
+    reliably infer it (a reviewed and a bypassed close can share one disposition)."""
     return {
         "verdict": verdict.outcome,
         "reviewed_disposition": disposition,
@@ -359,17 +259,12 @@ class _CloseFields:
     material: tuple[RecommendedLead, ...]
     turns_used: int
     failure_kind: str | None
-    #: #923: the `:T conclude.ceiling_test` RECEIPTS a priced `inconclusive` close just paid
-    #: its entry price with — `ref`/`state`/`cap` carried into the committed report's own
-    #: frontmatter, `note` into its body (see `render_report`). Populated on the REVIEWED
-    #: site only (#992), exactly when the verdict that stands is `inconclusive`; empty for
-    #: every other close, the bypass site's `unresolved` included.
+    #: The `:T conclude.ceiling_test` receipts a priced `inconclusive` close paid with. Set only
+    #: on the reviewed site when the standing verdict is `inconclusive`.
     ceiling_test: tuple[CeilingReceipt, ...] = ()
-    #: #983: the `:R consultations` BASELINE rows the companion recorded, carried into the
-    #: committed report's BODY. Populated on the reviewed site on every commit that leaves
-    #: it — the disposition that stood AND the host's `unresolved` the override arms commit
-    #: (mechanism A's whole point is visibility on every close). Empty only on the bypass
-    #: site, where a forced close skipped the document gate (see that site).
+    #: The `:R consultations` baseline rows, carried into the report body on every reviewed-site
+    #: commit (including an override to `unresolved`). Empty on the bypass site, whose forced
+    #: close skipped the document gate.
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = ()
 
 
@@ -379,11 +274,8 @@ def _fields_from(
     ceiling_test: tuple[CeilingReceipt, ...] = (),
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
 ) -> _CloseFields:
-    """The verdict's own scalars into the commit's bundle — ONE copy for the three commit sites
-    (the bypass, the reviewed site, the unreadable-companion arm), so a field added to either
-    side is threaded once rather than at three literal sites where the one forgotten silently
-    commits a default. The companion-derived fields are the caller's: only the reviewed site
-    has a body to carry them from."""
+    """The verdict's scalars as the commit bundle, shared by all three commit sites so a new
+    field cannot be forgotten at one. Companion-derived fields come from the caller."""
     return _CloseFields(
         outcome=verdict.outcome, cause=verdict.cause, detail=verdict.detail,
         material=material, turns_used=verdict.turns_used, failure_kind=verdict.failure_kind,
@@ -395,22 +287,15 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     deps: AgentDeps, disposition: str, fields: _CloseFields, record: dict, *,
     validator: ArtifactValidator, evidence: str | None = None,
 ) -> CloseResult:
-    """RS19. Record FIRST, report SECOND — both attempted regardless of the other's fault, and
-    any fault held until both writes have been attempted.
+    """Write the review record, then the report; both are attempted, and any fault is raised
+    only after both.
 
-    The report is rendered from `fields.outcome`/`fields.cause`/`fields.failure_kind` and
-    NOTHING else beyond the two companion-derived fields, `fields.ceiling_test` and
-    `fields.runtime_evidence` (see `render_report`).
-    `fields.detail` — the diagnostic, which may quote a stage — reaches the record via
-    `_record_dict` and never this render call, which is what keeps review prose out of the
-    judge's prompt and the ticket bridge's egress."""
+    `fields.detail` (which may quote a stage) reaches only the record, never the report, so
+    review prose stays out of the judge's prompt and the ticket bridge."""
     state = challenge_gate.ReviewState.of(deps)
     turn_for_record = state.turns + 1
 
-    # Resolving the record's name is part of writing it: the owner refuses a planted alias
-    # under that name with the same `OSError` the write seam raises, and it is recorded here
-    # the same way — the report is still attempted (RS19: record FIRST, report SECOND, both
-    # attempted regardless).
+    # Resolving the name can refuse a planted alias with `OSError`; treated like a write fault.
     record_path: Path | None = None
     record_error: BaseException | None = None
     try:
@@ -424,9 +309,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
         failure_kind=fields.failure_kind, evidence=evidence, ceiling_test=fields.ceiling_test,
         runtime_evidence=fields.runtime_evidence,
     )
-    # EVERY commit is validated — never only the ones carrying evidence. The verdict is
-    # obeyed, not merely computed: a refusal returns the validator's own reason and leaves
-    # nothing on disk.
+    # Every commit is validated; a refusal writes nothing and returns the validator's reason.
     schema_reason = validator(RUN_LAYOUT.report.name, body, None)
     report_error: BaseException | None = None
     if schema_reason is not None:
@@ -441,10 +324,8 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
         except OSError as e:
             report_error = e
 
-    # R4's terminality follows THE REPORT, not both writes. `report_error is None` means a
-    # disposition is committed on disk; leaving `closed` False because the RECORD write failed
-    # lets the model's retry sail past the already-closed refusal and re-run the whole gate on
-    # top of a committed report — the exact overwrite R4 exists to prevent.
+    # Terminality follows the report alone: once it is on disk the close is final, even if the
+    # record write failed, so a retry cannot re-run the gate and overwrite it.
     if report_error is None:
         state.closed = True
         state.disposition = disposition
@@ -464,60 +345,36 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
     forced: bool = False,
 ) -> CloseResult:
-    """`forced` distinguishes the FRAMEWORK's close from the model's. Only the driver's
-    `_close_a_run_cut_short` sets it — on the exits that stopped the model before it could
-    close and are the model's own (the request ceiling, the tool-retry budget; the circuit
-    breaker and the budget kill are deliberately not closed as a verdict — see the driver's
-    `_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE`) — and it buys exemption from the two
-    document gates below — the invlang structure check and the flagged-row window. Defaulted
-    False so every other caller is gated.
+    """The close shared by the sync host entry and the async tool.
 
-    Both exemptions rest on the same fact: a run cut short has no model left to repair with,
-    so gating the forced close would dead-letter the run at persist for a MISSING report.md.
-    A malformed companion is worse to publish than a well-formed one, but a run with no
-    disposition at all is worse than either, and the frontmatter still records honestly which
-    way the close went.
+    `forced` marks the framework's close of a run cut short (set only by the driver's
+    `_close_a_run_cut_short`). It exempts the close from the flagged-row window and the
+    structure check: with no model left to repair, gating would leave the run with no
+    report.md at all, which is worse than publishing off a malformed companion.
 
-    THE COMPANION IS READ ONCE. Four gates judge `investigation.md` on the way to a commit —
-    the flagged-row window, the entry price, the structure check and the challenge review —
-    and each used to take its own reading with its own decoder, so one document could get two
-    answers: the price gate decoded with replacement and collected the price, the review
-    decoded strictly and failed the run over the byte the price gate had read past. One
-    `CompanionRead` at the top, one parse of it here, and the parsed body threaded into the
-    review: the review judges the document the price gate priced and the report carries the
-    rows that review saw."""
+    The companion is read and parsed once, and that one body is threaded through every gate,
+    so the review judges the document the price gate priced and the report carries the rows
+    the review saw."""
     if deps.role is not AgentRole.MAIN:
         raise ModelRetry(
             "close_investigation is reachable only from the investigator (main) role — "
             f"not from {deps.role.value}"
         )
-    # `isinstance(str)` FIRST: a non-string value (a YAML list, an int) is unhashable, so a bare
-    # `value in DISPOSITION_ENUM` (a set) would raise TypeError out of the gate instead of
-    # denying. The tool lane cannot reach here with one — pydantic validates the argument as
-    # `str` — but the SYNC host entry has nothing in front of it, which is why the refusal lives
-    # in the body.
+    # `isinstance(str)` first: an unhashable value would raise out of the set membership test.
+    # The sync host entry has no pydantic validation in front of it.
     #
-    # lint-vocabulary: ok — the WRITE-gate asymmetry: this is the LIVE close, so the author is
-    # still on the other end and an exact test hands it retry text it can act on.
-    # `normalized_disposition` would silently ACCEPT a zero-width-laced value and commit a close
-    # no reader can tell from a clean one — and this gate's value is what the report frontmatter
-    # is written FROM, so normalizing here launders the injected character past the very gate
-    # that exists to deny it.
+    # lint-vocabulary: ok — live write gate: an exact test gives the author actionable retry
+    # text, while normalizing would accept a zero-width-laced value and write it into the
+    # report frontmatter.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
-        # Rendered from the ORDERED TUPLE, never `sorted(DISPOSITION_ENUM)`: this refusal and
-        # the tool schema are read in the SAME round trip, so a fifth member appended out of
-        # alphabetical order would hand the model two orderings of one closed vocabulary while
-        # it is trying to correct itself.
+        # The ordered tuple, matching the tool schema's order the model sees in the same turn.
         raise ModelRetry(
             f"disposition must be exactly one of {list(DISPOSITION_VALUES)} (got "
             f"{disposition!r}) — a typed enum, not free text"
         )
     _refuse_if_host_only_verdict_misused(disposition, forced=forced)
-    # R4: a COMMITTED close is terminal, and the refusal comes BEFORE the gate so a second
-    # attempt cannot spend the review either. Without it a confident `malicious` can be
-    # silently replaced by `inconclusive`, taking the first close's review record with it —
-    # every committing arm computes its record path from the turn counter, and only the
-    # NON-committing arm advances that counter.
+    # A committed close is terminal, refused before the gate so a second attempt cannot spend a
+    # review or overwrite the first disposition and its review record.
     state = challenge_gate.ReviewState.of(deps)
     if state.closed:
         raise ModelRetry(
@@ -525,30 +382,15 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "the close is terminal. Re-closing would re-run the whole review and overwrite "
             "both the recorded disposition and the first close's own review record."
         )
-    # TOP of the close — after the two cheap well-formedness refusals above, and before ANY
-    # disposition branch, so no branch can dodge the obligation and no reviewer's model calls
-    # are spent on a close that is going to be refused anyway.
-    #
-    # The framework's FORCED close is the one exception: a run cut short has no model left to
-    # repair with, so gating it would dead-letter the run at persist for a MISSING report.md,
-    # before investigation.md is validated at all. Every close the MODEL invokes is gated.
+    # Document gates run before any disposition branch, so no branch dodges them and no review
+    # is spent on a close that will be refused. The forced close is exempt (see docstring).
     read = tools_mod.read_companion(deps)
-    # A COMPANION THAT COULD NOT BE READ is decided here, once, ahead of every gate — not by
-    # each gate answering "cannot look" its own way (the window fell open, the structure check
-    # fell open, the price gate refused, the review read a lenient decode), which is how a
-    # confident disposition came to commit against a document the validator never checked.
-    # Two answers, keyed on whether a retry can change anything (`CompanionRead.retryable`):
-    #   * an I/O fault is a REFUSAL — the same "not permitted while the gate cannot look" the
-    #     close always gave — because overruling on it would let one hiccup of the run dir's
-    #     mount terminally replace a settled `malicious` with `unresolved` (the commit is
-    #     terminal; the retry would be refused as already closed). If the fault persists the
-    #     retry budget runs out and the host's forced close ends at the same `unresolved`.
-    #   * undecodable bytes or a planted entry are the document's own state, and no retry
-    #     changes them: the model's close is a review that cannot run, overruled to the host's
-    #     `unresolved` with the typed failure kind the projector arm uses for the same fact.
-    # The host's forced close proceeds off the empty document either way — `unresolved` owes
-    # nothing and is not reviewed — because a refusal there would end the run with NO
-    # report.md, the dead-letter the forced exemption exists to prevent.
+    # An unreadable companion is decided once here, ahead of every gate:
+    #   * an I/O fault is refused (retryable); overruling would let one transient fault
+    #     terminally replace a settled verdict with `unresolved`.
+    #   * undecodable bytes or a planted entry will not change on retry, so the model's close
+    #     is overruled to `unresolved` as a review that cannot run.
+    # The forced close proceeds off an empty document, since refusing it would leave no report.
     if read.text is None and not forced:
         if read.retryable:
             raise ModelRetry(
@@ -563,49 +405,21 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
         raise ModelRetry(tools_mod.flagged_write_refusal(
             "close_investigation", flagged, offered_text=False,
         ))
-    # The dispositions carrying a structural entry price, collected here as well as at the
-    # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
-    # and before the gate so a close that owes the price never spends a review.
+    # The entry price, also collected at the `investigation.md` write gate. After the
+    # terminal-close refusal, and before the review so an unpaid close spends none.
     companion = _refuse_if_entry_price_is_owed(text, disposition, forced=forced)
-    # The check the close never had (#961). Every other write verb meets the invlang schema
-    # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
-    # commits against this document and the review gate parses it — so it was the one path on
-    # which an error-severity document reached a committed disposition. It reads through
-    # `tools_mod`, beside the repair window above, so both document gates judge one reading.
-    #
-    # LAST of the three document gates, and the order is load-bearing. This one runs the WHOLE
-    # validator, which includes rules conditioned on the disposition the DOCUMENT concludes —
-    # benign gating, the false-positive entity check. Ahead of the price gate it would answer a
-    # close of `false-positive` with a complaint about the `benign` the companion happens to
-    # declare: true, but about a keyword the model is no longer claiming, and it would shadow
-    # the specific obligation the model can actually discharge. Behind it, each refusal is the
-    # most specific one the document has earned, and nothing gets past: the price gate refuses
-    # what it prices, this refuses everything else. Still ahead of every disposition branch, so
-    # no review is spent on a close that is going to be refused (H5's reason).
-    #
-    # `forced` is exempt with the flagged-row window above, for that exemption's own reason:
-    # a run cut short has no model left to repair with.
+    # The close publishes against this document, so it meets the full invlang schema like
+    # every other write. Deliberately after the price gate: the full validator includes rules
+    # keyed on the disposition the document declares, which would otherwise shadow the more
+    # specific price the model can actually pay.
     if not forced and (structure := tools_mod.committed_document_refusal(read)) is not None:
         raise ModelRetry(structure)
-    # #923 fork J4, narrowed by #992: `unresolved` is the ONE verdict matched by VALUE that
-    # skips the live review — it is the host's own account of a run that ended without a
-    # settled finding (a gate overrule, a review that could not complete, or the driver's own
-    # close of a run cut short), never a claim about the world, so there is nothing for a review
-    # to judge. `inconclusive` now spends the same review a confident close does (#992): its
-    # `ceiling_test` receipt asserts a claim — nothing further could be measured — and that is
-    # exactly what the review judges. Keying this on `forced` instead of value was considered
-    # and rejected: `forced=True` also reaches this function carrying a CONFIDENT verdict (a
-    # host-forced `malicious`, say), and that close must still spend its review — `... or
-    # forced:` would let the host commit any verdict unreviewed.
+    # Only `unresolved` skips the review: it describes the run, not the world. Keyed on value,
+    # not `forced`, because a forced close can carry a confident verdict that must be reviewed.
     if disposition in NO_REVIEW_DISPOSITIONS:
-        # The gate reviews everything but `unresolved`, so nothing was reviewed here and there
-        # is no stage output to diagnose — the empty detail is the honest value, not a gap.
-        # `unresolved` carries NEITHER companion-derived field, the baseline included: a forced
-        # close skips the document gate (a run cut short has no model left to repair with), so
-        # publishing model free text there would put text through no structural check into the
-        # one artifact no model can be asked to fix — and text the report schema then refused
-        # would fail the forced close on a MISSING report.md, which is the dead-letter that
-        # exemption exists to prevent.
+        # No review ran, so `detail` is empty. `unresolved` carries neither companion-derived
+        # field: the forced close skipped the document gate, and unchecked text the report
+        # schema then refused would leave the run with no report.md.
         unreviewed = challenge_gate.GateVerdict(
             outcome=STANDS, disposition=disposition, cause=CAUSE_NOT_REVIEWED, detail="",
             material=(), turns_used=0, failure_kind=None,
@@ -636,14 +450,9 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             failure_kind=verdict.failure_kind,
         )
 
-    # #983 mechanism A, O3, plus #992's M4. The POST-REVIEW site, which every close now takes
-    # once it clears `NO_REVIEW_DISPOSITIONS` — confident members and, since #992,
-    # `inconclusive`. `runtime_evidence` rides on every disposition, because recurrence context
-    # is descriptive on every close. `ceiling_test` is keyed on the VERDICT's disposition, not
-    # the argument the close was called with: a confident close's `_route` arm never returns
-    # `inconclusive`, so this is populated exactly when the committed disposition IS
-    # `inconclusive` — the one case where the report carries the receipts it paid its entry
-    # price with.
+    # The post-review site. `runtime_evidence` rides on every disposition. `ceiling_test` is
+    # keyed on the verdict's disposition, not the argument, so it is set exactly when the
+    # committed disposition is `inconclusive`.
     fields = _fields_from(
         verdict, material=material,
         ceiling_test=(
@@ -659,12 +468,10 @@ def close_investigation(  # noqa: PLR0913 — the close's own seams, all injecte
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds | None = None,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
 ) -> CloseResult:
-    """The SYNC host-level close, and one of the TWO boundaries where the gate's bounds are
-    resolved (`run_investigation` is the other). Everything inward of these two takes a
-    concrete `Bounds`. Never call this from inside a running event loop."""
-    # lint-default: ok — DI seam owning its default at a boundary: this entry point is
-    # reached directly (not through run_investigation), so it has no resolved value threaded
-    # to it and must resolve one. Resolved ONCE, into a fresh name, and threaded inward.
+    """The sync host-level close; one of the two boundaries (with `run_investigation`) that
+    resolves the gate's bounds. Never call this from inside a running event loop."""
+    # lint-default: ok — boundary entry point with no resolved value threaded to it; resolved
+    # once and threaded inward.
     resolved = bounds if bounds is not None else challenge_gate.default_bounds()
     return asyncio.run(_close_investigation_async(
         deps, disposition, stages=stages, bounds=resolved, evidence=evidence,
@@ -680,12 +487,9 @@ async def _tool_close_investigation(
 
 
 def _document_or_empty(read: CompanionRead) -> str:
-    """The text the close's gates judge. Only the HOST's forced close reaches here with a
-    companion that could not be read (the model's is overruled first), and for it the empty
-    document is the honest input: `unresolved` owes nothing and is not reviewed, and a refusal
-    would end the run with NO report.md — the dead-letter the forced exemption exists to
-    prevent. Logged here, once, where it is acted on — the reader itself runs on every model
-    request and says nothing."""
+    """The text the close's gates judge; empty for the forced close over an unreadable
+    companion (the model's close is overruled before this). Logged here because the reader
+    itself runs on every request and stays silent."""
     if read.text is None:
         _logger.warning(
             f"forced close: `investigation.md` could not be read ({read.refusal}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
@@ -700,12 +504,8 @@ def _overrule_unreadable_companion(
     deps: AgentDeps, read: CompanionRead, disposition: str, *,
     validator: ArtifactValidator, evidence: str | None,
 ) -> CloseResult:
-    """The model's close over a companion no retry will make readable (undecodable bytes, a
-    planted entry — never the I/O fault, which is refused instead): committed as the review
-    that cannot run it is (`challenge_gate.review_cannot_run`) — the host's `unresolved`, the
-    record naming what was under review and why nothing could judge it. The same commit the
-    reviewed site makes for a projector that cannot project, minus the companion-derived
-    fields: there is no body to carry receipts or baseline rows from."""
+    """Commit the model's close over a companion no retry will make readable as a review that
+    cannot run: the host's `unresolved`, with no companion-derived fields."""
     verdict = challenge_gate.review_cannot_run(
         deps, read.refusal or "investigation.md could not be read",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     )
@@ -717,23 +517,12 @@ def _overrule_unreadable_companion(
 
 
 def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> None:
-    """`unresolved` (#923) has exactly one legal caller — the driver's own forced close — and
-    exactly one illegal spelling for that caller to reach for instead. Both refusals sit at
-    the HOST-CHECK position (J5): right after the enum-membership refusal above and well
-    ahead of the price gate and the review, since neither owes any work for a call this
-    function is about to refuse outright.
+    """Refuse `unresolved` from the model and `inconclusive` from the forced close.
 
-    * fork F2 — HUMAN: a non-forced (i.e. MODEL) caller supplying `unresolved` is refused.
-      `unresolved` is the HOST's own verdict, recorded when a run terminates without a settled
-      finding (a gate overrule, a review that could not complete, or the driver's
-      close of a run cut short) — never model-authored. The model is offered this member for
-      free by the tool's own JSON schema (`DispositionArg` derives it from the ordered tuple
-      with nobody editing this file) and is held to a narrower set here; both halves of that
-      divergence are deliberate and both are witnessed.
-    * fork J31: a forced (i.e. HOST) caller supplying `inconclusive` is refused. That keyword
-      now carries an entry price (`_refuse_if_entry_price_is_owed`) a forced caller cannot pay
-      — no model is left to repair a refused write with — so a forced caller reaching for it
-      is refused here rather than silently manufacturing the analyst-facing verdict.
+    `unresolved` is the host's own verdict for a run that ended without a settled finding;
+    the tool schema offers it (derived from the full vocabulary) but the model may not commit
+    it. `inconclusive` carries an entry price a forced caller cannot pay, having no model left
+    to repair with. Checked before the price gate and the review, which a refused call skips.
     """
     if disposition == HOST_ONLY_DISPOSITION and not forced:
         raise ModelRetry(
@@ -754,47 +543,19 @@ def _refuse_if_host_only_verdict_misused(disposition: str, *, forced: bool) -> N
 def _refuse_if_entry_price_is_owed(
     text: str, disposition: str, *, forced: bool = False,
 ) -> CompanionBody:
-    """Collect the structural price this close's KEYWORD owes, refuse if it is unpaid, and
-    hand back the PARSED `investigation.md` the price was read off.
+    """Collect the structural price this close's disposition owes, refuse if unpaid, and return
+    the parsed `investigation.md` it was read from.
 
-    Returning the parsed document is what keeps #923's coverage channel honest: the
-    `ceiling_test` rows the close carries into `report.md` must be the rows this gate just
-    priced, and — since the review takes this same object — the rows the review judged.
-    Re-reading the file at the commit made the bound a bound on one snapshot and the report a
-    copy of another — a document rewritten between the two calls ships rows nothing charged.
+    Returning the parsed body means the companion is parsed once, here, inside the guard that
+    turns a parse fault into a refusal, and the review and report use exactly the rows this
+    gate priced. The price is collected here as well as at the write gate because nothing else
+    on the close path reads the companion. Per-disposition rules live in the owner's
+    `_DISPOSITION_GATES`.
 
-    The BODY rather than the text, so the close parses the companion exactly once, here, and
-    every later reader takes the body. `disposition_entry_price` short-circuits ahead of its
-    own parse for any unpriced keyword, so a `malicious` or `unresolved` close used to reach
-    the report readers with no parse having happened yet — and theirs was bare, which turned a
-    document this gate could not read into a traceback rather than the refusal the wrapping
-    below exists to produce.
-
-    `report.md` is written FROM the close's disposition argument and nothing else on that path
-    reads the companion, so a price collected only at the `investigation.md` write gate is owed
-    by the document the model chooses to write and by nothing the model calls. The dispatch
-    goes through the OWNER's `_DISPOSITION_GATES` and nothing in this module is keyed on a
-    disposition, so a fourth priced keyword is a row there rather than a branch here.
-
-    `text` is the close's one reading, already known to be a document (the close decides a
-    companion that could not be read before this gate; see `tools.CompanionRead`). NEVER
-    WRITTEN is `""`: an unwritten companion states no defect, names no entity check and
-    records no alerted entity, so it owes every priced keyword its whole price and the caller
-    denies with the same actionable text a blank `:T conclude` earns.
-
-    Fails CLOSED when the parse fails: this gate parses a file it did not write — an imported
-    run dir, a replayed fixture, a hand edit — and an empty text would mean "this gate did not
-    run", waiving the whole price. The parse fault would otherwise leave the close as a
-    traceback rather than a refusal.
-
-    `forced` is exempt from the PARSE fault, on the terms the driver's own forced-close comment
-    sets and the two document gates already honour: the framework's close has no model left
-    to repair a document with, so a refusal there ends the run with NO report.md and
-    dead-letters it at persist — worse than publishing a disposition off a companion nothing
-    could parse. It is exempt from the parse alone, never from the PRICE: an unparseable
-    document yields the empty body, which owes every priced keyword its whole price, so a forced
-    close of a priced keyword is still refused for what it did not pay. (`unresolved`, the one
-    disposition forced today, owes nothing and commits.)
+    `text` is `""` for a never-written companion, which owes every priced disposition its full
+    price. A parse failure refuses (fails closed) rather than waiving the price. `forced` is
+    exempt from the parse fault only, never the price: an unparseable document becomes the
+    empty body, so a forced close of a priced disposition is still refused.
     """
     try:
         companion, _warnings = parse_dense_companion(text)
@@ -822,46 +583,28 @@ def _refuse_if_entry_price_is_owed(
             f"close is not permitted while the gate cannot look."
         ) from exc
     if price:
-        # One owed string per line: `_check_benign_open_slots` files one per unresolved slot
-        # PER VERTEX, so a real log can owe dozens, and space-joined that is a wall. The write
-        # gate already hands the model the same diagnostics one per line.
+        # One owed string per line: a real log can owe dozens.
         raise ModelRetry("close blocked: " + price.rationale + "\n" + "\n".join(price.owed))
     return companion
 
 
-#: The `disposition` argument AS THE MODEL IS OFFERED IT: a plain `str` carrying the owner's
-#: vocabulary in its JSON schema. Derived from `DISPOSITION_VALUES`, so a fifth member reaches
-#: the model's TOOL SCHEMA with nobody editing this file.
+#: The `disposition` argument as the model is offered it: a plain `str` with the vocabulary in
+#: its JSON schema, derived from `DISPOSITION_VALUES`. (`SKILL.md` §REPORT enumerates the
+#: members by hand and must be updated separately.)
 #:
-#: That property holds for the TOOL SCHEMA ONLY. `SKILL.md` §REPORT — the runtime system
-#: prompt — hand-enumerates the members with a paragraph of MEANING each, so it is not
-#: derivable from a tuple of strings. A fifth member grows this schema automatically and leaves
-#: that roster stale, which is a prompt change, not this one.
-#:
-#: `json_schema_extra`, NOT a `StrEnum` or a `Literal`, DELIBERATELY. pydantic does not validate
-#: against it, so an out-of-enum value still reaches the body and the exact test in
-#: `_close_investigation_async` stays the SOLE rejecter. Hand the type system the enum and
-#: pydantic refuses first, which breaks three things: the host check becomes unreachable from
-#: this lane, the SYNC entry is left as the only lane it still guards, and the repr-escaped
-#: retry text is replaced by a framework message that echoes the invisible character RAW —
-#: measured, not assumed: `input: "beni<U+200B>gn"`. The hint is for the model; the gate stays
-#: ours.
+#: `json_schema_extra`, not a `StrEnum` or `Literal`, so pydantic does not validate it and the
+#: exact test in `_close_investigation_async` stays the sole rejecter. Pydantic's own error
+#: would echo an invisible character raw (`input: "beni<U+200B>gn"`) instead of our
+#: repr-escaped retry text.
 DispositionArg = Annotated[str, Field(json_schema_extra={"enum": list(DISPOSITION_VALUES)})]
 
 
 def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) -> None:
-    """MAIN's composition root ONLY — never called for any other role's agent build, and
-    only when that root's effective `ToolSet.close` is on."""
+    """Called only from MAIN's composition root, when its effective `ToolSet.close` is on."""
 
-    # `sequential=True`, for the same reason `append_block`/`fix_row` carry it (tools.py):
-    # two `ToolCallPart`s in ONE model response otherwise run as concurrent tasks. Here the
-    # lost update is the DISPOSITION. `state.closed` is not set until `_commit` has already
-    # replaced report.md, so two close calls both read it False at the R4 check, both run the
-    # review gate, and both reach `_commit` — which derives `turn_for_record` from
-    # `state.turns`, unchanged by either arm, so they collide on one `review_record.{turn}.json`
-    # and one `write_guarded(..., mode="replace")`. The run then records whichever disposition
-    # finished last while telling the model both closes succeeded, and report.md's frontmatter
-    # is what the learning loop trains on.
+    # `sequential=True`: two close calls in one model response would otherwise run
+    # concurrently, both pass the already-closed check (set only after the write), and both
+    # commit to the same review record and report.md, keeping whichever finished last.
     @agent.tool(sequential=True)
     async def close_investigation(
         ctx: RunContext[AgentDeps], disposition: DispositionArg

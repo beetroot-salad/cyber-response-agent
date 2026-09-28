@@ -15,9 +15,9 @@ families above it in this list:
                 screen, and the severity ceiling.
   * `_closure` — the three closure gates, which are one sentence over three namespaces.
 
-`diagnose` below is the only place that knows the running ORDER, which is load-bearing
-in two places it says so at. Everything else here is a re-export kept because a reader
-already imports that name from `validate`.
+`diagnose` below is the only place that knows the running order, which matters where its
+comments say so. Everything else here is a re-export kept because callers import those names
+from `validate`.
 """
 
 from __future__ import annotations
@@ -242,9 +242,8 @@ from ._closure import (
 def diagnose(
     proposed_text: str, current_text: str | None = None
 ) -> list[Diagnostic]:
-    """The validator proper. Failures arrive as `Diagnostic`s so a caller that wants to point
-    at the offending row can. `validate_companion` is the string surface over this and is what
-    nearly everything calls."""
+    """The validator proper, returning `Diagnostic`s so a caller can point at the offending
+    row. `validate_companion` is the string surface over this."""
     proposed_text = _normalize_newlines(proposed_text)
     if current_text is not None:
         current_text = _normalize_newlines(current_text)
@@ -255,13 +254,9 @@ def diagnose(
     companion, warnings = parse_dense_companion(proposed_text)
     current_companion: CompanionBody | None = None
     if current_text is not None:
-        # THE SAME TEXT IS THE SAME PARSE. Two callers read a committed document as its OWN
-        # baseline — `committed_investigation_reason` (a close proposes nothing) and
-        # `seed_investigation` (an inherited prefix introduces nothing its source had not
-        # already committed) — and for them the second `parse_dense_companion` is a full
-        # re-parse of bytes already in hand, feeding an append-only comparison of the document
-        # with itself. Both texts are newline-normalized above, so the equality is over the
-        # same value the parse would see.
+        # The same text is the same parse. `committed_investigation_reason` and
+        # `seed_investigation` validate a committed document against itself as baseline, and
+        # would otherwise re-parse identical bytes. Both texts are newline-normalized above.
         current_companion = (
             companion if current_text == proposed_text
             else parse_dense_companion(current_text)[0]
@@ -298,32 +293,26 @@ def diagnose(
         _check_vertex_participation(proposed_text, companion, current_companion)
     ))
     found.extend(_check_closed_vocab(companion, proposed_text))
-    # #983. The `:R authz`/`:R consultations` cells the two new mechanisms turn on, checked for
-    # every document rather than only for a benign one: `_check_authz_row_grounding` is also
-    # collected by `_check_benign_gating`, because a price owed at the write gate alone is not
-    # owed at the close — and the close is the artifact the learning loop and the ticket lane
-    # read. The other two are write-gate-only: neither moves a disposition's price.
+    # Checked for every document, not only benign ones. `_check_authz_row_grounding` is also
+    # collected by `_check_benign_gating`, because a price owed only at the write gate is not
+    # owed at the close, which is what the learning loop and ticket lane read.
     grounding = _check_authz_row_grounding(companion)
     found.extend(_plain(grounding))
     found.extend(_plain(_check_authz_basis(companion)))
     found.extend(_plain(_check_tacit_lookup_outcomes(companion)))
     found.extend(_plain(_check_runtime_evidence_windows(companion)))
     found.extend(_plain(_check_screen_structure(companion)))
-    # Bound, not recomputed: `_check_authz_contract_closure` defers to this gate's OUTPUT on
-    # any contract it is already refusing, and running it twice per write is the single most
-    # expensive thing in the pass.
+    # Bound once: `_check_authz_contract_closure` defers to this output, and running the gate
+    # twice is the most expensive thing in the pass.
     gated = _check_disposition_gating(companion)
-    # Collected at both boundaries, REPORTED once. `_check_benign_gating` re-runs the grounding
-    # check above (deliberately — see the comment there), and the two produce byte-identical
-    # strings, so a benign document handed the model the same wall of text twice on every
-    # refused write. The double COLLECTION is the point and stays; the double PRINT is not.
+    # `_check_benign_gating` re-runs the grounding check above and produces identical strings:
+    # collect at both boundaries, report once.
     already = set(grounding)
     found.extend(_plain([e for e in gated if e not in already]))
     found.extend(_plain(_check_ceiling_test_scope(companion)))
     found.extend(_plain(_check_hypothesis_persistence(companion)))
-    # The three closure gates, together and last: they are one sentence over three namespaces
-    # (`_unclosed_commitments`), and each is only safe to run because its `deferred_*` table is
-    # now projected.
+    # The three closure gates, together and last: they are one rule over three namespaces
+    # (`_unclosed_commitments`), each safe only once its `deferred_*` table is projected.
     found.extend(_plain(_check_authz_contract_closure(companion, gated=set(gated))))
     found.extend(_plain(_check_impact_closure(companion)))
     found.extend(_plain(_check_prediction_closure(companion)))
@@ -332,36 +321,28 @@ def diagnose(
 
 
 def warn_diagnostics(text: str) -> tuple[Diagnostic, ...]:
-    """The REPAIR WINDOW, derived from a document's current bytes and stored nowhere.
+    """The repair window: `diagnose`'s warn-severity findings over the document as it stands.
 
-    Not state anything records: it is `diagnose`'s warn-severity findings over whatever is on
-    disk right now, so it cannot go stale, cannot disagree with the file, and survives a
-    freshly constructed deps object. Each finding's `locus.row_text` is how `fix_row` addresses
-    the row — the row as PARSED (the tokenizer strips it), which is also the text the warning
-    prints, so the model's copy-paste round trip closes.
-
-    No baseline: append-only is judged against history, but a warning is a property of the
-    document as it stands."""
+    Derived, never stored, so it cannot go stale or disagree with the file. `locus.row_text` is
+    the row as parsed (and as the warning prints it), which is how `fix_row` addresses it. No
+    baseline: a warning is a property of the current document, not of its history."""
     return tuple(d for d in diagnose(text) if d.severity == "warning")
 
 
 def validate_companion(
     proposed_text: str, current_text: str | None = None
 ) -> list[str]:
-    """The string surface over `diagnose`, which is what the validator's callers are written
-    against. `_artifact_schema` is the one caller that wants the structure and calls `diagnose`
-    directly.
+    """Error-severity messages from `diagnose`, as strings.
 
-    ERROR severity only. Its production caller reads this list as "reasons to refuse the
-    document" — persist dead-letters a run on any element — and a warn-family row is explicitly
-    not that: the run reaches the learning loop with it."""
+    Warn-severity findings are excluded: the production caller dead-letters a run on any
+    element, and a warned row still lands and reaches the learning loop."""
     return [
         d.message for d in diagnose(proposed_text, current_text) if d.severity != "warning"
     ]
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports: each name's real home is the module it comes from. Kept because callers import
+#: them from here.
 __all__ = [
     "ATTR_PREFIX",
     "ATTR_UPDATES_LOCUS",

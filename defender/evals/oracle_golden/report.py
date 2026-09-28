@@ -1,51 +1,35 @@
 #!/usr/bin/env python3
 """Roll the per-case scores up into a report that states what it cannot certify.
 
-`score.py` is per-case; this aggregates, and every rate it prints is qualified by what
-the sample can actually support.
+Every rate is qualified by what the sample can support.
 
-**The headline is the ACTIVE band.** `delta_kind` groups into two:
+**The headline is the ACTIVE band.** `delta_kind` groups into:
 
-  - **active** — `present`, `suppressed`, `indistinguishable`: the activity touched this
-    envelope, and the oracle had to represent something;
-  - **quiet** — `absent`, `state-only`: the oracle correctly said nothing.
+  - **active**: `present`, `suppressed`, `indistinguishable` (the oracle had to represent
+    something);
+  - **quiet**: `absent`, `state-only` (the oracle correctly said nothing);
+  - **unmeasured**: leads the label pass could not settle, excluded from every rate and
+    counted beside it.
 
-Reporting one pooled number lets the quiet band carry the score — most leads are quiet,
-so a 0.92 headline is mostly correctly-said-nothing. Both bands are printed; the active
-one leads, because it is the one that measures whether the oracle can synthesize
-telemetry.
+A pooled number would let the mostly-quiet leads carry the score, so the active band leads.
 
-A third band, **unmeasured**, holds the leads the label pass could not settle. They are
-excluded from every rate and counted beside it — a judge abstention is a statement about
-the instrument and must not be charged to the oracle.
+**`n_units`, not `n_leads`.** The independent unit is (activity family x host pair):
+derived cases reshow their base's envelopes, and seeds and re-runs of one scenario on one
+host pair are one story shape. More captures do not raise the unit count.
 
-Four more things this reports that a hand-rolled percentage did not:
+**An interval at `n = n_units`.** The observed rate is lead-level, but the interval is
+taken at the unit count with `k = round(rate x n_units)`, a conservative
+full-within-unit-correlation design effect. Below `MIN_UNITS` a slice reports
+`insufficient` rather than an uninformative interval.
 
-**`n_units`, not `n_leads`.** A derived case reshows its base's envelopes, so a lead
-count double-counts. The independent unit is (activity family x host pair); seeds and
-re-runs POOL within a unit, because ten seeds of one scenario against one host pair are
-ten runs of one story shape, not ten trials. Automation raises the capture count cheaply
-and does **not** raise the unit count.
+**`n_environments`.** Cases captured from one restored snapshot are one environment.
 
-**An interval, computed at `n = n_units`.** The observed rate is the lead-level
-one, but the interval is taken at the unit count with `k = round(rate x n_units)`
-— a deliberately conservative full-within-unit-correlation design effect, held
-until there is enough data to estimate the real intra-unit correlation. Below a
-floor of `MIN_UNITS` a slice reports `insufficient` rather than a number, because
-a Wilson interval on one unit spans [0.21, 1.00] and publishing that invites
-someone to read the point estimate.
+**Mechanical results, separately.** Derived cases (mutation, negative-control) have no
+capture, so their result is the grammar check, the leak check and the manifest's
+`expectation:` clauses, reported as counts and named failures.
 
-**`n_environments`.** Two cases captured from one restored snapshot are one
-environment however different their stories, so a shared-snapshot pair cannot
-inflate a slice's apparent independence.
-
-**The mechanical results, separately.** Derived cases (mutation, negative-control) have
-no capture of their own, so they contribute no judged rows at all — their result is the
-grammar check, the leak check, and the manifest's `expectation:` clauses, reported as
-counts and named failures rather than folded into a measured rate.
-
-Dev and held-out are reported **separately and never pooled**: pooling them would
-launder the pool the prompt was fitted to into the certification number.
+Dev and held-out are reported separately and never pooled: pooling would launder the
+pool the prompt was fitted to into the certification number.
 
 Usage: report.py [<cases_dir>] [--json <out.json>] [--target-lower-bound 0.90]
 """
@@ -61,24 +45,21 @@ import yaml
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 
-# Run as a script from anywhere, so the package this module lives in has to be made
-# importable before its own sibling can be — `score.py` establishes the convention.
+# Runnable as a script from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from defender.evals.oracle_golden import stats as STATS  # noqa: E402 — after the bootstrap
 
-#: Fewest independent units a slice needs before an interval is published at all.
-#: At n=1 Wilson spans [0.21, 1.00] and at n=2 [0.34, 1.00]; printing either
-#: alongside a point estimate invites the point estimate to be read.
+#: Fewest independent units before an interval is published. At n=1 Wilson spans
+#: [0.21, 1.00] and at n=2 [0.34, 1.00], which only invites reading the point estimate.
 MIN_UNITS = 3
 
-#: A cause is treated as real only at this many instances across this many distinct UNITS.
-#: Units, not cases: a derived case is not independent evidence of anything its base shows.
+#: A cause is established only at this many instances across this many distinct units
+#: (not cases: a derived case is not independent of its base).
 CAUSE_MIN_INSTANCES = 5
 CAUSE_MIN_UNITS = 3
 
-#: The two reported bands, plus the third that is not a band but an admission. Keyed by
-#: `delta_kind`; anything unknown lands in `unmeasured` rather than silently in a rate.
+#: Band per `delta_kind`; unknown kinds land in `unmeasured` rather than in a rate.
 BANDS = {
     "present": "active", "suppressed": "active", "indistinguishable": "active",
     "absent": "quiet", "state-only": "quiet",
@@ -115,11 +96,9 @@ def unit_of(manifest: dict) -> str:
 def summarize(rows: list[dict], units: set[str], environments: set[str]) -> dict:
     """One slice: counts, observed rate, and the interval at the unit count.
 
-    The denominator is the DECIDED leads. `faithful is None` is the judge saying the
-    telemetry it was given does not settle the lead — charging that to the oracle would
-    turn a limit of the instrument into a defect of the thing measured. Abstentions are
-    counted beside the rate instead, and a slice that abstains at least as often as it
-    decides is reported as not a measurement at all.
+    The denominator is the decided leads: an abstention (`faithful is None`) is a limit of
+    the instrument, not an oracle failure. A slice that abstains at least as often as it
+    decides is not a measurement.
     """
     n_leads = len(rows)
     n_units = len(units)
@@ -150,9 +129,7 @@ def summarize(rows: list[dict], units: set[str], environments: set[str]) -> dict
                       f"an interval here would be uninformative")
         return out
     interval = STATS.wilson_interval(round(rate * n_units), n_units)
-    # `wilson_interval` answers `None` only for `n == 0`, and the floor check above already
-    # returned for anything under MIN_UNITS. Asserted rather than assumed: lowering
-    # MIN_UNITS to 0 would otherwise turn a never-measured slice into a `TypeError` here.
+    # Only `n == 0` gives `None`, excluded by the floor unless MIN_UNITS drops to 0.
     assert interval is not None, f"n_units={n_units} cleared the floor but has no interval"
     out["interval"] = [round(interval[0], 3), round(interval[1], 3)]
     return out
@@ -205,8 +182,7 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
             env = case["manifest"].get("capture_environment", "?")
             score = case["scores"][tag]
             if "judged" not in score:
-                # A pre-judge score doc. Skipping it silently would drop a whole case
-                # from a rate without changing the case count printed beside it.
+                # An old-format score; skipping it would silently drop a case from the rates.
                 raise ValueError(
                     f"{case['dir'].name}/scores/{tag}.json predates the judge redesign "
                     f"(#711 §5): it carries no `judged` flag and its rows have no "
@@ -215,15 +191,11 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
             mechanical["malformed_leads"] += len(mech.get("malformed_leads") or {})
             mechanical["leaked_values"] += [f"{case['id']}: {v}"
                                             for v in mech.get("forbidden_emitted") or []]
-            # The manifest's `expectation:` clauses, which are the WHOLE result of a derived
-            # case: it contributes no judged rows by construction, so dropping this would
-            # print such a case's name and not its verdict. `leaked_values` above is one of
-            # the five clauses (`must_not_emit`).
+            # The whole result of a derived case, which contributes no judged rows.
             mechanical["expectation_failures"] += [
                 f"{case['id']}: {f}" for f in mech.get("expectation_failures") or []]
             if not score.get("judged"):
-                # Carried by id, not silently dropped: a case that contributes no rows
-                # must still be visible, or "6 cases" reads as six measurements.
+                # Listed by id, so the case count does not read as that many measurements.
                 mechanical["unjudged_cases"].append(
                     {"case": case["id"], "why": score.get("why_unjudged", "")})
                 continue
@@ -327,8 +299,7 @@ _BAND_GLOSS = {
 
 
 def _print_mechanical(mechanical: dict) -> None:
-    """The checks that never reached a model. Printed even when clean — a leak check
-    reported only on failure reads as "no mutation case was scored"."""
+    """The checks that never reached a model, printed even when clean."""
     print(f"   mechanical: {mechanical['malformed_leads']} malformed lead(s); "
           f"pre-mutation leaks: "
           f"{'CLEAN' if not mechanical['leaked_values'] else mechanical['leaked_values']}")

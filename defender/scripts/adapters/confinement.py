@@ -1,4 +1,4 @@
-"""Target fidelity (D3/D4): a verb cannot be aimed outside the system it is declared under.
+"""Target fidelity: a verb cannot be aimed outside the system it is declared under.
 
 Two rule forms — an HTTP read-endpoint allowlist for the URL-shaped adapters, and a
 program+container-target pair for host-state, which has no URL — plus the transport capture
@@ -37,8 +37,8 @@ class AllowlistError(Exception):
 
 class ReadEndpointAllowlist(Mapping):
     """A validating `Mapping[system, tuple[(endpoint_pattern, method), ...]]`. Refuses at
-    AUTHORING time an entry naming no HTTP method (§7 F1) — the method is what separates the
-    ticket store's read from its write on the identical resolved path."""
+    authoring time an entry naming no HTTP method — the method is what separates the ticket
+    store's read from its write on the same path."""
 
     def __init__(self, table: Mapping[str, Iterable[Any]]):
         validated: dict[str, tuple[tuple[str, str], ...]] = {}
@@ -71,7 +71,7 @@ class ReadEndpointAllowlist(Mapping):
 
 def normalize_endpoint(url: str) -> str:
     """The resolved request target, normalized: percent-decoded, `..` segments resolved,
-    duplicate/trailing slashes collapsed, query string dropped (§7 R6)."""
+    duplicate/trailing slashes collapsed, query string dropped."""
     path = urllib.parse.unquote(urllib.parse.urlsplit(url).path)
     resolved: list[str] = []
     for part in path.split("/"):
@@ -160,16 +160,15 @@ class TransportCapture:
 
 
 def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
-    """Confine, then record — the ONE thing every outbound HTTP path does before opening a
-    connection. Both transports (the shared stub transport and elastic's own helper) call this
-    rather than restating the pair, so a third transport cannot half-adopt the seam."""
+    """Confine, then record — what every outbound HTTP path does before connecting. Both
+    transports call this rather than restating the pair."""
     confine_read_endpoint(system, url, method=method, verb_class="r")
     capture = getattr(ctx, "capture", None)
     if capture is not None:
         capture.record(system=system, url=url, method=method)
 
 
-# the elastic index (D3) confinement
+# the elastic index confinement
 
 
 def _reach_ok(index: str, pattern: str) -> bool:
@@ -186,18 +185,13 @@ def _reach_ok(index: str, pattern: str) -> bool:
 def confine_index(
     index: str, configured_patterns: Iterable[str], *, world_id: str | None = None,
 ) -> str:
-    """Refuse an index expression whose REACH falls outside every configured pattern — never
-    the literal string. Evaluates Elasticsearch's own grammar (a comma-list, `*`, a leading
-    `-` exclusion) and refuses the WHOLE call rather than silently narrowing to the in-bounds
-    part (§7 R5).
+    """Refuse an index expression whose reach (not literal string) falls outside every
+    configured pattern. Evaluates Elasticsearch's grammar (comma lists, `*`, leading `-`
+    exclusion) and refuses the whole call rather than narrowing to the in-bounds part.
 
-    `world_id` DECLARES this call's world views in bounds, and nothing else about them. A
-    branched world reads a private view of the corpus rather than the corpus, and that view is
-    named OUTSIDE the pattern it stages on purpose (see `world_view`) — so without a
-    declaration the staged read is refused as out of bounds, and with one the admissible names
-    are `is_world_view`'s: per world, so a model naming `wv-b-logs` in A is still refused, and
-    inside the configured corpora, so the world moves which NAME is admissible and never which
-    corpus is.
+    `world_id` admits that world's views (`is_world_view`), which are named outside the
+    configured patterns on purpose. Views are per world, and only of configured corpora: the
+    world changes which name is admissible, never which corpus.
     """
     patterns = tuple(configured_patterns)
     if not isinstance(index, str) or not index:
@@ -222,61 +216,38 @@ def confine_index(
 
 # the world-view namespace
 
-#: Characters an Elasticsearch index or alias name cannot carry. Whitespace is checked
-#: separately (`str.isspace`), so this names only the punctuation. `:` is NOT here: it is
-#: illegal inside a name but legal in the expression `remote:logs-*`, which addresses a
-#: cross-cluster source and prefixes correctly.
+#: Punctuation an Elasticsearch index or alias name cannot carry (whitespace is checked
+#: separately). `:` is absent: legal in the cross-cluster expression `remote:logs-*`.
 _ILLEGAL_IN_NAME = frozenset('\\/*?"<>|,')
 
-#: The namespace every world view lives in. A PREFIX, and that is the whole point: a view
-#: suffixed onto its own corpus (`logs-*` -> `logs-w-a`) is still matched BY `logs-*`, so the
-#: base run and every sibling that does not stage the event stream read each other's staged
-#: documents through the pattern they were derived from — the pair measuring contamination
-#: rather than a difference, which is the one thing the per-world view exists to prevent.
-#: Prefixed, no configured pattern reaches it, and `world_view` proves that per name.
+#: The namespace every world view lives in, as a prefix. A suffixed view (`logs-*` ->
+#: `logs-w-a`) would still match `logs-*`, so the base run and unstaged siblings would read the
+#: world's staged documents. `world_view` checks the disjointness per name.
 VIEW_NAMESPACE = "wv"
 
 
 class ViewNameError(ValueError):
     """A corpus pattern that cannot carry a world view.
 
-    A plain `ValueError`, NOT a `ConfinementFault`: naming is not confinement, and the caller
-    that builds views (the branch stager) owns how a refusal reaches the model — it wraps this
-    in its own usage-class fault so the refusal lands in the ledger as evidence.
+    A plain `ValueError`, not a `ConfinementFault`: the branch stager wraps it in its own
+    usage-class fault so the refusal lands in the ledger as evidence.
     """
 
 
 def world_view(base_pattern: str, world_id: str) -> str:
     """The alias `world_id`'s queries read in place of `base_pattern`.
 
-    Per WORLD, never shared: siblings reading one view would see each other's staged
-    documents. And OUTSIDE the pattern it was derived from, which is the half a per-world
-    name alone does not buy — see `VIEW_NAMESPACE`.
+    Per world (siblings sharing a view would see each other's documents) and outside the
+    pattern it derives from (see `VIEW_NAMESPACE`).
 
-    The stem must be a NAME an alias can carry, and three degenerate patterns are not. `*`
-    trims to the empty string, so there is nothing left to name the corpus by and every
-    pattern would collapse to one view. A pattern wildcarded anywhere but the tail
-    (`logs-*-2026`) keeps its `*` inside the derived name, which no alias answers to. The
-    third is what a quoted source leaves behind: a source only NEEDS quoting when its name
-    carries something a bare token cannot — a space, a `|` — and the view is written back
-    UNQUOTED, because a view is a name this function constructs and `"logs-*"-wv` answers to
-    nothing. `FROM "logs|weird"` would come back with the `|` reading as a command separator,
-    cutting the query in half one step after the quote-aware splitter read it correctly.
+    Refuses stems an alias cannot carry: `*` alone (nothing left to name the corpus by), a
+    non-trailing wildcard (`logs-*-2026`), and characters a quoted source needed (space, `|`),
+    since the view is written back unquoted and would break the query. The world id gets the
+    same rule, since it reaches every view the run stages. A view nobody can read would let a
+    sibling run green against the base corpus while reporting a world that was never applied.
 
-    The WORLD ID is held to the same rule as the stem, for the same reason and one step
-    earlier: it is authored per run and reaches this name unfiltered, and a `*` or a space in
-    it corrupts every view the run stages rather than one.
-
-    All of them are refused rather than guessed: a view nobody reads runs the sibling green
-    against the BASE corpus while reporting a world that was never applied.
-
-    And the disjointness is CHECKED, not assumed. The prefix buys it for every pattern that
-    names a corpus, but a pattern reaching into the namespace itself (`wv-*`) takes it back,
-    and the whole reason this function is not a format string is that the property is what
-    matters rather than the spelling. Checked against the pattern the view was derived from —
-    the one this function is given, and the one the contamination runs through, since it is
-    the base run and the unstaged siblings reading THAT pattern who would collect this world's
-    documents.
+    Disjointness is checked against `base_pattern`, not assumed: a pattern like `wv-*` reaches
+    into the namespace itself.
     """
     world = _nameable_world(world_id)
     stem = _nameable(_view_stem(base_pattern), f"corpus pattern {base_pattern!r}")
@@ -290,22 +261,13 @@ def world_view(base_pattern: str, world_id: str) -> str:
 
 
 def _view_stem(pattern: str) -> str:
-    """The corpus half of a view name: `pattern` with its trailing wildcard and separator gone.
+    """The corpus half of a view name: `pattern` without its trailing wildcard.
 
-    ONE spelling, because `world_view` BUILDS a name with it and `is_world_view` READS one back;
-    two would drift into a boundary that refuses the names the stager constructs.
-
-    THE WILDCARD ONLY. Trimming the separator too — `.removesuffix("-").removesuffix(".")` —
-    still collapsed `logs-*`, `logs.*` and `logs*` onto the single stem `logs`, so three
-    distinct corpora shared one alias and one ledger memo key: a world staging two of them
-    into one view, and a query for the narrow corpus reading the wide one's documents. (The
-    `rstrip` this replaced was worse again — a CHARACTER SET, so `logs---*` and `logs-**` went
-    the same way.) Keeping the separator, `wv-a-logs-` and `wv-a-logs.` are two names, which is
-    what two corpora need. A trailing `-` or `.` is legal in an index or alias name; only a
-    LEADING one is not, and the namespace prefix means no view ever starts with either.
-
-    What is left un-trimmed is refused rather than guessed: `logs-**` keeps its `*` and
-    `_nameable` says so, which is the honest answer to a pattern this naming cannot carry.
+    Shared by `world_view` (build) and `is_world_view` (read back) so they cannot drift. Only
+    the wildcard is trimmed: trimming the separator too would collapse `logs-*`, `logs.*` and
+    `logs*` onto one alias. A trailing `-` or `.` is legal in an alias name (only a leading one
+    is not, and the namespace prefix rules that out). Anything still unnameable, like
+    `logs-**`, is refused by `_nameable`.
     """
     return pattern.removesuffix("*")
 
@@ -322,11 +284,8 @@ def _nameable(part: str, origin: str) -> str:
             f"{origin} carries {illegal}, which an index or alias name cannot hold — the view "
             "is written back unquoted, so the retargeted query would not parse as the one "
             "command it replaced")
-    # LOWER CASE IS PART OF THE NAME RULE, and its failure is the silent one: an alias
-    # Elasticsearch cannot hold is not refused here, it is READ — `_search` appends
-    # `ignore_unavailable=true`, so `wv-A-logs` comes back 200 with zero hits and the sibling
-    # loses that evidence class while every ledger row reads honestly. Refused where the name
-    # is built, which is the only frame that can say what to rename.
+    # Lower case only. Elasticsearch does not refuse an upper-case alias here: `_search` uses
+    # `ignore_unavailable=true`, so it silently returns zero hits.
     if part != part.lower():
         raise ViewNameError(
             f"{origin} carries upper case, which an index or alias name cannot hold — a view "
@@ -336,25 +295,18 @@ def _nameable(part: str, origin: str) -> str:
 
 
 def refuse_unnameable_world(world_id: str) -> str:
-    """`world_id`, or the `ViewNameError` every view built from it would have raised.
-
-    The world-id half of `world_view`'s naming rule, asked WITHOUT a corpus pattern, so a caller
-    holding a world and no call yet can refuse it. It is the same rule and therefore the same
-    answer — an id that fails here fails on every pattern, so the alternative to asking early is
-    asking once per served call and losing the whole event stream to a name.
+    """`world_id`, or the `ViewNameError` every view built from it would raise — for callers
+    holding a world but no corpus pattern yet, so a bad id fails once rather than per call.
     """
     return _nameable_world(world_id)
 
 
 def _nameable_world(world_id: str) -> str:
-    """`world_id`, held to the alias name rule AND to the one extra rule an id has.
+    """`world_id`, held to the alias name rule plus one more: no `-`.
 
-    NO `-`, because the delimiter cannot also be data. `wv-{id}-{stem}` is written by
-    `world_view` and read back by `is_world_view`, and an id carrying the delimiter makes that
-    parse ambiguous in the direction that matters: world `a-logs-nginx`'s view of `logs-*` is
-    `wv-a-logs-nginx-logs-`, which reads equally well as world `a`'s view of `logs-nginx-logs-*`
-    — so the boundary hands A a name B staged. Refused here, where an id can still be renamed,
-    rather than resolved by a parse that has to guess.
+    `-` delimits `wv-{id}-{stem}`, so an id containing it makes one world's view name parse as
+    another's (`a-logs-nginx`'s view of `logs-*` reads as world `a`'s view of
+    `logs-nginx-logs-*`).
     """
     world = _nameable(world_id, f"world id {world_id!r}")
     if "-" in world:
@@ -368,43 +320,22 @@ def _nameable_world(world_id: str) -> str:
 def is_world_view(index: str, configured_patterns: Iterable[str], world_id: str) -> bool:
     """Is `index` a name `world_id` may read in place of a corpus it configures?
 
-    TWO conditions, and the second is what an enumeration got wrong. The name has to carry THIS
-    world's prefix — sibling B's `wv-b-…` stays out of bounds inside A — and its corpus stem has
-    to be a corpus the base run could itself have reached, so a view of a corpus this run never
-    configured (`wv-a-other`) is still refused: the world moves which NAME is admissible, never
-    which corpus is.
+    Two conditions: the name carries this world's prefix (`wv-b-…` is out of bounds in A), and
+    its stem is a corpus the base run could itself reach, so `wv-a-other` is refused.
 
-    Enumerating `world_view(p, world_id)` for each configured `p` was the same test for the
-    exact patterns and WRONG for every narrower one. The stager derives its view from the index
-    the CALL named, not from the configured pattern — a shipped template scoping to one data
-    stream (`logs-system.auth-*` under a `logs-*` corpus) staged to `wv-a-logs-system.auth`,
-    which an enumeration of the configured patterns does not contain. The base run answered that
-    call by reach and every sibling faulted at this boundary: a base-vs-sibling difference owned
-    by the harness rather than the world, which is the one kind this seam must never create.
+    Not an enumeration of `world_view(p, world_id)` over configured patterns: the stager derives
+    views from the index the call named, which may be narrower (`logs-system.auth-*` under
+    `logs-*`), and those must be admitted too. The stem is held to `_reach_ok`, the rule every
+    unstaged name gets, rather than a bare prefix test (which would admit `wv-a-logsecret`).
+    The `==` arm admits the view of the configured pattern itself (`wv-a-logs-`), which
+    `_reach_ok` alone does not.
 
-    The stem is held to `_reach_ok` — the SAME rule every unstaged name is held to — and not to
-    a bare `startswith` of the pattern's stem. `_view_stem` drops the separator (`logs-*` ->
-    `logs`), so a prefix test admitted `wv-a-logsecret`: a view of `logsecret-*`, a corpus the
-    base run refuses outright. That widened D3 for exactly the calls a branched run makes, which
-    is the opposite of this function's claim. The `==` arm is what keeps the view of the
-    configured pattern ITSELF admissible: `world_view("logs-*", "a")` is `wv-a-logs-`, whose
-    stem is the pattern's own stem and which `_reach_ok` does not admit (nothing reaches
-    `logs-*` without something after the separator).
-
-    The world id is matched as a WHOLE SEGMENT, which is why `refuse_unnameable_world` bars a
-    `-` inside one. With ids free to carry the delimiter, `wv-{id}-{stem}` does not parse: from
-    world `a`, sibling `a-logs-nginx`'s view of `logs-*` reads as prefix `wv-a-` plus stem
-    `logs-nginx-logs-`, which `_reach_ok` admits against `logs-*` — so A is handed B's staged
-    documents by the boundary built to keep them apart. Segmented, the id either IS this
-    world's or is not.
+    The world id is matched as a whole segment; `_nameable_world` bars `-` inside one so this
+    parse is unambiguous.
     """
     namespace, _, rest = index.partition("-")
     head, _, stem = rest.partition("-")
-    # THE NAMESPACE IS THE FIRST OF THE THREE, and dropping it read the world id off whatever
-    # segment happened to be second: `evil-a-logs-nginx` and `*-a-logs-*` both parsed as world
-    # `a`'s view of a reachable corpus and were handed back through D3 unrefused. The prefix is
-    # what `VIEW_NAMESPACE` calls "the whole point" — every name `world_view` builds carries it,
-    # and a name that does not is not a view of anything.
+    # The namespace must be checked, or `evil-a-logs-nginx` would parse as world `a`'s view.
     if namespace != VIEW_NAMESPACE or head != world_id or not stem:
         return False
     return any(
@@ -433,9 +364,9 @@ def confine_host(host: str) -> str:
 
 
 def confine_host_state_call(program: str, host: str) -> None:
-    """Both halves of D3's host-state rule: the PROGRAM against the per-system allowlist, and
-    the container TARGET against the declared inventory. Neither alone suffices — `cat` inside
-    the ticket store is a disclosure the program check alone would allow."""
+    """Both halves of the host-state rule: the program against the allowlist, and the container
+    target against the declared inventory (`cat` inside the ticket store would pass the program
+    check alone)."""
     if program not in HOST_STATE_PROGRAMS:
         raise ConfinementFault(
             f"host-state program {program!r} is not in the declared allowlist "

@@ -13,41 +13,25 @@ from defender._io import TEXT_READ_ERRORS
 def duplicate_key_paths(text: str) -> tuple[str, ...]:
     """Every mapping key that appears more than once under the same parent, as `a.b.c` paths.
 
-    PyYAML does not report a repeated key — the LAST one wins, silently. For a document whose
-    whole job is to be reviewed by a human that is a hole, not a quirk: two lines sit in the
-    file, a reviewer reads both, and the loader honours one. `safe_load` cannot see it because
-    the collapse happens while the node tree is being constructed, so this walks the node tree
-    from `compose`, which is the last representation where both keys still exist.
+    PyYAML silently keeps the last of a repeated key, so a reviewer reads two lines and the
+    loader honours one. The collapse happens at construction, so this walks the `compose` node
+    tree. A `<<:` merge counts as writing its keys, since an explicit key shadowing a merged one
+    is the same last-wins collapse.
 
-    A `<<:` MERGE counts as writing its keys here, because `safe_load` expands one into the
-    mapping before building it: a merged key that an explicit key shadows is a real last-wins
-    collapse, and the merged half leaves no trace in the loaded document. Reporting it is the
-    same rule, not an extra one — two statements in the file, one honoured.
-
-    Returns paths rather than raising, so each caller decides whether a repeat is fatal (a
-    permission table) or a warning (a corpus document).
+    Returns paths rather than raising, so each caller decides whether a repeat is fatal.
     """
     try:
         root = compose(text)
     except (yaml.YAMLError, RecursionError):
-        # Unparseable is not this function's verdict to give — the caller's own `safe_load`
-        # raises on it with the parser's message, which says far more than "duplicates: none".
-        # `RecursionError` for the same reason: `safe_load` below translates it into a
-        # `YAMLError`, and a document too deep to compose must reach the caller as that, not as
-        # an interpreter error escaping a helper that promises never to raise.
+        # Not this function's verdict: the caller's own `safe_load` reports it properly.
         return ()
 
     found: list[str] = []
-    # Iterative, with an identity-keyed visited set. Recursion here has two ways to blow the
-    # stack that `compose` itself survives: a deeply nested document, and an anchor that
-    # contains its own alias (`a: &x {b: *x}`), which PyYAML composes into a CYCLIC node graph
-    # because it registers the anchor before filling the node in. `safe_load` handles both;
-    # this must too, or it turns a caller's typed refusal into a `RecursionError`.
+    # Iterative with an identity-keyed visited set: documents can be deeply nested, and a
+    # self-referencing anchor (`a: &x {b: *x}`) composes into a cyclic node graph.
     stack: list[tuple[Any, str]] = [(root, "")]
     seen_nodes: set[int] = set()
-    # ONE constructor for the whole walk. `_resolved_key` needs a `SafeConstructor` to answer
-    # what `safe_load` would build for a key, and minting a fresh one per key both allocates
-    # per key and throws away the memo table PyYAML keeps on it.
+    # One constructor for the whole walk, keeping PyYAML's memo table across keys.
     constructor = yaml.constructor.SafeConstructor()
     while stack:
         node, path = stack.pop()
@@ -55,15 +39,8 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
             continue
         seen_nodes.add(id(node))
         if isinstance(node, yaml.MappingNode):
-            # `<<:` EXPANDED FIRST, for the reason the docstring gives: while a merge is still
-            # a `<<` pair of its own, the keys it contributes are invisible to the scan below,
-            # so an explicit key silently shadowing a merged one reads as no repeat at all.
-            # `duplicate_top_level_key` below flattens for the same reason, and
-            # `_artifact_schema._has_duplicate_top_level_key` delegates to it rather than
-            # deciding again — the two answers to "what would `safe_load` collapse here" must
-            # not diverge, so there is only one.
-            # Failure is not this function's verdict to give: an unmergeable `<<` reaches the
-            # caller through its own `safe_load`, with the parser's message.
+            # Expand `<<:` first so merged keys are visible to the scan. An unmergeable `<<`
+            # is left for the caller's own `safe_load` to report.
             with contextlib.suppress(yaml.YAMLError, RecursionError):
                 constructor.flatten_mapping(node)
             keys: set[Any] = set()
@@ -78,28 +55,17 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
         elif isinstance(node, yaml.SequenceNode):
             for i, child in enumerate(node.value):
                 stack.append((child, f"{path}[{i}]"))
-    # DEDUPLICATED, because the contract in the docstring is a key SET — "every mapping key
-    # that appears more than once" — and the loop above appends once per surplus occurrence,
-    # so `a:` written three times reported `('a', 'a')` and the caller's refusal listed one
-    # path twice. `dict.fromkeys` keeps first-seen order.
+    # The loop appends once per surplus occurrence; report each path once, in first-seen order.
     return tuple(dict.fromkeys(found))
 
 
 def duplicate_top_level_key(text: str) -> bool:
     """True iff `text`'s TOP-LEVEL mapping declares the same key twice.
 
-    The same question as `duplicate_key_paths` asked of one level only, and it shares that
-    function's key identity (`_resolved_key`) and its merge handling rather than re-deciding
-    either: the frontmatter gate and the permission table must not end up with two answers to
-    "what would `safe_load` collapse here" (defender/CLAUDE.md — one home for a helper).
-
-    Top-level ONLY, deliberately: `_artifact_schema` reads a top-level `disposition:` and a
-    nested one is "missing" there rather than a repeat, so widening this to the nested scan
-    would deny a document the gate is supposed to admit.
-
-    Returns False on any parse trouble, for `duplicate_key_paths`' reason: the caller has
-    already parsed this text once, so trouble here means no reliable signal rather than a
-    verdict.
+    Shares `duplicate_key_paths`' key identity and merge handling so the frontmatter gate and
+    the permission table agree on what `safe_load` would collapse. Top-level only: a nested
+    repeat is not a repeat of `_artifact_schema`'s top-level `disposition:`. Returns False on
+    parse trouble, which the caller's own parse reports.
     """
     try:
         root = compose(text)
@@ -120,21 +86,12 @@ def duplicate_top_level_key(text: str) -> bool:
 
 
 def _resolved_key(key_node: Any, constructor: Any) -> Any:
-    """A mapping key's identity AFTER tag resolution, which is the identity `safe_load` uses.
-
-    Comparing the raw scalar text is wrong in both directions, and this function's whole job
-    is the direction that loses data: `yes:` and `true:` are different text and the SAME key
-    (PyYAML 1.1 booleans, and `1:`/`true:` collapse too because Python dicts hash them
-    together), so a document carrying both silently keeps one row — precisely the collapse
-    this module exists to report. The other direction is a false alarm: `1:` and `"1":` are
-    the same text under different tags and are two real, distinct keys.
-
-    The identity is therefore the CONSTRUCTED value and nothing else, because a Python dict is
-    what `safe_load` builds and its key identity is the one that decides which row survives.
+    """A mapping key's identity after tag resolution — the constructed value, as `safe_load`
+    uses. Raw text is wrong both ways: `yes:` and `true:` (and `1:`/`true:`, which hash
+    together) are one key, while `1:` and `"1":` are two.
     """
     if not isinstance(key_node, yaml.ScalarNode):
-        # A collection key: unhashable once constructed, and no document this is used on has
-        # one. An identity that at least never collides with a scalar's.
+        # A collection key is unhashable once constructed; use an identity no scalar shares.
         return (key_node.tag, id(key_node))
     try:
         value = constructor.construct_object(key_node)
@@ -150,49 +107,32 @@ def safe_load(text: str) -> Any:
 
 
 class Readings(NamedTuple):
-    """One document, read twice from ONE node tree — see `safe_load_typed_and_spelled`."""
+    """One document, read twice from one node tree (`safe_load_typed_and_spelled`)."""
 
     typed: Any    #: what `safe_load` gives
     spelled: Any  #: the same shape exactly; every VALUE scalar the text it was written as
 
 
 def safe_load_typed_and_spelled(text: str) -> Readings:
-    """`safe_load`'s document AND its spelling, constructed from one composed tree.
+    """`safe_load`'s document and its spelling, constructed from one composed tree.
 
     @owns spelled — the text reading of a YAML document, produced here and nowhere else.
-    `safe_load` is compose-then-construct, and construction is the one step that re-spells a
-    scalar: a plain `2026-07-25T07:48:37.065Z` becomes a `datetime` whose `str()` is
-    `2026-07-25 07:48:37.065000+00:00`, `0755` becomes `493`, `yes` becomes `True`, and an
-    explicitly tagged `!!timestamp …` goes the same way.
-    The oracle-golden containment checks — is this `must_not_emit` literal a whole value or
-    a token of what the projection emitted — ran over a document already typed that way, so
-    whether a forbidden instant was caught depended on whether the model quoted it (#951).
+    Construction re-spells scalars (`2026-07-25T07:48:37.065Z` becomes a `datetime`, `0755`
+    becomes `493`, `yes` becomes `True`), so text-containment checks must scan the spelling or
+    their result depends on whether the model quoted a value.
 
-    `spelled` has the SAME SHAPE as `typed` — the same containers, the same keys, the same
-    number of pairs, the same root type, the same aliases and cycles — and differs only at
-    the leaves: a scalar that is a VALUE (a mapping's value, a sequence's item) is its text.
-    Mapping keys stay typed, because a text key would merge `1:` with `'1':` and drop one of
-    two pairs the typed document keeps — a value the judge is shown that the checks never
-    scanned. A bare scalar document stays typed for the same reason: it is nobody's value,
-    and a caller asking "is this a mapping" must get one answer for both readings. Every
-    null is its spelling (`~` is `"~"`, an empty value is `""`).
+    `spelled` has the same shape as `typed` (containers, keys, aliases, cycles) and differs
+    only where a scalar is a value (a mapping's value or a sequence's item): there it is the
+    source text, with nulls as their spelling (`~` is `"~"`, empty is `""`). Keys stay typed,
+    since text keys would merge `1:` with `'1':`; a bare scalar document stays typed too. One
+    tree guarantees the checked values are the values of the structure shown, and building
+    the typed half first means whatever `safe_load` refuses is refused here.
 
-    Both halves come from one tree, so a reader that wants the structure typed (which lead
-    has which events, is `events` a list) and the values spelled (what text did the model
-    emit) is handed two documents that can differ ONLY in what a value scalar became. That
-    is why this is a pair and not a second loader beside `safe_load`: the caller who needs
-    the spelling always needs the structure too, and one parse is what makes "the values
-    the checks scan are the values of the events the judge is shown" true by construction
-    rather than by two loaders happening to agree. And because the typed half is built
-    first, whatever `safe_load` refuses (a `!!python/…` tag anywhere, an impossible calendar
-    date) is refused here too.
-
-    Two edges, both outside the projection grammar: the safe loader's other collection tags
-    (`!!omap`, `!!pairs`, `!!set`) construct their members themselves and stay typed; and a
-    scalar aliased from a mapping key is constructed once, as the key.
+    Edges: `!!omap`/`!!pairs`/`!!set` members stay typed, and a scalar aliased from a mapping
+    key is constructed once, as the key.
     """
     with _construction_errors_as_yaml_errors():
-        # `compose` and not `yaml.compose`: the module's one safe-loader-only tree builder.
+        # This module's `compose`, which pins the safe loader.
         root = compose(text)
         if root is None:
             return Readings(None, None)
@@ -203,15 +143,11 @@ def safe_load_typed_and_spelled(text: str) -> Readings:
 
 
 class _SpelledValuesConstructor(yaml.constructor.SafeConstructor):
-    """`SafeConstructor` whose VALUE scalars construct to their own text.
+    """`SafeConstructor` whose value scalars construct to their own text.
 
-    A value is a node reached as a mapping's value or a sequence's item, and those are the
-    two places PyYAML hands children to `construct_object` — so each is noted as it goes by,
-    and a scalar arriving at `construct_object` unnoted (a key, the root) is typed as usual.
-    `flatten_mapping` runs first so a `<<:` merge's values are noted too. Only methods are
-    overridden — no class-level table (the resolver's in particular is the loader's, and
-    shared until first write) — so nothing here can leak into `yaml.safe_load` for the rest
-    of the process.
+    Mapping values and sequence items are noted as they pass; unnoted scalars (keys, the root)
+    are typed as usual. Only methods are overridden — no class-level tables, which are shared
+    with `yaml.safe_load` — so nothing leaks into other loads.
     """
 
     def __init__(self) -> None:
@@ -249,17 +185,11 @@ def _construction_errors_as_yaml_errors() -> Iterator[None]:
 
 
 def compose(text: str) -> Any:
-    """`text`'s node tree under the safe loader — the LAST representation in which every
-    mapping key is still there, which is what `duplicate_key_paths` and
-    `duplicate_top_level_key` read: construction is where a repeated key collapses to its
-    last value — and what `safe_load_typed_and_spelled` constructs its two readings from.
+    """`text`'s node tree under the safe loader — the last representation where repeated keys
+    still exist.
 
-    `SafeLoader` explicitly: `yaml.compose` defaults to the full `Loader`, and while composing
-    constructs nothing, this module's whole contract with its callers is that untrusted text
-    only ever meets the safe loader — a default that has to be argued about is one a later
-    edit gets wrong. Raises what `yaml.compose` raises, `RecursionError` included; the
-    key scans catch that themselves, because neither is the reader whose verdict a parse
-    failure is, and the loads translate it into the `YAMLError` they promise.
+    `SafeLoader` explicitly (`yaml.compose` defaults to the full `Loader`): untrusted text only
+    ever meets the safe loader. Raises what `yaml.compose` raises, `RecursionError` included.
     """
     return yaml.compose(text, Loader=yaml.SafeLoader)
 
@@ -270,12 +200,8 @@ def reject_unread_keys(
 ) -> None:
     """Refuse a mapping carrying a key nothing reads, as `error` naming `where` and the key.
 
-    A key the loader ignores is a statement a reviewer WILL read and the runtime will not
-    honour — the same two-statements-one-honoured defect as a duplicate key, one level up. An
-    adversarial implementer of #995 hid a `residue: settled` top-level key in the shipped table
-    to mute the census; a `class: rw` on a row, or a misspelled `resaon:` leaving a withholding
-    unexplained while looking explained, are the same shape inside a row; a misspelled
-    `correlation_tempalte:` in `lead-zero.yaml` is the same shape in a one-key file.
+    An ignored key is a statement a reviewer reads and the runtime does not honour — e.g. a
+    planted `residue: settled` muting a census, or a misspelled `resaon:` that looks explained.
     """
     unknown = sorted(str(k) for k in mapping if k not in known)
     if unknown:
@@ -289,14 +215,11 @@ def load_reviewed_mapping(
     path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
 ) -> Mapping[object, object]:
     """Read a hand-authored, reviewed per-deployment file (`verb-grants.yaml`,
-    `lead-zero.yaml`) as ONE top-level mapping carrying only `known` keys, or raise `error`.
+    `lead-zero.yaml`) as one top-level mapping carrying only `known` keys, or raise `error`.
 
-    Everything about the FILE being trustworthy at all, in one place — absent, unreadable or
-    undecodable, a repeated key (refused BEFORE the load, because the load is where the
-    duplicate disappears and YAML silently honours the last), unparseable, not a mapping, a
-    key nothing reads. Every refusal names `what` and `path`: the failure is read at startup by
-    someone who has just edited the file. What the KEYS mean is the caller's — this returns the
-    mapping and decides nothing about its values.
+    Refuses absent, unreadable, repeated keys (checked before the load, which would hide them),
+    unparseable, non-mapping, and unread keys, naming `what` and `path`. Values are the
+    caller's to interpret.
     """
     where = f"{what} at {path}"
     if not path.is_file():
@@ -319,9 +242,6 @@ def load_reviewed_mapping(
 
     if not isinstance(data, Mapping):
         raise error(f"{where} must be a mapping carrying the key(s) {list(known)}")
-    # BEFORE any shape check the caller makes: an unread top-level key is the more actionable
-    # diagnosis. A table carrying both (`residue: settled` beside an empty `dispositions:`)
-    # reported only "declares no dispositions", which sends the author looking for missing
-    # rows rather than at the key that does nothing.
+    # Before the caller's shape checks: an unread key is the more actionable diagnosis.
     reject_unread_keys(where, data, known, error=error)
     return data

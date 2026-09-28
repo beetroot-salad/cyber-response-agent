@@ -1,66 +1,54 @@
 #!/usr/bin/env python3
-"""List-as-key-set smell — flag a fix-up pass that walks an ORDERED LIST to patch a
-table already KEYED by that same list, so a repeated element patches one bucket twice.
+"""List-as-key-set smell: flag a fix-up pass that walks an ordered list to patch a table
+already keyed by that same list, so a repeated element patches one bucket twice.
 
-The shape (#956, ``scripts/visualize/visualize_run.py``)::
+The shape::
 
-    attribution = phase_attribution(events, phase_order, tags)   # keys came FROM phase_order
+    attribution = phase_attribution(events, phase_order, tags)   # keys came from phase_order
     ...
-    for ph in phase_order:                                       # a LIST — may repeat a name
+    for ph in phase_order:                                       # a list — may repeat a name
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)  # ← flagged
 
-``phase_order`` is a render list — the investigation's ``## PHASE`` headers in the order
-written. ``attribution`` is a dict keyed on the phase NAME. Two ``GATHER`` headers with no
-``PLAN`` between them normalize to the same ``GATHER (loop N)``, so the name repeats, and
-one bucket is visited twice: the cost is billed once per visit. The wall-time twin of the
-same loop is worse — it reads ``duration_sec`` back out of the entry the previous visit
-just wrote, so the adjustment COMPOUNDS rather than merely repeating.
+``phase_order`` is a render list (phase headers in written order); ``attribution`` is keyed on
+the phase name. When a name repeats, one bucket is visited twice and billed twice — and a
+wall-time twin that reads back the value the previous visit wrote compounds rather than
+repeats.
 
-The two meanings are the bug. A list that records *what happened in what order* and a key
-set that names *the distinct things* are different values; spelling them with one name
-makes the confusion invisible at every call site. Where both are wanted, derive them
-separately at the one place the list is built (``dict.fromkeys(...)`` preserves order), and
-give the deduped one its own name.
+A list recording what happened in what order and a key set naming the distinct things are
+different values; one name for both hides the confusion. Where both are wanted, derive them
+separately where the list is built (``dict.fromkeys(...)`` preserves order) and give the
+deduped one its own name.
 
-WHAT IS MECHANIZED
+What is mechanized
 ------------------
-Both halves must hold inside ONE function, which is what separates this from the counting
-idiom that shares its syntax:
+Both halves must hold inside one function, which separates this from the counting idiom that
+shares its syntax:
 
-  - the TABLE is bound in the function from a call that receives the sequence as an
-    argument — ``D = f(..., SEQ, ...)``, including through a tuple unpack
-    (``a, D = f(..., SEQ, ...)``). Its key set therefore came from ``SEQ``, so the loop is
-    a fix-up pass over an existing table, not a tally being built.
-  - the LOOP is ``for x in SEQ:`` over a bare ``Name``, whose body WRITES ``D[x]`` —
+  - the table is bound in the function from a call that receives the sequence as an
+    argument — ``D = f(..., SEQ, ...)``, including a tuple unpack. Its keys came from
+    ``SEQ``, so the loop is a fix-up over an existing table, not a tally.
+  - the loop is ``for x in SEQ:`` over a bare ``Name``, whose body writes ``D[x]`` —
     ``D[x] = ...``, ``D[x] op= ...``, or a nested ``D[x][k] = ...``.
 
-``Counter()``/``{}`` accumulation (``df[tok] += 1`` over a corpus, ``totals[k] += ...``
-over messages) never matches: those tables are built empty and DISCOVER their keys, so a
-repeat is the entire point. That distinction is the reason this gate is armed and a plain
-"augmented assign into a dict keyed on the loop variable" rule is not — measured over the
-tree, the plain rule fires six times and is wrong all six.
+``Counter()``/``{}`` accumulation never matches: those tables start empty and discover their
+keys, so a repeat is the point. A plain "augmented assign into a dict keyed on the loop
+variable" rule fires only on such tallies in this tree.
 
-A sequence rebound from a provably-unique source in the same function — ``set(...)``,
+A sequence rebound from a provably unique source in the same function — ``set(...)``,
 ``sorted(set(...))``, ``dict.fromkeys(...)``, ``.keys()``, a set/dict comprehension — is
-skipped: repeats are impossible, so the loop is already the deduped walk this gate asks for.
+skipped.
 
-WHAT IS **NOT** MECHANIZED — a clean run is NOT a clean tree
-------------------------------------------------------------
-  1. **Per-appearance RENDERING is invisible.** #956's third site emitted one bar segment
-     per appearance while sizing each as a share of a once-counted total, so the segments
-     overflowed 100%. It writes to no dict and this detector cannot see it. That half was
-     also the half #956's own suggested fix missed — a gap worth knowing, because it is
-     the half a reader notices first.
-  2. **Cross-function fix-ups are invisible.** Both halves must sit in one function body;
-     a table patched by a helper the loop calls does not match.
-  3. **Whether the list can actually repeat is not decided here.** The gate fires on the
-     shape and leaves the judgment to a reader — it cannot know that
-     ``normalize_phase_names`` only advances its loop counter on a ``PLAN`` header. A
-     sequence that genuinely cannot repeat is a suppression, not a redesign.
+What is not mechanized — a clean run is not a clean tree
+--------------------------------------------------------
+  1. Per-appearance rendering: emitting one segment per appearance, each sized as a share of
+     a once-counted total, writes to no dict and is invisible here.
+  2. Cross-function fix-ups: a table patched by a helper the loop calls does not match.
+  3. Whether the list can actually repeat is not decided here; the gate fires on the shape.
+     A sequence that genuinely cannot repeat is a suppression, not a redesign.
 
 Mark a deliberate site with ``# lint-keyset: ok — <reason>`` on the loop's line span.
 Pre-existing sites are ratcheted via ``lint_list_as_key_set_baseline.json`` (see
-scripts/lint/_baseline.py); the gate fails only on a NEW file+function+names tuple.
+scripts/lint/_baseline.py); the gate fails only on a new file+function+names tuple.
 
 Run from repo root:  python scripts/lint/lint_list_as_key_set.py
 Regenerate the baseline:  python scripts/lint/lint_list_as_key_set.py --update-baseline
@@ -82,10 +70,8 @@ BASELINE_PATH = Path(__file__).with_name("lint_list_as_key_set_baseline.json")
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKER = "lint-keyset: ok"
 
-#: Callables whose result cannot repeat an element. A sequence rebound from one of these
-#: is already the deduped walk this gate asks for. `sorted` is here because its argument
-#: is what decides — `sorted(set(x))` cannot repeat, `sorted(list(x))` can — and the
-#: recursion below looks through it to the inner call rather than trusting the name.
+#: Callables whose result cannot repeat an element. `sorted` and friends are transparent:
+#: `sorted(set(x))` cannot repeat, `sorted(list(x))` can, so the check looks through them.
 _UNIQUE_CALLS = frozenset({"set", "frozenset", "fromkeys", "keys"})
 _TRANSPARENT_CALLS = frozenset({"sorted", "list", "tuple", "reversed", "iter"})
 
@@ -98,12 +84,8 @@ def _callee_name(call: ast.Call) -> str:
 
 
 def _is_unique_source(node: ast.expr) -> bool:
-    """True if `node` cannot produce the same element twice.
-
-    Looks THROUGH the order/shape wrappers (`sorted`, `list`, ...) to whatever produced
-    the elements, so `list(dict.fromkeys(order))` and `sorted(set(order))` both resolve to
-    unique rather than to their outer call's name.
-    """
+    """True if `node` cannot produce the same element twice, looking through order/shape
+    wrappers (`sorted`, `list`, ...) to what produced the elements."""
     if isinstance(node, (ast.Set, ast.SetComp, ast.DictComp)):
         return True
     if isinstance(node, ast.Call):
@@ -125,12 +107,10 @@ def _arg_names(call: ast.Call) -> set[str]:
 
 
 def _walk_scope(node: ast.AST, *, into_functions: bool):
-    """`ast.walk`, but able to stop at a nested `def`.
+    """`ast.walk`, optionally stopping at a nested `def`.
 
-    A function scope descends into its closures — one that patches its enclosing scope's
-    table is the same defect, and only the outer walk can see where that table came from.
-    MODULE scope must not, or every function is scanned twice and each finding is reported
-    once under its own name and once under `<module>`.
+    A function scope descends into closures (one patching its enclosing scope's table is the
+    same defect). Module scope must not, or every finding is reported twice.
     """
     stack = [node]
     while stack:
@@ -145,10 +125,7 @@ def _walk_scope(node: ast.AST, *, into_functions: bool):
 
 
 def _bindings(func: ast.AST, *, into_functions: bool) -> tuple[dict[str, list[ast.Call]], set[str]]:
-    """`(name -> the calls it was bound from, names bound from a unique source)`.
-
-    Both are collected in one walk over the scope's body.
-    """
+    """`(name -> the calls it was bound from, names bound from a unique source)`."""
     from_call: dict[str, list[ast.Call]] = {}
     unique: set[str] = set()
     for node in _walk_scope(func, into_functions=into_functions):
@@ -172,11 +149,8 @@ def _bindings(func: ast.AST, *, into_functions: bool) -> tuple[dict[str, list[as
 
 
 def _tables_written(loop: ast.AST, var: str) -> set[str]:
-    """Names subscripted at `[var]` in a WRITE position anywhere inside `loop`.
-
-    Walks out through nested subscripts so `d[var][k] = v` reports `d`, and so the
-    fingerprint names the table rather than the innermost slice.
-    """
+    """Names subscripted at `[var]` in a write position inside `loop`, walking out through
+    nested subscripts so `d[var][k] = v` reports `d`."""
     written: set[str] = set()
     for node in ast.walk(loop):
         if isinstance(node, ast.AugAssign):
@@ -244,8 +218,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             findings.extend(_scan_function(rel, node, node.name, lines))
-    # Module scope stops at every `def`: without that, each function is scanned a second
-    # time here and every finding is reported twice.
+    # Module scope stops at every `def`, or each finding would be reported twice.
     findings.extend(_scan_function(rel, tree, "<module>", lines, into_functions=False))
     return findings
 
@@ -255,8 +228,7 @@ def _in_scope(path: Path) -> bool:
 
 
 def _scan(root: Path) -> list[Finding]:
-    """Findings under `root`, fingerprints relative to it — so the gate is drivable on an
-    injected tmp tree, not just the repo checkout."""
+    """Findings under `root`, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
@@ -291,10 +263,8 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the
-    # corpus, so a double-counting fix-up could sit in it and this gate would still print
-    # 0 findings. Exit 2 — the gate could not run, which is categorically not "clean"
-    # (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

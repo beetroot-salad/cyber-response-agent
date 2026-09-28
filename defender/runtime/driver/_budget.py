@@ -1,7 +1,7 @@
 """The spend ceiling: what a call costs, when the run stops, and who records it.
 
-The hooks assembled here are the only place a request is accounted, which is why a
-harness dispatch that bypasses them has to account itself.
+These hooks are the only place a request is accounted; a harness dispatch that bypasses them
+must account itself.
 """
 from __future__ import annotations
 
@@ -42,10 +42,8 @@ def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
-    # RS16: the exemption sits AHEAD of the tail kill, not only inside `should_refuse` — the
-    # tail kill is unconditional, so an exemption expressed only in the refusal check still
-    # ends the run at the close. The gate's own forced turns are what push a run past the tail
-    # to begin with, so closing must stay possible under exactly that pressure.
+    # Exemption before the unconditional tail kill: the review gate's forced turns can push a
+    # run past the tail, and closing must stay possible then.
     if tool_name in BUDGET_EXEMPT_TOOLS:
         return None
     state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
@@ -74,12 +72,8 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
 
 
 def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> None:
-    """Write the MEASURED latency into the render's pending stamp.
-
-    `selection.render` opens the stamp for the request it is preparing, but that request's
-    duration only exists once the model has answered — here. The next round's `ingest`
-    consumes the stamp, so patching it in place is what puts a real number in
-    `message.duration_ms` instead of the renderer's placeholder."""
+    """Write the measured latency into the render's pending stamp, replacing the placeholder
+    before the next round's `ingest` consumes it."""
     if store is None or session_id is None:
         return
     pending = getattr(store, "pending_stamps", None)

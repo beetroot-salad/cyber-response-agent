@@ -1,54 +1,33 @@
 #!/usr/bin/env python3
-"""Duplicate-helper lint — catches the recurring "same helper hand-copied across
-modules" smell that the jscpd gate (ci.yml) is structurally blind to.
+"""Duplicate-helper lint: catches the "same helper hand-copied across modules" smell that the
+jscpd gate (ci.yml) is structurally blind to.
 
-Why this exists alongside jscpd: jscpd is a block-level token-clone detector
-(`--min-tokens 60`, repo-wide % threshold). It is correctly tuned for *large*
-hand-mirrored blocks (the #330 class) but cannot see the *scattered small
-helper* class — a 1-5 line utility (`_now_iso`, `_log`, `_subscription_env`)
-copied into many modules is far under 60 tokens, and a dozen tiny copies barely
-move a percentage. It is also blind to *divergent* copies (same concept, drifted
-body/return type — the #359 frontmatter-parser class), since there is no long
-identical token run to match. Issues #357/#358/#359/#360 are exactly these.
+jscpd is a block-level token-clone detector (`--min-tokens 60`, repo-wide % threshold), tuned
+for large mirrored blocks. It cannot see a 1-5 line utility (`_now_iso`, `_log`) copied into
+many modules, nor divergent copies (same concept, drifted body) with no long identical run.
 
-This lint works on a different, cheap signal: the same module-level function
-name `def`'d in two or more modules. For each such group it normalizes the AST
-body (docstrings stripped) and classifies:
+This lint uses a cheap signal: the same module-level function name `def`'d in two or more
+modules. For each group it normalizes the AST body (docstrings stripped) and classifies:
 
-  - identical-duplicate   every copy's body is byte-identical after
-                          normalization → pure copy-paste; extract to a shared
-                          module (`_loop_config.py` / `_author_shared.py`).
-                          (#357 `_subscription_env`, #358 `_now_iso`/`_log`.)
+  - identical-duplicate   every copy's body is identical after normalization → pure
+                          copy-paste; extract to a shared module.
 
-  - divergent-duplicate   same name, bodies have drifted → unify the contract
-                          or rename. The higher-value flag: divergent copies
-                          silently diverge in behavior. (#359, the per-module
-                          frontmatter parsers, since folded into one.)
+  - divergent-duplicate   same name, drifted bodies → unify the contract or rename. The
+                          higher-value flag: divergent copies silently diverge in behavior.
 
-Ratchet model (mirrors the jscpd gate): the duplicate names that exist *today*
-are recorded in `lint_duplicate_helpers_baseline.json`. The lint fails (exit 1)
-only on a duplicate name *not* in the baseline — i.e. newly-introduced drift —
-so it blocks growth without forcing a big-bang cleanup of the existing set.
-Regenerate the baseline after a deliberate change with `--update-baseline`.
+Ratchet model (mirrors jscpd): today's duplicate names are recorded in
+`lint_duplicate_helpers_baseline.json`, and the lint fails (exit 1) only on a name not in it.
+Regenerate after a deliberate change with `--update-baseline`.
 
-Scope: `defender/` only, module-level defs only (nested defs and methods are
-not counted). Excluded as the jscpd gate's `--ignore` does: `.venv` and the
-transient run-output dirs (`runs/`). Excluded
-additionally (fixture/scaffold code that re-implements helpers by design):
-test modules — a `tests/` dir or a flat `test_*.py` / `*_test.py` file — and
-`skills/connect/examples/` (adapter scaffold templates meant to be copied). A
-few legitimately-polymorphic names (entry points) are allowlisted below.
+Scope: `defender/` only, module-level defs only. Excluded: `.venv`, `runs/`, test modules
+(a `tests/` dir or a flat `test_*.py` / `*_test.py`), and `skills/connect/examples/`
+(scaffold templates meant to be copied). A few polymorphic entry-point names are allowlisted.
 
-Also skipped: thin same-name *delegators* — a def whose whole body is `return
-<mod>.<same_name>(...)` (see `_is_delegator`). The author family re-exports the
-canonical `_author_shared`/`_curator` plumbing through same-named one-line
-adapters for import-locality; the real body lives once in the target, so
-counting the re-export as a copy is a name-collision false positive.
+Also skipped: thin same-name delegators, whose whole body is `return <mod>.<same_name>(...)`
+(see `_is_delegator`); the real body lives once in the target.
 
-Limitation: name-based, so a dup split across *different* names (e.g. #360's
-`acquire_queue_lock` vs `acquire_lock`) is only partially surfaced — the
-same-named copies fire, the renamed sibling does not. Block-level dup is jscpd's
-job; this is the small-helper complement.
+Limitation: name-based, so a copy under a different name is not surfaced. Block-level dup is
+jscpd's job; this is the small-helper complement.
 
 Run from repo root:  python scripts/lint/lint_duplicate_helpers.py
 Regenerate the baseline:  python scripts/lint/lint_duplicate_helpers.py --update-baseline
@@ -68,24 +47,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.json")
 
-# Directory names (any path segment, relative to defender/) excluded from scope.
-# `.venv` + the transient run-output dirs mirror the jscpd gate's --ignore;
-# `tests` drops fixture-helper modules (flat test_*.py files handled below).
+# Directory names (any path segment, relative to defender/) excluded from scope. Flat
+# test_*.py files are handled in `_in_scope`.
 EXCLUDED_DIRS = (".venv", "tests", "runs")
 
 # Accepted-boilerplate excludes (by path substring):
 #   connect/examples/   — adapter scaffold templates, meant to be copied
 #
-# There is deliberately no filename-suffix exclusion. The adapters used to be
-# skipped via `*_cli.py` (their name before #619) on the rationale that they 'share
-# argparse scaffolding by design' — dead since #611 took argparse out of every adapter
-# but `ticket`. The
-# exclusion outlived its reason and hid live duplication; findings under
-# `scripts/adapters/` now either get fixed or carry a written `# lint-dup: ok`.
+# No filename-suffix exclusion: adapter duplication under `scripts/adapters/` gets fixed or
+# carries a written `# lint-dup: ok`.
 EXCLUDED_PATH_PARTS = ("skills/connect/examples/",)
 
-# Module-level names that are legitimately defined in many modules — script
-# entry points, not copy-pasted logic. Never reported regardless of count.
+# Module-level names legitimately defined in many modules (entry points). Never reported.
 ALLOWLIST_NAMES = frozenset(
     {
         "main",  # every script's entry point
@@ -101,8 +74,7 @@ def _in_scope(path: Path) -> bool:
     rel = path.relative_to(DEFENDER)
     if any(part in EXCLUDED_DIRS for part in rel.parts):
         return False
-    # Flat pytest modules (test_*.py / *_test.py) outside a tests/ dir are
-    # fixture helpers too — exclude them for the same reason a tests/ dir is.
+    # Flat pytest modules outside a tests/ dir are fixture helpers too.
     if path.name.startswith("test_") or path.name.endswith("_test.py"):
         return False
     rel_posix = rel.as_posix()
@@ -110,8 +82,8 @@ def _in_scope(path: Path) -> bool:
 
 
 def _strip_docstring(body: list[ast.stmt]) -> list[ast.stmt]:
-    """Drop a leading docstring so copies that differ *only* in their docstring
-    (e.g. the five `_subscription_env`) normalize as identical."""
+    """Drop a leading docstring so copies differing only in their docstring normalize as
+    identical."""
     if (
         body
         and isinstance(body[0], ast.Expr)
@@ -129,12 +101,9 @@ def _body_fingerprint(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 
 
 def _is_delegator(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """True if the body is just `return <mod>.<same_name>(...)` (optionally
-    `await`ed) — a thin re-export/pinning adapter, NOT a copy. The author family
-    exposes the shared `_author_shared`/`_curator` plumbing through same-named
-    one-line delegators for import-locality; flagging those as duplicates is a
-    name-collision false positive (the real body lives once in the target).
-    A def that merely *calls* a differently-named shared helper is a real body."""
+    """True if the body is just `return <mod>.<same_name>(...)` (optionally awaited) — a
+    thin re-export adapter kept for import-locality, not a copy. A def that calls a
+    differently-named shared helper is a real body."""
     body = _strip_docstring(fn.body)
     if len(body) != 1 or not isinstance(body[0], ast.Return):
         return False
@@ -149,10 +118,8 @@ def _is_delegator(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def _suppressed(fn: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> bool:
-    """True if the inline SUPPRESS marker sits anywhere in the def's header — any
-    decorator line through the last line of a (possibly multi-line) signature —
-    so the marker is honored wherever in the header it is placed, not only on a
-    bare single-line `def`."""
+    """True if the SUPPRESS marker sits anywhere in the def's header, from the first
+    decorator through the last line of a multi-line signature."""
     start = fn.decorator_list[0].lineno if fn.decorator_list else fn.lineno
     end = max(fn.lineno, fn.body[0].lineno - 1) if fn.body else fn.lineno
     return any(
@@ -170,12 +137,12 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()
-        for node in tree.body:  # module level only — no methods, no nested defs
+        for node in tree.body:  # module level only
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if node.name in ALLOWLIST_NAMES:
                 continue
-            if _is_delegator(node):  # thin `return mod.same_name(...)` re-export
+            if _is_delegator(node):
                 continue
             if _suppressed(node, lines):
                 continue
@@ -215,9 +182,8 @@ HEADER = (
 
 
 def main(argv: list[str]) -> int:
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         table = _collect()
     except ScanBlind as exc:
@@ -228,7 +194,6 @@ def main(argv: list[str]) -> int:
     _print_section("identical-duplicate (extract to a shared module)", identical)
     _print_section("divergent-duplicate (unify the contract or rename)", divergent)
 
-    # Fingerprint is the bare helper name; the display carries its kind + sites.
     findings = [
         Finding(
             fingerprint=name,

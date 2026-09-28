@@ -1,40 +1,33 @@
 #!/usr/bin/env python3
-"""Run-records name gate (#1077 D6) — no code outside the four name-owner modules
+"""Run-records name gate: no code outside the four name-owner modules
 (`defender/_run_paths.py`, `defender/_episode_paths.py`, `defender/_tenant.py`,
-`defender/_run_handle.py`) may spell a run or episode record's name, whole or as a composed
-part, and no code outside them may join a name onto a run or episode root.
+`defender/_run_handle.py`) may spell or hold a run or episode record's name, whole or as a
+composed part, or join a name onto a run or episode root.
 
-#1076's call-site census (`run-records.tsv`, the old `scan()`/`findings()` over "every file
-access call, attributed to a kind") retired with this rewrite: it proved page == table, never
-table == tree, and could never see a subprocess writing a file or a SQL statement on an open
-connection. This gate proves something narrower and checkable instead — TWO name-keyed checks:
+Three checks:
 
-  (a) NEGATIVE, root-agnostic, literal pass. Outside the owner modules, any `ast.Constant`
-      string, any `ast.JoinedStr` piece, or any `glob`/`rglob` call's string argument that
-      CONTAINS a whole record name or a composed PART from the owners' own constant set is a
-      finding — and any `BinOp(/)` whose RIGHT operand is such a string is a finding whatever
-      the left operand is called (`child`, `dst_dir`, `source`, ... — no identifier list to
-      guess). The composed-part set is deliberately narrow (`COMPOSED_PARTS`, five
-      DISCRIMINATING fragments): a bare generic suffix (`.json`, `.db`) alone matches ~1065
-      non-target literals in this tree and would make the check unimplementable (§7 decision
-      6, fork D-F5). A quoted name inside a message string is still a finding unless the line
-      carries the inline `# lint-run-records: ok — <reason>` suppression.
+  (a) Literal pass, root-agnostic. Outside the owners, any string constant, f-string piece,
+      or `glob`/`rglob` string argument that contains a whole record name or a composed part
+      is a finding, as is any `BinOp(/)` whose right operand is such a string, whatever the
+      left operand is called. `COMPOSED_PARTS` is narrow (five discriminating fragments): a
+      generic suffix like `.json` or `.db` matches over a thousand unrelated literals. A name
+      quoted in a message string is still a finding unless the line carries
+      `# lint-run-records: ok — <reason>`.
 
-  (b) An ACCESSOR-DERIVED pass, using `_astlib.owner_derived` (shared with
-      `lint_hand_rolled_name_resolution.py`): a join `/` onto a value the pass traces back to
-      an owner (`RunPaths(run_dir).gather_raw / lead_id`, which carries no literal and is
-      therefore invisible to (a)) is a finding; an accessor-NAMED attribute read
-      (`.gather_raw`, `.executed_queries`, ...) on a value the pass cannot trace is reported as
-      `unresolvable accessor use` — never a skip.
+  (b) Accessor-derived pass, using `_astlib.owner_derived` (shared with
+      `lint_hand_rolled_name_resolution.py`): a join `/` onto a value traced
+      back to an owner (`RunPaths(run_dir).gather_raw / lead_id`, invisible to (a)) is a
+      finding; an accessor-named attribute read (`.gather_raw`, `.executed_queries`, ...) on
+      a value the pass cannot trace is reported as `unresolvable accessor use`, never skipped.
 
-SCOPE_STATEMENT names what this gate does not (and structurally cannot) see: the three trees it
-never enters, and the one composition class — a name assembled so that NO WHOLE PART is ever an
-AST literal — that (a) is blind to regardless of which of the five ordinary composition idioms
-(concatenation, `%`-formatting, `.format`, `os.path.join`, multi-arg `Path()`) does the
-assembling; carrying the name as ONE literal, in any of those five forms, IS still caught.
+  (c) Import pass: importing or reading a record-name constant off an owner module (see
+      `_scan_import_pass`).
+
+SCOPE_STATEMENT names what the gate cannot see: the trees it never enters, and a name
+assembled so that no whole part is ever an AST literal.
 
 A source file the sweep cannot parse is reported as a finding, never skipped and never a crash
-of the whole sweep (`_astlib.ScanBlind` is caught per file, here, not allowed to propagate).
+of the whole sweep (`_astlib.ScanBlind` is caught per file).
 
 Run from repo root:  python scripts/lint/lint_run_records.py [--render]
 Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run.
@@ -58,20 +51,18 @@ PAGE = DEFENDER / "docs" / "run-records.md"
 BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->"  # noqa: E501
 END_MARK = "<!-- end generated -->"
 
-#: The four owner modules (#1077 D1/D5) — the exempt set every other constant and check below
-#: is defined relative to. Exactly `defender.tests._spec1077.OWNER_MODULE_FILES`.
+#: The four owner modules, the exempt set everything below is defined relative to. Must equal
+#: `defender.tests._spec1077.OWNER_MODULE_FILES`.
 OWNER_MODULES: frozenset[str] = frozenset(
     {"_run_paths.py", "_episode_paths.py", "_tenant.py", "_run_handle.py"})
 
-#: The sweep set — unchanged from #1076, plus the top level of `defender/`. Never shrinks
-#: below this (decision 5's standing check).
+#: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
-#: §7 decision 5's carve-out: the three trees this sweep never enters, each holding live
-#: record-name use today (claims S10/G1/G3, brief red flag R3). The written obligation (O1)
-#: names them rather than claiming a coverage it does not have.
+#: The trees this sweep never enters, each holding live record-name use; named so the gate
+#: does not claim coverage it lacks.
 UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
 
 SCOPE_STATEMENT = (
@@ -88,9 +79,8 @@ SCOPE_STATEMENT = (
 APPENDIX_ONLY_KINDS = frozenset({"tool_seam"})
 
 def _composed_parts() -> tuple[str, ...]:
-    """The five DISCRIMINATING composed-name PARTS (§7 decision 6 / fork D-F5, reading 1),
-    READ from the owners' own constants rather than re-spelled here — this gate's own source
-    is not an exempt owner module, and D6(a) protects these five fragments too."""
+    """The five discriminating composed-name parts, read from the owners' constants rather
+    than re-spelled here: this file is not an owner module, and (a) protects these too."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender import _run_paths  # noqa: PLC0415
@@ -100,21 +90,17 @@ def _composed_parts() -> tuple[str, ...]:
         _run_paths.TRACE_SUFFIX, _run_paths.REVIEW_TRACE_SUFFIX, _run_paths.SERVED_PREFIX)
 
 
-#: The gate's substring-match set for a composed name, kept narrow on purpose: the generic bare
-#: suffixes (`.json`, `.db`, ...) match ~1065 non-target literals and are deliberately excluded.
+#: The substring-match set for a composed name, kept narrow: generic bare suffixes (`.json`,
+#: `.db`, ...) match over a thousand non-target literals.
 COMPOSED_PARTS: tuple[str, ...] = _composed_parts()
 
-#: A path segment of the kinds registry enters the WHOLE-NAME match set only when it is
-#: DISCRIMINATING — `name.ext`, or a multi-word `wire_logs` / `gather_raw` / `.box-sentinel`.
-#: A bare English word a segment happens to be (`runs`, `worlds`, `judge`, `served`) is
-#: substring-matched by decision 6's rule, and as a whole name it would report every docstring
-#: and log line that uses the word — the same reading that keeps `.json`/`.db` out of
-#: `COMPOSED_PARTS` (fork D-F5). `served/` and the other directory names are reached as
-#: composed parts, or not at all.
+#: A kinds-registry path segment enters the whole-name set only when discriminating — `name.ext`,
+#: or multi-word like `wire_logs` / `.box-sentinel`. A bare English word (`runs`, `judge`,
+#: `served`) would report every docstring and log line using it; such directories are reached
+#: as composed parts or not at all.
 _SEGMENT_PLACEHOLDER = re.compile(r"<[^>]*>")
 
-#: The inline escape — the ONLY one D6(a) admits, and only with a non-empty reason after the
-#: em dash.
+#: The only inline escape, and only with a non-empty reason after the em dash.
 _SUPPRESSION_MARKER = "lint-run-records: ok"
 
 
@@ -145,12 +131,10 @@ def _discriminating(segment: str) -> bool:
 
 
 def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
-    """The whole record names the gate bans, READ FROM THE KINDS REGISTRY (`run-records-kinds.
-    tsv`, the same table O2 holds one accessor per row of) rather than scraped from the owner
-    modules' namespaces: every WHOLE segment of every kind's `path` cell — a segment carrying
-    a placeholder (`<lead>.lead.json`, `<run>.run-end.json`) is a composition, whose
-    discriminating fragment is one of `COMPOSED_PARTS` — and only the DISCRIMINATING whole
-    segments admitted."""
+    """The whole record names the gate bans, read from the kinds registry
+    (`run-records-kinds.tsv`) rather than the owner modules' namespaces: every discriminating
+    whole segment of every kind's `path` cell. A segment with a placeholder
+    (`<lead>.lead.json`) is a composition, contributing only its discriminating fragments."""
     kinds = kinds if kinds is not None else load_kinds()
     names: set[str] = set()
     for row in kinds:
@@ -160,11 +144,10 @@ def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
                 continue  # `(the role's declared read/write targets)` — not a path
             for segment in spelled.split("/"):
                 if _SEGMENT_PLACEHOLDER.search(segment):
-                    # A COMPOSED segment (`<lead>.lead.json`, `<run>.run-end.json`) is not a
-                    # whole name. Its literal head and tail are the fragments a spelling
-                    # outside the owner would carry — admitted when they are file-name-shaped
-                    # and discriminating (`.run-end.json`, `review_record.`; never `.json`).
-                    # The five curated `COMPOSED_PARTS` are a subset of what this yields.
+                    # A composed segment is not a whole name; its literal head and tail are
+                    # what a spelling outside the owner would carry, admitted when
+                    # file-name-shaped and discriminating (`.run-end.json`, never `.json`).
+                    # `COMPOSED_PARTS` is a subset of what this yields.
                     head = segment[:segment.index("<")]
                     tail = segment[segment.rindex(">") + 1:]
                     for fragment in (head, tail):
@@ -177,15 +160,14 @@ def registry_names(kinds: list[dict[str, str]] | None = None) -> frozenset[str]:
 
 
 def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
-    """`(whole_names, composed_parts)` — the registry's whole names and decision 6's five
-    curated fragments."""
+    """`(whole_names, composed_parts)`."""
     return registry_names(), frozenset(COMPOSED_PARTS)
 
 
 def _accessor_names() -> frozenset[str]:
     """Every public accessor name on the path owners (`RunPaths`, `SessionPaths`,
-    `EpisodePaths`) — computed, not typed out, so it never goes stale as D1 grows the owners.
-    A new owner CLASS is still a line here, beside its entry in `_astlib._OWNER_CLASS_ORIGINS`."""
+    `EpisodePaths`), computed so it never goes stale. A new owner class needs a line here and
+    in `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
@@ -211,8 +193,7 @@ def _suppressed(lineno: int, lines: list[str]) -> bool:
     if _SUPPRESSION_MARKER not in line:
         return False
     after = line.split(_SUPPRESSION_MARKER, 1)[1]
-    # The escape requires a REASON after the marker's own `— <reason>` em dash — a bare
-    # marker, or one with nothing following the dash, does not suppress.
+        # A bare marker, or one with nothing after the em dash, does not suppress.
     reason = after.split("—", 1)[1].strip() if "—" in after else ""
     return bool(reason)
 
@@ -242,27 +223,24 @@ def _scan_literal_pass(
         ))
 
     docstrings = _docstring_nodes(tree)
-    # A constant that is a PIECE of something reported as a whole — an f-string's literal
-    # part, a join's right operand — is reported once, at the whole, never again as itself.
+    # A constant that is a piece of something reported as a whole (an f-string's literal part,
+    # a join's right operand) is reported once, at the whole.
     covered: set[ast.AST] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.JoinedStr):
             covered.update(node.values)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            # Only a CONSTANT right operand is the join's to report; an f-string there is the
-            # f-string's own (`d / f"{lead}.lead.json"` is reported as the f-string piece),
-            # so it must not be covered twice into silence.
+            # Only a constant right operand is the join's to report; an f-string there is
+            # reported as the f-string piece, so it must not be covered twice into silence.
             if isinstance(node.right, ast.Constant):
                 covered.add(node.right)
     for node in ast.walk(tree):
         if node in covered:
             continue
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            # A docstring DESCRIBES a record; it cannot be joined onto a root or handed to a
-            # glob. The gate is about names reaching the filesystem from outside the owner —
-            # prose that mentions one is not that, and reporting it would only teach every
-            # docstring to spell the name in pieces. A name quoted in a MESSAGE (an argument,
-            # not a statement) is still reported, and admitted only under the suppression.
+            # A docstring describes a record; it cannot reach the filesystem. Reporting it
+            # would only teach docstrings to spell names in pieces. A name quoted in a
+            # message (an argument, not a statement) is still reported.
             if node in docstrings:
                 continue
             if _record_shaped(node.value, whole, parts):
@@ -305,22 +283,18 @@ def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
             if owner_derived(node.left, env):
                 report(node, "literal-free join onto an owner-derived value")
         elif isinstance(node, ast.Attribute) and node.attr in accessor_names:
-            # An accessor-NAMED read on a receiver the pass cannot trace is reported — when
-            # the name is one only an owner answers. `x.wire_log`, `x.gather_raw`,
-            # `x.executed_queries` on an unknown `x` is a record reached around the owner;
-            # `args.alert`, `self.budget`, `resp.payload`, `verdict.review` are ordinary
-            # attributes that happen to share an English word with an accessor, and the
-            # SPELLED name those sites would have to reach is what pass (a) catches. One
-            # predicate for "discriminating", shared with pass (a)'s whole-name set.
+            # Reported only when the name is discriminating, i.e. one only an owner answers:
+            # `x.wire_log` on an unknown `x` is a record reached around the owner, while
+            # `args.alert` or `self.budget` merely share an English word with an accessor
+            # (their spelled names would be caught by pass (a)).
             if not owner_derived(node, env) and _discriminating(node.attr):
                 report(node, f"unresolvable accessor use (.{node.attr})")
     return findings
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
-    """The `ast.Constant` node of every docstring — a module's, a class's, a function's, and
-    the bare-string statement after an assignment that documents an attribute. A string that
-    is a whole STATEMENT is prose: no expression consumes it, so it reaches no path."""
+    """The `ast.Constant` of every bare-string statement (docstrings, attribute docs). A
+    whole-statement string is prose: no expression consumes it, so it reaches no path."""
     out: set[ast.AST] = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
@@ -343,23 +317,19 @@ def _enclosing(tree: ast.Module) -> dict[ast.AST, str]:
     return names
 
 
-#: (c) D7's rule, in its tightened form. The owner exports these NON-RECORD names; a swept
-#: module may import any of them. Everything else an owner module binds at module level is a
-#: record name, and importing one is refused.
+#: The owner modules' non-record exports, which a swept module may import. Everything else an
+#: owner binds at module level is a record name, and importing one is refused.
 #:
-#: WHY AN ALLOW-LIST RATHER THAN A DENY-LIST. The deny side is the thing that grows: a record
-#: added to an owner is a record the gate must protect the day it lands, and a deny-list is a
-#: second place to remember. The exports below are a closed set — the handles, the two shape
-#: validators the permission layer keys on, and three values that are not records at all — so
-#: a new record is refused by default and a new non-record EXPORT is a deliberate line here.
+#: An allow-list because the deny side is what grows: a new record is refused by default, and a
+#: new non-record export is a deliberate line here.
 _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
-    # The handles and their layout views — the whole point of D7.
+    # The handles and their layout views.
     "RunPaths", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES",
     "EpisodePaths", "EpisodeLayout", "LAYOUT", "WorldPaths", "WorldLayout",
     "ArchivedWorldLeaves", "WORLD_LEAVES", "Run", "RunRecord",
-    # Entry screens, which take a path and answer about the ENTRY, never a name.
+    # Entry screens, which take a path and answer about the entry, never a name.
     "artifact_file", "artifact_dir", "plain_file", "contained_payload", "entry_present",
-    # Not record names: an id shape, a regex body, a read-grant shape, a metadata KEY on a
+    # Not record names: an id shape, a regex body, a read-grant shape, a metadata key on a
     # tool-return part, a refusal sentence, and the tenant vocabulary.
     "LEAD_ID_RE", "LEAD_ID_BODY", "GATHER_RAW_SHAPE", "GATE_METADATA_KEY",
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED", "DEFAULT_TENANT_ID",
@@ -371,13 +341,9 @@ _OWNER_MODULE_NAMES: frozenset[str] = frozenset(
 
 
 def _owner_record_names() -> frozenset[str]:
-    """Every NAME an owner module binds to a string at module level, minus the non-record
-    exports above — computed by importing the owners, never typed out here.
-
-    Computed rather than listed for the reason `_accessor_names` is: a record added to an
-    owner must be protected the day it lands, and a hand-kept deny-list is a second place to
-    remember. A binding that is not a string (the handles, the screens, the predicates, the
-    shape builders) is not a record name and needs no entry anywhere.
+    """Every name an owner module binds to a string at module level, minus the non-record
+    exports above — computed by importing the owners, so a new record is protected the day
+    it lands. Non-string bindings are not record names.
     """
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
@@ -399,21 +365,18 @@ OWNER_RECORD_NAMES: frozenset[str] = _owner_record_names()
 
 
 def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Finding]:
-    """(c) NO MODULE OUTSIDE THE OWNERS MAY HOLD A RECORD NAME (#1077 D7).
+    """(c) No module outside the owners may hold a record name.
 
-    D6 banned SPELLING a record name. That is one word too loose, and the gap is not
-    theoretical: a module that imports `SESSION_POINTER` and writes
-    `run_dir / session_store.POINTER_FILENAME` spells nothing the literal pass can see, and
-    the join carries no owner value the accessor pass can trace — so ~20 such sites sat in a
-    tree the gate certified clean. Worse, the alias OUTLIVES ITS HOME: when `ledger.py`
-    stopped exporting two names it had re-bound, six modules broke at once, at import, with
-    nothing having warned.
+    Banning spelling alone is too loose: a module that imports a record-name constant and
+    joins it onto a run dir spells nothing pass (a) sees and carries no owner value pass (b)
+    traces. And an alias outlives its home, so when the owner stops exporting a name every
+    re-binder breaks at import.
 
-    So the rule is HOLD, not spell, and it is checkable without dataflow — three fixed shapes:
+    Three fixed shapes, checkable without dataflow:
 
       * `from <owner> import NAME` — the name a consumer binds.
       * `<owner_alias>.NAME` — an attribute read on an owner imported whole.
-      * a re-export of either under `__all__`, which is how one second home becomes six.
+      * a re-export of either under `__all__`.
     """
     findings: list[Finding] = []
     owner = _enclosing(tree)
@@ -432,10 +395,8 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
-            # `from defender import _run_paths` binds the MODULE, not a name in it — the
-            # second of the three shapes, and the one `_artifact_schema.py` used to hold two
-            # record names through. Recorded here as well as on `import x.y`, or the
-            # attribute arm below never sees it.
+            # `from defender import _run_paths` binds the module, not a name in it; record
+            # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:
                 if alias.name in _OWNER_MODULE_NAMES:
                     whole_module_aliases[alias.asname or alias.name] = alias.name
@@ -464,12 +425,11 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
 
 
 def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> list[Finding]:
-    """The gate's whole sweep: checks (a) and (b), over every file `sweep_files` names minus
-    the ones an `allow_list` entry admits (D7's migration-in-flight mechanism — a module named
-    there is skipped entirely, however many findings it would otherwise carry).
+    """The gate's whole sweep over every file `sweep_files` names, minus those `allow_list`
+    admits (skipped entirely).
 
-    A file the sweep cannot parse is a FINDING (`unresolvable accessor use` never a skip): the
-    scan continues to the rest of the tree, but this one file is reported, not certified clean.
+    A file the sweep cannot parse is a finding: the scan continues, but that file is
+    reported, not certified clean.
     """
     allow_list = allow_list if allow_list is not None else ALLOW_LIST
     whole, parts = _owner_constants()
@@ -492,16 +452,14 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
     return findings
 
 
-#: D7's migration-in-flight mechanism: a module named here (relative to `DEFENDER`, as
-#: `sweep_files` spells it) is skipped by `scan` entirely, however many findings it would
-#: otherwise carry — the observable shape of a mixed-route intermediate state. The terminal
-#: state (D7 step 4) is an EMPTY dict; `test_gate_passes_with_an_empty_allow_list` is the one
-#: demand that cannot be green at any earlier commit (cluster O).
+#: Migration-in-flight mechanism: a module named here (relative to `DEFENDER`, as
+#: `sweep_files` spells it) is skipped by `scan` entirely. The terminal state is empty;
+#: `test_gate_passes_with_an_empty_allow_list` pins that.
 ALLOW_LIST: dict[str, int] = {}
 
 
 # ---------------------------------------------------------------------------------------
-# the render — the kinds table only (N6: no reader/writer census, no site data)
+# the render — the kinds table only
 # ---------------------------------------------------------------------------------------
 
 def load_kinds(path: Path = KINDS_TSV) -> list[dict[str, str]]:

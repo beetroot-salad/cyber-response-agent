@@ -28,10 +28,8 @@ _CAT_BOOL_BUNDLE = re.compile(gnu_flags.bundle(gnu_flags.CAT_BOOL))
 
 
 def rm_target_files(argv: list[str]) -> list[str] | None:
-    """The operand(s) a claimed `rm` grant names — the grant's own `pattern` already restricts
-    the shape to a single bare path (no flags), so this is a plain tail slice, resolved+scoped
-    like any other opener: a symlink INSIDE the corpus pointing OUTSIDE it must be caught by
-    resolving the operand, not merely by the pattern matching the pre-resolution text."""
+    """The operands of a claimed `rm` grant (its pattern already admits only bare paths).
+    They are resolved and scoped like any opener's, so a symlink out of the corpus is caught."""
     return argv[1:]
 
 
@@ -79,11 +77,9 @@ TREE = rf"{SEG}(?:/{SEG})*"
 
 
 def _already_compiled(value: Any) -> Any:
-    # A bare `str` is refused, not compiled: pydantic's `re.Pattern` schema compiles a string
-    # even under `strict=True`, so without this the "no coercion" guarantee `_model` documents
-    # would not hold for the gate's own patterns — a path or shape string handed where a
-    # `program_shape(...)`/`under(...)` result was meant would become a live regex with its
-    # metacharacters unescaped, where it used to fail at the first `.match`.
+    # Pydantic compiles a bare `str` into a pattern even under `strict=True`; refuse it, or a
+    # path string passed by mistake would become a live regex with unescaped metacharacters.
+
     if not isinstance(value, re.Pattern):
         raise ValueError(
             f"a grant pattern must be a compiled re.Pattern, got {type(value).__name__} "

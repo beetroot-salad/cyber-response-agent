@@ -1,71 +1,46 @@
 #!/usr/bin/env python3
-"""Half-read policy table — flag a boundary that hardcodes ONE key of someone else's keyed
-gate table, leaving the table's other keys with no reader at that boundary.
+"""Half-read policy table: flag a boundary that hardcodes one key of someone else's keyed gate
+table, leaving the table's other keys with no reader at that boundary.
 
-A module-level dict mapping string keys to per-key handlers is the one place a key's MEANING
-is decided: every key has its own answer, and the owner reaches those answers through a
-lookup (``T.get(d)`` / ``T[d]`` / ``d in T`` / iteration). A collaborating module that
-branches on ONE key spelled as a string literal has, by construction, no reader for the
-table's other keys — it re-decided one row of the table locally and silently declined to
-decide the rest. That is #879: ``runtime/close_tool.py`` charges the ``"false-positive"``
-entry price by literal, while ``"benign"`` — the other key of
-``skills.invlang.validate._DISPOSITION_GATES`` — passes that boundary ungated.
+A module-level dict mapping string keys to per-key handlers is where each key's meaning is
+decided, and the owner reaches those answers through a lookup (``T.get(d)`` / ``T[d]`` /
+``d in T`` / iteration). A collaborating module that branches on one key spelled as a literal
+has re-decided one row locally and declined to decide the rest — e.g. charging an entry price
+for ``"false-positive"`` by literal while ``"benign"``, the table's other key, passes ungated.
 
-WHAT IS MECHANIZED
-------------------
-The CONSUMER half, and only its SHAPE:
+What is mechanized (the consumer half, by shape only):
 
-  - a TABLE is a module-level ``Assign``/``AnnAssign`` whose value is an ``ast.Dict`` with
-    >= 2 keys, no ``**`` spread, every key resolving to a string through ``_astlib.str_value``
-    (so a table that hoists its keys to module constants — ``{BENIGN: g, FALSE_POSITIVE: g}``
-    — is the same table), and every VALUE a ``Name``/``Attribute``/``Lambda``: each key has
-    its own ANSWER. A str->str map is a naming table, not a gate table, and is skipped.
-  - a table is ARMED once it is looked up GENERICALLY anywhere in the corpus — ``T[expr]``
+  - A table is a module-level ``Assign``/``AnnAssign`` whose value is an ``ast.Dict`` with
+    >= 2 keys, no ``**`` spread, every key resolving to a string through
+    ``_astlib.str_value`` (so hoisted key constants are the same table), and every value a
+    ``Name``/``Attribute``/``Lambda``. A str->str map is a naming table and is skipped.
+  - A table is armed once it is looked up generically anywhere in the corpus — ``T[expr]``
     with a non-Constant slice, ``T.get(...)``, ``.items()``/``.keys()``/``.values()``,
-    ``x in T``, iteration, and the same through a resolved import (``m.T[...]``,
-    ``getattr(m, "T")``). Self-arming, like ``lint_borrowed_vocabulary``: a new keyed gate
-    table starts being guarded the moment it lands, with no edit to this lint.
-  - a FINDING is a branch on a string equal to one of an armed table's keys, in a module that
-    is not the table's owner but does import it, where the branching function does not itself
-    reach the table's lookup — one finding per key of that table left unread at that
-    boundary. "Branch" is ``==``/``!=`` against a string, ``in``/``not in`` a literal
-    sequence of strings, and ``case "s":``.
+    ``x in T``, iteration, or the same through a resolved import (``m.T[...]``,
+    ``getattr(m, "T")``). New tables are guarded with no edit to this lint.
+  - A finding is a branch on a string equal to one of an armed table's keys, in a module
+    that imports the owner but is not it, where the branching function does not itself reach
+    the table's lookup — one finding per unread key. "Branch" is ``==``/``!=`` against a
+    string, ``in``/``not in`` a literal sequence of strings, and ``case "s":``.
 
-Every call and every cross-module reference is resolved through ``_astlib``
-(``origin``/``callee``/``module_env``), never by dotted spelling — the #602 rule.
+Calls and cross-module references resolve through ``_astlib``, never by dotted spelling.
 
-WHAT IS **NOT** MECHANIZED — a clean run is NOT a clean tree
-------------------------------------------------------------
-Only one half of this pattern is lintable, and the green half is the narrow one. Do not read
-an exit-0 here as "no table is half-read".
+What is not mechanized — a clean run is not a clean tree:
 
-  1. **A boundary that enumerates EVERY key by literal is invisible.** The detector fires on
-     the GAP (keys with no reader here), so a consumer that spells out all of the table's
-     keys in its own if/elif chain — the fullest possible copy of someone else's dispatch,
-     and the one that goes stale the day a key is added — produces zero findings. Completing
-     the enumeration is a way to turn this gate green that makes the code worse.
-  2. **Whether the branch actually re-derived the decision is not checked.** The gate proves
-     a literal-keyed branch exists with unread siblings. It cannot tell a genuine local
-     re-derivation from a boundary that legitimately treats one key as special (an entry
-     price, a single exemption) after delegating everything else. That judgement is the
-     reviewer's; the suppression marker is where it gets written down.
-  3. **Cross-module key identity here is VALUE-based, not reference-based.** These tables are
-     private (``_DISPOSITION_GATES`` is never imported), so there is no reference to follow:
-     a consumer is tied to a table by its key STRINGS plus an import edge to the owning
-     module. Two consequences, in both directions:
-       - short, generic keys COLLIDE. ``learning/core/persist.py`` branches on
-         ``direction == "benign"`` — the learning LANE, an unrelated vocabulary that merely
-         shares a spelling with a disposition. That is a structural false positive, baselined
-         as one, and no amount of resolver work removes it.
-       - distinctive keys never collide, so a genuinely half-read table whose consumer does
-         not import the owner is a false NEGATIVE. The import edge is a suffix match on the
-         import's dotted path (anywhere in the file, function-local imports included), which
-         is loose in the FP direction and blind in the FN one.
-  4. **The OWNER half is out of scope entirely.** Nothing here checks that the table's
-     handlers are complete, mutually exclusive, or correct, that a key added to the table
-     gained a handler, or that the owner's own lookup fails closed on an unknown key.
-  5. Values reached as DATA rather than as a branch — a lookup into a local dict, a key
-     threaded through as a parameter — carry no literal and are never seen.
+  1. A boundary that enumerates every key by literal is invisible: the detector fires on the
+     gap, so completing the enumeration turns the gate green while making the code worse.
+  2. Whether the branch actually re-derived the decision is not checked; a boundary may
+     legitimately special-case one key after delegating the rest. That judgement is the
+     reviewer's, recorded via the suppression marker.
+  3. Cross-module key identity is value-based: the tables are private, so a consumer is tied
+     to one by its key strings plus an import edge to the owner. Short generic keys collide
+     (an unrelated ``direction == "benign"`` is a baselined structural false positive), and a
+     consumer that does not import the owner is a false negative. The import edge is a suffix
+     match, including function-local imports.
+  4. The owner half is out of scope: handler completeness, exclusivity, correctness, and
+     fail-closed lookup on an unknown key are not checked.
+  5. Values reached as data (a lookup into a local dict, a key passed as a parameter) carry
+     no literal and are never seen.
 
 Mark a deliberate site with ``# lint-half-table: ok — <reason>``, on the site's own lines or
 anywhere in the comment block directly above it.
@@ -115,12 +90,11 @@ EXCLUDED_DIRS = frozenset(
 )
 SUPPRESS = "lint-half-table: ok"
 
-# One key is a constant, not a table. Two is the smallest dispatch with something to leave
-# unread — and #879's table has exactly two.
+# One key is a constant, not a table; two is the smallest dispatch with something to leave
+# unread.
 MIN_KEYS = 2
 
-# The reads that mean "this table answers for every key", as opposed to a literal subscript
-# that answers for one.
+# Reads that answer for every key, as opposed to a literal subscript answering for one.
 _LOOKUP_METHODS = frozenset({"get", "items", "keys", "values"})
 
 
@@ -150,10 +124,8 @@ def _dotted(rel: str) -> tuple[str, ...]:
 def _module_tables(tree: ast.Module, env: ModuleEnv) -> dict[str, tuple[str, ...]]:
     """``name -> keys`` for every module-level keyed gate table this module defines.
 
-    Keys resolve through ``str_value``, so hoisting them to module constants — the tidy way
-    to write the table — does not make it a different table. Every value must be a
-    ``Name``/``Attribute``/``Lambda``: that is what makes each key's answer its OWN, and what
-    separates a dispatch table from a str->str naming map.
+    Every value must be a ``Name``/``Attribute``/``Lambda``, which separates a dispatch table
+    from a str->str naming map.
     """
     tables: dict[str, tuple[str, ...]] = {}
     for node in tree.body:
@@ -183,13 +155,12 @@ def _module_tables(tree: ast.Module, env: ModuleEnv) -> dict[str, tuple[str, ...
 
 
 def _generic_lookups(tree: ast.AST, env: ModuleEnv) -> tuple[set[str], set[str]]:
-    """What this tree looks up GENERICALLY, as ``(bare local names, resolved origins)``.
+    """What this tree looks up generically, as ``(bare local names, resolved origins)``.
 
-    Two channels because a table is reached two ways. Inside its owner it is a bare local
-    name, which by construction resolves to nothing. Everywhere else it is reached through an
-    import, and then the only sound identity is the dotted ORIGIN ``_astlib.origin`` resolves
-    — ``m.T[...]``, ``from m import T`` then ``T.get(...)``, and ``getattr(m, "T")`` all land
-    on the same string, while a same-named attribute of a local object lands on none.
+    Inside its owner a table is a bare local name (resolving to nothing); elsewhere it is
+    reached through an import, where the dotted origin is the only sound identity —
+    ``m.T[...]``, ``from m import T`` then ``T.get(...)``, and ``getattr(m, "T")`` all land on
+    the same string, while a same-named attribute of a local object lands on none.
     """
     local: set[str] = set()
     origins: set[str] = set()
@@ -203,7 +174,7 @@ def _generic_lookups(tree: ast.AST, env: ModuleEnv) -> tuple[set[str], set[str]]
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Subscript):
-            # A literal subscript reads ONE key; anything else reads whichever key it is given.
+            # A literal subscript reads one key; anything else reads whichever it is given.
             if not isinstance(node.slice, ast.Constant):
                 record(node.value)
         elif isinstance(node, ast.Call):
@@ -230,9 +201,7 @@ def _generic_lookups(tree: ast.AST, env: ModuleEnv) -> tuple[set[str], set[str]]
 def _imported_modules(tree: ast.Module) -> set[tuple[str, ...]]:
     """Every module path this file imports, as dotted tuples.
 
-    ``ast.walk``, not ``tree.body``: a function-local import is a collaboration edge exactly
-    as a top-level one is, and ``learning/core/persist.py`` reaches the invlang validator
-    that way and no other.
+    ``ast.walk``, not ``tree.body``: a function-local import is a collaboration edge too.
     """
     out: set[tuple[str, ...]] = set()
     for node in ast.walk(tree):
@@ -250,9 +219,9 @@ def _imported_modules(tree: ast.Module) -> set[tuple[str, ...]]:
 
 
 def _imports_owner(imports: set[tuple[str, ...]], owner: tuple[str, ...]) -> bool:
-    """Whether this file names the owner's module. A SUFFIX match, so a relative import
-    (``from .validate import ...``, whose dots ``ast`` does not keep in ``module``) still
-    counts — loose in the false-positive direction, and stated as such in the docstring."""
+    """Whether this file names the owner's module. A suffix match, so a relative import
+    (whose dots ``ast`` does not keep in ``module``) still counts; loose toward false
+    positives."""
     return any(
         path and len(path) <= len(owner) and owner[-len(path):] == path for path in imports
     )
@@ -294,19 +263,16 @@ def _branch_literals(
 
 
 def _reaches_lookup(func: ast.AST | None, env: ModuleEnv, table_origin: str) -> bool:
-    """Whether the branching function ITSELF reaches the owner's lookup. A function that
-    looks the table up generically is deciding through the owner's answer; the literal beside
-    it is then a special case of a decision that was made, not a decision taken locally."""
+    """Whether the branching function itself reaches the owner's lookup; if so the literal
+    is a special case of a decision made through the owner, not a local re-decision."""
     if func is None:
         return False
     return table_origin in _generic_lookups(func, env)[1]
 
 
 def _suppressed(node: ast.AST, lines: list[str]) -> bool:
-    """The marker on the site's own line span, OR anywhere in the contiguous comment block
-    directly above it. Same two-place rule as ``lint_borrowed_vocabulary``: a suppression here
-    has to say why one boundary may hardcode one row of someone else's table, and that reason
-    rarely fits on the branch's own line."""
+    """The marker on the site's own line span, or anywhere in the contiguous comment block
+    directly above it (the reason rarely fits on the branch's own line)."""
     start = getattr(node, "lineno", 0)
     end = getattr(node, "end_lineno", start) or start
     if any(SUPPRESS in lines[i - 1] for i in range(start, end + 1) if 0 < i <= len(lines)):
@@ -328,24 +294,18 @@ def _reexport_edges(
 ) -> dict[tuple[str, str], set[tuple[str, ...]]]:
     """Facade modules that re-export a table, as extra module paths standing in for its owner.
 
-    A file split into families behind a facade (`validate.py` -> `_gating.py` et al.) moves the
-    table's DEFINITION without moving the name its consumers import. The import edge this gate
-    ties a consumer to an owner by is then a suffix match that can never hit: `persist.py`
-    names `...invlang.validate`, and the table now lives in `...invlang._gating`. Left
-    unresolved, every such consumer goes quiet and the gate reads as clean — the exact
-    regression `test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries` exists
-    to catch.
+    Splitting a file behind a facade moves the table's definition without moving the name
+    consumers import, so the import-edge suffix match would never hit and those consumers
+    would go quiet.
 
-    ONE HOP, deliberately: a re-export of a re-export is a facade over a facade, which is a
-    shape to refuse rather than to resolve.
+    One hop only: a re-export of a re-export is a facade over a facade, a shape to refuse
+    rather than resolve.
     """
     edges: dict[tuple[str, str], set[tuple[str, ...]]] = {}
     owners = {(owner_rel, name) for owner_rel, name in tables}
     for rel, tree, _lines, _env in corpus:
-        # For `pkg/__init__.py` the package IS its dotted path — `_dotted` already dropped
-        # the `__init__`, so a one-dot import there resolves INSIDE the package, not beside
-        # it. Taking `[:-1]` unconditionally aimed the facade's own re-export at the parent
-        # directory and the edge never matched, which put this gate back to zero findings.
+        # For `pkg/__init__.py` the package is its own dotted path (`_dotted` dropped the
+        # `__init__`), so a one-dot import there resolves inside the package, not beside it.
         package = _dotted(rel) if rel.endswith("/__init__.py") else tuple(_dotted(rel)[:-1])
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or node.module is None:
@@ -376,7 +336,6 @@ def _scan_file(
     if not literals:
         return []
     imports = _imported_modules(tree)
-    # Which keys of which table this FILE branches on, and where each branch sits.
     covered: dict[tuple[str, str], set[str]] = {}
     sites: dict[tuple[str, str, str], tuple[ast.AST, tuple[str, ...]]] = {}
     for value, node, scope, func in literals:
@@ -384,8 +343,7 @@ def _scan_file(
             if owner_rel == rel or value not in keys:
                 continue
             owner = _dotted(owner_rel)
-            # The owner's own path, or any facade re-exporting the table under its own
-            # name: both are this consumer naming the module that decides the keys.
+            # The owner's own path, or any facade re-exporting the table under its name.
             stand_ins = (reexports or {}).get((owner_rel, name), set())
             if not (_imports_owner(imports, owner)
                     or any(_imports_owner(imports, path) for path in stand_ins)):
@@ -399,8 +357,7 @@ def _scan_file(
     for (owner_rel, name), seen in sorted(covered.items()):
         missing = sorted(set(tables[(owner_rel, name)]) - seen)
         if not missing:
-            # Every key has a reader here. The gate is blind to this shape on purpose —
-            # see "WHAT IS NOT MECHANIZED" (1) in the module docstring.
+            # Every key has a reader here; the gate is blind to this shape by design.
             continue
         live = [
             (value, *sites[(owner_rel, name, value)])
@@ -426,11 +383,10 @@ def _scan_file(
 
 
 def _scan(scope: Path = DEFENDER) -> list[Finding]:
-    """Two passes over ONE corpus: which tables are armed, then who half-reads them.
+    """Two passes over one corpus: which tables are armed, then who half-reads them.
 
-    ``scope`` is the testability seam the other gates carry, and load-bearing beyond
-    convenience here: arming is a whole-corpus property, so a gate that could only scan the
-    real tree could not be shown to arm and disarm.
+    ``scope`` is the test seam; arming is a whole-corpus property, so tests need it to show
+    the gate arming and disarming.
     """
     corpus: list[tuple[str, ast.Module, list[str], ModuleEnv]] = []
     for path in sorted(scope.rglob("*.py")):
@@ -440,7 +396,7 @@ def _scan(scope: Path = DEFENDER) -> list[Finding]:
         text, tree = read_and_parse(path, rel)
         corpus.append((rel, tree, text.splitlines(), module_env(tree)))
 
-    # Pass 1: every keyed gate table, and whether anything in the corpus reads it generically.
+    # Pass 1: every keyed gate table, and whether anything reads it generically.
     declared: dict[tuple[str, str], tuple[str, ...]] = {}
     owner_local: dict[str, set[str]] = {}
     corpus_origins: set[str] = set()
@@ -457,7 +413,6 @@ def _scan(scope: Path = DEFENDER) -> list[Finding]:
         or f"{'.'.join(_dotted(rel))}.{name}" in corpus_origins
     }
 
-    # Pass 2: everyone else branching on one of an armed table's keys.
     reexports = _reexport_edges(corpus, armed)
     findings: list[Finding] = []
     for rel, tree, lines, env in corpus:
@@ -488,10 +443,8 @@ def main(
     if not scope.is_dir():
         print(f"scan scope not found at {scope}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Worse here
-    # than for a single-pass lint: an unreadable OWNER silently disarms its table for the whole
-    # repo. Exit 2 — the gate could not run, which is not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus, and an unreadable owner silently disarms
+    # its table repo-wide. Exit 2: the gate could not run, which is not "clean".
     try:
         findings = _scan(scope)
     except ScanBlind as exc:

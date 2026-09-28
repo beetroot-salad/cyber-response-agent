@@ -9,10 +9,8 @@ from defender._model import model
 
 def process_defender_dir() -> Path:
     """The code tree a command-line process runs against: `$DEFENDER_DIR` when set, else the
-    tree this package is in. ONE derivation for every operator command and host-side writer, so
-    an override honoured by one is honoured by all — they also root their default tenants
-    folder at its checkout (`_tenants.entry_tenant`), and two derivations would read two
-    checkouts' tenants."""
+    tree this package is in. Shared by every operator command and host-side writer so they all
+    honour the override and read the same checkout's tenants."""
     import os
 
     env = os.environ.get("DEFENDER_DIR")
@@ -20,18 +18,8 @@ def process_defender_dir() -> Path:
 
 
 def adapters_under(defender_dir: Path) -> Path:
-    """`<defender_dir>/scripts/adapters` — the adapters directory of an ARBITRARY tree.
-
-    `DefenderPaths.adapters_dir` answers for the tree an instance is rooted at, which is the
-    main checkout for the `PATHS` singleton. The callers that matter here are not in the tree
-    they ask about: the loop's commit gate and the lead author's permission gate are both
-    handed a WORKTREE's `defender_dir` and must resolve its adapters, not the running
-    process's — and each spelling the join for itself gave the directory several owners that
-    could disagree silently.
-
-    A function, not a second `ClassVar`: `adapters_rel` is the REPO-relative spelling git
-    pathspecs and porcelain paths use, and this is the absolute join off a tree. Neither is
-    derivable from the other without a repo root.
+    """`<defender_dir>/scripts/adapters` for an arbitrary tree, e.g. a worktree handed to the
+    commit gate or the lead author's permission gate rather than the running process's tree.
     """
     return defender_dir / "scripts" / "adapters"
 
@@ -45,8 +33,8 @@ class DefenderPaths:
     skills_rel: ClassVar[str] = "defender/skills/"
     adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
     lessons_dir_rel: ClassVar[str] = "defender/lessons/"
-    #: #1007 M7: the questioner's own corpus — findings ABOUT a world, never a lesson for the
-    #: defender. A second, deliberately separate root from `lessons_dir_rel` above.
+    #: The questioner's own corpus — findings about a world, never a lesson for the defender,
+    #: so kept separate from `lessons_dir_rel`.
     lessons_questioner_dir_rel: ClassVar[str] = "defender/lessons-questioner/"
 
     @property

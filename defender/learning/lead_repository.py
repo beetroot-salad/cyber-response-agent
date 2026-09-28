@@ -35,22 +35,15 @@ if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
 
 
-# `_LEAD_SUFFIX` was a re-binding of the owner's `LEAD_CLAIM_SUFFIX` (#1077 D7). The glob
-# and the stem below now derive from one owner-composed SPECIMEN name, so the pattern that
-# finds a claim and the strip that recovers its id cannot disagree — they were two spellings
-# of one fact, and a glob matching what the strip cannot undo yields a lead id with the
-# suffix still attached.
-#
-# The specimen id is a valid one by construction (`LEAD_ID_RE`'s own shape) so the owner's
-# composing check admits it; nothing is read or written at the composed path.
+# A valid lead id used only to compose a claim file name, from which both the glob and the
+# suffix strip in `load_leads` derive, so the two cannot disagree. Nothing is read or written
+# at the composed path.
 _SPECIMEN_LEAD_ID = "l-0"
 
 
 def _as_int(value, default: int = 0) -> int:
-    """A stored integer column as the reader's `int`, `default` for anything that is not one.
-    `OverflowError` beside the two: a JSON number past a float's range decodes to `inf`, and
-    `int(inf)` is neither a `TypeError` nor a `ValueError` — one such `seq` raised out of
-    `joined()` for every reader of the table."""
+    """A stored integer column as `int`, `default` for anything that is not one.
+    `OverflowError` because an out-of-range JSON number decodes to `inf`."""
     try:
         return int(value)
     except (TypeError, ValueError, OverflowError):
@@ -59,26 +52,21 @@ def _as_int(value, default: int = 0) -> int:
 
 @model(frozen=True)
 class QueryRow:
-    """One queries-table row as the canonical surface reads it: EVERY column
+    """One queries-table row as the canonical surface reads it: every column
     `record_query.QUERY_ROW_COLUMNS` declares, with the writer's own coercions, and
-    `payload_path` read as the containment-checked `raw_ref` (the one recorded derivation).
+    `payload_path` read as the containment-checked `raw_ref`.
 
-    The typed fields are a READER'S view — `error_class` is derived from `exit_code` when the
-    key is absent, a missing `system_key` reads as `""`. The row as the writer left it is kept
-    beside them and returned by `record()`, for the reader that must see what the live guard
-    saw (#1017 D2)."""
+    The typed fields are a reader's view (e.g. `error_class` derived from `exit_code` when
+    absent). The row as written is kept and returned by `record()`, for a reader that must see
+    what the live guard saw."""
 
     lead_id: str
     seq: int
     system: str
     verb: str
     query_id: str
-    #: `SkipValidation` for the same reason `_record` below carries it: `load_queries` passes
-    #: `rec["params"]` itself, and `record()`'s docstring makes "`params` is the same object"
-    #: a promise this row keeps. A validated `dict` field is rebuilt on every construction,
-    #: which quietly makes the typed view a COPY of the record — the one thing #1017 C16 says
-    #: this row must never hand back. The loader already refuses a non-dict at the seam
-    #: (`params if isinstance(params, dict) else {}`).
+    #: `SkipValidation`: validation would rebuild the dict, and `params` must be the same
+    #: object as the record's (see `record()`). The loader already refuses a non-dict.
     params: Annotated[dict, SkipValidation]
     raw_command: str
     exit_code: int
@@ -86,74 +74,40 @@ class QueryRow:
     payload_status: str
     payload_digest: str
     raw_ref: Path | None
-    #: #877's content identity of the payload — `sha256` of the persisted sidecar text. `""`
-    #: on a row written before the column existed, and on a keyword-built fixture. Coerced
-    #: with `as_str` like `system_key` below (absent, `None` and non-string all read as `""`);
-    #: no guard reads this column — its one live reader, `repeat_note`'s `_result_identity`,
-    #: treats any falsy value as "no identity", so the two agree on every value a writer
-    #: stores (`append_query_row` always writes the hex digest).
-    #:
-    #: NOT model-facing content, and nothing here has to say so: this module's renders that
-    #: reach a model (`actor_view`, and `questioner_leads` / `render_joined_yaml` through
-    #: `project_leads`) name their columns, so a column is model-facing only where a render
-    #: names it, and none names this one — `tests/test_1017_row_schema.py` pins each of the
-    #: three renders' key sets. Until #1032 the questioner's section stringified whole rows
-    #: through this dataclass's `repr`, which made every column model-facing unless someone
-    #: remembered `repr=False` — the flag this field carried.
+    #: The payload's content identity — `sha256` of the persisted sidecar text; `""` when
+    #: absent (older rows, fixtures). Its reader, `repeat_note`'s `_result_identity`, treats any
+    #: falsy value as "no identity". Not model-facing: renders name their columns, and none
+    #: names this.
     payload_sha256: str = ""
-    #: #871's hash half of an above-guard rejection's identity: `sha256` of a model-authored
-    #: system string the writer coarsened to `system=""`, `""` everywhere else. Coerced the way
-    #: the guard's own `_trip` coerces the stored column (`as_str`: absent, `None` and
-    #: non-string all read as `""`), so a table from before the column replays through this
-    #: surface exactly as it ran. A fingerprint is `_trip`'s to read, not a model's — see
-    #: `payload_sha256` for why that no longer needs a `repr` flag.
+    #: The hash half of an above-guard rejection's identity: `sha256` of a model-authored system
+    #: string the writer coarsened to `system=""`; `""` elsewhere. Coerced as the guard's `_trip`
+    #: coerces it, so an older table replays exactly as it ran. For the guard, not a model.
     system_key: str = ""
-    #: The parsed JSON record this row was read from, untouched — see `record()`. Excluded from
-    #: equality and repr because it is the SOURCE of the typed fields, not a fifteenth column.
-    #: `SkipValidation` (#1067): this field IS the parsed record, by identity — strict
-    #: validation rebuilds a `dict` field on every construction, and `record()` would then
-    #: return a re-projection of the row rather than "byte-for-byte what `record_query.
-    #: lead_rows` hands the guard live", which is the whole distinction #1017 C16 draws.
+    #: The parsed JSON record this row was read from, by identity — see `record()`. Excluded
+    #: from equality and repr; `SkipValidation` because validation would copy it.
     _record: Annotated[dict | None, SkipValidation] = field(
         default=None, repr=False, compare=False)
 
     def record(self) -> dict:
-        """The row AS READ — the parsed JSON record, byte-for-byte what `record_query.lead_rows`
-        hands the guard live, never a re-projection of the typed fields.
+        """The row as read — the parsed JSON record exactly as `record_query.lead_rows` hands
+        the guard live, never a re-projection of the typed fields.
 
-        The distinction is load-bearing (#1017 C16): the typed view COERCES — `error_class`
-        derived from `exit_code` when the key is absent, `system_key` and `params` and `seq`
-        normalised — while the guard's predicates read the keys verbatim, so a replay over
-        re-projected rows can reach a verdict the live run never reached (a rejection counted
-        that the run did not count, an identity that matches where the run's did not). No
-        writer of this repo has emitted an above-guard row without `error_class`, so today the
-        two views agree on every real table; the guarantee is against re-projection in
-        general, and it is what makes `rejection_trip([r.record() for r in
-        load_queries(run_dir)], ...)` the run's own verdict rather than a reading of it. That
-        replay's consumer is the offline oracle in the test tree (`_replay_rejections`); no
-        shipped code calls this yet.
+        The typed view coerces while the guard reads keys verbatim, so a replay over
+        re-projected rows could reach a verdict the live run never reached. This is what makes
+        `rejection_trip([r.record() for r in load_queries(run_dir)], ...)` the run's own
+        verdict.
 
-        The dict is the parsed record ITSELF, shared with the typed view (`params` is the same
-        object), not a copy: a caller that mutates it rewrites what every later reader of this
-        row sees as "what the guard read". Read it; do not write to it.
-
-        A row built by keyword (a fixture) has no record to return."""
+        The dict is shared with the typed view (not a copy): read it, do not write to it. A row
+        built by keyword (a fixture) has no record to return."""
         if self._record is None:
             raise ValueError("QueryRow.record(): this row was not read from a queries table")
         return self._record
 
     @property
     def is_sentinel(self) -> bool:
-        """Is this row a WRITER-ONLY record rather than a query the defender ran?
-
-        The `∅.`-prefixed sentinels (`record_query.RESERVED_QUERY_ID_PREFIX`) share one
-        property: nothing they describe reached a system of record. A repeat the guard refused,
-        a call the argument schema turned back, a failed reducer shim — each records the lead's
-        conduct in the queries table because that is the run's only append-only surface, not
-        because a query was issued.
-
-        The predicate is the writer's own (`is_reserved_query_id`) rather than a second list of
-        literals here, so a new sentinel partitions on the day it is defined."""
+        """Is this row a writer-only `∅.` record (a refused repeat, a rejected call, a failed
+        reducer shim) rather than a query the defender ran? Nothing it describes reached a
+        system of record. Uses the writer's own predicate, so new sentinels partition too."""
         return is_reserved_query_id(self.query_id)
 
 
@@ -170,19 +124,14 @@ class JoinedLead:
     #: Absent (`None`) reads as model-authored: rows written before this field existed must
     #: join the same way.
     provenance: str | None = None
-    #: The lead's `∅.`-prefixed rows, seq-ordered. Split OUT of `queries` rather than filtered
-    #: at each consumer — a filter is a thing a future reader forgets, whereas a field named
-    #: `queries` holding only queries makes the safe reading the default. The rows are kept,
-    #: not dropped, because `collect_general_failures` reaches them via `extract_from_joined`.
+    #: The lead's `∅.`-prefixed rows, seq-ordered — split out of `queries` so the safe reading
+    #: is the default. Kept because `collect_general_failures` reads them.
     sentinels: list = field(default_factory=list)
 
     @property
     def rows(self) -> list:
-        """Every row this lead has in the queries table, in seq order — `queries` and
-        `sentinels` remerged. For the readers that mean "the table", not "the queries": the
-        offline extraction (whose `pitfall_id` keys on position, so the order must be the
-        table's own) and the run-inspection HTML (where hiding a refusal row from a human
-        debugging the run is the opposite of the help)."""
+        """Every row this lead has in the queries table, in seq order (`queries` and
+        `sentinels` remerged), for readers that mean the table rather than the queries."""
         return sorted([*self.queries, *self.sentinels], key=lambda r: r.seq)
 
 
@@ -190,36 +139,22 @@ class JoinedLead:
 
 def load_leads(run_dir: Path) -> dict[str, dict]:
     gather = RunPaths(Path(run_dir)).gather_raw
-    # `artifact_dir`, not `is_dir()`: a link at `gather_raw` would otherwise be walked and its
-    # target's files read as this run's leads. `stage_tables` below already judges the same
-    # directory this way; the two are the same tree read by two functions.
+    # `artifact_dir`, not `is_dir()`: a linked `gather_raw` would read another tree's leads.
     if not artifact_dir(gather):
         return {}
     leads: dict[str, dict] = {}
-    # ONE SPECIMEN, for both halves: the glob that finds a claim and the strip that recovers
-    # its id are the same fact, and a pattern that matches what the strip cannot undo yields
-    # a lead id with the suffix still on it.
     specimen = RunPaths(gather.parent).lead_claim(_SPECIMEN_LEAD_ID).name
     suffix = specimen[len(_SPECIMEN_LEAD_ID):]
     for path in sorted(gather.glob(f"*{suffix}")):
         lead_id = path.name[: -len(suffix)]
         if not lead_id:
             continue
-        # `read_guarded` on the ENTRY, not only `artifact_dir` on the directory: the glob
-        # yields a link planted at a lead's name as readily as the file, and a plain read
-        # follows it. The judge's leads view gated each lead file (`artifact_file`, an `lstat`)
-        # until #1017 D3 moved that read onto the surface, and the surface is the one reader
-        # now — a goal off another tree would otherwise reach a prompt as this run's own. The
-        # guarded read
-        # rather than the lstat-then-read pair, for the reason `corpus_samples` gives below:
-        # `O_NOFOLLOW` + `fstat` judge the very object opened, so a link swapped in between a
-        # check and a read, or a hard link (a regular file to `lstat`), is refused too.
+        # Guarded read of each entry: the glob yields planted links too. `O_NOFOLLOW` + `fstat`
+        # judge the object actually opened, so a swapped-in link or a hard link is refused.
         text, _refused = read_guarded(path)
         if text is None:
             continue
-        # `load_json_artifact`, the one decoder with the one tolerance: a lead file that is not
-        # JSON, or is nested past the bound, is not a lead — the same answer the table's row
-        # reader gives a row, so `joined()` raises on neither file for its content.
+        # Not JSON, or nested past the bound: not a lead (never a raise out of `joined()`).
         data, unreadable = load_json_artifact(text)
         if unreadable is not None or not isinstance(data, dict):
             continue
@@ -253,15 +188,9 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
     log = RunPaths(run_dir).executed_queries
     rows: list[QueryRow] = []
     try:
-        # `artifact_file` (an `lstat`) AHEAD of the read, the posture `load_leads` takes on
-        # each lead file: `read_jsonl_rows_report` follows a link, and a link (or FIFO, or
-        # device) planted at the table's name would read another tree's rows as this run's
-        # own — for EVERY consumer of this surface, not only the judge, which used to keep
-        # this gate privately ahead of `joined()` and threw the lead files' goals away with
-        # the rows (#1017 D3). ABSENT is the ordinary "no query landed" shape and counts
-        # nothing; something ELSE wearing the name is one unreadable record, like a table the
-        # reader could not open. Inside the `try`: pathlib re-raises what `artifact_file`
-        # swallows (an `EACCES` on the run dir), and that is the `OSError` arm's case.
+        # `artifact_file` ahead of the read, which follows links: a link, FIFO or device at the
+        # name would read another tree's rows. Absent counts nothing; anything else there is one
+        # unreadable record. Inside the `try` for an `EACCES` on the run dir.
         if not artifact_file(log):
             return [], (1 if log.is_symlink() or log.exists() else 0)
         raw_rows, unreadable = read_jsonl_rows_report(log)
@@ -269,11 +198,8 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
         return [], 1
     for rec in raw_rows:
         lead_id = rec.get("lead_id")
-        # THE LEAD-ID SHAPE, at the one loader every consumer reads the table through. The
-        # writers only ever put a `claim_lead`-validated id here, but the file is in the box's
-        # rw bind, and since #860 an id with a `∅.` row reaches the judge's VIEW 1 heading
-        # from this column alone — so a value that is not a lead id (`_run_paths.LEAD_ID_RE`,
-        # the shape the claim enforces) is one unreadable record, like a row with no id.
+        # The file is box-writable and a lead id can reach a judge prompt heading from this
+        # column alone, so a value not shaped like a lead id is an unreadable record.
         if not isinstance(lead_id, str) or not _LEAD_ID_RE.match(lead_id):
             unreadable += 1
             continue
@@ -299,8 +225,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 payload_status=str(rec.get("payload_status", "")),
                 payload_digest=str(rec.get("payload_digest", "")),
                 raw_ref=raw_ref,
-                # `as_str`, not `str(...)`: the guard's own coercion of a stored column, so
-                # absent / `None` / non-string read as the `""` a live call carries (#1017 D2).
+                # `as_str`: the guard's own coercion (absent / `None` / non-string -> `""`).
                 payload_sha256=as_str(rec.get("payload_sha256")),
                 system_key=as_str(rec.get("system_key")),
                 _record=rec,
@@ -361,12 +286,8 @@ def joined(run_dir: Path) -> list[JoinedLead]:
 
 
 def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
-    """`(queries, sentinels)`, each seq-ordered.
-
-    A lead is bucketed on ALL its rows before this split; the split decides which list each row
-    lands in, never whether the LEAD appears at all. A lead whose only rows are sentinels still
-    joins with an empty `queries` — the run really did open it, and the pitfalls residue reads
-    it."""
+    """`(queries, sentinels)`, each seq-ordered. Never decides whether the lead appears: a lead
+    with only sentinels still joins with empty `queries`."""
     ordered = sorted(rows, key=lambda r: r.seq)
     return (
         [r for r in ordered if not r.is_sentinel],
@@ -375,11 +296,8 @@ def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
 
 
 
-#: How much of one sampled document reaches a prompt. A payload is whatever an adapter wrote —
-#: routinely thousands of fields across hundreds of hits — and the reader of a sample needs the
-#: SHAPE of a document, not the document. Both caps are applied per sampled document, and the
-#: sample says so when it elides, because a reader that cannot tell a short document from a
-#: truncated one will author against the truncation.
+#: How much of one sampled document reaches a prompt: the reader needs the document's shape,
+#: not all of it. The sample says when it elides, or an author writes against the truncation.
 SAMPLE_MAX_FIELDS = 40
 SAMPLE_MAX_VALUE_CHARS = 200
 #: Containers are capped too, and nesting is bounded: a payload can carry an object deep
@@ -389,13 +307,8 @@ SAMPLE_MAX_DEPTH = 6
 
 
 def _one_document(payload: object) -> dict | None:
-    """One document out of a parsed payload, in whichever shape the wire used.
-
-    Two shapes reach here and both are real: a search answers `{"hits": [...]}`, where a hit IS
-    a document; ES|QL answers `{"columns": [...], "values": [[...]]}`, where a row is a
-    PROJECTION and the document shape is only as wide as the query's own SELECT. The projection
-    is still worth showing — it names real fields — but it is not the same claim, so the caller
-    is told which it got by the `esql_projection` key rather than left to infer it from shape.
+    """One document out of a parsed payload: a search hit (`{"hits": [...]}`), or an ES|QL row
+    (`{"columns", "values"}`), which is only a projection and is marked `esql_projection`.
     """
     if not isinstance(payload, dict):
         return None
@@ -417,12 +330,9 @@ def _one_document(payload: object) -> dict | None:
 def _capped_document(value: object, depth: int = 0) -> object:
     """`value` trimmed to what a prompt can carry, saying so wherever it elided.
 
-    STRUCTURE SURVIVES THE TRIM. Stringifying a nested object here rendered it as a Python
-    repr — single-quoted keys, `None` for null — inside a sample whose whole purpose is to show
-    what a document in this corpus looks like. An author copying that shape writes a document
-    with one flat field holding a quoted blob where the corpus has an object, which is the
-    invented-shape failure this sampler exists to remove, reintroduced by its own renderer.
-    Only leaf STRINGS are truncated; containers are capped by length and recursed into.
+    Structure survives: only leaf strings are truncated, containers are capped and recursed.
+    Stringifying a nested object would show a Python repr, which an author would copy as a
+    flat quoted blob — an invented shape.
     """
     if depth >= SAMPLE_MAX_DEPTH:
         return "…(nested further)"
@@ -445,36 +355,21 @@ def _capped_document(value: object, depth: int = 0) -> object:
 def corpus_samples(
     leads: Sequence[JoinedLead], *, pattern_of: Callable[[QueryRow], str | None]
 ) -> dict[str, dict | None]:
-    """One real document per base pattern this run's queries addressed.
+    """One real document per base pattern this run's queries addressed — what the questioner
+    needs to inject documents with real field names, which the investigation's own queries
+    would then retrieve.
 
-    OVER THE JOIN, NOT THE RUN DIR: `leads` is `joined(run_dir)`, read once by the caller and
-    projected here — the launcher composes this with `questioner_leads` over the same list, and
-    a second read of both tables for a value that cannot differ from the first is what the
-    two path-taking signatures used to cost it. A `Sequence`, not an `Iterable`, for that
-    reason: the same object is walked twice, and a one-shot iterator would hand the second
-    projection nothing, silently.
+    `leads` is `joined(run_dir)`, shared with `questioner_leads`; a `Sequence` because it is
+    walked more than once.
 
-    THE ANSWER TO "what does a document in this corpus look like". Its caller is the questioner,
-    which authors documents to INJECT into these corpora and, without this, had only
-    `QueryRow.payload_digest` — the byte count — to go on. A world staged with invented field
-    names is a world whose evidence no query of the investigation's own vocabulary retrieves,
-    and that is a difference that is staged, recorded and unobservable.
+    Every addressed pattern is a key; `None` means "asked and held nothing", distinct from
+    never addressed. The keys are also the capture's FROM sources that
+    `parse_family(captured_patterns=...)` checks overlays against.
 
-    EVERY ADDRESSED PATTERN IS A KEY, including the ones whose every query came back empty:
-    `None` there says "this corpus was asked and held nothing", which is a different fact from
-    a pattern the run never addressed, and the difference is exactly what tells an author which
-    corpora are live in this deployment. The keys are therefore also the capture's own FROM
-    sources — what `parse_family(captured_patterns=...)` judges an overlay's keys against.
+    `pattern_of` is injected: which key names a call's corpus is the estate's vendor knowledge.
 
-    `pattern_of` is INJECTED because which key of a call names its corpus is the estate's
-    vendor knowledge and this module holds none: the join surface owns the walk, the stager
-    owns the routing.
-
-    Reads go through `read_guarded`, not `artifact_file` then read. A payload lives in a prior
-    box's rw bind, and this one is bound for a model PROMPT: the lstat-then-open pair is a
-    check-then-act window on a path a model can replace between the two, and the bytes that
-    then reach the prompt are the planted link's target. One unreadable payload skips to the
-    next candidate rather than blinding the pattern.
+    Reads use `read_guarded` (not lstat-then-read, a check-then-act window) since payloads are
+    box-writable and bound for a prompt. An unreadable payload skips to the next candidate.
     """
     samples: dict[str, dict | None] = {}
     for lead in leads:
@@ -485,13 +380,8 @@ def corpus_samples(
                 continue
             if not isinstance(pattern, str) or not pattern:
                 continue
-            # A REAL DOCUMENT OUTRANKS A PROJECTION, so a pattern whose first usable payload
-            # was an ES|QL row keeps looking. The author's question is "what does a document
-            # here look like", and an aggregate's columns (`STATS ... BY proc`) answer a
-            # different one — they name real fields, but nothing about the shape of the record
-            # those fields sit in. First-usable-wins locked the weaker answer in whenever a
-            # summarising query happened to run before a retrieving one, which is the ordinary
-            # order for a lead that counts before it reads.
+            # A real document outranks an ES|QL projection, which names fields but not the
+            # record's shape; keep looking after a projection.
             held = samples.get(pattern)
             if held is not None and not held.get("esql_projection"):
                 continue
@@ -501,8 +391,6 @@ def corpus_samples(
             text, _refused = read_guarded(query.raw_ref)
             if text is None:
                 continue
-            # One unreadable payload — not JSON, nested past the bound — is one skipped
-            # candidate, decided by the same decoder every other reader of a run dir uses.
             payload, unreadable = load_json_artifact(text)
             if unreadable is not None:
                 continue
@@ -517,17 +405,12 @@ def corpus_samples(
 def actor_view(run_dir: Path) -> dict:
     """The actor's gray-box view: the queries the defender ran, and nothing else about it.
 
-    Sentinel rows are dropped and the lead is KEPT — one decision: a lead that only tripped the
-    repeat guard is still a lead the defender opened, and the actor's job is to write a story
-    around what the defender did and did not look at. But `∅.repeat-trip` is a refusal record
-    and `∅.bash-shim` carries up to `SHIM_COMMAND_MAX_CHARS` of model-authored shell text;
-    shown as queries they tell the actor the defender ran something it never ran, in words a
-    prior turn chose."""
+    Sentinel rows are dropped (shown as queries they would claim runs that never happened, and
+    `∅.bash-shim` carries model-authored shell text), but their lead is kept."""
     run_dir = Path(run_dir)
     grouped: dict[str, list[dict]] = {}
     for q in load_queries(run_dir):
-        # The lead is registered BEFORE the skip, so a lead whose only rows are sentinels
-        # still reaches the actor with an empty query list rather than vanishing.
+        # Registered before the skip, so a sentinel-only lead appears with no queries.
         entries = grouped.setdefault(q.lead_id, [])
         if q.is_sentinel:
             continue
@@ -545,16 +428,11 @@ def actor_view(run_dir: Path) -> dict:
 
 def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
     """Copy the two tables into the learning run dir, refusing anything that is not a regular
-    file or a real directory. Returns what it refused, so the caller can say so out loud.
+    file or a real directory; returns what it refused.
 
-    Only real artifacts cross this boundary. The run dir is the box's rw bind, so a link
-    planted at an artifact's name would otherwise have its TARGET copied in — the escape
-    happens here, at the copy, and afterwards the planted bytes are an ordinary in-run file no
-    read-time gate can distinguish. A boxed run whose tree holds a link never reaches this
-    point (the exit scrub taints it), so a refusal here means the tree skipped that scrub.
-
-    Refusing rather than aborting: a dangling link in the gather tree must not cost the run its
-    whole learning pass, and every consumer already tolerates a missing payload.
+    The run dir is box-writable, and a link copied here would become an ordinary file no later
+    gate can tell apart. A refusal means the tree skipped the box's exit scrub. Refused rather
+    than aborted: every consumer tolerates a missing payload.
     """
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)
@@ -569,11 +447,8 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
         refused.append(queries_src)
     gather_src = RunPaths(src_run_dir).gather_raw
     if artifact_dir(gather_src):
-        # `symlinks=True` alongside the ignore hook: the hook decides from an `lstat` taken
-        # before the copy, so the flag is what keeps a link planted inside that window from
-        # being dereferenced anyway.
-        # The ROOT is judged by `artifact_dir` above, and `symlinks=True` covers every entry
-        # found while walking.
+        # `symlinks=True` too: the ignore hook's `lstat` precedes the copy, so the flag keeps a
+        # link planted in that window from being dereferenced.
         shutil.copytree(  # lint-tree-read-follows-link: ok — root screened, entries preserved, destinations screened by `refusing_copy2`
             gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
             ignore=refuse_non_artifacts(refused), dirs_exist_ok=True,
@@ -584,23 +459,14 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
 
 
 def refusing_copy2(refused: list[Path]):
-    """`shutil.copy2`, refusing a DESTINATION that is not already a plain, single-linked file.
+    """`shutil.copy2`, refusing a destination that is not absent or a plain, single-linked file.
 
-    `refuse_non_artifacts` screens the SOURCE side of a walk; nothing screened the other end,
-    and `copy2` opens its destination for writing — which resolves a link planted at that name
-    and writes the copied bytes wherever it points. The root of each destination tree is judged
-    by its caller, but `copytree(dirs_exist_ok=True)` walks INTO an existing destination
-    directory and copies entry by entry, so an entry planted at any depth below that root was
-    still followed. Both trees this is used on are box-reachable (a run dir's rw bind, and the
-    episode dir the archive writes into), so this is the same rule as the source screen, one
-    level down and on the other side.
-
-    Refused rather than raised, matching `refuse_non_artifacts`: one planted name must not cost
-    a world its whole archive, and the caller prints what it dropped."""
+    `copy2` opens its destination for writing, following a planted link, and
+    `copytree(dirs_exist_ok=True)` walks into existing, box-reachable destination trees at any
+    depth. Refused rather than raised, so one planted name does not cost a whole archive."""
     def _copy(src, dst, *, follow_symlinks=True):
         target = Path(dst)
-        # `plain_file`, not `artifact_file`: a hard link at the leaf is a regular file to
-        # `lstat` and `copy2` opens it for writing all the same (#1047 F-F).
+        # `plain_file`: a hard link is a regular file to `lstat` but still shares the target.
         if (target.exists() or target.is_symlink()) and not plain_file(target):
             refused.append(target)
             return dst
@@ -611,11 +477,7 @@ def refusing_copy2(refused: list[Path]):
 
 def refuse_non_artifacts(refused: list[Path]):
     """`copytree`'s ignore hook, recording as it goes: drops every entry at every depth that is
-    not a regular file or a real directory.
-
-    PUBLIC because it has a second caller: the episode archive walks `gather_summaries/` with
-    the same hook, and a second `def` of it there would be a copy the duplicate-helper gate
-    cannot see (it keys on the symbol name, and the copy had a different one)."""
+    not a regular file or a real directory. Also used by the episode archive."""
     def _ignore(directory, names):
         here = Path(directory)
         dropped = {n for n in names
@@ -634,21 +496,12 @@ def render_actor_view_yaml(run_dir: Path) -> str:
 def project_leads(
     leads: Sequence[JoinedLead], *, lead_fields: Sequence[str], query_fields: Sequence[str],
 ) -> list[dict]:
-    """THE ONE WALK from the join to a model-facing list of dicts: every lead in `leads`, in
-    its order, as a dict of exactly `lead_fields` plus `queries`, each query a dict of exactly
-    `query_fields`. The two renders over it (`questioner_leads`, `render_joined_yaml`) differ
-    only in the columns they name, so a coercion or a shape decision made here is made once —
-    the two used to be hand-spelled walks whose key sets drifted apart in silence.
+    """The one walk from the join to a model-facing list of dicts: each lead as exactly
+    `lead_fields` plus `queries`, each query exactly `query_fields`.
 
-    `.queries`, never `.rows`: the sentinel rows are the defender's refusals and shims, not
-    queries it ran, and shown as queries they say the run asked something it never asked —
-    the same decision `actor_view` records, and a `∅.bash-shim` row carries model-authored
-    shell text besides. A lead whose only rows are sentinels is still a lead the run opened,
-    so it is kept with `queries: []`. Orphans (rows with no lead file) arrive as `joined()`
-    hands them: `goal` and `provenance` `None`, `what_to_summarize` empty.
-
-    Columns are named, never dumped: a column added to `QueryRow` reaches a model only by
-    being named in a render's `query_fields`, and never by existing."""
+    `.queries`, never `.rows`: sentinels are not queries the defender ran (as in `actor_view`),
+    though a sentinel-only lead is kept with `queries: []`. Columns are named, never dumped, so
+    a new `QueryRow` column reaches a model only by being named here."""
     return [
         {
             **{name: getattr(jl, name) for name in lead_fields},
@@ -658,12 +511,9 @@ def project_leads(
     ]
 
 
-#: The questioner's "joined leads" section, per lead and per query — the whole census of what
-#: the questioner is shown of a row. Pinned as literals by `tests/test_1017_row_schema.py`.
-#: NOT here, on purpose: `raw_command` and `raw_ref` (a shell string and the host's absolute
-#: payload path — no other model-facing render shows either), `payload_sha256` and
-#: `system_key` (identities for the guards, not for a model), `orphan` (a lead with no file
-#: already reads as `goal: None`), `sentinels`.
+#: Everything the questioner is shown of a lead and a query. Deliberately absent: `raw_command`
+#: and `raw_ref` (a shell string and the host's absolute path), `payload_sha256`/`system_key`
+#: (guard identities), `orphan` (reads as `goal: None`), `sentinels`.
 QUESTIONER_LEAD_FIELDS: tuple[str, ...] = ("lead_id", "goal", "what_to_summarize", "provenance")
 QUESTIONER_QUERY_FIELDS: tuple[str, ...] = (
     "seq", "system", "verb", "query_id", "params", "exit_code", "error_class",
@@ -672,13 +522,10 @@ QUESTIONER_QUERY_FIELDS: tuple[str, ...] = (
 
 
 def questioner_leads(leads: Sequence[JoinedLead]) -> list[dict]:
-    """The questioner's "joined leads" section (#1032): `project_leads` over `joined()`'s
-    answer with the questioner's columns — never a row object, never its `repr`.
+    """The questioner's "joined leads" section: `project_leads` over `joined()` with the
+    questioner's columns — never a row object or its `repr`.
 
-    @owns questioner_leads — the section's shape is decided by the two field tuples above and
-    nowhere else. Takes the JOIN rather than the run dir, like `corpus_samples` and unlike the
-    document renders (`actor_view`, `render_joined_yaml`, which carry `case_id`): the launcher
-    reads the run once and projects it twice."""
+    @owns questioner_leads — the section's shape is decided by the two field tuples above."""
     return project_leads(
         leads, lead_fields=QUESTIONER_LEAD_FIELDS, query_fields=QUESTIONER_QUERY_FIELDS)
 
@@ -703,9 +550,7 @@ def narration_crosscheck(run_dir: Path, l_ids: set[str]) -> dict:
     table_ids = lead_ids | query_lead_ids
 
     jl = joined(run_dir)
-    # `.rows`, not `.queries`: this is a bookkeeping crosscheck between the narration and the
-    # two tables, so the question is whether the lead reached the TABLE at all. A lead that
-    # only tripped the repeat guard has a row and is not a lead the narration failed to write.
+    # `.rows`: the question is whether the lead reached the table at all.
     leads_without_queries = sorted(
         {j.lead_id for j in jl if not j.rows} | (l_ids - table_ids)
     )
@@ -734,10 +579,8 @@ def _lead_ids_from_companion(companion: CompanionBody) -> set[str]:
     return {
         f["id"]
         for f in companion.get("findings", [])
-        # lint-selection: ok — reads bytes the write gate already accepted. `:L findings` is
-        # the sole site that declares a lead and `validate._check_lead_refs` refuses a
-        # malformed id there, so nothing this could drop reaches a persisted document. Defence
-        # in depth over validated input, not a selection that decides anything.
+        # lint-selection: ok — defence in depth over input the write gate already validated
+        # (`validate._check_lead_refs` refuses a malformed `:L findings` id), so nothing is dropped.
         if isinstance(f, dict) and isinstance(f.get("id"), str)
         and _LEAD_ID_RE.match(f["id"])
     }

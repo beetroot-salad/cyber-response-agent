@@ -1,35 +1,16 @@
 """Item 3's dispatch identity: the configured template, resolved against the deployment's own
-catalog and checked for AGREEMENT with the table's grant, once, at run start (#1003).
+catalog and checked for agreement with the table's grant, once, at run start.
 
-The table (`verb-grants.yaml`) decides whether the correlation lead runs and under which
-pair; the config (`lead-zero.yaml`) decides which template it binds. Each is authored on its
-own, per deployment, so they can disagree — and before #1003 a disagreement was silent: a
-table moving the holder to another vendor's search verb, or to a sibling verb on the same
-vendor, loaded clean, derived that system, and the lead was told to bind a template its
-grant-filtered index could not list. It spent all eight requests discovering that and
-reported a truncated session with no findings.
+The table (`verb-grants.yaml`) decides whether the correlation lead runs and under which pair;
+the config (`lead-zero.yaml`) decides which template it binds. They are authored separately and
+can disagree, and a silent disagreement makes the lead burn its whole request budget trying to
+bind a template its grant-filtered index cannot list.
 
-ONE RESOLVER, NOT TWO. The invariant this module promises is exactly "the id the lead is told
-to bind is one its own machinery will bind": listed by the index it reads
-(`tools_gather._template_index`, filtered on `_corpus.is_established`) and handed back
-verbatim by the query tool when it passes the id on its `query` call
-(`query_tool.resolve_query_id`). So the check is composed of those two predicates, and
-nothing here respells the id grammar, the established-tier filter or the id-to-file rule —
-a second spelling of any of them is an id the check accepts and the lead cannot bind, which
-is the silent burn again with a green check in front of it.
-
-Repo CI pins the same join on the repo's own copies (`test_gather_template_discovery.py`).
-This module is the runtime-side twin: the operator who can author the mismatch never runs
-CI, so the check runs on every run that will dispatch the lead, over the tree the run reads,
-before any prompt is built.
-
-WHY HERE AND NOT IN THE TABLE LOADER: `_spec` imports `verb_dispositions`, so the loader
-cannot name the template without a cycle — and the loader has no catalog to resolve it
-against. The three narrowing rules in `_refuse_incoherent_narrowing` are unchanged; this is a
-fourth, one level up, where the catalog is visible.
-
-Sibling-free like `_spec`: imports it and nothing else in the package. The query tool is
-imported at the call, the way the rest of the package reaches the gather machinery.
+The check is composed of the lead's own predicates (`_corpus.is_established` for the index,
+`resolve_query_id` for the query tool) rather than a second spelling of them, which could
+accept an id the lead cannot bind. It runs on every run, since the operator who can author the
+mismatch never runs CI. It lives here, not in the table loader, because the loader cannot name
+the template without an import cycle and has no catalog.
 """
 from __future__ import annotations
 
@@ -44,24 +25,18 @@ from ._spec import correlation_system
 
 
 class CorrelationDispatchError(Exception):
-    """Raised at run start for a config/table/catalog trio no dispatch can honestly be built
-    from. One class for every arm because every arm has the same correct handling: stop,
-    before any prompt is built, naming what disagreed."""
+    """Raised at run start when config, table and catalog disagree; the run stops before any
+    prompt is built."""
 
 
 @model(frozen=True)
 class CorrelationDispatch:
-    """Item 3's dispatch identity, derived once at run start from three inputs — the config's
-    id, the catalog walk, and the table's holder rows — and CARRIED to the two frames that
-    act on it (`prepare_correlation_lead`, `dispatch_correlation`) rather than re-derived
-    there from module constants.
+    """Item 3's dispatch identity, derived once at run start and carried to the frames that
+    act on it rather than re-derived there.
 
-    `system` and `grant` are the table's projections exactly as `_spec` derives them at
-    import; `template_id` is the config's. `system is None` means the table withheld the
-    lead, and then nothing about the id was checked. Whenever `system` is set, the check
-    resolved `template_id` to exactly one established template filed under `system` and
-    binding the holder's one query pair — so the system the lead is dispatched on, labelled
-    with and cache-keyed by IS the template's, by construction.
+    `system is None` means the table withheld the lead and the id was not checked. Otherwise
+    `template_id` resolved to exactly one established template filed under `system` and
+    binding the holder's one query pair.
     """
 
     template_id: str
@@ -70,7 +45,7 @@ class CorrelationDispatch:
 
 
 def _pair(system: str, verb: str) -> str:
-    """The spelling the table loader names a pair by — what an operator greps the table for."""
+    """A pair as the table loader spells it, so an operator can grep for it."""
     return f"{system}.{verb}"
 
 
@@ -79,34 +54,22 @@ def resolve_correlation_dispatch(
 ) -> CorrelationDispatch:
     """Resolve `template_id` against `templates` and check it agrees with `grant`.
 
-    WITHHELD FIRST: when the grant holds no query verb the lead is skipped (ORIENT says so),
-    and the id is NOT consulted — `templates` is never iterated. A withholding is a decision
-    an author wrote a reason for; it degrades the run rather than stopping it, and a typo in
-    a config the lead will not read is not this run's problem.
+    When the grant holds no query verb the lead is skipped and the id is not consulted: a
+    withholding degrades the run rather than stopping it.
 
     Otherwise, refuse — naming both sides — when:
-      (a) the id resolves to no established template (`is_established`, the index's own
-          filter), or to more than one — two files carrying the id is a catalog fault, said
-          as such, never settled by which sorts first;
-      (b) the query tool would not hand the id back verbatim as the lead's own id on the
-          system the file is filed under (`resolve_query_id`): not `{system}.{kebab}`, or a
-          prefix naming another system than the directory — the location invariant the
-          corpus lints (`_scaffold_rules._id_findings`), met here at bind time. Said as a
-          fault in the FILE, never as a table mismatch;
-      (c) the resolved template declares no `verb:` — said as a MALFORMED TEMPLATE, never as
-          a mismatch on an empty verb, which would send the operator to the table for a
-          fault in the file;
+      (a) the id resolves to no established template, or to more than one (a catalog fault);
+      (b) `resolve_query_id` would not hand the id back verbatim on the system the file is
+          filed under (a fault in the file, not the table);
+      (c) the template declares no `verb:` (a malformed template, not a table mismatch);
       (d) `(template.system, template.verb)` is not exactly the holder's one query pair.
 
-    The grant is handed through unchanged: the config SELECTS a template, only the table
-    grants (#1003 O5). No value of the id reaches this function's output as a wider grant.
+    The grant passes through unchanged: the config selects a template, only the table grants.
     """
     system = correlation_system(grant)
     if system is None:
         return CorrelationDispatch(template_id, None, grant)
-    # The holder's one query pair. The loader refuses a second query verb for this holder, so
-    # this is a single pair for any grant that came through it; the raise is this function's
-    # own contract for one that did not, as `correlation_system`'s is for two systems.
+    # The loader already refuses a second query verb; this guards grants built elsewhere.
     query_pairs = sorted((s, v) for s, v, _ in grant.entries if v != HEALTH_CHECK)
     if len(query_pairs) != 1:
         raise GrantError(
@@ -137,11 +100,9 @@ def resolve_correlation_dispatch(
 
     from defender.scripts.gather_tools.record_query import resolve_query_id
 
-    # THE bind-time rule, not a restatement of it: what the lead's `query` call does with a
-    # `query_id`. Held against the system the file is FILED under, which is the system the
-    # lead is dispatched on once (d) below holds — so an id this arm accepts is one the tool
-    # records verbatim, and one it refuses would have been recorded under the untagged
+    # The query tool's own bind-time rule. A refused id would be recorded under the untagged
     # fallback, losing the template identity the learning loop keys on.
+
     if resolve_query_id(template.system, template.verb, template_id) != template_id:
         raise CorrelationDispatchError(
             f"correlation template {template_id!r} at {template.path} carries an id the "

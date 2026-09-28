@@ -2,13 +2,10 @@
 """Seed UNIX accounts on a playground host from hosts/inventory.yaml.
 
 Runs at container start (not image build) so inventory.yaml changes take
-effect with `compose up -d` alone — no rebuild loop. Idempotent: re-running
-on an already-seeded host is a no-op per user (useradd is skipped if the
-account exists, password is re-set to keep drift out).
+effect with `compose up -d` alone. Idempotent.
 
-Keeping identity labels IDENTICAL across Keycloak (IdP events) and
-/etc/passwd (auth.log, auditd) is the property that makes cross-source
-correlation work — see docs/playground-environment-v2.md §Identities.
+Usernames must be identical across Keycloak and /etc/passwd, or cross-source
+correlation (IdP events vs auth.log/auditd) breaks.
 """
 import os
 import pwd
@@ -38,12 +35,9 @@ def user_exists(username: str) -> bool:
 def ensure_user(username: str, shell: str, sudo: bool) -> None:
     """Create the account if missing; update shell + sudo membership if present.
 
-    Password is (re)set to DEFAULT_PASSWORD on every run — drift from the
-    playground baseline is a footgun, not a feature. Real rotation happens
-    out-of-band.
+    The password is reset to DEFAULT_PASSWORD on every run to keep drift out.
     """
     if user_exists(username):
-        # Align shell + sudo with current inventory — inventory is truth.
         run(["usermod", "-s", shell, username])
     else:
         # -m creates $HOME; -U makes a matching group.
@@ -52,7 +46,6 @@ def ensure_user(username: str, shell: str, sudo: bool) -> None:
     subprocess.run(["chpasswd"], input=f"{username}:{DEFAULT_PASSWORD}\n",
                    text=True, check=True)
 
-    # Sudo membership — add-if-missing, remove-if-no-longer-authorized.
     groups_line = run(["id", "-nG", username]).stdout.strip().split()
     if sudo and "sudo" not in groups_line:
         run(["usermod", "-aG", "sudo", username])
@@ -72,8 +65,8 @@ def resolve_users(inv: dict, host_name: str) -> list[dict]:
         sys.exit(f"FATAL: host {host_name!r} not in inventory.yaml")
     host = hosts[host_name]
 
-    # Load the realm user list — usernames + which realm role each belongs to.
-    # Cross-file invariant with keycloak/realm.yaml; see inventory.yaml header.
+    # Username -> realm role. Cross-file invariant with keycloak/realm.yaml.
+
     realm_path = Path("/opt/soc-playground/realm.yaml")
     realm_users: dict[str, str] = {}
     if realm_path.exists():

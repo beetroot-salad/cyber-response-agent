@@ -36,11 +36,8 @@ from defender.learning.core.validate import (  # noqa: E402
     reply_document_text,
 )
 
-#: THE TWO AUTHORING STAGES AND THE NAMES THEIR CALLERS ALREADY IMPORT FROM HERE.
-#:
-#: This module is a facade: what is exported is what still has a caller — the two drains,
-#: the CLI, and the handful of helpers other packages read through this name rather than
-#: reaching into `core/`.
+#: A facade: the two authoring drains, the CLI, and the helpers other packages import through
+#: this name rather than reaching into `core/`.
 __all__ = [
     "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
     "author_drain", "lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir

@@ -39,20 +39,17 @@ from defender.learning.core.config import (
 
 AuthorError = _shared.AuthorError
 
-# The ONE spelling of this channel's name: `cfg.log_prefix` comes from it, and so do the envelope
-# and the drain's per-channel logger (`drain.channel_logger`, whose `repair` child the repair
-# pass logs under). This module's own lines log under its module name, like every other.
+# This channel's name: `cfg.log_prefix`, the envelope and the drain's per-channel logger
+# (`drain.channel_logger`) all derive from it.
 _LOG_PREFIX = "author"
 
 
 @model(frozen=True, kw_only=True)
 class AuthorConfig(CorpusAuthorConfig):
-    """The lessons curator's drain config: the shared corpus-author core plus the three
-    fields only this drain has — the held report, the manifest seed the lessons prompt
-    takes, and the env-backed model knobs.
+    """The lessons curator's drain config: the shared corpus-author core plus the held report,
+    the manifest seed the lessons prompt takes, and the env-backed model knobs.
 
-    Lock topology is not carried as config here (#719) — the roles are fields on
-    `QueueChannel`."""
+    Lock topology lives on `QueueChannel`, not here (#719)."""
 
     held_report: Path
     manifest_seed: str | None = None
@@ -81,9 +78,7 @@ def build_author_config(
         channel=paths.findings,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
-        # Channel-scoped, like the graveyard and the stuck-row record beside it: this
-        # report is lessons-local, so it must not sit on a name an observation channel
-        # would look like it shares.
+        # Channel-scoped, like the graveyard and stuck-row record beside it.
         held_report=paths.pending_dir / "findings.held_report.log",
         log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
@@ -96,7 +91,7 @@ def build_author_config(
         post_rotate=_write_held_report_after_rotate,
         manifest_seed=manifest_seed,
         box=box,
-        # #773 M2: the lessons channel's own drain-run check.
+        # The drain runs this check itself; the curator never does.
         forward_check=FINDINGS_CHECK,
         exempt=skips_forward_check,
         repair_prompt=paths.learning_dir / "author" / "lessons" / "repair.md",
@@ -121,8 +116,7 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
-    """This direction's name for the ONE shared read (`shared.existing_finding_ids`), kept so
-    the module's own callers and tests keep their spelling."""
+    """This channel's name for `shared.existing_finding_ids`."""
     return _shared.existing_finding_ids(cfg)
 
 
@@ -140,9 +134,8 @@ def build_user_prompt(
 
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
-    """#773 M1: the curator writes and never checks — no `ForwardCheckConfig`, no
-    `forward_check` tool. The drain runs the check itself, between `_project` and the
-    commit; this spawn's only job is to author the batch and self-report."""
+    """Spawn the curator to author the batch and self-report. It runs no forward check; the
+    drain does that before committing."""
     from defender.learning.author import curator_engine
 
     cfg.pending_dir.mkdir(parents=True, exist_ok=True)
@@ -190,20 +183,17 @@ def write_held_report(
 ) -> None:
     """The lessons channel's four decline reasons, as the labels its report line carries.
 
-    The line is composed by `shared.write_disposition_report`, which both curators call and
-    which derives every `<label>_ids` key from the caller's own group names. What this
-    function owns is WHICH labels the lessons channel reports, not the spelling of the keys.
+    `shared.write_disposition_report` composes the line and derives the `<label>_ids` keys;
+    this function picks which labels the lessons channel reports. Each implies a different
+    recovery:
 
-    #773 M6/M7 replace the old retryable `forward_bad` hold with TWO new groups:
-    `forward_bad_terminal` (a finding whose lesson stayed BAD after D1's one repair attempt
-    — consumed, never re-queued by this drain, its full account in the gap ledger) and
-    `deferred` (a finding that could not land through no fault of its own — bounded, still
-    queued, §7 FK-16 carries only its id and count). `skipped` is terminal, and a `gate_held`
-    row never reached the agent at all and will be held again every tick until a human moves
-    it (#881/O3). An operator reading one label for another reads the wrong recovery.
+    - `forward_bad_terminal`: the lesson stayed BAD after the one repair attempt; consumed,
+      with its full account in the gap ledger.
+    - `deferred`: couldn't land through no fault of its own; bounded and still queued.
+    - `skipped`: terminal.
+    - `gate_held`: never reached the agent; held every tick until a human moves it.
 
-    Nothing is written when the tick declined nothing: a report that gains a line per tick
-    names nothing."""
+    Nothing is written when the tick declined nothing."""
     _shared.write_disposition_report(
         cfg.held_report, cfg.pending_dir, batch_id=batch_id,
         groups={
@@ -215,24 +205,15 @@ def write_held_report(
 
 
 
-# This drain's one diagnostic logger, built from the single prefix anchor at the top.
 _logger = logging.getLogger(__name__)
 
 
 def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
-    """Run after BOTH the corpus commit and the queue rotation — the only seam that
-    observes the tick's closing edge, which is why it is shared config rather than
-    lessons-local decoration, even though only this direction populates it.
+    """Runs after both the corpus commit and the queue rotation — the only seam that sees the
+    tick's closing edge.
 
-    UNCONDITIONAL: the rows a tick held or skipped are the same rows whether or not other
-    rows committed, and the operator's one written trace of what the tick declined — a
-    `forward_bad` verdict, a skip, or a pre-author gate hold — must not depend on how the
-    tick's other rows went, least of all in a MIXED batch, the shape a hold is most
-    interesting in.
-
-    `outcome.gate_held` is the PRE-AUTHOR gate's own list, read off its own field rather
-    than out of `outcome.held` — which carries the AUTHOR_RESULT buckets, i.e. rows the
-    agent returned a verdict on. A gate hold never reached the agent (#881/O3)."""
+    Unconditional: this report is the operator's one written trace of what the tick declined,
+    and must not depend on how the tick's other rows went."""
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
@@ -262,41 +243,28 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
-#: D6/O2: the ONE `judge_outcome` this partition admits for authoring. Stated positively, and
-#: that is the whole point: a denylist here answers "author" for every value it does not
-#: recognise, so a row whose `judge_outcome` is absent, torn, or `discard` was routed to the
-#: curator exactly as if the judge had scored the family `survived` — the O7 outcome
-#: `learning/judge/enqueue.py`'s own docstring says must never happen, guarded only at the
-#: appender and therefore not guarded at all for any other producer on this shared queue.
+#: The one `judge_outcome` admitted for authoring. An allowlist, so an absent, torn or
+#: `discard` outcome from any producer on this shared queue is never authored as if the
+#: family survived.
 _FAMILY_AUTHOR_OUTCOME = "survived"
-#: `judge_outcome` values that are SKIPPED (consumed, never authored) rather than held.
-#: `discard` and `corpus-contradiction` do not reach the queue through the judge's own appender
-#: (M5 refuses them there), so this partition should never see them — a row carrying one anyway
-#: came from somewhere the appender did not gate, and is HELD for a human rather than skipped.
+#: `judge_outcome` values skipped (consumed, never authored) rather than held. `discard` and
+#: `corpus-contradiction` are refused by the judge's appender, so a row carrying one came from
+#: an ungated producer and is held for a human.
 _FAMILY_SKIP_OUTCOMES = frozenset({"caught", "undecidable"})
 
 
 def _gate_family(entry: dict) -> tuple[str, dict] | None:
-    """D6/O2: the family partition inside `_gate_findings`'s one gate.
+    """The family partition inside `_gate_findings`.
 
     `None` admits the row for authoring; otherwise `("consumed"|"held", row)` says which list
     the caller files it under.
 
-    A `direction: family` row's ground truth is `disposition_declared` on the family record —
-    already resolved into `judge_outcome` by the judge's own mechanical pass — so this
-    partition never reads `source_refs.yaml` at all. `survived` is admitted for authoring (the
-    caller lets the row fall through to `to_author` the same way an admitted adversarial row
-    does); `caught`/`undecidable` are consumed WITHOUT authoring, terminally rather than held —
-    a word that will never change must not sit in the queue forever (a hold is forever; a skip
-    is terminal). EVERYTHING ELSE IS HELD, with the value that could not be read named on the
-    row: this partition is a POSITIVE rule, so a row with no readable ground truth is the one
-    thing it will not do silently, which is the same posture the adversarial/benign arm below
-    takes for an unresolvable `source_refs.yaml`."""
-    # THROUGH THE OWNER'S NORMALIZER, not a bare `in`. The appender validates `judge_outcome`
-    # with `normalized_judge_outcome`, which casefolds and trims — so `Caught` passes validation,
-    # is written to the queue verbatim, and a raw membership test here does not recognise it.
-    # A family the judge scored as CAUGHT was then authored as though it had survived. This is
-    # `lint-vocabulary`'s own shape: one parser, two interpreters, disagreeing on one string.
+    A family row's ground truth is already resolved into `judge_outcome` by the judge, so
+    `source_refs.yaml` isn't read. `survived` is authored; `caught`/`undecidable` are consumed
+    without authoring (an outcome that will never change must not be held forever); anything
+    else is held with the unreadable value named on the row."""
+    # Through the appender's normalizer (casefold and trim), so `Caught` — valid and written
+    # verbatim — isn't mistaken for an unknown outcome.
     outcome = normalized_judge_outcome(entry.get("judge_outcome"))
     if outcome == _FAMILY_AUTHOR_OUTCOME:
         return None
@@ -313,27 +281,16 @@ def _gate_family(entry: dict) -> tuple[str, dict] | None:
 def _gate_findings(
     batch: list[dict], cfg: AuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """The findings direction's pre-author policy: idempotency against the corpus, then EITHER
-    the family partition (D6) for a `direction: family` row OR the `source_refs.yaml` ground
-    truth an adversarial/benign finding needs before it can become a lesson.
+    """The findings channel's pre-author policy: idempotency against the corpus, then either the
+    family partition for a `direction: family` row or the `source_refs.yaml` ground truth an
+    adversarial/benign finding needs before it can become a lesson.
 
-    `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
-    even though the policies are not one policy parameterised.
-
-    AN EMPTY BATCH ANSWERS WITHOUT READING THE CORPUS. `existing_finding_ids` walks and
-    frontmatter-parses every lesson in `defender/lessons/`, which is the most expensive
-    non-agent step in a tick — and since #881 `_tick` runs the whole tick body for a queue
-    that is nothing but unreadable lines, purely to reach a rotation that clears them. There
-    is no partition of no rows, so the walk would be paid for an answer that is three empty
-    lists whatever the corpus holds."""
+    An empty batch returns without reading the corpus: `existing_finding_ids` is the most
+    expensive non-agent step, and `_tick` runs for all-unreadable queues just to rotate."""
     if not batch:
         return [], [], []
-    # THE SAME PREDICATE THE ROUTE USES, not a second spelling of it. `skips_forward_check`
-    # is the channel's `exempt` (M2), the predicate the drain's verdict step keys EXEMPT on;
-    # re-deriving
-    # `entry["direction"] == "family"` here gives one rule two homes, and the duplicate-helper
-    # gate keys on the symbol NAME, so it is structurally blind to the copy. Widening the family
-    # route later would otherwise update one site and leave the other routing as it always did.
+    # The channel's `exempt` predicate, the same one the drain keys EXEMPT on, rather than
+    # re-deriving `direction == "family"` here.
     from defender.learning.author.verify_forward.checks import skips_forward_check
     from defender.learning.judge.run import SUBJECT_WORLD
 
@@ -341,14 +298,10 @@ def _gate_findings(
     held: list[dict] = []
     consumed_idempotent: list[dict] = []
     for entry in batch:
-        # #1007 M6/S4: a `direction: world` row is bound for the QUESTIONER curator's channel,
-        # never this one — the defender curator's gate refuses it LOUDLY (never a silent hold,
-        # which would read exactly like an ordinary un-authorable finding) so a mis-routed row
-        # cannot be turned into a defender lesson by the gate that never expected to see it.
-        # BOTH FIELDS, not `direction` alone. `subject` is the appender's own PRIMARY screen
-        # (`_validate_row` refuses anything but `subject: defender`), so a row screened here on
-        # `direction` alone let `{subject: world, direction: family}` through the one guard that
-        # exists to stop a world observation becoming a defender lesson.
+        # A world row belongs on the questioner channel; refuse it loudly (a hold would look
+        # like an ordinary un-authorable finding) so it can't become a defender lesson. Both
+        # fields are checked: `subject` is the appender's primary screen, and
+        # `{subject: world, direction: family}` must not slip through.
         if SUBJECT_WORLD in (entry.get("direction"), entry.get("subject")):
             raise ValueError(
                 f"a {SUBJECT_WORLD!r}-subject row (finding_id={entry.get('finding_id')!r}) "
@@ -360,11 +313,8 @@ def _gate_findings(
             consumed_idempotent.append(rec)
             continue
         if skips_forward_check(entry):
-            # P6's blast radius still applies to a malformed family row: the WRITER is what is
-            # supposed to refuse a row lacking `run_id` before it ever reaches this gate
-            # (J12), not this partition — indexing it here (never using the value) is what
-            # keeps that property true rather than silently routing a row the appender should
-            # have refused.
+            # The appender must refuse a row lacking `run_id`; indexing it here (value unused)
+            # fails loudly on one that slipped through rather than routing it silently.
             entry["run_id"]  # noqa: B018 — see comment above
             routed = _gate_family(entry)
             if routed is not None:
@@ -373,10 +323,9 @@ def _gate_findings(
             continue
         run_id = entry.get("run_id")
         if not isinstance(run_id, str) or not run_id:
-            # #773 O1: a row with no `run_id` at all has no ground truth to gate ON here —
-            # holding it forever would give an operator no signal at all. It falls through
-            # to `to_author` untouched; M3.3's own per-pair handler is where an uncheckable
-            # pair meets its disposition (retry once, then a NAMED, gap-ledgered BAD).
+            # No `run_id`, no ground truth to gate on; holding it forever would be silent. It
+            # falls through to authoring, and the forward check turns the uncheckable pair into
+            # a gap-ledgered BAD.
             continue
         disp = disposition_for(cfg, run_id)
         direction = entry["direction"]

@@ -1,4 +1,4 @@
-"""M7's pure half — deciding that an agent-reachable payload leaks the harness (O6).
+"""The pure half of the audit: deciding that an agent-reachable payload leaks the harness.
 
 The ledger knows exactly what the controller wrote, so the audit checks for
 *that*, not for words:
@@ -11,12 +11,8 @@ The ledger knows exactly what the controller wrote, so the audit checks for
     failures stamp the same shape on malformed lines and are not ours.
 
 Those are `findings`; they gate the exit code. The harness-marker word scan
-(`scan_markers`) is kept as an *advisory*: useful for a human reading the
-report, but a token like `fault` or `eval` is ordinary syslog vocabulary
-(`general protection fault`, `/usr/bin/eval`), so it cannot decide a pass.
-`ctl.py audit`'s live half (sampling the payloads themselves, and the
-positive control) is not exercised here — see `chaos/tests/test_o6_audit.py`
-for what is.
+(`scan_markers`) is only advisory: tokens like `fault` or `eval` are ordinary
+syslog vocabulary. The live sampling half is `ctl.run_audit`.
 """
 from __future__ import annotations
 
@@ -24,12 +20,9 @@ import re
 from typing import Any, Iterable
 
 HARNESS_MARKERS = frozenset({"chaos", "fault", "injected", "harness", "defender", "eval"})
-# Underscore-separated compound keys (defender_eval) are the whole reason this
-# isn't a plain substring/`\b` check: `\b` treats `_` as a word character, so
-# it would never fire inside "defender_eval". Splitting into letter-only
-# tokens and requiring an EXACT match against a marker is what lets a
-# compound key still count while "default" (contains "fault") and
-# "evaluate"/"failure" (contain "eval"/no relation to "fault") do not.
+# Letter-only tokens with exact matching: `\b` treats `_` as a word character
+# and would miss "defender_eval", while a substring check would flag "default".
+
 _TOKEN_RE = re.compile(r"[a-z]+")
 
 

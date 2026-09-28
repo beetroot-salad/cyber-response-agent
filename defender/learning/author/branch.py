@@ -65,10 +65,9 @@ class AuthorBranch:
     def quarantine_dir(self) -> Path:
         """Where a tainted worktree is preserved before cleanup destroys it.
 
-        A sibling of the live worktrees so it follows `worktree_base` wherever a caller
-        redirects it. Inside the repo checkout is fine BECAUSE the artifact is an inert
-        archive — the reason to push it out of tree would have been a preserved worktree's
-        live symlinks, and a `.tar.gz` has none. `.worktrees/` is already gitignored.
+        A sibling of the live worktrees, so it follows `worktree_base`. Inside the checkout is
+        fine because the artifact is an inert archive with no live symlinks, and
+        `.worktrees/` is gitignored.
         """
         return self._worktree_base / QUARANTINE_DIRNAME
 
@@ -125,9 +124,8 @@ class AuthorBranch:
     def finish_batch(self, batch_id: str, wt: Path) -> str | None:
         """Push the batch's branch and open its PR; `None` for a batch with no commits.
 
-        A `BranchError` here — the push rejected, the PR refused — leaves the commit on the
-        local branch, which `cleanup` never deletes: the batch is DONE, and only its delivery
-        is outstanding. `deliver` is the retry, from the branch alone, with no worktree."""
+        A `BranchError` (push rejected, PR refused) leaves the commit on the local branch,
+        which `cleanup` never deletes; `deliver` retries from the branch alone."""
         if self.commits_ahead(wt) == 0:
             return None
         branch = self.branch_name(batch_id)
@@ -139,11 +137,10 @@ class AuthorBranch:
 
     def deliver(self, batch_id: str) -> str | None:
         """Deliver a batch whose `finish_batch` failed: push its local branch and open its PR
-        from the checkout itself, no worktree needed. Idempotent — a push that already landed
-        is a no-op, and a PR already open for the branch is returned rather than duplicated.
+        from the checkout, no worktree needed. Idempotent: an already-open PR is returned.
 
-        `None` when there is nothing to deliver: the branch is gone, or has nothing ahead of
-        `origin/main` (merged some other way). Either way the caller may forget it."""
+        `None` when there is nothing to deliver (branch gone, or nothing ahead of
+        `origin/main`); the caller may then forget it."""
         branch = self.branch_name(batch_id)
         if not _git.git_ok(
             ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root
@@ -170,18 +167,14 @@ class AuthorBranch:
         return ref or branch
 
     def cleanup(self, wt: Path) -> None:
-        # Best-effort: a failed removal must not mask the fault that brought us here. But it
-        # is never silent — a worktree that survives cleanup is one the box could have written
-        # and, on the crash path, one the scrub never walked. The caller's own `except` cannot
-        # see this: the suppression lives HERE, so the log has to as well.
+        # Best-effort, so it doesn't mask the fault that brought us here, but logged: a leaked
+        # worktree may hold box writes the scrub never walked.
         try:
             _git.git_worktree_remove(self.repo_root, wt, force=True)
         except GitError as e:
             _logger.error(f"worktree cleanup failed: {e} — {wt} leaked")
-        # The verdict sidecar sits BESIDE `wt`, outside the tree the git remove above just
-        # destroyed, so removing the tree never removes it. By now anything that needed the
-        # verdict (`preserve_tainted_tree`'s manifest, on the taint path) has read it; left
-        # behind it accumulates one orphaned sidecar per drain tick forever.
+        # The verdict sidecar sits beside `wt`, so the tree removal leaves it; anything that
+        # needed it has read it by now, and left behind it would accumulate each tick.
         with contextlib.suppress(OSError):
             verdict_path(wt).unlink()
 

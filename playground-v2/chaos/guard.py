@@ -1,34 +1,19 @@
-"""O4 — a chaos profile cannot silence the alert it degrades.
+"""A chaos profile cannot silence the alert it degrades.
 
 Reads the real `detection-rules/*.json` at activate time and builds two sets:
 
-  * rule-key fields — the fields any rule's threshold or query keys on. Two
-    sources feed this, and missing either one reopens the exact near-miss the
-    design flagged: `threshold.field` (a JSON array — this is where
-    `source.ip` and several `host.name` values live, nowhere in the query
-    text) *and* the parsed query/EQL string (where `process.name`,
-    `event.outcome`, `falco.rule` live).
+  * rule-key fields — from both `threshold.field` (where `source.ip` and some
+    `host.name` keys live) and the parsed query/EQL text; either alone misses some.
   * rule-read datasets — the dataset behind each rule's `index` pattern
     (`logs-system.auth-*` -> `system.auth`).
 
-Both sides speak the stack's vocabulary, so every check is exact set
-membership:
+A mutation's `fields` may not include a rule-key field or an ancestor of one
+(removing `event` removes `event.outcome`), and its `dataset` may not be one a
+rule reads. A rule whose index pattern is too wide to name one dataset
+(`logs-*`) blocks every data-drop.
 
-  * a mutation's `fields` (everything its processor reads, writes or
-    removes) may not include a rule-key field or an ancestor of one —
-    removing `event` removes `event.outcome`;
-  * a mutation's `dataset` may not be one a rule reads. A dataset names
-    exactly one pipeline, so there is no glob to widen and no parent
-    pipeline to reach — a profile that tries to name one is refused as
-    malformed before it gets here (chaos.mutations).
-
-A rule whose index pattern does not pin down one dataset (`logs-*`) reads
-every dataset, and every data-drop is refused while it exists.
-
-`check_profile` applies these to a profile's parameters (cheap, before any
-resolution); `check_mutations` applies the same tests to the resolved
-mutations the controller is about to push. Both share one set of predicates,
-so they cannot disagree.
+`check_profile` runs on a profile's parameters (cheap, before resolution);
+`check_mutations` runs the same predicates on the resolved mutations.
 """
 from __future__ import annotations
 
@@ -39,10 +24,8 @@ from typing import Any, Iterable
 
 from chaos.mutations import dataset_of_stream
 
-# Every field name in these rules is written dotted (process.name, source.ip,
-# falco.output_fields.container.name, ...); nothing else in the query/EQL
-# text happens to be. A plain dotted-identifier scan is therefore precise
-# enough without a real lucene/EQL/kuery parser.
+# Field names in these rules are dotted and nothing else in the query text is,
+# so a dotted-identifier scan suffices without a real query parser.
 _FIELD_RE = re.compile(r"\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b")
 
 READS_EVERY_DATASET = "*"
@@ -123,15 +106,15 @@ def check_profile(profile: Any, *, rules_dir: Path) -> None:
     if profile.mode == "schema-drift":
         rename = profile.params.get("rename")
         fields = [rename["from"], rename["to"]] if rename else [profile.params.get("remove")]
-        # The processor lives in the auth dataset's pipeline by design (that
-        # is where the investigation-read fields are); only its fields are
-        # guarded, never the pipeline itself.
+        # Only the processor's fields are guarded; its pipeline (auth) is
+        # rule-read by design.
         _check_fields([f for f in fields if f], rules_dir)
     elif profile.mode == "data-drop":
         dataset = profile.params.get("dataset")
         if isinstance(dataset, str):
             _check_dataset(dataset, rules_dir)
-    # cmdb-stale carries no O4 exposure: no detection rule reads CMDB fields.
+    # cmdb-stale is safe: no detection rule reads CMDB fields.
+
 
 
 def check_mutations(mutations: list[dict[str, Any]], *, rules_dir: Path) -> None:

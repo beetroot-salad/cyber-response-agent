@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """The project profile the spec_graph checks read.
 
-The checks are the mechanical half of the write-tests gate, and the *method* they
-implement is repo-agnostic: a demand's prose must not thread a concept its `binds` omits
-(check_binds), and every execution context that drives the change must be modelled as an
-actor (check_actors). What is NOT repo-agnostic is where a project keeps its code, what
-its entrypoints look like, and what its graph calls things — so those live here, in the
-target repo's `.claude/spec-flow.json`, not in the checks.
-
-Missing config is not an error: the defaults below are the "unconfigured repo" reading,
-and every field can be overridden. `/spec-flow:init` writes the file.
+The checks' method is repo-agnostic; where a project keeps its code, what its entrypoints
+look like, and what its graph calls things live in the target repo's
+`.claude/spec-flow.json`. Missing config is not an error: the defaults below apply, and
+`/spec-flow:init` writes the file.
 """
 from __future__ import annotations
 
@@ -22,10 +17,9 @@ from typing import Any
 
 CONFIG_REL = ".claude/spec-flow.json"
 
-# Directory names that are never a project's own source, and are expensive to walk. `worktrees`
-# is bare on purpose: it has to catch both `.worktrees/` and Claude Code's `.claude/worktrees/`,
-# and a sibling checkout under either is a whole second copy of the repo — its files would enter
-# the census as phantom drivers and its graphs as phantom artifacts.
+# Directory names that are never a project's own source, and are expensive to walk. Bare
+# `worktrees` also catches `.claude/worktrees/`: a sibling checkout would otherwise add phantom
+# drivers and graphs.
 _PRUNE = {
     ".git",
     ".venv",
@@ -41,8 +35,7 @@ _PRUNE = {
 
 @functools.cache
 def repo_root(start: Path | None = None) -> Path:
-    # `start` anchors the lookup at an explicitly-given path (a suite dir passed as an
-    # argument may live in a different repo than the process cwd); default stays cwd.
+    # `start` anchors the lookup (a suite dir argument may live in another repo than cwd).
     cmd = ["git", "rev-parse", "--show-toplevel"]
     if start is not None:
         cmd[1:1] = ["-C", str(start)]
@@ -51,12 +44,9 @@ def repo_root(start: Path | None = None) -> Path:
     ).stdout.strip()
     if out:
         return Path(out)
-    # git could not answer — no git on PATH, an exported tree with no `.git`, or a
-    # `safe.directory` dubious-ownership refusal in CI. Walk up for the marker rather than
-    # handing back `start` itself: every anchored caller passes a SPECS or SUITE directory, and
-    # a repo-relative `tests:` joined onto that resolves the suite inside the specs dir, where
-    # check_binds reports every demand as a phantom prose orphan at exit 1. The unanchored form
-    # keeps its cwd fallback, which is where the gate is run from.
+    # git could not answer (no git, no `.git`, or a `safe.directory` refusal). Walk up for
+    # `.git` rather than returning `start`: anchored callers pass a specs or suite dir, and
+    # joining a repo-relative `tests:` onto that would resolve the wrong suite.
     base = (start if start is not None else Path.cwd()).resolve()
     for cand in (base, *base.parents):
         if (cand / ".git").exists():
@@ -65,8 +55,7 @@ def repo_root(start: Path | None = None) -> Path:
 
 
 def _walk(top: Path) -> list[Path]:
-    """Every file under `top`, pruning `_PRUNE` dirs from the walk itself (not after the fact —
-    descending into a `.venv` or a sibling worktree is the expensive part)."""
+    """Every file under `top`, pruning `_PRUNE` dirs during the walk (descending is the cost)."""
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(top):
         dirnames[:] = [d for d in dirnames if d not in _PRUNE]
@@ -87,13 +76,8 @@ def load(explicit: str | None = None) -> dict[str, Any]:
     conventions: dict[str, Any] = {}
     if path.is_file():
         profile = json.loads(path.read_text(encoding="utf-8"))
-        # `isinstance` on BOTH sections, not just `or {}`: the coalescing form only replaces a
-        # FALSY value, so a profile that spells either section as a string or a list survives it
-        # and the first `.get` below raises `AttributeError` — out of `load`, which every
-        # checker main calls OUTSIDE its try, so a malformed profile arrives as a traceback
-        # behind exit 1 ("looked, found something") for a gate that never loaded its config.
-        # `conventions` is the newly-read one and the likelier to be prose: the init skill
-        # documents everything outside `specGraph` as free-form for a skill to read.
+        # Type-checked, not `or {}`: a non-mapping section would raise AttributeError outside
+        # the checkers' try blocks. `conventions` is documented as free-form, so may be anything.
         raw = _section(profile, "specGraph")
         conventions = _section(profile, "conventions")
     return {
@@ -112,13 +96,9 @@ def load(explicit: str | None = None) -> dict[str, Any]:
         # Shared roots for `spec-graph trace resource`: name → {writers, readers, grep},
         # each sink `<file>::<symbol>` (see trace.py's docstring).
         "resources": raw.get("resources", {}),
-        # The branch a diff-taking checker compares against when `--base` is not given. Read
-        # from `conventions`, NOT `specGraph`: it is the same fact the ship skill already
-        # documents there, and a second spelling would let the two disagree. Hardcoding "main"
-        # was harmless while an unresolvable base silently produced an empty diff; once
-        # check_actors preflights the ref (#949) it becomes a mandatory `--base` on every
-        # invocation in any repo whose default branch is named something else — and this ships
-        # as a plugin to repos we do not control.
+        # The default `--base` for diff-taking checkers. Read from `conventions`, where the ship
+        # skill already keeps it, so there is one spelling. An unresolvable base is a hard error,
+        # so repos with another default branch need this.
         "defaultBranch": conventions.get("defaultBranch") or "main",
     }
 
@@ -126,10 +106,8 @@ def load(explicit: str | None = None) -> dict[str, Any]:
 def _kept(path: Path, root: Path) -> bool:
     """Whether `path` survives pruning.
 
-    Every check here is keyed on the path RELATIVE to the repo root. An absolute-path check
-    would misfire whenever the checkout itself sits under a matching name — prune the entire
-    repo for a worktree under `.worktrees/`, or (the `tests` rule) drop every source file for
-    a checkout under `/srv/tests/myrepo`. Both fail *silently*, to zero findings.
+    Keyed on the path relative to the repo root: an absolute-path check would silently prune
+    everything when the checkout itself sits under a matching name (`.worktrees/`, `/srv/tests/`).
     """
     parts = path.relative_to(root).parts
     return not (_PRUNE & set(parts)) and "tests" not in parts[:-1]
@@ -138,9 +116,8 @@ def _kept(path: Path, root: Path) -> bool:
 def artifacts(cfg: dict[str, Any]) -> list[Path]:
     """The committed spec_graph_*.yaml artifacts — the configured glob, minus prune-listed dirs.
 
-    The pruning is not cosmetic: the default glob is `**/spec_graph_*.yaml`, and
-    write-code-from-spec *mandates* working in a worktree — so an unpruned glob run from the
-    main checkout picks up every sibling branch's graphs alongside this branch's.
+    Pruning matters: work happens in worktrees, so an unpruned glob from the main checkout
+    would pick up every sibling branch's graphs.
     """
     root = repo_root()
     return sorted(p for p in root.glob(cfg["artifacts"]) if not _PRUNE & set(p.relative_to(root).parts))

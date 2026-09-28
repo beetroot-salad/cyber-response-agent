@@ -25,13 +25,10 @@ from .session_store import (  # noqa: F401 — re-exported, identity checked by 
 )
 
 
-#: A frontier's text, composed ON THE APPEND PATH ONLY: `_fold_impl` calls it after every
-#: refusal it can raise and right before the append, and runs the action it returns right
-#: after the row landed — never on a reuse round, never on a mint that raised. A caller whose
-#: text is expensive or whose composition has an after-commit obligation (#936: the driver
-#: derives a lessons block over the document and must record the push once, only for a row
-#: that exists) hands this in instead of a string, and the reuse predicate stays the mint's
-#: own — nothing outside re-asks it to decide whether to compose.
+#: A lazily composed frontier text plus an optional after-commit action. `_fold_impl` calls
+#: it only on the append path (after all refusals, never on reuse) and runs the action once
+#: the row has landed. For callers with expensive text or an after-commit obligation, e.g.
+#: recording a lessons push only for a row that exists.
 Composer: TypeAlias = Callable[[], tuple[str, Callable[[], None] | None]]
 
 
@@ -49,11 +46,8 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     text: str | Composer | None = None,
 ) -> int:
     if boundary is None:
-        # `_default_boundary` must NOT stand in here: it counts the session's non-synthesized
-        # ROWS, which over-counts once a fold has displaced some off the path, so a caller
-        # with no boundary of its own fails closed rather than silently taking that count.
-        # (The count has no path predicate by design — a frontier's seq is keyed to rows
-        # written, not to rows still reachable.)
+        # Not `_default_boundary`: it counts rows written, which over-counts once a fold has
+        # displaced some off the path.
         raise ValueError(
             "boundary is required; selection.fold no longer defaults it from the "
             "session's own row count")
@@ -76,9 +70,8 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
         raise StoreAppendError(
             "a fold refuses to parent its frontier onto a row belonging to another "
             "session — the folding session's own lineage root must be its own row")
-    # The caller owns the frontier's CONTENT (the driver passes the invlang record of the
-    # loops being folded). The placeholder is shape-only: a frontier saying just "boundary N"
-    # discards the folded turns without replacing them, so no production path should take it.
+    # The caller supplies the content; the placeholder is shape-only and would discard the
+    # folded turns without replacing them.
     on_minted: Callable[[], None] | None = None
     if callable(text):
         text, on_minted = text()

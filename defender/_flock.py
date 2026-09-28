@@ -1,13 +1,7 @@
-"""One `fcntl.flock` primitive, and the one deadline loop its callers share.
+"""A shared `fcntl.flock` primitive: take an exclusive lock (once, until a deadline, or forever)
+and release it. Expiry returns `False` rather than raising, since callers treat it differently.
 
-Two behaviours: take an exclusive lock on a file (immediately, retried until a deadline, or
-waiting forever), and release it. What a caller does when the deadline expires differs and is
-therefore a parameter — `author/drain.py`'s retire decision keys on a raise, while the drain's
-channel wait must NOT raise, because an appender's ordinary hold is not a fault.
-
-This lives at `defender/` level rather than in either caller: `learning/core/persist.py` and
-`learning/author/shared.py` both need it, and `core` importing `author` would invert the
-dependency and drag the pipeline prompt machinery into the persistence layer.
+Lives at `defender/` level so `learning/core` can use it without importing `learning/author`.
 """
 from __future__ import annotations
 
@@ -16,17 +10,15 @@ import time
 from pathlib import Path
 from typing import IO, Any
 
-#: How often a waiting acquirer retries. The two live values are deliberate, not drift: a
-#: repo lock is held across a whole authoring run so polling it fast buys nothing, while a
-#: channel's append lock is held for a single row and a slow poll would dominate the wait.
+#: Retry interval for a waiting acquirer. A repo lock is held for a whole authoring run (slow
+#: poll is fine); a channel append lock is held for one row (a slow poll would dominate).
 SLOW_POLL = 0.2
 FAST_POLL = 0.05
 
 
 def open_lock(path: Path) -> IO[str]:
-    """The lock file, created if absent. Append mode: the bytes are irrelevant, the inode
-    is the lock, and `a+` neither truncates a file another holder has open nor fails on a
-    missing one."""
+    """The lock file, created if absent. `a+` neither truncates a file another holder has open
+    nor fails on a missing one."""
     path.parent.mkdir(parents=True, exist_ok=True)
     return path.open("a+", encoding="utf-8")
 
@@ -34,13 +26,8 @@ def open_lock(path: Path) -> IO[str]:
 def take(fh: Any, *, timeout_seconds: float | None, poll: float = FAST_POLL) -> bool:
     """Take the exclusive lock on `fh`. `True` if taken, `False` if the deadline expired.
 
-    `timeout_seconds=0` tries exactly once — the "skip this tick" acquisition.
-    `timeout_seconds=None` blocks forever, which is what an APPENDER wants: giving up would
-    lose the row it is carrying, and it waits on nothing but other appenders and a short
-    rewrite window.
-
-    Never closes `fh`. The caller opened it and owns it on every path, including failure,
-    because the three callers dispose of a failed acquisition differently.
+    `timeout_seconds=0` tries exactly once; `None` blocks forever (for appenders, where giving
+    up would lose the row). Never closes `fh` — the caller owns it on every path.
     """
     if timeout_seconds is None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)

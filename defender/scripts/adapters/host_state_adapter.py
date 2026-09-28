@@ -55,26 +55,16 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
 
 
 def _captured_at(ctx: VerbContext) -> str:
-    """When this observation was taken, as the RUN reckons time.
+    """When this observation was taken, as the run reckons time.
 
-    This adapter is the only one of the seven that mints a timestamp, and `captured_at` is the
-    one field in a served payload that is not a function of the question asked. On an ordinary
-    run that is exactly right — a host-state read IS a point-in-time capture, and the skill
-    tells its readers to cross-reference the value against event timestamps. On a BRANCHED run
-    it is what makes an episode unreplayable: two siblings forked from one branch point, or one
-    episode re-run a week later, produce different bytes for identical questions, and the
-    difference belongs to neither world. `ctx.as_of` is the branch point's moment, so the
-    stamp describes the world the sibling is living in rather than the afternoon it executed.
+    The only adapter-minted timestamp, and the one payload field not determined by the
+    question. On an ordinary run it is a real point-in-time capture. On a branched run,
+    wall-clock time would make siblings and re-runs differ for identical questions, so
+    `ctx.as_of` (the branch point's moment) is used instead.
 
-    `getattr` rather than `ctx.as_of`, for the reason `elastic_adapter` reads `world_id` the
-    same way: this adapter is reached with duck-typed contexts from the CLI lane and from test
-    stubs, and an `AttributeError` inside a verb body is not an `AdapterFault` — the query tool
-    files it as exit 2, an INFRA code, so a shape mismatch would read as the estate being down.
-
-    THE ONE ANCHOR for the optionality: resolved here, once, and every caller below takes a
-    concrete string. `health_check` is deliberately not a caller — it stamps nothing today,
-    reaches no corpus, and a liveness probe that grew a timestamp would be a contract change
-    for no gain.
+    `getattr` because duck-typed contexts (CLI lane, test stubs) reach this adapter, and an
+    `AttributeError` in a verb body is filed as an infra fault (exit 2). `health_check` stamps
+    nothing and does not call this.
     """
     at = getattr(ctx, "as_of", None)
     return _clock.z_seconds(datetime.datetime.now(datetime.UTC) if at is None else at)
