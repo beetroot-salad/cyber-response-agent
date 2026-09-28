@@ -642,7 +642,8 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     # match is the framed CONTENT against the un-gated text — the bytes the model reads.
     g_text = json.loads(gated.stdout.strip().splitlines()[-1])
     p_text = json.loads(plain.stdout.strip().splitlines()[-1])
-    assert not g_text["text_raised"] and not p_text["text_raised"]
+    assert not g_text["text_raised"], "harvesting the gated arm's text raised"
+    assert not p_text["text_raised"], "harvesting the un-gated arm's text raised"
     assert framed_content(g_text["text"]) == p_text["text"], (
         "the gate changed the model-visible text on a `}`-in-key payload"
     )
