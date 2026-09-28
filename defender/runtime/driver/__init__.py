@@ -430,6 +430,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     toolset: Any = None,
     resume: Any = None,
     tenant: RunTenant,
+    orient_shim: orient.ShimRunner | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -509,7 +510,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
-        tenant=tenant,
+        tenant=tenant, orient_shim=orient_shim,
     )
 
     # Item 3 is scheduled here (after item 1) and awaited in the store's render processor just

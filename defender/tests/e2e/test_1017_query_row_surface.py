@@ -191,8 +191,8 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
 
 
 def test_the_replay_through_the_surface_agrees_with_the_live_run(tmp_path):
-    """O2 end to end — `test_855`'s replay parity, driven through the SURFACE instead of over
-    raw dicts: the companion guard's oracle over `[r.record() for r in load_queries(...)]`
+    """O2 end to end — #855's replay parity (O3 there), driven through the SURFACE and checked
+    against the raw dicts too, so it carries both halves: the companion guard's oracle over `[r.record() for r in load_queries(...)]`
     reaches the live verdict on BOTH tables — the distinct-ghost lead that ran on (no trip)
     and the same-ghost lead the guard ended at seq 2. Both, on purpose: an oracle fed rows that
     lost `system_key` agrees on the same-ghost table (three `""` keys still match) and trips

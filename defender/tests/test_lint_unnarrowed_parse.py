@@ -364,7 +364,13 @@ def test_the_shipped_baseline_carries_a_reason_for_every_entry():
     assert not unreasoned, unreasoned
 
 
-def test_the_motivating_findings_are_in_the_shipped_baseline():
+@pytest.fixture(scope="module")
+def real_tree_findings():
+    """The shipped tree scanned ONCE for the module — both real-code demands below read it."""
+    return _GATE._scan(_GATE.DEFENDER)
+
+
+def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings):
     """A gate that does not fire on the defect it exists for is not landed. One of #878's four
     motivating sites is still open and still reported — the positive control that this gate
     fires on REAL code and not only on the synthetic seams above.
@@ -380,7 +386,7 @@ def test_the_motivating_findings_are_in_the_shipped_baseline():
     of `parse_iso_utc`, but it PARSES ONLY TO VALIDATE and discards the value, so no naive-vs-
     aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
     reachable faults, and #878 did not widen its scope to collect it."""
-    fingerprints = {f.fingerprint for f in _GATE._scan(_GATE.DEFENDER)}
+    fingerprints = {f.fingerprint for f in real_tree_findings}
     assert "defender/runtime/lead_zero/_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
 
     for fixed in (
@@ -391,7 +397,7 @@ def test_the_motivating_findings_are_in_the_shipped_baseline():
         assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
 
 
-def test_the_readers_of_a_laundered_value_are_not_reported():
+def test_the_readers_of_a_laundered_value_are_not_reported(real_tree_findings):
     """The deliberate half-coverage, pinned so a later widening is a decision rather than a
     drift. The gate fires at the SEAM; the readers that subscript `_run_dir`'s laundered dict
     — `circuit_breaker._record`'s `state["systems"]`, `budget_enforcer`'s `state.get(...)` —
@@ -402,7 +408,7 @@ def test_the_readers_of_a_laundered_value_are_not_reported():
     forgetting."""
     reported = {
         f.fingerprint.split(":", 1)[0]
-        for f in _GATE._scan(_GATE.DEFENDER)
+        for f in real_tree_findings
         if f.fingerprint.endswith(":unnarrowed-parse")
     }
     for reader in ("defender/runtime/circuit_breaker.py", "defender/hooks/budget_enforcer.py"):

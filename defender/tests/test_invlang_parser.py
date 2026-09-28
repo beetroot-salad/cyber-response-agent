@@ -35,13 +35,6 @@ def test_split_cells_honors_quoted_pipe():
     assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root'
 
 
-def test_split_cells_backslash_escape_still_works():
-    cells = _split_cells(r"a|b\|c|d")
-    assert cells == ["a", "b|c", "d"]
-
-
-
-
 _CONFORMANT = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

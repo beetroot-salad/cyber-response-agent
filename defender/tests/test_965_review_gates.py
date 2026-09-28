@@ -109,6 +109,7 @@ def test_the_marker_clears_a_site_whose_guard_is_on_the_line_above(tmp_path: Pat
     )}) == 0
 
 
+@pytest.mark.gate
 def test_the_repo_itself_passes_the_read_gate() -> None:
     """The shipped baseline is accurate and fully annotated — `require_reasons` is on, so an
     entry someone adds later without saying why fails with the force of a new finding."""
@@ -160,6 +161,7 @@ def test_the_dataclasses_helper_is_not_a_finding(tmp_path: Path) -> None:
     )}) == 0
 
 
+@pytest.mark.gate
 def test_the_repo_itself_passes_the_fields_gate_on_an_empty_baseline() -> None:
     """Ships EMPTY, and the test says so: there is no legitimate production use of the raw
     mapping in this tree, so any entry appearing here later is a decision, not drift."""

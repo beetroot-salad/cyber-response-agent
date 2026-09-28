@@ -289,6 +289,32 @@ def _run_two_leads(
     return _Res(run_dir, main, gather)
 
 
+@pytest.fixture(scope="module")
+def three_identical_requests(tmp_path_factory, checkout_roster):
+    """ONE driven run of the canonical trip — one lead asking elastic the same query three
+    times, then `DONE` — shared by the demands that only READ it: its run dir and tables, the
+    verb recorder, and the two replay scripts. A demand that seeds, plants or needs a second
+    starting state drives its own run.
+
+    Module-scoped, so it is built before the function-scoped conftest fixtures: it holds the
+    checkout's capabilities for the drive itself, as `_held_capabilities` does for a test."""
+    from defender.skills.invlang.validate import hold_capabilities, release_capabilities
+
+    rec = VerbRecorder()
+    hold_capabilities(checkout_roster)
+    try:
+        r = _run(tmp_path_factory.mktemp("repeat-trip"), verbs=elastic_ok(rec),
+                 run_id="d807-trip", turns=[
+                     q("elastic", "query", {"native_query": "FROM logs"}),
+                     q("elastic", "query", {"native_query": "FROM logs"}),
+                     q("elastic", "query", {"native_query": "FROM logs"}),
+                     DONE,
+                 ])
+    finally:
+        release_capabilities()
+    return r, rec
+
+
 #: The payload text a seeded SUCCESS row stands for — one text, so two seeded successes are
 #: byte-identical the way two rows of one repeated request are, and the fixture's digest and
 #: content hash are both derived from it (#877 F-9).
@@ -690,7 +716,7 @@ def test_repeat_trip_predicate_seam(tmp_path):
     ) is not None, "the production predicate could not be driven over a recorded run"
 
 
-def test_gather_dead_end_type(tmp_path):
+def test_gather_dead_end_type(three_identical_requests):
     """gather_dead_end_type — `GatherDeadEnd(reason, escape)` exists, is raised out of
     `QueryCapture.wrap_tool_execute` at M2's placement (so the tripping call never returns a
     tool result to the gather model and gather is never asked again), and is catchable at
@@ -704,13 +730,7 @@ def test_gather_dead_end_type(tmp_path):
     assert made.reason == "r", "GatherDeadEnd did not carry its reason through construction"
     assert made.escape == "e", "GatherDeadEnd did not carry its escape through construction"
 
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-type", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     assert r.gather.calls == 4, (
         "three query turns plus ONE summary turn is four (#987). Fewer means the lead was cut "
         "before its summary turn; more means the closed door did not end the lead and the "
@@ -722,19 +742,13 @@ def test_gather_dead_end_type(tmp_path):
     assert issubclass(GatherDeadEnd, Exception), "GatherDeadEnd must be an Exception subclass to be raised"
 
 
-def test_repeat_trips_on_third_identical_request(tmp_path):
+def test_repeat_trips_on_third_identical_request(three_identical_requests):
     """repeat_trips_on_third_identical_request — the positive control every negative in this
     spec pairs with: with `repeat_threshold` N = 3, the first two identical requests in a lead
     EXECUTE and the third is refused before the backend, ending the lead with a
     `GatherDeadEnd`. N = 3 is C11's floor — at N = 2 the guard refuses a lead that went on to
     succeed."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-trip", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     assert len(rec.calls) == 2, "calls 1 and 2 must execute; call 3 must not"
     rows = r.own_rows
     assert len(rows) == 3
@@ -823,18 +837,12 @@ def test_repeat_key_ignores_query_id(tmp_path):
     assert INCOMPLETE_IDIOM in r.summary()
 
 
-def test_repeat_trip_never_reaches_the_backend(tmp_path):
+def test_repeat_trip_never_reaches_the_backend(three_identical_requests):
     """repeat_trip_never_reaches_the_backend — M2: the refused call is refused WITHOUT
     executing. `interacts(query_tool->verbs_registry)` is never driven for it — the verb
     function is entered twice and never a third time, and the third call's params never reach
     a transport."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-backend", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     assert len(rec.calls) == 2, "the refused call reached the backend"
     assert rec.verbs == ["query", "query"]
     assert r.own_rows[2]["exit_code"] == 64
@@ -878,7 +886,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
     assert down.gather.calls == 4, "the infra breaker's answer was replaced by a dead end"
 
 
-def test_repeat_trip_row_is_agent_fixable(tmp_path):
+def test_repeat_trip_row_is_agent_fixable(three_identical_requests):
     """repeat_trip_row_is_agent_fixable — O4: the refused call appends a row to
     `executed_queries` with a NON-ZERO exit and `error_class == "agent-fixable"` — not absent,
     not null. The exit code is `USAGE_EXIT_CODE` (64), the code the tool already uses for a
@@ -889,13 +897,7 @@ def test_repeat_trip_row_is_agent_fixable(tmp_path):
     #   (#823); O4 stops at "the trip is recorded".
     # rejected: exit 2 (the module's own DEFAULT_FAULT_EXIT) — it yields error_class "infra",
     #   failing O4 outright, AND marks the system DOWN after two trips (G12, executed).
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-o4", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["exit_code"] != 0, "no trip happened, so the negative is vacuous"
     assert trip["exit_code"] == 64
@@ -905,7 +907,7 @@ def test_repeat_trip_row_is_agent_fixable(tmp_path):
     assert trip["verb"] == "query"
 
 
-def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
+def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identical_requests):
     """repeat_trip_leaves_the_infra_breaker_untouched — a repeat is an AGENT dead end, not an
     unreachable system: the trip must NOT increment `circuit_breaker` and must not mark the
     system DOWN for the rest of the run. Driven in both starting states — from a fresh run dir
@@ -914,13 +916,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
     byte for byte. Positive control on the same address under the complementary condition: an
     exit-2 adapter fault DOES write breaker state, so the observation channel can see the
     difference."""
-    rec = VerbRecorder()
-    r = _run(tmp_path / "trip", verbs=elastic_ok(rec), run_id="d807-breaker", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
         "the repeat trip wrote infra-breaker state"
@@ -960,7 +956,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
         "the control could not see a breaker write at all"
 
 
-def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
+def test_trip_row_conforms_to_the_frozen_row_contract(three_identical_requests):
     """trip_row_conforms_to_the_frozen_row_contract — the trip row's payload carries the SAME
     frozen keys as any other queries row: no key of its own, no amendment to
     `test_row_contract_frozen`. Every downstream reader written against the frozen set still
@@ -972,13 +968,7 @@ def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
     #   it breaks `test_row_contract_frozen` and every reader written against the frozen set;
     #   that is a deliberate contract amendment this issue did not propose. F-I option 2 puts the
     #   repetition in the existing detail field instead (see trip_row_detail_names_the_repetition).
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-frozen", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["exit_code"] == 64, "row 2 must be the trip itself, not an ordinary third success"
     assert set(trip) == ROW_KEYS
@@ -1266,20 +1256,14 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
             "the guard's own read propagated PermissionError — it must fail OPEN"
 
 
-def test_tripping_call_carries_no_repeat_note(tmp_path):
+def test_tripping_call_carries_no_repeat_note(three_identical_requests):
     """tripping_call_carries_no_repeat_note — the regression witness for M2's ordering: the
     tripping call never reaches `_model_view`, so `gather_model_context` never carries a
     `REPEAT` annotation AND a dead end for the same call. Any placement after `handler(args)`
     breaks this. Positive control on the same address under the complementary condition: the
     shipped `repeat_note` DOES fire on the second, non-tripping occurrence, so exactly one
     REPEAT annotation reaches the gather model across the whole lead."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-note", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     seen = r.gather_saw
     assert seen.count("[record_query] REPEAT") == 1, \
         "the second occurrence's REPEAT notice is the control; the tripping call must add none"
@@ -1430,7 +1414,7 @@ def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
     assert INCOMPLETE_IDIOM in r.summary()
 
 
-def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
+def test_lead_repository_reads_the_trip_row_unchanged(tmp_path, three_identical_requests):
     """lead_repository_reads_the_trip_row_unchanged — `lead_repository.load_queries` is a
     reader of `executed_queries` this change does not move, and it must keep reading: after a
     trip, `joined` returns the lead with all three rows in seq order, the trip row's
@@ -1444,13 +1428,7 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
     below through `.rows`, which is the seq-ordered remerge — the row is not dropped, its
     payload is still reachable to the join surface, staging is still byte-unfiltered, and the
     replay verdict is still identical."""
-    rec = VerbRecorder()
-    r = _run(tmp_path / "src", verbs=elastic_ok(rec), run_id="d807-repo", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     leads = [
         lead for lead in lead_repository.joined(r.run_dir)
         if lead.lead_id not in RESERVED_LEAD_IDS
@@ -1578,20 +1556,14 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert INCOMPLETE_IDIOM in genuine.summary()
 
 
-def test_trip_row_is_itself_an_occurrence_on_replay(tmp_path):
+def test_trip_row_is_itself_an_occurrence_on_replay(three_identical_requests):
     """trip_row_is_itself_an_occurrence_on_replay — the trip row is written from inside
     `wrap_tool_execute`, so it is one row like any other and DOES count toward a later check
     of the same key in the same lead. Live this is unreachable (M3 terminates the lead), so it
     bites only on replay — and it has to, or a replay of a recorded table stops matching the
     live run it replays. Driven over a REAL trip row produced by a real run, not a
     hand-written one."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-triprow", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     rows = r.own_rows
     trip = rows[2]
     assert trip["exit_code"] == 64, "no trip row was produced, so the premise is vacuous"
@@ -1628,7 +1600,7 @@ def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
     assert repeat_trip(rows[:1], LEAD, system="elastic", verb="probe", params=live) is None
 
 
-def test_trip_row_survives_the_learning_extractors_payload_gate(tmp_path):
+def test_trip_row_survives_the_learning_extractors_payload_gate(three_identical_requests):
     """trip_row_survives_the_learning_extractors_payload_gate — the trip is written through
     the existing `_record` path, so `lead_extraction` — O4's named audience — really sees it:
     `payload_status` computes to "error", a valid enum member, so `extract_from_joined` cannot
@@ -1639,13 +1611,7 @@ def test_trip_row_survives_the_learning_extractors_payload_gate(tmp_path):
     # rejected: a bespoke trip-row writer that skips _persist_payload — `payload_path: null`
     #   is its natural shape, and such a row is invisible to extract_from_joined: O4 satisfied
     #   on paper and defeated in fact for its named audience.
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-extract", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["payload_status"] == "error"
     sidecar = r.run_dir / trip["payload_path"]
