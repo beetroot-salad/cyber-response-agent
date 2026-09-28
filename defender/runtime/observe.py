@@ -5,7 +5,6 @@ import contextlib
 import hashlib
 import json
 import logging
-import math
 import os
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,7 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
-from defender._io import guarded_mkdir, open_guarded, write_guarded
+from defender._io import guarded_mkdir, json_safe, open_guarded, write_guarded
 from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
@@ -39,20 +38,10 @@ POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 _DENIAL_PARAM_DIGEST_LEN = 16
 
 
-def _normalize_for_digest(value: Any) -> Any:
-    if isinstance(value, float):
-        return value if math.isfinite(value) else f"<non-finite:{value!r}>"
-    if isinstance(value, dict):
-        return {str(k): _normalize_for_digest(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_normalize_for_digest(v) for v in value]
-    if value is None or isinstance(value, (str, int, bool)):
-        return value
-    return repr(value)
-
-
 def _params_digest(params: Any) -> str:
-    normalized = _normalize_for_digest(params)
+    # The rule the query record keys the same call by, so a denial and a repeat identify a
+    # call alike.
+    normalized = json_safe(params, non_finite="text")
     text = json.dumps(normalized, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_DENIAL_PARAM_DIGEST_LEN]
 

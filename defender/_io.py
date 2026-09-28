@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import datetime as _dt
 import errno
 import fcntl
 import json
+import math
 import os
 import re
 import secrets
 import stat
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
-from typing import Any
+from typing import Any, Literal
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -575,6 +577,80 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
         else:
             rows.append(row)
     return rows, unreadable
+
+
+def json_safe(value: Any, *, non_finite: Literal["text", "null"],
+              max_depth: int | None = None, naive_is_utc: bool = False) -> Any:
+    """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
+    booleans and null are left as the encoder would write them.
+
+    A set becomes a list, ordered by each member's written JSON. A key is always text. A key
+    or value JSON has no type for becomes text: a date or time in ISO 8601, a timestamp that
+    knows its zone in UTC as `2026-01-01T10:00:00.000000Z` — one fixed width, so every
+    timestamp in one output reads alike. `naive_is_utc` is for a caller whose zone-less
+    timestamps are known to be UTC; any other zone-less one is written without a zone.
+
+    A non-finite float goes the way the caller says: `"text"` keeps it, spelled as the
+    Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a
+    reader diagnosing; `"null"` makes it missing, for a reader computing over the field.
+    `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
+    if non_finite not in ("text", "null"):
+        raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
+    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth, naive_is_utc)
+    return _json_safe_walk(value, rules, 0)
+
+
+@dataclasses.dataclass(frozen=True)
+class _JsonRules:
+    non_finite: str
+    max_depth: int
+    naive_is_utc: bool
+
+
+def _json_safe_walk(v: Any, rules: _JsonRules, depth: int) -> Any:
+    if v is None or isinstance(v, (bool, int, str)):
+        return v
+    if isinstance(v, float):
+        if math.isfinite(v):
+            return v
+        return None if rules.non_finite == "null" else _non_finite_text(v)
+    if depth >= rules.max_depth:
+        return repr(v)
+    if isinstance(v, Mapping):
+        return {_json_key(k, rules): _json_safe_walk(x, rules, depth + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set, frozenset)):
+        items = [_json_safe_walk(x, rules, depth + 1) for x in v]
+        if isinstance(v, (set, frozenset)):
+            # By written JSON: text in text order, and `1` never ties `"1"`, so the order never
+            # depends on how the set happens to iterate.
+            items.sort(key=lambda x: json.dumps(x, ensure_ascii=False))
+        return items
+    return _json_text(v, rules)
+
+
+def _json_key(k: Any, rules: _JsonRules) -> str:
+    # Always text, so a caller that sorts keys never compares `1` with `"b"`; a key the encoder
+    # carries is spelled as the encoder would write it (`true`, `null`, `1`, `NaN`).
+    if k is None or isinstance(k, (bool, int, float)):
+        return json.dumps(k)
+    return _json_text(k, rules)
+
+
+def _json_text(v: Any, rules: _JsonRules) -> str:
+    if isinstance(v, _dt.datetime):
+        if v.utcoffset() is None and rules.naive_is_utc:
+            v = v.replace(tzinfo=_dt.UTC)
+        if v.utcoffset() is None:
+            return v.isoformat(timespec="microseconds")
+        utc = v.astimezone(_dt.UTC).replace(tzinfo=None)
+        return utc.isoformat(timespec="microseconds") + "Z"
+    if isinstance(v, _dt.time):
+        return v.isoformat(timespec="microseconds")
+    return str(v)  # a date's text is already ISO 8601
+
+
+def _non_finite_text(v: float) -> str:
+    return "NaN" if math.isnan(v) else "Infinity" if v > 0 else "-Infinity"
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:
