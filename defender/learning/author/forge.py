@@ -13,11 +13,8 @@ class ForgeError(Exception):
     pass
 
 
-# `@runtime_checkable` (#1067): `AuthorBranch.forge` is typed `Forge | None`, and a strict
-# pydantic dataclass validates an arbitrary class annotation with `isinstance` — which a plain
-# `Protocol` refuses to be the second argument of. The structural contract is unchanged (the
-# check is by method NAME, not by signature); what it buys is that the production `GhForge` and
-# every test double alike reach the field as themselves.
+# `@runtime_checkable` because `AuthorBranch.forge` is a strict pydantic field validated with
+# `isinstance`, which a plain `Protocol` rejects. The check is by method name only.
 @runtime_checkable
 class Forge(Protocol):
 

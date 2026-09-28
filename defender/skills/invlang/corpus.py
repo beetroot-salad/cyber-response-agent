@@ -25,13 +25,9 @@ from .schema import (
 class Companion:
     case_id: str
     source_path: Path
-    #: `SkipValidation`: `CompanionBody` is a `TypedDict` used as a STATIC typing aid over a
-    #: dict the projector builds incrementally and field by field (`_Projector.out`) — nothing
-    #: in the design ever promised every declared key is present at every point a `Companion`
-    #: is constructed with it, and `validate.diagnose`'s `Diagnostic`s are the one deliberate
-    #: well-formedness check over a document, not pydantic re-deriving one from the TypedDict's
-    #: required keys. Without this, every fixture and production document missing an optional
-    #: key pydantic's schema now treats as required refuses construction outright (#1067 PR 4).
+    #: `SkipValidation`: `CompanionBody` is a static typing aid over a dict the projector builds
+    #: incrementally, so required keys may be absent; `validate.diagnose` is the
+    #: well-formedness check, not pydantic.
     body: Annotated[CompanionBody, SkipValidation]
     signature_id: str | None = None
     created_at: str | None = None
@@ -59,13 +55,11 @@ class LoadReport:
         return sum(len(ws) for _, ws in self.partial)
 
     def detail_lines(self, *, verbose: bool) -> list[str]:
-        """The per-file reasons behind the counts — empty when every scanned file loaded whole.
+        """The per-file reasons behind the counts; empty when every scanned file loaded whole.
 
-        The counts alone say a case is missing or came in short; only these lines say WHICH case
-        and why — the difference between a query that quietly answers off a smaller corpus than
-        the operator thinks they have and one they can fix. `verbose` expands each partial
-        file's per-row parse warnings; without it a partial file reports only how many rows it
-        dropped, since a systematically bad block drops many identical ones.
+        Says which case is missing or short and why. `verbose` expands each partial file's
+        per-row parse warnings; otherwise only the dropped-row count is shown, since one bad
+        block often drops many identical rows.
         """
         lines = [f"  skipped {path.parent.name}: {reason}" for path, reason in self.skipped]
         for path, warnings in self.partial:

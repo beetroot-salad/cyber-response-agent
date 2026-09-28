@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """Offline dry-run of per-loop compaction over a recorded run.
 
-Step 0 of the Phase-B validation ladder (design doc §Validation): compaction
-is a pure history-rewrite, so we replay it over a recorded `llm_requests.jsonl`
-— no API, no stack, no drift — to (a) exercise loop-detection and the
-prefix-builder on a real history and (b) get a first *mechanical* savings
-number before anything touches the live driver.
+Compaction is a pure history rewrite, so it can be replayed over a recorded
+`llm_requests.jsonl` — no API, no stack, no drift — to (a) exercise loop detection and the
+prefix builder on a real history and (b) get a mechanical savings number without touching
+the live driver.
 
-What it does NOT capture: trajectory divergence (the agent may behave
-differently once it sees compacted context). That needs a live A/B run — this
-only measures the rewrite applied to the history the agent actually produced.
+What it does not capture: trajectory divergence (the agent may behave differently once it
+sees compacted context), which needs a live A/B run.
 
 Usage:
     python3 scripts/testing/compaction_dryrun.py <run_dir|llm_requests.jsonl>
     python3 scripts/testing/compaction_dryrun.py /tmp/defender-runs/<id> --json
 
-Token figures are estimates: char-counted payload converted with a
-chars-per-token ratio calibrated from this run's own generated output (printed
-for audit). The headline mechanical figure — history-payload chars removed —
-is tokenizer-free and exact.
+Token figures are estimates, regressed from this run's recorded prompt tokens (the
+calibration is printed for audit). The headline mechanical figure — history-payload chars
+removed — is tokenizer-free and exact.
 """
 
 from __future__ import annotations
@@ -42,7 +39,7 @@ class StepMetric:
     loop: int | None
     full_chars: int
     comp_chars: int
-    input_tokens: int  # recorded Phase-A total prompt tokens for this request
+    input_tokens: int  # recorded total prompt tokens for this request
     reason: str | None
 
 
@@ -65,9 +62,9 @@ def _tokens_per_char(metrics: list["StepMetric"]) -> tuple[float, float] | None:
 
     `prompt_tokens(i) ≈ a · history_chars(i) + b`, where `a` is tokens/char
     and the intercept `b` is the fixed system-prompt + tool-schema overhead
-    (constant across requests, so it cancels out of any char *delta*).
-    Calibrating on the input we actually want to model — far steadier than a
-    chars/token ratio derived from generated output. Returns (a, b) or None.
+    (constant across requests, so it cancels out of any char delta). Calibrating
+    on the input being modelled is far steadier than a ratio derived from
+    generated output. Returns (a, b) or None.
     """
     pts = [(m.full_chars, m.input_tokens) for m in metrics
            if m.input_tokens > 0 and m.full_chars > 0]
@@ -90,7 +87,7 @@ def _cache_split(records: list[dict]) -> dict[str, int]:
     """Recorded fresh / cache-read / cache-creation input tokens (top-level usage).
 
     Compaction shrinks the prompt, but billed cost depends on the cache: a
-    cache-read token is ~0.1x a fresh one. This contextualises the headline.
+    cache-read token is ~0.1x a fresh one.
     """
     fresh = read = create = 0
     for rec in records:
@@ -106,12 +103,10 @@ def _cache_split(records: list[dict]) -> dict[str, int]:
 def dry_run(records: list[dict]) -> list[StepMetric]:
     """One compaction step per model request, over the history that request actually sent.
 
-    `llm_requests.jsonl` records each request's message list VERBATIM (#705 removed
-    RequestLogger's write-time delta encoding), so the `kind == "request"` records
-    between two responses ARE that turn's complete history — they are not increments to
-    append to a running list. Accumulating them instead, as this did while the log was
-    delta-encoded, re-adds every earlier turn's prefix on every turn: `full_chars` grows
-    quadratically and the reported savings figure inflates by a multiple of run length.
+    `llm_requests.jsonl` records each request's message list verbatim, so the
+    `kind == "request"` records between two responses are that turn's complete history, not
+    increments. Accumulating them across turns would re-add every earlier prefix and inflate
+    `full_chars` quadratically.
     """
     investigation_md = ""
     state: C.FrozenState | None = None
@@ -146,11 +141,9 @@ def dry_run(records: list[dict]) -> list[StepMetric]:
 def _resolve_jsonl(arg: str) -> Path:
     """The wire log a `<run_dir|path>` argument names.
 
-    A run dir resolves through `RunPaths`, never by joining the name: the log moved to
-    `<run_dir>/wire_logs/` when the read gate stopped admitting it at the run root
-    (`_run_paths.WIRE_LOG_DIR`), so the joined spelling now names a file no run has. The
-    run-root fallback is the same READER-side courtesy `visualize_messages.load_messages`
-    takes — this tool's whole purpose is replaying logs recorded before the move."""
+    A run dir resolves through `RunPaths` (the log lives under `<run_dir>/wire_logs/`), with
+    a fallback to the run root for logs recorded under the older layout, the same reader-side
+    courtesy `visualize_messages.load_messages` takes."""
     p = Path(arg)
     if p.is_dir():
         current = RunPaths(p).wire_log

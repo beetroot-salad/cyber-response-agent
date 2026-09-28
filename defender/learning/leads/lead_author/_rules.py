@@ -1,7 +1,7 @@
 """The verification rules a produced edit has to survive before it is allowed to land.
 
-Split out of `lead_author.py` at 1017 lines. Each rule is a refusal with a reason, and the
-drain treats any of them firing as "revert, do not commit".
+Each rule is a refusal with a reason; the drain treats any of them firing as "revert, do not
+commit".
 """
 #!/usr/bin/env python3
 from __future__ import annotations
@@ -95,14 +95,12 @@ def _check_promoted_template(
     repo_root: Path, resolver: _scaffold_rules.VerbResolver, path: str,
 ) -> None:
     """The content half of the promotion gate: `connect`'s invariants (e.g. every
-    `${placeholder}` is a param its verb declares), which `validate_scaffold` does not reach
-    because it excludes `_draft/` — the only directory this lane mints into.
+    `${placeholder}` is a param its verb declares), which `validate_scaffold` doesn't reach
+    because it excludes `_draft/`.
 
-    Fires at PROMOTION, the same seam the half-promote guard below sits at, and not at the
-    lane's `_draft/` writes: a draft is auto-minted from a query that really ran, and refusing
-    the batch over one would discard signal the loop wanted. That split is safe because the
-    minter emits a conformant skeleton (`draft_synthesis._draft_frontmatter`), so a promotion
-    starts from a file that already passes this.
+    Fires at promotion, not on `_draft/` writes: a draft is auto-minted from a query that
+    really ran, and refusing the batch over one would discard signal. The minter emits a
+    conformant skeleton, so a promotion starts from a file that already passes.
     """
     template, reason = _corpus.read_query_template(repo_root / path)
     if template is None:
@@ -113,9 +111,8 @@ def _check_promoted_template(
     try:
         verbs = resolver.verbs(template.system)
     except _scaffold_rules.ScaffoldRuleError as e:
-        # NOT a skip. A template under a system with no importable adapter is a phantom system
-        # wearing a catalog path, and "could not check" silently accepted is the exact defect
-        # this gate closes.
+        # Not a skip: a template under a system with no importable adapter is a phantom
+        # system, and "could not check" must refuse.
         raise LeadAuthorError(
             f"agent wrote {path}, whose system could not be resolved ({e}); refusing to commit"
         ) from e
@@ -125,11 +122,8 @@ def _check_promoted_template(
 def _skills_content_rule(
     repo_root: Path, resolver: _scaffold_rules.VerbResolver, xy: str, path: str,
 ) -> None:
-    """The content half of the gate, split out from the path half above it.
-
-    Everything above answers "may the agent touch this path", everything here "is what it
-    wrote well-formed" — which is why only this half needs the resolver, and why it runs
-    last, on paths the path half has already admitted.
+    """The content half of the gate: is what the agent wrote well-formed? Runs only on paths
+    the path half admitted.
     """
     if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
         twin = _draft_twin(path)
@@ -139,13 +133,10 @@ def _skills_content_rule(
                 f"twin {twin} still exists; refusing to commit (the promote's `rm` "
                 "didn't happen — established + draft would both land)"
             )
-        # After the pair check and only on a file that is still there: a delete has already been
-        # refused by the path half, and a content rule cannot read a path git says is gone.
+        # Only on a file still there; the path half already refused deletes.
         #
-        # `_is_catalog_template`, not `_is_catalog_path`: the content rule reads a file as a
-        # TEMPLATE, and the catalog also holds files that are not one (a `{system}/README.md`,
-        # a note at the catalog root). Judging those by the template rule refuses them for a
-        # reason that is not their defect — "no `id:`", or a system named `queries`.
+        # `_is_catalog_template`, not `_is_catalog_path`: the catalog also holds non-template
+        # files (a `{system}/README.md`, a root note) that the template rule would wrongly refuse.
         if "D" not in xy and (repo_root / path).is_file() and _is_catalog_template(path):
             _check_promoted_template(repo_root, resolver, path)
     if _is_system_skill_md(path) and "D" not in xy and (repo_root / path).is_file():
@@ -156,9 +147,8 @@ def _skills_content_rule(
 
 
 def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset[str]) -> None:
-    # `execution.md`, at ANY depth under `defender/skills`, is the one per-system file this
-    # lane can never get committed — the marker's integrity IS the commit gate, so this keys
-    # on the BASENAME rather than on which in-scope form owns the path.
+    # `execution.md` is never committable by this lane at any depth, so this keys on the
+    # basename rather than on which in-scope form owns the path.
     if Path(path).name == "execution.md":
         raise LeadAuthorError(
             f"agent wrote {path}; refusing to commit (execution.md is not "
@@ -172,9 +162,8 @@ def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset
         raise LeadAuthorError(
             f"agent mutated a protected surface file ({path}); refusing to commit"
         )
-    # Membership fires BEFORE the delete-prohibition, so a `D` record under an undeclared
-    # directory is reported by NAME with the registry reason, never absorbed into a deletion
-    # complaint about a directory that should never have been written to.
+    # Membership before the delete-prohibition, so a `D` under an undeclared directory is
+    # reported with the registry reason, not as a deletion.
     system = _membership_segment(path)
     if system not in systems:
         raise LeadAuthorError(
@@ -185,9 +174,8 @@ def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset
             f"agent deleted an established template / SKILL.md ({path}); refusing to "
             "commit (delete-prohibition; a demotion is rejected the same way)"
         )
-    # The frontmatter `id:` prefix must agree with the directory it sits in, closing the
-    # CONTENT channel alongside the directory channel — an idless in-scope file (a system
-    # `SKILL.md`, `SCHEMA.md`) is spared.
+    # The frontmatter `id:` prefix must agree with the directory; idless in-scope files (a
+    # system `SKILL.md`, `SCHEMA.md`) are spared.
     ident = _frontmatter_id(repo_root, path)
     if ident is not None and ident.split(".", 1)[0] != system:
         raise LeadAuthorError(
@@ -204,9 +192,7 @@ def _skills_rule(
     *,
     systems: frozenset[str],
 ) -> None:
-    """The whole per-path gate: the path half, then the content half on what it admitted —
-    ordered so the content half never reads a path the path half has already refused.
-    """
+    """The whole per-path gate: the path half, then the content half on what it admitted."""
     _skills_path_rule(repo_root, xy, path, systems=systems)
     _skills_content_rule(repo_root, resolver, xy, path)
 
@@ -214,10 +200,8 @@ def _skills_rule(
 def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | None:
     """The template `path` was at HEAD, or `None` if HEAD did not carry it or it did not parse.
 
-    A `None` for an unparseable pre-image is deliberate and it fails OPEN. Everything this
-    answers is a question about what the agent's edit DID to a file, and a pre-image the corpus
-    reader cannot parse is one no invariant was holding before this batch either — refusing the
-    commit over it would punish the author for the state of the tree they were handed."""
+    An unparseable pre-image fails open: no invariant held before this batch either, so
+    refusing would punish the author for the tree they were handed."""
     text = _git.git_show_head(repo_root, path)
     if text is None:
         return None
@@ -225,21 +209,17 @@ def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | Non
     return template
 
 
-#: The mint wrote nothing this tick — the default for every caller of the gate that is not
-#: `_run_locked` (the tests that drive it directly, and any future one). A frozen mapping
-#: rather than a `None` the body re-coalesces, and rather than a `{}` literal default.
+#: The mint wrote nothing this tick — the default for callers other than `_run_locked`. A
+#: frozen mapping rather than `None` or a mutable `{}` default.
 _NO_MINTED: Mapping[Path, tuple[str, ...]] = MappingProxyType({})
 
 
 def _minted_identities(created: list[Path]) -> Mapping[Path, tuple[str, ...]]:
-    """`{draft path -> the identities it records}` for the drafts THIS tick's mint wrote.
+    """`{draft path -> the identities it records}` for the drafts this tick's mint wrote.
 
-    Read HERE, between the mint and the agent, because afterwards the answer may no longer be
-    on disk and there is nowhere else to get it: a draft this tick minted is untracked, so
-    deleting it before the commit leaves git neither a porcelain record nor a HEAD pre-image.
-    That is the common case, not a corner one — `_run_locked` mints and then hands the same
-    draft to the author in the same tick, so a bare discard of a just-minted draft is the
-    usual shape of what `_covers_rule`'s transfer half refuses.
+    Read between the mint and the agent: a just-minted draft is untracked, so if the agent
+    deletes it git has neither a porcelain record nor a HEAD pre-image. That is the common case
+    `_covers_rule`'s transfer half must catch.
     """
     out: dict[Path, tuple[str, ...]] = {}
     for path in created:
@@ -250,14 +230,11 @@ def _minted_identities(created: list[Path]) -> Mapping[Path, tuple[str, ...]]:
 
 
 def _answered_after_batch(repo_root: Path) -> set[str]:
-    """Every identity the catalog answers once this batch lands, through the mint's OWN reader.
+    """Every identity the catalog answers once this batch lands, through the mint's own reader.
 
-    Read off the working tree, so it already includes whatever the agent just wrote. The
-    transfer rule below asks exactly one question — "will this identity be re-minted next
-    run?" — and the only thing entitled to answer it is the function the mint asks:
-    `answered_identities`, ids UNION `covers:`, over the whole catalog (drafts included,
-    since a draft can be the wide neighbor). Score against a narrower set and the gate
-    discards a whole tick's batch over a delete that costs nothing.
+    Read off the working tree. The transfer rule asks "will this identity be re-minted next
+    run?", so it must use the mint's `answered_identities` (ids plus `covers:`, drafts
+    included); a narrower set would refuse harmless deletes.
     """
     return answered_identities(lead_neighbors.load_catalog(repo_root / CATALOG_REL))
 
@@ -266,11 +243,9 @@ def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
     """The other side of transfer: an identity may not land on an established template while the
     draft that recorded it is still on disk.
 
-    `_skills_content_rule`'s half-promote probe derives the twin from the BASENAME
-    (`_draft_twin`), which a promote no longer shares: the draft's name is a digest and the
-    established file's is the author's. So it cannot see established + draft both landing
-    because the promote's `rm` never happened. The surviving draft is unchanged, so no `git
-    status` record carries it — only a filesystem probe can.
+    `_skills_content_rule`'s probe derives the twin from the basename, which a promote doesn't
+    share (the draft's name is a digest, the established file's the author's). The surviving
+    draft is unchanged, so no `git status` record carries it — only a filesystem probe finds it.
     """
     if not taken_over:
         return
@@ -294,22 +269,15 @@ def _departed_drafts(
     minted: Mapping[Path, tuple[str, ...]],
     records: list[tuple[str, str]],
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """`(path, identities)` for every draft that is no longer in the tree — from the TWO places
-    a departure can be read, because a draft has two provenances.
+    """`(path, identities)` for every draft no longer in the tree.
 
-    A draft an earlier tick committed departs as a `D` porcelain record, and its identities come
-    out of its HEAD pre-image. A draft this tick minted has neither: the mint writes it
-    untracked, so removing it before the commit leaves `git status` nothing to report and `git
-    show HEAD:` nothing to parse. Those identities are captured at mint time instead
-    (`_minted_identities`) and carried in — without this half the transfer rule is inert for
-    exactly the batch it was written for.
+    A committed draft departs as a `D` record, with identities from its HEAD pre-image. A draft
+    this tick minted is untracked, so its identities come from `minted` instead.
     """
     out: list[tuple[str, tuple[str, ...]]] = []
     for xy, path in records:
-        # The draft half, spelled with `_under_draft` rather than `_is_catalog_template`:
-        # that predicate EXCLUDES drafts, so the two together admit nothing. The catalog's own
-        # non-template surfaces are still screened off — a `_draft/README.md` and a `SCHEMA.md`
-        # are protected files the path rule has already refused, and neither carries `covers:`.
+        # `_under_draft`, since `_is_catalog_template` excludes drafts. Protected non-template
+        # files (`_draft/README.md`, `SCHEMA.md`) carry no `covers:` and are skipped.
         if "D" not in xy or not _under_draft(path):
             continue
         if _is_draft_readme(path) or _is_schema_md(path):
@@ -317,9 +285,8 @@ def _departed_drafts(
         draft = _template_at_head(repo_root, path)
         if draft is not None and draft.covers:
             out.append((path, draft.covers))
-    # A distinct name, not a rebinding of `path` above: that one is the repo-relative `str` git
-    # reports, this one the absolute `Path` the mint returned — the point of this loop is that
-    # they are not interchangeable.
+    # `draft_path` is the absolute `Path` the mint returned, not the repo-relative `str` git
+    # reports.
     for draft_path, identities in minted.items():
         if draft_path.exists():
             continue
@@ -338,50 +305,35 @@ def _covers_rule(
 ) -> None:
     """The two whole-batch invariants on `covers:` — the identities a template accounts for.
 
-    Both exist because a draft's basename is not derivable from its content: the author names
-    the established file for what it measures, so `covers:` is the only thing tying draft and
-    promoted template together, and it has to be carried rather than merely encouraged.
+    The author names the established file for what it measures, so `covers:` is the only link
+    between a draft and its promoted template.
 
-    **Transfer.** A draft that leaves the tree must have its identities land somewhere. Both
-    dispositions `lead_author.md` gives satisfy this — a promote writes them onto the new file,
-    a discard-into-widen adds them to the template it widened. What it refuses is the bare
-    discard, and the refusal names the alternative: a draft you cannot attribute to any
-    template is one to SKIP, not to delete. Unenforced, the omission is silent and self-
-    repeating — the identity is re-minted the next time a run coins it, the author discards it
-    again, and nothing reports that the loop is going in circles. Scored against the whole tree
-    (`_answered_after_batch`) rather than this batch's edits, because that is the question
-    `synthesize_drafts` will ask next run. Both provenances of a departed draft are read — the
-    committed one out of git, the one this tick minted out of `minted`, which git cannot see
-    (`_departed_drafts`). Its mirror is `_refuse_half_promote`: an identity that lands on a
-    template while its draft is still on disk is the takeover half-done.
+    Transfer: a draft that leaves the tree must have its identities land somewhere (a promote
+    writes them onto the new file; a discard-into-widen adds them to the widened template). A
+    bare discard is refused — an unattributable draft should be skipped, since deleting it just
+    gets it re-minted next run, silently looping. Scored against the whole tree, the question
+    `synthesize_drafts` asks next run. Its mirror is `_refuse_half_promote`.
 
-    **Monotonicity.** An established template may gain identities and may never lose them, and
-    its `id:` may not change under an edit. This is the collision detector: the write lane
-    admits any `{system}/{name}.md` and overwriting an established template is a legal FOLD, so
-    an author who picks a name that already exists gets no error — it silently replaces a
-    different measurement, taking that template's own `covers:` down with it. Losing provenance
-    is the observable that separates a clobber from a widen.
+    Monotonicity: an established template may gain identities but never lose them, and its
+    `id:` may not change. Overwriting an established template is a legal fold, so a name
+    collision would otherwise silently replace a different measurement; lost provenance is what
+    separates a clobber from a widen.
     """
-    # `_is_catalog_template` is already draft-excluding (it is the predicate the content rule
-    # uses to decide what may be READ as a template), so this is the established half by
-    # construction; a second `_under_draft` test would add nothing.
+    # `_is_catalog_template` already excludes drafts.
     established = [p for xy, p in records if "D" not in xy and _is_catalog_template(p)]
-    # The identities this batch moved ONTO an established template — `after` minus `before`, not
-    # `after`, so the half-promote probe below fires on a takeover and never on a template that
-    # already accounted for the identity before the agent was spawned.
+    # Identities newly moved onto an established template (`after` minus `before`), so the
+    # half-promote probe fires only on a takeover.
     taken_over: set[str] = set()
     for path in established:
         after = _corpus.read_query_template(repo_root / path)[0]
         if after is None:
-            # Its own refusal already, from `_check_promoted_template` on the per-path pass.
+            # Already refused by `_check_promoted_template` on the per-path pass.
             continue
         before = _template_at_head(repo_root, path)
         _refuse_lost_provenance(path, before, after)
         taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
 
-    # The tree walk is behind the `if`: `_answered_after_batch` parses the whole catalog, and
-    # the question it answers is only ever asked about a draft that left. A batch that
-    # deleted none pays nothing.
+    # `_answered_after_batch` parses the whole catalog, so only pay for it when a draft left.
     if departed := _departed_drafts(repo_root, minted, records):
         covered = _answered_after_batch(repo_root)
         for path, identities in departed:
@@ -400,19 +352,11 @@ def _covers_rule(
 def _repairs_the_id(
     before: _corpus.QueryTemplate, after: _corpus.QueryTemplate,
 ) -> bool:
-    """Is this `id:` change the REPAIR of an id that disagreed with its directory?
+    """Is this `id:` change the repair of an id that disagreed with its directory?
 
-    Without this the two rules deadlock, and the deadlock has no exit. A template filed at
-    `queries/{system}/{name}.md` while calling itself `{other}.{name}` is refused by
-    `check_template`'s `id-system-mismatch` on every edit — with a message telling the author
-    the id must start with `{system}`. The author does exactly that, and the monotonicity rule
-    refuses the batch for "rewriting the identity of an established template". Moving the file
-    instead is refused by the delete-prohibition. Every tick that touches the file discards its
-    whole batch, following two instructions that contradict each other.
-
-    Narrow on purpose: the id must have been wrong BEFORE and right AFTER. A change between two
-    well-formed ids is still the clobber the rule is here to catch, and a change that swaps one
-    mismatch for another is not a repair.
+    Without it, `check_template`'s `id-system-mismatch` demands the fix, monotonicity refuses
+    the id change, and the delete-prohibition refuses moving the file — a deadlock on every
+    tick that touches it. Narrow: the id must be wrong before and right after.
     """
     def _prefix(t: _corpus.QueryTemplate) -> str:
         return t.id.split(".", 1)[0] if "." in t.id else ""
@@ -423,10 +367,8 @@ def _repairs_the_id(
 def _refuse_lost_provenance(
     path: str, before: _corpus.QueryTemplate | None, after: _corpus.QueryTemplate,
 ) -> None:
-    """The monotonicity half of `_covers_rule`, on ONE established template — the only part
-    of the rule that compares a file against its own pre-image. The pre-image is passed IN
-    rather than read here, because the caller needs it too and re-reading costs a second `git
-    show` per changed template for an answer that cannot have moved.
+    """The monotonicity half of `_covers_rule`, on one established template against its
+    pre-image (passed in, since the caller needs it too).
     """
     if before is None:
         return
@@ -450,16 +392,12 @@ def _verify_skills_state(
     repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
     minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
 ) -> list[str]:
-    # ONE resolver for the whole batch, built on the tree being committed rather than on the
-    # process's own: the drain runs this from the main checkout against a `lead-author/<id>`
-    # worktree, and `_load_adapter_module` keys its cache on the resolved absolute path, so this
-    # is what makes the verdict a statement about the commit it is about to make.
+    # One resolver for the batch, built on the tree being committed rather than the process's
+    # own checkout: the drain runs this against a `lead-author/<id>` worktree, and
+    # `_load_adapter_module` caches by resolved absolute path.
     #
-    # Wrapped like `_skills_content_rule`'s `resolver.verbs(...)`: since #1031 the resolver
-    # fails at CONSTRUCTION over a tree whose adapters directory cannot be read, and "could
-    # not check" is this lane's refusal — `LeadAuthorError`, the one class every other
-    # refusal here dead-letters under — not a bare `ScaffoldRuleError` a reader of the dead
-    # letters would not be looking for.
+    # The resolver fails at construction over an unreadable adapters directory; re-raised as
+    # `LeadAuthorError`, the class every other refusal here dead-letters under.
     try:
         resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
     except _scaffold_rules.ScaffoldRuleError as e:

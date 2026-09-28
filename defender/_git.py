@@ -61,11 +61,8 @@ def git_status(
 ) -> list[tuple[str, str]]:
     """The working tree's status as `(XY, path)` records.
 
-    `no_renames` turns OFF git's rename detection, which is what a caller COUNTING the paths a
-    sha does not name has to do: `git mv a b` is reported as one `R  b` record whose original
-    `a` this parser consumes as the record's second field and drops, so two paths that differ
-    from HEAD are counted once and the vanished one is never named. With the flag, the same
-    move reports `D  a` and `A  b` — two records, two paths, which is the honest answer.
+    `no_renames` turns off rename detection, for callers counting changed paths: otherwise
+    `git mv a b` is one `R  b` record and `a` is dropped; with it, `D  a` and `A  b`.
     """
     args = ["status", "--porcelain", "--untracked-files=all", "-z"]
     if no_renames:
@@ -85,9 +82,7 @@ def git_status(
         xy, path = rec[:2], rec[3:]
         records.append((xy, path))
         if xy[0] in "RC" or xy[1] in "RC":
-            # A rename/copy record is FOLLOWED by its `<origPath>` as a field of its own.
-            # Consuming it here stops it being read as a record whose status is the first two
-            # characters of a path.
+            # A rename/copy record is followed by its `<origPath>` as a separate field; skip it.
             i += 1
     return records
 
@@ -95,11 +90,8 @@ def git_status(
 def git_show_head(cwd: Path, path: str) -> str | None:
     """`path`'s content at HEAD, or `None` when HEAD does not carry it.
 
-    `check=False` and a `None` return rather than a `GitError`, because "the file is new in this
-    batch" is an ORDINARY answer here — a promoted template and a deleted draft are read through
-    the same call, and only one is expected to exist at HEAD. Unstripped: the caller parses
-    frontmatter out of this, and `strip()` would eat the leading `---` delimiter's line
-    structure.
+    Absence is an ordinary answer (a file new in this batch), not a `GitError`. Unstripped,
+    since callers parse frontmatter out of it.
     """
     proc = _run(["show", f"HEAD:{path}"], cwd=cwd, check=False)
     return proc.stdout if proc.returncode == 0 else None
@@ -112,9 +104,8 @@ def git_head_sha(cwd: Path, *, timeout: float | None = None) -> str:
 def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
     """The text a path carries at `rev`, or `None` when it is not there.
 
-    Deliberately NOT `git()`: that helper strips the output, and a caller comparing a committed
-    document against a working-tree one needs the bytes as committed — a stripped trailing
-    newline reads as an edit nobody made."""
+    Not `git()`, which strips output: a stripped trailing newline would read as an edit when
+    compared against the working tree."""
     proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False)
     if proc.returncode != 0:
         return None
@@ -122,12 +113,9 @@ def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
 
 
 def git_show_file_bytes(cwd: Path, rev: str, path: str) -> bytes | None:
-    """The RAW bytes a path carries at `rev`, or `None` when it is not there. The byte-mode
-    twin of `git_show_file`: `_run` always decodes as text, which applies universal-newline
-    translation to the captured stdout — CRLF and LF decode to the identical string, so a
-    caller that wants to know whether two blobs are byte-for-byte identical (not just
-    decode-identical) cannot get there through `git_show_file` (#773 claims-adversary finding
-    on `_byte_identical_to_head`, which used to compare decoded text)."""
+    """The raw bytes a path carries at `rev`, or `None` when it is not there. Use for
+    byte-identity checks: `git_show_file` decodes with universal newlines, so CRLF and LF
+    compare equal there."""
     proc = subprocess.run(
         ["git", "show", f"{rev}:{path}"], cwd=cwd, capture_output=True, check=False,
     )
@@ -179,26 +167,15 @@ def git_commit_paths(
     *,
     trailers: list[tuple[str, str]] | None = None,
 ) -> str | None:
-    """#773 M5: the drain's own explicit-file-list commit — stages exactly `paths` (the
-    approved files plus curator deletions) and commits them.
+    """Stage exactly `paths` (including deletions) and commit them; `None` if nothing changed.
 
-    A SECOND, SEPARATE primitive from `git_commit` above, which keeps its single-pathspec
-    signature byte-for-byte unchanged (§7 FK-1) — the three sibling lanes (questioner,
-    lead-author, pitfalls) never reference this function's name at all.
-
-    An EMPTY `paths` returns `None` WITHOUT calling git at all: `git add --` with an empty
-    pathspec stages nothing, but `git commit -F - --` with an empty pathspec then commits
-    the WHOLE INDEX (C15, probe-confirmed — a stray file reached HEAD that way) — so the
-    guard here is what keeps a tick with nothing approved from sweeping in whatever else
-    happens to be staged."""
+    An empty `paths` returns `None` without calling git: `git commit -F - --` with an empty
+    pathspec would commit the whole index, sweeping in whatever else is staged."""
     if not paths:
         return None
-    # A path already fully staged as deleted — a `git mv` decomposed by the drain's own
-    # `no_renames=True` reads already removed it from BOTH the worktree and the index —
-    # has nothing for `git add` to match, and it refuses the whole call with "did not match
-    # any files" rather than staging the other paths in the list. `git rm --cached
-    # --ignore-unmatch` handles that shape too (a no-op when the path is already gone from
-    # the index), so every path in `paths` goes through the ONE call that admits it.
+    # `git add` refuses the whole call if any path is gone from both worktree and index
+    # ("did not match any files"), so absent paths go through `git rm --cached
+    # --ignore-unmatch`, which is a no-op when the index no longer has them.
     present = [p for p in paths if (cwd / p).exists()]
     absent = [p for p in paths if p not in present]
     if present:

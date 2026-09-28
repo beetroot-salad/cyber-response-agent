@@ -64,9 +64,7 @@ DENY_PATTERNS = [
     "* > *",
 ]
 
-# Safe command prefixes — when a command matches, persist the PREFIX pattern
-# (e.g. "Bash(git status:*)") instead of the exact command string.
-# This keeps settings.local.json clean and covers future variations.
+# Only commands starting with one of these prefixes are persisted (as the exact command).
 SAFE_PREFIXES = [
     "git status",
     "git diff",
@@ -111,7 +109,6 @@ COMPOUND_OPERATORS = re.compile(r"\s*[;&|]{1,2}\s*")
 
 
 def is_denied(command: str) -> bool:
-    """Check if command matches any deny pattern."""
     for pattern in DENY_PATTERNS:
         if fnmatch.fnmatch(command, pattern):
             return True
@@ -119,8 +116,7 @@ def is_denied(command: str) -> bool:
 
 
 def is_compound(command: str) -> bool:
-    """Check if command contains shell operators (&&, ||, ;, |)."""
-    # Ignore operators inside quotes
+    """Check if command contains shell operators (&&, ||, ;, |) outside quotes."""
     in_single = False
     in_double = False
     i = 0
@@ -150,7 +146,7 @@ def claude_pattern_matches(pattern: str, tool_name: str, value: str) -> bool:
     """
     m = re.match(r"^(\w+)\((.+)\)$", pattern)
     if not m:
-        # Bare tool name like "Bash" — matches all uses of that tool
+        # Bare tool name like "Bash" matches all uses of that tool.
         return pattern == tool_name
 
     pat_tool, pat_content = m.group(1), m.group(2)
@@ -167,7 +163,6 @@ def claude_pattern_matches(pattern: str, tool_name: str, value: str) -> bool:
 
 
 def is_already_allowed(allow_list: list, tool_name: str, value: str) -> bool:
-    """Check if a command/URL is already covered by an existing allow pattern."""
     for pattern in allow_list:
         if claude_pattern_matches(pattern, tool_name, value):
             return True
@@ -185,11 +180,8 @@ def matching_safe_prefix(command: str) -> str | None:
 
 
 def build_rule(tool_name: str, tool_input: dict) -> str | None:
-    """Build the permission rule string for the given tool call.
-
-    Returns None if the command should not be auto-allowed.
-    If the command matches a safe prefix, returns a prefix pattern
-    (e.g. "Bash(git status:*)") instead of the exact command.
+    """Build the permission rule string for the given tool call, or None if it should not
+    be auto-allowed. Bash commands are persisted verbatim, and only under a safe prefix.
     """
     if tool_name == "Bash":
         command = tool_input.get("command", "")
@@ -199,7 +191,6 @@ def build_rule(tool_name: str, tool_input: dict) -> str | None:
             return None
         if is_compound(command):
             return None
-        # Always save the exact command (useful for debugging iteration).
         if matching_safe_prefix(command) is None:
             return None
         return f"Bash({command})"

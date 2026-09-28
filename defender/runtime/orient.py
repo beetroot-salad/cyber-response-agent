@@ -23,12 +23,8 @@ def _shim(argv: list[str], env: dict[str, str]) -> str | None:
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, cwd=str(_REPO_ROOT), timeout=_SHIM_TIMEOUT_S,
         )
-    # `ValueError` belongs here with the rest: `subprocess.run` raises a bare
-    # `ValueError("embedded null byte")` — NOT an `OSError` — before it ever forks, for any
-    # argv element carrying a NUL. The one argv element this module builds from the alert is
-    # the signature, external data (`rule.id`), so a NUL in it would unwind out of
-    # `orientation()` past `driver.py`'s unguarded call and kill the run before the first
-    # model request. A shim that cannot be spawned is a shim with no output.
+    # `subprocess.run` raises `ValueError` (not `OSError`) for a NUL in argv, and the
+    # signature argv element is external alert data; uncaught it would kill the run.
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     out = (proc.stdout or "").strip()
@@ -45,21 +41,11 @@ def _catalog() -> str:
 
 
 def _alert_signature(alert_path: Path) -> str | None:
-    """The alert's `rule.id`, always as a `str` — the annotation, honoured.
+    """The alert's `rule.id` as a `str`, or `None`.
 
-    Both consumers take the value as text (`re.escape` in `_build_lessons_section`, a
-    `subprocess.run` argv in `_build_corpus_vocab_section`), and a foreign-SIEM `alert.json`
-    carrying a numeric id (`"id": 5710`) would otherwise detonate on `orientation()`'s
-    unguarded path and kill the run before the first model request — a breach of this module's
-    "orientation must never break the run" invariant. Coercing at the reader fixes both.
-
-    Empty and `None` collapse to `None`: an empty signature would build a `.*` lessons pattern
-    matching every row, which is not "the alert has no signature".
-
-    So does a NON-SCALAR id. `str()` is total, so a bare coercion turns `"id": []` into the
-    signature `"[]"` — a string that is not an id, handed to a lessons grep and to a shim argv
-    as though it were one. `bool` is excluded explicitly: it is an `int` to `isinstance`, and
-    `"id": false` would otherwise become the signature `"False"`."""
+    Coerced because both consumers need text and a numeric id (`"id": 5710`) would otherwise
+    crash orientation. Empty, non-scalar and `bool` ids give `None`: an empty signature would
+    match every lesson, and `[]` or `False` would become bogus signatures."""
     try:
         rid = json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -152,9 +138,7 @@ def orientation(
     if alert_block:
         sections.append(alert_block)
 
-    # Lead-0's ancestor resolution has already run, sync, before this text is assembled:
-    # `resolve_lead_zero` did the I/O and the table writes, this is a pure formatting append
-    # (orient.py stays a text-assembler).
+    # `resolve_lead_zero` already did the I/O; this module only assembles text.
     if lead_zero_section:
         sections.append(lead_zero_section)
 

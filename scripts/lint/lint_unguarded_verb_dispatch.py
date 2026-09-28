@@ -1,38 +1,31 @@
 #!/usr/bin/env python3
-"""Unguarded verb-dispatch smell — flag a data-source verb dispatch that resolves a verb
-function from an injected registry OUTSIDE a fault seam.
+"""Unguarded verb-dispatch smell: flag a data-source verb dispatch that resolves a verb
+function from an injected registry outside a fault seam.
 
-The mechanical shape of the #672/#678 escape. A data-source tool promises "any unmapped fault
--> the fault-class envelope; write a row, never unwind out of ``agent.iter()``" and delivers
-that promise through a single fault-mapping ``try``. The registry dispatch —
-``registry.verbs(system)[verb]`` — resolves the verb function to call, and in the production
-``ModuleVerbRegistry`` that call LAZILY IMPORTS the adapter, so it can raise
-``KeyError``/``ImportError``/``SystemExit`` on a broken or malformed adapter. If that dispatch
-sits OUTSIDE the seam, a broken adapter unwinds the stage with no row and no breaker outcome —
-exactly the invariant the module documents, silently unmet. The whole suite stayed green because
-every injected fake resolves cleanly, so no test ever drove the resolution seam
-(``spec_graph_672``'s ``d7`` was discharged with the fault injected inside the verb body only).
+A data-source tool promises "any unmapped fault -> the fault-class envelope; write a row, never
+unwind out of ``agent.iter()``" through a single fault-mapping ``try``. The dispatch
+``registry.verbs(system)[verb]`` lazily imports the adapter in the production
+``ModuleVerbRegistry``, so it can raise ``KeyError``/``ImportError``/``SystemExit`` on a broken
+adapter. Outside the seam, that unwinds the stage with no row and no breaker outcome. Tests do
+not catch it because injected fakes always resolve cleanly.
 
-What this flags: a subscripted verb dispatch — an ``ast.Subscript`` whose ``.value`` is a call
-to ``<anything>.verbs(...)``, i.e. ``X.verbs(...)[...]`` — that is not lexically inside a ``try``
-in its own function. The subscript is the discriminator: ``X.verbs(system)[verb]`` RESOLVES A
-VERB FN TO EXECUTE (must be fault-guarded so a broken adapter faults-and-continues), whereas a
-bare ``X.verbs(system)`` (no subscript) reads the roster mapping for validation / skill
-description and is out of scope.
+What this flags: an ``ast.Subscript`` whose ``.value`` is a call to ``<anything>.verbs(...)``
+(``X.verbs(...)[...]``) that is not lexically inside a ``try`` body in its own function. The
+subscript is the discriminator: ``X.verbs(system)[verb]`` resolves a verb fn to execute,
+whereas a bare ``X.verbs(system)`` reads the roster for validation or description.
 
-What it does NOT flag:
+What it does not flag:
   - a module that installs a pydantic-ai capability catch-all (a ``ClassDef`` based on
-    ``AbstractCapability``, or a ``wrap_tool_execute`` method): its tool body's dispatch is
-    guarded by the hook's ``except BaseException`` one seam out, not by a lexical ``try``
-    (``runtime/query_tool.py`` — its ``registry.verbs(system)[verb]`` rides the ``wrap_tool_execute``
-    catch-all). The whole such module is exempt.
-  - a dispatch entering a nested function/closure is judged by ITS OWN function's ``try`` state,
-    not the enclosing one — a ``try`` in the outer function does not dynamically guard a callee.
-  - test modules — fakes resolve cleanly by construction; this smell is a production-code shape.
+    ``AbstractCapability``, or a ``wrap_tool_execute`` method): its tool bodies are guarded
+    by the hook's ``except BaseException`` one seam out (``runtime/query_tool.py``). The whole
+    module is exempt.
+  - a dispatch in a nested function is judged by its own function's ``try`` state; an outer
+    ``try`` does not dynamically guard a callee.
+  - test modules — fakes resolve cleanly by construction.
 
 Mark a deliberate exception with ``# lint-verb-dispatch: ok — <reason>`` on the dispatch's line
 span. Pre-existing sites are ratcheted via ``lint_unguarded_verb_dispatch_baseline.json`` (see
-scripts/lint/_baseline.py); the gate fails only on a NEW file+function pair.
+scripts/lint/_baseline.py); the gate fails only on a new file+function pair.
 
 Run from repo root:  python scripts/lint/lint_unguarded_verb_dispatch.py
 Regenerate the baseline:  python scripts/lint/lint_unguarded_verb_dispatch.py --update-baseline
@@ -71,8 +64,7 @@ def _is_test_module(rel: str) -> bool:
 
 def _module_installs_capability_catchall(tree: ast.AST) -> bool:
     """True iff the module defines a pydantic-ai capability whose ``wrap_tool_execute`` hook is
-    the ``except BaseException`` catch-all for its tool bodies — so a lexical ``try`` around the
-    dispatch is not the seam here (``query_tool``'s shape)."""
+    the ``except BaseException`` catch-all for its tool bodies (``query_tool``'s shape)."""
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
             node.name == "wrap_tool_execute"
@@ -88,8 +80,7 @@ def _module_installs_capability_catchall(tree: ast.AST) -> bool:
 
 
 def _is_verb_dispatch(node: ast.AST) -> bool:
-    """True iff ``node`` is ``<expr>.verbs(...)[...]`` — a subscripted call to a ``.verbs``
-    attribute, i.e. resolving one verb fn from the registry to execute it."""
+    """True iff ``node`` is ``<expr>.verbs(...)[...]``: resolving one verb fn to execute."""
     if not isinstance(node, ast.Subscript):
         return False
     call = node.value
@@ -143,10 +134,9 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _visit_field(node, field, child, func_name, guarded, visit) -> None:  # noqa: ANN001
-    """Recurse into one AST field, tracking two things the flat walk cannot: the ENCLOSING
-    function (a nested def resets the ``try`` guard — an outer ``try`` never dynamically guards a
-    callee) and whether we are inside a ``Try.body`` (the only region an ``except`` protects; a
-    dispatch in ``orelse``/a handler is unguarded)."""
+    """Recurse into one AST field, tracking the enclosing function (a nested def resets the
+    guard) and whether we are inside a ``Try.body`` (the only region an ``except`` protects;
+    ``orelse`` and handlers are unguarded)."""
     items = child if isinstance(child, list) else [child]
     for item in items:
         if not isinstance(item, ast.AST):

@@ -1,56 +1,34 @@
-"""Shared AST resolution for the lint gates — answer "where does this call COME FROM",
-not "how was it SPELLED".
+"""Shared AST resolution for the lint gates: answer "where does this call come from", not "how
+was it spelled".
 
-THIS MODULE OWNS THAT QUESTION, for gates and suites alike, and the ownership is enforced:
-`lint_hand_rolled_name_resolution.py` fails a module that parses shipped source, decides what
-a name refers to by matching the spelling, and never reaches here. Reach it from a gate by bare
-name (`from _astlib import callee`) and from a test through `tests/_by_path.import_lint_lib`.
+This module is the declared owner of that question, for gates and suites alike, and
+`lint_hand_rolled_name_resolution.py` enforces it: a module that parses shipped source and
+decides what a name refers to by matching its spelling fails unless it goes through here.
+Reach it from a gate by bare name (`from _astlib import callee`) and from a test through
+`tests/_by_path.import_lint_lib`. If you are about to write `node.func.id == "..."`,
+`alias.asname`, or a walk over `ast.ImportFrom` to decide a binding, use `callee()` or
+`origin()` instead. (Not an `@owns` tag: that names a field with a sole producer; this is a
+sole implementation of a derivation.)
 
-The declaration is here rather than as an `@owns` tag because that tag names a FIELD — a value
-with a sole producer — and this is a sole implementation of a DERIVATION. The rule is the same
-one (`lint_unowned_field.py`'s docstring states it: two pieces of code deriving one quantity by
-different means is this repo's recurring bug), and the cost of re-deriving it has now been paid
-four times: three lint gates that each went blind to an alias in a different way (#602, #594,
-below), and then #1008, where a test suite re-derived name resolution three times in three
-rounds of review and shipped a live policy hole on each. If you are about to write
-`node.func.id == "..."`, `alias.asname`, or a walk over `ast.ImportFrom` to decide a binding,
-that is this module's job — `callee()` and `origin()` are the two entry points.
+Spelling-based identification ("is this written as ``re.something(...)``?") is blind to an
+alias (``import re as regex``) or a from-import (``from re import search``). It also cannot
+know the callee's arity: ``Path.open(mode)`` takes the mode first, but every module opener
+(``codecs.open(file, mode)``, ``gzip.open(file, mode)``) takes the path first. Resolving the
+callee supplies the mode's slot and default.
 
-Three gates used to identify a banned call by its spelled dotted name:
-``_receiver_root(call) == "re"`` (frontmatter), ``call.func.value.id == "json"``
-(jsonl), a ``subprocess.`` prefix and an opener-root skip-list (text-io). Each asked
-*"is this call written as ``re.something(...)``?"* rather than *"does this call land in
-the ``re`` module?"*, so an alias (``import re as regex``) or a from-import
-(``from re import search``) made all three blind — the same hole, re-derived three times
-(#602, #594).
+``callee()`` returning None is a signal, not a failure: the receiver is a value rather than a
+module (``p.open("r")``, ``zf.open(n)``). A gate that wants the duck-typed case must key on
+the attribute name and skip only via a positive table of origins; "skip whatever resolves"
+turns every resolvable receiver into a false negative. ``zf.open(n)`` and ``p.open("r")`` are
+indistinguishable here; telling them apart needs local-binding tracking, which this module
+does not do.
 
-Spelling-based identification fails a second, worse way: it cannot know the callee's
-ARITY. ``lint_unpinned_text_io._open_mode`` read ``call.args[0]`` as the mode of any
-``<x>.open(...)`` — right for ``Path.open(mode)``, wrong for every path-first module
-opener (``codecs.open(file, mode)``, ``io.open(file, mode)``, ``gzip.open(file, mode)``),
-so the gate read the FILE PATH as the mode string and every verdict on that family turned
-on whether the path was a literal containing the letter ``b``. The mode's positional slot
-and its default are properties of the CALLEE. Resolving the callee is what supplies them:
-the resolver is not a patch for the alias hole, it is what makes such a check correct at
-all.
+Names resolve against the scope they are used in, not a flat module map: function-local
+imports must be collected (a local ``import re as regex`` is a plausible evasion), but binding
+them module-wide makes any same-named local elsewhere resolve to a module.
 
-``callee()`` returning None is a first-class signal, NOT a failure: it means the receiver
-is a value rather than a module (``p.open("r")``, ``zf.open(n)``). A gate that wants the
-duck-typed case must key on the attribute NAME and skip only via a POSITIVE table of
-origins — "skip whatever resolves" would turn every resolvable receiver into a false
-negative. ``zf.open(n)`` and ``p.open("r")`` are indistinguishable here by construction;
-telling them apart needs local-binding tracking, which this module deliberately does not do.
-
-Names resolve against the SCOPE they are used in, not against one flat module map (#607).
-Collecting function-local imports is necessary — a local ``import re as regex`` is a
-plausible evasion — but binding them module-wide makes any local of the same name resolve
-to a module, which is how a real ``Path.open`` in ``judge/compare.py`` came to resolve as
-``…invlang.parser.open`` and got skipped. ``module_env`` therefore builds a scope tree, and
-a local binding shadows an import exactly as far as Python says it does.
-
-The one unsound hole — ``from re import *`` — is closed outside the gates: ruff runs
-``--select E,F`` repo-wide, so F403 already makes a star-import unmergeable. That is why
-this resolver can be sound without dataflow.
+``from re import *`` would be unsound, but ruff F403 (``--select E,F`` repo-wide) makes a
+star-import unmergeable, so the resolver can be sound without dataflow.
 """
 from __future__ import annotations
 
@@ -63,35 +41,20 @@ _BUILTIN_NAMES = frozenset(dir(builtins))
 
 
 class ScanBlind(RuntimeError):
-    """A file inside a gate's own scan scope could not be read or parsed, so the gate never
-    examined it. The gate cannot report on what it did not read, and must not report clean."""
+    """A file inside a gate's own scan scope could not be read or parsed. The gate cannot
+    report on what it did not read, and must not report clean."""
 
 
 def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:
     """Read and parse one file of a gate's scan scope, or raise ScanBlind.
 
-    Eight gates each carried their own copy of::
+    Swallowing the error would drop the file from the corpus and let the gate report clean
+    with a violation sitting in the skipped file. Raising (rather than warn-and-continue) is
+    right because the scope is first-party source: an unparseable file there is already
+    failing ruff, mypy and pytest.
 
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):
-            continue
-
-    — the swallow-to-clean shape (#618/#621/#652): the file drops out of the corpus, the gate
-    scans the remainder, prints ``0 finding(s)`` and exits 0. A ban this gate exists to enforce
-    could sit in the skipped file and nothing would say so.
-
-    Raising (rather than the WARN-and-continue tier ``check_actors`` uses for its census) is
-    right *here* because the scope is this project's own first-party source. There is no
-    vendored or fixture population to tolerate: an unparseable file under ``defender/`` or
-    ``spec-flow/scripts/`` means ruff, mypy and pytest are already failing on it, so this
-    raises approximately never — and when it does, silence would be the wrong answer.
-
-    ``errors="replace"`` is preserved from the copies it replaces, so decoding still cannot
-    raise; a ``UnicodeDecodeError`` (a ``ValueError``, never an ``OSError`` — see
-    ``lint_unpinned_text_io``'s docstring) is therefore not a live case, and is not caught
-    here on the pretence that it is.
+    ``errors="replace"`` means decoding cannot raise, so ``UnicodeDecodeError`` (a
+    ``ValueError``, not an ``OSError``) is not caught.
     """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -127,9 +90,9 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 @dataclass(frozen=True)
 class ModuleEnv:
-    """What one SCOPE binds — the module's, or a function's.
+    """What one scope binds — the module's, or a function's.
 
-    ``imports`` — bound name -> dotted ORIGIN::
+    ``imports`` — bound name -> dotted origin::
 
         import re                   -> {"re": "re"}
         import re as regex          -> {"regex": "re"}
@@ -140,15 +103,13 @@ class ModuleEnv:
         from .mod import y          -> {"y": ".mod.y"}     # leading dot: never collides
                                                            # with a stdlib origin
     ``consts``  — module-level ``NAME = "<str literal>"`` bindings, minus any the scope
-    rebinds (a function that reassigns ``FENCE`` no longer carries the module's value).
-    ``defines`` — the names bound to something OTHER than an import: def/class names,
-    assignments, parameters, loop and ``with`` targets. These are the names that are
-    therefore NOT the builtin, and NOT the import, of the same name.
+    rebinds.
+    ``defines`` — names bound to something other than an import (def/class, assignments,
+    parameters, loop and ``with`` targets); these shadow a builtin or import of that name.
 
-    ``scope_of`` maps every node of the tree to the env of the scope it sits in. It is
-    keyed by the node OBJECT (AST nodes hash by identity), so the map both resolves
-    correctly and keeps the nodes alive — an ``id()``-keyed map would be a
-    use-after-free waiting to alias a recycled address onto the wrong scope.
+    ``scope_of`` maps every node to the env of its scope, keyed by the node object (AST
+    nodes hash by identity) so the nodes stay alive; an ``id()`` key could alias a recycled
+    address onto the wrong scope.
     """
 
     imports: dict[str, str]
@@ -157,18 +118,17 @@ class ModuleEnv:
     scope_of: dict[ast.AST, ModuleEnv] = field(
         default_factory=dict, compare=False, repr=False
     )
-    #: (#1077 D6(b)) Names DIRECTLY bound, in this scope's own statements, to a name-owner
-    #: instance — an `Owner(...)` construction, a chained alias of one, or a parameter
-    #: annotated with an owner class. See `owner_derived`.
+    #: Names directly bound, in this scope's own statements, to a name-owner instance — an
+    #: `Owner(...)` construction, a chained alias of one, or a parameter annotated with an
+    #: owner class. See `owner_derived`.
     owner_locals: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
 
 def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
-    """``(imports, other bindings)`` made DIRECTLY in one scope.
+    """``(imports, other bindings)`` made directly in one scope.
 
-    Walks the scope's own statements and stops at every nested function/lambda/class: a
-    name bound inside a nested scope belongs to THAT scope, not this one. The nested def's
-    NAME, however, is bound here — so it is collected before the descent is cut off.
+    Stops at every nested function/lambda/class, whose bindings belong to that scope; the
+    nested def's name is bound here.
     """
     imports: dict[str, str] = {}
     bound: set[str] = set()
@@ -176,7 +136,7 @@ def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
     def walk(node: ast.AST) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                bound.add(child.name)  # the def binds its name HERE; its body is elsewhere
+                bound.add(child.name)  # the def binds its name here; its body is elsewhere
                 continue
             if isinstance(child, ast.Lambda):
                 continue  # params + body are a scope of their own
@@ -213,9 +173,8 @@ def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
 def _module_consts(tree: ast.AST) -> dict[str, str]:
     """Top-level ``NAME = "<str literal>"`` bindings.
 
-    MODULE-LEVEL only, deliberately asymmetric with ``imports``: an import unambiguously
-    binds a name to a module, a function-local string assignment does not, and widening it
-    is a detector-semantics change with real false-positive risk on live code (#605).
+    Module-level only, unlike ``imports``: a function-local string assignment does not
+    unambiguously bind a name, and widening it would add false positives on live code.
     """
     consts: dict[str, str] = {}
     for node in getattr(tree, "body", []):
@@ -233,27 +192,23 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
     return consts
 
 
-#: (#1077 D6(b)) The name-owner classes `owner_derived` tags — construction of one, and reads on
-#: the instance it builds, resolved BY DOTTED ORIGIN so an alias or a from-import still counts.
+#: The name-owner classes `owner_derived` tags — construction of one, and reads on the instance
+#: it builds, resolved by dotted origin so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
     "defender._run_paths.RunPaths",
     "defender._episode_paths.EpisodePaths",
-    # The file-backed handle (#1077 D5) is the fourth owner module's class: a value reached
-    # through `run.facts.<record>` / `run.tables.<table>` is owner-derived the same way a
-    # `RunPaths(x).<record>` is — every name on that chain is the owner's own.
+    # The file-backed handle: a value reached through `run.facts.<record>` /
+    # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
     "defender._run_handle.Run",
     "defender._episode_paths.WorldPaths",
-    # The session store's owner — built from the runs base, since one store spans a run and
-    # its resumes and forks (#1077). Its accessors answer like any instance owner's.
+    # The session store's owner, built from the runs base since one store spans a run and
+    # its resumes and forks.
     "defender._run_paths.SessionPaths",
 })
 
-#: (#1077 D7) The owner modules' module-level SINGLETONS — stateless layout values a caller
-#: imports rather than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the
-#: same record's name relative to the run dir, which is the form `_io.Bound`'s readers take.
-#: Both are the owner's own value, so both are owner-derived; only the CONSTRUCTED form was
-#: recognised before, which is the mechanical reason every bound reader hand-composed its
-#: relative name out of an imported constant — the owner had no value it could hand them.
+#: The owner modules' module-level singletons — stateless layout values a caller imports rather
+#: than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the same record's name
+#: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
 _OWNER_VALUE_ORIGINS = frozenset({
     "defender._run_paths.RUN_LAYOUT",
     "defender._run_paths.WIRE_LOG_NAMES",
@@ -261,26 +216,20 @@ _OWNER_VALUE_ORIGINS = frozenset({
     "defender._episode_paths.WORLD_LEAVES",
 })
 
-#: (#1077 D7) The handle sub-collections an owner-rooted attribute chain may pass THROUGH.
-#:
-#: The chain arm exists for `run.facts.<record>` — `Run`'s five declared sub-collections are
-#: the owner's own values. It was written to recurse through ANY attribute, which made every
-#: chain rooted at a tagged name owner-derived: once `paths = RunPaths(d)` was bound anywhere
-#: in a scope, an accessor read on `paths.<anything>.<record>` was accepted, and the gate's
-#: "unresolvable accessor use" arm could not fire again for that name. Named here, so the
-#: escape is the size of the thing it was built for.
+#: The handle sub-collections an owner-rooted attribute chain may pass through (for
+#: `run.facts.<record>`). Named rather than recursing through any attribute: otherwise
+#: `paths.<anything>.<record>` would be accepted once `paths` is tagged, silencing the gate's
+#: "unresolvable accessor use" arm for that name.
 _OWNER_SUBCOLLECTIONS = frozenset({
     "tables", "facts", "documents", "observability", "session",
-    # `WorldPaths.rel` is the same world's records in relative form — an owner value reached
-    # by attribute, like the handle's five.
+    # `WorldPaths.rel`: the same world's records in relative form.
     "rel",
 })
 
-#: (#1077 D7) Owner METHODS that return another owner handle rather than a path.
-#: `EpisodePaths(d).world(label)` is a `WorldPaths`, and `LAYOUT.world(label)` a `WorldLayout`
-#: — the archive's destination handle and the page's reader both come from here. Named, not
-#: inferred: tagging the result of EVERY owner call would make `paths.alert` an owner instance
-#: and silence the join arm on the very values it exists to judge.
+#: Owner methods that return another owner handle rather than a path:
+#: `EpisodePaths(d).world(label)` is a `WorldPaths`, `LAYOUT.world(label)` a `WorldLayout`.
+#: Named, not inferred: tagging the result of every owner call would make `paths.alert` an
+#: owner instance and silence the join arm on the values it exists to judge.
 _OWNER_SUBHANDLE_METHODS = frozenset({"world"})
 
 
@@ -299,11 +248,10 @@ def _owner_locals(
     defines: frozenset[str], inherited: frozenset[str],
 ) -> frozenset[str]:
     """Names bound, in `scope`'s own statements (never a nested def), to a name-owner
-    instance: an `Owner(...)` construction, a chained alias of one (`x = y` where `y` is
-    already tagged, or `x = owner.attr` — an owner-derived VALUE, tagged the same way so a
-    join onto it is still caught), or — for a function scope — a parameter annotated with an
-    owner class. `inherited` is the enclosing scope's own tagged names this scope has not
-    shadowed."""
+    instance: an `Owner(...)` construction, a chained alias of one (`x = y` with `y` tagged,
+    or `x = owner.attr`, so a join onto it is still caught), or — in a function scope — a
+    parameter annotated with an owner class. `inherited` is the enclosing scope's tagged
+    names this scope has not shadowed."""
     probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={})
     owners: set[str] = set(inherited)
 
@@ -351,13 +299,9 @@ def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool
     if isinstance(node, ast.Name):
         return node.id in owners or _origin(node, env) in _OWNER_VALUE_ORIGINS
     if isinstance(node, ast.Attribute):
-        # An attribute CHAIN rooted at an owner (`run.facts.scrub_verdict`, where `run` is a
-        # `Run`-annotated parameter) stays owner-derived — but ONLY through a DECLARED
-        # sub-collection. Recursing through any attribute at all made the escape unbounded:
-        # `paths.whatever.wire_log` passed once `paths` was tagged, so the gate's
-        # "unresolvable accessor use" arm went quiet for the rest of the scope. A member that
-        # is not one of the owner's own sub-collections is a container this pass cannot see
-        # into, which is exactly what that arm is for.
+        # An attribute chain rooted at an owner stays owner-derived only through a declared
+        # sub-collection; any other member is a container this pass cannot see into, which
+        # the "unresolvable accessor use" arm handles.
         if node.attr not in _OWNER_SUBCOLLECTIONS:
             return False
         return _owner_instance_in(node.value, owners, env)
@@ -365,9 +309,9 @@ def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool
 
 
 def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
-    """The env INSIDE one function: the enclosing env, with this scope's own bindings
-    applied. A local (non-import) binding SHADOWS an inherited import — that is the whole
-    point — and a local import rebinds on top of it."""
+    """The env inside one function: the enclosing env with this scope's own bindings
+    applied. A local non-import binding shadows an inherited import, and a local import
+    rebinds on top of it."""
     local_imports, bound = _scope_bindings(func)
     imports = {n: o for n, o in parent.imports.items() if n not in bound}
     imports.update(local_imports)
@@ -387,32 +331,25 @@ def _tag(node: ast.AST, env: ModuleEnv, scope_of: dict[ast.AST, ModuleEnv]) -> N
     """Record, for every node, the env of the scope it sits in."""
     for child in ast.iter_child_nodes(node):
         scope_of[child] = env
-        # A ClassDef is NOT in the chain: Python does not close methods over the class
-        # body, so a method's enclosing scope is the module (or the enclosing function).
-        # Recursing with the same env is exactly that. Class-body bindings are therefore
-        # invisible — accepted, and vanishingly rare in this tree.
+        # A ClassDef is not a scope in the chain: Python does not close methods over the
+        # class body, so a method's enclosing scope is the module (or enclosing function).
+        # Class-body bindings are therefore invisible — accepted, and rare in this tree.
         _tag(child, _child_env(child, env) if isinstance(child, _SCOPES) else env, scope_of)
 
 
 def module_env(tree: ast.AST) -> ModuleEnv:
-    """Build the SCOPE TREE for one module and return its root (module-level) env.
+    """Build the scope tree for one module and return its root (module-level) env.
 
-    Every node is tagged with the env of the scope it sits in, so ``callee``/``origin``/
-    ``str_value`` resolve a name the way Python would — against the innermost scope that
-    binds it — while callers keep passing the one env this returns.
+    Every node is tagged with its scope's env, so ``callee``/``origin``/``str_value`` resolve
+    a name against the innermost scope that binds it while callers pass the one env returned.
 
-    Scope-awareness is what makes collecting function-local imports SAFE. A local
-    ``import re as regex`` is a plausible evasion, so it must be seen; but binding it
-    module-wide (the pre-#607 resolver did) makes any local of the same name resolve to a
-    module. That is not hypothetical: ``learning/pipeline/judge/compare.py`` binds ``p`` to
-    a module inside ``_invlang()`` while ``write_comparison_files()`` uses ``p`` as a
-    ``Path``, so ``p.write_text(...)`` resolved to ``…invlang.parser.write_text``. Scoped,
-    the local ``p`` shadows the import in the function that rebinds it, and nowhere else.
+    Scoping is what makes collecting function-local imports safe: a function that binds
+    ``p`` to a module must not make ``p.write_text(...)`` in another function (where ``p`` is
+    a ``Path``) resolve to that module.
 
-    Note the two directions of "unresolvable", which is why a bail-out was never an option
-    here: for ``lint_unpinned_text_io`` a None callee means FLAG (the duck-typed
-    ``p.open()``), while for the jsonl and frontmatter gates it means SKIP. Only real
-    scoping is safe for all three at once.
+    A bail-out on ambiguity is not an option: for ``lint_unpinned_text_io`` a None callee
+    means flag (the duck-typed ``p.open()``), while for the jsonl and frontmatter gates it
+    means skip. Only real scoping is safe for all of them.
     """
     scope_of: dict[ast.AST, ModuleEnv] = {}
     imports, bound = _scope_bindings(tree)
@@ -430,16 +367,13 @@ def module_env(tree: ast.AST) -> ModuleEnv:
 
 
 def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
-    """(#1077 D6(b)) Is `node`'s value derived from a name owner (`RunPaths`/`EpisodePaths`) —
-    an `Owner(x).attr` chain, a local bound to an owner construction (or an owner-derived
-    value) in the same function, or a parameter annotated with an owner type?
+    """Is `node`'s value derived from a name owner (`RunPaths`/`EpisodePaths`) — an
+    `Owner(x).attr` chain, a local bound to an owner construction (or owner-derived value)
+    in the same function, or a parameter annotated with an owner type?
 
-    Resolved against the scope `node` sits in, the same way `callee`/`origin` are. A `Name`
-    is owner-derived when it was tagged by `_owner_locals`; an `Attribute` is owner-derived
-    when its RECEIVER resolves as an owner instance — `RunPaths(x).gather_raw` and
-    `paths.gather_raw` (where `paths` is a tagged local or an annotated parameter) both
-    qualify, so a join `.../ lead_id` onto either is what `lint_run_records`'s D6(b) pass
-    flags."""
+    Resolved against `node`'s scope. A `Name` qualifies when `_owner_locals` tagged it; an
+    `Attribute` when its receiver resolves as an owner instance (`RunPaths(x).gather_raw`,
+    `paths.gather_raw`). A join `.../ lead_id` onto either is what `lint_run_records` flags."""
     e = _env_at(node, env)
     if isinstance(node, ast.Name):
         return node.id in e.owner_locals
@@ -457,20 +391,19 @@ def _env_at(node: ast.AST, env: ModuleEnv) -> ModuleEnv:
 
 
 def origin(node: ast.expr, env: ModuleEnv) -> str | None:
-    """The dotted origin of a PURE ``Name.attr.attr`` chain rooted at an imported name,
+    """The dotted origin of a pure ``Name.attr.attr`` chain rooted at an imported name,
     resolved against the scope ``node`` sits in.
 
     ``os`` -> ``"os"``; ``regex`` -> ``"re"``; ``re.error`` -> ``"re.error"``.
-    ``p`` -> None (a local value — including one that merely SHARES a name with an import
-    bound in some other function). ``zipfile.ZipFile(p)`` -> None: a Call in the chain
-    makes it a VALUE, not an attribute path — never walk through one, or the value's
-    origin gets confused with its constructor's.
+    ``p`` -> None (a local value, even one sharing a name with an import in another
+    function). ``zipfile.ZipFile(p)`` -> None: a Call makes it a value, and walking through
+    it would confuse the value's origin with its constructor's.
     """
     return _origin(node, _env_at(node, env))
 
 
 def _origin(node: ast.expr, env: ModuleEnv) -> str | None:
-    """``origin`` against an ALREADY-resolved scope env."""
+    """``origin`` against an already-resolved scope env."""
     parts: list[str] = []
     cur: ast.expr = node
     while isinstance(cur, ast.Attribute):
@@ -487,23 +420,18 @@ def _origin(node: ast.expr, env: ModuleEnv) -> str | None:
 
 
 def callee(call: ast.Call, env: ModuleEnv) -> str | None:
-    """The dotted origin of the called FUNCTION, or None when the receiver is a value
+    """The dotted origin of the called function, or None when the receiver is a value
     rather than a module.
 
         re.search(...) / regex.search(...) / search(...)   -> "re.search"
         subprocess.run(...) / run(...)                     -> "subprocess.run"
         open(...)      [not imported, not shadowed]        -> "builtins.open"
-        p.open("r") / p.read_text() / zf.open(n)           -> None   <- DUCK-TYPED
+        p.open("r") / p.read_text() / zf.open(n)           -> None   <- duck-typed
 
-    Everything resolves against the scope the CALL sits in, so a function-local import is
-    seen inside that function and nowhere else, and a local that merely shares a name with
-    an import elsewhere in the file stays a local (#607).
-
-    ``env.defines`` — the names bound to something that is not an import — is consulted
-    BEFORE ``env.imports``, so a shadowing local wins over an ambiguous module-level
-    binding. The ``builtins.<id>`` fallback fires ONLY in call position, and only for a
-    Name in neither map, so a parameter named ``input`` or a ``def open(...)`` cannot
-    fabricate an origin.
+    Resolves against the call's scope. ``env.defines`` is consulted before ``env.imports``
+    so a shadowing local wins. The ``builtins.<id>`` fallback fires only for a Name in
+    neither map, so a parameter named ``input`` or a ``def open(...)`` cannot fabricate an
+    origin.
     """
     env = _env_at(call, env)
     func = call.func
@@ -521,13 +449,11 @@ def callee(call: ast.Call, env: ModuleEnv) -> str | None:
 
 
 def root_name(node: ast.expr) -> str | None:
-    """The LOOSE root Name of an attribute/call/subscript chain, walking THROUGH calls:
+    """The loose root Name of an attribute/call/subscript chain, walking through calls:
     ``line.strip()`` -> ``"line"``; ``zipfile.ZipFile(p).open`` -> ``"zipfile"``.
 
-    This identifies a NAME for value-derivation tracking (which local a value came from);
-    it is NOT module resolution and must not be used as one. Distinct from ``origin`` on
-    purpose — the three gates each had a private copy of this walker under a different
-    name (``_receiver_root`` / ``_open_receiver_root`` / ``_root_name``).
+    For value-derivation tracking (which local a value came from); it is not module
+    resolution and must not be used as one — use ``origin``.
     """
     cur: ast.expr = node
     while True:
@@ -543,14 +469,12 @@ def root_name(node: ast.expr) -> str | None:
 
 
 def str_args(call: ast.Call, env: ModuleEnv) -> list[str]:
-    """The string args of a call — positional AND keyword (so ``re.compile(pattern=…)``
+    """The string args of a call — positional and keyword (so ``re.compile(pattern=…)``
     is seen), tuple elements flattened (so ``startswith(("a", "b"))`` is), and Names
     resolved through ``env.consts``.
 
-    The const resolution matters: hoisting a literal to a module constant
-    (``FENCE = "---\\n"`` … ``text.startswith(FENCE)``) is GOOD style, and a detector that
-    reads inline Constants only makes the tidiest way to write the banned idiom the one
-    way to evade the gate.
+    Const resolution matters: hoisting a literal to a module constant is good style, and a
+    detector reading inline Constants only would make that the one way to evade the gate.
     """
     out: list[str] = []
     for arg in [*call.args, *(kw.value for kw in call.keywords)]:
@@ -562,10 +486,9 @@ def str_args(call: ast.Call, env: ModuleEnv) -> list[str]:
 
 
 def arg_at(call: ast.Call, index: int, keyword: str) -> ast.expr | None:
-    """The argument in positional slot ``index`` or passed as ``keyword=``, whichever is
-    present. The positional slot is a property of the CALLEE — ``builtins.open(file, mode)``
-    puts mode at 1, ``Path.open(mode)`` at 0, ``tempfile.NamedTemporaryFile(mode)`` at 0 —
-    so the caller must pass the index it resolved, never guess one."""
+    """The argument in positional slot ``index`` or passed as ``keyword=``. The slot is a
+    property of the callee (``builtins.open(file, mode)`` puts mode at 1, ``Path.open(mode)``
+    at 0), so the caller passes the index it resolved."""
     if index >= 0 and len(call.args) > index:
         return call.args[index]
     for kw in call.keywords:
@@ -584,11 +507,9 @@ def str_value(node: ast.expr | None, env: ModuleEnv) -> str | None:
     return None
 
 
-# Openers that DO take `encoding=`, keyed by resolved origin -> (mode's positional slot,
-# mode's default). Both facts are properties of the CALLEE, and both used to be guessed:
-# the old `_open_mode` read args[0] as the mode for every `<x>.open(...)`, which is right
-# only for `Path.open(mode)`. Every module-level opener is path-FIRST, so the gate read the
-# file path as the mode string (#594/#602). Verified against inspect.signature.
+# Openers that take `encoding=`, keyed by resolved origin -> (mode's positional slot, mode's
+# default). Both are properties of the callee: module-level openers are path-first, unlike
+# `Path.open(mode)`. Verified against inspect.signature.
 OPENERS = {
     "builtins.open": (1, "r"),
     "io.open": (1, "r"),                          # io.open IS builtins.open
@@ -601,31 +522,26 @@ OPENERS = {
     "tempfile.TemporaryFile": (0, "w+b"),
     "tempfile.SpooledTemporaryFile": (1, "w+b"),  # max_size comes FIRST — mode is slot 1
 }
-# `Path.open(mode)` and friends: the receiver is a VALUE, so the callee never resolves.
-# Duck-typed on purpose — this is the case the gates most exist to catch.
+# `Path.open(mode)` and friends: the receiver is a value, so the callee never resolves.
+# Duck-typed on purpose — the case the gates most exist to catch.
 DUCK_OPENER = (0, "r")
-# Genuinely encoding-less: `os.open` returns an fd (its third arg is the PERMISSION bits,
+# Genuinely encoding-less: `os.open` returns an fd (its third arg is the permission bits,
 # not a text mode); `tarfile.open` has no `encoding` parameter.
 NO_ENCODING_OPENERS = ("os.open", "tarfile.open")
 
 
 def opener_slot(call: ast.Call, env: ModuleEnv) -> tuple[int, str] | None:
     """``(mode's positional slot, mode's default)`` for an opener call, or None if this
-    call is not an opener at all.
+    call is not an opener.
 
-    An origin is skipped only via the POSITIVE ``NO_ENCODING_OPENERS`` table — never
-    because it merely resolved. "It resolved, so the receiver is a module, so it is not a
-    duck-typed opener" is FALSE: the receiver may be an imported OBJECT, and
-    ``PATHS.lessons_dir.open()`` duly resolves to
-    ``defender._paths.PATHS.lessons_dir.open``. Reading that as "not an opener" silently
-    drops the Path-like text open these gates most exist to catch, and the empty baseline
-    would stay green while it happened. Scoping (#607) does not close this — ``PATHS`` is
-    a genuine import, never rebound — so the positive table is what carries it.
+    An origin is skipped only via the positive ``NO_ENCODING_OPENERS`` table, never because
+    it merely resolved: the receiver may be an imported object (``PATHS.lessons_dir.open()``
+    resolves to ``defender._paths.PATHS.lessons_dir.open``), and treating it as "not an
+    opener" would drop exactly the Path-like text open these gates exist to catch.
 
-    So: a tabled origin gets the callee's real slot/default; any OTHER ``.open`` on a
-    receiver falls back to the duck opener. The cost is a possible false alarm on an
-    untabled module opener called with a literal path — a false alarm the suppression
-    marker answers, where the reverse error is a violation that ships.
+    A tabled origin gets the callee's real slot/default; any other ``.open`` falls back to
+    the duck opener. The cost is a possible false alarm on an untabled module opener, which
+    the suppression marker answers.
     """
     o = callee(call, env)
     if o in NO_ENCODING_OPENERS:
@@ -639,11 +555,10 @@ def opener_slot(call: ast.Call, env: ModuleEnv) -> tuple[int, str] | None:
 
 
 def open_mode(call: ast.Call, env: ModuleEnv) -> str | None:
-    """The mode an opener call opens in — the CALLEE's own default when no mode is passed.
+    """The mode an opener call opens in — the callee's own default when no mode is passed.
 
-    None means "no mode this checker can read": either the call is not an opener, or the
-    mode is an expression rather than a literal/module-const. Both mean the same thing to
-    every caller (there is nothing to decide on), so they share the return.
+    None means there is no readable mode: the call is not an opener, or the mode is an
+    expression rather than a literal/module-const.
     """
     slot = opener_slot(call, env)
     if slot is None:

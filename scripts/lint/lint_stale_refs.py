@@ -1,88 +1,48 @@
 #!/usr/bin/env python3
-"""Stale-reference scan — for symbols/files removed in a PR's diff,
-verify the post-PR tree has no remaining references.
+"""Stale-reference scan: for symbols/files removed in a PR's diff, verify the post-PR tree has
+no remaining references (the "rename refactor missed a callsite" class).
 
-Catches the recurring "rename refactor missed a callsite" class:
-- f1a6014: stale `WAZUH_CLI_VENV` after rename
-- 0aa4924: stale `scripts/siem` refs after refactor to `scripts/tools`
-- b77a276: `_prior_recall` import path broken in hook contexts
-- 8ef005f: test glob still matched old pre-suffix filename pattern
-
-WHAT IS COMPARED, AND AGAINST WHAT. The diff runs from `merge-base($STALE_REF_BASE, HEAD)` to
-the WORKING TREE — not to HEAD. Both halves of this gate then read one tree: the reference half
-is `git grep`, which has always read the working tree, so a removal half reading HEAD made the
-gate answer about a tree that does not exist. Uncommitted deletions donated no identifiers while
-the references the same edit added were fully visible, so the ordinary run-then-commit workflow
-verified the wrong tree and reported clean (#922 shipped two rounds of stale references that
-way). On a clean tree — CI's, always — the two bases are identical, so this narrows nothing
-there; on a dirty one it reports on the work in it, as every other lint here already does.
+The diff runs from `merge-base($STALE_REF_BASE, HEAD)` to the working tree, not to HEAD, because
+the reference half (`git grep`) reads the working tree; both halves must read the same tree or
+uncommitted deletions go unseen. On a clean tree (CI) the two are identical.
 
 Algorithm:
   1. Diff from `merge-base($STALE_REF_BASE, HEAD)` (default base `origin/main`) to the
      working tree.
   2. Collect identifiers removed by `-`-side lines:
-       - `def NAME(` / `class NAME` — except a def nested inside a function body
-         (resolved against the base tree's AST): invisible outside its scope, so
-         its removal can strand nothing
+       - `def NAME(` / `class NAME`, except a def nested in a function body (resolved
+         against the base tree's AST): invisible outside its scope, it can strand nothing
        - top-level `NAME =` (uppercase constants)
        - removed `from ... import NAME` targets
-  3. Filter: skip identifiers under 8 chars that contain no underscore, and
-     skip common stdlib symbols (typing/Callable/etc.) — they're never
-     project-specific stale-ref signal.
-  4. Skip identifiers that still have a binding site (def/class/assignment/
-     import) ANYWHERE in the post-PR tree — they were moved, re-exported, or
-     their import line merely reflowed (single→multi-line), not removed. A
-     genuine stale ref is a symbol defined NOWHERE yet still referenced.
-     Idents harvested from PATHS (step 2's component/stem walk) are skipped on
-     the same principle by `_path_named`: a name still carried by a tracked
-     directory or file has not been removed, so emptying a directory but keeping
-     one file in it must not condemn every reference to the directory. Archival
-     trees (`_ARCHIVAL_DIRS`) hold frozen copies and cannot vouch for a name.
-  5. Grep the tree ONCE for all survivors, word-boundary (`git grep -w -F -e A
-     -e B ...`) — `-w` so a removed `_by_id` does not match
-     `template_path_by_id`. Steps 4 and 5 read the same grep. Idents with >50
-     hits are too common to be signal; skip them. Idents with 1–50 hits in
-     files OUTSIDE the diff's own changed files are surfaced.
+  3. Skip identifiers under 8 chars with no underscore, and common stdlib symbols.
+  4. Skip identifiers that still have a binding site (def/class/assignment/import) anywhere
+     in the post-PR tree: moved, re-exported, or an import reflowed. Idents harvested from
+     paths are skipped likewise by `_path_named` when a tracked directory or file still
+     carries the name. Archival trees (`_ARCHIVAL_DIRS`) cannot vouch for a name.
+  5. Grep the tree once for all survivors, word-boundary (`git grep -w -F -e A -e B ...`),
+     so a removed `_by_id` does not match `template_path_by_id`. Idents with >50 hits are
+     too common to be signal; idents with 1–50 hits outside the diff's changed files are
+     surfaced.
 
-A hit in a PYTHON file is classified against that file's AST, not against the
-text of the line: a name is bound there (def/class/import/assignment → step 4)
-or declared there (a parameter → not a reference) or read there. The line's text
-cannot answer this. A parameter on its own line of a multi-line signature reads
-as a bare `name,` — indistinguishable, textually, from a multi-line import
-member, so a regex that calls one a binding calls the other one too, and the
-ident drops out of the whole scan. Every non-Python file (markdown prompt, YAML,
-shell) still falls back to the textual heuristics, which is where the actual
-#617-class stale reference lives.
+A hit in a Python file is classified against that file's AST (bound, declared as a parameter,
+or read), not the line's text: a parameter alone on a line of a multi-line signature reads
+textually like a multi-line import member. Non-Python files use textual heuristics.
 
-FAIL-CLOSED (#618). Every git command this gate needs is required to succeed; a
-failure raises `GitError` and exits 2. It must never be possible to confuse "git
-could not answer" with "the answer is empty" — that is how this gate spent its
-whole life reporting clean on every PR:
-
-    the `code-smells` checkout was depth-1, so HEAD (`refs/pull/N/merge`) was a
-    shallow graft with no common ancestor. `git rev-parse --verify origin/main`
-    PASSED — a `--depth=50` fetch had created the ref — but `origin/main...HEAD`
-    is the three-dot form and needs a MERGE-BASE, which the graft does not have.
-    `git diff` exited 128, the old `_run` swallowed it into "", and "no diff" read
-    as "nothing was removed". So the preflight below checks the merge-base and not
-    merely the ref: a rev-parse-only guard ships the same bug again.
-
-Exactly one git call may exit non-zero: `git grep` returns 1 for "no match", a
-legitimate empty answer. Every other call must exit 0.
+Fail-closed: every git command must succeed, else `GitError` and exit 2, so "git could not
+answer" is never confused with "the answer is empty". In particular a shallow CI checkout can
+resolve the base ref yet have no merge-base, so the preflight checks the merge-base, not just
+the ref. The one allowed non-zero exit is `git grep` returning 1 for "no match".
 
 Exit codes:
   0  clean, or every finding is baselined
   1  a new stale reference
-  2  the gate COULD NOT RUN — unresolvable base ref, no merge-base, or a git
-     failure. Never a silent pass (the lint_vulture convention).
+  2  the gate could not run — unresolvable base ref, no merge-base, or a git failure.
 
 Suppression:
-  - `# lint-stale-ref: ok — <reason>` on the referencing line, for a reference
-    that names a dead symbol ON PURPOSE — e.g. a negative-assertion test proving
-    the dead command is denied, where removing the name removes the test's point.
-  - A YAML frontmatter `name: <ident>` line is a DECLARATION, not a reference, and
-    is never reported (a skill's own name may collide with a deleted shim's
-    basename). Line-scoped: other references in the same file still go red.
+  - `# lint-stale-ref: ok — <reason>` on the referencing line, for a reference that names a
+    dead symbol on purpose (e.g. a negative-assertion test proving the dead command is denied).
+  - A YAML frontmatter `name: <ident>` line is a declaration, not a reference, and is never
+    reported. Line-scoped: other references in the same file still count.
 
 Run from repo root:  python scripts/lint/lint_stale_refs.py
 """
@@ -105,11 +65,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASE_REF = os.environ.get("STALE_REF_BASE", "origin/main")
 BASELINE_PATH = Path(__file__).with_name("lint_stale_refs_baseline.json")
 
-# Maximum total hits before we declare an ident too common to be signal.
 HIT_CAP = 50
 
-# Patterns per `git grep` call. See `_grep_lines`: the matcher degrades superlinearly in the
-# pattern count, so batching cuts the TOTAL cost rather than merely spreading it.
+# Patterns per `git grep` call: the matcher degrades superlinearly in the pattern count, so
+# batching cuts total cost.
 _GREP_BATCH = 200
 
 REMOVED_DEF = re.compile(r"^-\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
@@ -119,45 +78,31 @@ REMOVED_PY_IMPORT = re.compile(
     r"^-\s*import\s+([\w.]+)"
 )
 
-# Identifiers that are never project-specific stale-ref signal.
-#
-# The second line is the ordinary-English class, and it is a real shape rather than a
-# convenience: a deleted test's local double is routinely `def successful(...)` or
-# `def interrupted(...)`, and the name then condemns every ordinary use of the word in the live
-# tree — 57 of them on #922, including one inside a captured postgres log line. A word this
-# common cannot carry a rename, so a hit on it is noise by construction.
+# Identifiers that are never project-specific stale-ref signal. The ordinary-English words are
+# here because a deleted test double like `def successful(...)` would otherwise condemn every
+# ordinary use of the word in the tree.
 GENERIC_NAMES = {
     "main", "handle", "author", "format_output",
     "successful", "interrupted",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
-    # A stdlib PROTOCOL method: a test's `sys.meta_path` finder defines it, and deleting that
-    # finder condemned every `importlib.util.find_spec(...)` call in the tree (15 on #1075).
+    # A stdlib protocol method: deleting a test's `sys.meta_path` finder would otherwise
+    # condemn every `importlib.util.find_spec(...)` call.
     "find_spec",
 }
 
-# Trees that hold FROZEN copies of things the live tree may since have deleted: a name
-# surviving only here is not evidence it survives in the live tree, so `_path_named` does
-# not let them vouch for one. Distinct from EXCLUDED_GREP_DIRS below, which answers a
-# different question ("is this dir a reference SOURCE") and includes live dirs.
+# Trees holding frozen copies of things the live tree may have deleted: a name surviving only
+# here cannot vouch that it survives. Distinct from EXCLUDED_GREP_DIRS ("is this dir a
+# reference source"), which includes live dirs.
 _ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-flow/specs/archive/")
 
-# Trees whose DISAPPEARANCE is not a code change. A third question again: `_ARCHIVAL_DIRS`
-# answers "may a name here vouch that a symbol survives", `EXCLUDED_GREP_DIRS` answers "is
-# this dir a reference SOURCE", and this answers "is a `def` deleted from here evidence that
-# a symbol was removed from the product". For local scratch — research runs, experiment
-# harnesses — it is not: those trees carry thousands of throwaway definitions whose names
-# collide with ordinary English (`transcripts`, `main`, `runs`), so removing one in a single
-# commit donates hundreds of identifiers and every unrelated mention of the word in the live
-# tree reads as a stale reference. Excluded from the removal DIFF rather than from the grep,
-# because it is the `-` side that manufactures them.
+# Trees whose removals are not code changes (local scratch: research runs, experiment
+# harnesses). Their throwaway definitions collide with ordinary English, so deleting one would
+# donate many identifiers and every unrelated mention would read as stale. Excluded from the
+# removal diff, since the `-` side is what manufactures them.
 #
-# `experiments` is here for a second reason that makes it structural rather than a judgement
-# call: it is also an `_ARCHIVAL_DIRS` entry, so a name surviving only there may not vouch for
-# itself. Deleting ONE file under it therefore donated the path component `experiments` as a
-# removed identifier that nothing could clear — and every ordinary mention of the word in the
-# live tree (34 of them on #922) read as a stale reference. Any tree in both lists has that
-# shape; these two are the trees that are in both.
+# `experiments` must be here structurally: it is also in `_ARCHIVAL_DIRS`, so deleting one file
+# under it would donate the component `experiments` as a removed identifier nothing could clear.
 NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
@@ -168,51 +113,25 @@ EXCLUDED_GREP_DIRS = (
     # Task files and design docs reference removed symbols historically;
     # they are not code that should be kept consistent with current names.
     "tasks", "docs",
-    # POC design notes — same rationale.
     "defender/docs",
-    # The spec corpus: every graph, and the pre-graph #575 artifacts archived beside
-    # them, QUOTE the pre-change code by construction — naming the old symbol is the job.
-    # One directory covers the whole corpus now that the graphs live together, which is
-    # what retires the two per-test-tree globs this used to need below.
+    # The spec corpus quotes pre-change code by construction.
     "spec-flow/specs",
-    # An entry matches `rel == d` or `rel` under `d + "/"`, so it does NOT cover a
-    # same-prefixed SIBLING directory. These two are the same historical-prose class
-    # as `defender/fixtures` and `defender/lessons` above, and slipped through on that
-    # technicality (#618). Keep them explicit rather than relaxing the match to a bare
-    # prefix, which would silently swallow any future `defender/tests-*` sibling.
+    # An entry matches `rel == d` or `rel` under `d + "/"`, so it does not cover a
+    # same-prefixed sibling directory; these are listed explicitly rather than relaxing the
+    # match to a bare prefix, which would swallow any future `defender/tests-*` sibling.
     "defender/fixtures-e2e",
     "defender/lessons-environment",
-    # #1007: the questioner's own corpus — same rationale as the two above.
     "defender/lessons-questioner",
-    # The judge-alignment dataset: human-labelled samples of what a judge emitted, batch by
-    # batch. Same class as the lesson corpora above — authored knowledge whose text quotes the
-    # code of its own moment, and #922 deleted the judge it was labelled against. Rewriting the
-    # samples to name today's vocabulary would falsify the labels, and deleting the dataset is
-    # the owner's call, not this gate's.
+    # Judge-alignment dataset: human-labelled samples whose text quotes the code of its
+    # moment. Rewriting them to today's vocabulary would falsify the labels.
     "defender/learning/judge-alignment",
-    # The golden CASE tree — the same class again. Each case is a captured record of one
-    # recruitment: `manifest.yaml` says which code path produced its artifacts, `expected.yaml`
-    # says how the expectation was derived, and `hidden/`/`oracle_visible/` are the payloads
-    # themselves. Naming the producing symbol is the record's job, and rewriting it to name
-    # today's code would falsify what was actually run. The eval CODE beside it
-    # (`score.py`, `controls.py`, `validate_cases.py`, …) is not excluded and is still scanned.
+    # Golden case records: each names the code path that produced it, and rewriting that
+    # would falsify what was run. The eval code beside it is still scanned.
     "defender/evals/oracle_golden/cases",
 )
 
-# Frozen spec graphs of merged issues: inert records, not code. Rewriting one to name
-# today's symbols would falsify the record. The executable half of a spec
-# (defender/tests/test_*.py) is still fully scanned, and fails if spec and code diverge.
-# A spec graph whose suite lives under tests/e2e/ sits there too, and the first glob does
-# NOT reach it — `*` does not cross a `/`. Same class as the `defender/fixtures-e2e` and
-# `defender/lessons-environment` entries above, and it slipped through on the same
-# technicality (#667): spec_graph_540.yaml's frozen prose names `resolve_run_dir`, which
-# #667 deletes. Kept as a second explicit glob rather than a `**` relaxation, which would
-# silently swallow any future spec graph parked anywhere under defender/.
-# Empty by design: the spec corpus is one directory (`spec-flow/specs`, in
-# EXCLUDED_GREP_DIRS above), so the per-test-tree globs this held — one that missed the
-# e2e sibling because `*` does not cross a `/`, and the explicit second glob added to
-# patch that (#667) — no longer have anything to cover. Kept as a seam for a future
-# artifact that is inert-by-construction but cannot live under a single root.
+# Globs for inert-by-construction artifacts that cannot live under one excluded root. Empty:
+# the spec corpus is one directory in EXCLUDED_GREP_DIRS. Note `*` does not cross a `/`.
 EXCLUDED_GREP_GLOBS: tuple[str, ...] = ()
 
 # On the REFERENCING line: this reference names a dead symbol deliberately.
@@ -221,23 +140,17 @@ SUPPRESS = "lint-stale-ref: ok"
 # A YAML frontmatter `name:` line declares an identity; it does not call anything.
 FRONTMATTER_NAME = re.compile(r"^\s*name:\s*(\S+)\s*$")
 
-# A `def`/`class` signature line — the only place a bare `ident` in a parameter slot is a
-# local's DECLARATION rather than a reference to the module-level symbol of that name.
-# The textual FALLBACK, for a file with no AST to ask (see `_PyFacts`).
+# A `def` signature line — the only place a bare `ident` in a parameter slot declares a local
+# rather than referencing the module-level symbol. Textual fallback for files with no AST.
 DEF_SIGNATURE = re.compile(r"^\s*(?:async\s+)?def\s")
 
-# Every maximal word run on a line. Used to narrow "which of the removed identifiers could
-# this line possibly be about" from a scan of all of them to a set lookup, which is what keeps
-# the two per-hit loops below off an idents x hits product (#922 removes 1526 identifiers and
-# the grep returns 23k lines — 35M regex searches per loop).
+# Every maximal word run on a line: narrows "which removed identifiers could this line be
+# about" to a set lookup, keeping the per-hit loops off an idents x hits product.
 #
-# EXACT for a word-shaped name, not an approximation: such a name is itself a `\w+` run, and
-# `\b` is defined off the same `\w` class, so `re.search(rf"\b{ident}\b", line)` is true exactly
-# when `ident` is one of this line's maximal runs. `\w+` rather than an identifier pattern for
-# the same reason — `1foo` must yield `1foo`, not `foo`, because `\bfoo\b` does not match
-# inside it. Names that are NOT one run — the path stems, which carry `-` and `.` — cannot come
-# back from this and are matched one regex each; there are a handful, so the product they cost
-# is not the one this exists to avoid.
+# Exact for a word-shaped name: `\b` is defined off the same `\w` class, so
+# `re.search(rf"\b{ident}\b", line)` is true exactly when `ident` is one of the line's maximal
+# runs (`1foo` yields `1foo`, not `foo`). Names that are not one run (path stems with `-`/`.`)
+# are matched one regex each.
 WORD_RUN = re.compile(r"\w+")
 
 
@@ -249,7 +162,7 @@ def _referencing(content: str, word_idents: set[str], other: dict[str, re.Patter
 
 
 def _split_idents(idents: Sequence[str]) -> tuple[set[str], dict[str, re.Pattern]]:
-    """`(word-shaped, {the rest: its \b-anchored pattern})` — the two lookup strategies above."""
+    """`(word-shaped, {the rest: its \b-anchored pattern})`."""
     word = {i for i in idents if WORD_RUN.fullmatch(i)}
     other = {i: re.compile(rf"\b{re.escape(i)}\b") for i in idents if i not in word}
     return word, other
@@ -257,26 +170,20 @@ def _split_idents(idents: Sequence[str]) -> tuple[set[str], dict[str, re.Pattern
 
 @dataclass(frozen=True)
 class _PyFacts:
-    """What each LINE of one Python file binds, declares, and reads — keyed `(lineno, name)`.
+    """What each line of one Python file binds, declares, and reads — keyed `(lineno, name)`.
 
-    `bindings` is what makes an ident "still defined" (def/class name, import alias,
-    assignment target). A PARAMETER is deliberately NOT one: it binds a local, and reading
-    it as a definition of the module-level symbol of the same name would drop that ident
-    from the ENTIRE scan — an ident-scoped whitelist, the one shape this gate must never
-    have. It lands in `params` instead, which is line-scoped and only says "this line does
-    not REFERENCE the name".
+    `bindings` makes an ident "still defined" (def/class name, import alias, assignment
+    target). A parameter is not a binding: it binds a local, and treating it as a definition
+    would drop the ident from the entire scan. It goes in `params`, which is line-scoped and
+    only says "this line does not reference the name".
 
-    `loads` is consulted so that `def f(x=x())` — a parameter that also reads the
-    module-level symbol it shadows — stays a reference.
-
-    (`_astlib` resolves a different question: where a CALL comes from. The question here is
-    what a LINE binds, so the facts are collected here.)"""
+    `loads` keeps `def f(x=x())` — a parameter that also reads the symbol it shadows — a
+    reference."""
 
     bindings: frozenset[tuple[int, str]]
     params: frozenset[tuple[int, str]]
     loads: frozenset[tuple[int, str]]
-    #: `bindings` inverted to `lineno -> names`. Derived, never a second source of truth: it
-    #: answers "which names does THIS line bind" without a scan over every removed identifier.
+    #: `bindings` inverted to `lineno -> names` (derived).
     bindings_by_line: dict[int, frozenset[str]]
 
 
@@ -288,8 +195,8 @@ def _collect_py_facts(tree: ast.AST) -> _PyFacts:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             bindings.add((node.lineno, node.name))
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            # `alias.lineno` is the MEMBER's own line, so a reflowed multi-line import
-            # binds each name on the line it actually sits on.
+            # `alias.lineno` is the member's own line, so a reflowed multi-line import
+            # binds each name on its own line.
             for alias in node.names:
                 for name in (alias.asname, alias.name.split(".")[0]):
                     if name and name != "*":
@@ -325,9 +232,8 @@ class _PySources:
         self._cache: dict[str, _PyFacts | None] = {}
 
     def facts(self, rel: str) -> _PyFacts | None:
-        """None when there is no AST to ask — the file is not Python, or does not parse.
-        Callers fall back to the textual heuristics, which is what every markdown prompt,
-        YAML and shell file uses anyway."""
+        """None when there is no AST (not Python, or does not parse); callers fall back to
+        textual heuristics."""
         if rel not in self._cache:
             self._cache[rel] = self._parse(rel)
         return self._cache[rel]
@@ -343,8 +249,7 @@ class _PySources:
 
 
 class GitError(RuntimeError):
-    """A git command the gate REQUIRES to succeed did not. The gate cannot run, and so
-    must not report clean."""
+    """A git command the gate requires to succeed did not; the gate must not report clean."""
 
 
 def _git(
@@ -355,8 +260,7 @@ def _git(
     ok_codes: tuple[int, ...] = (0,),
 ) -> str:
     """Run `git <args>` and return stdout. Raise GitError unless the exit code is in
-    `ok_codes`. There is deliberately NO empty-string-on-failure path: an empty return
-    value means git ran and found nothing."""
+    `ok_codes`; an empty return always means git ran and found nothing."""
     printable = "git " + " ".join(args)
     try:
         proc = subprocess.run(
@@ -375,8 +279,7 @@ def _git(
 
 
 def _git_ok(args: Sequence[str], *, cwd: Path, timeout: int = 30) -> bool:
-    """Predicate form, for a probe whose non-zero exit IS the answer (does this ref
-    resolve? is there a merge-base?). Never raises."""
+    """Predicate form, for a probe whose non-zero exit is the answer. Never raises."""
     try:
         proc = subprocess.run(
             ["git", *args], cwd=cwd, text=True, capture_output=True, timeout=timeout,
@@ -390,9 +293,8 @@ def _git_ok(args: Sequence[str], *, cwd: Path, timeout: int = 30) -> bool:
 def _base_ref_error(repo_root: Path, base_ref: str) -> str | None:
     """None if `base_ref` is a usable diff base; otherwise the operator-facing reason.
 
-    Both probes are fatal. The merge-base one is load-bearing: in the CI run that
-    exposed #618 the ref resolved and the merge-base did not, so a rev-parse-only
-    guard passes while the gate checks nothing."""
+    Both probes are fatal. A shallow clone can resolve the ref but have no merge-base, so a
+    rev-parse-only guard would pass while the gate checks nothing."""
     if not _git_ok(
         ["rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}"], cwd=repo_root
     ):
@@ -413,24 +315,11 @@ def _base_ref_error(repo_root: Path, base_ref: str) -> str | None:
 
 
 def _diff_base(repo_root: Path, base_ref: str) -> str:
-    """The commit every diff below is taken FROM — `merge-base(base_ref, HEAD)`, resolved once.
+    """`merge-base(base_ref, HEAD)`, the commit every diff is taken from, resolved once.
 
-    THE DIFF RUNS AGAINST THE WORKING TREE, NOT AGAINST HEAD, and that is the whole point of
-    naming the base separately. `git diff A...HEAD` is `git diff $(git merge-base A HEAD) HEAD`;
-    passing the merge-base with NO second revision diffs it against the working tree instead —
-    index and unstaged edits included.
-
-    The two halves of this gate have to read the SAME tree or it answers a question about a tree
-    that does not exist. The reference half is `git grep`, which reads the WORKING TREE; the
-    removal half read HEAD. Uncommitted work was therefore invisible on the removal side and
-    fully visible on the reference side, so a deletion sitting in the working tree donated no
-    identifiers and the gate reported clean on it — while reporting on every reference the same
-    edit had added. Running it before committing verified the wrong tree, and it took two
-    rounds of CI on #922 to notice, because CI's tree is always clean and the two bases agree
-    there. They still agree there: this changes nothing about what CI checks.
-
-    A dirty tree therefore now reports on the work in it, which is what every other lint in this
-    repo already does — this one was the odd one out."""
+    Diffs pass it with no second revision, so they run against the working tree (index and
+    unstaged edits included), the same tree `git grep` reads. Diffing against HEAD would make
+    uncommitted deletions invisible while their references stay visible."""
     return _git(["merge-base", base_ref, "HEAD"], cwd=repo_root).strip()
 
 
@@ -443,16 +332,13 @@ _DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*?) b/(.*)$")
 
 
 def _function_local_defs(repo_root: Path, diff_base: str, path: str) -> set[str]:
-    """Names bound by a `def`/`class` INSIDE A FUNCTION BODY in the base version of `path`,
+    """Names bound by a `def`/`class` inside a function body in the base version of `path`,
     minus any bound at module or class scope in the same file.
 
-    A function-local name is invisible outside its scope by construction, so removing it can
-    leave no stale reference anywhere — and it is usually an ordinary word (`outbound`,
-    `render`, `check`) that the rest of the tree uses as prose or as an unrelated local.
-    Harvesting it as a removed identifier turns every such use into a finding (#1060: 33
-    baseline entries for one nested test helper). Read off the BASE tree's AST because that
-    is where the definition existed; the diff's `-` line alone cannot say what scope it sat
-    in (a local `def` inside a top-level function and a method are both indented four)."""
+    A function-local name is invisible outside its scope, so removing it strands nothing, and
+    it is often an ordinary word used elsewhere as prose. Read off the base tree's AST because
+    the diff's `-` line cannot say what scope it sat in (a nested `def` and a method are both
+    indented four)."""
     try:
         text = _git(["show", f"{diff_base}:{path}"], cwd=repo_root)
         tree = ast.parse(text)
@@ -496,17 +382,10 @@ def _collect_removed_idents(repo_root: Path, diff_base: str) -> set[str]:
             idents.add(m.group(1))
         m = REMOVED_PY_IMPORT.match(line)
         if m:
-            # ONLY the from-import's TARGETS (group 2) are candidate removed identifiers.
-            # The MODULE PATH — group 1 of `from X import Y`, group 3 of `import X` — is
-            # deliberately not collected: dropping an import line is evidence that the
-            # imported NAME may be gone, never that the module is. Collecting the path's
-            # last component made every surviving importer of that module read as a stale
-            # reference, because a module's binding site is a FILE and `_still_defined`
-            # only recognises AST bindings (def/class/assignment/import), so it could
-            # never clear the ident. A genuinely deleted module is covered by the
-            # deleted-path STEM walk in `_scan` — which reads the file's actual fate
-            # from `--name-status`, rather than inferring a module's death from one
-            # importer having dropped a line.
+            # Only the from-import's targets (group 2) are collected, never the module path:
+            # dropping an import line says the name may be gone, not the module, and a
+            # module's binding site is a file that `_still_defined`'s AST scan cannot see. A
+            # deleted module is caught by the deleted-path stem walk in `_scan`.
             targets = m.group(2)
             if targets:
                 for part in re.split(r"[\s,]+", targets):
@@ -520,13 +399,10 @@ def _renamed_or_deleted_paths(
     repo_root: Path, diff_base: str
 ) -> tuple[set[str], set[str]]:
     """`(gone, deleted)` — every path the diff removed from its old location, and the
-    subset that was DELETED outright rather than renamed.
+    subset deleted outright rather than renamed.
 
-    The two are collected differently by `_scan`, and the difference is the basename. A
-    deleted `foo_helper.py` takes the name `foo_helper` with it, so a surviving reference
-    to that name is stale. A RENAMED `a/foo_helper.py` -> `b/foo_helper.py` does not: the
-    module still exists under the same name, and collecting its stem would flag every
-    importer of a module that merely moved."""
+    Only deleted paths contribute their stem: a renamed `a/foo_helper.py` ->
+    `b/foo_helper.py` keeps its module name, so collecting it would flag every importer."""
     out = _git(["diff", "--name-status", diff_base, "--", ".",
                 *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     gone: set[str] = set()
@@ -556,33 +432,17 @@ def _is_excluded_path(rel: str) -> bool:
 
 
 def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
-    """The single `git grep` site. rc 1 means "no match" — a legitimate empty answer;
-    rc >= 2 is a real failure and raises.
+    """The single `git grep` site. rc 1 means "no match"; rc >= 2 raises.
 
-    `EXCLUDED_GREP_DIRS` is pushed down into the grep as `:(exclude)` pathspecs rather than
-    only filtered out of the results. This is a pure COST change and not a semantic one:
-    every consumer of these hits already drops an excluded path — `_batch_grep` before it
-    attributes a line, `_still_defined` before it reads one as a binding — so a hit from
-    those trees can reach no verdict either way. The Python-side `_is_excluded_path` stays
-    the authority (it also carries `EXCLUDED_GREP_GLOBS`, which has no pathspec here).
+    `EXCLUDED_GREP_DIRS` is pushed down as `:(exclude)` pathspecs purely for cost: every
+    consumer already drops excluded paths, and `_is_excluded_path` stays the authority (it
+    also applies `EXCLUDED_GREP_GLOBS`). The excluded trees are most of the repo's bytes, and
+    without the pushdown a large retirement's grep blows the 60s ceiling. That ceiling is
+    deliberately not raised, so a real regression still fails.
 
-    It is what keeps the deadline reachable on a large retirement. The cost scales with the
-    removed-identifier count, and #797 removes 247 of them: unbounded, that grep measured 85s
-    against 13s with the exclusions — the `defender/lessons*`,
-    `defender/fixtures*` and `experiments/` trees are most of the repo's bytes and none of
-    them is a reference source. The 60s budget is left where it is deliberately: it is a real
-    ceiling, and raising it to fit a grep that reads trees this gate ignores would hide the
-    next regression instead of failing on it.
-
-    BATCHED, and that is what keeps the ceiling honest on a retirement an order of magnitude
-    larger. `grep -F` with many patterns is not linear in the pattern count: measured on #922
-    (1526 removed identifiers) the one-shot call took 120s, while 800 of the same patterns
-    took 44s, 400 took 5.7s and 100 took 0.1s. Chunking is therefore a real reduction in TOTAL
-    work — the same 1526 patterns in batches of `_GREP_BATCH` run in a few seconds — and not a
-    per-call bound quietly bought by spending more of them. Every batch still carries the same
-    60s ceiling, so one stalled call still names itself; a bigger diff now costs more CALLS,
-    which is bounded and visible, rather than a superlinear single one that hits the ceiling
-    and reports blindness."""
+    Batched because `grep -F` is superlinear in the pattern count (~1500 patterns: 120s in
+    one call, a few seconds in batches of `_GREP_BATCH`), so batching reduces total work.
+    Each batch keeps the 60s ceiling."""
     if not idents:
         return []
     lines: list[str] = []
@@ -592,9 +452,8 @@ def _grep_lines(repo_root: Path, idents: Sequence[str]) -> list[str]:
             cmd.extend(["-e", ident])
         cmd.append("--")
         cmd.extend(f":(exclude){d}" for d in EXCLUDED_GREP_DIRS)
-        # The union of the batches is the one-shot answer: every consumer reads these lines as
-        # an unordered bag keyed on (path, ident), so the batch a line came back in is not
-        # observable. Duplicates cannot arise — an ident appears in exactly one batch.
+        # Consumers read these lines as an unordered bag and each ident is in exactly one
+        # batch, so the union equals the one-shot answer.
         lines.extend(_git(cmd, cwd=repo_root, timeout=60, ok_codes=(0, 1)).splitlines())
     return lines
 
@@ -613,24 +472,18 @@ def _hits(lines: Sequence[str]) -> list[tuple[str, int, str]]:
 def _is_declaration(
     facts: _PyFacts | None, lineno: int, content: str, ident: str
 ) -> bool:
-    """True if this LINE declares the name rather than referencing it. Two shapes:
+    """True if this line declares the name rather than referencing it:
 
     - a YAML frontmatter `name: <ident>` — a skill keeps its own name after a like-named
       CLI shim is deleted;
-    - the ident in a PARAMETER slot of a signature — `def f(cfg, <ident>: Any)` declares a
-      local, and its collision with a deleted module-level symbol of the same name means
-      nothing. A parameter is what the AST calls a parameter, at whatever line it sits on,
-      so a multi-line signature is read the same as a one-line one. A default VALUE stays a
-      real reference — whether the ident is the callee (`def f(x=<ident>())`) or an argument
-      inside it (`def f(x=g(<ident>))`), both of which a "is it after a `(` or a `,`" regex
-      cannot tell apart from a parameter.
+    - the ident in a parameter slot of a signature (per the AST, so multi-line signatures
+      work). A default value stays a reference, whether `def f(x=<ident>())` or
+      `def f(x=g(<ident>))`, which a textual regex cannot tell from a parameter.
 
-    (The prose here says `<ident>`, never a real name: this gate greps its own source, and
-    an identifier spelled in a docstring is a reference like any other.)
+    (The prose says `<ident>`, never a real name: this gate greps its own source.)
 
-    Deliberately hit-scoped, NOT ident-scoped: as a *binding* either shape would drop the
-    ident from the scan entirely, whitelisting every surviving instruction that still tells
-    the model to run the dead command — the exact bug this gate exists to catch."""
+    Hit-scoped, not ident-scoped: as a binding either shape would drop the ident from the
+    scan entirely and whitelist surviving references to the dead command."""
     m = FRONTMATTER_NAME.match(content)
     if m and m.group(1) == ident:
         return True
@@ -652,8 +505,7 @@ def _batch_grep(
     Word-boundary (`-w`) so a removed `_by_id` doesn't match `template_path_by_id`;
     the attribution below is `\\b`-anchored for the same reason."""
     by_ident: dict[str, list[str]] = {i: [] for i in idents}
-    # Position in `idents`, so the narrowed candidate set below can be walked in the SAME
-    # order the full scan walked — "first ident it references" has to mean the same thing.
+    # Walk candidates in `idents` order so "first ident it references" is stable.
     order = {ident: i for i, ident in enumerate(idents)}
     word_idents, other_idents = _split_idents(idents)
     for rel, lineno, content in hits:
@@ -676,9 +528,8 @@ def _batch_grep(
 def _is_binding(
     facts: _PyFacts | None, lineno: int, line: str, ident: str
 ) -> bool:
-    """True if this line DEFINES or IMPORTS `ident` — a `def`/`class`, an assignment, or an
-    import naming it. In Python the AST says so; a parameter is not a binding here (see
-    `_PyFacts`). Otherwise fall back to the text."""
+    """True if this line defines or imports `ident`. In Python the AST says so (a parameter
+    is not a binding; see `_PyFacts`); otherwise fall back to the text."""
     if facts is not None:
         return (lineno, ident) in facts.bindings
     e = re.escape(ident)
@@ -691,14 +542,10 @@ def _is_binding(
 
 @lru_cache(maxsize=1)
 def _tracked_paths(repo_root: Path) -> frozenset[str]:
-    """Every git-tracked path that is STILL ON DISK, repo-relative. Cached — `_module_named` is
-    called per ident.
+    """Every git-tracked path still on disk, repo-relative. Cached; called per ident.
 
-    The existence filter is the same working-tree agreement `_diff_base` is about, one level
-    down: these paths are what may VOUCH that a name survives, and `git ls-files` reads the
-    INDEX. A file deleted with a plain `rm` is gone from the tree and still in the index, so
-    without the filter it would vouch for its own name right after being deleted — the gate
-    saying a module survives while the grep reads a tree where it does not."""
+    `git ls-files` reads the index, so a file deleted with plain `rm` would otherwise vouch
+    for its own name while the grep reads a tree without it."""
     return frozenset(
         rel for rel in _git(["ls-files"], cwd=repo_root).splitlines()
         if rel and (repo_root / rel).exists()
@@ -706,23 +553,15 @@ def _tracked_paths(repo_root: Path) -> frozenset[str]:
 
 
 def _module_named(repo_root: Path, ident: str) -> bool:
-    """Whether `ident` names a module or package that still EXISTS in the tree.
+    """Whether `ident` names a module or package that still exists in the tree.
 
-    A module's binding site is a FILE, which `_is_binding` — an AST scan for
-    def/class/assignment/import — can never see. `_removed_idents` already refuses to
-    collect the module PATH of a `from X.Y import Z` for exactly this reason, but the
-    `from PACKAGE import MODULE` form puts the module in the TARGET position, where it
-    is collected like any other name. Without this, deleting one importer of a live
-    module makes every OTHER importer of it read as a stale reference.
+    A module's binding site is a file, which `_is_binding` cannot see. `from PACKAGE import
+    MODULE` puts the module in the target position, where it is collected like any name, so
+    without this check deleting one importer of a live module makes every other importer
+    read as stale. A deleted module is still caught by `_scan`'s deleted-path stem walk.
 
-    A genuinely deleted module is still caught: `_scan`'s deleted-path STEM walk reads
-    the file's actual fate from `--name-status` instead of inferring it from an import
-    line, and this check finds no file for it.
-
-    Scoped to git-TRACKED paths, never a filesystem walk: `rglob` would descend into
-    `.worktrees/` and any vendored checkout, where a stale copy of a module deleted from
-    THIS tree still sits on disk — which would mask exactly the deletion the gate exists
-    to catch."""
+    Scoped to git-tracked paths, never a filesystem walk: `.worktrees/` or a vendored
+    checkout may hold a stale copy that would mask a real deletion."""
     tracked = _tracked_paths(repo_root)
     return any(
         (rel.endswith(f"/{ident}.py") or rel == f"{ident}.py"
@@ -733,30 +572,19 @@ def _module_named(repo_root: Path, ident: str) -> bool:
 
 
 def _path_named(repo_root: Path, ident: str) -> bool:
-    """Whether `ident` still names a tracked DIRECTORY component or file stem.
+    """Whether `ident` still names a tracked directory component or file stem.
 
-    `_scan` harvests idents from the path components and stems of removed files, so it
-    reads a name as removed when the paths carrying it are gone. That is wrong whenever
-    the name outlives those particular paths — emptying a directory but keeping one file
-    in it, or deleting one `foo.xml` while a different `foo.yaml` lives elsewhere. The
-    directory case is the sharp one: delete 24 of the 25 files under `held-out/` and every
-    surviving reference to a directory that STILL EXISTS reads as stale at once.
+    `_scan` harvests idents from removed paths, which is wrong whenever the name outlives
+    those paths — e.g. deleting 24 of 25 files under `held-out/` must not make every
+    reference to the surviving directory stale.
 
-    Survival is asked of git-TRACKED paths, so an untracked copy in `.worktrees/` or a
-    vendored checkout cannot mask a real deletion.
+    Only tracked paths count, so an untracked copy cannot mask a real deletion. Not filtered
+    through `_is_excluded_path`: that list means "not a reference source", and includes live
+    dirs like `defender/fixtures`. Only `_ARCHIVAL_DIRS` are excluded, since their frozen
+    copies cannot vouch for survival.
 
-    It is NOT asked through `_is_excluded_path`, unlike `_module_named`: that list is
-    `EXCLUDED_GREP_DIRS`, which says "do not read this dir as a REFERENCE source"
-    (historical prose), never "this dir does not exist". `defender/fixtures` is on it and
-    is a live directory — routing survival through it would keep the exact false positive
-    this function exists to remove. What is excluded instead is the narrower set of
-    ARCHIVAL trees, which hold frozen copies of things the live tree may have deleted and
-    so must not vouch for a name's survival.
-
-    A genuinely deleted path is still caught: nothing tracked carries its name afterwards.
-    What this deliberately gives up is the ambiguous case where a name survives only in an
-    unrelated file — there the gate cannot tell which thing a bare textual mention meant,
-    and `_module_named` already resolves that same ambiguity in favour of the survivor."""
+    Gives up the ambiguous case where a name survives only in an unrelated file, the same
+    choice `_module_named` makes."""
     tracked = _tracked_paths(repo_root)
     for rel in tracked:
         if rel.startswith(_ARCHIVAL_DIRS) or rel in _ARCHIVAL_DIRS:
@@ -771,18 +599,14 @@ def _still_defined(
     idents: list[str], hits: list[tuple[str, int, str]], py: _PySources,
     repo_root: Path | None = None,
 ) -> set[str]:
-    """Idents that still have a binding site (def/class/assignment/import) ANYWHERE
-    in the post-PR tree — i.e. moved or re-exported, not removed. A genuine stale
-    ref is a symbol defined NOWHERE yet still referenced; a move/rename/import
-    reflow leaves the symbol defined elsewhere and is not stale. Scans the whole
-    tree (changed files included — that is where a moved def now lives).
+    """Idents that still have a binding site (def/class/assignment/import) anywhere in the
+    post-PR tree, i.e. moved, re-exported, or import-reflowed rather than removed. Changed
+    files are included, since that is where a moved def lives.
 
-    This is the one ident-SCOPED filter in the gate — a single binding site drops the ident
-    everywhere — so what counts as a binding has to be exact. It is the AST's answer for
-    Python, never the line's text: a parameter on its own line of a multi-line signature,
-    and a name on its own line of a list literal, both read as a bare `name,` — the same
-    text a multi-line import member has. The one binding the AST cannot answer for is a
-    MODULE's, whose binding site is a file — see `_module_named`."""
+    This is the one ident-scoped filter — a single binding drops the ident everywhere — so
+    bindings come from the AST for Python, never the text (a parameter or list element alone
+    on a line looks like a multi-line import member). Module bindings are files; see
+    `_module_named`."""
     word_idents, other_idents = _split_idents(idents)
     wanted = set(idents)
     defined: set[str] = set()
@@ -792,11 +616,8 @@ def _still_defined(
         if _is_excluded_path(rel):
             continue
         facts = py.facts(rel)
-        # The candidates, and only they. With an AST the line's bindings are already indexed
-        # by line, and `_is_binding` reduces to that membership — so the index IS the answer.
-        # Without one, every arm of the textual fallback requires the name on the line, so the
-        # names the line mentions are the complete candidate set. Neither narrowing can change
-        # a verdict; both are what keep this off an idents x hits product.
+        # With an AST the line's bindings are already indexed by line; without one, every
+        # textual arm needs the name on the line. Either way the candidate set is complete.
         candidates = (facts.bindings_by_line.get(lineno, frozenset()) if facts is not None
                       else _referencing(content, word_idents, other_idents))
         for ident in candidates & wanted:
@@ -829,9 +650,7 @@ def _hit_file(hit: str) -> str:
 def _scan(
     repo_root: Path, base_ref: str, *, exclude_files: frozenset[str] = frozenset()
 ) -> list[Finding]:
-    # Resolved ONCE and threaded, so the three diffs below cannot drift onto different bases —
-    # and, since `_diff_base` diffs it against the WORKING TREE, so they read the same tree the
-    # grep does. See `_diff_base`.
+    # Resolved once and threaded, so every diff uses the same base (and the working tree).
     diff_base = _diff_base(repo_root, base_ref)
     changed = _changed_files(repo_root, diff_base) | set(exclude_files)
     idents = _collect_removed_idents(repo_root, diff_base)
@@ -842,12 +661,8 @@ def _scan(
             if len(component) >= 5 and "." not in component:
                 idents.add(component)
 
-    # The DIRECTORY components above can never yield a deleted module's own name: every
-    # filename carries a suffix, so the `"." not in component` filter drops the basename
-    # of every file in the diff. That made the removed-paths walk blind to exactly the
-    # case it reads as covering — delete `foo_helper.py`, keep a reference to
-    # `foo_helper`, and nothing here saw it. Take the STEM of deleted paths explicitly.
-    # Deleted, not renamed: see `_renamed_or_deleted_paths`.
+    # The component walk above drops every file basename (they carry a suffix), so take the
+    # stem of deleted (not renamed) paths explicitly.
     for p in deleted_paths:
         stem = Path(p).stem
         if len(stem) >= 5 and "." not in stem:
@@ -860,14 +675,10 @@ def _scan(
         print(f"Skipped {len(skipped)} generic identifiers: {', '.join(skipped[:10])}"
               + ("..." if len(skipped) > 10 else ""))
 
-    # ONE tree-wide grep answers both passes below: `_batch_grep`'s idents are a subset of
-    # `_still_defined`'s, so a second call would re-walk the tree for a subset of these hits.
+    # One grep serves both passes: `_batch_grep`'s idents are a subset of `_still_defined`'s.
     py = _PySources(repo_root)
     grep_hits = _hits(_grep_lines(repo_root, specific))
 
-    # Drop idents still defined/imported somewhere post-PR (moved, re-exported, or
-    # an import line merely reflowed) — those are not stale, only a removed-AND-
-    # undefined symbol with surviving references is.
     moved = _still_defined(specific, grep_hits, py, repo_root)
     if moved:
         print(f"Skipped {len(moved)} still-defined identifier(s) (moved/re-exported): "
@@ -923,8 +734,7 @@ def main(
 ) -> int:
     args = sys.argv[1:] if argv is None else argv
 
-    # Preflight first — including before --update-baseline. You must not be able to
-    # bless an empty result that was never computed.
+    # Preflight before --update-baseline too, so an uncomputed empty result can't be blessed.
     err = _base_ref_error(repo_root, base_ref)
     if err is not None:
         print(f"lint_stale_refs: {err}", file=sys.stderr)

@@ -8,19 +8,15 @@ from defender.runtime import box as box_mod
 from defender.runtime.verbs import RegistryError
 
 
-# `RunTainted` is here for TWO readers. `_run_stage` logs it CRITICAL + exit 2
-# instead of a bare traceback, so the operator-facing failure mode does not depend on which
-# drain lane found it. And `run_or_dead_letter` re-raises rather than dead-letters it: the
-# taint is raised from `stop_and_scrub`, outside `do_work`, so it never meets that guard
-# today — but a tainted tree filed as one item's ordinary failure is exactly the silence this
-# tuple prevents.
+# Faults no single item caused, which must never be dead-lettered as one item's failure.
 #
-# `RegistryError` is the adapters directory this checkout cannot read — absent, unlistable,
-# listable but not searchable (#1035). The lead-author resolver raises it as its own class
-# (`declared_systems.AdaptersUnreadable`, a `LeadAuthorError` that IS a `RegistryError`), and
-# without it here the dead-letter guard filed that as the batch's ordinary failure: every
-# queued pitfall row's lifetime `attempts` bumped per tick, the whole queue retired to the
-# graveyard at the ceiling, for a fault no row caused and no retry can clear.
+# `RunTainted`: `_run_stage` logs it CRITICAL + exit 2 whichever lane found it, and a tainted
+# tree must never be filed as an ordinary item failure (it is raised outside `do_work` today,
+# but this keeps it that way).
+#
+# `RegistryError`: an unreadable adapters directory (raised as
+# `declared_systems.AdaptersUnreadable`). Dead-lettering it would bump every queued row's
+# `attempts` each tick until the whole queue was graveyarded for a fault no retry clears.
 SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (
     StageAbort, FatalConfigError, GitError, box_mod.BoxFault, box_mod.RunTainted, RegistryError,
 )

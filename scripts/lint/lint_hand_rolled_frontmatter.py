@@ -1,68 +1,51 @@
 #!/usr/bin/env python3
-"""Hand-rolled frontmatter parsing — flag fence arithmetic under ``defender/`` that
-bypasses the canonical grammar in ``defender/_frontmatter.py``.
+"""Hand-rolled frontmatter parsing: flag fence arithmetic under ``defender/`` that bypasses the
+canonical grammar in ``defender/_frontmatter.py``.
 
-There is ONE contract for "parse the YAML frontmatter out of a markdown doc":
-``split_frontmatter`` / ``parse_frontmatter`` / ``parse_frontmatter_or_none``. Before
-#591, five readers re-derived the fence offsets themselves, each with a subtly
-different grammar — a loose leading fence, an unanchored regex, a ``text[3:]``
-slice — so the same document parsed differently depending on who read it. The
-worst of it: the frozen-actor eval metric (since retired) and the learning loop
-read the same ``report.md`` through DIFFERENT grammars (parser differential
-injected into exactly the divergence signal it existed to measure), and a scaffold
-linter greenlit a SKILL.md whose real ``name:`` the runtime would reject. This
-gate keeps a sixth copy from growing back.
+There is one contract for parsing YAML frontmatter out of a markdown doc:
+``split_frontmatter`` / ``parse_frontmatter`` / ``parse_frontmatter_or_none``. Readers that
+re-derive the fence offsets each get a subtly different grammar (a loose leading fence, an
+unanchored regex, a ``text[3:]`` slice), so the same document parses differently depending on
+who reads it — a parser differential that can, e.g., let a linter accept a SKILL.md ``name:``
+the runtime rejects.
 
 What it flags — parse-shaped **Call** nodes in defender/ production code:
 
 - ``<x>.find/rfind/index("…---…")`` — fence-offset arithmetic
-- ``<x>.split/rsplit/partition/rpartition("---…" | "\\n---…")`` — a fence separator.
-  BOTH halves of the grammar count: ``"\\n---"`` is the closing fence
-  ``split_frontmatter`` itself searches for, so splitting on it is a hand-rolled
-  parser exactly as much as splitting on the opener is.
+- ``<x>.split/rsplit/partition/rpartition("---…" | "\\n---…")`` — a fence separator. Both
+  halves of the grammar count: ``"\\n---"`` is the closing fence ``split_frontmatter``
+  itself searches for.
 - ``<x>.startswith/removeprefix/removesuffix("---…" | "\\n---…")`` — a hand-rolled
   opening/closing-fence check or strip
 - ``re.compile/search/match/fullmatch/sub/subn/finditer/findall/split`` with a
   fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal).
-  A closing-fence pattern is marked in BOTH of its spellings — the raw ``r"\\n---"``,
-  whose constant holds the two characters ``\\``+``n``, and the non-raw ``"\\n---"``,
-  whose constant holds a real newline. They are different strings by the time the
-  AST is read, and only marking one of them misses the other entirely (#885).
-  (This docstring is not raw, so both examples are written ``\\n`` here; what
-  distinguishes them is the ``r`` prefix on the source literal, not the render.)
+  A closing-fence pattern is matched in both spellings — the raw ``r"\\n---"`` (constant
+  holds ``\\`` + ``n``) and the non-raw ``"\\n---"`` (constant holds a real newline);
+  they are different strings in the AST. (This docstring is not raw, so both render as
+  ``\\n`` here; the difference is the ``r`` prefix on the source literal.)
 
-The ``re`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not by
-the spelling ``re.``: ``import re as regex`` and ``from re import search`` are the same
-case as the dotted form (#602). String args are read inline AND through module-level
-constants: ``FENCE = "---\\n"`` followed by ``text.startswith(FENCE)`` is flagged, because
-hoisting the literal to a constant is good style and must not double as the way to evade
-the gate.
+The ``re`` call is identified by resolved origin (``scripts/lint/_astlib.py``), so aliases and
+from-imports count. String args are read inline and through module-level constants:
+``FENCE = "---\\n"`` then ``text.startswith(FENCE)`` is flagged, so hoisting a literal is not
+an evasion.
 
-What it does NOT flag: string constants and writer f-strings that merely EMIT fences
-and are never passed into a parse-shaped call (``f"---\\nid: …"``, a ``"--- stdout ---"``
-separator, docstrings) — the detector keys on Call nodes, never on a Constant/JoinedStr
-in its own right; a constant only matters once it is HANDED to one. Also waived by
-design (spec_graph_591 ``w_containment_detector``): ``"\\n---" in text``
-in-containment Compare nodes — flagging them risks false positives on separator
-checks. Tests are excluded (fixtures legitimately hand-build fence documents),
-and ``defender/_frontmatter.py`` itself is exempt by name — the canonical module
-is where the fence arithmetic is SUPPOSED to live.
+What it does not flag: constants and writer f-strings that merely emit fences and are never
+passed into a parse-shaped call (``f"---\\nid: …"``, a ``"--- stdout ---"`` separator,
+docstrings) — the detector keys on Call nodes. Also waived: ``"\\n---" in text`` containment
+Compare nodes (false-positive risk on separator checks). Tests are excluded (fixtures
+hand-build fence documents), and ``defender/_frontmatter.py`` is exempt as the canonical
+module.
 
-Known limitation — a CALL-FREE parser is out of reach BY CONSTRUCTION. The detector keys
-on ``ast.Call``, so a fence parser that makes no fence-shaped call is invisible: a
-slice-compare (``if text[:4] == "---\\n":``) or a line loop (``lines = text.split("\\n")``
-— the separator is ``"\\n"``, not fence-shaped — then ``if lines[0] == "---":`` and a
-``for`` scanning for the closer). Widening to ``Compare`` nodes is what
-``w_containment_detector`` already rejected on false-positive grounds, and a slice-compare
-rule would drag in every ``x[:n] == "…"`` in the tree. This is an accepted limit, not an
-oversight: the gate stops the IDIOMATIC sixth copy — the shape someone actually reaches
-for when re-deriving a parser — and a hand-written line loop is not it (#602).
+Known limitation — a call-free parser is out of reach by construction: a slice-compare
+(``if text[:4] == "---\\n":``) or a line loop (``lines = text.split("\\n")`` then
+``if lines[0] == "---":``) makes no fence-shaped call. Widening to ``Compare`` nodes would drag
+in every ``x[:n] == "…"`` in the tree. The gate stops the idiomatic copy, which is the shape
+people actually reach for.
 
-Mark a deliberate site with ``# lint-frontmatter: ok — <reason>`` on the call's
-line span. Pre-existing sites are ratcheted via
-``lint_hand_rolled_frontmatter_baseline.json``; the gate fails only on a NEW
-file+function+kind. The baseline ships EMPTY — the five sites were folded when
-the gate landed, so an entry appearing in it is a regression someone chose.
+Mark a deliberate site with ``# lint-frontmatter: ok — <reason>`` on the call's line span.
+Pre-existing sites are ratcheted via ``lint_hand_rolled_frontmatter_baseline.json``; the gate
+fails only on a new file+function+kind. The baseline ships empty, so an entry is a chosen
+regression.
 
 Run from repo root:  python scripts/lint/lint_hand_rolled_frontmatter.py
 Regenerate the baseline:  python scripts/lint/lint_hand_rolled_frontmatter.py --update-baseline
@@ -92,12 +75,9 @@ _RE_FUNCS = (
     "compile", "search", "match", "fullmatch",
     "sub", "subn", "finditer", "findall", "split",
 )
-# A regex arg is fence-shaped when it anchors or searches for a '---' fence line.
-# These are matched against the CONSTANT, so an escape has two distinct spellings and
-# both must be listed: `"\\A---"` / `"\\n---"` are the regex-SOURCE forms (what a raw
-# `r"\A---"` / `r"\n---"` actually contains), while `"\n---"` is a real newline — what a
-# non-raw `"\n---"` contains. `r"\n---"` is how the closing-fence pattern is normally
-# written, and marking only the newline form let it through (#885).
+# A regex arg is fence-shaped when it anchors or searches for a '---' fence line. Matched
+# against the constant, so escapes have two spellings: `"\\A---"` / `"\\n---"` are what a raw
+# `r"\A---"` / `r"\n---"` contains, while `"\n---"` is a real newline (non-raw). Both needed.
 _FENCE_PATTERN_MARKS = ("^---", "\\A---", "\\n---", "\n---")
 
 
@@ -120,21 +100,17 @@ def _is_fence_pattern(value: str) -> bool:
 
 
 def _is_fence_literal(value: str) -> bool:
-    """A fence-shaped separator/opener: the OPENING fence (``---\\n…``) or the CLOSING
-    one (``\\n---``) — the two halves of the canonical grammar. Both count: the closing
-    half is what ``split_frontmatter`` itself searches for (``text.find("\\n---", 4)``),
-    so ``text.split("\\n---", 1)`` is a hand-rolled parser every bit as much as
-    ``text.split("---", 2)`` is."""
+    """A fence-shaped separator/opener: the opening fence (``---\\n…``) or the closing one
+    (``\\n---``, what ``split_frontmatter`` itself searches for)."""
     return value.startswith("---") or value.startswith("\n---")
 
 
 def _kind(call: ast.Call, env: ModuleEnv) -> str | None:
     """Which hand-rolled fence-parse shape this call is, or None.
 
-    The regex branch resolves the CALLEE, so every spelling of the same origin is one
-    case: ``re.search`` / ``regex.search`` (aliased) / a bare ``search`` (from-import).
-    It must be tested BEFORE the ast.Attribute guard below — a from-import callee is an
-    ``ast.Name``, and the old guard returned None before it could be reached (#602).
+    The regex branch resolves the callee, so ``re.search`` / aliased / bare from-imported
+    ``search`` are one case. It must run before the ast.Attribute guard below, since a
+    from-import callee is an ``ast.Name``.
     """
     args = str_args(call, env)
     if not args:
@@ -142,12 +118,12 @@ def _kind(call: ast.Call, env: ModuleEnv) -> str | None:
 
     o = callee(call, env)
     if o is not None and o.startswith("re.") and o.rpartition(".")[2] in _RE_FUNCS:
-        # Early return: `re.split(p, t)` on a NON-fence pattern is not a hand-rolled
-        # parser, and must not fall through into the str `.split` branch below.
+        # Early return: `re.split(p, t)` on a non-fence pattern must not fall through into
+        # the str `.split` branch below.
         return "regex" if any(_is_fence_pattern(v) for v in args) else None
 
-    # The remaining shapes are str METHODS — duck-typed on purpose (the receiver is a
-    # value, so its callee never resolves). Key on the attribute name.
+    # The remaining shapes are str methods, duck-typed (the receiver is a value): key on
+    # the attribute name.
     func = call.func
     if not isinstance(func, ast.Attribute):
         return None
@@ -206,17 +182,14 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    """Findings under ``root``, fingerprints relative to it — so the gate is
-    drivable on an injected tmp tree, not just the repo checkout."""
+    """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
             continue
         rel = path.relative_to(root).as_posix()
-        # Exempt the canonical module by its PATH, not its basename: a basename match
-        # would exempt any new `<pkg>/_frontmatter.py` anywhere under the scope — i.e.
-        # a verbatim second copy of the grammar, which is the one thing this gate exists
-        # to stop, waved through for being named after the module it duplicates.
+        # Exempt the canonical module by path, not basename: a basename match would wave
+        # through a verbatim second copy of the grammar named after the module it duplicates.
         if rel == CANONICAL_MODULE:
             continue
         if _is_test_module(rel):
@@ -250,9 +223,8 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

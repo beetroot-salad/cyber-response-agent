@@ -2,11 +2,9 @@
 """spec-graph check #8 — formal-slot validation against schema.md's closed vocabularies.
 
 schema.md's slot discipline: every formal slot draws from a closed vocabulary, every
-semantic slot is an `nl:` sentence, and nothing in between. Until this linter, the
-closed-vocabulary check was a hand pass recorded per run in `handoff.deviations`
-(rules.md, "The artifact"); this is that pass, mechanical. A value outside its
-vocabulary is either a typo (fix it) or a vocabulary the schema must deliberately grow
-(rare, demand-driven — grow schema.md and this table together, one commit).
+semantic slot is an `nl:` sentence, and nothing in between. A value outside its
+vocabulary is a typo, or a vocabulary the schema must deliberately grow (grow schema.md
+and this table together, in one commit).
 
 Checked: top-level and structure keys; demand kind/form vocabularies and the
 form-conditional fields (a `form: test` demand is a pointer — `discharged_by`, no
@@ -52,16 +50,11 @@ _GATE = {"evaluated", "obligations", "holes", "pre_discharged"}
 class _Lint:
     """The accumulator every `_rule_*` below appends to.
 
-    schema.md's slots are independent of each other, so this check is a LIST of rules
-    over one graph rather than one walk: each rule reads the slots it owns and appends
-    its own findings, and `check` is just the order they run in. Exactly one value
-    crosses rules — `demand_ids`, filled by `_rule_demands` and read by the gate rules
-    that must resolve a pointer to a demand — and `_RULES`' order is what guarantees it
-    is populated first.
+    Each rule reads the slots it owns. The only value shared across rules is
+    `demand_ids`, filled by `_rule_demands` before the gate rules read it.
 
-    Sections are read through `section()` at the point of use rather than unpacked in
-    `__init__`, so a section holding the wrong shape (`structure:` as a scalar) surfaces
-    from the rule that owns it instead of from the constructor, before any rule has run.
+    Sections are read via `section()` at the point of use, so a wrong-shaped section
+    surfaces from the rule that owns it rather than from the constructor.
     """
 
     def __init__(self, path: Path) -> None:
@@ -82,9 +75,8 @@ class _Lint:
             self.add(f"{where}: `{field}: {value}` is not one of {sorted(allowed)}.")
 
     def mappings(self, label: str, entries) -> list[dict]:
-        """A linter lints the malformed shape instead of dying on it: a bare string (or any
-        non-mapping) where schema.md declares a mapping entry is a SLOT finding naming the
-        entry — uncaught, it surfaced as an AttributeError traceback behind exit 1."""
+        """The mapping entries of a list; each non-mapping entry becomes a slot finding
+        rather than an AttributeError."""
         kept: list[dict] = []
         for entry in entries or []:
             if isinstance(entry, dict):
@@ -100,10 +92,8 @@ class _Lint:
 def _rule_top_level(lint: _Lint) -> None:
     for k in set(lint.graph) - _TOP:
         lint.add(f"{lint.n}: unknown top-level key `{k}` (schema.md, 'The artifact').")
-    # A closed SET, not a pin: the corpus holds graphs authored against more than one
-    # contract, and `_schema.SINCE` reads the declaration to decide which rules each one
-    # owes a `gate.evaluated` entry for. Pinning a single version would force every new
-    # rule to be paid for by re-baselining history (#883).
+    # A closed set, not a pin: graphs authored against older contracts stay valid, and
+    # `_schema.SINCE` reads the version to decide which rules each owes.
     if lint.graph.get("schema_version") not in _schema.SCHEMA_VERSIONS:
         lint.add(
             f"{lint.n}: schema_version `{lint.graph.get('schema_version')}` "
@@ -135,8 +125,6 @@ def _rule_demands(lint: _Lint) -> None:
         if not binds:
             lint.add(f"{where}: `binds` is empty — a demand must bind ≥1 address.")
         elif not isinstance(binds, list):
-            # A truthy scalar passed the emptiness check, then check_gate iterated the
-            # string per-character — binds must be a list of addresses.
             lint.add(f"{where}: `binds` must be a list of addresses, not a "
                      f"{type(binds).__name__}.")
         if "executable" in d and d["executable"] != (form == "test"):
@@ -219,9 +207,8 @@ def _facet_domain(lint: _Lint, where: str, domain: dict) -> None:
     fv = domain.get("falsy_valid")
     if fv is not None and not isinstance(fv, bool):
         lint.add(f"{where}.domain: `falsy_valid: {fv}` must be true|false.")
-    # The YAML scalar trap: an unquoted `off`/`no`/`true`/`null` member parses as
-    # bool/None, and check_gate's address matching stringifies it to `True`/`None` —
-    # the cell the author meant can then never be bound. Quote the intended string.
+    # An unquoted `off`/`no`/`true`/`null` parses as bool/None, and the intended cell can
+    # then never be bound.
     for v in domain.get("distinguished", []) or []:
         if isinstance(v, bool) or v is None:
             lint.add(
@@ -275,7 +262,7 @@ def _rule_drives(lint: _Lint) -> None:
 
 
 def _rule_claims(lint: _Lint) -> None:
-    # kind/verdict/probe_kind vocabularies are check_claims' — one source, not two.
+    # kind/verdict/probe_kind vocabularies are check_claims'.
     claim_ids: set[str] = set()
     for c in lint.graph.get("claims", []) or []:
         cid = c.get("id")
@@ -309,19 +296,14 @@ def _rule_gate_discharges(lint: _Lint) -> None:
             lint.vocab(f"{lint.n}:gate.{section}", "rule", entry.get("rule"), _RULES)
             ref = entry.get(ref_field)
             if not ref:
-                # rules.md declares the shape WITH the pointer — a bare entry still counts
-                # as "the gate saw this element" in check_gate, so an entry pointing at no
-                # demand is a silencer, not a discharge.
+                # check_gate counts any entry as an answer, so one without a demand pointer
+                # would silence a trigger without discharging it.
                 lint.add(
                     f"{lint.n}:gate.{section}: entry for `{entry.get('element')}` carries no "
                     f"`{ref_field}` — the shape requires the demand pointer."
                 )
             else:
-                # One obligation is legitimately discharged by SEVERAL demands, and authors
-                # write that as a list. Reading it as a scalar raised `unhashable type` out
-                # of the membership test, which the caller turns into exit 2 — so the graph
-                # was never linted at all, and the run still printed "0 finding(s)". A
-                # checker that crashes on a valid shape is the #652 class in its own gate.
+                # Several demands may discharge one obligation, written as a list.
                 for one in (ref if isinstance(ref, list) else [ref]):
                     if one not in lint.demand_ids:
                         lint.add(
@@ -343,10 +325,8 @@ def _rule_handoff(lint: _Lint) -> None:
         lint.add(f"{lint.n}: unknown handoff key `{k}`.")
 
 
-#: The check, in order. Order is contract, not taste: findings print in the order they
-#: were appended, and `_rule_demands` must precede the two gate rules that resolve a
-#: pointer against the demand ids it collects. Named `_LINT_RULES`, not `_RULES` —
-#: `_RULES` above is the R0–R8 gate vocabulary `vocab()` validates against.
+#: The check, in order: findings print in this order, and `_rule_demands` must precede the
+#: gate rules that read `demand_ids`. (`_RULES` above is the R0–R8 gate vocabulary.)
 _LINT_RULES = (
     _rule_top_level,
     _rule_demands,
@@ -384,13 +364,8 @@ def main(argv: list[str]) -> int:
     for p in paths:
         try:
             all_findings.extend(check(p))
-        # AttributeError is the backstop for nested wrong shapes the per-list tolerance
-        # above does not cover — the same could-not-read class as a bad top level, never
-        # a traceback behind exit 1. Collected, not returned on: bailing here threw away
-        # every finding the already-linted graphs produced.
-        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
-        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
-        # ("looked, found something") for a gate that read nothing.
+        # AttributeError backstops nested wrong shapes; `ValueError` covers
+        # UnicodeDecodeError. Both are could-not-read (exit 2). Collected, not returned on.
         except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             print(f"check_lint: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             unreadable.append(p)

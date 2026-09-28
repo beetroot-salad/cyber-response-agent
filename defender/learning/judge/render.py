@@ -1,17 +1,13 @@
 """The judge's input: four joined views over one archived world, plus the counterfactual
-withholding (#921 M1).
+withholding.
 
-Ported from `experiments/judge-context-921/variants/contexts.py::render_proposed` — the arm the
-experiment measured at 2.8 / 2.3 / 0.9 recall with false findings at or below 0.2 (C9). Reads
-ONLY `episode_dir`, `runs_base`, and the checkout at the sibling's recorded commit (O8) — never
-a sibling's own run dir, which #947's D3 says may be gone (`test_921_render_reads_no_sibling_
-run_dir`).
+Ported from `experiments/judge-context-921/variants/contexts.py::render_proposed`, the measured
+arm. Reads only `episode_dir`, `runs_base`, and the checkout at the sibling's recorded commit —
+never a sibling's own run dir, which may be gone.
 
-O5/J14: every world but the graded one is marked `counterfactual: true` in the rendered
-manifest and its overlay is withheld — and the withholding's scope is stated across ALL FOUR
-views, not the manifest alone: the coverage view, the lessons view and the trial spread each
-carry sibling-derived content too, and each excludes the ungraded worlds' own contribution just
-as the manifest does.
+Every world but the graded one is marked `counterfactual: true` in the rendered manifest with
+its overlay withheld, and the coverage, lessons and spread views likewise exclude the ungraded
+worlds' contribution.
 """
 
 from __future__ import annotations
@@ -62,8 +58,8 @@ from defender.learning.judge.family import (
 from defender.run_common import REPO_ROOT
 from defender.runtime.branch._family import episode_token_for
 
-#: The frame tag every model-authored body in the judge's prompt is wrapped in — the same
-#: spelling the questioner uses, so `_triplet_947.untrusted_frames`'s regex matches both.
+#: The frame tag every model-authored body in the judge's prompt is wrapped in — the
+#: questioner's spelling, so one frame regex matches both.
 UNTRUSTED_TAG = "untrusted"
 
 
@@ -89,27 +85,18 @@ class JudgeInput:
     manifest_text: str = ""
     document_text: str = ""
     report_text: str = ""
-    #: #1007 M4/O5: the questioner's own sample for this world's staged pattern, and this
-    #: world's own reachability block off `review.yaml` — never a sibling's (S6).
+    #: The questioner's sample(s) for this world's staged patterns, and this world's own
+    #: reachability block off `review.yaml` — never a sibling's.
     sample_text: str = ""
     review_text: str = ""
 
-    #: The operator's `JUDGE_PAYLOAD_CAP`, or `None`. Held on the input rather than applied
-    #: during assembly because what it must bound is the BYTES THAT REACH THE PROMPT.
+    #: The operator's `JUDGE_PAYLOAD_CAP`, or `None`. Applied at `as_prompt_sections`, since
+    #: what it bounds is the bytes that reach the prompt.
     payload_cap: int | None = None
 
     def as_prompt_sections(self) -> dict[str, str]:
-        """Each view as the text that goes inside its frame, the SET of them under the cap.
-
-        THE CAP IS CHARGED OVER THE WHOLE SET, not per section. It first bounded one file — a
-        lead's `gather_summaries/<lead>.md` — while the leads view embedded every executed
-        query's whole row for that lead (the `document_rows` dump #1017 removed — the view now
-        names `params` and the payload digests and nothing else of the row), `_render_lessons`
-        embedded each lesson's whole body at its recorded commit, and the document and report
-        were whole files. Charging it per section instead
-        fixed that and introduced its own version of it: eight sections each at the cap is eight
-        times the bound, and the knob still reported success. What the operator is bounding is
-        the bytes that reach the model, so that is the quantity measured."""
+        """Each view as the text that goes inside its frame, with the cap charged over the
+        whole set — a per-section cap would multiply the bound by the section count."""
         return _cap_sections({
             "manifest": self.manifest_text,
             "leads": _render_leads(self.leads),
@@ -125,13 +112,11 @@ class JudgeInput:
 
 
 def _cap_sections(sections: dict[str, str], payload_cap: int | None) -> dict[str, str]:
-    """The rendered views, trimmed so their TOTAL length is at most `payload_cap`.
+    """The rendered views, trimmed so their total length is at most `payload_cap`.
 
-    An EQUAL SHARE of what is left, smallest section first: a view that already fits is never
-    cut and hands its unused share back to the ones that do not, so the bytes come off whichever
-    view is actually large. Trimming every section to `cap / 8` instead would cut the spread and
-    the coverage table — the two smallest and most load-bearing views — to make room for a
-    document nobody bounded."""
+    Equal share of what is left, smallest section first: a view that fits is never cut and
+    hands its unused share on, so the bytes come off whichever view is actually large (not the
+    small, load-bearing spread and coverage views)."""
     if payload_cap is None or sum(len(body) for body in sections.values()) <= payload_cap:
         return sections
     remaining, left = payload_cap, len(sections)
@@ -145,16 +130,10 @@ def _cap_sections(sections: dict[str, str], payload_cap: int | None) -> dict[str
 
 
 def _capped(body: str, share: int, name: str) -> str:
-    """One rendered section trimmed to `share` bytes, SAYING it was cut.
-
-    A silent truncation is a view the model reads as complete; the stamp is what makes the
-    missing bytes a fact it can reason about rather than an absence it fills in (C11). The
-    stamp is INSIDE the share and the result is clamped to it — a bound the returned value may
-    exceed by the length of its own explanation is not a bound."""
-    # SHORT ON PURPOSE. The stamp is inside the share, so a long explanation is a long
-    # explanation the view's own content pays for — at a small cap it crowded out the very rows
-    # it was explaining the absence of. The view is titled in the prompt already, so the stamp
-    # only has to say that what is above is a prefix.
+    """One rendered section trimmed to `share` bytes, saying it was cut — a silent truncation
+    reads as complete, and a model fills in unstated absences. The stamp counts against the
+    share, so the bound holds."""
+    # Short, since the stamp is paid for out of the view's own content.
     stamp = f"\n...[{name} truncated at the payload cap]...\n"
     return (body[:max(share - len(stamp), 0)] + stamp)[:share]
 
@@ -168,9 +147,7 @@ def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
         lines.append(f"- goal: {chain.get('goal')}")
         lines.append(f"- params: {chain.get('params')}")
         lines.append(f"- payload: {chain.get('payload')}")
-        # Directly after `payload:` and printed for EVERY lead, `[]` included (#860 M4): the
-        # line's absence would be one more way for "refused nothing" and "refusals are not
-        # shown here" to read the same.
+        # Printed for every lead, `[]` included, so "refused nothing" is never ambiguous.
         lines.append(f"- refused: {render_refused(chain['refused'])}")
         lines.append(f"- summary: {chain.get('summary')}")
         lines.append(f"- resolutions: {chain.get('resolutions')}")
@@ -202,23 +179,15 @@ def _render_siblings(siblings: list[dict[str, Any]], union_notes: dict[str, Any]
 
 
 def _union_unattempted(union_notes: dict[str, Any]) -> bool:
-    """Was the sibling walk never actually made? ONE predicate, because three views ask it and
-    the answer must be the same in all of them: an unattempted union is not "no sibling exists",
-    and only a walk that RAN over a real directory may render that sentence."""
+    """Was the sibling walk never actually made? Shared by all three union views: an
+    unattempted union is not "no sibling exists"."""
     return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing")
                 or union_notes.get("runs_base_unreadable") or union_notes.get("alert_unidentified"))
 
 
 def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
-    """May a view say "this is a first-run alert" — i.e. did a walk RUN and find nothing, with
-    nothing dropped on the way?
-
-    THE EXCLUSIONS COUNT TOO, not just whether the walk happened. An episode branched from a
-    source run that lives under the operator's runs base excludes that run by name — so the
-    alert has demonstrably been tried before, and the very next line of the view says so. The
-    sentence and its own footnote contradicted each other on every ordinary branched episode.
-    The same holds for a trial skipped as unreadable or unclosed: something WAS found and
-    dropped, which is not "no sibling trial is recorded"."""
+    """May a view say "this is a first-run alert" — did a walk run and find nothing, with
+    nothing dropped? An excluded source run or a skipped trial means something was found."""
     return not (_union_unattempted(union_notes)
                 or union_notes.get("source_run_excluded")
                 or union_notes.get("skipped_unreadable")
@@ -226,12 +195,8 @@ def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
 
 
 def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
-    """What the union DROPPED, said out loud in the view the drops belong to.
-
-    The counts were tallied and rendered nowhere, so the model was handed a shorter sibling
-    list and a smaller spread with nothing saying either had been trimmed — and then asked to
-    reason about the spread. An unstated absence is what a model fills in (C11), which is the
-    whole reason the empty-union case says so explicitly one line up."""
+    """What the union dropped or never attempted, stated in the view — a model fills in
+    unstated absences."""
     out = []
     if union_notes.get("runs_base_unset"):
         out.append("(no runs base was named for this pass, so the sibling union was never "
@@ -263,18 +228,15 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
     lines = []
     for entry in lessons:
         name = entry.get("lesson_name")
-        # `exposure` is REQUIRED (a KeyError, not a silent omission): the line is what tells
-        # the judge whether the model read the body or saw a description — `None` only for
-        # the unnamed-rows entry, which has no lesson to expose.
+        # Required (KeyError, not silent omission): it tells the judge whether the model read
+        # the body. `None` only for the unnamed-rows entry.
         exposure = entry["exposure"]
         head = f"### {name}\n({exposure})\n" if exposure is not None else f"### {name}\n"
         if entry.get("body") is not None:
             lines.append(f"{head}{entry['body']}")
         else:
             lines.append(f"{head}{entry.get('note')}")
-        # `is not False`, not truthiness. `dirty` is three-valued and `None` means the tree was
-        # never measured, which is not a clean bill of health — the caveat belongs on that world
-        # too, saying which of the two it is.
+        # `dirty` is three-valued; `None` (never measured) is not clean, so it gets a caveat.
         if entry.get("dirty") is not False:
             lines.append(
                 ("(caveat: this sibling's tree was DIRTY when it ran"
@@ -286,17 +248,10 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
 
 
 def _render_spread(spread: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
-    """The spread's own row shape — `disposition` and `count`, NOT the sibling view's
-    `run_id`/`disposition`. The spread is the tally ACROSS the siblings, so the count is the
-    only thing it carries that the sibling list does not; rendering it with the sibling
-    formatter printed a `None` run id per line and dropped every count.
+    """The spread: `disposition` and `count` per row (the tally across siblings).
 
-    THE THIRD VIEW THAT ASKS `_union_unattempted` — its docstring says three do and only two
-    did. The spread is derived from the same union the siblings view renders, so an empty
-    spread meant "nobody looked" exactly as often as it meant "nothing is there", and the flat
-    sentence below stated the absence as a fact in the same prompt whose siblings view said the
-    walk was never attempted. Two contradictory statements about one fact is worse than the
-    unstated absence C11 measured."""
+    An empty spread only claims "no other trial" when the walk ran and dropped nothing,
+    agreeing with the siblings view."""
     if not spread:
         if not _union_empty_after_a_walk(union_notes):
             return ("The spread is empty because the sibling union it tallies is — see the "
@@ -311,8 +266,7 @@ def _render_spread(spread: list[dict[str, Any]], union_notes: dict[str, Any]) ->
 
 
 def _spread_label(disposition: Any) -> str:
-    """A spread key as text. `None` is a real member — a sibling whose report exists but
-    carries no `disposition:` line — and it is named rather than printed as `None`."""
+    """A spread key as text; `None` (a report with no disposition) is named, not printed."""
     return "(none recorded)" if disposition is None else str(disposition)
 
 
@@ -324,9 +278,7 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
 
 
 def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
-    # Every OTHER world listed FIRST, the graded world LAST: a reader slicing a fixed window
-    # from the graded world's own line must not run into a sibling's `counterfactual: true`
-    # line immediately after it.
+    # The graded world last, so a window sliced from its line never runs into a sibling's.
     lines = [f"discriminator: {doc.get('discriminator')}"]
     graded_line: str | None = None
     for world in doc.get("worlds") or ():
@@ -350,25 +302,14 @@ def _manifest_text(doc: dict[str, Any], graded_label: str) -> str:
 def _sibling_row(
     run: Bound, run_id: str, *, alert_id: str | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """One directory under the operator's runs base (`run`, its sub-bind), CLASSIFIED
-    EXHAUSTIVELY.
+    """Classify one directory under the runs base.
 
-    `(row, None)` — a finished trial of this alert. `(None, key)` — a trial of this alert that
-    was skipped, and `key` names the count in `union_notes` that says so in the view. `(None,
-    None)` — not a trial of this alert at all, and so not a skip either.
+    `(row, None)`: a finished trial of this alert. `(None, key)`: a skipped trial of this
+    alert, `key` naming its count in `union_notes`. `(None, None)`: not a trial of this alert
+    (e.g. no `alert.json`), so not counted as a skip either.
 
-    THE THIRD ANSWER IS THE POINT. `skipped_unreadable` renders as "N further trial(s) OF THIS
-    ALERT could not be read", and a directory under the runs base with no `alert.json` — a
-    half-created run dir, a scratch directory, a lock — is not a trial of this alert. Counted as
-    one it told the model N unreadable siblings exist when none do, in the one view whose whole
-    purpose is to keep an absence from being invented (C11).
-
-    `report.md` goes THROUGH `read_archived_report` — `_report`'s own parse of the frontmatter
-    the close gate writes, the vocabulary through `normalized_disposition` — and, the part that
-    matters at THIS call site, it NEVER RAISES: a bare `read_text` here made one undecodable
-    byte in one unrelated run under the operator's runs base refuse the whole grade of an
-    episode whose own archive reads perfectly. Both reads walk no-follow from the runs base's
-    own handle (#1049): a link at either name is never followed."""
+    `read_archived_report` never raises, so one bad byte in an unrelated run cannot refuse the
+    grade. Both reads are no-follow."""
     alert_rec = run.read(RUN_LAYOUT.alert)
     if alert_rec.absent:
         return None, None
@@ -388,17 +329,10 @@ def _sibling_row(
 def sibling_union(
     runs_base: Path | None, *, alert_id: str | None, source_run_id: str | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """J9's sibling union — every finished trial of this alert under the operator's runs base.
+    """The sibling union: every finished trial of this alert under the operator's runs base.
 
-    PUBLIC, and computed ONCE PER PASS rather than once per world: every world of one episode
-    shares the alert, so the answer is identical for all of them, while the walk costs one
-    `alert.json` read and one report parse per run under the runs base. `render` will compute
-    it for a caller that hands over nothing, the same way it reads a world's files itself.
-
-    `runs_base=None` is NOT an empty union. It means nobody named a runs base, which is a
-    different fact from "this alert has no other trial" and is recorded as such — an
-    unattempted union rendered as `no sibling trial is recorded` is the unstated absence C11
-    measured a model filling in."""
+    Computed once per pass (every world shares the alert). `runs_base=None` is recorded as
+    "never attempted", not rendered as an empty union."""
     notes: dict[str, Any] = {
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
         "runs_base_unset": runs_base is None, "runs_base_missing": False,
@@ -410,39 +344,20 @@ def sibling_union(
     siblings: list[dict[str, Any]] = []
     runs_base = Path(runs_base)
     if alert_id is None:
-        # NOTHING TO MATCH ON IS NOT "EVERYTHING MATCHES". `_sibling_row` selects with
-        # `alert_doc.get("alert_id") != alert_id`, and a graded world whose own `alert.json` is
-        # present but carries no `alert_id` (only `is_file()` is required of it) makes that
-        # `None != None` — FALSE for every unrelated run under the operator's runs base whose
-        # own `alert.json` also lacks the key. The union then handed the model other alerts'
-        # closes as prior trials of THIS one, and the spread tallied them. Refused here rather
-        # than in `_sibling_row` so the reason lands on the notes and is rendered (C11): nobody
-        # could look, which is not the same fact as "no sibling trial exists".
+        # No id to match on: `None == None` would match every unrelated run lacking one.
         return siblings, notes
-    # `bind` FOLLOWS the root's own spelling — the operator's OWN configured root, not an entry
-    # inside a box-writable tree; `defender/CLAUDE.md` documents the devcontainer pointing this
-    # knob at a path that may itself be a link, and refusing that would refuse every union.
+    # The root itself may be a link (the operator's own configuration); entries under it are
+    # box-writable and judged no-follow.
     with bind(runs_base) as runs:
         listing = runs.entries()
         if listing.reason is not None:
-            # THERE, BUT NOT LISTABLE (a permission fault, a file squatting the name): a
-            # different fact from "missing", and the reason is carried so the view says it.
+            # Present but not listable: a different fact from missing.
             notes["runs_base_unreadable"] = listing.reason
             return siblings, notes
         if listing.absent:
-            # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
-            # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that
-            # the directory exists — `defender/CLAUDE.md` documents the devcontainer having to
-            # override that knob — so a typo or an unset knob left the walk unattempted and the
-            # prompt then asserted "This is a first-run alert: no sibling trial is recorded".
-            # That is the same unstated absence `runs_base_unset` exists for, one step further
-            # along: nobody looked, and the views must say so rather than state the absence as
-            # a fact (C11).
+            # The configured runs base need not exist (e.g. a typo); nobody looked.
             notes["runs_base_missing"] = True
             return siblings, notes
-        # Each ENTRY under that root is a run dir — a box's rw bind — so it is judged of
-        # itself (a real directory, never a link) even though the root above is the operator's
-        # own.
         for run_id in listing.dirs():
             if source_run_id is not None and run_id == source_run_id:
                 notes["source_run_excluded"] = run_id
@@ -461,20 +376,15 @@ def _world_alert_id(world: Bound) -> str | None:
 
 
 def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
-    """The alert this episode's worlds all investigate, off the first world that names one.
+    """The alert this episode's worlds all investigate: the first world's `alert.json` that
+    carries an `alert_id`, else the first that parses.
 
-    ONE RULE, because two readers want this file and they must not pick different worlds. The
-    sibling union keys on the first world whose `alert.json` carries an `alert_id`; the queue
-    row's `alert_rule_key` used to be derived from the first whose `alert.json` merely PARSED —
-    so a family whose world b has an unkeyed alert and whose world c has a keyed one keyed the
-    union on c's alert while every row landed under a rule key derived from b's document. The
-    fallback (first that parses) is kept for a family where no world names an id at all, which
-    is a different fact from "no world has an alert".
+    Shared by the sibling union and the enqueue's `alert_rule_key`, so both key on the same
+    world.
     """
     fallback: dict[str, Any] = {}
     for label in labels:
-        # A label off `judge.yaml` (a box-writable record) that is not a plain path component
-        # names no directory and so no alert — skipped, never a `ValueError` out of the walk.
+        # A label off box-writable `judge.yaml` may not be a path component; skip it.
         try:
             data = json_mapping(bound, LAYOUT.world(label).alert)
         except ValueError:
@@ -489,36 +399,16 @@ def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
 
 
 def _render_sample(pattern: str, samples_doc: dict[str, Any]) -> str:
-    """#1007 M4/O5: the questioner's own reference document for THIS world's staged pattern —
-    the same bytes `samples.yaml` holds under `pattern`, dumped as JSON so the prompt carries
-    exactly one canonical rendering of it (`test_the_judges_sample_is_byte_identical_to_the_
-    questioners_within_one_attempt` re-parses whatever JSON object appears here and compares it
-    canonically to the stored document — never a substring match, which a re-ordered or
-    re-quoted YAML dump would fail).
+    """The questioner's reference document for one staged pattern, as canonical JSON (the
+    prompt carries exactly one rendering, compared canonically to the stored document).
 
-    `pattern not in samples_doc` and `samples_doc[pattern] is None` render IDENTICALLY — both
-    are "nothing to compare against" — which is the SAME predicate `family._grade_world`
-    computes independently for `sample_unavailable` over the same file (`.get(pattern) is
-    None`); this is that fact's own rendering, not a second derivation of it (H2's `family.py`
-    owns the flag on the row, this owns the prompt's own sentence)."""
+    Absent and `null` render the same ("nothing to compare against"), matching the row's
+    `sample_unavailable` predicate."""
     document = samples_doc.get(pattern)
     if document is None:
         return f"no sample was captured for {pattern!r}\n"
-    # `default=str`, the guard the questioner's own renderer of these same documents carries
-    # (`branch/questioner/_corpus_section`). `samples.yaml` is read PERMISSIVELY on purpose —
-    # `_default_samples_reader`'s contract is that a damaged file costs the shape-invention
-    # claims their evidence and NEVER the whole grade — and a bare `json.dumps` over a value
-    # `safe_load` typed as `date`/`set`/`bytes` raises `TypeError` out of `render`, a class
-    # `grade_episode`'s conversion set does not name.
-    #
-    # AND THE DUMP ITSELF IS INSIDE THE ENVELOPE, because `default=` is never consulted for a
-    # dict KEY: `{2024-01-01: ...}` still raises `TypeError: keys must be str, int, float,
-    # bool or None`, and `sort_keys=True` over mixed key types raises before any conversion is
-    # attempted. Both shapes are ordinary `safe_load` output from a file this reader promises
-    # cannot cost more than its own claims, so an unrenderable document says so here rather
-    # than escaping `render` (past `_prepare_world_prompt`'s `(JudgeRefused, OSError,
-    # ValueError, TimeoutError)` arm and `grade_episode`'s conversion set alike) as a bare
-    # traceback with every world's model calls already paid for.
+    # `default=str` handles YAML-typed values; non-string or mixed-type keys still raise, so the
+    # dump is guarded — a damaged samples file must cost only its own claims, never the grade.
     try:
         return json.dumps(document, sort_keys=True, indent=2, default=str) + "\n"
     except (TypeError, ValueError):
@@ -526,15 +416,8 @@ def _render_sample(pattern: str, samples_doc: dict[str, Any]) -> str:
 
 
 def _render_samples(patterns: list[str], samples_doc: dict[str, Any]) -> str:
-    """EVERY staged pattern's own sample, one `_render_sample` block per pattern — O5's own
-    domain ("per staged pattern"), never reduced to the world's single representative one.
-
-    A world staging into two staged patterns and shown a sample for only one is O5's own
-    falsifier: this function is what closes it on the RENDER side (`family._grade_world`'s
-    `sample_unavailable_patterns` closes the corresponding fact side). A single-pattern world
-    (every fixture in this suite until `test_a_two_pattern_world_...`) renders identically to
-    the single-block output `_render_sample` alone produced before this existed — one header,
-    one document — so no existing byte-identity assertion moves."""
+    """Every staged pattern's sample, one block per pattern — never reduced to one, so a
+    missing sample for any pattern is visible."""
     if not patterns:
         return "no pattern is staged for this world\n"
     return "\n".join(
@@ -542,10 +425,8 @@ def _render_samples(patterns: list[str], samples_doc: dict[str, Any]) -> str:
 
 
 def _render_review_block(block: dict[str, Any] | None) -> str:
-    """This world's OWN reachability block off `review.yaml` (M1/M3) — never a sibling's, and
-    never the review record whole (S6 forbids a sibling's overlay reaching this prompt, and the
-    review record carries no overlay itself, but rendering it whole would still carry every
-    OTHER world's own measurements where this world's judge has no business reading them)."""
+    """This world's own reachability block off `review.yaml` — never the whole record, which
+    would carry every other world's measurements into this world's prompt."""
     if not isinstance(block, dict):
         return "No reachability block is recorded for this world.\n"
     lines = [
@@ -554,9 +435,9 @@ def _render_review_block(block: dict[str, Any] | None) -> str:
         f"reachable_by_capture: {block.get('reachable_by_capture')!r}",
         f"injected_retrieved: {block.get('injected_retrieved')!r}",
         f"injected_present: {block.get('injected_present')!r}",
-        # H2/G-1, KNOWINGLY: `envelope_failed` is `str(AdapterFault.detail)` verbatim
-        # (`review.py`), which can carry the `wv-<world>-<stem>` staged-view naming scheme. The
-        # frame below stops this text being read as instruction; it does not redact the names.
+        # Accepted gap: `envelope_failed` is an adapter fault's text verbatim and can carry the
+        # `wv-<world>-<stem>` staged-view names. The frame stops it being read as instruction;
+        # it does not redact them.
         f"envelope_failed: {block.get('envelope_failed')!r}",
     ]
     replays = block.get("capture_replays")
@@ -571,7 +452,7 @@ def _render_review_block(block: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined views (O4) plus #1007's sample/review pair; each view is already its own helper, this is the join, and the keyword tail is the per-pass hand-over (facts/union/manifest/review/samples) that keeps this from re-reading what the caller has already read
+def render(  # noqa: C901, PLR0913, PLR0915 — the join of the views; the keyword tail is the per-pass hand-over that avoids re-reading what the caller has read
     episode_dir: Path, world_label: str, runs_base: Path | None = None, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None, review: dict[str, Any] | None = None,
@@ -581,15 +462,11 @@ def render(  # noqa: C901, PLR0913, PLR0915 — one assembly of the four joined 
 ) -> JudgeInput:
     """The judge's rendered input for one non-control world.
 
-    `runs_base` is the operator's runs base (J9's sibling union). `git_show` is the injected
-    `(cwd, rev, path) -> str | None` seam for reading a lesson body at a recorded commit;
-    defaults to the sanctioned `_git.git_show_file` facade. `lessons_commit` overrides the
-    per-world provenance read — J8's "resolved once per pass and threaded". `facts` is this
-    world's already-read archived record and `union` is the episode's sibling union: the
-    mechanical pass reads the same three files immediately before this runs, and every world of
-    one episode has the same union, so the orchestration hands both over and only a caller with
-    nothing to hand over pays to compute them again. `bound` is the same hand-over for the
-    episode handle (#1049): the orchestration's one bind, or one made here for this render.
+    `runs_base` is for the sibling union. `git_show` is the `(cwd, rev, path) -> str | None`
+    seam for reading a lesson body at a recorded commit. `lessons_commit` overrides the
+    per-world provenance read. `facts`, `union`, `manifest`, `review`, `samples` and `bound`
+    are the caller's already-read per-pass inputs; each is read or computed here only when not
+    handed over.
     """
     episode_dir = Path(episode_dir)
     with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
@@ -606,20 +483,12 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     union: tuple[list[dict[str, Any]], dict[str, Any]] | None,
     manifest: dict[str, Any] | None,
 ) -> JudgeInput:
-    # THE PASS'S OWN PARSE, when the caller has one. `family.yaml` was read and YAML-parsed here
-    # once per world on top of the orchestration's read and `grade_family`'s, so a two-world
-    # episode parsed one file four times — and, since the episode dir is a tree a box can reach,
-    # with no guarantee the four documents agreed. `facts=` and `union=` already exist for
-    # exactly this hand-over; the manifest simply was not put through it.
     doc = manifest if manifest is not None else read_manifest(bound)
     episode_token = episode_token_for(episode_id_of(doc))
     world_entry = _world_entry(doc, world_label)  # validates the graded world is actually declared
     show = git_show if git_show is not None else _git_show_default
     world = bound.under(LAYOUT.world(world_label).dir)
-    # `leads_by_id` is `lead_repository`'s surface, shared with the live run dir, and takes the
-    # world's directory — the one path on this lane, behind the same listing gate the
-    # mechanical pass keeps (`family._repository_leads`, run by `read_world_facts` once its
-    # own reads have passed; the orchestration hands `facts` over).
+    # `leads_by_id` takes a path; gated as in the mechanical pass.
     record = facts if facts is not None else read_world_facts(
         bound, world_label, episode_token=episode_token,
         leads=lambda: _repository_leads(world, episode_dir, world_label))
@@ -627,28 +496,15 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead
     lead_ids = set(record.referenced_leads) | summary_lead_ids(world)
-    # #860 M4b: a lead whose only activity was refused may be cited by neither the document
-    # nor a summary — the harness writes a summary for a dead-ended lead, not for one the
-    # grant check turned away — and VIEW 1 built from those two sources alone left it out
-    # entirely. Every lead the surface knows to have a refusal is added; a lead with a file
-    # and nothing else is NOT (the judge grades what the lead did, and it did nothing). Off
-    # the world's one read of its table (`WorldFacts.leads`), which is also where the
-    # lead id was screened: the table is in the box's rw bind, and a `lead_id` that is not a
-    # lead id is an unreadable row at the loader, never a heading here.
+    # A lead whose only activity was refused may appear in neither the document nor a summary;
+    # add every lead with a refusal (but not a lead with a file and nothing else).
     by_id = record.leads
     lead_ids |= {lid for lid, lead in by_id.items() if has_refusals(lead)}
 
-    # The report's BYTES for the prompt, off the same read the mechanical pass made.
     report_text = record.report.text
 
-    # NORMALIZED ONCE, and the same way `family._holding_system` normalizes it — `raw.strip()
-    # .casefold()`, which is the spelling every per-world fact keys on. Taken RAW for the
-    # patch-only pattern fallback below while the ledger filter took it FOLDED, a manifest that
-    # merely capitalised the system name made the prompt render one spelling of the pattern
-    # while that world's row — its `sample_unavailable_patterns`, and its mechanical finding —
-    # carried the folded one. Samples are matched by exact string on purpose, and
-    # `cites_sample` compares a citation's fragment the same way, so A1(b) stopped refusing the
-    # very citation the prompt had told the model to copy verbatim.
+    # Folded exactly as `family._holding_system` does, so the patch-only pattern fallback here
+    # matches the row's (samples and citations are matched by exact string).
     raw_holding_system = discriminator_of(doc).get("holding_system")
     resolved_holding_system = (
         raw_holding_system.strip().casefold()
@@ -656,20 +512,10 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     h_rows = own_h_rows(record.ledger_rows, resolved_holding_system) \
         if isinstance(raw_holding_system, str) else []
 
-    # #1007 M4/O5: this world's own sample(s) and its own reachability block — off the SAME
-    # `sample_patterns` and `world_review_block` helpers `family._grade_world` uses, so the
-    # prompt names the same pattern(s) and the same block the mechanical row was computed from.
-    # EVERY staged pattern, never just one (O5's own falsifier) — the patch-only fallback (the
-    # holding system's own name, `world_pattern`'s single anchor) is `sample_patterns`' own,
-    # spelled once for both sites.
+    # Same helpers as `family._grade_world`, so the prompt shows the patterns and block the
+    # mechanical row was computed from.
     overlay = world_entry.get("overlay")
     world_staged_patterns = sample_patterns(overlay, holding_system=resolved_holding_system)
-    # THE PASS'S OWN PARSES, when the caller has them — the same hand-over `manifest`/`facts`/
-    # `union` already take, and for the reason `read_review_record`'s own docstring gives ("the
-    # episode dir is a tree a box can reach — two independent parses had no guarantee of
-    # agreeing"). `render` runs once per graded world, so reading these here made 2N further
-    # parses of two box-reachable files the pass had already read, and let the mechanical row
-    # and the prompt section that claims to render it come off different documents.
     samples_doc = read_samples_record(bound) if samples is None else samples
     sample_text = _render_samples(world_staged_patterns, samples_doc)
     review_doc = (read_review_record(bound) or {}) if review is None else review
@@ -687,32 +533,16 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     provenance = _read_provenance(world)
     commit = _usable_commit(
         lessons_commit if lessons_commit is not None else provenance.get("commit"))
-    # THREE-VALUED, and the third value is not `False`. `RunProvenance.dirty` is `None` when the
-    # tree could not be measured at all — its own docstring calls collapsing that onto "clean"
-    # the one error a provenance record must not make — so `bool(...)` suppressed the caveat for
-    # exactly the world whose checkout is least certain to be the tree it ran against.
+    # Three-valued: `None` (never measured) must not collapse onto clean.
     dirty = provenance.get("dirty")
     lessons_loaded, _malformed, _rec = world.read_jsonl(WORLD_LEAVES.lessons_loaded)
     lessons: list[dict[str, Any]] = []
-    # READ AS A SET through the record's one reader (`hooks.record_lesson_load.exposures`,
-    # the same call `learning/ops/trace_lesson.py` makes): the file is an EVENT log — a row per
-    # time a lesson reached an agent, one per matching lesson per compaction boundary since
-    # #936 — and this view is what was in front of the model. Rendered per row, a lesson the
-    # run kept matching repeated its whole body once per boundary in the judge's prompt; and
-    # a row that says `push` means the model saw the description and dimensions, not the body
-    # below, which the exposure line beside each lesson now says.
+    # The file is an event log (a row each time a lesson reached an agent); read as a set via
+    # `exposures`, so a repeatedly matched lesson's body appears once.
     read = exposures(lessons_loaded)
     for exposure in read.lessons:
         name = exposure.lesson_name
-        # DERIVED FROM THE NAME: `lessons_loaded.jsonl` has exactly one production writer —
-        # `runtime/tools/_deps._record_lesson_load` — and it writes `{lesson_name, ts, kind,
-        # role}`: no `path` column exists. Read as an absent path, EVERY lesson of EVERY real
-        # archived world rendered as "unavailable: no path is recorded", so VIEW 4 shipped with
-        # no bodies at all and the whole `git_show`/`lessons_commit` seam below was dead in
-        # production while green against fixtures that synthesise the column. The name IS the
-        # path: `hooks/record_lesson_load.lesson_name` returns `p.stem` of
-        # `defender/<corpus>/<name>.md`, and the runtime corpus is one directory
-        # (`RUNTIME_LESSON_CORPORA`), so the row's own name resolves it.
+        # The writer records no path column; the name resolves to one (see `_lesson_paths_for`).
         candidates = _lesson_paths_for(name)
         path = candidates[0] if candidates else None
         body = None
@@ -732,9 +562,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         lessons.append({"lesson_name": name, "path": path, "body": body, "note": note,
                         "dirty": dirty, "exposure": _exposure_line(exposure)})
     if read.unnamed:
-        # STATED, not dropped: a row whose name is not a string names no lesson, but a view
-        # that then said "no lessons were loaded" would state an absence as fact over a record
-        # that holds rows — the lie `_render_spread`'s docstring warns about.
+        # Stated, not dropped: "no lessons were loaded" would be false over a file with rows.
         lessons.append({"lesson_name": f"({read.unnamed} row(s) that named no lesson)",
                         "path": None, "body": None,
                         "note": "unavailable: the row's `lesson_name` is not a string",
@@ -742,14 +570,10 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
 
     siblings, union_notes = union if union is not None else sibling_union(
         Path(runs_base) if runs_base is not None else None,
-        # Read HERE and not above: this world's `alert.json` is opened and parsed only on the
-        # path that actually needs it, and the orchestration always supplies the union.
+        # Read only on this fallback path; the orchestration always supplies the union.
         alert_id=_world_alert_id(world), source_run_id=doc.get("source_run_id"))
     spread = Counter(s.get("disposition") for s in siblings)
-    # SORTED BY A KEY, not by the values themselves. A sibling whose report exists but carries
-    # no `disposition:` line contributes `None`, so the moment one such sibling shares an alert
-    # with a normal one the tally holds both a string and `None` and comparing them directly
-    # raises `TypeError` — out of the render, past every handler, taking the episode with it.
+    # Sorted by key: the tally can hold both strings and `None`, which do not compare.
     spread_rows = [
         {"disposition": k, "count": v}
         for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
@@ -760,27 +584,15 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
 
     manifest_text = _manifest_text(doc, world_label)
 
-    # A COPY, because `union_notes` belongs to the PASS and the note below belongs to the
-    # WORLD. The union is computed once and threaded to every world (J9), so writing a per-world
-    # note into it left world c's "no row was ever recorded on the holding system for this
-    # world" standing in world b's coverage view — above the row world b had in fact recorded.
-    # That is the exact fact the lead-set and lead-quality buckets turn on.
+    # A copy: the union is shared across worlds, and the note below is this world's alone.
     union_notes = dict(union_notes)
     if not _union_empty_after_a_walk(union_notes):
-        # NOT "this is a first-run alert". Either nobody looked, or something WAS found and
-        # dropped (the source run this episode branched from, an unreadable or unclosed trial)
-        # — both different facts from "no sibling exists", and the siblings view says which in
-        # the same prompt, so asserting the absence here would hand the model two contradictory
-        # statements about one fact. The same predicate the siblings and spread views use, so
-        # the three cannot disagree about whether the sentence may be said at all.
+        # Not "first-run alert": nobody looked, or something was found and dropped.
         if not coverage:
             union_notes["coverage_note"] = (
                 "no row on the holding system is recorded for this world")
     elif not siblings:
-        # THE COVERAGE VIEW IS WHERE THE EMPTY UNION IS STATED, and that is the committed spec's
-        # own demand (`test_921_first_run_alert_coverage_view_states_the_empty_union`): an
-        # unstated absence is what a model fills in (C11), and this note is the first thing the
-        # prompt says about the union, above the coverage rows.
+        # The empty union is stated here, the first thing the prompt says about the union.
         union_notes["coverage_note"] = (
             "this is a first-run alert: no sibling trial is recorded" + (
                 " and no row on the holding system is recorded either" if not coverage else ""))
@@ -798,11 +610,8 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     )
 
 
-#: What the judge is told about HOW a lesson reached the model, per `LessonExposure.evidence`.
-#: The body is rendered whichever class it is — the judge grades whether the model acted on
-#: what it was shown, and needs the lesson to grade that — but a `push` shows the model a
-#: description and dimensions, not this body, and the judge must not weigh the body as if
-#: the model had read it.
+#: How a lesson reached the model, per `LessonExposure.evidence`. The body is always rendered
+#: for grading, but after a `push` the model saw only the description, not the body.
 _EXPOSURE_LINES = {
     EVIDENCE_READ: "read by the model",
     EVIDENCE_PUSH: "pushed by the runtime: the model saw this lesson's description and "
@@ -819,17 +628,11 @@ def _exposure_line(exposure: LessonExposure) -> str:
 
 
 def _lesson_paths_for(lesson_name: Any) -> list[str]:
-    """The repo-relative paths a runtime lesson row's `lesson_name` could name, in a stable
-    order — the candidates to read a body at, empty when the name cannot become one.
+    """The repo-relative paths a runtime lesson row's `lesson_name` could name, in stable order.
 
-    THE WRITER'S OWN INVERSE. `hooks.record_lesson_load.lesson_name` accepts
-    `defender/<corpus>/<stem>.md` for a corpus in the set it is handed and returns the STEM;
-    the runtime readers hand it `RUNTIME_LESSON_CORPORA`. So the stem plus that set IS the path,
-    and this is the inverse of the writer rather than a second spelling of the repo layout —
-    a corpus added there becomes a candidate here with no edit.
-
-    Empty for a name that is not a single path segment: the row is model-adjacent text, and a
-    name carrying a separator would build a path outside the corpus."""
+    The inverse of `hooks.record_lesson_load.lesson_name` (which records the stem of
+    `defender/<corpus>/<stem>.md`) over `RUNTIME_LESSON_CORPORA`. Empty for a name that is not
+    a single path segment, which would build a path outside the corpus."""
     from defender.hooks.record_lesson_load import RUNTIME_LESSON_CORPORA
 
     if (not isinstance(lesson_name, str) or not lesson_name
@@ -843,23 +646,15 @@ def _read_provenance(world: Bound) -> dict[str, Any]:
     return json_mapping(world, WORLD_LEAVES.provenance) or {}
 
 
-#: A commit this pass will spend in a subprocess argv. Nothing else is: `provenance.json` lives
-#: in the archived world dir, copied out of a tree the box has an rw bind on and screened only
-#: for being a regular FILE, so its `commit` is attacker-reachable text — and the sanctioned
-#: `_git.git_show_file` facade spends it as the single argv element `f"{rev}:{path}"`. A value
-#: beginning with `-` is then read as an OPTION rather than a revision (`--output=<file>` is one
-#: the command accepts), which turns a rendered prompt into a host-side write at a path the
-#: archive chose, in the LAUNCHER's own process and outside every box. It is also never
-#: type-checked upstream (`json_mapping` hands back whatever the JSON holds, and this frame's
-#: own fallback does not coerce), so a non-string reached the same interpolation. An object-name
-#: grammar is the whole fix: a resolvable object name is hex, and nothing else may reach an argv.
+#: The only commit shape this pass will put in a `git show` argv. `provenance.json`'s `commit`
+#: is attacker-reachable (box-writable tree), and a value starting with `-` would be parsed as
+#: an option (e.g. `--output=<file>`, a host-side write outside every box). Hex only.
 _COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{7,40}\Z")
 
 
 def _usable_commit(commit: Any) -> str | None:
-    """`commit` when it is an abbreviated-or-full object name, `None` otherwise — see
-    `_COMMIT_RE`. `None` renders as the lessons view's own "no commit is recorded" note, which
-    is the honest answer for a stamp this pass will not spend."""
+    """`commit` when it is an abbreviated-or-full object name, else `None` (rendered as "no
+    commit is recorded")."""
     return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
 
 

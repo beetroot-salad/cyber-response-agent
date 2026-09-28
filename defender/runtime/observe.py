@@ -31,17 +31,11 @@ _logger = logging.getLogger(__name__)
 
 WIRE_LOG_ENSURE_ASCII = True
 
-#: The fixed policy-denial stream, ONE per site (§7 R1). Kept SEPARATE from the request stream
-#: (whose append-and-flush-per-record discipline it shares): folded in, "no denial happened"
-#: would be indistinguishable from "this file predates the denial record".
-# `POLICY_DENIALS` was RE-EXPORTED from here so the stream's writer could bind it off this
-# module (#1077 D1). D7 removes that: a re-export is a second home, and the readers that
-# bound it here now resolve `RunPaths(d).policy_denials` like every other reader of the
-# stream.
+#: Policy denials go to their own stream (path: `RunPaths.policy_denials`), separate from the
+#: request stream, so "no denial happened" is distinguishable from "file predates denials".
 POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 
-#: The bounded, normalized projection §7 R12 demands: the policy FACT, never the raw
-#: model-controlled parameter blob.
+#: Denials record a bounded digest of the params, never the raw model-controlled blob.
 _DENIAL_PARAM_DIGEST_LEN = 16
 
 
@@ -49,8 +43,6 @@ def _normalize_for_digest(value: Any) -> Any:
     if isinstance(value, float):
         return value if math.isfinite(value) else f"<non-finite:{value!r}>"
     if isinstance(value, dict):
-        # No pre-sort: `_params_digest` dumps with sort_keys=True, which orders the stringified
-        # keys itself — sorting here as well only pays for the same ordering twice.
         return {str(k): _normalize_for_digest(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_normalize_for_digest(v) for v in value]
@@ -99,10 +91,8 @@ def encode_wire_record(record: dict) -> str:
 
 
 _ACTIVE_PATHS: set[str] = set()
-#: Paths a RequestLogger has EVER opened in this process, never removed (unlike
-#: `_ACTIVE_PATHS`) — distinguishes "fresh log target" (truncate; a file some OTHER writer
-#: left there is not this logger's history to preserve) from "this process already logged here
-#: and closed" (append, so a second construction does not clobber the first's lines).
+#: Paths a RequestLogger has ever opened in this process (never removed). A fresh target is
+#: truncated; one this process already logged to is appended to, so reopening doesn't clobber.
 _EVER_LOGGER_PATHS: set[str] = set()
 
 
@@ -114,10 +104,8 @@ class RequestLogger:
         if key is not None and key in _ACTIVE_PATHS:
             raise FileExistsError(f"a RequestLogger has already opened {path}")
         mode = "a" if key is not None and key in _EVER_LOGGER_PATHS else "w"
-        # The open happens BEFORE the registration: `open_guarded` refuses a planted alias,
-        # and a registration made ahead of a failed open is never undone — the path would stay
-        # in `_ACTIVE_PATHS` forever, disabling that log for the whole process even once the
-        # alias is cleared.
+        # Open before registering: if `open_guarded` refuses a planted alias, the path must not
+        # stay stuck in `_ACTIVE_PATHS` for the rest of the process.
         fh = open_guarded(path, mode)
         if key is not None:
             _ACTIVE_PATHS.add(key)
@@ -150,16 +138,11 @@ class RequestLogger:
         self._write_record(disk)
 
     def _write_record(self, rec: dict) -> None:
-        """THE ONE WRITE onto the wire log every record kind goes through — a message, a
-        policy denial, a budget refusal. Each kind spells its own row (#1077 decision 18's
-        `writer_id` rides on the records an AGENT produces — messages and budget refusals; a
-        policy denial is the host's own bounded projection of a call, keyed by `role`, whose
-        exact key set #632 pins and which names its writer already).
+        """The single write path for every wire-log record kind.
 
-        `encode_wire_record` pins ensure_ascii=True deliberately: a lone UTF-16 surrogate
-        (reachable from a provider response body via a backslash-u escape) survives this
-        encode but raises UnicodeEncodeError where a raw str would be utf-8-encoded. Flipping
-        it reopens a content-triggered availability halt."""
+        `encode_wire_record` uses ensure_ascii=True because a lone UTF-16 surrogate (reachable
+        from a provider response via a `\\u` escape) would otherwise raise UnicodeEncodeError
+        on write and halt the run."""
         self._fh.write(encode_wire_record(rec) + "\n")
         self._fh.flush()
 
@@ -174,9 +157,7 @@ class RequestLogger:
         resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
         extra: dict[str, Any] = {}
         if toon_gate is not None:
-            # The gate's operator-facing record: how many foreign results it examined,
-            # refused, substituted, and how many bytes that saved. Rides the SAME wire-log
-            # record every other run-level observable does — no new run-dir sink.
+            # The TOON gate's counters, carried on the response record.
             extra["toon_gate"] = toon_gate
         self._emit(
             agent_id, "response", resp_dump, cap,
@@ -193,10 +174,9 @@ class RequestLogger:
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
     ) -> dict:
-        """Append one policy-denial record — the bounded projection §7 R12 demands: role,
-        system, verb, call id, and a digest of the parameter VALUES (never the raw blob). A
-        failed write is NOT swallowed (§7 R2): it propagates, after the refusal it audits has
-        already taken effect. Deliberately not `log_budget_refusal`'s blanket suppressor."""
+        """Append one policy-denial record: role, system, verb, call id, and a digest of the
+        param values (never the raw blob). A failed write propagates (unlike
+        `log_budget_refusal`), after the refusal it audits has already taken effect."""
         seq = self._denial_seq
         self._denial_seq += 1
         rec = {
@@ -225,25 +205,19 @@ class RequestLogger:
             self._fh.close()
 
 
-#: The ONE policy-denial writer per run dir, shared by every denial site in this process.
-#: `RequestLogger` refuses a second open of a path it already holds, and the runtime builds a
-#: separate `QueryCapture` for EVERY gather lead against one shared run dir — so a
-#: per-capability logger turns the run's second denied call into an uncaught `FileExistsError`
-#: out of the tool wrapper instead of a refusal. Still lazy: a clean run leaves no such file.
+#: One policy-denial writer per run dir, shared by every denial site: `RequestLogger` refuses a
+#: second open of the same path, and each gather lead has its own `QueryCapture`. Opened
+#: lazily, so a clean run leaves no file.
 _DENIAL_LOGGERS: dict[str, RequestLogger] = {}
 
 
 def _denial_logger_or_null(path: Path) -> RequestLogger:
-    """Open the denial stream, degrading to a null sink rather than letting one refused open
-    end the run (§7 D3, extended to the streaming lane).
+    """Open the denial stream, degrading to a null sink if the open is refused.
 
-    This logger opens LAZILY, on the first denial — mid-run, after the box has had every
-    opportunity to plant a symlink at its name. `open_guarded` refuses that plant, and letting
-    the refusal escape would hand the box a denial-of-service lever costing one planted entry.
-    The refusal being audited has ALREADY taken effect, so the run survives and the model
-    still sees its denial; only the RECORD is lost, announced in the log, with the plant left
-    on disk for the reap scan to report as taint. `log_policy_denial`'s own write stays
-    non-swallowing (§7 R2): only a refused OPEN is a lever the box can pull at will."""
+    It opens lazily, mid-run, after the box could have planted a symlink at the name; letting
+    that refusal end the run would give the box a cheap denial-of-service lever. The denial
+    itself still takes effect; only the record is lost (logged), and the reap scan reports the
+    plant."""
     try:
         return RequestLogger(path)
     except OSError as e:
@@ -259,8 +233,7 @@ def denial_logger(run_dir: Path) -> RequestLogger:
     key = str(path.resolve())
     logger = _DENIAL_LOGGERS.get(key)
     if logger is None:
-        # The null fallback is cached like any other: without that, every later denial re-probes
-        # the planted name and re-logs, turning one plant into per-call log noise.
+        # Cache the null fallback too, so a plant doesn't cause per-call re-probing and logging.
         logger = _denial_logger_or_null(path)
         _DENIAL_LOGGERS[key] = logger
     return logger
@@ -269,11 +242,8 @@ def denial_logger(run_dir: Path) -> RequestLogger:
 def wire_log_path(run_dir: Path) -> Path:
     """The run's wire log (`<run_dir>/wire_logs/llm_requests.jsonl`), creating the holding dir.
 
-    The WRITER's half of a location `_run_paths` owns; why the log sits one level down rather
-    than at the run root is documented there, on `WIRE_LOG_DIR` — it is a read-gate boundary,
-    not tidiness. Callers ask here instead of joining the name onto a run dir, so the location
-    cannot drift. The `RunPaths` assertion keeps the delegation honest: the accessor every
-    READER resolves through must name the file this WRITER opens."""
+    The subdirectory is a read-gate boundary (see `_run_paths.WIRE_LOG_DIR`). The assertion
+    keeps this writer's path identical to the `RunPaths` accessor readers use."""
     path = stage_trace_path(run_dir, RUN_LAYOUT.wire_log.name)
     assert path == RunPaths(Path(run_dir)).wire_log, (
         "the wire log's writer and its RunPaths accessor have drifted apart"
@@ -284,11 +254,8 @@ def wire_log_path(run_dir: Path) -> Path:
 def stage_trace_path(root: Path, trace_name: str) -> Path:
     """A learning stage's trace (`<root>/wire_logs/<trace_name>`), creating the holding dir.
 
-    `wire_log_path`'s twin for the OFFLINE lane, off a root that varies by stage. Same
-    component, and it has to be: `permission.files.names_wire_log_dir` is ONE path-component
-    test, so every wire log in the tree must land where that test finds it. Here the component
-    is NOT what denies (see `files.WIRE_LOG_DENY_REASON`) — it is what makes the deny
-    addressable: a rule keyed on a directory covers a trace name nobody has invented yet."""
+    Every wire log must sit under the `wire_logs` component, since
+    `permission.files.names_wire_log_dir` keys its read deny on that directory."""
     root = Path(root)
     wire_logs = root / RUN_LAYOUT.wire_log_dir
     guarded_mkdir(wire_logs, base=root)
@@ -296,10 +263,8 @@ def stage_trace_path(root: Path, trace_name: str) -> Path:
 
 
 def writer_id(agent_id: str) -> str:
-    """#1077 decision 18 — every agent-produced wire-log record carries a writer id, so the
-    main process and every concurrent gather sub-agent sharing ONE file stay individually
-    attributable. MAIN's own `agent_id` is "main"; its writer id is the upper-cased form,
-    "MAIN", which is what every reader checks for."""
+    """The writer id on agent-produced wire-log records, attributing lines in the shared
+    file. Main's is "MAIN", which readers check for; others use the `agent_id`."""
     return "MAIN" if agent_id == "main" else agent_id
 
 
@@ -358,22 +323,14 @@ def _user_event(message: Any) -> dict | None:
 
 
 def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
-    """`{run_dir}/tool_trace.jsonl` — the events THIS run produced, and its own cost.
+    """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
 
-    SLICED AT THE BRANCH POINT. `path_row_ids` walks parents across a fork, so a resumed run
-    (#920's turn-N branch) hydrates the source run's whole prefix alongside its own rows — and
-    every number below is a sum over what it hydrates. Left whole, a sibling's trace reports
-    the SOURCE's tool calls as its own and its `result` event bills the shared prefix's turns,
-    tokens and dollars to the sibling: `scripts/analytics/run_stats.py` reads exactly that
-    event, so an N-sibling sweep counts the prefix N times. `branch_point` answers `None` for
-    every unforked session, so the ordinary run is untouched.
+    Sliced at the branch point: a resumed run hydrates the source run's prefix too, which
+    would otherwise be reported (and billed, e.g. in `run_stats.py`) once per sibling.
     """
     from . import session_store as ss  # local import — avoids a cycle at module load
 
-    # `branch_point` FIRST: it is one indexed row lookup and answers `None` for every unforked
-    # session, so the ordinary run pays that and nothing else. Asked after an unconditional
-    # `path_row_ids`, every run paid a whole extra parent walk — one query per message — whose
-    # result it then threw away.
+    # `branch_point` first: a cheap lookup, so unforked runs skip the extra parent walk.
     cut = ss.branch_point(store, session_id)
     messages = ss.hydrate(store, session_id, role="analysis")
     coords = ss.hydrate(store, session_id, role="actor")

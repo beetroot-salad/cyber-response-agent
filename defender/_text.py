@@ -1,77 +1,45 @@
 """Does this text carry anything a reader would see?
 
-`str.strip()` / `str.isspace()` is the obvious spelling of that question and the
-wrong one. isspace() is True for the visible-width separators (U+00A0 NO-BREAK
-SPACE, U+3000, U+2028, U+0085, U+001C-1F) and False for the zero-width ones
-(U+200B, U+FEFF, U+00AD, U+2060) and for NUL — so a `.strip()` test calls text
-that renders as *nothing at all* non-empty, and text that is only spacing empty.
-
-Every caller here decides something on model-produced text, and that text is
-steerable by the attacker-influenced alert/gather content the model was asked to
-analyze. Decisions key off what RENDERS instead.
+`str.strip()` is the wrong test: `isspace()` is False for zero-width characters (U+200B,
+U+FEFF, U+00AD, U+2060) and NUL, so text that renders as nothing counts as non-empty. Callers
+decide things on model-produced text that an attacker can steer through alert content, so
+decisions key off what renders.
 """
 from __future__ import annotations
 
 import unicodedata
 from typing import Any
 
-# Categories whose members occupy no visual space: Cc (controls, incl. NUL), Cf
-# (formats — U+200B, U+FEFF, U+00AD, U+2060, the tag block), Cs (lone surrogates).
-# Co and Cn are deliberately excluded: private-use codepoints and ones this
-# interpreter's UCD has not seen yet can carry a glyph, and "empty" must not shift
-# with the interpreter's Unicode version.
+# Cc (controls, incl. NUL), Cf (formats: U+200B, U+FEFF, U+00AD, U+2060, tag block), Cs (lone
+# surrogates). Co and Cn are excluded: private-use and not-yet-assigned codepoints can carry a
+# glyph, and "empty" must not shift with the interpreter's Unicode version.
 _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
 
 
 def as_str(value: Any) -> str:
-    """`value` when it is a `str`, else `""` — the ONE coercion for a value that is typed as
-    text but arrives from somewhere that cannot promise it.
-
-    Two callers with two provenances and one answer: a MODEL TOOL ARGUMENT before it is spent
-    as a system name (`query_tool`, where the pydantic schema has already refused, so the
-    arguments are whatever the model sent) and a STORED COLUMN read back (`record_query`,
-    where a row written before the column existed has `None`). They were separate one-line
-    copies with a comment arguing they might diverge; nothing about "not a string" differs
-    between the two, and the module that already owns "what does this text amount to" is
-    where the answer belongs.
-
-    `""` and not `None`: every caller goes on to compare or hash the result, and an `Optional`
-    that each of them re-narrows is the second source of truth this exists to remove."""
+    """`value` when it is a `str`, else `""` — for a value typed as text that arrives from
+    somewhere that cannot promise it (raw model tool arguments, nullable stored columns).
+    `""` rather than `None` because every caller compares or hashes the result."""
     return value if isinstance(value, str) else ""
 
 
 def as_int(value: Any) -> int | None:
-    """`value` when it is an `int` and NOT a `bool`, else `None` — `as_str`'s sibling for a
-    value typed as a count that arrives from JSON/YAML a caller cannot vouch for.
-
-    `bool` excluded explicitly: `True` passes `isinstance(_, int)`, and since #1067 the records
-    these values land in (`RepeatTrip.first_seq`, ...) are strict, so a planted `"seq": true`
-    that slipped through an `isinstance` filter turns a trip into a `ValidationError`. The
-    tree spelled this predicate inline in eight places before it had a home; new boundaries
-    take it from here, and the old copies migrate as they are touched."""
+    """`value` when it is an `int` and not a `bool`, else `None` — for a count from untrusted
+    JSON/YAML. `bool` is excluded because `True` passes `isinstance(_, int)` and the strict
+    records these values land in would raise `ValidationError`."""
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def is_content_less(text: str) -> bool:
-    """Whether `text` carries no visible character. Empty text is content-less.
-
-    One visible character is content — including a character merely adjacent to
-    invisible ones, so real prose never trips this by carrying a BOM or a soft
-    hyphen.
-    """
+    """Whether `text` carries no visible character. Empty text is content-less."""
     return all(
         ch.isspace() or unicodedata.category(ch) in _INVISIBLE_CATEGORIES for ch in text
     )
 
 
 def strip_zero_width(text: str) -> str:
-    """`text` with every character that occupies no space at all removed.
-
-    Whitespace SURVIVES — it separates tokens, and callers that split on it must
-    keep doing so; what goes is the zero-width set `.strip()` cannot see (U+200B,
-    U+FEFF, U+00AD, U+2060, NUL, the tag block). Use before matching model text
-    against a keyword, so a token that reads as `caught` matches `caught` however
-    the model spelled the gaps around it.
+    """`text` with every zero-width character removed; whitespace is kept so token splitting
+    still works. Use before matching model text against a keyword.
     """
     return "".join(
         ch for ch in text

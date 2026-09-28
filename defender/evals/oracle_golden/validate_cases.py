@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """Lint the golden-set case tree, and report how complete it is.
 
-These are checks on SAMPLES, not assertions about code, so they live here as a CLI that
-exits non-zero rather than as pytest sweeps. The engine's own behaviour is tested beside
-each module under `defender/tests/evals/`; this validates the artifacts those tools
-produce and consume. Everything checked here is true regardless of how a lead is graded:
+These are checks on samples, not code, so they run as a CLI that exits non-zero rather than
+as pytest sweeps (the tools themselves are tested under `defender/tests/evals/`). Checks:
 
-  structure          a case missing a file the README promises is not a case
-  environment        every case carries the notes BOTH judge passes read; a case
-                     without them is a case the judge cannot read
-  identity           manifest and directory name agreeing, so a copied case cannot
-                     silently be mistaken for another
-  story hygiene      no story states the expected result — the ONE leak the
-                     hidden/visible split cannot catch, because `story.md` is
-                     deliberately an oracle input
+  structure          every file the README promises is present
+  environment        every case carries the notes both judge passes read
+  identity           manifest and directory name agree, so a copied case cannot pass
+                     for another
+  story hygiene      no story states the expected result (`story.md` is an oracle
+                     input, so the hidden/visible split cannot catch this)
   replay boundary    no code literal in `replay.py` names `hidden/`
   split, unit        every case carries both, and a derived case inherits its base's
   held-out ledger    every held-out score is in the append-only ledger with a matching
@@ -21,28 +17,20 @@ produce and consume. Everything checked here is true regardless of how a lead is
   seq keying         every observed payload is named for a seq some query in
                      `leads.jsonl` is keyed by, so a control cannot baseline a different
                      query's envelope
-  controls           every stored control measures the window its record declares, so a
-                     baseline that silently measured something else cannot be graded
-                     against
+  controls           every stored control measures the window its record declares
   known defects      the accepted-invalid registry still describes the tree it waives
 
-**Some committed control records carry a measurement that is known-invalid and cannot be
-repaired in code** — their windows sit behind a `LIMIT`/`KEEP` that already reduced the
-rows. Repairing one is a capture session against the live stack, not a change to this repo.
+Some committed control records carry a known-invalid measurement that cannot be repaired in
+code (their windows sit behind a `LIMIT`/`KEEP` that already reduced the rows); repairing one
+needs a capture session against the live stack. They are listed in `known_defects.yaml`
+instead of failing the run, and printed on every run. The registry is itself checked: an
+entry whose record no longer carries the defect, or names a missing record, fails. A new
+defect anywhere else still exits 1.
 
-They live in `known_defects.yaml` rather than failing the run, because a check that always
-fails is a check nobody reads. They are still PRINTED on every run, and the registry is
-itself checked — an entry whose record no longer carries the defect fails, so a waiver
-cannot outlive what it waives, and an entry naming a record that does not exist fails the
-way the held-out ledger refuses one. A NEW defect anywhere else still exits 1.
-
-The second half is a COMPLETENESS REPORT rather than a pass/fail: how many leads carry
-observed telemetry, how many carry a baseline, how many controls landed on a window where
-the stack was not running, and how many payloads the capture failed to record. None of
-those is a defect in the tree — a lookup has no baseline by construction, and a zero-byte
-payload is a query that errored at capture (`query_tool.py` writes "" on a non-zero exit).
-They are the instrument's own limits, and a suite that does not print them invites the
-reader to assume they are zero.
+The second half is a completeness report, not pass/fail: how many leads carry observed
+telemetry or a baseline, how many controls landed on a window where the stack was down, and
+how many payloads are zero-byte (a query that errored at capture). These are the
+instrument's limits, printed so nobody assumes they are zero.
 
 Usage: validate_cases.py [<cases_dir>] [--quiet]
 """
@@ -71,9 +59,6 @@ KNOWN_DEFECTS = GOLDEN_DIR / "known_defects.yaml"
 REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
                   "oracle_visible/story.md", "oracle_visible/leads.jsonl")
 
-# `DERIVED_KINDS` and the eval-tells list are imported from their owners rather than restated,
-# so a new kind cannot be added to one list and not the other.
-
 
 def _leads_of(case_dir: Path) -> dict[str, dict]:
     out = {}
@@ -91,8 +76,7 @@ def check_case(case_dir: Path, by_id: dict[str, dict],
                known: dict[tuple[str, str, int], dict] | None = None) -> list[str]:
     """Every problem with one case, as human-readable lines.
 
-    `known` is the accepted-defect registry (`load_known_defects`); the default of none
-    tracked keeps a caller that only wants the structural checks from having to pass it.
+    `known` is the accepted-defect registry (`load_known_defects`).
     """
     problems: list[str] = []
     name = case_dir.name
@@ -123,13 +107,11 @@ def check_case(case_dir: Path, by_id: dict[str, dict],
 def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int], dict]:
     """The control records whose stored measurement is accepted as invalid.
 
-    Keyed by `(case, lead, seq)` — the same key `hidden/controls/<lead>/<seq>.json` is filed
-    under, so an entry names one record and cannot quietly cover a second.
+    Keyed by `(case, lead, seq)`, matching `hidden/controls/<lead>/<seq>.json`, so an entry
+    names exactly one record.
 
-    RAISES on a malformed entry, unlike the artifact readers that report and carry on: this is
-    operator-authored config, and applying a waiver it misread is worse than stopping. A key
-    that is not `(str, str, int)` compares unequal to every real record key, so a typo'd
-    `seq: "1"` would silently waive nothing while reading as though it did.
+    Raises on a malformed entry, unlike the artifact readers: this is operator-authored
+    config, and a mistyped key (e.g. `seq: "1"`) would silently waive nothing.
     """
     if not path.is_file():
         return {}
@@ -151,8 +133,7 @@ def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int],
         if not isinstance(case, str) or not isinstance(lead, str):
             raise ValueError(f"{path.name}: entry {i} needs string `case` and `lead`, "
                              f"found {case!r} and {lead!r}")
-        # `bool` is an `int` in Python, and `seq: true` naming record 1 is not a thing
-        # anyone means. Excluded explicitly rather than left to surprise a later reader.
+        # `bool` is an `int` subclass; `seq: true` is never meant as record 1.
         if not isinstance(seq, int) or isinstance(seq, bool):
             raise ValueError(f"{path.name}: entry {i} ({case}/{lead}) needs an integer "
                              f"`seq`, found {seq!r}")
@@ -166,13 +147,11 @@ def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int],
 
 def check_known_defects(cases_dir: Path,
                         known: dict[tuple[str, str, int], dict]) -> list[str]:
-    """The registry must describe the tree it waives, or it is a silence.
+    """The registry must still describe the tree it waives.
 
-    Two ways it rots, both failures here. An entry naming a record that no longer HAS a defect
-    is the dangerous one: the record was repaired and the line left behind, so the next real
-    defect at that key is waived by a stale entry — which is why `check_controls` is re-run
-    against the record rather than trusted. An entry naming a record that does not exist is
-    the same failure the held-out ledger refuses.
+    Fails an entry whose record is missing, or no longer carries the defect (a stale entry
+    would waive the next real defect at that key), re-checking the record rather than
+    trusting the entry.
     """
     problems = []
     for (case, lead, seq), entry in sorted(known.items()):
@@ -194,19 +173,11 @@ def check_known_defects(cases_dir: Path,
 def check_seq_keying(case_dir: Path) -> list[str]:
     """A lead's queries must be keyed by the seq its observed payloads are named for.
 
-    `check_controls` below pairs a control record to a LEAD QUERY, which is only half the
-    join. The other half is the one `judge.load_lead_inputs` makes: observed payloads come
-    from `hidden/observed/<lead>/{seq}.json` and baselines from
-    `hidden/controls/<lead>/{seq}.json`, both keyed by whatever `controls.lead_queries`
-    answered. That reader falls back to the LIST POSITION for a case whose `leads.jsonl`
-    predates the `seq` field — exact only while position IS seq, which the `∅.`-prefixed
-    sentinels split out of `JoinedLead.queries` (but still counted by `record_query._next_seq`)
-    break.
-
-    When the fallback is wrong it is invisible to `check_controls`: the control record and
-    `lead_queries` both used the position, so they agree with each other and disagree with the
-    payloads on disk. The payload FILENAMES are the only surviving witness — they carry the
-    table's own seq — so this compares against them rather than trusting the fallback.
+    `judge.load_lead_inputs` joins `hidden/observed/<lead>/{seq}.json` to
+    `hidden/controls/<lead>/{seq}.json` by whatever `controls.lead_queries` answers, which
+    falls back to list position when `leads.jsonl` has no `seq` field. Position diverges from
+    seq once `∅.` sentinels are split out, and `check_controls` cannot see that (both sides
+    used the position). The payload filenames carry the real seq, so this checks against them.
     """
     observed_root = case_dir / "hidden" / "observed"
     if not observed_root.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
@@ -217,9 +188,8 @@ def check_seq_keying(case_dir: Path) -> list[str]:
 
     problems = []
     for lead_dir in sorted(p for p in observed_root.iterdir() if p.is_dir()):
-        # Fewer payloads than queries is normal — a query with no by-ref payload writes no
-        # file. A payload named for a seq NO query is keyed by is the failure: that lead's
-        # controls are keyed off a different numbering than its envelopes.
+        # Fewer payloads than queries is normal (no by-ref payload, no file); a payload seq
+        # no query is keyed by is the failure.
         named = {int(p.stem) for p in lead_dir.glob("*.json") if p.stem.isdigit()}
         stray = sorted(named - keyed.get(lead_dir.name, set()))
         if stray:
@@ -236,33 +206,20 @@ def check_controls(case_dir: Path,
                    known: dict[tuple[str, str, int], dict] | None = None) -> list[str]:
     """Every stored control must actually measure the window its record claims.
 
-    Records listed in `known_defects.yaml` are omitted: their measurement is accepted as
-    invalid and tracked there with the capture session that would repair it. Omitted, not
-    silenced — `main` prints them, and `check_known_defects` fails if such an entry stops
-    reproducing, so the waiver cannot outlive the defect.
+    Records listed in `known_defects.yaml` are omitted here; `main` prints them and
+    `check_known_defects` audits them.
 
-    A control is the baseline a lead is graded against, and a wrong one is silent all the way
-    down: `judge._control` forwards `live` and DROPS the query string, so the label pass sees a
-    live window that observed nothing and reads it as "this stream has no baseline" — against
-    which every observed row is distinguishable, so the lead grades `present`. Nothing
-    downstream can tell that apart from a real empty baseline.
+    A wrong control is silent downstream: `judge._control` drops the query string, so a live
+    window that measured the wrong thing reads as an empty baseline and the lead grades
+    `present`. Zero rows alone is not the signature (most empty live controls are honest); a
+    query that does not filter to its declared window is. Two known forms:
 
-    Note what this does NOT key on: a zero row count. Hundreds of the corpus's controls are
-    live with zero rows and nearly all are honest. Emptiness is not the signature; a query that
-    does not filter to its own declared window is.
+      - an added clause landing after another command (ES|QL separates commands with `|`,
+        so in `FROM idx | LIMIT 1` a later filter sees one arbitrary row);
+      - crossed shifted bounds (`< start AND >= end`), unsatisfiable yet accepted by ES|QL.
 
-    Two ways that has actually happened:
-
-      - the added clause landed after another command. Splicing after `splitlines()[0]` is
-        wrong because ES|QL separates commands with `|`, so a one-line `FROM idx | LIMIT 1`
-        takes one arbitrary row and THEN filters it by time.
-      - the shifted bounds were crossed. Binding replacements by POSITION against the pair
-        `esql_window` returns sorted gives a query that wrote its upper bound first
-        `< start AND >= end` — unsatisfiable, and ES|QL runs it happily.
-
-    Which rewrite a record went through is read from the LEAD's own query rather than guessed
-    from the control's shape: an added clause and a model-authored one can be written
-    identically, and only the original says whether there was a bound to shift.
+    Whether a clause was added or shifted is read from the lead's own query, since the two
+    can look identical in the control.
     """
     tracked = known or {}
     return [problem
@@ -274,34 +231,29 @@ def check_controls(case_dir: Path,
 def control_problems_by_record(case_dir: Path) -> dict[tuple[str, str, int], list[str]]:
     """`check_controls`'s findings, kept under the `(case, lead, seq)` each belongs to.
 
-    Split out so the waiver in `known_defects.yaml` can be applied and audited at RECORD
-    granularity: asking "does this case still have problems?" would let one unrepaired record
-    keep a second record's stale entry alive.
+    Record granularity lets `known_defects.yaml` be applied and audited per record, so one
+    unrepaired record cannot keep another's stale entry alive.
     """
     controls_dir = case_dir / "hidden" / "controls"
     if not controls_dir.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
         return {}
     name = case_dir.name
-    # `object` in the key, because the seq this is looked up BY comes off an untrusted
-    # record: a control carrying `"seq": "1"` must miss and be reported as pairing with no
-    # query, not be narrowed away before it can be.
+    # `object` in the key: the lookup seq comes from an untrusted record, and `"seq": "1"`
+    # must miss and be reported rather than be narrowed away.
     originals: dict[tuple[str, object], str] = {
         (lead_id, seq): params.get("query") or ""
         for lead_id, seq, params in CONTROLS.lead_queries(case_dir)}
 
     by_record: dict[tuple[str, str, int], list[str]] = {}
     for path in sorted(controls_dir.rglob("*.json")):
-        # Keyed by the PATH's lead and seq, not the record's own fields: those are what
-        # the file is filed under and what a registry entry can be written against, and
-        # a record whose own `seq` disagrees is exactly what this reports below.
+        # Keyed by the path, which is what registry entries name; a record whose own fields
+        # disagree is reported below.
         try:
             key = (name, path.parent.name, int(path.stem))
         except ValueError:
             key = (name, path.parent.name, -1)
         problems = by_record.setdefault(key, [])
-        # A linter over artifacts must not die on the artifact it exists to catch: a
-        # record it cannot read is a problem line, not a traceback out of the sweep that
-        # would take every LATER case's findings with it.
+        # An unreadable record is a problem line, not a traceback that ends the sweep.
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -312,9 +264,7 @@ def control_problems_by_record(case_dir: Path) -> dict[tuple[str, str, int], lis
             problems.append(f"{name}: {path.parent.name}/{path.name} is a "
                             f"{type(record).__name__}, not a control record")
             continue
-        # The DIRECTORY, because that is the join `judge.load_lead_inputs` makes
-        # (`hidden/controls/<lead_id>/`). A record whose own `lead_id` says otherwise is
-        # attached to this lead's payloads no matter what it claims.
+        # The directory is what `judge.load_lead_inputs` joins on, whatever the record claims.
         lead_id = path.parent.name
         rel = f"{lead_id}/{path.name}"
         declared = record.get("lead_id")
@@ -325,8 +275,6 @@ def control_problems_by_record(case_dir: Path) -> dict[tuple[str, str, int], lis
                 f"DIRECTORY, so this baselines a lead it does not name")
         original = originals.get((lead_id, record.get("seq")))
         if original is None:
-            # The pairing itself is broken: this control keys onto no query in the lead
-            # set, so whatever it measured, nothing can say what it is a baseline FOR.
             problems.append(
                 f"{name}: {rel} keys to (lead {lead_id}, seq {record.get('seq')!r}), which "
                 f"is not a query in leads.jsonl — the control cannot be paired with the "
@@ -359,17 +307,14 @@ def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str
                 f"{CONTROLS.esql_operators(query) or 'absent'} — that names no window, so "
                 f"this measured something other than the window it records"]
 
-    # Operator-aware, because that is the whole of what the crossed-pair defect broke:
-    # a positional read cannot tell `>= start AND < end` from `< start AND >= end`, and
-    # the second is unsatisfiable. Compared as instants rather than strings so a literal
-    # written with different precision is not reported as a crossed bound.
+    # Operator-aware, so crossed bounds (`< start AND >= end`) are caught; compared as
+    # instants so a literal with different precision is not reported as crossed.
     try:
         want = {">": CONTROLS.parse_iso(window[0]), "<": CONTROLS.parse_iso(window[1])}
     except ValueError as exc:
         return [f"{where} [{label}]: the declared window {window!r} is not a pair of "
                 f"timestamps ({exc})"]
-    # `strict`: both lists are one entry per `_BOUND` match, so a length mismatch is not a
-    # short query but a broken invariant in the two readers, and it should raise here.
+    # `strict`: both lists come from the same `_BOUND` matches; a length mismatch is a bug.
     for operator, literal in zip(CONTROLS.esql_operators(query),
                                  CONTROLS.esql_bounds(query), strict=True):
         try:
@@ -386,15 +331,9 @@ def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str
                 f"predicate returns zero rows that read as an empty baseline")
 
     if was_added:
-        # The lead's query carried no bound, so this clause is one this tool wrote, and it
-        # belongs immediately after the source command: there it narrows the row set and
-        # CANNOT widen it, which is the only property that makes an added window a control at
-        # all. Anywhere later and it filters whatever the commands before it already reduced
-        # the rows to.
-        #
-        # "Where it landed" is the command that CARRIES THE BOUNDS, not the first one whose
-        # text starts `WHERE @timestamp`: a lead may open with `WHERE @timestamp IS NOT NULL`,
-        # which is no bound at all, and a prefix test would read that as the added clause.
+        # An added window must sit immediately after the source command; later, it filters
+        # rows earlier commands already reduced. Locate it by the command carrying bounds,
+        # not a `WHERE @timestamp` prefix (`WHERE @timestamp IS NOT NULL` is no bound).
         commands = [c.strip() for c in CONTROLS.split_commands(query)]
         landed = next((i for i, c in enumerate(commands) if CONTROLS.esql_bounds(c)), None)
         if landed != 1:
@@ -408,13 +347,8 @@ def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str
 
 
 def check_expectation(name: str, manifest: dict) -> list[str]:
-    """A derived case must assert something, because nothing else will.
-
-    An observed case is graded against the judge's measurement of `hidden/`. A derived case
-    has no `hidden/`, so the judge never runs on it and `expectation:` is the ONLY thing
-    standing between it and a vacuous pass — a forged `neg-001` projection copying the base
-    case's burst into every lead would otherwise score clean and exit 0.
-    """
+    """A derived case must declare an `expectation:`: the judge never runs on it, so
+    without one any projection would pass."""
     if not is_derived(manifest.get("kind")):
         return []
     expectation = manifest.get("expectation") or {}
@@ -430,15 +364,9 @@ def check_expectation(name: str, manifest: dict) -> list[str]:
 def check_clause_text(case_dir: Path, manifest: dict) -> list[str]:
     """`must_emit` / `must_not_emit` entries are quoted strings, wherever the case keeps them.
 
-    The scorer compares these literals with the projection's text, and an unquoted
-    `2026-07-25T07:48:37.065Z` is a `datetime` to YAML — a clause that can never match and
-    so never fires (#951). The scorer refuses such a clause at score time; this is the same
-    refusal at commit time, from the same readers, so the author sees it before a projection
-    is ever paid for. `forbidden_values` reads every location a `must_not_emit` may sit in —
-    the manifest's `expectation:`, `expected.yaml`, the manifest top level — not just the one
-    that wins, so a shadowed clause is refused too rather than lying dead until the winning
-    one is removed. Each clause is reported on its own: an author with both mis-typed learns
-    both at once.
+    An unquoted timestamp loads as a `datetime` and can never match the projection's text.
+    Same readers as the scorer, so the refusal surfaces at commit time; each clause is
+    reported separately.
     """
     problems: list[str] = []
     for read in (lambda: forbidden_values(case_dir, manifest),
@@ -451,8 +379,7 @@ def check_clause_text(case_dir: Path, manifest: dict) -> list[str]:
 
 
 def check_identity(case_dir: Path, manifest: dict) -> list[str]:
-    """The case's own name, agreed by the manifest — so a copied case cannot silently
-    pass for another — and the capture an observed case must carry."""
+    """The manifest agrees with the directory name, and an observed case carries its capture."""
     name = case_dir.name
     problems = []
     if manifest.get("case_id") != name:
@@ -468,12 +395,10 @@ def check_identity(case_dir: Path, manifest: dict) -> list[str]:
 
 
 def check_environment(case_dir: Path) -> list[str]:
-    """`environment.yaml` is an input to BOTH judge passes, not documentation.
+    """`environment.yaml` is an input to both judge passes, not documentation.
 
-    It carries what decides whether a cross-window difference is real at all: the
-    columns that rotate across lever-ups, how the controls were built, what
-    `window_live: false` means. A case missing it, or missing the unstable-identifier
-    list inside it, is a case the judge will read the environment wrongly.
+    It says whether a cross-window difference is real: which columns rotate across
+    lever-ups, how controls were built, what `window_live: false` means.
     """
     name = case_dir.name
     notes = yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8")) or {}
@@ -523,9 +448,8 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
                           ledger_path: Path = LEDGER) -> list[str]:
     """A held-out result is written once per (case, tag) and never rewritten.
 
-    No code seam can stop someone reading a held-out case while editing the prompt — the tree
-    is readable by anything with repo access. What IS mechanizable is detecting a result that
-    changed after the fact.
+    Reading a held-out case cannot be prevented; a result changed after the fact can be
+    detected.
     """
     problems = []
     ledger = (yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
@@ -552,10 +476,8 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
                     f"ledger hash. A held-out result is recorded once per tag; to record a "
                     f"new oracle version, add a NEW tag rather than re-running this one")
     for key in sorted(set(entries) - seen):
-        # A `retired` entry is allowed to have no file: retiring a held-out result is how
-        # a DEFECTIVE case leaves the suite, and the entry stays behind with its reason so
-        # the result is never silently unmade. An entry with no file and no reason is the
-        # failure this catches — a held-out score deleted because someone disliked it.
+        # A `retired` entry (a defective case leaving the suite) may lack its file; any other
+        # missing file is a deleted held-out result.
         if entries[key].get("retired"):
             continue
         problems.append(
@@ -571,14 +493,10 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
 def coverage(case_dir: Path, manifest: dict) -> dict:
     """What this case actually holds — reported, never asserted.
 
-    A lookup lead has no baseline because a lookup has no `@timestamp` bounds to move;
-    a derived case has no telemetry because it was never fired; a zero-byte payload is a
-    query that errored at capture. None of those is a defect. Printing them is how the
-    reader learns the instrument's limits instead of assuming they are zero.
+    A lookup lead has no baseline (no `@timestamp` bounds to move), a derived case has no
+    telemetry, and a zero-byte payload is a query that errored at capture. None is a defect.
     """
-    # A half-built case — a recruitment still running, or one that failed partway — has
-    # no lead set yet. `check_case` already reports it as missing a required file; the
-    # coverage report's job is to stay readable beside that, not to die on it.
+    # A half-built case has no lead set yet; `check_case` reports that, so don't crash here.
     leads = _leads_of(case_dir) if (case_dir / "oracle_visible" / "leads.jsonl").is_file() else {}
     observed_dir, controls_dir = case_dir / "hidden" / "observed", case_dir / "hidden" / "controls"
     observed = {p.name for p in observed_dir.iterdir()} & set(leads) if observed_dir.is_dir() else set()
@@ -596,10 +514,8 @@ def coverage(case_dir: Path, manifest: dict) -> dict:
                     dead += 1
     return {
         "case": case_dir.name, "kind": manifest.get("kind"), "split": manifest.get("split"),
-        # A case whose capture cannot answer the question its leads ask. It stays in the
-        # tree -- the telemetry is real and the defect is instructive -- but it is not
-        # part of any split's totals, because counting it inflates the unit count with a
-        # unit nothing was ever measured for.
+        # Its capture cannot answer its leads' question: kept in the tree, excluded from
+        # split totals.
         "defective": manifest.get("defective"),
         "unit": f"{(manifest.get('unit') or {}).get('activity_family', '?')} "
                 f"{(manifest.get('unit') or {}).get('host_pair', '')}".strip(),
@@ -668,8 +584,7 @@ def main(argv: list[str] | None = None) -> int:
     if not ns.quiet:
         print(render_coverage([coverage(d, m) for d, m in cases]))
 
-    # Printed on every run, clean or not, and BELOW the coverage report rather than above it —
-    # a waived defect that stops being mentioned is a defect that has been forgotten.
+    # Printed on every run so waived defects are not forgotten.
     tracked = [k for k in sorted(known) if k[0] in {d.name for d in case_dirs}]
     if tracked:
         print(f"\n!! {len(tracked)} control record(s) carry an ACCEPTED invalid "

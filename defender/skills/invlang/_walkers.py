@@ -37,25 +37,12 @@ def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
 
 
 def vertex_types(companion: CompanionBody) -> dict[str, str]:
-    """Every vertex id in the document, mapped to its type — the WHOLE document, not the
-    prologue.
+    """Every vertex id in the whole document (prologue and lead observations), mapped to its
+    type. First declaration wins, matching `all_hypotheses`.
 
-    An investigation declares vertices in two places: the prologue's opening graph, and each
-    lead's own `outcome.observations`. Indexing the prologue alone while filtering against the
-    full hypothesis set (`all_hypotheses` walks both) silently drops any hypothesis anchored
-    to a vertex the run discovered mid-investigation: the anchor resolves to no type, so an
-    `attached_to_type` filter refuses it as a non-match rather than as a missing id.
-
-    First declaration wins, matching `all_hypotheses`: the prologue is the declaring site for
-    anything it names, and a later re-observation adds ids rather than re-typing them.
-
-    That is NOT the same fold `effective_vertex_state` runs, and `frontier._node_state` pairs
-    the two: `_seed_vertex_state` unions `attributes` across every `:V` row for the id and
-    upgrades an open `classification` or `ident` to a concrete one, so a document that
-    re-declares an id under a DIFFERENT `type` — which the validator accepts silently, since
-    append-only only compares across writes — yields an `OpenSlot` carrying the FIRST row's
-    type beside a later row's attribute. Reconciling the two folds is #919 follow-up work;
-    do not read the first-wins rule here as a guarantee that the pair agrees.
+    Not the same fold as `effective_vertex_state`, which merges attributes across rows: if a
+    document re-declares an id under a different type, `frontier._node_state` can pair the
+    first row's type with a later row's attribute.
     """
     v_type: dict[str, str] = {}
     for v in all_vertices(companion):
@@ -151,20 +138,12 @@ def final_weights(companion: CompanionBody) -> dict[str, Any]:
     """Where every DECLARED hypothesis ended up: its `:H` weight, moved by each
     resolution against it, last move winning.
 
-    NOT document order, and the difference is observable: `iter_resolutions` walks the LEADS in
-    declaration order and each lead's rows within that, so two leads moving one hypothesis in a
-    single `:T resolutions` block settle on the row belonging to the later-DECLARED lead, not
-    the later-written row. A block whose rows follow their leads is where the orders coincide.
+    "Last" is in lead-declaration order, not document order: two leads moving one hypothesis
+    settle on the later-declared lead's row. The orders coincide when resolution rows follow
+    their leads.
 
-    A resolution MOVES a weight; it does not declare one. Seeding an entry from the resolution
-    row would mint a hypothesis no `:H` row carries, and these keys are what
-    `live_hypothesis_ids` reports — so an `h-*` existing only as a typo in `:T resolutions`
-    would count as live. `validate_companion` denies that document, but this walker also reads
-    documents that never went through it (one carrying a parse warning, or one read back after
-    the fact).
-
-    So the declared set is the whole key set, and an unknown `h-*` is dropped rather than
-    added — silently, because naming it is the validator's job and this is the read side.
+    Only declared hypotheses are keys: a resolution naming an unknown `h-*` is dropped
+    silently (the validator reports it), so a typo cannot count as live here.
     """
     declared = all_hypotheses(companion)
     final: dict[str, Any] = {

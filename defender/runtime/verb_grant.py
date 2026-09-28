@@ -1,10 +1,9 @@
 """The per-role verb grant: an enumerated `(system, verb, verb_class)` allowance.
 
-A `VerbGrant` is authored data, not a filter derived from the registry. It is frozen and
-hashable so it can live on `AgentDefinition` beside `bash_shapes`, and it validates its own
-contents at construction (a bad class token, or one `(system, verb)` declared twice with
-conflicting classes) rather than at first use — the grant's authoring-integrity guarantee,
-matched by the read-endpoint allowlist's own constructor (`scripts/adapters/confinement.py`).
+A `VerbGrant` is authored data, not derived from the registry. It is frozen and hashable so it
+can live on `AgentDefinition`, and it validates its contents at construction (unknown class
+token, or one `(system, verb)` declared with conflicting classes) so authoring defects fail at
+load rather than at first use.
 """
 from __future__ import annotations
 

@@ -10,101 +10,53 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-#: The operator runs `feed_token` REFUSES outright. Narrower than `_SHLEX_PUNCTUATION` on
-#: purpose, and the gap is `(`/`)`: a run containing one is not refused here — it falls
-#: through to `cur_argv` and crosses as a literal argv word. `parse('echo $(whoami)')` is
-#: `['echo', '$', '(', 'whoami', ')']` and `parse('cat <(id)')` is `['cat','<(','id',')']`,
-#: both accepted, and `test_540_exec_seam.py` pins that shape deliberately. What keeps them
-#: off an authorised argv is `permission/bash.py::_stage_unsafe` — a layer up, not here — but
-#: read what it actually tests before relying on it: `t in ("(", ")")` is EXACT equality, so a
-#: paren FUSED into a wider operator run is not refused by it. `cat <(id)` is caught by its
-#: own trailing `)` token; `cat <(id)|grep y` is not — the `|` is swallowed into a `)|` token
-#: that neither this module's `set(t) <= _OPERATOR_CHARS` refusal nor `_stage_unsafe` rejects,
-#: and the pipeline separator disappears. It fails closed at `_claim`/`_in_scope` today (no
-#: grant pattern admits a `)|` operand), which is a second gate and not this claim. Nothing
-#: expands either way, because no shell re-parses downstream.
+#: Operator runs `feed_token` refuses outright. Narrower than `_SHLEX_PUNCTUATION`: a run
+#: containing `(`/`)` is not refused here and crosses as a literal argv word
+#: (`parse('cat <(id)')` is `['cat','<(','id',')']`). `permission/bash.py::_stage_unsafe`
+#: refuses bare paren tokens, but by exact equality, so a fused run like the `)|` in
+#: `cat <(id)|grep y` passes both checks and swallows the pipe; today it fails closed only
+#: because no grant pattern admits a `)|` operand. Nothing expands either way: no shell
+#: re-parses downstream.
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
-#: The characters that END a word and start an operator run — `shlex`'s own punctuation set
-#: from the `punctuation_chars=True` lexing this module used to do, kept verbatim so the
-#: scanner splits words exactly where that lexer split them. WIDER than `_OPERATOR_CHARS`:
-#: `(`/`)` break a word here without being operators the grammar accepts, and `feed_token`
-#: does NOT refuse them — see `_OPERATOR_CHARS` for where that refusal actually lives. Kept
-#: wide regardless, because splitting the word is what the lexer this replaced did, and the
-#: shape downstream is pinned on it.
+#: Characters that end a word and start an operator run (`shlex`'s punctuation set). Wider
+#: than `_OPERATOR_CHARS`: `(`/`)` split a word but are not refused by `feed_token`; the
+#: downstream token shape is pinned on this split.
 _SHLEX_PUNCTUATION = frozenset("();<>|&")
 
-#: The characters that SEPARATE words — BASH's blank set, which is space and tab. (`\n` is
-#: carried for completeness only: `parse` splits the command on it before a line reaches the
-#: scanner, so it is never seen here.)
-#:
-#: Taken from bash rather than from `shlex`, and that is the whole of the distinction. Two
-#: wider sets are both wrong, in the same direction:
-#:
-#:   * `str.isspace()` is a Unicode predicate — true for `\x0b`, `\x0c`, `\x1c`-`\x1f`,
-#:     `\x85`, NBSP and every Unicode space, none of which bash splits on.
-#:   * `shlex.whitespace` is `' \t\r\n'`, which is NOT bash's IFS: bash's default IFS is
-#:     space/tab/newline and carries no `\r`. `cat a\rb` is ONE word to bash.
-#:
-#: Splitting on any of them cuts a word bash keeps whole — `cat 'a\xa0b'` reaching the
-#: executor as `['cat', 'a', 'b']`, or `w a\r2>/dev/null` losing its `2` operand and having
-#: its redirect read as an fd-2 one when bash redirects stdout. That is #955 F-50's own defect
-#: (an argv that is not the one the model wrote, authorised by a gate reading the rewritten
-#: one) one character class over, so the oracle here has to be bash and not the lexer this
-#: scanner replaced. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins every member.
+#: Bash's word separators: space and tab (`\n` never reaches the scanner; `parse` splits on
+#: it). Not `str.isspace()` (true for NBSP, `\x0b`, `\x85`, ...) and not `shlex.whitespace`
+#: (includes `\r`, which bash keeps in the word). Splitting on a wider set hands the executor
+#: an argv the model did not write, e.g. `w a\r2>/dev/null` losing its `2` operand and having
+#: a stdout redirect read as fd 2. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins it.
 _BLANKS = frozenset(" \t\n")
 
-#: `_BLANKS` as a string, built ONCE — for `str.strip`, and for any membership test outside
-#: this module. (It fed `shlex.whitespace` on main; #959 M2 removed the lexer this module used
-#: to resolve a word with, so there is nothing left here to configure.)
-#:
-#: PUBLIC, and that is the point rather than a convenience. Every defect in #955 is two rules
-#: where the code needs one: an fd read off the token stream vs the raw text, a word boundary
-#: read off `str.isspace()` vs bash's set, a trim in the gate that undid the scanner's own
-#: narrowing one call before it ran. A private name reached across a module boundary is how
-#: the NEXT copy gets written instead of imported, so anything in this tree that has to know
-#: where a bash word ends imports this and does not spell it again.
-#:
-#: `sorted` rather than a literal because `frozenset` iteration order is not a guaranteed
-#: property; hoisted out of `_word_value` because building it per WORD put a `sorted()` on the
-#: slow path of every quoted argument the gate sees.
+#: `_BLANKS` as a string, for `str.strip` and membership tests. Public so anything that needs
+#: to know where a bash word ends imports it rather than spelling its own copy. `sorted`
+#: because frozenset iteration order is not guaranteed.
 BLANKS = "".join(sorted(_BLANKS))
 
-#: Bash's comment character. It begins a comment only where a WORD begins — at the start of
-#: the line, after a blank, or after an operator run — and only unquoted: `a#b` is the word
-#: `a#b`, `'#'` and `\#` are the character. Everything from there to the end of the line is
-#: not part of the command at all.
-#:
-#: Decided against the raw text for the same reason the fd prefix is (#955 F-50): by the time
-#: `shlex` has resolved a word to its value, a `#` that stood for itself and a `#` that opened
-#: a comment are one token. Reading it off the token stream is what made
-#: `cat run/a.json # ; rm -rf run/b` TWO stages here and ONE command plus a comment in bash —
-#: the executor running an argv the model's own text says is commented out, and the gate
-#: authorising that one. A `#` INSIDE a word stays an ordinary character: `_word_value` simply
-#: passes it through, where the lexer this replaced had to be told to (`commenters = ""`).
+#: Bash's comment character: starts a comment only unquoted and where a word begins (`a#b`,
+#: `'#'` and `\#` are literal). Decided against the raw text, because once a word is resolved
+#: a literal `#` and a comment `#` look the same; otherwise `cat a # ; rm -rf b` would be two
+#: stages here while bash runs one command plus a comment.
 _COMMENT = "#"
 
-#: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
-#: other one is refused, so the scan only has to recognise this one.
+#: The only fd this executor routes; any other IO_NUMBER is refused.
 _STDERR_FD = "2"
 
-#: The two fd-2 redirects this executor implements: `operator -> (required target, stderr mode)`.
-#: A table rather than two near-identical arms, because the condition they share is #955 F-50's
-#: own fix and one copy of it is one place it can be got wrong.
+#: The fd-2 redirects this executor implements: `operator -> (required target, stderr mode)`.
+#: One table so the shared fd-prefix condition exists in one place.
 _FD2_REDIRECTS = {">": ("/dev/null", "devnull"), ">&": ("1", "stdout")}
 
-#: The tokens that leave a line INCOMPLETE when they close it — `A |`, `A &&` need the next
-#: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
+#: Tokens that leave a line incomplete when they close it (`A |`, `A &&`). `;` is absent:
+#: `A;` is a finished command.
 _DANGLING_CONNECTORS = frozenset({"|", "&&", "||"})
 
-#: A token's KIND — the three cases the grammar turns on. `2>` is bash's IO_NUMBER redirect;
-#: a spaced `>` is a redirect of stdout after the ordinary word `2`, and both arrive with the
-#: same TEXT (#955 F-50), so the kind is what a reader must use to tell them apart. `FD_OPERATOR`
-#: marks the bare digit token itself (`2`) that a following `>`/`>&` is GLUED to — the operator
-#: that follows stays plain `OPERATOR` — because the two still arrive as separate tokens (their
-#: raw spans and values differ) and it is the digit's own glue to what follows that makes it an
-#: IO_NUMBER rather than an ordinary word.
+#: Token kinds. `2>` (an IO_NUMBER redirect) and `2 >` (the word `2`, then a stdout redirect)
+#: have the same token text, so the kind tells them apart: `FD_OPERATOR` marks the bare `2`
+#: glued to a following `>`/`>&`; the operator itself stays `OPERATOR`.
 WORD = "word"
 OPERATOR = "operator"
 FD_OPERATOR = "fd-operator"
@@ -112,11 +64,8 @@ FD_OPERATOR = "fd-operator"
 
 @dataclass(frozen=True)
 class Token:
-    """One token of a scanned line: its resolved VALUE, the START/END offsets of its raw
-    spelling in the line (code-point offsets, quoting and glue intact), and its KIND.
-
-    One frozen record per token (#959 M1) — not three index-aligned collections, where
-    alignment between the token stream and the raw text was exactly what #955 F-50 was about."""
+    """One scanned token: resolved value, start/end code-point offsets of its raw spelling
+    (quoting and glue intact), and kind."""
 
     value: str
     start: int
@@ -128,9 +77,8 @@ def _literal_mask(line: str) -> list[bool] | None:
     """Which characters of `line` stand as themselves — unquoted, unescaped, and not a quote
     or escape character of the syntax. `None` if a quote never closes.
 
-    Everything `_scan` decides rests on this: whether an operator character IS an operator, and
-    whether it was glued to the word on its left. Both are facts about the raw text, and both
-    are gone by the time a word has been resolved to its value (#955 F-50)."""
+    `_scan` uses it to decide whether an operator character is an operator and whether it was
+    glued to the word on its left; neither is recoverable from resolved word values."""
     mask = [False] * len(line)
     quote: str | None = None
     i = 0
@@ -158,10 +106,8 @@ def _literal_mask(line: str) -> list[bool] | None:
 
 def _double_quoted_value(span: str, start: int) -> tuple[str, int] | None:
     """The resolved content of a double-quoted run starting at `span[start] == '"'`, and the
-    index just past its closing quote — or `None` if it never closes. Split out of
-    `_word_value` purely to keep that function's branch count within the lint budget; the
-    escaping rule (only `"`, `\\`, `$` and a backtick are meaningful after a backslash here) is
-    the one POSIX double-quote carve-out the single-quote and bare-word cases don't need."""
+    index just past its closing quote — or `None` if it never closes. Only `"`, `\\`, `$` and
+    a backtick are escapable inside double quotes (POSIX)."""
     j, n = start + 1, len(span)
     buf: list[str] = []
     while j < n:
@@ -180,34 +126,14 @@ def _double_quoted_value(span: str, start: int) -> tuple[str, int] | None:
 def _word_value(span: str) -> str | None:
     r"""One word's raw text — quotes and escapes intact — resolved to the value it stands for.
 
-    A hand-rolled unquoter over a span that HAS no unquoted whitespace and no unquoted operator
-    (`_scan` bounds it that way), so it never needs a notion of whitespace and can never
-    re-split what it is handed — the whole of #959 M2. `None` on a dangling escape or a quote
-    that never closes within the span (both indicate a line that `_literal_mask` already
-    accepted as balanced overall but whose OWN token turned out not to be — practically
-    unreachable given that guarantee, kept as a defensive `None` rather than an exception).
+    `_scan` bounds the span so it has no unquoted blank or operator, so this never re-splits.
+    `None` on a dangling escape or unclosed quote (defensive; `_literal_mask` already checked
+    the line's balance).
 
-    CHOSEN OVER CONFIGURING `shlex`, which is how main closed the same defect: pinning
-    `lex.whitespace = BLANKS` stops the re-split too, and both readings were live at the merge.
-    What decides it is bash, not speed. Inside double quotes bash resolves `\$` to `$` and a
-    backslash-escaped backtick to a backtick; `shlex` hands both back with the backslash still
-    on. A gate whose thesis is "mean what bash means" cannot resolve a word by a rule bash does
-    not use. That difference is a verdict change on two spellings no corpus row carries, and it
-    is enumerated here rather than left to be discovered.
-
-    THE FAST PATH IS WHAT MAKES THE SPEED CLAIM TRUE, and it was missing when this landed. A
-    span carrying none of the three characters that mean anything here — `'`, `"`, `\` — already
-    IS its value, and three C-level `in` scans say so; the loop below costs one Python
-    iteration, one `str` allocation and one list append PER CHARACTER to reach the same answer.
-    82% of the spans in this change's own frozen corpus are quote-free, and `parse` runs on
-    every Bash tool call, so the path this skips is the common one.
-
-    MEASURED over every span of that corpus, three readings, so nobody has to take the
-    adjective: `shlex` with its own fast path 0.237s, this loop WITHOUT one 0.184s, this loop
-    with one 0.044s. The omission was not a regression — it was still marginally ahead — but
-    the "~3x faster" this file used to claim was measured on a hand-picked span mix that was
-    half quoted, where the real one is a fifth. Against `shlex` the honest numbers are ~1.3x
-    without the fast path and ~5x with it."""
+    Hand-rolled rather than `shlex` because bash resolves `\$` and an escaped backtick inside
+    double quotes, and `shlex` leaves the backslash on; the gate must resolve words as bash
+    does. The quote-free fast path matters: most spans have no `'`, `"` or `\`, and `parse`
+    runs on every Bash tool call."""
     if not ("'" in span or '"' in span or "\\" in span):
         return span
     out: list[str] = []
@@ -241,11 +167,7 @@ def _word_value(span: str) -> str | None:
 
 def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[Token]) -> bool:
     """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
-    to its left that STARTS its own word.
-
-    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
-    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
-    standing alone is the fd."""
+    to its left that starts its own word. Bash reads `foo2>` and `"2">` as stdout redirects."""
     if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
         return False
     if not toks or toks[-1].value != _STDERR_FD:
@@ -253,34 +175,18 @@ def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[Token]) -> bo
     if at == 1:
         return True
     before = line[at - 2]
-    # `_OPERATOR_CHARS`, NOT `_SHLEX_PUNCTUATION`: the wider set carries `(`/`)`, which end a
-    # word for the scanner but are not characters an IO_NUMBER may follow in any line bash
-    # will run. Reading them as one made `w a)2>/dev/null` an fd-2 redirect — the `2` popped
-    # off argv and stderr rerouted — on a line `bash -n` refuses outright, which is the
-    # accept-what-bash-rejects direction `test_bash_differential_897.py` exists to close.
+    # Not `_SHLEX_PUNCTUATION`: an IO_NUMBER cannot follow `(`/`)` in any line bash runs, and
+    # accepting `w a)2>/dev/null` as an fd-2 redirect would accept a line bash rejects.
     return mask[at - 2] and (before in _BLANKS or before in _OPERATOR_CHARS)
 
 
 def _scan(line: str) -> list[Token] | None:
-    r"""The line's tokens, as one frozen record per token (#959 M1): resolved value, the
-    start/end offsets of its raw spelling, and its kind.
+    r"""The line's tokens, or `None` if a quote never closes.
 
-    Structure is decided against the RAW TEXT and only the values go through `_word_value`,
-    which is the whole of #955 F-50. Lexing the line with a punctuation-splitting shlex lexer —
-    as this module used to — hands back a stream in which the two questions the grammar turns
-    on can no longer be asked:
-
-      * WAS THE OPERATOR GLUED to the word on its left? `2>` is a single IO_NUMBER redirect
-        and `2 >` is the word `2` followed by a redirect of stdout, and both arrive as
-        `['2', '>']`. Reading the fd off the previous TOKEN accepted `head -c 2 >/dev/null`
-        and ran `head -c` — the gate answering on an argument's VALUE, and the executor
-        running a command the model did not write.
-      * WAS IT AN OPERATOR AT ALL? A quoted or escaped one is an ordinary character: the `\;`
-        that `find -exec` requires came back as a bare `;` token and was read as a pipeline
-        separator, dropping the terminator `find` cannot run without.
-
-    Both are answered here and neither can be answered downstream, so the tokenizer is the
-    only place the fix fits."""
+    Structure is decided against the raw text; only word values go through `_word_value`.
+    That is the only place two questions can be answered: was an operator glued to the word
+    on its left (`2>` vs `2 >`), and was it an operator at all (a quoted/escaped `\;` for
+    `find -exec` is a word, not a separator)."""
     mask = _literal_mask(line)
     if mask is None:
         return None
@@ -291,26 +197,16 @@ def _scan(line: str) -> list[Token] | None:
             i += 1
             continue
         if mask[i] and line[i] == _COMMENT:
-            # A word STARTS here (blanks are consumed above, and every other arm consumes its
-            # whole token), so an unquoted `#` at this position is bash's comment and the rest
-            # of the line is not command text. Dropping it here rather than refusing the line
-            # is what bash does, and it keeps the operator that PRECEDES a comment answerable
-            # by the arms that already handle it: `A |` / `A &&` / `2>` left dangling by the
-            # comment still fail, as they do in bash, because the token they need is gone.
+            # A word starts here, so this is bash's comment. Dropping the rest (as bash does)
+            # leaves an operator dangling before it (`A | # x`) to fail as it does in bash.
             break
         if mask[i] and line[i] in _SHLEX_PUNCTUATION:
             j = i
             while j < n and mask[j] and line[j] in _SHLEX_PUNCTUATION:
                 j += 1
             if _is_fd_prefix(line, mask, i, toks):
-                # Retroactively mark the PRECEDING bare digit as the fd component — it is the
-                # digit's glue to this operator that makes it an IO_NUMBER, not a property of
-                # the operator token itself, which stays plain `OPERATOR` either way.
-                #
-                # Constructed rather than `dataclasses.replace`d: `replace` re-derives the field
-                # list and re-enters `__init__` through a kwargs splat for 2x the cost, on a
-                # function that runs for every `2>` on every Bash tool call. Same frozen record
-                # either way — a NEW Token, never a mutation.
+                # Retroactively mark the preceding bare digit as the fd. Constructed directly
+                # rather than via `dataclasses.replace`, which is ~2x slower on a hot path.
                 prev = toks[-1]
                 toks[-1] = Token(prev.value, prev.start, prev.end, FD_OPERATOR)
             toks.append(Token(line[i:j], i, j, OPERATOR))
@@ -366,14 +262,9 @@ class _PipelineBuilder:
 
     def end_pipeline(self, next_connector: str) -> None:
         if self.cur_stages and not self.cur_argv:
-            # A `|` banked a stage and nothing COMPLETE follows it, so this pipeline would
-            # close holding only its left side and the `|` would vanish — `A | ; B` would run
-            # B on /dev/null. The check lives here, where a pipeline closes, rather than
-            # beside `feed_token`'s token checks, because the token that exposes it is not
-            # always a connector (`;` is carved out below, and `A | 2>/dev/null` empties its
-            # right side with no separator at all). The invariant — no pipeline banks a stage
-            # list whose last `|` had an empty right side — covers every spelling, where
-            # enumerating the tokens that may follow a pipe does not.
+            # A `|` with nothing complete after it would silently vanish (`A | ; B`,
+            # `A | 2>/dev/null`). Checked where a pipeline closes, since the exposing token
+            # is not always a connector.
             raise UntokenizableCommand(
                 "pipeline token '|' has nothing to its right"
             )
@@ -387,22 +278,15 @@ class _PipelineBuilder:
         tok, n = tokens[i], len(tokens)
         t = tok.value
         if tok.kind == WORD:
-            # A token whose TEXT is an operator but whose raw spelling was quoted or escaped —
-            # `find … {} \;`, `echo ';'`. Every arm below dispatches on text, so without this
-            # the `;` that `find -exec` requires was read as a pipeline separator and dropped,
-            # leaving `find` to run a command it cannot complete (#955 F-50's other half).
+            # Quoted/escaped operator text (`find … {} \;`, `echo ';'`) is an argument; every
+            # arm below dispatches on text.
             self.cur_argv.append(t)
             return i + 1
         if t in _DANGLING_CONNECTORS and not self.cur_argv:
-            # A connector with no COMPLETE command to its left. Within a line that is a bash
-            # syntax error; ACROSS lines (`A\n| B`) the token would be dropped and `A | B`
-            # would silently become `A ; B` — a second stage on /dev/null, reported as the
-            # last pipeline's rc. `cur_stages` is deliberately NOT consulted: `A | | B`
-            # reaches here with a stage already banked, and the second `|` is just as dropped.
-            #
-            # Same set as the trailing check: a leading `;` drops NOTHING, so refusing it would
-            # deny a harmless command under the only reason the agent is ever shown —
-            # `permission/bash.UNTOKENIZABLE_REASON`, which names `|`/`&&`/`||` and not `;`.
+            # A connector with no complete command to its left; across lines (`A\n| B`) it
+            # would be dropped and `A | B` become `A ; B`. `cur_stages` is not consulted so
+            # `A | | B` is caught too. A leading `;` drops nothing and is allowed, matching
+            # `permission/bash.UNTOKENIZABLE_REASON`, which names only `|`/`&&`/`||`.
             raise UntokenizableCommand(
                 f"pipeline/connector token {t!r} has no command to its left"
             )
@@ -413,16 +297,9 @@ class _PipelineBuilder:
             self.end_pipeline(t)
             return i + 1
         if t in _FD2_REDIRECTS:
-            # ONE arm for both spellings, because the test they share is the one #955 F-50 got
-            # wrong, and two copies of it is two places a later correction can be applied to
-            # only one — which is the shape the original defect already had.
-            #
-            # The PRECEDING token carrying `fd-operator` kind is the whole of the fd test;
-            # `cur_argv[-1] == "2"` only confirms the token stream agrees with the raw text
-            # about which word that was. Testing the TOKEN alone (as both arms did until
-            # #955 F-50) reads an ordinary numeric operand as an fd: `head -c 2 >/dev/null` was
-            # accepted and ran `head -c` — the gate's answer turning on an argument's VALUE,
-            # and the executor running a command the model did not write.
+            # The fd test is the preceding token's `FD_OPERATOR` kind; `cur_argv[-1] == "2"`
+            # only confirms it. Testing the text alone would read the operand in
+            # `head -c 2 >/dev/null` as an fd and run `head -c`.
             target, stderr = _FD2_REDIRECTS[t]
             if (
                 i > 0 and tokens[i - 1].kind == FD_OPERATOR
@@ -440,18 +317,12 @@ class _PipelineBuilder:
 
 
 def parse(cmd: str) -> list[Pipeline]:
-    """The pipelines `cmd` names — the model's raw command text, byte for byte: there is no
-    wrapper step, and no second function a caller must apply first (#959 D1/C3, #971). Every
-    PHYSICAL LINE is scanned on its own and each stage becomes a bare argv.
+    """The pipelines in `cmd` (the model's raw command text). Each physical line is scanned on
+    its own and each stage becomes a bare argv.
 
-    NO WORD IS PARSED SPECIALLY HERE. `bash -c '<payload>'` used to be recognised and its
-    payload extracted — the last of the two folds, after the `timeout` prefix went in #971 —
-    and both are gone for the same reason: a fold DELETES TEXT AHEAD OF THE DECISION, so every
-    way of mis-reading the shape is a way of WIDENING what the gate allows, while a
-    pass-through can only refuse. `bash` and `sh` are ordinary ungranted words now; the lane's
-    capability reason answers them like any other program it does not have. What is still
-    special is punctuation, never a keyword: the connectors, the two stderr redirects, the
-    newline that ends a line, and the quoting."""
+    No word is special (`bash -c`, `timeout` are ordinary argv words): unwrapping a command
+    deletes text ahead of the gate's decision, so a misparse could only widen what it allows.
+    Only punctuation is special: connectors, the two stderr redirects, newlines, quoting."""
     builder = _PipelineBuilder()
     tokens: list[Token] | None
     for line in cmd.split("\n"):
@@ -465,8 +336,7 @@ def parse(cmd: str) -> list[Pipeline]:
             tokens and tokens[-1].value in _DANGLING_CONNECTORS
             and tokens[-1].kind != WORD
         ):
-            # `A |` / `A &&` closing a line. There is no shell to join the lines, so the
-            # connector would be dropped and the implicit `;` below would run the next line
+            # `A |` / `A &&` closing a line: nothing joins lines, so the next line would run
             # as an independent command.
             raise UntokenizableCommand(
                 f"pipeline/connector token {tokens[-1].value!r} closes a line with nothing to "
@@ -474,15 +344,9 @@ def parse(cmd: str) -> list[Pipeline]:
             )
         builder.end_pipeline(";")
         if builder.pending_connector in _DANGLING_CONNECTORS:
-            # An `&&`/`||` that banked its LEFT pipeline and never got a right one WITHIN ITS
-            # OWN LINE, so the connector was consumed and dropped. The token check above cannot
-            # see it: the line ends with the bare `;` that follows (`A && ;`), which the
-            # carve-out lets through.
-            #
-            # PER LINE, not once after the loop: `pending_connector` is builder state that
-            # outlives a line, so an end-of-parse check leaves `A && ;\nB` accepted — the `&&`
-            # then reaches ACROSS the line boundary and runs B conditionally on A. The
-            # connector's right side must arrive on its own line or not at all.
+            # `A && ;`: the connector got no right side within its line. Checked per line
+            # because `pending_connector` outlives the line; otherwise `A && ;\nB` would run B
+            # conditionally on A.
             raise UntokenizableCommand(
                 f"pipeline/connector token {builder.pending_connector!r} has no command "
                 "to its right"
@@ -626,13 +490,9 @@ def run_parsed(
 
 
 def _run_box_entrypoint() -> int:
-    """The process that runs INSIDE the sandbox: only the mounted tree on its `PYTHONPATH`, no
-    venv. One of these per `docker exec`, and one `docker exec` per command an agent issues,
-    so it imports `box_codec` — the wire codec and the env allowlist, stdlib — and NOT the
-    `box` package door, whose import costs roughly seven times as much because it reaches
-    `defender._model` and through it pydantic (#1096; #1092 made that resolvable in-box, which
-    is why this is a cost rule and not an availability one). Function-local because
-    `box_codec` imports this module at its top."""
+    """The process that runs inside the sandbox, once per command an agent issues. Imports
+    `box_codec` (stdlib only) rather than the `box` package, whose import pulls in pydantic and
+    costs ~7x as much. Function-local because `box_codec` imports this module."""
     from defender.runtime import box_codec
 
     frame = sys.stdin.buffer.read()
@@ -664,15 +524,9 @@ def _run_box_entrypoint() -> int:
 
 
 if __name__ == "__main__":  # lint-log-setup: ok — the box entrypoint: runs inside the sandbox, and its stderr is the host's channel from the box
-    # `python3 -m defender.runtime.bash_exec` is how a box starts this file, so the interpreter
-    # has it registered as `__main__` and NOT under its own import name. `box_codec` imports it
-    # by that name, which without this line parses, compiles and executes all of it a SECOND
-    # time in the same process — and the tree is mounted read-only, so there is no bytecode
-    # cache to make the second pass cheap (#1096). Aliasing the one already running costs
-    # nothing and also keeps `Pipeline`/`Stage` a single pair of classes, rather than two that
-    # only interoperate because nothing here uses `isinstance`.
-    # `setdefault`, not assignment: under any launch that DID import this module normally, the
-    # real one is already registered and must win.
+    # Under `-m` this module is `__main__`; `box_codec` imports it by its real name, which would
+    # execute it a second time (no bytecode cache on the read-only mount) and create a second
+    # `Pipeline`/`Stage` pair. Alias it; `setdefault` so a normal import, if any, wins.
     if __spec__ is not None:  # `-m`/runpy set it; a bare `python bash_exec.py` does not
         sys.modules.setdefault(__spec__.name, sys.modules[__name__])
     sys.exit(_run_box_entrypoint())

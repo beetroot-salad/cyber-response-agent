@@ -1,67 +1,50 @@
 #!/usr/bin/env python3
-"""Unsafe JSONL-I/O smell — flag hand-rolled per-line JSONL reads/appends under
-``defender/`` that bypass the shared ``defender._io`` helpers.
+"""Unsafe JSONL-I/O smell: flag hand-rolled per-line JSONL reads/appends under ``defender/``
+that bypass the shared ``defender._io`` helpers.
 
-A JSONL queue (``_pending/findings.jsonl``, ``_pending/pitfalls.jsonl``,
-``executed_queries.jsonl``, ``lessons_loaded.jsonl`` …) is appended to live and
-read back by the off-process drains. Two hand-rolled shapes recur, each a dedup
-smell and (on the read side) a safety bug:
+JSONL queues (``_pending/findings.jsonl``, ``executed_queries.jsonl`` …) are appended to live
+and read back by off-process drains. Two hand-rolled shapes recur:
 
 READ — a torn last line crashes the drain ::
 
     for line in path.read_text().splitlines():
         rec = json.loads(line)          # raises JSONDecodeError on a torn line
 
-A ``json.JSONDecodeError`` is neither ``RunUnprocessable``, ``StageAbort`` nor
-``AuthorError``, so it escapes every drain guard and crashes the worker every
-tick until the queue is hand-fixed (#446). Route reads through the single
-tolerant reader ``defender._io.read_jsonl_rows``, which skips torn/blank lines.
+``json.JSONDecodeError`` is not ``RunUnprocessable``, ``StageAbort`` or ``AuthorError``, so it
+escapes every drain guard and crashes the worker every tick until the queue is hand-fixed.
+Route reads through ``defender._io.read_jsonl_rows``, which skips torn/blank lines.
 
-APPEND — the json.dumps+newline write skeleton copied across modules ::
+APPEND — ``append_jsonl``'s body inlined ::
 
     with path.open("a") as fh:
         fh.write(json.dumps(row) + "\n")
 
-This is ``append_jsonl``'s body inlined; a fourth/fifth copy drifts from the
-helper (mkdir-on-demand, empty-rows no-op). Route appends through
-``defender._io.append_jsonl``. (#447 hoisted both helpers into ``defender/_io.py``.)
+Copies drift from the helper (mkdir-on-demand, empty-rows no-op). Route appends through
+``defender._io.append_jsonl``.
 
-What the READ check flags: a ``for`` loop whose iterable is derived from reading a
-file (``<p>.read_text().splitlines()`` / ``.split(...)``, ``open(...)``/``<p>.open()``,
-or a name bound to one of those in a ``with``/assignment) whose body calls
-``json.loads(...)`` on the loop line (directly or via an intermediate like
-``s = line.strip()``).
+The READ check flags a ``for`` loop whose iterable reads a file
+(``<p>.read_text().splitlines()`` / ``.split(...)``, ``open(...)``/``<p>.open()``, or a name
+bound to one of those) whose body calls ``json.loads(...)`` on the loop line, directly or via
+an intermediate like ``s = line.strip()``.
 
-The ``json`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not
-by the spelling ``json.``: ``import json as j`` and ``from json import loads`` are the same
-case as the dotted form. Before #602 the check required ``call.func.value.id == "json"``,
-so either of those made the gate blind to the very idiom it exists to stop.
+``json`` calls and openers are identified by resolved origin (``_astlib``), so aliases and
+from-imports count, and the opener's mode comes from the callee's own positional slot
+(``codecs.open(p, "a")`` is path-first).
 
-The OPENER is resolved the same way (``_astlib.opener_slot`` / ``open_mode``), so the
-handle's mode comes out of the callee's own positional slot. A private ``_open_mode`` here
-used to read ``args[0]`` as the mode of every ``<x>.open(...)`` — true only for
-``Path.open(mode)`` — so ``codecs.open(p, "a")`` read the PATH as its mode and the append
-handle went unrecognised.
+The APPEND check flags ``<fh>.write(json.dumps(...) + "\n")`` where ``<fh>`` is a local
+handle opened in append mode in the same function. This targets the ``append_jsonl`` drift
+while skipping long-lived streaming writers held as instance state and atomic whole-file
+rewrites (a separate concern, not gated here).
 
-What the APPEND check flags: ``<fh>.write(json.dumps(...) + "\n")`` where ``<fh>``
-is a local handle opened in *append* mode (``open(p, "a")`` / ``p.open("a")``) in
-the same function. Restricting to append-mode local handles is deliberate: it
-targets exactly the ``append_jsonl`` drift and skips both long-lived streaming
-writers that hold an open handle as instance state (``observe.py``'s
-``self._fh``, a ``"w"`` log stream) and atomic whole-file rewrites (the
-``write_atomic`` / ``tmp.write_text``+``os.replace`` pattern, a separate
-non-JSONL concern that is NOT gated here).
-
-What neither check flags: ``json.loads(path.read_text())`` (a single whole-file
-document, not line-delimited); ``for raw in stdout.splitlines(): json.loads``
-(parsing an in-memory subprocess stream, not a file); and a single-object
+Neither check flags ``json.loads(path.read_text())`` (one whole-file document),
+``for raw in stdout.splitlines(): json.loads`` (an in-memory stream), or a single-object
 ``fh.write(json.dumps(obj, indent=2))`` with no per-line newline.
 
-The one sanctioned reader/appender are ``read_jsonl_rows``/``append_jsonl``
-themselves (in ``defender/_io.py``); mark them (and any other deliberate
-exception) with ``# lint-jsonl-io: ok — <reason>`` on the ``for``/``write`` line.
-Pre-existing sites are ratcheted via ``lint_unsafe_jsonl_io_baseline.json`` (see
-scripts/lint/_baseline.py); the gate fails only on a NEW file+function pair.
+The sanctioned reader/appender (``read_jsonl_rows``/``append_jsonl`` in ``defender/_io.py``)
+and any other deliberate exception are marked with ``# lint-jsonl-io: ok — <reason>`` on the
+``for``/``write`` line. Pre-existing sites are ratcheted via
+``lint_unsafe_jsonl_io_baseline.json`` (see scripts/lint/_baseline.py); the gate fails only
+on a new file+function pair.
 
 Run from repo root:  python scripts/lint/lint_unsafe_jsonl_io.py
 Regenerate the baseline:  python scripts/lint/lint_unsafe_jsonl_io.py --update-baseline
@@ -92,7 +75,7 @@ BASELINE_PATH = Path(__file__).with_name("lint_unsafe_jsonl_io_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
-# Accept the legacy read-only marker too, so any pre-#447 suppression keeps working.
+# The legacy read-only marker is still accepted.
 SUPPRESS_MARKERS = ("lint-jsonl-io: ok", "lint-jsonl-read: ok")
 
 
@@ -101,13 +84,10 @@ def _in_scope(path: Path) -> bool:
 
 
 def _is_test_module(rel: str) -> bool:
-    """A ``tests/`` dir or a flat ``test_*.py`` / ``*_test.py`` / ``conftest.py`` —
-    the test-fixture category the duplicate-helper gate also exempts. The APPEND
-    check skips these: a fixture re-implementing the json.dumps+newline write is by
-    design, and some MUST hand-roll to write deliberately-torn/non-json lines that
-    exercise the reader's tolerance (``append_jsonl`` only emits valid JSON). The
-    READ check still covers them — a torn-line crash (#446) is a real bug anywhere
-    a live file is read, including a replay harness."""
+    """A ``tests/`` dir or a flat ``test_*.py`` / ``*_test.py`` / ``conftest.py``. The
+    append check skips these: fixtures must sometimes hand-roll deliberately torn/non-JSON
+    lines to exercise the reader's tolerance. The read check still covers them — a torn-line
+    crash is a real bug anywhere a live file is read."""
     p = Path(rel)
     return (
         "tests" in p.parts
@@ -119,14 +99,8 @@ def _is_test_module(rel: str) -> bool:
 
 def _is_open_call(node: ast.expr, env: ModuleEnv) -> bool:
     """``open(...)`` / ``io.open(...)`` / ``<p>.open(...)`` — anything that yields a file
-    handle, identified by its RESOLVED origin (``_astlib.opener_slot``).
-
-    This used to be a spelled-name test (``func.id == "open"`` or ``func.attr == "open"``)
-    paired with a private ``_open_mode`` that read ``args[0]`` as the mode of every
-    ``<x>.open(...)`` — the identical positional-slot bug #602 fixed in the text-io gate,
-    left standing here. Every module opener is path-FIRST, so ``codecs.open(p, "a")`` read
-    the PATH as its mode, returned None, and the append handle went unrecognised: a
-    hand-rolled ``json.dumps`` append onto it walked straight through this gate.
+    handle, identified by resolved origin (``_astlib.opener_slot``) so the mode is read from
+    the callee's real slot.
     """
     return isinstance(node, ast.Call) and opener_slot(node, env) is not None
 
@@ -134,10 +108,9 @@ def _is_open_call(node: ast.expr, env: ModuleEnv) -> bool:
 def _iterates_file_lines(it: ast.expr, fh_names: set[str], env: ModuleEnv) -> bool:
     """True if ``for _ in <it>`` walks the lines of a file on disk.
 
-    Matches the read-text-and-split idiom, direct file-handle iteration, and a
-    name bound to ``open(...)``/``.open()`` earlier in the function. Crucially
-    NOT matched: ``<str>.splitlines()`` where the base is a plain value (e.g. a
-    subprocess ``stdout`` string), which has no torn-file failure mode.
+    Matches the read-text-and-split idiom, direct file-handle iteration, and a name bound to
+    ``open(...)``/``.open()`` in the function. Not ``<str>.splitlines()`` on a plain value
+    (e.g. subprocess ``stdout``), which has no torn-file failure mode.
     """
     # `<expr>.read_text(...).splitlines(...)` or `.split(...)`
     if (
@@ -158,8 +131,7 @@ def _iterates_file_lines(it: ast.expr, fh_names: set[str], env: ModuleEnv) -> bo
 
 def _filehandle_names(func: ast.AST, env: ModuleEnv, *, append_only: bool = False) -> set[str]:
     """Names bound to a file handle anywhere in ``func``, via a ``with`` item or a plain
-    assignment. With ``append_only``, restrict to handles opened in append mode — the mode
-    read out of the callee's own resolved slot, never guessed from the call's shape."""
+    assignment. With ``append_only``, only handles whose resolved mode contains ``a``."""
     names: set[str] = set()
 
     def _accept(call: ast.expr) -> bool:
@@ -183,11 +155,7 @@ def _filehandle_names(func: ast.AST, env: ModuleEnv, *, append_only: bool = Fals
 
 
 def _is_json_call(call: ast.AST, attr: str, env: ModuleEnv) -> bool:
-    """True if ``call`` lands in ``json.<attr>`` — however it was SPELLED.
-
-    This used to require ``call.func.value.id == "json"``, so ``import json as j`` or
-    ``from json import loads`` made the whole gate blind to the very idiom it exists to
-    stop (#602). Resolving the callee makes every spelling one case."""
+    """True if ``call`` lands in ``json.<attr>``, however it was spelled."""
     return isinstance(call, ast.Call) and callee(call, env) == f"json.{attr}"
 
 
@@ -243,8 +211,7 @@ def _writes_json_line(call: ast.Call, append_fh_names: set[str], env: ModuleEnv)
         if _is_json_call(node, "dumps", env):
             has_dumps = True
         elif isinstance(node, (ast.Constant, ast.Name)):
-            # Through module consts too: hoisting `NEWLINE = "\n"` is good style and
-            # must not double as the way to evade the append check.
+            # Through module consts too, so hoisting `NEWLINE = "\n"` does not evade the check.
             value = str_value(node, env)
             if value is not None and "\n" in value:
                 has_newline = True
@@ -317,8 +284,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    """Findings under ``root``, fingerprints relative to it — so the gate is
-    drivable on an injected tmp tree, not just the repo checkout."""
+    """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
@@ -353,9 +319,8 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

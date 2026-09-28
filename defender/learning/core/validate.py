@@ -15,10 +15,9 @@ from defender.learning.core.config import RunUnprocessable
 def normalize_disposition(report_path: Path) -> str:
     """The run's disposition, or `RunUnprocessable`.
 
-    What the value MEANS is `_report.read_report`'s single decision. What stays here is the
-    loop's REACTION: a case whose headline it cannot read is refused with a typed error the
-    drain can dead-letter, never guessed at. The head-of-file dump accompanies every refusal —
-    it is the operator's only view of what the model actually wrote.
+    `_report.read_report` decides what the value means; this refuses an unreadable headline
+    with a typed error the drain can dead-letter, never a guess. Each refusal carries the
+    report's head, the operator's only view of what the model wrote.
     """
     read = read_report(report_path)
     if read.disposition is None:
@@ -37,17 +36,11 @@ class MalformedReply(ValueError):
     """A model reply that is not exactly one bare document. The message names the shape."""
 
 
-# An UNINDENTED line ending in a closing think tag, trailing spaces allowed — on its own line
-# (the recorded prelude shape) or closing a line of reasoning (`…so caught.</think>`). No
-# opening tag is required: the recorded prelude shape has none. The column-0 anchor is what
-# keeps a tag quoted inside an indented block scalar from ending a prelude, so a reply that
-# does not load is not cut at a line its own document indented. Only a BARE reply that does not already load
-# as one mapping is searched for it: a reply opening with a fence has nothing in front of the
-# document by construction, and a loadable reply is the document — so a tag quoted inside a
-# valid document, or inside a fenced one, never moves the parse boundary. What remains is a
-# bare reply that is broken YAML AND quotes a column-0 close tag: the cut may land inside the
-# quote, and the consumer's loader is what decides the remainder. A YAML-aware scan would
-# close that too; it is not worth its weight against a reply that was already unloadable.
+# An unindented line ending in a closing think tag (alone or closing a line of reasoning); no
+# opening tag is required. Column 0, so a tag quoted in an indented block scalar doesn't end a
+# prelude. Only searched in a bare reply that doesn't already load as a mapping, so a tag
+# quoted inside a valid or fenced document never moves the boundary. Residual gap: a broken
+# bare reply quoting a column-0 close tag may be cut inside the quote.
 _THINK_CLOSE_LINE = re.compile(
     r"^(?:\S[^\n]*?)?</(?:think(?:ing)?|[a-zA-Z_][\w-]*?think[a-zA-Z_]*)>[ \t]*$", re.MULTILINE)
 _FENCE_LINE = re.compile(r"^```", re.MULTILINE)
@@ -58,15 +51,13 @@ _ONE_FENCED_DOCUMENT = re.compile(r"\A```([A-Za-z0-9_+-]*)[ \t]*\n(.*)\n```[ \t]
 def reply_document_text(text: str) -> str:
     """The bare document text of one model reply, or `MalformedReply` naming the shape.
 
-    A reply is one document, or it is malformed — the parser does not guess which of several
-    blocks the model meant (#1018: every attempt at guessing recorded a wrong verdict silently
-    on some other shape). In order: CRLF and a leading BOM are normalised; a bare reply that
-    does not already load as one mapping may carry a reasoning prelude ending in a line that
-    closes a think tag, which is dropped; the remainder is either exactly one fenced block (any
-    tag — a `json` tag on one document is still one document) or unfenced text. A column-0 ```
-    line inside either is a second block UNLESS the text loads as one mapping — a fence line
-    inside a quoted scalar is document, not a fence. Schema validation is the consumer's job,
-    and so is loading the returned text: the loads here are shape tests only.
+    A reply is one document or it is malformed; the parser never guesses which of several
+    blocks the model meant, since guessing silently records wrong verdicts. In order: CRLF and
+    a leading BOM are normalised; a bare reply that doesn't load as a mapping may have a
+    reasoning prelude ending in a think-close line, which is dropped; the remainder is exactly
+    one fenced block (any tag) or unfenced text. A column-0 ``` line inside is a second block
+    unless the text loads as one mapping. Loading and schema validation are the consumer's
+    job; the loads here are shape tests.
     """
     s = text.replace("\r\n", "\n").lstrip("\ufeff").strip()
     if not s:
@@ -96,8 +87,8 @@ def reply_document_text(text: str) -> str:
 
 
 def _loads_as_mapping(s: str) -> bool:
-    """Does the text load as one YAML mapping? A mapping, not merely "loads": a prose line and a
-    fenced block together load as one multi-line plain scalar, and that is not a document."""
+    """Does the text load as one YAML mapping? Not merely "loads": prose plus a fenced block
+    loads as one plain scalar."""
     try:
         return isinstance(safe_load(s), dict)
     except yaml.YAMLError:

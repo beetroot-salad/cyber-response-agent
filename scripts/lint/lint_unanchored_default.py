@@ -1,58 +1,41 @@
 #!/usr/bin/env python3
-"""Unanchored-default smell — flag a parameter re-defaulted *in the body* via a
-self-referential None-coalesce to a named/called fallback, under ``defender/``.
+"""Unanchored-default smell: flag a parameter re-defaulted in the body via a self-referential
+None-coalesce to a named/called fallback, under ``defender/``.
 
-The recurring shape (the "defensive one-liner") ::
+The shape ::
 
     def f(repo_root: Path | None = None):
         repo_root = repo_root if repo_root is not None else REPO_ROOT   # ← flagged
         ...
 
-Two things are wrong with it, and both are about a single source of truth:
+Both problems are about a single source of truth:
 
-1. The signature says ``repo_root: Path | None`` but the first body line makes it
-   non-None — the ``Optional`` is a *lie*. The optionality should be parsed away
-   at the boundary (resolve once at the entry/composition root, then pass the
-   concrete value inward as a non-``Optional``), not re-validated at every layer.
-2. The fallback (``REPO_ROOT`` / ``CATALOG_DIR`` / ``subscription_env()``) is
-   *default knowledge*. Repeating ``else REPO_ROOT`` in N functions duplicates
-   that knowledge and lets it drift. The fix is to anchor the default in ONE
-   place: a signature default referencing the constant (``repo_root: Path =
-   REPO_ROOT``) when the body needs a concrete value, or — better — defer to the
-   single callee/boundary that already owns the default and don't re-default here.
+1. The signature says ``Path | None`` but the first body line makes it non-None. Optionality
+   should be parsed away once at the boundary, then passed inward as a concrete value.
+2. The fallback (``REPO_ROOT`` / ``CATALOG_DIR`` / ``subscription_env()``) is default
+   knowledge; repeating ``else REPO_ROOT`` in N functions lets it drift. Anchor it in one
+   place: a signature default (``repo_root: Path = REPO_ROOT``), or better, defer to the
+   callee/boundary that already owns it.
 
-What this flags: a statement ``NAME = NAME if NAME is not None else <FALLBACK>``
-(or the reversed ``NAME = <FALLBACK> if NAME is None else NAME``), assignment or
-annotated, where ``NAME`` is a parameter of the enclosing function AND
-``<FALLBACK>`` is a ``Name`` / ``Attribute`` / ``Call`` — i.e. it references
-shared/external state, the drift-prone kind.
+What this flags: ``NAME = NAME if NAME is not None else <FALLBACK>`` (or the reversed
+``NAME = <FALLBACK> if NAME is None else NAME``), plain or annotated, where ``NAME`` is a
+parameter of the enclosing function and ``<FALLBACK>`` is a ``Name`` / ``Attribute`` /
+``Call`` (shared/external state, the drift-prone kind).
 
-What it deliberately does NOT flag:
+What it does not flag:
 
-- *Literal* fallbacks (``x = x if x is not None else []`` / ``{}`` / ``""`` /
-  ``0``), and the empty-container *constructors* that have no literal form
-  (``set()`` / ``dict()`` / ``list()`` / ``tuple()`` / ``frozenset()``). The
-  None-sentinel into an empty container is the sanctioned idiom for a mutable
-  default (``def f(items=[])`` is the famous bug); it carries no
-  single-source-of-truth concern.
-- Binding to a *new* name (``_spawn = spawn if spawn is not None else
-  subprocess.Popen``). Resolving an optional param into a fresh local is the DI/
-  test-seam shape that *owns* its default; the self-referential restriction
-  leaves it alone. Still discouraged at scale — see ``defender/CLAUDE.md``.
-- The ``x = x or <fallback>`` form. It is both common-and-often-fine and
-  separately buggy on valid-falsy values (``0``/``""``/``[]``); linting it is too
-  noisy. ``defender/CLAUDE.md`` covers it in prose.
-
-The cure pattern (``param: T = DEFAULT`` in the signature, or no in-body default
-at all) is NOT flagged — that is the anchored single source this gate pushes
-toward.
+- Literal fallbacks (``[]`` / ``{}`` / ``""`` / ``0``) and no-arg empty-container
+  constructors (``set()``, ``dict()`` ...): the None-sentinel mutable-default idiom.
+- Binding to a new name (``_spawn = spawn if spawn is not None else subprocess.Popen``): the
+  DI/test-seam shape that owns its default. Still discouraged at scale (see
+  ``defender/CLAUDE.md``).
+- ``x = x or <fallback>``: common, often fine, and separately buggy on falsy values; too noisy
+  to lint. ``defender/CLAUDE.md`` covers it in prose.
 
 Pre-existing sites are ratcheted via ``lint_unanchored_default_baseline.json``
-(see scripts/lint/_baseline.py); the gate fails only on a NEW
-file+function+param triple, where *function* is the dotted path of enclosing
-classes/defs (``Class.method``) so two same-named siblings stay distinct.
-Suppress a deliberate site with ``# lint-default: ok — <reason>`` on the
-assignment.
+(see scripts/lint/_baseline.py); the gate fails only on a new file+function+param triple,
+where *function* is the dotted path of enclosing classes/defs (``Class.method``).
+Suppress a deliberate site with ``# lint-default: ok — <reason>`` on the assignment.
 
 Run from repo root:  python scripts/lint/lint_unanchored_default.py
 Regenerate the baseline:  python scripts/lint/lint_unanchored_default.py --update-baseline
@@ -134,10 +117,8 @@ _EMPTY_CONTAINER_BUILTINS = frozenset(
 
 
 def _is_empty_container_call(node: ast.expr) -> bool:
-    """A no-arg call to a built-in container constructor (``set()`` / ``dict()`` /
-    ``list()`` …) — the literal-less form of the sanctioned empty-container
-    mutable-default idiom (a ``set`` has no literal). It carries no drift-prone
-    default knowledge, so it is exempt just like ``[]`` / ``{}`` / ``""``."""
+    """A no-arg call to a built-in container constructor (``set()`` / ``dict()`` …): the
+    literal-less form of the empty-container idiom, exempt like ``[]`` / ``{}``."""
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -148,10 +129,8 @@ def _is_empty_container_call(node: ast.expr) -> bool:
 
 
 def _is_named_fallback(fallback: ast.expr) -> bool:
-    """Fallback references shared/external state (the drift-prone kind), not a
-    literal/empty-container (the sanctioned mutable-default idiom). An empty
-    container built via its constructor (``set()`` / ``dict()`` / ``list()``) is
-    the literal-less form of that idiom and is likewise exempt."""
+    """Whether the fallback references shared/external state, rather than being a literal or
+    empty container."""
     if _is_empty_container_call(fallback):
         return False
     return isinstance(fallback, (ast.Name, ast.Attribute, ast.Call))
@@ -174,11 +153,9 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
             scope = (*scope, node.name)
             params = _param_names(node)
         elif isinstance(node, ast.ClassDef):
-            # A class body is its own namespace: ``x = ...`` binds a class
-            # attribute, not the enclosing function's param. Drop params so a
-            # same-named class attribute isn't misread as an in-body re-default
-            # (the new-name shape the gate exempts), and push the class name so
-            # two ``Class.method`` siblings don't share one fingerprint.
+            # A class body is its own namespace: `x = ...` binds a class attribute, not the
+            # enclosing function's param. Push the class name so `Class.method` siblings
+            # get distinct fingerprints.
             scope = (*scope, node.name)
             params = set()
         target = _assign_target(node)
@@ -241,9 +218,8 @@ def main(argv: list[str]) -> int:
     if not DEFENDER.is_dir():
         print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:

@@ -257,9 +257,8 @@ document.getElementById("hide-stale").addEventListener("change", applyFilters);
 
 
 # =========================================================================================
-# The queue-state page (#903): what the loop gave up on, parked, or set aside — one host's
-# state root, on demand, beside the lessons page. Same spine (RUN_CSS), same self-contained
-# shape; its contract is `serialize_queues.build_view`.
+# The queue-state page: what the loop gave up on, parked, or set aside — one host's state
+# root, on demand, beside the lessons page. Its contract is `serialize_queues.build_view`.
 # =========================================================================================
 
 QUEUES_CSS = """
@@ -352,10 +351,8 @@ const DATA = ${queues_json};
 """
 
 
-# Every value this renderer touches is already the contract's type (`serialize_queues`' rule),
-# so the helpers below take strings and ints and do one thing each: `esc_untrusted` is applied
-# exactly once, at the point a value is written into markup, never to text that is already
-# markup.
+# Values arrive already typed by the contract. `esc_untrusted` is applied exactly once, where a
+# value is written into markup, never to text that is already markup.
 
 
 def _when(value: str | None) -> str:
@@ -430,9 +427,8 @@ def _li(key: str, value: str, tail: str = "") -> str:
 
 
 def _cap(tainted: dict) -> str:
-    """`held / cap`, warm once two slots or fewer remain — and never on an empty directory,
-    whatever the cap. `held` is null when the directory could not be listed: "?" then, not a
-    number the writer would not agree with."""
+    """`held / cap`, warm once two slots or fewer remain (never on an empty directory). `held`
+    null (unlistable) shows as "?"."""
     held, cap = tainted["held"], tainted["cap"]
     near = held is not None and held > 0 and cap - held <= 2
     shown = "?" if held is None else str(held)
@@ -474,10 +470,8 @@ def _aside_card(q: dict) -> str:
 
 
 def _fault_band(view: dict) -> str:
-    """The machinery-health band, present only when a channel has a stuck record, so a page
-    whose channels all drained cleanly carries no fault heading at all. The stuck file is
-    append-only and nothing clears it, so the band is titled by the record's time: "last
-    fault", never "stuck now"."""
+    """The machinery-health band, present only when a channel has a stuck record. Titled
+    "last fault", never "stuck now": the stuck file is append-only and nothing clears it."""
     stuck = [ch for ch in view["channels"] if ch.get("stuck")]
     if not stuck:
         return ""
@@ -500,11 +494,9 @@ def _fault_band(view: dict) -> str:
 
 
 def render_queues(view: dict) -> str:
-    """The whole page from the contract, RENDERED HERE rather than by a script in the page:
-    every value a person reads goes through `esc_untrusted` on this side, where a test can
-    see it, and the page needs no script to show anything. The template is filled in ONE
-    pass, so a value that happens to spell a placeholder is content, never a second
-    substitution."""
+    """The whole page from the contract, rendered here rather than by a page script, so every
+    value is escaped where a test can see it. The template is filled in one pass, so a value
+    spelling a placeholder is never substituted again."""
     payload = json.dumps(view, ensure_ascii=False).replace("<", "\\u003c")
     return Template(QUEUES_PAGE).substitute(
         css=RUN_CSS + NAV_CSS + QUEUES_CSS,
@@ -526,8 +518,8 @@ def render(view: dict) -> str:
 
 
 def main(paths: LoopPaths | None = None) -> int:
-    """Both pages, into this directory. `paths` is the queue page's whole input surface — the
-    CLI leaves it None and the state root is resolved at call time; a test hands its own."""
+    """Both pages, into this directory. `paths` is the queue page's input; `None` resolves the
+    state root at call time."""
     view = serialize.stamped_view()
 
     json_out = HERE.parent / "lessons.json"

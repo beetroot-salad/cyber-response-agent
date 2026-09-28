@@ -150,8 +150,7 @@ def _materialize_standing(now: Optional[datetime] = None) -> int:
 
 
 def _parse(iso: str) -> datetime:
-    # Accept trailing Z or explicit offset. datetime.fromisoformat handles both
-    # on python 3.11+; normalize Z first for older tolerance.
+    # Normalize a trailing Z for pre-3.11 fromisoformat.
     return datetime.fromisoformat(iso.replace("Z", "+00:00"))
 
 

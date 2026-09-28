@@ -1,28 +1,13 @@
-"""The invariants that say a system's authored surface is well-formed — as DATA, for every lane
-that writes it.
+"""Well-formedness invariants for a system's authored surface (query templates, `SKILL.md`),
+as data — shared by `connect`'s scaffold check and the lead-authoring lane's commit gate.
 
-Two lanes write it: `connect`'s maintainer-run scaffold check, and the lead-authoring lane,
-which mints `_draft/` templates (`learning/leads/draft_synthesis.py`) and promotes them into
-the established catalog and into `skills/{system}/SKILL.md` continuously, post-merge. These
-checks are about AUTHORED CONTENT rather than about an adapter, which is why they cover both
-lanes; only `connect` writes adapters.
+Nothing here prints or exits: callers decide what a `Finding` means. Messages carry no path;
+each caller prefixes the locator it has.
 
-Two properties make this callable from a commit gate as well as from a CLI:
-
-- **findings, not output.** Nothing here prints, and nothing raises `SystemExit`. A caller decides
-  what a finding means — a `FAIL` row in `connect`'s report, a `LeadAuthorError` that refuses a
-  commit, an assertion in CI.
-- **no path in the message.** Each caller prefixes the locator it actually has (a file name for
-  `connect`, a repo-relative path for the loop's commit gate), so neither has to strip the
-  other's.
-
-The allowed param surface is `model_facing_params`, not `declared_params`: a template's
-`${placeholder}` and its `params:` list are both things a MODEL binds at dispatch, so a param
-`@verb(wrapper_only=…)` reserves to a first-party wrapper is not bindable from a template.
-Under `declared_params` such a template would pass here and then be refused at
-`validate_params` with the run already spent. `body_substitutions:` is held to the same set
-from the other side: it is the one key that tells this checker *not* to classify a `${name}`,
-so a reserved name spelled there would put the surface one frontmatter line from optional.
+The allowed param surface is `model_facing_params`, not `declared_params`: template
+placeholders and `params:` are bound by a model, so a `@verb(wrapper_only=…)` param must be
+refused here rather than at `validate_params` after the run is spent. `body_substitutions:`
+may not name such a param either, since it exempts a `${name}` from checking.
 """
 from __future__ import annotations
 
@@ -47,51 +32,38 @@ from defender.runtime.verbs import (
     wrapper_only_params,
 )
 
-#: The one checked placeholder grammar, and the only one `SCHEMA.md` documents. `lead_render`
-#: additionally substitutes a bare `{name}` when it renders a handoff for display; that form is
-#: deliberately NOT checked here, because a query LANGUAGE body carries braces of its own (an
-#: ES|QL `GROK "%{IP:src}"` pattern is the shipped case) and checking it would make the corpus's
-#: own syntax a source of false refusals.
+#: The checked placeholder grammar, as `SCHEMA.md` documents it. The bare `{name}` form
+#: `lead_render` also substitutes is not checked: query-language bodies carry braces of their
+#: own (e.g. ES|QL `GROK "%{IP:src}"`).
 _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
 
 
 def placeholders(text: str) -> set[str]:
-    """Every `${name}` the CHECKED grammar finds in `text`.
-
-    THE reader of `_PLACEHOLDER_RE`, exported so any writer deciding which `${name}`s of a body
-    it must declare classifies against the same grammar the checker will apply, rather than a
-    second copy of it.
+    """Every `${name}` the checked grammar finds in `text` — exported so writers classify
+    against the same grammar the checker applies.
     """
     return set(_PLACEHOLDER_RE.findall(text))
 
 
 @model(frozen=True)
 class Finding:
-    """One violated invariant. `code` is the stable machine name (tests bind to it); `message` is
-    the operator-facing sentence, naming the offending symbol but never the file."""
+    """One violated invariant. `code` is the stable machine name (tests bind to it); `message`
+    names the offending symbol but never the file."""
 
     code: str
     message: str
 
 
 class ScaffoldRuleError(Exception):
-    """A rule could not be EVALUATED — an adapter that will not import, a system with none. Not a
-    finding: a finding says the authored file is wrong, this says the checker could not tell, and
-    a caller that treats the two alike re-opens the hole this module closes."""
+    """A rule could not be evaluated (an adapter that will not import, a system with none).
+    Distinct from a finding: the checker could not tell, which callers must not treat as a pass."""
 
 
 def _id_findings(t: QueryTemplate) -> list[Finding]:
     """The `id: {system}.{template-id}` invariant `SCHEMA.md` states.
 
-    A template's system is derived from WHERE IT SITS, while every consumer of the corpus
-    routes on the id's prefix (`query_id` is `{system}.{kebab-name}`, and `lead_neighbors` keys
-    `by_id` on it) — so a file filed under one system's directory while calling itself
-    `{other}.x` sends the row to the wrong system and mints a sibling draft besides.
-
-    Both WRITERS are already held to this from their own side (the minter by
-    `_draft_candidate_segments`, the loop's commit gate by `lead_author._skills_path_rule`).
-    Checked here for every READER that takes a template as data with no repo-relative path to
-    key on: `connect`'s scaffold sweep and the corpus-wide CI check.
+    A template's system comes from its directory, but consumers route on the id's prefix, so a
+    mismatch sends rows to the wrong system and mints a sibling draft.
     """
     prefix = t.id.split(".", 1)[0] if "." in t.id else ""
     if prefix == t.system:
@@ -108,17 +80,9 @@ def _id_findings(t: QueryTemplate) -> list[Finding]:
 def _covers_findings(t: QueryTemplate) -> list[Finding]:
     """`covers:` entries must be `{system}.{segment}` for the system the file sits under.
 
-    Checked for the same reason `id:` is, and with more at stake. A `covers:` entry asserts
-    that this file ANSWERS that identity, and `synthesize_drafts` believes it: an entry naming
-    another system's identity means that system never gets that draft again — permanently,
-    silently, from one copy-pasted line. It also weakens the lead lane's transfer rule, since
-    any entry on any established template can discharge a departed draft's attribution.
-
-    The shape matters as much as the prefix. `covers:` rides `_declared_names`, whose scalar
-    and numeric branches are deliberately tolerant (a YAML `on` becomes the string `True`), so
-    without this an unquoted `covers: on` claims the identity `"True"` and a bare
-    `covers: probe` claims one no `resolve_query_id` could emit — neither matches any row, and
-    both read as provenance.
+    `synthesize_drafts` trusts `covers:`, so an entry naming another system silently stops that
+    system's draft from ever being minted. The shape check also catches YAML-coerced entries
+    (`covers: on` → `"True"`) and bare names no `resolve_query_id` could emit.
     """
     bad = [c for c in t.covers if c.split(".", 1)[0] != t.system or "." not in c]
     if not bad:
@@ -165,11 +129,8 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         for name in sorted(set(t.params) - allowed)
     ]
 
-    # A `body_substitutions:` entry is an UNCHECKED escape from the placeholder rule, so a name
-    # a model may not bind must not be spellable there either: `body_substitutions:
-    # [require_closed]` would otherwise readmit exactly the `@verb(wrapper_only=…)` param the
-    # `model_facing_params` surface above keeps out, and the refusal would land at
-    # `validate_params` with the gather turn already spent.
+    # `body_substitutions:` exempts a name from the placeholder rule, so it must not readmit a
+    # `wrapper_only` param that `model_facing_params` keeps out.
     reserved = wrapper_only_params(fn)
     out.extend(
         Finding(
@@ -180,11 +141,8 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         for name in sorted(set(t.body_substitutions) & reserved)
     )
 
-    # A template that is not a draft must carry a `## Query`. The rule is here rather than left
-    # to a consumer because every consumer degrades SILENTLY without one: `lead_render` renders
-    # the empty string, `lead_neighbors` scores an empty token set, and the placeholder rule
-    # below is vacuous. The reachable way to write one is a promote that copies a draft and
-    # keeps its `## Executed query` heading.
+    # Every consumer degrades silently without a `## Query` (typically a promote that kept the
+    # draft's `## Executed query` heading), so non-drafts must carry one.
     if t.status != "draft" and not t.query.strip():
         out.append(
             Finding(
@@ -196,9 +154,7 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         )
 
     if engine_of(fn) != "none":
-        # An engine verb's body IS the query language, so its `${…}` are body text, not params
-        # — the rule is per-VERB (`adapter.md`). Counting these as satisfied would report
-        # coverage the check does not have.
+        # An engine verb's body is query language, so its `${…}` are body text, not params.
         return out
 
     undeclared = sorted(
@@ -216,14 +172,11 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
 
 
 def check_system_skill(skill_md: Path, system: str) -> list[Finding]:
-    """The per-system `SKILL.md` frontmatter identity. The `execution.md` shape stays a
-    `connect`-local WARN and is not here: it is authoring advice, not an invariant, and the
-    pitfalls curator writes that file under a rule of its own."""
+    """The per-system `SKILL.md` frontmatter identity. (`execution.md` shape is authoring advice,
+    left to `connect` as a warning.)"""
     text, reason = read_text_soft(skill_md)
     if text is None:
-        # Its OWN finding, not the identity one: `read_text_soft` answers `None` for a file that
-        # is unreadable or undecodable as much as for one that is absent, and reporting either as
-        # "frontmatter name is not …" sends the reader to a line that may be perfectly correct.
+        # Its own finding: "frontmatter name is not …" would point at a line that may be fine.
         return [Finding("skill-unreadable", f"could not be read ({reason})")]
     front = parse_frontmatter_or_none(text)
     if front is not None and front.get("name") == f"defender-{system}":
@@ -237,31 +190,18 @@ def check_system_skill(skill_md: Path, system: str) -> list[Finding]:
 
 
 class VerbResolver:
-    """`{system} -> declared verbs`, resolved off ONE tree and cached per system.
+    """`{system} -> declared verbs`, resolved off one tree and cached per system.
 
-    Takes a `defender_dir` rather than reading a module global, because the callers that matter
-    are not in the tree they check: the loop's commit gate runs in the main checkout and gates a
-    drain WORKTREE. `_load_adapter_module` caches on the resolved absolute path, so a resolver
-    built on the worktree's adapters dir gets the worktree's adapters, not the running
-    process's — which makes the gate's verdict a statement about the commit it is about to make.
-
-    Importing those adapters is safe at that seam: the lane's scope check has already refused
-    the commit if the agent touched anything outside `defender/skills/**.md`, so an adapter
-    reachable here is first-party checked-in code, never agent-written.
-
-    `DENY_ALL` is deliberate. This asks what a system DECLARES, not what a role may call —
-    `verbs()` is grant-independent by construction, and passing a real role's grant would
-    silently scope a well-formedness check to one role's authorization.
+    Takes a `defender_dir` because the commit gate runs in the main checkout but checks a drain
+    worktree; adapters load by resolved path, so the verdict is about the worktree's code.
+    Importing them is safe because the lane's scope check already refuses agent edits outside
+    `defender/skills/**.md`. Uses `DENY_ALL` because this asks what a system declares, not what
+    a role may call.
     """
 
     def __init__(self, defender_dir: Path) -> None:
         self._adapters_dir = adapters_under(Path(defender_dir))
-        # A tree whose adapters directory cannot be listed fails HERE, as "could not check"
-        # (`ScaffoldRuleError`, the error both production callers already catch) — not later
-        # as a clean empty roster, which is #901's own defect one step earlier. This resolver
-        # is its lane's composition root, so the one roster read (`read_roster`, which raises
-        # for a missing or unreadable directory) sits here; wrapped so the resolver's callers
-        # keep catching one type.
+        # An unlistable adapters dir fails here as "could not check", never as an empty roster.
         try:
             self._registry = ModuleVerbRegistry(read_roster(self._adapters_dir), DENY_ALL)
         except RegistryError as e:
@@ -269,41 +209,23 @@ class VerbResolver:
         self._cache: dict[str, Mapping[str, Verb]] = {}
 
     def is_system(self, system: str) -> bool:
-        """Does `system` name an adapter in this tree at all — COLD, no import.
+        """Does `system` name an adapter in this tree — cold, no import?
 
-        The membership question, which is not `verbs()`'s "what does it declare":
-        `defender/skills/` holds authored surfaces that are not systems of record, and a
-        per-SYSTEM rule asked about one of those answers about the wrong thing. WHICH
-        directories those are is deliberately not listed here — every copy of that roster is
-        one a newly authored directory falsifies; `tests/test_hardening_772._AUTHORED_SURFACES`
-        holds the shipped set and asserts it against the tree.
-
-        Two of those surfaces are agent system prompts — `gather/SKILL.md` is the gather
-        subagent's whole `instructions=` and `invlang/SKILL.md` is inlined into MAIN's ORIENT
-        message — which is why the lead author's WRITE gate consumes this answer too, not only
-        its commit gate.
+        `defender/skills/` also holds authored surfaces that are not systems (some are agent
+        system prompts, e.g. `gather/SKILL.md`), so the lead author's write gate asks this too.
         """
-        # Membership in the registry's own roster — the tuple it fixed at construction (#1031),
-        # which is AFTER the writes this resolver checks: the lead author builds one resolver
-        # per batch once the agent's writes are in, and the connect skill builds a fresh one
-        # per call. The tree being written under those callers is the skills/catalog tree,
-        # never the adapters dir. A handful of names, so no set is built to ask.
+        # The roster is fixed at construction, which callers do after the writes being checked.
         return system in self._registry.systems()
 
     def verbs(self, system: str) -> Mapping[str, Verb]:
-        # Cached per SYSTEM because the gate asks once per changed path and a batch routinely
-        # touches several templates of one system; a failure is deliberately NOT cached, so it
-        # is re-raised (and re-reported) rather than remembered as an empty roster.
+        # Failures are not cached, so they are re-raised rather than remembered as empty.
         if system not in self._cache:
             self._cache[system] = self._resolve(system)
         return self._cache[system]
 
     def _resolve(self, system: str) -> Mapping[str, Verb]:
-        # The membership question FIRST, so the two verdicts stay distinguishable. `verbs()`
-        # raises `KeyError(system)` when it finds no adapter file — but a `KeyError` from the
-        # adapter's own import (a module-scope `os.environ["…"]`) is indistinguishable from it
-        # at the `except`, and reports a file that EXISTS as missing. Asked ahead of the
-        # import, "is there an adapter" has one answer.
+        # Membership first: a `KeyError` from the adapter's own import would otherwise be
+        # indistinguishable from `verbs()`'s "no adapter" `KeyError`.
         if not self.is_system(system):
             raise ScaffoldRuleError(
                 f"no adapter for system {system!r} under {self._adapters_dir}"
@@ -311,16 +233,8 @@ class VerbResolver:
         try:
             verbs = self._registry.verbs(system)
         except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            # Ahead of the blanket clause below. An interrupt is the operator and a
-            # cancellation is the event loop, not a broken adapter; `CancelledError` is a
-            # `BaseException`, so leaving it to the clause below would swallow a cancel into a
-            # finding about whichever adapter happened to be importing, making a corpus sweep
-            # un-interruptible.
-            #
-            # NOT imported from `query_tool`, though it names the same interrupts: `_RERAISE`
-            # there also carries `BudgetKill` and the pydantic-ai `CONTROL_FLOW_EXCEPTIONS`,
-            # and this plain-data rule layer has neither dependency nor a budget to be killed
-            # by.
+            # Interrupts and cancellation are not a broken adapter; without this the blanket
+            # clause below would make a corpus sweep un-interruptible.
             raise
         except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
             raise ScaffoldRuleError(

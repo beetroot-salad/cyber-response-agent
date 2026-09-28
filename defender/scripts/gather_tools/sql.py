@@ -20,18 +20,15 @@ EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
 EXIT_INPUT_ERROR = 2
 
-#: A missing `duckdb` is the ONE failure here that is not the caller's fault, and it must not
-#: share `EXIT_INPUT_ERROR` with the three agent mistakes: `_record_shim_failure` files a failed
-#: reduce as a lesson for the pitfalls curator, which writes prompt text into
-#: `skills/{system}/execution.md`, and a deployment fault fails EVERY reduce — the queue would
-#: fill with identical un-actionable records. 69 is sysexits' `EX_UNAVAILABLE`.
+#: A missing `duckdb` is a deployment fault, not the caller's mistake, so it gets its own exit
+#: code (sysexits' `EX_UNAVAILABLE`): failed reduces are filed for the pitfalls curator, and
+#: this one would fill the queue with identical un-actionable records.
 EXIT_NO_RUNTIME = 69
 
 _MAX_OBJECT_SIZE = 1 << 30
 
-#: The one spelling that binds `h` to the unnested STRUCT on the search-hits shape. Stated once
-#: because two places quote it — `--help`'s epilog and the query-error hint — and a form that
-#: drifts in one of them no longer runs.
+#: The form that binds `h` to the unnested struct on the search-hits shape, shared by
+#: `--help`'s epilog and the query-error hint.
 _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
 
 
@@ -52,14 +49,11 @@ def _top_level_columns(con) -> list[str]:
 
 
 def _error_note(message: str) -> str:
-    """The one clause that answers THIS error, or nothing.
+    """The clause that answers this error, or nothing.
 
-    duckdb self-answers most of what lands here (`Candidate Entries: "user"`, `Did you mean
-    "data"?`), and prose appended to a self-answering error buries the answer. So a clause is
-    attached only where duckdb names the symptom and not the cause: the lateral join, whose
-    `Candidate bindings` never says `h` bound the TABLE, and the unquoted `@`, whose parser
-    error points at the character rather than at the quoting rule. Everything else gets the
-    shape and the runnable skeleton alone.
+    duckdb's own message usually answers itself, and extra prose would bury it. A clause is
+    added only where duckdb names the symptom rather than the cause: the lateral-join binding
+    of `h`, and the unquoted `@`.
     """
     low = message.lower()
     if "candidate bindings" in low and "unnest" in low:
@@ -84,8 +78,7 @@ def _shape_hint(con, message: str) -> str:
     except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
         return ""
     colset = set(cols)
-    # Each branch punctuates itself: an idiom ENDING in a copyable query must not have a
-    # sentence-terminating period appended to the query's last token.
+    # Each branch punctuates itself, so a copyable query does not get a trailing period.
     if "hits" in colset:
         idiom = (
             "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
@@ -112,17 +105,14 @@ def _shape_hint(con, message: str) -> str:
 
 
 def _disambiguate_columns(columns: list[str]) -> tuple[list[str], list[str]]:
-    """Make the result-set column names unique, and say which ones moved.
+    """Make result column names unique, and say which ones moved.
 
-    An unaliased projection of two ECS-nested fields (`h.host.name, h.agent.name`) collides on
-    the leaf, and a row built by zipping into a dict keeps only the LAST of each colliding pair.
-    Renaming rather than refusing keeps a legitimate `SELECT *` over a self-join working; the
-    stderr note is what makes the narrowing loud, since a silently-dropped column is
-    indistinguishable downstream from a field the payload never carried.
+    Unaliased ECS fields (`h.host.name, h.agent.name`) collide on the leaf, and zipping into a
+    dict would silently keep only the last. Renaming keeps `SELECT *` over a self-join working;
+    the stderr note makes it visible.
     """
-    # Every LITERAL name is reserved up front, not as the walk reaches it: a projection can
-    # spell its own `name_1` alias AFTER the collision that would generate one, and a generated
-    # name that took it would hand the agent its alias holding the other column's value.
+    # Reserve every literal name up front: a projection may spell its own `name_1` alias after
+    # the collision that would generate one.
     taken = set(columns)
     seen: dict[str, int] = {}
     out: list[str] = []
@@ -173,8 +163,8 @@ def _run(sql: str) -> int:
         import duckdb
     except ImportError:
         if os.environ.get("DEFENDER_BOX"):
-            # M6/O5/O1 (#1092): inside a box `duckdb` comes from the OWNED image, never a
-            # `pip install` into the read-only mount — the remedy is rebuilding the image.
+            # Inside a box `duckdb` comes from the image (the mount is read-only), so the
+            # remedy is rebuilding it.
             print(
                 "defender-sql: duckdb is not installed in this box image "
                 "(run `python3 defender/scripts/box_image.py build` to rebuild it).",
@@ -243,10 +233,8 @@ def _run(sql: str) -> int:
 
 
 def main() -> int:
-    # The epilog and every hint carry an em-dash, and a lead's shell is not always UTF-8 (a
-    # container with no locale set is `C`): left to the locale, `--help` and each hint die on
-    # the encode instead of printing. Called here and not at import, so loading the module
-    # in-process for its internals does not reconfigure the host's streams.
+    # The help and hints contain an em-dash and a lead's shell may be the `C` locale. Done
+    # here, not at import, so in-process imports leave the host's streams alone.
     use_utf8_stdio()
     parser = argparse.ArgumentParser(
         prog="defender-sql",

@@ -1,24 +1,17 @@
 #!/usr/bin/env python3
 """Control-window measurement for oracle-calibration cases.
 
-A control answers one question: *would this row be here anyway?* Get it wrong and
-the lead's result class is wrong, silently. The procedure doc's first rule is
-**measure a control with the lead's own query predicate** — a control taken on a
-broader filter describes a different envelope, and the mismatch is invisible.
+A control answers *would this row be here anyway?* It must use the lead's own query
+predicate: a control on a broader filter describes a different envelope, invisibly. Here a
+control is the lead's own ES|QL string with only the two `@timestamp` bounds changed, so no
+path can widen the predicate.
 
-This module makes that rule true **by construction** rather than by discipline: a
-control IS the lead's own ES|QL string with nothing changed but the two
-`@timestamp` bounds. There is no path here that can widen a predicate, because
-there is no path here that can write one.
-
-Split deliberately in two:
-  - window arithmetic and query rewriting — pure, no clock, no network, unit-tested;
-  - execution — one `infra/bin/es.sh` call, the same transport the elastic adapter
-    and `extract_alert.py` use.
+Window arithmetic and query rewriting are pure (no clock, no network); execution is one
+`infra/bin/es.sh` call, the same transport the elastic adapter uses.
 
 Payloads are emitted in the SAME shape the production `esql` verb stores
-(`{query, columns, row_count, values}`), so `judge.py` compares attack-window and
-control payloads like with like rather than reconciling two formats.
+(`{query, columns, row_count, values}`), so `judge.py` compares attack-window and control
+payloads like with like.
 
 Usage:
   controls.py <case_dir> [--offsets-days 7,14,21] [--dry-run]
@@ -39,12 +32,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
-# `split_commands` is a RE-EXPORT: `validate_cases` and `test_controls` reach it through the
-# CONTROLS module namespace, which is the interface it has always had. The splitter moved to
-# `esql_text` so the turn-N corpus stager could share it rather than grow the second copy this
-# module's own docstring warns about. The suppression has to sit on the imported NAME — ruff
-# attaches a `noqa` to the line carrying the diagnostic, so one on a comment line of its own
-# suppresses nothing and would leave the re-export failing F401 the day it is tidied.
+# `split_commands` is re-exported for `validate_cases` and tests. The F401 `noqa` must stay on
+# the name's own line: ruff ignores a `noqa` on a separate comment line.
 from defender.scripts.adapters.esql_text import (  # noqa: E402
     split_commands,  # noqa: F401
     split_first_command,
@@ -52,28 +41,21 @@ from defender.scripts.adapters.esql_text import (  # noqa: E402
 
 ES_SH = REPO_ROOT / "infra" / "bin" / "es.sh"
 
-# The two bounds a lead's ES|QL carries. Captured as three groups so a rewrite can
-# put back the operator and quoting exactly as the query had them — the goal is a
-# string that differs from the original in the timestamps and NOTHING else.
+# The two bounds a lead's ES|QL carries. Three groups so a rewrite restores the operator and
+# quoting exactly, changing only the timestamps.
 _BOUND = re.compile(r'(@timestamp\s*(?:>=|>|<=|<)\s*")([^"]+)(")')
 
-# The comparison operator inside a `_BOUND` match's FIRST group. Read back out rather
-# than captured as a fourth group: `_BOUND`'s group numbers are part of its contract
-# (`esql_bounds` reads group 2; a rewrite puts back groups 1 and 3), and inserting a
-# capture would renumber them under every caller at once.
+# The operator inside a `_BOUND` match's first group. Not a fourth capture group, because
+# callers depend on `_BOUND`'s group numbering.
 _OPERATOR = re.compile(r"(?:>=|>|<=|<)")
 
-# Shape-matched by default: whole weeks back, so a Saturday capture is controlled
-# against prior Saturdays. The playground's baseline generators are
-# schedule-shaped (weekday/weekend multipliers), so a weekday control for a
-# weekend capture is not a control at all — it is a different environment.
+# Whole weeks back, so the weekday matches: the playground's baseline generators are
+# schedule-shaped (weekday/weekend multipliers).
 DEFAULT_OFFSETS_DAYS = (7, 14, 21)
 
-#: A control window must be long enough to have a chance of SEEING the baseline.
-#: Duration-matching is the wrong instinct: a 21-second operation gets 21-second control
-#: windows that observe almost nothing, so a routine login grades `+event` — a manufactured
-#: catch. Widening can only move a class toward `+noise`, which is the safe direction: it
-#: costs recall, never a false detection.
+#: Minimum control window. A duration-matched control for a short operation observes almost
+#: nothing, so routine activity grades `+event`. Widening only moves a class toward `+noise`,
+#: which costs recall, never a false detection.
 MIN_CONTROL_SECONDS = 3600
 
 ISO_FORMATS = ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z")
@@ -103,9 +85,7 @@ def esql_bounds(query: str) -> list[str]:
 def _operator_of(prefix: str) -> str:
     """The comparison operator inside a `_BOUND` match's first group."""
     found = _OPERATOR.search(prefix)
-    # `_BOUND` cannot match without one of the four operators, so this is unreachable
-    # — asserted rather than silently defaulted, because a default here would pick a
-    # bound direction and so silently pick a window.
+    # Unreachable; asserted because a default would silently pick a bound direction.
     assert found is not None, f"_BOUND matched without an operator: {prefix!r}"
     return found.group(0)
 
@@ -113,9 +93,8 @@ def _operator_of(prefix: str) -> str:
 def esql_operators(query: str) -> list[str]:
     """The comparison operator of each `@timestamp` bound, in source order.
 
-    Source order is NOT semantic order. A query is free to write its upper bound
-    first, which is why every rewrite here binds a replacement to this rather than
-    to a match's position — see `shift_esql_window`.
+    Source order is not semantic order: a query may write its upper bound first, so
+    rewrites bind replacements by operator, not position.
     """
     return [_operator_of(m.group(1)) for m in _BOUND.finditer(query)]
 
@@ -124,9 +103,7 @@ def bounds_name_a_window(query: str) -> bool:
     """Do this query's `@timestamp` bounds bound a window — exactly one each way?
 
     Two literals are not automatically a window: `@timestamp >= A AND @timestamp >= B`
-    carries two and bounds nothing above. `esql_window` and `shift_esql_window` must
-    tell that apart from a real pair — one to answer `None`, the other to raise — so
-    it is decided here once rather than assumed at each site.
+    bounds nothing above.
     """
     ops = esql_operators(query)
     return (sum(op.startswith(">") for op in ops) == 1
@@ -136,18 +113,10 @@ def bounds_name_a_window(query: str) -> bool:
 def esql_window(query: str) -> tuple[datetime, datetime] | None:
     """The (start, end) window a query filters on, or `None` if it has no bounds.
 
-    `None` is a real and common answer, not an error: some leads carry no `@timestamp`
-    predicate at all, so their payload mixes historical baseline with the attack. Those
-    cannot be controlled by shifting — there is no bound to shift — and the caller must
-    say so rather than inventing a window.
-
-    A pair that is not one lower and one upper bound is `None` for the same reason:
-    it names no window, and `measure_controls` must refuse it the way it refuses an
-    odd bound count rather than shift something that bounds nothing.
+    `None` is common: some leads carry no `@timestamp` predicate, and a pair that is not
+    one lower and one upper bound names no window either. Callers must not invent one.
     """
-    # One test, not two: exactly one lower and one upper bound ALREADY means exactly two
-    # bounds, because every bound this module can read points one way or the other. A
-    # second `len(...) != 2` here would read as a case this can reach and cannot.
+    # One lower plus one upper bound already implies exactly two bounds.
     if not bounds_name_a_window(query):
         return None
     start, end = (parse_iso(b) for b in esql_bounds(query))
@@ -157,20 +126,13 @@ def esql_window(query: str) -> tuple[datetime, datetime] | None:
 def shift_esql_window(query: str, start: datetime, end: datetime) -> str:
     """The same query with only its two `@timestamp` literals replaced.
 
-    `start` lands on the `>=`/`>` bound and `end` on the `<=`/`<` bound, bound to
-    each match's own OPERATOR rather than to its position. Position is the wrong
-    key: `esql_window` returns its pair sorted low-then-high on purpose, so a query
-    that wrote its upper bound first — `@timestamp < B AND @timestamp >= A`, which
-    the defender model is free to do — would have the two crossed into a window
-    whose start is after its end. ES|QL runs that predicate happily and returns
-    nothing, and a zero-row control reads downstream as an empty baseline, which
-    grades every observed row `present`.
+    `start` replaces the `>=`/`>` bound and `end` the `<=`/`<` bound, matched by operator
+    rather than position: a query written upper-bound-first would otherwise get crossed
+    bounds, an unsatisfiable predicate whose zero rows read as an empty baseline.
 
-    Raises when the query does not carry exactly one lower and one upper bound —
-    silently returning the query unchanged would produce a "control" that
-    re-measures the attack window and reports every event as baseline, turning
-    every `+event` into `+noise`. That is the most dangerous possible failure of
-    this module, so it is an exception rather than a fallback.
+    Raises unless there is exactly one lower and one upper bound. Returning the query
+    unchanged would re-measure the attack window as its own baseline, turning every
+    `+event` into `+noise`.
     """
     bounds = esql_bounds(query)
     if len(bounds) != 2:
@@ -191,21 +153,14 @@ def shift_esql_window(query: str, start: datetime, end: datetime) -> str:
 def add_esql_window(query: str, start: datetime, end: datetime) -> str:
     """Add a `@timestamp` restriction to a query that carries none.
 
-    A query that filters on host and IP but not on time has a payload mixing the attack
-    with months of history and no bound to shift. The control for such a query is the
-    same predicate restricted to a baseline window — and its *attack contribution* is
-    the same predicate restricted to the attack window. Comparing those two is the only
-    way the activity's delta is visible at all; comparing the unbounded payload against
-    a bounded control would compare two different questions.
+    An unbounded query's payload mixes the attack with all history. Its control is the same
+    predicate restricted to a baseline window, compared against its *attack contribution*:
+    the same predicate restricted to the attack window.
 
-    Inserted as its own `WHERE` immediately after the source command, which narrows the
-    row set and cannot widen it — the property that matters. "After the source command"
-    is found by splitting on `|`, the separator ES|QL actually uses, NOT on newlines: a
-    query is free to write its whole pipeline on one line, and splicing after `lines[0]`
-    would append the clause after `LIMIT` in `FROM logs-zeek.ssh-* | LIMIT 1`. That takes
-    one arbitrary row and *then* filters it by timestamp — not a narrower row set but an
-    empty one, which reads downstream as an empty baseline and grades every observed row
-    `present`.
+    Inserted as its own `WHERE` immediately after the source command, where it can only
+    narrow the row set. The source command ends at the first `|`, not the first newline: in
+    a one-line `FROM logs-zeek.ssh-* | LIMIT 1`, a clause after `LIMIT` would filter one
+    arbitrary row and read as an empty baseline.
     """
     if esql_bounds(query):
         raise ValueError("query already carries @timestamp bounds — shift, do not add")
@@ -213,13 +168,8 @@ def add_esql_window(query: str, start: datetime, end: datetime) -> str:
         raise ValueError("empty query")
     clause = (f'| WHERE @timestamp >= "{format_iso(start)}" '
               f'AND @timestamp < "{format_iso(end)}"')
-    # Everything after the first separator is put back VERBATIM, separator included:
-    # the clause is the only thing this may add, and re-joining parsed commands would
-    # let it reformat a predicate it has no business touching. The cut comes from
-    # `split_first_command` rather than `partition`, so a `|` inside a string literal in
-    # the source command is not mistaken for the end of it — and from THAT helper rather
-    # than from `separator_offsets[0]` re-sliced here, because "the source command and
-    # everything after it" is one boundary rule and `esql_text` exists so it has one home.
+    # The tail is kept verbatim so nothing but the clause changes. `split_first_command`
+    # ignores a `|` inside a string literal.
     head, tail = split_first_command(query)
     placed = f"{head.rstrip()}\n{clause}"
     return f"{placed}\n{tail}" if tail else placed
@@ -231,11 +181,8 @@ def shape_matched_windows(start: datetime, end: datetime,
                           ) -> list[tuple[str, datetime, datetime]]:
     """Named control windows: the same clock time, whole weeks earlier.
 
-    Widened symmetrically about the operation's midpoint to at least
-    `min_seconds`, because a control shorter than the baseline's own period
-    cannot observe the baseline at all — see `MIN_CONTROL_SECONDS`. Whole-week
-    offsets keep the weekday, which matters: the Poisson baseline generators are
-    schedule-shaped, so a weekday control for a weekend capture is not a control.
+    Widened symmetrically about the operation's midpoint to at least `min_seconds`
+    (see `MIN_CONTROL_SECONDS`); whole-week offsets keep the weekday.
     """
     midpoint = start + (end - start) / 2
     half = max((end - start) / 2, timedelta(seconds=min_seconds) / 2)
@@ -244,21 +191,15 @@ def shape_matched_windows(start: datetime, end: datetime,
             for days in offsets_days]
 
 
-#: Liveness answers per control window, so a case's ~50 queries do not re-probe
-#: the same three windows. Keyed by the exact window, never by day.
+#: Liveness per exact control window, so a case's queries do not re-probe the same windows.
 _LIVENESS: dict[tuple[str, str], bool] = {}
 
 
 def named_cell(payload: dict, name: str, default: Any = None) -> Any:
     """The named cell of a columnar ES|QL payload's FIRST row, or `default`.
 
-    `values` is the wire's own positional form — cell `i` binds to `columns[i]` — so a read
-    resolves the index off `columns` instead of hardcoding one. Pure and named, so the reader
-    a caller runs is the reader a test can pin; a test that re-derives the index inline pins
-    its own copy and stays green when the caller regresses to `row[0]`.
-
-    `default` covers both "no rows" and "no such column": a probe whose projection does not
-    carry the name has measured nothing, which is not the same fact as a zero.
+    Resolves the column index from `columns` rather than hardcoding it. `default` covers
+    both "no rows" and "no such column" (measured nothing, which is not a zero).
     """
     columns = payload.get("columns", [])
     rows = payload.get("values", [])
@@ -272,22 +213,16 @@ def named_cell(payload: dict, name: str, default: Any = None) -> Any:
 def window_is_live(start: datetime, end: datetime) -> bool:
     """Was the environment RUNNING during this window?
 
-    The stack is levered up and down between snapshots, so a control window can land in a
-    gap when the server did not exist. A dead window returns zero rows for every query,
-    which is indistinguishable from "this stream has no baseline" — and reading it that way
-    suppresses real `-noise`.
+    The stack is levered up and down, so a control window can land in a gap. A dead window
+    returns zero rows for every query, which would read as "no baseline".
 
-    The probe is total ingest across `logs-*` for the window. Zero documents from ANY host
-    means the environment was not running; no live playground-v2 hour is silent, because the
-    agents alone emit metricbeat continuously.
+    Probes total ingest across `logs-*`: no live hour is silent, because the agents emit
+    metricbeat continuously.
     """
     key = (format_iso(start), format_iso(end))
     if key not in _LIVENESS:
         probe = (f'FROM logs-*\n| WHERE @timestamp >= "{key[0]}" AND @timestamp < "{key[1]}"\n'
                  f"| STATS total = COUNT(*)")
-        # `values` is the wire's own columnar form, so the index is resolved from `columns`
-        # rather than hardcoded to 0: this probe projects a single column today, and a name
-        # lookup does not rot if it ever projects two.
         total = named_cell(run_esql(probe), "total", default=0)
         _LIVENESS[key] = bool(total)
     return _LIVENESS[key]
@@ -307,9 +242,7 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
     resp = json.loads(proc.stdout)
     if "error" in resp:
         raise RuntimeError(f"ES|QL error: {json.dumps(resp['error'])[:400]}")
-    # Through the ADAPTER's own shaper, not a second copy of it: two producers of one
-    # promised shape drift, and `judge.py` would then compare an attack window in one
-    # encoding against its controls in the other.
+    # The adapter's own shaper, so attack and control payloads cannot drift apart in shape.
     return esql_payload(query, resp)
 
 
@@ -318,15 +251,11 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
                      dry_run: bool = False) -> tuple[list[dict], dict | None]:
     """Measure this query's controls, and its attack-window contribution if needed.
 
-    Two shapes, because the leads really come in two shapes:
-
-    - the query **carries bounds** — shift them; the stored observed payload is
-      already the attack-window measurement, so nothing extra is needed.
-    - the query **carries none** — its stored payload mixes the attack with all
-      history. Restrict it to `operation_window` to get the activity's actual
-      contribution, and to the shifted windows for the baseline. Without an
-      `operation_window` there is nothing to compare and the honest answer is no
-      controls at all, which the labeler reads as `needs-label`.
+    - The query **carries bounds**: shift them; the stored payload already is the
+      attack-window measurement.
+    - The query **carries none**: restrict it to `operation_window` for the attack
+      contribution and to shifted windows for the baseline. Without an
+      `operation_window`, return no controls (the labeler reads that as `needs-label`).
 
     Returns `(controls, attack_contribution)`, the latter `None` when the stored
     payload already is the attack-window measurement.
@@ -338,12 +267,8 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
         windows = shape_matched_windows(*window, offsets_days)
         rewrite = shift_esql_window
     elif esql_bounds(query):
-        # Bounds that name no window: an ODD number of them (one, or three), or a
-        # pair pointing the same way (`>= A AND > B`). Neither route is safe: there
-        # is no window to shift, and adding one would leave the original bounds in
-        # place, so the "control" would filter on a mix of the attack window and the
-        # baseline window. Real defender queries do carry these shapes; refuse rather
-        # than measure the wrong thing.
+        # Bounds that name no window (odd count, or both one way): nothing to shift, and
+        # adding a window would mix it with the original bounds. Refuse.
         return [], None
     elif operation_window is not None:
         windows = shape_matched_windows(*operation_window, offsets_days)
@@ -363,8 +288,7 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
         live = True if dry_run else window_is_live(start, end)
         out.append({"name": name, "window": [format_iso(start), format_iso(end)],
                     "query": shifted,
-                    # A window the environment was not running in is not a control.
-                    # Recorded rather than dropped, so the case shows what was tried.
+                    # A dead window is not a control; recorded to show what was tried.
                     "live": live,
                     "payload": None if (dry_run or not live) else run_esql(shifted)})
     return out, contribution
@@ -373,10 +297,8 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
 def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
     """The real operation's window, from the manifest.
 
-    Read from whichever provenance block the case carries — `attack.window` for a
-    catalog scenario, `operation.window` for a hand-run one. Absent for a case
-    whose manifest never recorded one, and that absence is reported rather than
-    guessed: inventing a window here would silently define the baseline.
+    `attack.window` for a catalog scenario, `operation.window` for a hand-run one. `None`
+    when absent; guessing would silently define the baseline.
     """
     import yaml  # local: keeps the pure window helpers importable without pyyaml
     manifest_path = case_dir / "manifest.yaml"
@@ -393,16 +315,10 @@ def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
 def lead_queries(case_dir: Path) -> list[tuple[str, int, dict]]:
     """(lead_id, seq, params) for every query, in the order the case assembler stored them.
 
-    `seq` is the QUERIES TABLE's seq, not this list's position, because that is what the
-    observed payload beside it is named for (the assembler copied `raw_ref`, whose name
-    is `{seq}.json`). They differ once `∅.`-prefixed sentinel rows are split out of
-    `JoinedLead.queries` while `record_query._next_seq` still counts them: one refused
-    query ahead of a real one makes the position trail the seq for the rest of the lead.
-    Keying the control record by position then pairs query A's baseline with query B's
-    envelope, and `judge._control` drops the query string, so nothing downstream sees it.
-
-    Cases built before the `seq` field existed fall back to the position, which is exact
-    for them and not a guess: no sentinel was ever split out of their `queries`.
+    `seq` is the queries table's seq, which names the observed payload (`{seq}.json`). It
+    differs from list position once `∅.` sentinel rows are split out, and pairing by
+    position would baseline one query against another's envelope. Cases without a `seq`
+    field fall back to position, which is exact for them (no sentinels were split out).
     """
     text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
     out = []
@@ -440,9 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         observed = ns.case_dir / "hidden" / "observed" / lead_id / f"{seq}.json"
         if observed.is_file() and observed.stat().st_size == 0:
-            # A zero-byte payload is an ERRORED query (query_tool.py writes "" on a
-            # non-zero exit). Controlling it would only re-run the same broken
-            # query; the labeler already excludes it from the comparison.
+            # Zero-byte means the query errored at capture; the labeler excludes it anyway.
             skipped += 1
             print(f"  {lead_id}/{seq}: errored at capture (zero-byte payload) — skipped")
             continue
@@ -450,18 +364,12 @@ def main(argv: list[str] | None = None) -> int:
             controls, contribution = measure_controls(
                 query, offsets, operation_window=operation_window, dry_run=ns.dry_run)
         except RuntimeError as exc:
-            # A query that will not run cannot be controlled. Record nothing rather
-            # than an empty control set — an empty control set means "the baseline
-            # was empty", which would turn every row into a `+event`.
+            # Record nothing: an empty control set would mean "empty baseline".
             skipped += 1
             print(f"  {lead_id}/{seq}: control query failed — skipped ({exc})"[:200])
             continue
         if not controls:
             skipped += 1
-            # Two different refusals reach here and they are not the same fact: a query
-            # that carries bounds naming no window HAS time bounds, and printing "no time
-            # bounds" of it sends the reader looking for a missing operation window that
-            # would not have helped.
             why = ("@timestamp bounds that name no window"
                    if esql_bounds(query) else
                    "no time bounds and no operation window")

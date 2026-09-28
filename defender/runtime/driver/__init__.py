@@ -1,14 +1,14 @@
 """The investigation loop: drive one alert end to end.
 
-What it takes to BUILD a run was split out of this module, leaving the loop itself:
+Building a run lives in sibling modules:
 
   * `_prompts` — the opening prompt and the per-turn user message, including the resume.
   * `_budget`  — the spend ceiling, the short-circuit, and the hooks that account a call.
   * `_build`   — the composition roots: which model, which grants, which tools each role
                  gets, for the main agent and for gather.
 
-`run_investigation` at the bottom is still the entry point, and still the only frame that
-holds everything a live run needs at once.
+`run_investigation` is the entry point and the only frame that holds everything a live run
+needs at once.
 """
 
 from __future__ import annotations
@@ -156,22 +156,16 @@ def _default_store_factory(case_id: str, run_dir: Path) -> Any:
 
 
 def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> StoreFactory:
-    """Which store this run opens, DERIVED from whether it is a resume.
+    """Which store this run opens, derived from whether it is a resume.
 
-    A fresh run mints its own (or takes the injected seam's); a resume joins the source run's,
-    because that is where the prefix rows live and `fork` walks parents inside one connection.
-
-    THE RESUME WINS, and that ordering is the whole point. Deciding it here rather than letting
-    the caller supply both a `resume=` and a matching `store_factory=` is what stops the two
-    from disagreeing — a spec pointing at run X beside a factory opening run Y's store forks
-    against a database that does not hold the branch point, and `_walk_parents` terminates
-    cleanly on an id it cannot resolve, so the result is a silently truncated prefix rather
-    than an error. Asking the caller and then preferring the caller's answer would leave that
-    disagreement reachable, which is exactly what this function claims to close.
+    A fresh run mints its own (or takes the injected one); a resume joins the source run's,
+    where the prefix rows live. The resume wins over an injected factory: a factory opening a
+    different store would fork against a database without the branch point, and the parent walk
+    would silently truncate the prefix instead of erroring.
     """
     if resume is not None:
         return branch.store_factory_for(resume)
-    if store_factory is not None:  # lint-default: ok — DI seam owning its default (R12's fifth seam)
+    if store_factory is not None:  # lint-default: ok — DI seam owning its default
         return store_factory
     return _default_store_factory
 
@@ -180,12 +174,10 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     *, output: Any, model_name: str | None, requests: int, end: run_end.RunEnd,
     exit_reason: str | None, case_id: str, store_path: Any,
 ) -> dict:
-    """The one shape `run_investigation` returns through, on every exit — setup-failure
-    and the normal end alike — so the two exits cannot drift apart on a field name.
+    """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
-    `end` is the run-end record (#1047) — the exit class and whether the model had already
-    closed when it was stamped — flattened onto the summary so `run.py`'s post-steps take
-    both halves of one record from one in-process value and read nothing off disk."""
+    `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
+    post-steps read it in-process rather than off disk."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
@@ -194,18 +186,15 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
-    """Capture the terminal exchange (whatever `run` holds on ANY exit, clean or not) and
-    stamp `truncated_by`, both best-effort so a broken store cannot mask the exit that got us
-    here."""
+    """Capture the terminal exchange and stamp `truncated_by`, both best-effort so a broken
+    store cannot mask the exit that got us here."""
     if run is not None:
         try:
             live = run.ctx.state.message_history
             confirmed_len = store.last_render_len(session_id) or 0
             if len(live) <= confirmed_len:
-                # A prior round's processor already committed everything `live` holds, or more
-                # — the request-limit check withholds a doomed round's continuation, so `live`
-                # can be SHORTER than what is confirmed. Either way there is nothing to add,
-                # and truncating here would re-add content the store correctly declined.
+                # Already committed (`live` can be shorter: the request-limit check withholds a
+                # doomed round's continuation). Nothing to add.
                 pass
             else:
                 # New content past the last confirmed round: drop a trailing incomplete
@@ -227,14 +216,11 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
 
 
 async def _reap_correlation_task(task: Any) -> None:
-    """`correlation_task` (item 3's fire-and-forget dispatch) is only ever awaited by
-    `_inject_correlation`, itself only reached when MAIN prepares a SECOND model request. A run
-    that closes after one request — or exits `_drive_agent` through any other handled exception
-    first — would otherwise leave the task running past `run_investigation`'s return: still
-    issuing backend/model calls and writing the run dir (queries table, `gather_raw/l-00c/*`,
-    `budget.json`, the session store) concurrently with `run.py`'s post-run steps on that same
-    tree, with any exception it raises never retrieved. Called unconditionally after
-    `_drive_agent` returns; a no-op if `_inject_correlation` already consumed it."""
+    """Cancel and await item 3's fire-and-forget correlation task.
+
+    It is only awaited when MAIN prepares a second request; a run that ends sooner would leave it
+    writing the run dir concurrently with `run.py`'s post-run steps, with its exception never
+    retrieved. No-op if already consumed."""
     if task is None:
         return
     if not task.done():
@@ -251,29 +237,21 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, run_end.RunEnd, str | None]:
-    """@owns truncated_by, @owns closed_before_cut — runs the `async for node in run` loop,
-    classifies its caught exits into the run-end record and an exit reason, and returns the
-    (possibly unfinished) `run` alongside both, so the caller can still read
-    `run.result`/`run.ctx` on a clean exit and hand the record on without re-deriving it.
-    The sole producer of a MAIN session's exit class and of `closed_before_cut`: the sidecar
-    and the summary both carry what is decided here, and nothing else stamps either."""
+    """@owns truncated_by, @owns closed_before_cut — runs the agent loop, classifies its caught
+    exits into the run-end record and an exit reason, and returns them with the (possibly
+    unfinished) `run`. The sole producer of a MAIN session's exit class."""
     truncated_by: str | None = None
     exit_reason: str | None = None
     run: Any = None
     try:
         async with agent.iter(
             prompt, deps=deps,
-            # A RESUMED run's inherited prefix, or None for a fresh one. The store's render
-            # processor rebuilds history from the store on every request and `selection.ingest`
-            # compares the live list against `last_render_len` — which a fork has ALREADY
-            # seeded to its inherited prefix. So a fresh `agent.iter`, whose list starts empty,
-            # underflows against a store that is correct. Handing the prefix back here is what
-            # closes that, and it is exact rather than approximate: `fork` and
-            # `hydrate(role="send")` both truncate through `_complete_prefix_len`.
+            # A resumed run's inherited prefix, or None. A fork has already seeded
+            # `last_render_len` to the prefix, so starting from an empty list would underflow
+            # `selection.ingest`.
             message_history=message_history,
-            # RS7: the ceiling that terminates a run is raised by the gate's own forced-turn
-            # cap, read FROM the bound rather than restated as a literal. Every run pays it
-            # whether or not the gate ever fires — a property of the run, not of a review.
+            # The ceiling includes the review gate's forced-turn headroom, read from the bound,
+            # whether or not the gate fires.
             usage_limits=UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds)),
         ) as run:
             async for node in run:
@@ -283,10 +261,7 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
         exit_reason = "UsageLimitExceeded"
     except UnexpectedModelBehavior as e:
-        # RS6: a stubborn model that keeps retrying a call the gate refuses (e.g. a write of
-        # report.md) exhausts the framework's shared tool-retry budget (`DEFAULT_TOOL_RETRIES`)
-        # and pydantic_ai raises this; no other handler here catches it, so uncaught it takes
-        # the process down.
+        # A model that keeps retrying a refused call exhausts the shared tool-retry budget.
         _logger.warning(f"{e}; writing partial trace (retry budget exhausted)")
         truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
@@ -299,26 +274,16 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
     except (sqlite3.Error, session_store.StoreError) as e:
-        # StoreError, not StoreAppendError: PayloadNotRepresentable / IngestTailUnderflow /
-        # CyclicParentChain / UnknownSchemaVersion all reach here from inside the
-        # ProcessHistory hook, and any one escaping takes the whole run.py process down
-        # instead of writing the partial trace this handler exists for.
+        # The `StoreError` base: every store fault can surface from the ProcessHistory hook.
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
-    # #1047: the run-end record, stamped HERE — the one frame that can see both the exit class
-    # and whether the model had already closed when it landed — and taken at this moment,
-    # BEFORE the forced close below sets `closed` itself. The host-side sidecar is written
-    # UNCONDITIONALLY (a clean run records `truncated_by: null`, not nothing) and before the
-    # forced report: the record is what lets a later reader tell a real model verdict from a
-    # host-manufactured one, so a FAILED record write is a reason not to write the forced
-    # report at all — a report with no record beside it is the exact pre-#1047 bug (claim h2).
-    # That skip is named in the exit reason ONLY when a forced report was actually owed (the
-    # model had not closed); a run that already holds its own verdict lost nothing and keeps
-    # its ordinary exit reason, exactly as `_close_a_run_cut_short`'s own `closed` early return
-    # would have left it.
+    # The run-end record is taken before the forced close sets `closed`, and written always
+    # (a clean run records `truncated_by: null`). It is how readers tell a model verdict from a
+    # host-forced one, so if it cannot be written no forced report is written either; that is
+    # named in the exit reason only when a forced close was actually owed.
     end = run_end.RunEnd(truncated_by, challenge_gate.ReviewState.of(deps).closed)
     written = _write_run_end_sidecar(deps, end)
     if truncated_by in _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE:
@@ -333,9 +298,8 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
     """Write the host-side run-end sidecar beside `deps.run_dir`; `True` on success.
 
-    Best-effort like every other post-run write in this tree: a failure is logged loudly and
-    swallowed rather than taking the run down, and reported back so the forced-close arm can
-    refuse to write a report with no record beside it.
+    Best-effort: a failure is logged and reported so the forced close can refuse to write a
+    report with no record beside it.
     """
     try:
         run_end.write_sidecar(deps.run_dir, end)
@@ -345,49 +309,27 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
         return False
 
 
-#: The exits on which the MODEL was stopped before it could close and the run still says
-#: something about the CASE — the request ceiling and the tool-retry budget: the model spent
-#: what it had and settled nothing, which is what `unresolved` records. Each ends with no
-#: report.md unless the host writes one, and a run with no report.md dead-letters at persist
-#: for a missing artifact.
+#: Exits where the model was stopped before closing but the run still says something about the
+#: case (request ceiling, tool-retry budget): the host closes `unresolved` so a report.md exists.
 #:
-#: The circuit breaker and the budget kill are deliberately ABSENT, as is the store arm. The
-#: breaker trips when the ENVIRONMENT is unreachable and its own message asks for escalation;
-#: the budget kill fires on the run dir failing its accounting writes as often as on the
-#: tail of the tool budget. Neither is a finding about the case, and a report.md is read as
-#: one by everything downstream: the ticket lane closes the ticket on any readable report
-#: (where a missing one leaves it open, which IS the escalation), the episode reader grades a
-#: world with a report where it skips one without, and the held-out scorer counts
-#: `unresolved` as a wrong disposition rather than a missing run. Until the host's report
-#: carries the exit class those consumers can key on, an infra exit keeps ending as it did
-#: before #992 — no report, dead-lettered at persist — rather than as a verdict.
-#:
-#: The set itself lives with the vocabulary (`run_end.FORCED_CLOSE_EXITS`): the ticket lane
-#: keys on the SAME set, and it must not import this module to get it.
+#: Circuit-breaker, budget-kill and store exits are excluded: they are infrastructure faults,
+#: not findings, and downstream readers treat any report.md as a verdict (the ticket lane
+#: closes the ticket, the scorer counts `unresolved` as wrong). Those runs end with no report.
+#: The set lives in `run_end` because the ticket lane keys on it without importing this module.
 _CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE = run_end.FORCED_CLOSE_EXITS
 
 
 async def _close_a_run_cut_short(
     deps: AgentDeps, bounds: challenge_gate.Bounds, exit_reason: str | None,
 ) -> str | None:
-    """The host's own `unresolved` close for a run the framework cut short on an exit the
-    model owns (`_CUT_SHORT_WITH_A_MODEL_STILL_OWED_A_CLOSE`), so every such run ends with a
-    report.md. ONE place, after the loop, keyed on the exit class rather than written into
-    each arm — an arm that forgot it (the request-limit arm did, until #992 let a challenged
-    `inconclusive` reach that ceiling) reopened the dead-letter.
+    """The host's `unresolved` close for a run cut short on a model-owned exit, so every such
+    run ends with a report.md. Keyed on the exit class in one place rather than per handler.
 
-    Returns the exit reason to record: the caller's, or `ForcedCloseFailed` when this close
-    itself failed — logging alone left a forced close that failed indistinguishable
-    downstream from one that committed, and the run dead-lettered invisibly.
+    Returns the exit reason to record: the caller's, or `ForcedCloseFailed` so a failed forced
+    close is distinguishable downstream. A run that already closed keeps its decision.
 
-    R4: a run that was cut short AFTER closing keeps what it decided; forcing here would
-    replace a confident finding with `unresolved` and destroy that close's review record.
-
-    `forced=True` and `stages=None`: `unresolved` is the host's verdict, the one disposition
-    the gate does not review (`close_tool.NO_REVIEW_DISPOSITIONS`), and a forced close is
-    exempt from both document gates — no model is left to repair anything, and refusing
-    would end the run with no report.md for the wrong reason. The run's own bounds are
-    threaded so this limb cannot act on a different value from the rest of the run."""
+    `forced=True`, `stages=None`: `unresolved` is not reviewed, and a forced close is exempt
+    from the document gates since no model is left to repair anything."""
     if challenge_gate.ReviewState.of(deps).closed:
         _logger.info("the investigation already closed; keeping its disposition")
         return exit_reason
@@ -407,18 +349,11 @@ async def _close_a_run_cut_short(
 def _dispatch_catalogs(
     defender_dir: Path, roster: RosterRead, grants: RunGrants,
 ) -> tuple[str | None, str | None]:
-    """The descriptor index each dispatch prompt opens with — MAIN's, narrowed to the gather
-    role's committed grant, and lead-0's, narrowed to the correlation grant — built HERE,
-    once, at run start, over the roster the run read, and handed down to the two dispatch
-    sites rather than built inside them per dispatch. The one read that can fail for the
-    tree is `read_roster`, and it ran at `run_investigation`'s own frame before any model
-    call, so neither catalog can fail for it — not on the first dispatch inside a tool the
-    model is mid-run on, and not inside item 3's task, which swallows its own failures into
-    "injection skipped".
+    """The descriptor index each dispatch prompt opens with: MAIN's (narrowed to the gather
+    grant) and lead-0's (narrowed to the correlation grant).
 
-    The RUN's grants (#1106), never the injected `verbs=` registry's: a registry scoped
-    narrower than the run's gather grant must not narrow what the catalog advertises (the
-    same decoupling `build_agent` states at the dispatch tool's registration)."""
+    Built once at run start so a roster fault fails here, not mid-tool. Uses the run's grants,
+    not the injected `verbs=` registry, so a narrower registry does not narrow the catalog."""
     skills = defender_dir / "skills"
     return (
         descriptor_catalog(skills, roster, grants.gather),
@@ -429,23 +364,12 @@ def _dispatch_catalogs(
 def _correlation_dispatch_at_run_start(
     *, tenant: RunTenant, resume: Any, lead_zero_verbs: Any,
 ) -> CorrelationDispatch | None:
-    """Item 3's dispatch identity for a run that WILL dispatch the lead (#1003), and `None` for
-    one that will not.
+    """Item 3's dispatch identity for a run that will dispatch the lead, else `None`.
 
-    WHETHER this run dispatches item 3 at all is decided here, once, on the two facts the
-    dispatch frame itself keys on: a resume skips turn-0 work, and a scenario with no
-    injected registry dispatches nothing. The dispatch frame then keys on the VALUE (`None`
-    means "not this run"), so the check cannot refuse a run for a lead that run would never
-    have consulted — a branch episode resuming every sibling world after an operator demoted
-    the template — and the dispatch cannot run unchecked.
-
-    WHAT it dispatches on is not derived here: `run_tenant.resolve_run_tenant` resolved and
-    checked it before the box started (the run's tenant's `lead-zero.yaml` against the catalog
-    of the run's tree and the tenant's correlation grant), and it is CARRIED on the tenant — to
-    here, and from here to `prepare_correlation_lead` and `dispatch_correlation` — so the frame
-    that checked the template and the frames that dispatch on it hold one value, and the files
-    are read once. A tenant resolved as not dispatching the lead, handed to a run that would,
-    is a caller's bug, and raises rather than dispatching unchecked."""
+    A resume or a scenario with no injected registry dispatches nothing; deciding that here
+    means a run is never refused for a lead it would not consult. The identity itself was
+    resolved and checked by `run_tenant.resolve_run_tenant` and is carried on the tenant; a
+    tenant resolved without it, handed to a dispatching run, is a caller bug and raises."""
     if resume is not None or lead_zero_verbs is None:
         return None
     if tenant.correlation is None:
@@ -458,29 +382,16 @@ def _correlation_dispatch_at_run_start(
 def _adapters_at_run_start(
     defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any]:
-    """Everything a run resolves from an adapters tree, resolved FIRST — before the budget
-    opens, the logger opens, or any model exists — so an adapters tree this process cannot
-    read fails at `run_investigation`'s own frame as `RegistryError` naming it (#1031,
-    #1035), never inside a tool the model is mid-run on.
+    """Everything a run resolves from an adapters tree, resolved first — before the budget,
+    logger or any model — so an unreadable tree fails here as `RegistryError`, not mid-tool.
 
-    THE ROSTER is `run.py`'s one read, handed in beside the registry it built over it; it is
-    read here, once, only for a caller that injected neither. Every consumer in this process
-    takes the VALUE — the gather registry, both dispatch catalogs, the workspace map's
-    Adapters section — and none holds a directory to go back to.
+    The roster is read here only if the caller injected none; consumers take the value.
 
-    The invlang `nothing-to-try` gate is priced against the CHECKOUT's roster (a closed
-    universe this repo owns, not the run's tree), and it is HANDED that roster here
-    (`hold_capabilities`) rather than reading for itself: in production the run's tree IS the
-    checkout (`run.py` passes `DEFENDER_DIR`), so the one read above is the value the gate
-    holds and the tree is read once; a caller whose `defender_dir` is another tree (the
-    hermetic suite's fixtures) costs one more read, of the checkout, still here, still before
-    any model call. Either way the read that can fail fails at this frame as `RegistryError`,
-    never inside a guard on the document's path — the write gate's fail-closed wrap, the
-    close's price wrap and the prepare-time readers each re-filed the host's fault as the
-    document's when the gate read lazily on first use."""
+    The invlang `nothing-to-try` gate is handed the checkout's roster (`hold_capabilities`)
+    rather than reading lazily, so a read fault is not misfiled as a document fault by the
+    gates that call it. When the run's tree is the checkout, the same read is reused."""
     roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
-    # The default registry is built over the RUN's gather grant (#1106) — there is no
-    # process-level one to fall back to.
+    # Built over the run's gather grant; there is no process-level one.
     verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
         roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
@@ -491,9 +402,8 @@ def _adapters_at_run_start(
 
 
 def _alert_doc_soft(alert_path: Path) -> dict:
-    """The alert as item 3's contract reads it — `{}` when the file is unreadable or not
-    JSON, because the contract's own gate (`_correlation_contract`: no usable timestamp, no
-    dispatch) is the refusal, and item 1 has already said what it could about the file."""
+    """The alert as item 3's contract reads it — `{}` when unreadable or not JSON; the
+    contract's own gate does the refusing."""
     try:
         doc = json.loads(alert_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -521,16 +431,14 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     resume: Any = None,
     tenant: RunTenant,
 ) -> dict:
-    # `tenant` (#1106) is the run's own, resolved once at the entry point: its tenant folder
-    # (the settings every verb reads), the permissions projected from that tenant's table, and
-    # item 3's checked dispatch identity. Required — there is no process-level grant or
-    # settings folder to fall back to.
+    # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
+    # dispatch identity). Required: there is no process-level fallback.
     model_name = resolve_main_model(model_name)
-    # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
-    # lead-0 acquire one via the MAIN-gather default resolved below. Captured before it.
+    # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
+    # inherit MAIN-gather's default registry.
     lead_zero_verbs = verbs
-    # lint-default: ok — DI seam owning its default (the gate's bounds, carrying the request
-    # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
+    # lint-default: ok — DI seam owning its default (the gate's bounds), resolved once here and
+    # threaded inward.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
@@ -541,29 +449,18 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
-    # `<run_dir>/wire_logs/llm_requests.jsonl`, one level down and NOT at the run root: the
-    # subdirectory is what keeps this log out of every reader agent's `under(run, SEG)` read
-    # shape, MAIN's and GATHER's alike. `observe.wire_log_path` owns the location.
+    # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
+    # read shape.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
 
-    # THE one place a live review bundle can honestly be built, and it sits BELOW the logger:
-    # the entry point is the only frame holding all three things a live stage needs — the run
-    # dir it anchors its policies on, the operator's model choice, and the run's own
-    # `RequestLogger`. Built above the logger, every stage mints a private one and writes to a
-    # file no reader opens, so the review's model calls charge a provider and land in no
-    # accounted total.
+    # The live review bundle is built here, after the logger, so review calls are logged and
+    # priced with the run's own `RequestLogger`.
     #
-    # `model_override` is the operator's RAW `--model`, deliberately not `model_name` above,
-    # which is already resolved against the investigator's default. Handing the resolved one
-    # over would give the review a non-`None` explicit model on every run, making its own
-    # pinned default unreachable in production.
+    # `model_override` is the operator's raw `--model`, not the resolved `model_name`, so the
+    # review's own pinned default stays reachable.
     #
-    # Guarded, because this sits BELOW the open: `live_review_stages` reads three prompt assets
-    # off the tree and `role_prompt` raises `FileNotFoundError` on a missing one, which would
-    # leave `llm_requests.jsonl` open AND permanently registered in `observe._ACTIVE_PATHS`, so
-    # a second `run_investigation` in the same process could never reopen that path. Its own
-    # handler rather than the store-setup one below: a missing prompt asset is not a store
-    # fault and must not be reported as one.
+    # A missing prompt asset raises here; close the logger so its path is not left registered
+    # in `observe._ACTIVE_PATHS` (which would block a later run in this process).
     try:
         stages = (
             review_stages if review_stages is not None
@@ -576,56 +473,27 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         raise
 
     case_id = uuid.uuid4().hex
-    # R12's fifth DI seam, and a resume derives its own store and outranks it — the default and
-    # the precedence both live in `_resolve_store_factory`, which is where the `lint-default`
-    # site moved to as well.
+    # Default and resume precedence live in `_resolve_store_factory`.
     factory = _resolve_store_factory(resume, store_factory)
     store = None
     try:
         store = factory(case_id, run_dir)
-        # A resume JOINS a case rather than minting one: the store the factory hands back is
-        # the SOURCE run's, and the prefix rows live in it. So the pointer is written from the
-        # STORE's own case id rather than from the uuid minted above — on a fresh run they are
-        # the same string, and on a resume the minted one names no session in that database,
-        # because `fork` inherits its parent row's `case_id`.
-        #
-        # That mismatch was not cosmetic. `branch.open_source_store` re-derives the store path
-        # from the recorded case id and refuses when it disagrees, so a branch could never be
-        # taken FROM a branch; and a reader resolving run_dir -> store -> `main_session_id`
-        # landed on the ROOT of the lineage, rendering the source run's transcript for the
-        # sibling. The session id below is the other half of that second one.
-        # `run_dir` rides along because a resumed MAIN inherits a DOCUMENT as well as a
-        # message history, and the document is a run-dir artifact — see `open_main_session`.
+        # A resume joins the source run's case, so the case pointer comes from the store, not
+        # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
+        # resumed MAIN inherits the investigation document as well as the message history.
         session_id, resume_history = branch.open_main_session(store, resume, run_dir)
-        # WRITTEN AFTER the session opens, so a REFUSED branch leaves no pointer behind. The
-        # pointer is what resolves a run dir to a store, and on a resume it names the SOURCE
-        # run's database — so a sibling dir that got one and then never started would hand any
-        # reader (`visualize_run`, and anything built to the "resolve the pointer, then clean up
-        # what it names" shape) the source run's store as if it were its own.
-        # REBOUND to what the pointer recorded, so `_run_summary` names the case this run
-        # joined rather than the uuid minted for a case it never opened. On a fresh run the
-        # two are the same string; on a resume the minted one names no session in the source
-        # database, and a reader joining the summary back to the store (or through
-        # `store_path_for`, which is exactly `open_source_store`'s derive-and-compare) resolves
-        # nothing.
+        # Written after the session opens, so a refused branch leaves no pointer naming the
+        # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
             store, resume, run_dir, case_id=case_id, session_id=session_id)
-    # `branch.BranchError` rides here with the store faults: a refused branch point (message 0,
-    # no captured evidence, an empty or snapped frontier, a pointer that names another store)
-    # is a SETUP failure, and without it the raise escapes `run_investigation` entirely —
-    # leaving the sqlite connection open AND `llm_requests.jsonl` permanently registered in
-    # `observe._ACTIVE_PATHS`, so the next sibling in an in-process sweep can never reopen it.
+    # A refused branch point (`BranchError`) is a setup failure like a store fault; letting it
+    # escape would leave the connection and the wire log open.
     except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
-        # The store is opened during SETUP, outside `_drive_agent`'s handler — so without
-        # this, a stale-version file (or a plain filesystem fault: an unwritable
-        # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
-        # process down instead of ending the run through the handled `truncated_by="store"`
-        # exit. Not one model turn is driven.
+        # Setup is outside `_drive_agent`'s handler; end the run through the
+        # `truncated_by="store"` exit without driving a turn.
         _logger.error(f"store setup failed ({e!r}); ending the run")
         if store is not None:
-            # `factory()` can succeed — a live connection, DDL already run — and a LATER
-            # call in this same try (`write_case_pointer`, `new_session`) still fail;
-            # without this the connection (and its WAL/-shm sidecars) is never closed.
+            # `factory()` may have succeeded before a later call failed.
             try:
                 store.close()
             except Exception as close_err:  # noqa: BLE001 — best-effort on an already-failing path
@@ -644,13 +512,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         tenant=tenant,
     )
 
-    # Item 3's async frame: scheduled here (after item 1 has resolved synchronously) and
-    # awaited later, inside the store's render processor, right before MAIN's SECOND request.
-    # A scenario with no injected registry dispatches nothing.
+    # Item 3 is scheduled here (after item 1) and awaited in the store's render processor just
+    # before MAIN's second request. `correlation` is `None` when this run dispatches none.
     correlation_task: Any = None
-    # `correlation` is `None` exactly for a run that dispatches no item 3 (a resume, or no
-    # injected registry — `_correlation_dispatch_at_run_start` decides that, once, and this
-    # frame keys on its value); otherwise it is the identity the run-start check stood behind.
     if correlation is not None:
         from .. import lead_zero as lead_zero_mod
 
@@ -660,17 +524,14 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         )
         if contract is not None:
             goal, what_to_summarize = contract
-            # Chain the budget hooks around lead-0's OWN dispatch: routing through
-            # QueryCapture/the gather machinery does not by itself move `budget.json` —
-            # `subagent_spawns` is gated on the literal tool name "gather", which a harness
-            # dispatch never emits.
+            # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name,
+            # which a harness dispatch never emits.
             lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
             correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
                 run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-                # Share the RUN's own budget-clock origin rather than letting it default to a
-                # fresh `time.monotonic()` stamp taken whenever this task happens to start.
+                # Share the run's budget-clock origin rather than a fresh stamp.
                 budget_started_monotonic=budget_started_monotonic,
                 catalog=correlation_catalog, dispatch=correlation,
                 settings_dir=tenant.settings,
@@ -686,8 +547,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
-        # The run's tenant folder rides on MAIN's deps so every gather lead it dispatches
-        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3.
+        # On MAIN's deps so every gather lead it dispatches inherits it.
         settings_dir=tenant.settings,
     )
 
@@ -706,11 +566,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         try:
             write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
-            # The fallback runs while an exception is already being handled, and its target is
-            # a name the box can plant an alias at — unguarded, one planted entry converts "the
-            # trace could not be built" into an uncaught OSError that ends the run at its last
-            # step, discarding the summary and every artifact already written. The trace is
-            # observability; the run's result is not.
+            # The target can be a planted alias; the trace is observability and must not
+            # discard the run's result.
             _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
                           f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
     logger.close()
@@ -721,8 +578,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     )
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports; each name's home is the module it is imported from.
 __all__ = [
     "Agent",
     "AgentDefinition",

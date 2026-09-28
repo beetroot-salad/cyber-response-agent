@@ -31,8 +31,7 @@ class Template:
     cli: str
     status: str
     #: `QueryTemplate.covers` — the coined `query_id`s this template accounts for, carried so
-    #: `synthesize_drafts` can union them into `by_id` off the ONE catalog walk it already does
-    #: rather than re-reading every file's frontmatter to answer "is this identity taken".
+    #: `synthesize_drafts` reuses this catalog walk instead of re-reading every frontmatter.
     covers: tuple[str, ...] = ()
 
 
@@ -76,10 +75,9 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
             system=t.system,
             path=t.path,
             goal=t.goal,
-            # `query` for an established template, `recording` for a draft — a draft carries a
-            # transcript rather than an interface, so it has no `## Query`. Neighbor scoring is
-            # how the AUTHOR decides whether a draft narrows an existing template, so reading
-            # only `query` would score every draft against an empty token set.
+            # A draft has no `## Query`, only a recording; without the fallback every draft
+            # would score against an empty token set, and the author uses these scores to spot
+            # a draft that narrows an existing template.
             query_variants=_query_variants(t.query or t.recording),
             cli=_resolve_cli(t.id),
             status=t.status,

@@ -14,12 +14,9 @@ from defender.learning.core.config import QueueChannel, source_first_party_key
 class BucketSpec:
     """One bucket of an AUTHOR_RESULT, as data.
 
-    The agent partitions the batch it was handed into named buckets; one list drives both
-    `validate_agent_result_partition` and the projection.
-
-    `formatter` is why a bare field name was not enough: the reason a bucket writes onto a
-    row is not uniform (`forward_bad: <reason>` on the lessons hold, a bare `<reason>` on a
-    skip), so the shaping travels with the bucket rather than being re-derived per site."""
+    The agent partitions its batch into named buckets; one list drives both
+    `validate_agent_result_partition` and the projection. `formatter` shapes the reason a
+    bucket writes onto a row, which differs per bucket."""
 
     name: str
     #: `committed` (goes through the corpus commit), `consumed` (rotates out of the queue)
@@ -33,21 +30,13 @@ class BucketSpec:
 class CorpusAuthorConfig:
     """What every corpus-authoring drain needs, in one shape.
 
-    It had two subclasses — the observation curators' config and `author/lessons/run.py`'s —
-    feeding the same batch envelope, and where they differed (pre-author gate, buckets, id
-    field, append lock, commit trailers, the lessons-only held report) is a FIELD here rather
-    than a second copy of the batch driver. #922 retired the observation directions, so one
-    subclass is left; the base stays because the fields are the batch driver's contract with
-    whatever authors a corpus, not a generalisation over two callers.
+    Where channels differ (pre-author gate, buckets, id field, locks, commit trailers, held
+    report) is a field here rather than a second copy of the batch driver (#719); these fields
+    are the driver's contract with whatever authors a corpus.
 
-    Subclassed rather than composed, for the reason `LoopPaths(DefenderPaths)` gives: an
-    attribute read (`cfg.repo_root`) keeps answering for the whole set, so the shared fields
-    did not have to be re-spelled at ~80 call sites to gain the base.
-
-    `kw_only` because the subclasses add their own required fields and the base ends in one
-    that has a default — otherwise every extension field would need a default too, purely
-    for dataclass field ordering. (#719 is the fold onto one body this class is: their
-    remaining differences are fields here, not two copies of the batch driver.)"""
+    Subclassed rather than composed, like `LoopPaths(DefenderPaths)`, so attribute reads
+    (`cfg.repo_root`) answer for the whole set. `kw_only` so subclasses can add required
+    fields after the base's defaulted ones."""
 
     repo_root: Path
     runs_dir: Path
@@ -63,42 +52,33 @@ class CorpusAuthorConfig:
     author_timeout: int
     author_effort: str | None
     invoke_agent: Callable[..., dict]
-    #: The direction's pre-author policy: `(batch, cfg) -> (held, consumed_pre, to_author)`.
+    #: The channel's pre-author policy: `(batch, cfg) -> (held, consumed_pre, to_author)`.
     gate: Callable[..., tuple[list[dict], list[dict], list[dict]]]
-    #: The AUTHOR_RESULT buckets this direction declares, in one list.
+    #: The AUTHOR_RESULT buckets this channel declares.
     buckets: tuple[BucketSpec, ...]
-    #: `(message, cfg) -> commit sha | None`. Per-direction because the provenance trailers
-    #: are.
+    #: `(message, cfg) -> commit sha | None`. Per-channel because the provenance trailers are.
     commit_fn: Callable[..., str | None]
-    #: What the drain's diagnostics call a row: "observations" / "findings".
+    #: What the drain's diagnostics call a row, e.g. "findings".
     noun: str
-    #: The attempt ceiling, BOUND ONCE HERE rather than re-read from the environment inside
-    #: the failure handler — so a malformed value fails the tick before any row is read, and
-    #: an environment change mid-batch cannot move the ceiling a row is judged against.
+    #: The attempt ceiling, bound once here so a malformed value fails the tick before any
+    #: row is read and a mid-batch environment change can't move it.
     max_attempts: int
-    #: Optional hook run after BOTH the corpus commit and the queue rotation, outside the
-    #: clauses that name the retire set. The lessons direction populates it with its
-    #: held-report writer; the observation directions leave it unset.
+    #: Optional hook run after both the corpus commit and the queue rotation (the lessons
+    #: channel's held report).
     post_rotate: Callable[..., None] | None = None
     box: Any = None
-    #: #773 M2. The drain-run check, per channel — `None` means every (file, finding) pair
-    #: is EXEMPT without a verifier call, so nothing is ever BAD and the repair spawn never
-    #: fires; vouching (M3.2), the explicit-list commit (M5) and the tree-derived fates
-    #: (O4/O5) run on EVERY channel regardless.
+    #: The drain-run forward check. `None` makes every pair EXEMPT without a verifier call, so
+    #: nothing is BAD and the repair spawn never fires; vouching, the explicit-list commit and
+    #: tree-derived fates still run.
     forward_check: ForwardCheck | None = None
-    #: A row this channel's check does not cover — EXEMPT by row kind, never by absence
-    #: from any id set (which is ERROR territory, J12's already-shipped bug). Consulted
-    #: BEFORE any verifier call, never by the check itself.
+    #: A row this channel's check doesn't cover — EXEMPT by row kind, never by absence from an
+    #: id set. Consulted before any verifier call.
     exempt: Callable[[dict], bool] = lambda row: False
-    #: The repair prompt M4's one bounded spawn reads. `None` is a legitimate, distinguished
-    #: member (the shipped default), never a reason to skip the repair pass; a path that is
-    #: CONFIGURED but unreadable is O10's fatal-config path.
+    #: The repair spawn's prompt. `None` means the shipped default; a configured but
+    #: unreadable path is fatal config.
     repair_prompt: Path | None = None
-    #: M4's repair spawn — the injection seam its fake enters through, mirroring
-    #: `invoke_agent`. `(pairs, batch_id, cfg) -> dict`; the drain never trusts its return
-    #: value, only the tree it re-reads afterward.
+    #: The repair spawn's injection seam, like `invoke_agent`: `(pairs, batch_id, cfg) ->
+    #: dict`. The drain ignores its return value and re-reads the tree.
     invoke_repair: Callable[..., dict] = _shared.invoke_repair
-    #: The verifier-key preflight's resolver (M3.3), the seam `run_curator_stage` already
-    #: carries under this exact name (C16), moved to the drain by M3.3 and gated per §7
-    #: FK-27 on `forward_check is not None`.
+    #: Resolves the verifier key in the drain's preflight, only when `forward_check` is set.
     source_key: Callable[..., object] = source_first_party_key

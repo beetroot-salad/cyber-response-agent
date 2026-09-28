@@ -1,16 +1,11 @@
-"""#1106 — ONE run's tenant, resolved once at the entry point and handed inward as one value.
+"""One run's tenant, resolved once at the entry point and handed inward as one value.
 
-WHY A BUNDLE. Everything a run takes from its tenant — the folder, the grants projected from its
-table, item 3's dispatch identity — is read from files an operator can edit at any moment. Read
-in pieces (the entry point checks the table, the driver re-reads the lead-zero config, a
-registry re-coalesces a missing grant), each piece can see a different file and each gap is
-filled a different way. Resolved here, once, before the box and before any model call, every
-later frame takes the VALUE and reads nothing again; there is no "no grant handed in" case left
-to handle.
+The tenant's folder, grants and item 3's dispatch identity come from operator-editable files.
+Resolving them once, before the box and any model call, means every later frame sees the same
+values instead of re-reading files that may have changed.
 
-`resolve_run_tenant` is also where the run-start refusals live (D3, M5), each one naming the
-file an operator edits. It raises; the entry point (`run.py`) and the replay harness decide how
-a refusal is reported.
+`resolve_run_tenant` holds the run-start refusals, each naming the file an operator edits; the
+caller decides how to report them.
 """
 from __future__ import annotations
 
@@ -29,10 +24,8 @@ if TYPE_CHECKING:
 
 
 def table_pointer(tenant_id: str) -> str:
-    """The MODEL-FACING name of a tenant's verb-disposition table — what a DENIED refusal and
-    ORIENT's withheld-lead note say. It names the tenant and the file inside its folder, never
-    the resolved host path: the settings half is host-only, and the host's layout (and the
-    prompt prefix built over it) must not change with the machine the run is on. Operator
+    """The model-facing name of a tenant's verb-disposition table. Never the resolved host
+    path: the settings half is host-only and the prompt must not vary by machine. Operator
     messages print `RunGrants.path` instead."""
     from defender.runtime.verbs import TABLE_POINTER
 
@@ -43,10 +36,9 @@ def table_pointer(tenant_id: str) -> str:
 class RunTenant:
     """One run's tenant: its folder, its grants, and item 3's dispatch identity.
 
-    `correlation` is `None` for a run resolved as one that dispatches no lead-zero (a resumed
-    sibling world: turn-0 work is skipped), and otherwise the identity the run-start agreement
-    check stood behind (#1003) — a `CorrelationDispatch` whose `system` is `None` when the
-    table withholds the lead."""
+    `correlation` is `None` for a run that dispatches no lead zero (a resumed sibling),
+    otherwise the checked `CorrelationDispatch`, whose `system` is `None` when the table
+    withholds the lead."""
 
     dir: TenantDir
     grants: RunGrants
@@ -79,7 +71,7 @@ def correlation_dispatch(
     settings: Path, templates: Iterable[QueryTemplate], grant: VerbGrant,
 ) -> CorrelationDispatch:
     """Item 3's dispatch identity for one tenant: its `lead-zero.yaml` id, resolved against
-    `templates` and checked for agreement with `grant`, its table's correlation grant (#1003).
+    `templates` and checked for agreement with `grant`, its table's correlation grant.
     Raises `LeadZeroConfigError`, `CorrelationDispatchError` or `GrantError`, each naming the
     file."""
     from defender.runtime import lead_zero as lead_zero_mod
@@ -113,14 +105,10 @@ def resolve_tenant(
 ) -> RunTenant:
     """`tenant_id` under `tenants_root`, checked whole, or `TenantRefused`. @owns tenant acceptance
 
-    THE ONE FRAME every entry point accepts a tenant through — a run, a resumed sibling, the
-    branch launcher, `defender-policy` — so none can accept a tenant another refuses:
-      * the folder and id rules (`_tenants.tenant_dir`: grammar, the retired `default`, no link
-        anywhere inside);
-      * the folder is not inside a tree a box mounts — `defender_dir`, bound read-only into
-        every box, and whatever else the caller names in `box_mounted` (a run passes its runs
-        base, whose run dirs are the box's rw bind): the settings half is host-only, and a
-        tenants root placed there would hand the model every tenant's endpoints;
+    Every entry point accepts a tenant through here, so none accepts one another refuses:
+      * the folder and id rules (`_tenants.tenant_dir`);
+      * the folder is not inside a tree a box mounts (`defender_dir`, plus `box_mounted`,
+        e.g. the runs base): the settings half is host-only;
       * the content rules (`resolve_run_tenant`)."""
     from defender._tenants import TenantDirError, tenant_dir
 

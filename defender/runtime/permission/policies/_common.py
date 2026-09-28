@@ -25,22 +25,16 @@ def read_shapes(
     run, dfn = run_dir.resolve(), defender_dir.resolve()
     corpus = "|".join(_CORPUS_SUBDIRS)
     shapes = [
-        # `SEG` is ONE segment, so this admits every file at the run ROOT and nothing below
-        # it — which makes "where a run-dir stream is written" a gate decision, not a layout
-        # preference. A stream that replays another agent's context (the wire log: gather's
-        # tool returns and MAIN's transcript both go through one `RequestLogger`) must NOT
-        # sit at the root, or this shape hands it to MAIN and to GATHER alike. That one lives
-        # under `<run>/wire_logs/` for exactly this reason — see `_run_paths.WIRE_LOG_DIR`, and
-        # `tests/test_wire_log_read_gate.py`, which pins both agents denied.
+        # One segment: every file at the run root, nothing below. So a stream that replays
+        # another agent's context (the wire log) must not sit at the root, or MAIN and GATHER
+        # can both read it; it lives under `<run>/wire_logs/`.
         under(run, SEG),
         under(run, gather_summaries_shape(SEG)),
     ]
     if raw:
-        # `_run_paths.GATHER_RAW_SHAPE`, not a second spelling of it. This shape and the lead-id
-        # VALIDATORS answer the same question and must not drift: the payload path gather is told
-        # to `cat` is minted from a claimed lead id, so a gate narrower than the validator denies
-        # gather its own payload. (Beware `\d` in a local spelling too — on a str pattern it reads
-        # as every Unicode decimal, wider than any writer.)
+        # The shared shape, not a local spelling: it must match the lead-id validators, or
+        # gather is denied its own payload.
+
         shapes.append(under(run, GATHER_RAW_SHAPE))
     shapes.append(under(dfn, rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md"))
     return PathShapes(shapes)

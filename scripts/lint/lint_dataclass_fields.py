@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """``__dataclass_fields__`` where ``dataclasses.fields()`` is meant — the pseudo-field hole.
 
-The two look interchangeable and are not. ``fields(obj)`` returns the REAL fields: the ones the
-generated ``__init__`` accepts. ``__dataclass_fields__`` is the raw mapping, and it also holds
-the ``ClassVar`` and ``InitVar`` PSEUDO-fields, which ``fields()`` filters out precisely because
-they are not constructor parameters. So::
+The two look interchangeable and are not. ``fields(obj)`` returns the real fields, the ones
+the generated ``__init__`` accepts. ``__dataclass_fields__`` is the raw mapping, which also
+holds the ``ClassVar`` and ``InitVar`` pseudo-fields that ``fields()`` filters out. So::
 
     @dataclass
     class Ctx:
@@ -14,32 +13,25 @@ they are not constructor parameters. So::
     [f.name for f in fields(Ctx)]      -> ["run_id"]
     list(Ctx.__dataclass_fields__)     -> ["run_id", "as_of"]     <- the hole
 
-Feed the second list to ``replace()`` (or to any ``Cls(**kwargs)`` splat) and it raises
-``TypeError: __init__() got an unexpected keyword argument`` — an ``init=False`` field raises
-``ValueError`` the same way. This is not theoretical: `#965` swapped one for the other in the
-estate registry's context-carrying helper, on a line whose own comment asserted it could not
-raise and which sat OUTSIDE the handler that converts a fault into a ledger row. The result was
-the one state that table exists to make visible — a served response with no row — plus an exit
-code that read as infrastructure and tripped the circuit breaker for one sibling and not its
-base.
+Feed the second list to ``replace()`` (or any ``Cls(**kwargs)`` splat) and it raises
+``TypeError: __init__() got an unexpected keyword argument`` (an ``init=False`` field raises
+``ValueError`` likewise) — from code that looks like it cannot raise, possibly outside the
+handler meant to record the fault.
 
-There is no legitimate production use of the raw mapping in this tree. Reading a field's
-metadata, iterating fields, building a kwargs dict, checking a name: ``fields()`` answers all
-of them and answers them correctly. So this gate is a flat ban rather than a heuristic, and its
-baseline ships EMPTY.
+There is no legitimate production use of the raw mapping in this tree: ``fields()`` answers
+metadata reads, iteration, kwargs building and name checks correctly. So this gate is a flat
+ban, and its baseline ships empty.
 
 What it flags, inside `SCOPE` (``defender/``): any attribute access named
 ``__dataclass_fields__``, plus the string spelling reached through ``getattr(x,
 "__dataclass_fields__")`` — the same attribute by a different door.
 
-What it does NOT flag: test modules. Three tests assert a retired field is ABSENT from a class
-(``assert "bindable" not in AgentDefinition.__dataclass_fields__``), which is a membership
-question about the class rather than field iteration, and is the stricter of the two checks
-there — the pseudo-fields it also sees are extra names the assertion wants to cover. Tests are
-skipped by the same rule ``lint_unguarded_tree_write`` uses.
+What it does not flag: test modules. Tests assert a retired field is absent
+(``assert "bindable" not in AgentDefinition.__dataclass_fields__``), a membership question
+where seeing the pseudo-fields too makes the check stricter.
 
-Ratcheted (``lint_dataclass_fields_baseline.json``) with ``require_reasons`` ON, so the empty
-baseline can only grow by someone writing down why.
+Ratcheted (``lint_dataclass_fields_baseline.json``) with ``require_reasons`` on, so the empty
+baseline can only grow with a written reason.
 
 Run from repo root:  python scripts/lint/lint_dataclass_fields.py
 Regenerate the baseline:  python scripts/lint/lint_dataclass_fields.py --update-baseline
@@ -91,9 +83,8 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
 def _hits(node: ast.AST) -> bool:
     """The attribute by either door: spelled, or named as a string to ``getattr``/``hasattr``.
 
-    The string form is checked against the CALL's arguments rather than against every string
-    literal in the file, so a docstring or a comment naming the attribute — this gate's own
-    explanation of why not to use it, for one — is not a finding.
+    The string form is checked only against the call's arguments, so a docstring or comment
+    naming the attribute is not a finding.
     """
     if isinstance(node, ast.Attribute) and node.attr == ATTR:
         return True

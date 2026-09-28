@@ -1,65 +1,45 @@
 #!/usr/bin/env python3
 """Score an oracle projection against the telemetry it was projecting.
 
-`y'` vs `y`: the oracle emits telemetry, so this grades telemetry against telemetry
-rather than projecting both sides down to a four-way class. Three things run first, in
-code, and never reach the model:
+`y'` vs `y`: the oracle emits telemetry, so this grades telemetry against telemetry rather
+than projecting both sides down to a four-way class. Three checks run first, in code, and
+never reach the model:
 
 1. **Lead-set integrity.** A projection missing leads, carrying leads the case does not
-   have, or repeating a `lead_id` is not a result. It is reported and nothing is scored
-   — the judge is not paid to grade a truncated document.
+   have, or repeating a `lead_id` is not a result: it is reported and nothing is scored.
 2. **Grammar.** The oracle's output grammar is closed (`oracle/prompt.md` §"Output"):
-   event mappings, or exactly one of the two marker strings, never mixed. `case-005
-   l-002` emitted a prose paragraph whose *content* was correct; that scores as a
-   failure, deterministically, because a judge would be tempted to be generous about it.
+   event mappings, or exactly one of the two marker strings, never mixed. Prose output
+   fails deterministically, even when its content is right.
 3. **Leak check.** For mutation cases, the pre-mutation entities must appear nowhere in
-   the projection. Deterministic, whole-value-or-token containment.
+   the projection (whole-value or token containment).
 
-The containment checks are TEXT containment, and the projection — the side the model wrote
-— is a YAML document whose scalars `yaml.safe_load` TYPES: an unquoted
-`2026-07-25T07:48:37.065Z` becomes a `datetime` whose `str()` is
-`2026-07-25 07:48:37.065000+00:00`, so whether a forbidden instant was caught depended on
-whether the model happened to quote it (#951). The projection is therefore read through
-`defender._yaml.safe_load_typed_and_spelled`: ONE parse of the file, constructed twice from
-that one node tree. The `typed` reading is what every reader had before #951 — the
-lead→events structure the integrity and grammar checks walk, the per-lead expectation
-clauses inspect, and the judge is shown, unchanged. The `spelled` reading has the same
-shape exactly, with every VALUE scalar as the text in the file, and it is what every
-question about the TEXT of the projection is asked of: the two containment checks
-(`must_not_emit`, `must_emit`) and the concrete-value check. One walker (`emitted_values`)
-serves those, and it walks the spelled reading only. Both readings come from one tree, so
-the values the checks scan are, by construction, the values of the events the judge is
-shown. The author's side — `must_emit` / `must_not_emit` — is text by RULE, not by reader:
-each entry must be a quoted string, and `forbidden_values` / `required_values` refuse a
-clause that carries anything else, so the manifest and `expected.yaml` stay the typed
-documents every other reader makes of them (`defective: false` is a boolean).
+The containment checks compare text, but `yaml.safe_load` types unquoted scalars (an
+unquoted timestamp becomes a `datetime` with a different `str()`). So the projection is
+parsed once via `defender._yaml.safe_load_typed_and_spelled` into two same-shaped
+readings: `typed` for structure (integrity, grammar, expectation clauses, what the judge
+sees) and `spelled` (every value scalar as written) for text questions (`must_not_emit`,
+`must_emit`, the concrete-value check). The author's side is text by rule: each
+`must_emit` / `must_not_emit` entry must be a quoted string, or the clause is refused.
 
 Everything downstream is the judge's, in two passes (`judge.py`):
 
-* the **label** pass reads the telemetry alone — never the story, never the projection —
-  and returns the `delta_kind` this envelope actually carried;
+* the **label** pass reads the telemetry alone and returns the `delta_kind` this envelope
+  actually carried;
 * the **verdict** pass grades the projection against that measurement.
 
-A lead the label pass calls `undecidable` never reaches the verdict pass: there is
-nothing to grade against. It is recorded with `faithful: null`, excluded from every
-denominator, and counted in the abstention tally.
+A lead labelled `undecidable` is not graded: it is recorded with `faithful: null`,
+excluded from every denominator, and counted as an abstention.
 
-**The label pass is a function of (case, lead) and nothing else** — it is the one part
-of this that does not depend on which projection is being scored. Its output is cached
-per case under `labels/<judge-suffix>.json`, so two oracle tags are graded against the
-same measurement instead of two independent readings of the same telemetry, and a
-re-score costs the verdict pass only. Editing either prompt changes the suffix and
-invalidates the cache by construction.
+The label pass depends only on (case, lead), so it is cached per case under
+`labels/<judge-suffix>.json`: two oracle tags are graded against the same measurement, and
+a re-score pays for the verdict pass only. Editing either prompt changes the suffix.
 
-**Derived cases (`mutation`, `negative-control`) never reach the judge.** They reuse
-their base's envelopes and change only the story, so no telemetry was ever captured for
-the story they tell — there is no `y`. They are scored by the mechanical checks alone
-and contribute no judged rows — chiefly `mechanical.expectation_failures`, the
-manifest's `expectation:` clauses, which is the whole of what grades them. `report.py`
-reports those separately rather than folding a definitional truth into a measured rate.
+**Derived cases** (`mutation`, `negative-control`, ...) never reach the judge. They reuse
+their base's envelopes with a changed story, so there is no `y`; they are scored by the
+mechanical checks alone, chiefly the manifest's `expectation:` clauses.
 
-Because the judge runs here, THIS IS NOT DETERMINISTIC, and the judge is part of the
-tag: `<oracle-tag>__judge-<model>-<effort>_<prompts-sha8>`.
+The judge makes this non-deterministic, so it is part of the tag:
+`<oracle-tag>__judge-<model>-<effort>_<prompts-sha8>`.
 
 Usage: score.py <case_dir> <projections/<tag>.yaml> [--json <out>] [--jobs N] [--relabel]
 """
@@ -79,16 +59,13 @@ from defender._model import model  # noqa: E402
 from defender._yaml import safe_load, safe_load_typed_and_spelled  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
-# The closed marker vocabulary. Anything else is malformed model output and must not be
-# folded into a real answer — a degraded model emitting prose would otherwise be graded
-# on its prose.
+# The closed marker vocabulary; anything else is malformed output, not an answer.
 _SUPPRESSED_PREFIX = "<suppressed"
 _NOISE_MARKER = "<standard environment noise>"
 
-#: Kinds whose story was never fired, so nothing was ever measured for it. They are graded
-#: against `expectation:` in the manifest instead — see `expectation_failures`.
-#: THE owner: `validate_cases` reads the same fact from the other side (no capture of its own,
-#: so a missing `hidden/` is by design, not a gap).
+#: Kinds whose story was never fired, so nothing was measured for it; they are graded against
+#: the manifest's `expectation:` instead. `validate_cases` reads this too (a missing `hidden/`
+#: is expected for these kinds).
 DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
                  "corrupted")
 
@@ -96,26 +73,20 @@ DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
 def is_derived(kind: object) -> bool:
     """Was this case's story never fired, so nothing was ever measured for it?
 
-    The question, beside the vocabulary — for the reason `defender/_vocab.py` states: a
-    vocabulary and the answer to "is this value in it" drift apart the moment they live in
-    different files. Importing a closed vocabulary only to re-derive what belonging to it MEANS
-    is what `lint_borrowed_vocabulary` exists to stop, and it is how a later kind that is
-    derived-but-graded-differently gets the old answer at some sites and not others.
+    Lives beside the vocabulary so callers ask this rather than re-deriving membership.
     """
     return kind in DERIVED_KINDS
 
 
-#: Causes decided in code, never by the judge. They are disjoint from `judge.CAUSES` on
-#: purpose: a mechanical failure is a property of the document, needs no measurement to
-#: establish, and must not be confused with a graded one when the report tallies causes.
+#: Causes decided in code, never by the judge. Disjoint from `judge.CAUSES` so the report
+#: never tallies a document-level failure as a graded one.
 C_MALFORMED = "C-MALFORMED"
 C_NOT_PROJECTED = "C-NOT-PROJECTED"
 MECHANICAL_CAUSES = frozenset({C_MALFORMED, C_NOT_PROJECTED})
 
-#: Punctuation trimmed off a token before a leak comparison — `<`/`>` included, so a marker's
-#: closing bracket ("…on office-ws-1>") does not hide a real leak. A whole `<placeholder>` is
-#: exempt (see `_tokens`): trimming those turns the placeholder vocabulary into bare words and
-#: lets `<port>` collide with `port`.
+#: Punctuation trimmed off a token before a leak comparison. `<`/`>` are included so a marker's
+#: closing bracket ("…on office-ws-1>") does not hide a leak; a whole `<placeholder>` is exempt
+#: (see `_tokens`) so `<port>` cannot collide with `port`.
 _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
@@ -135,8 +106,8 @@ def _marker_kind(marker: str) -> str | None:
 def grammar_problem(events: object) -> str | None:
     """`None` when a lead's events parse as the oracle's closed grammar, else why not.
 
-    Repeated markers of the SAME kind still read as that kind — unambiguous in meaning,
-    even though `prompt.md` asks for a single marker item.
+    Repeated markers of the same kind are accepted: unambiguous, though `prompt.md` asks
+    for one.
     """
     if not isinstance(events, list):
         return f"events is {type(events).__name__}, not a list"
@@ -157,23 +128,14 @@ def grammar_problem(events: object) -> str | None:
 
 
 def emitted_values(events: object) -> list[str]:
-    """Every value a projection emits under one lead's `events` — mapping values, marker
-    strings, and the scalars inside any nested collection an event carries.
+    """Every value a projection emits under one lead's `events`: mapping values, marker
+    strings, and scalars inside nested collections. Order is not preserved.
 
-    Keys are excluded on purpose: they are schema field names (`user.name`), never the
-    mutated entities a mutation case forbids, so scanning them only invents false leaks.
-    Nested collections are walked because their content is content — the grammar admits an
-    event whose value is a list (a threat-intel row's `tags: []` is a committed example), and
-    a leak inside one is a leak. `events` that is not a list at all (a bare scalar, a
-    mapping) is walked as it is, for the same reason. Order is not preserved: both readers
-    (`emitted_index`, a set; `has_concrete_value`, an `any`) are order-blind.
-
-    Walks the SPELLED reading (`_measured`), so every scalar here is already the model's
-    text. `str()` is for the scalars that reading leaves typed (the safe loader's own
-    `!!omap`/`!!pairs`/`!!set` members) and for a caller (a test) that hands in a document
-    it built in memory. Identity-keyed `seen`: an anchor that contains its own alias
-    (`&e [{self: *e}]`) loads as a cyclic object, in both readings, and a walk without it
-    never ends.
+    Keys are excluded: they are schema field names, never mutated entities, so scanning
+    them only invents false leaks. Callers pass the spelled reading; `str()` covers the
+    scalars it leaves typed (`!!omap`/`!!pairs`/`!!set` members) and in-memory test input.
+    `seen` is identity-keyed because a self-referencing anchor (`&e [{self: *e}]`) loads
+    as a cyclic object.
     """
     out: list[str] = []
     stack: list[object] = [events]
@@ -204,22 +166,17 @@ def _tokens(value: str) -> set[str]:
 
 
 def leaks(forbidden: list[str], emitted: Set[str]) -> list[str]:
-    """Forbidden pre-mutation values a projection actually emitted (`emitted` is
-    `emitted_index` of the projection).
+    """Forbidden pre-mutation values a projection emitted (`emitted` is its `emitted_index`).
 
-    Matches a forbidden value against a whole emitted value or one of its
-    whitespace-delimited, punctuation-trimmed tokens — never as a bare substring.
-    Substring matching cannot tell `user.name: root` (a real leak) from
-    `file.path: /root/.ssh/authorized_keys` (an unrelated path that merely contains the
-    token), and case-002 in this very suite emits the latter.
+    Matches whole values or tokens, never bare substrings: a substring match cannot tell
+    `user.name: root` (a leak) from `file.path: /root/.ssh/authorized_keys` (not one).
     """
     return [f for f in forbidden if f in emitted]
 
 
 def emitted_index(preds: Mapping[str, object]) -> frozenset[str]:
-    """Every value the projection emits, across every lead, plus its tokens — the ONE surface
-    `must_not_emit` and `must_emit` match against, so the forbidden and required directions
-    cannot drift apart. Built once per projection and handed to both checks."""
+    """Every value the projection emits, across every lead, plus its tokens. Shared by
+    `must_not_emit` and `must_emit` so the two directions match against the same surface."""
     seen: set[str] = set()
     for events in preds.values():
         for value in emitted_values(events):
@@ -232,12 +189,9 @@ def emitted_index(preds: Mapping[str, object]) -> frozenset[str]:
 def has_concrete_value(events: object) -> bool:
     """Did the projection commit to any fully concrete value?
 
-    `prompt.md` mandates `<angle-placeholder>` for anything the story does not state, so
-    a wholly-placeholdered event is an abstention, not a claim. Reported for the derived
-    cases, where it is the only thing distinguishing "declined to invent" from "invented".
-
-    A question about the projection's TEXT, so it is asked of the spelled reading like the
-    containment checks — a null is the `~` or `""` the model wrote, and counts as it did.
+    `prompt.md` mandates `<angle-placeholder>` for anything the story does not state, so a
+    wholly-placeholdered event is an abstention. For derived cases this is what separates
+    "declined to invent" from "invented". Pass the spelled reading.
     """
     return any(not _PLACEHOLDER.search(v) for v in emitted_values(events))
 
@@ -245,12 +199,7 @@ def has_concrete_value(events: object) -> bool:
 # definitional expectations
 
 def _requested(spec: str | list[str] | None, lead_ids: list[str]) -> list[str]:
-    """`all`, or an explicit lead list, resolved against the case's own lead ids.
-
-    Resolving against the case's own ids is what stops a clause that names a lead the
-    case does not have from passing silently — it asserts nothing, and a contract that
-    quietly asserts nothing is the failure this whole mechanism exists to prevent.
-    """
+    """`all`, or an explicit lead list, resolved against the case's own lead ids."""
     if spec == "all":
         return list(lead_ids)
     return [lead_id for lead_id in (spec or []) if lead_id in lead_ids]
@@ -260,24 +209,15 @@ def expectation_failures(expectation: dict, preds: dict[str, list], lead_ids: li
                          emitted: Set[str]) -> list[str]:
     """Rules the story settles by itself, and the projection broke anyway.
 
-    `preds` is the projection, for the per-lead clauses; `emitted` is `emitted_index` of the
-    same `preds`, for `must_emit`.
-
-    A derived case has no telemetry, so the judge cannot grade it and NOTHING else would: a
-    forged `neg-001` projection copying the brute-force burst into every lead — exactly the
-    window-copying the negative control exists to catch — would score clean and exit 0.
-
-    These need no `y`. `oracle/prompt.md` is a specification and much of it is decidable from
-    the story alone — an unrelated story touches nothing, suppression is earned by an explicit
-    blinding action, a value the story never states must stay a placeholder. Each failure names
-    the rule, so it reads as a spec violation and not as a diff.
+    `preds` is the projection, for the per-lead clauses; `emitted` is its `emitted_index`,
+    for `must_emit`. These are the only grading a derived case gets (it has no telemetry),
+    and each is decidable from the story alone. Each failure names the rule it breaks.
     """
     out: list[str] = []
     for lead_id in _requested(expectation.get("empty_leads"), lead_ids):
         if events := preds.get(lead_id):
-            # A marker is a different error from a fabricated event: `+ noise` asserts the
-            # activity IS here and merely looks routine, which is a claim of presence, not
-            # a quantity. Name it, or the failure reads as "emitted 1 item" and hides that.
+            # Name a marker explicitly: `+ noise` claims the activity is present, which is a
+            # different error from fabricating events.
             markers = [e for e in events if isinstance(e, str)]
             what = (f"the {_marker_kind(markers[0])} {markers[0]!r}" if markers
                     else f"{len(events)} fabricated event(s)")
@@ -303,12 +243,9 @@ def expectation_failures(expectation: dict, preds: dict[str, list], lead_ids: li
 # lead framing
 
 def system_of(lead: dict) -> str:
-    """The stratification axis, derived from the lead's own `query_id` prefixes.
+    """The stratification axis, from the lead's `query_id` prefixes (`{system}.{name}`).
 
-    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so this is a property of the
-    envelope rather than an attribution someone made. A lead spanning systems keeps both,
-    `+`-joined: it really is a mixed lead, and flattening it to the majority system would file
-    a cross-system result under a single-system slice.
+    A lead spanning systems keeps all of them, `+`-joined, rather than being filed under one.
     """
     systems = sorted(judge.lead_systems(lead) - {""})
     return "+".join(systems) if systems else "?"
@@ -317,8 +254,7 @@ def system_of(lead: dict) -> str:
 def load_predictions(proj: object) -> tuple[dict[str, list], list[str]]:
     """Projection rows as {lead_id: events}, plus any lead_id repeated in the doc.
 
-    A document that is not a mapping (empty, a bare `null`, a scalar) has no rows: every
-    lead is then MISSING, which is the integrity check's verdict to give, not a crash's."""
+    A non-mapping document has no rows, so every lead reports as missing rather than crashing."""
     preds: dict[str, list] = {}
     duplicates: list[str] = []
     rows = proj.get("projections") if isinstance(proj, dict) else None
@@ -350,9 +286,7 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
                  call: judge.CallFn = judge.call_model) -> dict:
     """The label pass over a case's leads, read from or written to the label cache.
 
-    Projection-independent by construction — see the module docstring. A cached entry is
-    reused verbatim; only leads absent from the cache are measured, so adding a lead to a
-    case does not re-measure the rest of it.
+    Independent of the projection. Only leads absent from the cache are measured.
     """
     path = labels_path(case_dir, model, effort)
     cached: dict = {}
@@ -369,8 +303,8 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
                     model=model, effort=effort, call=call),
                 todo))
         cached.update(dict(zip(todo, fresh, strict=True)))
-        # Read the judge back from the calls rather than echoing the request: a run that
-        # silently fell back must not be filed under the tag we asked for.
+        # Record the model the calls actually used: a silent fallback must not be filed
+        # under the requested tag.
         resolved = judge.sole_judge(fresh, what="the label pass")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
@@ -384,12 +318,8 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
 # the score
 
 def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: str) -> dict:
-    """A row failed in code. It carries the measurement's `delta_kind` anyway, so the
-    lead still lands in its own slice — a malformed projection is not evidence about the
-    envelope, and hiding it from the slice would flatter the slices it belongs to.
-
-    A mechanical failure wins over an `undecidable` measurement: it is established by the
-    document alone and needs no telemetry to settle.
+    """A row failed in code. It keeps the measurement's `delta_kind` so the failure still
+    counts against its own slice, and it wins over an `undecidable` measurement.
     """
     return {
         "lead": lead_id, "system": system,
@@ -404,8 +334,7 @@ def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: st
 
 @model(frozen=True)
 class _Mechanical:
-    """`_measured` output: the score as far as it goes with no model in the loop, plus the
-    three inputs the judged half then reads again."""
+    """The score as far as it goes with no model, plus the inputs the judged half reuses."""
 
     summary: dict
     manifest: dict
@@ -416,17 +345,10 @@ class _Mechanical:
 def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _Mechanical:
     """Load one case-and-projection pair and run every check that needs no model.
 
-    THE definition of the mechanical half. `--dry-run` is exactly this and stops here;
-    `score_case` is exactly this and then decides whether to pay for judging. Deriving it
-    twice would let the dry run disagree with the thing it exists to preview — and a
-    `--dry-run` that reports clean for a projection the real score refuses is worse than no
-    dry run, because it is consulted precisely when a model call is expensive.
+    Shared by `--dry-run` and `score_case` so the dry run cannot disagree with the score.
     """
     manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
-    # One parse of the projection, two readings of it (module docstring): the typed one is
-    # the structure every check walks and the judge is shown; the spelled one — same shape,
-    # so the same navigation finds the same rows — is what every question about the
-    # projection's TEXT is asked of.
+    # Typed reading for structure and the judge; spelled reading (same shape) for text checks.
     readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(readings.typed)
@@ -463,9 +385,7 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
     mech = _measured(case_dir, proj_path, model=model, effort=effort)
     summary, manifest, leads, preds = mech.summary, mech.manifest, mech.leads, mech.preds
 
-    # A lead set that does not match is not a result. Report it and stop before paying
-    # for a single judge call — grading a truncated document produces a number that
-    # looks like a score and is not one.
+    # A mismatched lead set is not a result; stop before paying for any judge call.
     if any(summary["mechanical"][k] for k in
            ("missing_leads", "unscored_leads", "duplicate_leads")):
         summary.update({"judged": False, "rows": [],
@@ -473,9 +393,8 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
         return summary
 
     if manifest.get("defective"):
-        # A case whose leads cannot contain the activity they were gathered for. Scoring
-        # it would report a projection as correctly-quiet and file that under a unit
-        # nothing was ever measured for — which reads as coverage.
+        # Its leads cannot contain the activity they were gathered for; scoring it would
+        # record a correctly-quiet projection as coverage.
         summary.update({
             "judged": False, "rows": [],
             "why_unjudged": f"the case is marked defective: {manifest['defective']}",
@@ -518,7 +437,7 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
         if problem is not None:
             rows.append(_mechanical_row(lead_id, system, label, C_MALFORMED, problem))
             continue
-        if lead_id not in verdicts:          # the measurement could not settle the lead
+        if lead_id not in verdicts:          # labelled undecidable
             rows.append({
                 "lead": lead_id, "system": system, "delta_kind": "undecidable",
                 "faithful": None, "cause": None,
@@ -555,27 +474,20 @@ def score_case(case_dir: Path, proj_path: Path, *, model: str, effort: str, jobs
 
 
 def measurement(label: dict) -> dict:
-    """The label pass's reading, as the verdict pass is shown it. Provenance and cost are
-    ours, not the judge's business, and feeding them back would put the label pass's
-    price tag inside the grading prompt.
+    """The label pass's reading as the verdict pass is shown it, without provenance or cost.
 
-    Public because `audit_judge.verdict_set` must show the verdict pass the SAME reading a real
-    score would; a second copy of the key list makes an audit's "how stable is the verdict
-    pass" only as good as two lists staying equal."""
+    Public so `audit_judge.verdict_set` shows the verdict pass the same reading a real score
+    does."""
     return {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence") if k in label}
 
 
 def forbidden_values(case_dir: Path, manifest: dict) -> list[str]:
     """`must_not_emit` for a mutation case: the pre-mutation entities.
 
-    Read from the manifest's `expectation:`, else from `expected.yaml` where the seed cases
-    keep it, else from the manifest's top level — `expected.yaml` is the label pass's
-    calibration set now, and a case recruited without hand labels declares its mutation in
-    its manifest instead. The first NON-EMPTY clause wins; but every clause present is read
-    through `_text_clause` first, so a mis-typed one is refused wherever it sits, including
-    a shadowed location that would otherwise be dead text nobody ever reads until the
-    winning clause is removed. Public because `validate_cases` refuses at commit time
-    exactly what this refuses at score time, from this one reader.
+    Read from the manifest's `expectation:`, else `expected.yaml` (seed cases), else the
+    manifest's top level; the first non-empty clause wins. Every present clause is validated,
+    including shadowed ones, so a mis-typed clause is refused wherever it sits. Public
+    because `validate_cases` applies the same check at commit time.
     """
     sources: list[tuple[dict, str]] = [
         (manifest.get("expectation") or {}, "manifest.yaml expectation")]
@@ -594,23 +506,17 @@ def required_values(expectation: dict) -> list[str]:
 
 
 class ClauseError(ValueError):
-    """A `must_emit` / `must_not_emit` clause that is not a list of quoted strings — an
-    authoring error in the case, named by file and clause. A `ValueError` so that a caller
-    that only knows "the case is malformed" still catches it, and its own class so that
-    `main` can report it as the mechanical refusal it is rather than let it escape as a
-    traceback."""
+    """A `must_emit` / `must_not_emit` clause that is not a list of quoted strings: an
+    authoring error in the case. Its own class so `main` can report it as a refusal rather
+    than a traceback."""
 
 
 def _text_clause(doc: dict, key: str, *, where: str) -> list[str]:
-    """`doc[key]` as the list of literals it must be, or `ClauseError` saying what it is.
+    """`doc[key]` as a list of string literals, or `ClauseError` saying what it is.
 
-    The containment checks compare the author's literal with the model's spelling, and only a
-    STRING carries a spelling: an unquoted `2026-07-25T07:48:37.065Z` reaches here as a
-    `datetime` whose `str()` no model ever wrote, `0755` as `493`, `yes` as `True` — a clause
-    that could never match, i.e. silently unarmed (#951). A bare scalar instead of a list is
-    the same defect one level up: iterating it would forbid each of its characters. Both are
-    an authoring error, so both are refused rather than coerced — a rule the validator
-    applies at commit time and the scorer applies at score time, from this one function.
+    Only a string carries a spelling to compare: an unquoted timestamp arrives as a
+    `datetime`, `0755` as `493`, `yes` as `True`, and would never match. A bare scalar would
+    be iterated character by character. Both are refused rather than coerced.
     """
     entries = doc.get(key)
     if entries is None:
@@ -640,8 +546,7 @@ def _by_system(rows: list[dict]) -> dict[str, str]:
 def score_tag(projection_stem: str, model: str, effort: str) -> str:
     """`<oracle-model>_<oracle-prompt>__judge-<model>-<effort>_<prompts-sha8>`.
 
-    The judge runs at score time, so it is part of the tag: editing either prompt is a new tag
-    requiring a full re-score, exactly like an oracle change.
+    Editing either judge prompt yields a new tag, requiring a full re-score.
     """
     return f"{projection_stem}__{judge.tag_suffix(model, effort)}"
 
@@ -704,21 +609,15 @@ def main(argv: list[str] | None = None) -> int:
             summary = score_case(ns.case_dir, ns.projection, model=model, effort=effort,
                                  jobs=ns.jobs, relabel=ns.relabel, call=judge.call_model)
     except ClauseError as e:
-        # An authoring error in the case, not a scorer fault: reported the way every other
-        # mechanical refusal is, so a sweep over many cases sees one `!!` line and moves on
-        # rather than dying on the first mis-typed manifest with a traceback.
+        # An authoring error: one `!!` line, so a sweep over many cases keeps going.
         print(f"== score: {ns.projection.name} vs {ns.case_dir.name} ==")
         print(f"!! clause — {e}")
         return 1
     print_report(summary)
 
-    # `expectation_failures` and `forbidden_emitted` join the lead-set checks rather than
-    # merely reporting: a derived case IS its contract, so a violated one is a failed score,
-    # and a mutation case that leaked a pre-mutation entity must not exit 0.
-    #
-    # Some committed scores DO leak and so exit 1 here — that is the measurement those cases
-    # exist to take, not a broken artifact. A caller sweeping the tree must not read exit 1 as
-    # "re-score me"; read `mechanical.forbidden_emitted` and decide.
+    # A violated expectation or a leak fails the score, since derived cases are graded by
+    # nothing else. Some committed scores do leak and exit 1 by design; a sweeping caller
+    # should read `mechanical.forbidden_emitted` rather than treat exit 1 as "re-score me".
     broken = any(summary["mechanical"][k] for k in
                  ("missing_leads", "unscored_leads", "duplicate_leads",
                   "expectation_failures", "forbidden_emitted"))
@@ -728,16 +627,11 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         print(f"\nwrote {out}")
-    # Non-zero on a lead-set mismatch: a partial projection is not a result, and a caller
-    # scripting the suite must not read it as one.
     return 1 if broken else 0
 
 
 def _dry_run(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> dict:
-    """The mechanical half, with no model in the loop — what `--dry-run` reports.
-
-    Nothing here but the stop: the checks themselves are `_measured`, so the dry run cannot
-    drift from the score it previews."""
+    """The mechanical half, with no model in the loop — what `--dry-run` reports."""
     summary = _measured(case_dir, proj_path, model=model, effort=effort).summary
     summary.update({"judged": False, "rows": [],
                     "why_unjudged": "--dry-run: no model was called"})

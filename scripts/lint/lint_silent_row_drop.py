@@ -1,70 +1,48 @@
 #!/usr/bin/env python3
-"""Silent row drop — a row may not leave a loop in the invlang row-carrying surface
-unless, unconditionally on that same path, a ``ParseWarning`` was raised or the row
-landed in a destination.
+"""Silent row drop: a row may not leave a loop in the invlang row-carrying surface unless,
+unconditionally on that same path, a ``ParseWarning`` was raised or the row landed in a
+destination.
 
-THE RULE.  Inside the two roles that carry invlang rows — the TOKENIZER that turns lines
-into ``Block``s, and the PROJECTOR class that owns the ``list[ParseWarning]`` — an escape
-(``continue`` / ``break`` / bare ``return``) out of a ``for`` over rows must be preceded,
-on every path from the loop head to that escape, by either a warning or a landing. Neither
-one on the path means the row left the parser and nothing downstream can know it existed:
-``disposition: benign`` gets computed over a document the reader silently shortened.
-``ParseWarning`` is the sanctioned drop channel; this gate is the check that the channel is
-actually used when the drop happens (#876).
+Inside the two roles that carry invlang rows — the tokenizer that turns lines into
+``Block``s, and the projector class that owns the ``list[ParseWarning]`` — an escape
+(``continue`` / ``break`` / bare ``return``) out of a ``for`` over rows must be preceded, on
+every path from the loop head, by a warning or a landing. Otherwise the row left the parser
+and nothing downstream knows it existed: ``disposition: benign`` gets computed over a
+silently shortened document. ``ParseWarning`` is the sanctioned drop channel; this gate
+checks it is used.
 
-ROLES ARE DERIVED STRUCTURALLY — this is what makes the check a construction boundary
-rather than a ban on a spelling, and it is why the gate arms itself as the parser grows:
+Roles are derived structurally, so the gate arms itself as the parser grows:
 
-  * PROJECTOR — any ``ClassDef`` that BOTH declares an ``AnnAssign`` field whose annotation
-    mentions ``ParseWarning`` AND contains a method that CONSTRUCTS one. Both halves are
-    required, and the second half is not decoration: ``corpus.Companion`` and
-    ``corpus.LoadReport`` each declare a ``list[ParseWarning]`` field, but they merely CARRY
-    warnings somebody else raised. A class that never raises one owns no drop channel, so
-    its loops are not drops. Every method of a matching class is in scope.
-  * TOKENIZER — any function whose RETURN ANNOTATION mentions the row container ``Block``,
-    resolved through ``_astlib.origin`` so ``from ._types import Block as B`` and
-    ``_types.Block`` are the same case as ``Block`` (#602). The thing that turns lines into
-    rows is the other place a row can vanish before anyone can warn about it.
+  * Projector — any ``ClassDef`` that both declares an ``AnnAssign`` field whose annotation
+    mentions ``ParseWarning`` and has a method that constructs one. Both halves are needed:
+    ``corpus.Companion`` and ``corpus.LoadReport`` carry warnings others raised, so they own
+    no drop channel. Every method of a matching class is in scope.
+  * Tokenizer — any function whose return annotation mentions ``Block``, resolved through
+    ``_astlib.origin`` so aliases and qualified forms count.
 
-  The WARN-EMITTER set is likewise a FIXPOINT, not a table: a function emits if it
-  constructs a ``ParseWarning``, or calls something in the same module that does. Adding a
-  new ``self._warn_*`` helper therefore clears the sites that call it, with no edit here.
+  The warn-emitter set is a fixpoint: a function emits if it constructs a ``ParseWarning``
+  or calls something in the same module that does, so a new ``self._warn_*`` helper needs
+  no edit here.
 
-WHAT IS *NOT* MECHANIZED — read this before treating a green run as a clean tree.
-This gate sees only the EXPLICIT escape: a row that leaves through a ``continue`` /
-``break`` / bare ``return`` statement it can point at. The other half of the same defect is
-the IMPLICIT drop, and it is not detectable by this construction:
+What is not mechanized — read this before treating a green run as a clean tree. Only the
+explicit escape is seen. The implicit drop is not detectable by this construction:
 
   * a dispatch arm that returns "handled" without ever projecting the row;
-  * an ``if`` / ``elif`` chain with no ``else`` — the row simply falls off the end of the
-    body and the loop advances, with no statement anywhere to flag;
+  * an ``if`` / ``elif`` chain with no ``else`` — the row falls off the end of the body;
   * a suppressed conversion (``rec.get(...) or {}``, a swallowed ``RowError``) that turns a
     malformed row into an empty one that projects "successfully".
 
-A clean run of this gate is NOT proof that the parser drops nothing. It is proof that every
-place a row is EXPLICITLY thrown away either warns or lands. The implicit half needs review
-and tests, and no future edit to this file should be read as extending coverage to it.
+A clean run proves only that every explicit throw-away warns or lands; the implicit half
+needs review and tests.
 
-WHY THIS SHAPE, AND WHAT WAS MEASURED.  Run unscoped over the whole invlang package, the
-escape rule yields 61 findings, roughly three quarters of them read-side filters that drop
-no row at all (``queries.py`` skipping a companion that does not match). Scoped to
-``parser.py`` but with no role anchor, 16. Only the role anchor together with the
-unconditional-path rule gets it to 8, of which 4 are real. The PAIRING check — every
-``_extend_by_id`` call site must be preceded by ``_warn_repeated_ids`` on the same rows —
-was prototyped alongside this one and deliberately NOT shipped: it is a two-call ordering
-convention rather than a construction boundary, it cannot see the pairing once either side
-moves behind a helper, and its 4 findings were already closed by the ``_warn_repeated_ids``
-calls that landed with #840.
-
-The unconditional-path rule leans conservative on purpose. A landing (or a warning) sitting
-inside a sibling ``if`` that this path did not take is not on this path, so it does not
-clear the escape. The error that direction can make is a false alarm, answered by the
-marker below; the reverse error is a silent drop that ships.
+Without the role anchor and the unconditional-path rule, the escape rule is mostly noise from
+read-side filters that drop no row. The rule is conservative: a landing or warning inside a
+sibling ``if`` this path did not take does not clear the escape. The resulting false alarm is
+answered by the marker; the reverse error is a silent drop that ships.
 
 Suppress a deliberate site with ``# lint-row-drop: ok — <reason>`` on the escape's own
 lines. Pre-existing sites are ratcheted through ``lint_silent_row_drop_baseline.json``
-(scripts/lint/_baseline.py) and every entry must carry a reason — ``require_reasons`` is on,
-so burying a new drop costs a sentence saying why it is not one.
+(scripts/lint/_baseline.py) and every entry must carry a reason (``require_reasons`` is on).
 
 Run from repo root:       python scripts/lint/lint_silent_row_drop.py
 Regenerate the baseline:  python scripts/lint/lint_silent_row_drop.py --update-baseline
@@ -90,16 +68,13 @@ BASELINE_PATH = Path(__file__).with_name("lint_silent_row_drop_baseline.json")
 EXCLUDED_DIRS = frozenset({".venv", "__pycache__", "tests"})
 SUPPRESS = "lint-row-drop: ok"
 
-#: The sanctioned drop channel's type — a row that leaves without one of these is a row
-#: nobody downstream can know about.
+#: The sanctioned drop channel's type.
 WARNING_TYPE = "ParseWarning"
 #: The row container the tokenizer emits; a function returning it is a tokenizer.
 BLOCK_TYPE = "Block"
 
-#: Duck-typed LANDING verbs: the row reached a destination on this path, so the escape
-#: below it is not a drop. A POSITIVE table of sanctioned mutations (the ``_astlib.OPENERS``
-#: direction), never a list of bad spellings — the receiver here is a value by construction,
-#: so ``callee()`` cannot and should not resolve it.
+#: Duck-typed landing verbs: the row reached a destination on this path. A positive table of
+#: sanctioned mutations; the receiver is a value, so ``callee()`` cannot resolve it.
 LANDING_ATTRS = frozenset({"append", "extend", "update", "add", "setdefault", "insert"})
 
 
@@ -107,8 +82,8 @@ LANDING_ATTRS = frozenset({"append", "extend", "update", "add", "setdefault", "i
 
 
 def _local_defs(tree: ast.Module) -> frozenset[str]:
-    """The names this module defines at top level — the classes a bare ``Block`` /
-    ``ParseWarning`` annotation could be naming without any import at all."""
+    """Top-level names this module defines — the classes a bare ``Block`` / ``ParseWarning``
+    annotation could name without any import."""
     return frozenset(
         node.name
         for node in tree.body
@@ -119,15 +94,12 @@ def _local_defs(tree: ast.Module) -> frozenset[str]:
 def _names_type(
     node: ast.expr | None, env: ModuleEnv, defs: frozenset[str], want: str
 ) -> bool:
-    """Whether an annotation mentions the anchor type ``want``, anywhere inside it —
-    ``Block``, ``list[Block]``, ``Iterator[Block]`` and ``tuple[X, list[ParseWarning]]``
-    all count, because what matters is that the row container is in the signature.
+    """Whether an annotation mentions ``want`` anywhere inside it (``Block``,
+    ``list[Block]``, ``tuple[X, list[ParseWarning]]`` all count).
 
-    Resolution goes through ``_astlib.origin`` rather than the dotted spelling, so
-    ``from ._types import Block as B`` and ``_types.Block`` are the same case as a local
-    ``class Block`` (#602/#607). A locally-defined class is checked first: it has no import
-    to resolve, and the module that DEFINES the container is exactly the one the tokenizer
-    rule most needs to see.
+    Resolved through ``_astlib.origin``, so aliased and qualified imports count. A locally
+    defined class is checked first: it has no import to resolve, and the module defining
+    the container is the one the tokenizer rule most needs to see.
     """
     if node is None:
         return False
@@ -142,9 +114,8 @@ def _names_type(
 
 
 def _self_method(call: ast.Call) -> str | None:
-    """``self.foo(...)`` -> ``"foo"``. A method call on ``self`` is the one receiver whose
-    binding is not a value this resolver can chase — it is the enclosing class, and its
-    methods are exactly the module-local functions the emitter fixpoint ranges over."""
+    """``self.foo(...)`` -> ``"foo"``. Methods on ``self`` are module-local functions the
+    emitter fixpoint ranges over, which the resolver cannot chase as values."""
     func = call.func
     if (
         isinstance(func, ast.Attribute)
@@ -173,8 +144,8 @@ def _functions(node: ast.AST):
 
 
 def _constructs_warning(node: ast.AST, env: ModuleEnv, defs: frozenset[str]) -> bool:
-    """Whether anything under ``node`` calls the warning TYPE itself — the construction of
-    the drop channel, resolved by origin so an aliased import counts."""
+    """Whether anything under ``node`` calls the warning type itself, resolved by origin so
+    an aliased import counts."""
     for sub in ast.walk(node):
         if not isinstance(sub, ast.Call):
             continue
@@ -187,17 +158,13 @@ def _constructs_warning(node: ast.AST, env: ModuleEnv, defs: frozenset[str]) -> 
 
 
 def _warn_emitters(tree: ast.Module, env: ModuleEnv, defs: frozenset[str]) -> set[str]:
-    """The FIXPOINT of warn-emitting function names in this module: a function that
-    constructs a ``ParseWarning``, or one that calls something here which does.
+    """The fixpoint of warn-emitting function names in this module: a function that
+    constructs a ``ParseWarning``, or calls something here which does.
 
-    A fixpoint rather than a hardcoded ``{"_warn", "_warn_repeated_ids"}`` because the
-    table is the part that goes stale. The parser's warnings are raised through a chain
-    (``_project_rows`` -> ``_warn`` -> ``ParseWarning(...)``); the next helper someone adds
-    joins the set the moment it lands, and every escape that calls it clears without an
-    edit here.
-
-    Keyed on the BARE name, deliberately: a call reaches these as ``self._warn(...)`` or as
-    a module-level ``_two_site_reason(...)``, and both are answered by the same module.
+    A fixpoint rather than a hardcoded name set, so warnings raised through a helper chain
+    (``_project_rows`` -> ``_warn`` -> ``ParseWarning(...)``) and future helpers are covered.
+    Keyed on the bare name: calls arrive as ``self._warn(...)`` or a module-level
+    ``_two_site_reason(...)``, both answered by this module.
     """
     bodies = {fn.name: fn for fn in _functions(tree)}
     emitters = {
@@ -222,10 +189,8 @@ def _warn_emitters(tree: ast.Module, env: ModuleEnv, defs: frozenset[str]) -> se
 def _projector_methods(
     tree: ast.Module, env: ModuleEnv, defs: frozenset[str]
 ) -> list[ast.AST]:
-    """Every method of every class that BOTH holds ``ParseWarning`` state AND raises one.
-
-    The conjunction is the whole point — see the module docstring on ``corpus.Companion``,
-    which holds the field and raises nothing, and must not be mistaken for a projector.
+    """Every method of every class that both holds ``ParseWarning`` state and raises one
+    (a class that only holds the field, like ``corpus.Companion``, is not a projector).
     """
     methods: list[ast.AST] = []
     for node in ast.walk(tree):
@@ -262,9 +227,8 @@ def _tokenizers(
 
 
 def _is_escape(node: ast.AST) -> bool:
-    """``continue`` / ``break`` / a bare ``return`` — the three ways a row leaves a loop
-    without being handed anywhere. A ``return <value>`` is not one: it carries something
-    out, and what it carries is the caller's business."""
+    """``continue`` / ``break`` / a bare ``return``. A ``return <value>`` carries something
+    out, which is the caller's business."""
     if isinstance(node, (ast.Continue, ast.Break)):
         return True
     if isinstance(node, ast.Return):
@@ -280,9 +244,8 @@ def _paths_to_escapes(
     """Every escape in this loop's own body, with the statements that precede it on the
     path from the loop head and the guard tests it sits under.
 
-    Descends through ``if`` / ``try`` / ``with`` — control structures the same iteration
-    passes through — but never into a nested loop or function: an escape there belongs to
-    THAT loop, and ``_scan`` reaches it as its own loop.
+    Descends through ``if`` / ``try`` / ``with`` but never into a nested loop or function:
+    an escape there belongs to that loop, which ``_scan`` reaches separately.
     """
     results: list[tuple[ast.stmt, list[ast.stmt], list[ast.expr]]] = []
 
@@ -311,12 +274,10 @@ def _paths_to_escapes(
 
 
 def _unconditional(stmt: ast.stmt, predicate) -> bool:
-    """Whether ``predicate`` holds on EVERY path through this one preceding statement.
+    """Whether ``predicate`` holds on every path through this one preceding statement.
 
-    An ``if`` clears only when it has an ``else`` and both branches clear: a landing in the
-    taken branch of a one-armed ``if`` says nothing about the path that skipped it. A
-    nested loop clears nothing — it may run zero times — and a ``def`` / ``class`` is a
-    binding, not an execution.
+    An ``if`` clears only with an ``else`` and both branches clearing. A nested loop clears
+    nothing (it may run zero times), and a ``def`` / ``class`` is a binding, not an execution.
     """
     if isinstance(stmt, ast.If):
         return bool(stmt.orelse) and all(
@@ -371,8 +332,8 @@ def _warns(
 
 
 def _qualname(tree: ast.Module, target: ast.AST) -> str:
-    """The dotted path of enclosing classes/defs for ``target``, so two same-named methods
-    on different classes never share a fingerprint."""
+    """The dotted path of enclosing classes/defs for ``target``, so same-named methods on
+    different classes never share a fingerprint."""
     stack: list[tuple[ast.AST, str]] = [(tree, "")]
     while stack:
         node, name = stack.pop()
@@ -464,9 +425,7 @@ def _scan(scope: Path) -> list[Finding]:
         if any(part in EXCLUDED_DIRS for part in relative_parts):
             continue
         rel = _relative(path, scope)
-        # A file inside the scan scope that could not be read or parsed never entered the
-        # corpus, so a silent drop could sit in it and this gate would still print 0
-        # findings on a shrunken corpus. Raising is the only honest answer (#618/#621/#652).
+        # Raises ScanBlind on an unreadable file rather than scanning a shrunken corpus.
         text, tree = read_and_parse(path, rel)
         env = module_env(tree)
         findings.extend(_escape_findings(rel, tree, env, text.splitlines()))

@@ -2,32 +2,23 @@
 """Lesson → in-context-outcome traceability (platform-design §4.4 control loop).
 
 For a merged lesson, surface which subsequent cases had it **in context** and what
-disposition each reached — the post-merge visibility half of "no pre-merge sign-off, but a
-human control loop after". This is **in context**, not demonstrably *influenced* — see
-``defender/hooks/record_lesson_load.py``'s caveat; the green bar + one-click revert
-are the load-bearing safety controls, this is best-effort visibility.
+disposition each reached — post-merge visibility for a human control loop. This is **in
+context**, not demonstrably *influenced* (see ``defender/hooks/record_lesson_load.py``); the
+green bar and one-click revert are the safety controls, this is best-effort visibility.
 
-TWO KINDS OF ROW reach ``lessons_loaded.jsonl`` (#919), and since #936 each row says which
-(``kind``) and for which agent (``role``). A READ (``runtime/tools._gated_read``) records a
-lesson the model chose to open. A PUSH (``runtime/lessons_push``: the write return that moved
-the investigation's frontier, and the compaction fold's frontier row) records each lesson
-whose ``description`` and dimensions the runtime put in front of MAIN — the model saw enough
-to act on and was told not to open the file to decide relevance, so the row is honest, but it
-is weaker evidence than a Read. Neither covers ``runtime/orient.py``'s PLAN-time signature
-block, which pushes the same way and records nothing. So a lesson carrying ``frontier_nodes``
-/ ``frontier_edges`` selectors has more ways to earn a row than one that does not; read a
-difference in counts between two lessons with that in mind.
+Two kinds of row reach ``lessons_loaded.jsonl``, each naming its ``kind`` and ``role``. A READ
+records a lesson the model chose to open. A PUSH records a lesson whose ``description`` and
+dimensions the runtime showed MAIN (on a frontier-moving write, or the compaction fold) —
+weaker evidence than a read. The PLAN-time signature block pushes the same way but records
+nothing, so a lesson with ``frontier_nodes``/``frontier_edges`` selectors has more ways to earn
+a row; compare counts between lessons with that in mind.
 
-The ``evidence`` column names the strongest class behind a case's "in context", from the
-CLOSED vocabulary ``read`` (a MAIN read) > ``push`` (to MAIN) > ``indirect`` (another role
-only — a GATHER agent or a curator) > ``unknown`` (rows from before #936, which cannot say —
-an honest downgrade of history rather than an assumed read), and ``loaded_at`` is the
-earliest row OF THAT CLASS, so the two cells describe one event. Both come from the record's
-one reader, ``hooks.record_lesson_load.exposures`` — the judge's lessons view asks the same
-function, so the two cannot disagree about what was in front of the model. Only qualifying
-rows count: a row outside the lesson's ``created_at`` window lifts nothing. The value is
-EMITTED from that vocabulary, never from the row's bytes: ``lessons_loaded.jsonl`` is a
-#1047 forgery universal, and a ``kind`` carrying a tab must not forge a column.
+The ``evidence`` column names the strongest class behind a case's "in context": ``read`` (a
+MAIN read) > ``push`` (to MAIN) > ``indirect`` (another role only) > ``unknown`` (older rows
+that do not say). ``loaded_at`` is the earliest row of that class. Both come from
+``hooks.record_lesson_load.exposures``, the same reader the judge uses. Rows outside the
+lesson's ``created_at`` window do not count. The value is emitted from that closed vocabulary,
+never the row's bytes, so a forged ``kind`` cannot forge a column.
 
 Usage:
   trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
@@ -87,8 +78,7 @@ def _default_runs_dir() -> Path:
 
 
 def _parse_dt(raw) -> datetime | None:
-    """`parse_iso_utc` plus the two already-typed shapes only this caller meets — a lesson's
-    frontmatter is YAML, so a bare date or datetime arrives parsed rather than as a string."""
+    """`parse_iso_utc`, plus YAML frontmatter's already-parsed date and datetime values."""
     if isinstance(raw, datetime):
         return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     if isinstance(raw, date):
@@ -108,19 +98,15 @@ class CaseHit:
 def _report_disposition(run_dir: Path) -> str:
     """This case's disposition for the trace table, or the unknown placeholder.
 
-    Degrades rather than raises: one unreadable historical report must cost its own row, not
-    the whole walk. It warns for ANY unreadable headline, since a present-but-malformed report
-    is where a silent `?` reads as "this case never resolved". A report that was never written
-    stays silent — an ordinary in-progress run, not a defect.
+    Degrades rather than raises, so one bad report costs only its row. Warns when a present
+    report has no readable headline; a report never written (an in-progress run) is silent.
     """
     report = RunPaths(run_dir).report
     if not report.is_file():
         return UNKNOWN_DISPOSITION
     read = read_report(report)
     if read.reason is not None:
-        # Flattened like every other value this module prints: the reason quotes
-        # model-authored bytes back (a YAML fence error carries the offending frontmatter line
-        # verbatim), which unflattened could forge rows on this line-oriented stream.
+        # Flattened: the reason can quote model-authored bytes, which could forge rows.
         print(f"warn: {_flatten(run_dir.name)}/{_flatten(read.reason)} — disposition unknown",
               file=sys.stderr)
     return read.disposition_or_unknown
@@ -136,9 +122,7 @@ def in_context_cases(
         loaded = RunPaths(run_dir).lessons_loaded
         if not loaded.is_file():
             continue
-        # THIS lesson's rows only, before the reader classifies anything: `--all` calls this
-        # once per lesson per run, and classifying every other lesson's rows each time is
-        # N-lessons × rows of work thrown away.
+        # Filter to this lesson first: `--all` calls this once per lesson per run.
         mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
         for exposure in exposures(mine, since=created_at).lessons:
             hits.append(CaseHit(run_dir.name, _report_disposition(run_dir),
@@ -219,8 +203,7 @@ def main(argv: list[str]) -> int:
     since = str(created_at) if created_at is not None else f"? ({_unwindowed_reason(raw_created)})"
     print(f"# {_flatten(path.stem)} — {len(hits)} case(s) in context since {since}")
     for h in hits:
-        # `evidence` goes through the same flatten as every other cell even though it is
-        # emitted from a closed vocabulary — one rule for the row, not one per column.
+        # Every cell flattened, closed-vocabulary ones included — one rule for the row.
         print(f"{_flatten(h.case_id)}\t{_flatten(h.disposition)}\t{_flatten(h.loaded_at)}"
               f"\t{_flatten(h.evidence)}")
     return 0

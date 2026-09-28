@@ -2,9 +2,8 @@
 
 Source of truth is hosts/inventory.yaml (baked into /opt/cmdb/inventory.yaml at
 build time). Reads load into an immutable BASE dict; writes go to OVERLAY,
-which is shallow-merged over BASE on read. The overlay exists to let the chaos
-control plane (batch 11) stage stale-CMDB scenarios — phantom owners, renamed
-hosts, reclassified criticality — without touching the file.
+which is shallow-merged over BASE on read. The overlay lets the chaos control
+plane stage stale-CMDB scenarios without touching the file.
 
 Not for production. Auth-less; loopback-exposed on the VPS.
 """
@@ -38,10 +37,8 @@ def _load_inventory() -> None:
 
 def _effective(name: str) -> Optional[dict[str, Any]]:
     overlay = OVERLAY.get(name)
-    # The chaos control plane's "missing-host" fault: an overlay tombstone
-    # ({"__absent__": True}) makes an otherwise-real host disappear, the same
-    # way a real CMDB silently drops a decommissioned or never-registered
-    # asset. No marker survives into any response — the host is just gone.
+    # A tombstone overlay ({"__absent__": True}) makes a real host disappear,
+    # with no marker in any response, as a real CMDB silently drops an asset.
     if overlay is not None and overlay.get("__absent__"):
         return None
     base = BASE.get(name)
@@ -63,10 +60,7 @@ app = FastAPI(title="Playground CMDB stub", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    # overlay_count used to be returned here. It is an agent-reachable count
-    # of the chaos control plane's own edits — it rises the moment a
-    # stale-CMDB profile activates, which is a harness tell no non-harness
-    # consumer needs (issue #401, O6).
+    # No overlay count here: it is agent-reachable and would reveal active chaos.
     return {"status": "ok", "host_count": len(BASE)}
 
 
@@ -102,17 +96,15 @@ def get_roles():
 
 
 class OverlayBody(BaseModel):
-    # Free-form partial record; fields shallow-merge over BASE on read.
-    # Typed as dict to accept any inventory field (role, criticality, owner,
-    # change_window, os, service, trust_edges_out, users, etc.).
+    # Free-form partial record; any inventory field shallow-merges over BASE.
     model_config = {"extra": "allow"}
 
 
 @app.get("/admin/overlay/{name}")
 def get_overlay(name: str):
-    # The overlay as stored (not merged over BASE) — what the chaos control
-    # plane snapshots before it touches a host, and restores afterwards.
-    # `overlay: null` means no overlay is set.
+    # The raw overlay, which the chaos control plane snapshots and restores.
+    # `overlay: null` means none is set.
+
     return {"name": name, "overlay": OVERLAY.get(name)}
 
 

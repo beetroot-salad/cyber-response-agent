@@ -1,35 +1,22 @@
 """The two derived readers: what each world concluded, and where the worlds differ.
 
-#947's M8, read side. `verdicts` answers "what disposition did each sibling reach"; `delta_o`
-answers "on which of the questions the family shares did a world's observation differ, and was
-the difference the one that world declared". Both are DERIVED ON READ — nothing here is
-stored, because a stored answer is a second place for it to live and the one that drifts is
-the one nobody re-derives.
+`verdicts` answers "what disposition did each sibling reach"; `delta_o` answers "on which shared
+questions did a world's observation differ, and was it the difference that world declared".
+Both are derived on read; nothing is stored.
 
-**BOTH READ THE EPISODE DIRECTORY AND NOTHING ELSE.** That is D3's self-containment claim, and
-it is a claim about this module more than about the archive: the sibling run dirs are
-disposable, they live under a root this module is not told about, and one of them may be gone
-by the time anyone grades the episode. So the archived report is what `verdicts` reads (never
-the run's own `report.md`), the archived `served/` ledgers are what `delta_o` pairs, and the
-archived `run_dir` pointer is INFORMATIONAL — a text file naming where the bytes came from,
-which nothing here opens, resolves or follows. A test deletes every sibling's directory and
-asks both readers the same questions again; a reader that reached for one would answer
-differently, or not at all, on an episode that is otherwise complete.
+Both read the episode directory and nothing else. Sibling run dirs are disposable and may be
+gone by grading time, so `verdicts` reads the archived report, `delta_o` pairs the archived
+`served/` ledgers, and the archived `run_dir` pointer is informational only — never opened or
+followed.
 
-**BOTH REFUSE AN EPISODE WHOSE RECORDED OUTCOME IS `incomplete`.** `incomplete` is a modelled
-outcome (§7 FORK-1), not the absence of a file: the launcher writes it into `review.yaml` with
-a reason when a sibling's scrub or stamp could not be verified, and it withholds the family
-stamp. The worlds that ARE archived are still on disk and still individually readable — but
-they are not COMPARABLE, because the thing that failed is the guarantee that the three ran
-against one tree. A per-key answer computed over them would carry no marker saying so, and
-downstream it would read as a measurement. Refusing is what keeps "no differences" and "no
-comparison was possible" from being the same empty dict.
+Both refuse an episode whose recorded outcome is `incomplete`. The launcher records that (with a
+reason) when a sibling's scrub or stamp could not be verified, and withholds the family stamp.
+The archived worlds are individually readable but not comparable, since nothing guarantees they
+ran against one tree; refusing keeps "no differences" distinct from "no comparison possible".
 
-**An episode with no archived worlds answers EMPTY rather than refusing** (§7 FORK-18). An
-episode rejected before `Step.RUNS` (`branch/steps.py`) never ran a sibling and is a legitimate
-archived state — its manifest, staging record and review are the artifacts, and `{}` is the
-honest reading of "no world produced anything". That is only safe because the recorded outcome
-above distinguishes it from "the worlds ran and agreed".
+An episode with no archived worlds answers empty rather than refusing: one rejected before
+`Step.RUNS` (`branch/steps.py`) never ran a sibling, and `{}` is the honest answer. That is safe
+only because the recorded outcome distinguishes it from "the worlds ran and agreed".
 """
 
 from __future__ import annotations
@@ -60,16 +47,12 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 
-#: The outcome that withholds comparability. Spelled once: the launcher writes it, both
-#: readers refuse on it, and a second spelling is a refusal that stops firing.
+#: The outcome that withholds comparability; the launcher writes it and both readers refuse on it.
 INCOMPLETE = "incomplete"
 
-#: What a difference is called when there is no model seam to attribute it with. NOT a
-#: degraded `mutation`: `undeclared` says exactly "this world's observation differs and the
-#: difference has not been shown to be the axis it declared", which is precisely what is known
-#: when nothing classified it. Inventing `mutation` there would report a measurement nobody
-#: made. The comparator's own member, borrowed rather than spelled: this reader reports the
-#: delta seat's vocabulary and keeps no second copy of it (`comparator.DELTA_SEAT`).
+#: What a difference is called when nothing attributed it: "differs, and not shown to be the
+#: declared axis". Reporting `mutation` would claim a measurement nobody made. Borrowed from the
+#: comparator's delta-seat vocabulary rather than re-spelled.
 UNATTRIBUTED = Verdict.UNDECLARED.value
 
 Invoke = Callable[..., Any]
@@ -78,10 +61,9 @@ Invoke = Callable[..., Any]
 class EpisodeError(ValueError):
     """An episode these readers cannot answer over honestly.
 
-    Three things reach it: a recorded outcome that withholds comparability, an archived report
-    whose disposition is outside the shipped vocabulary, and an archived world the manifest
-    does not declare. A `ValueError`, so a caller that funnels this design's refusals through
-    one boundary catch keeps them all.
+    Raised for a recorded `incomplete` outcome, an archived disposition outside the shipped
+    vocabulary, or an archived world the manifest does not declare. A `ValueError` so callers
+    can catch this design's refusals at one boundary.
     """
 
 
@@ -93,10 +75,8 @@ class EpisodeError(ValueError):
 def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
     """The episode's recorded outcome and its reason, or `(None, "")` when none is recorded.
 
-    An absent, unreadable or unparseable record is NOT an outcome. It is how an episode looks
-    before the launcher has written anything, and the readers of a hand-built or partially
-    written episode must not be gated on a document that does not exist yet — the refusal
-    below fires on a recorded `incomplete`, which is a positive statement someone made.
+    An absent or unparseable record is not an outcome: it is an episode the launcher has not
+    written yet, and must not gate the readers. Only a recorded `incomplete` refuses.
     """
     text = bound.read(LAYOUT.review).text
     if text is None:
@@ -117,7 +97,7 @@ def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
 
 
 def _refuse_incomplete(bound: Bound) -> None:
-    """Refuse an episode the launcher recorded as `incomplete` — see the module docstring."""
+    """Refuse an episode the launcher recorded as `incomplete`."""
     outcome, reason = _recorded_outcome(bound)
     if outcome == INCOMPLETE:
         raise EpisodeError(
@@ -128,25 +108,16 @@ def _refuse_incomplete(bound: Bound) -> None:
 
 
 def _archived_labels(bound: Bound) -> list[str]:
-    """Every archived world's label, sorted — the ONE definition of "this episode's worlds".
+    """Every archived world's label, sorted — the single definition of "this episode's worlds".
 
-    Taken from the archive rather than from the manifest, because they are different sets and
-    the difference is the point: an incomplete family archives the siblings that were
-    individually clean and omits the one that was not, and both readers answer about what is
-    on disk. Off the bind's own listing (#1049) rather than `is_dir()`: this directory sits
-    inside the episode tree, and an entry there is judged on what it IS rather than on what it
-    points at.
+    Taken from the archive, not the manifest: an incomplete family archives only its clean
+    siblings, and the readers answer about what is on disk. Listed through the bind, so an entry
+    is judged on what it is rather than what it points at.
 
-    A RESERVED LABEL IS NOT A WORLD, and skipping it here is what keeps this reader honest
-    about a directory the grading pass owns. #1007's family-level judge call archives its draws
-    at `worlds/family/judge/`, unconditionally and before any draw is attempted, so every graded
-    episode carries a `worlds/family/` entry that no manifest can ever declare — `_family.
-    RESERVED_WORLD_LABELS` refuses a world claiming that name precisely so it cannot. Counted
-    as a world, it made `delta_o` raise `EpisodeError: the archive holds a world 'family' the
-    manifest does not declare` for EVERY episode from the moment it was graded, and left
-    `verdicts()` skipping a phantom label on the strength of an absent `report.md`. Asked
-    through the owner's own normalizer, never a local `!= "family"`, so the two gates cannot
-    come to disagree about what the reservation covers.
+    Reserved labels are skipped: the grading pass archives its own draws under
+    `worlds/family/`, which no manifest can declare, and counting it would make `delta_o`
+    refuse every graded episode. Asked through `is_reserved_world_label` so both gates agree on
+    what is reserved.
     """
     return [label for label in bound.under(LAYOUT.worlds).entries().dirs()
             if not is_reserved_world_label(label)]
@@ -160,12 +131,9 @@ def _archived_labels(bound: Bound) -> list[str]:
 def _declared_disposition(text: str) -> Any:
     """The `disposition` value an archived report declares, raw and unjudged.
 
-    Two shapes, because the archive copies whatever the sibling published and this reader
-    must not be the thing that decides which spelling counts. The house form is frontmatter
-    (`_frontmatter` owns the fence arithmetic — nothing here counts `---` lines); a document
-    with no fences whose head is a YAML mapping is read as that mapping. Anything else yields
-    `None`, which the caller reports as a report with no disposition rather than as a report
-    with a bad one.
+    Frontmatter first (via `_frontmatter`); a fence-less document whose head is a YAML mapping
+    is read as that mapping. Anything else yields `None`, reported as no disposition rather than
+    a bad one.
     """
     frontmatter = parse_frontmatter_or_none(text)
     if frontmatter is None:
@@ -180,17 +148,12 @@ def _declared_disposition(text: str) -> Any:
 def verdicts(episode_dir: Path) -> dict[str, str]:
     """Each archived world's disposition, keyed by world label.
 
-    Read from each world's OWN archived `report.md` — one report per world, none sourced from
-    another, and never from a run dir. Gated by the shipped disposition vocabulary through
-    `_vocab.normalized_disposition` rather than by a membership test written here: that
-    function owns what a disposition MEANS, including the zero-width strip a locally-written
-    `in DISPOSITION_ENUM` would silently drop, and a report laced with a zero-width character
-    would otherwise render as `malicious` to a human and refuse for a reader (or worse, the
-    other way round).
+    Read from each world's own archived `report.md`, never a run dir. Judged by
+    `_vocab.normalized_disposition`, which owns the vocabulary including zero-width stripping
+    that a local `in DISPOSITION_ENUM` would miss.
 
-    A value outside the vocabulary REFUSES and the refusal names it: the disposition is the
-    headline #921 grades on, and a world whose headline cannot be read is not a world with no
-    headline.
+    A value outside the vocabulary refuses, naming it: a headline that cannot be read is not the
+    same as no headline.
     """
     with bind(Path(episode_dir)) as bound:
         return _verdicts(bound)
@@ -201,15 +164,10 @@ def _verdicts(bound: Bound) -> dict[str, str]:
     out: dict[str, str] = {}
     for label in _archived_labels(bound):
         name = LAYOUT.world(label).report
-        # ABSENT AND UNREADABLE ARE DIFFERENT ANSWERS, and `archive.py` is what forces the
-        # split: "a path that is simply not there is skipped and reported (a sibling that died
-        # before writing its report has no report)". A world archived without one is therefore
-        # a state the archive DELIBERATELY produces, and it reaches here on an ACCEPTED episode
-        # too — `verify_family` gates on the scrub verdict and the stamps, not on the report —
-        # so refusing it took every other world's readable headline down with it. Skipped, this
-        # reader answers for the worlds that concluded something; a report that is PRESENT and
-        # cannot be read is still the refusal it was — decided by the bound reader's own open
-        # (#1049), never by an `exists()`/`is_symlink()` pair ahead of it.
+        # Absent and unreadable differ. The archive deliberately archives a world with no
+        # report (a sibling that died before writing one), even on an accepted episode, so it
+        # is skipped rather than taking every other world's headline down. A present but
+        # unreadable report still refuses, decided by the bound reader's own open.
         rec = bound.read(name)
         if rec.absent:
             continue
@@ -235,51 +193,31 @@ def _verdicts(bound: Bound) -> dict[str, str]:
 
 
 def _pair_key(row: dict) -> str | None:
-    """The key a row PAIRS on: the call as it was ASKED.
+    """The key a row pairs on: the call as it was asked (`ledger.correlation_key_of`).
 
-    The recorded `correlation_key` when the row carries one, and otherwise the same
-    derivation `ServedCall.correlation_key` makes — `request_key` over `asked_params` where
-    staging rewrote the call, falling back to `params` where nothing was rewritten.
-
-    THE FALLBACK IS THE WHOLE MECHANISM, not a tolerance. A staged world's `params` name that
-    world's own corpus by construction (`wv-<token>-logs-`), so a pairing keyed on them
-    intersects the base's keys in the EMPTY SET — every world would report no difference from
-    a base it never met, silently, and silently on the event stream, where most of a run's
-    evidence lives.
-
-    ONE HOME, in `ledger`, beside the `ServedCall` property whose derivation it is: `review`
-    reads the same identity off the same rows, and the copy that drifts is the one whose reader
-    stops pairing.
+    A staged world's `params` name its own corpus, so pairing on them would intersect the
+    base's keys in the empty set and silently report no difference on the event stream.
     """
     return correlation_key_of(row)
 
 
 def _canonical(row: dict) -> str | None:
-    """One row's answer, in the canonical spelling both sides of a comparison are dumped in.
+    """One row's answer in canonical spelling (`comparator.canonical`).
 
-    Re-dumped through `comparator.canonical` (which is `ledger.payload_text` over the parsed
-    row) rather than compared as stored text: `sort_keys` is what makes two dumps of one answer
-    compare equal, and the source run's captured sidecars were written WITHOUT it — so a byte
-    comparison of stored text would report a difference on every row of a primed capture, in a
-    field no world touched.
+    Stored text cannot be compared byte-for-byte: the source run's captured sidecars were
+    written without `sort_keys`, so every primed row would differ in a field no world touched.
+    Non-JSON text (a torn row, an error digest) is compared as-is, so two worlds recording the
+    same unparseable answer still agree.
     """
     text = row.get("payload_text")
     if not isinstance(text, str) or not text:
         return None
-    # `comparator.canonical`, not a second copy of it. `mechanical`'s own docstring is why that
-    # function is published: "a second copy of the canonical-then-fold ladder in that module is
-    # how the two would come to disagree about what `same` means". The not-JSON arm is its too —
-    # a torn row or an error digest has no canonical form, so it is compared as the bytes it is
-    # rather than dropped, and two worlds recording the same unparseable answer still agree.
     return canonical(text)
 
 
 def _answers(path: Path) -> dict[str, str]:
-    """One ledger file as `{pair key: canonical answer}`, first row winning.
-
-    First-row-wins is the append-only reading of "recorded once", and it is the same rule the
-    ledger's own memo applies — two readers resolving a duplicate key in opposite directions
-    is how one file gets read as two different recordings.
+    """One ledger file as `{pair key: canonical answer}`, first row winning (as the ledger's
+    own memo does).
     """
     if not artifact_file(path):
         return {}
@@ -296,51 +234,37 @@ def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis
               invoke: Invoke | None) -> dict[str, str]:
     """One world's shared keys, each classified against the base's answer.
 
-    Mechanical first and by design: equal canonical text is `same` with no model call at all,
-    which is what keeps a family of a few hundred replayed calls from being a few hundred
-    model calls. Only a genuine difference reaches the comparator, and it reaches it with the
-    world's OWN declared axis — the delta seat — so the answer is "is this the difference the
-    world said it was making" rather than "do these two payloads disagree".
+    Equal canonical text is `same` with no model call. Only a real difference reaches the
+    comparator, with the world's own declared axis (the delta seat), asking "is this the
+    difference the world said it was making".
 
-    With no model seam (`invoke=None`) nothing is attributed: a difference is `undeclared`,
-    the member that says exactly that, and the reader stays deterministic and offline instead
-    of reaching for a provider a caller did not hand it.
+    With no model seam (`invoke=None`) a difference is `undeclared`, keeping the reader
+    deterministic and offline.
     """
     out: dict[str, str] = {}
     for key in keys:
         if base[key] == world[key]:
             out[key] = Verdict.SAME.value
             continue
-        # NO AXIS IS THE SAME ANSWER AS NO MODEL SEAM, and for the same reason: `undeclared`
-        # says "this world's observation differs and the difference has not been shown to be the
-        # axis it declared", which is exactly what is known about a world that declared none.
-        # `_check_axis` admits `axis: null` on a non-base world, so this arm is reachable — and
-        # asked anyway, `compare(a, b, None, …)` selects the REVIEW seat, which admits
-        # `contradiction`, which `DELTA_SEAT` does not: the first such answer raised out of
-        # `_wrong_seat` and took the WHOLE episode's ΔO with it, under a message reading "with
-        # an axis given" when none was.
+        # No axis is answered like no model seam. `axis: null` is legal on a non-base world,
+        # and `compare(..., None, ...)` would select the review seat, whose `contradiction`
+        # the delta seat does not admit.
         if invoke is None or axis is None:
             out[key] = UNATTRIBUTED
             continue
-        # `.value`, not the member: this reader's answer is a plain-string table a caller
-        # writes to YAML and compares against bare words, and `str(Verdict.SAME)` on a
-        # `(str, Enum)` renders `'Verdict.SAME'` rather than `'same'`. The membership gate is
-        # the comparator's OWN seat set — a second list of the members this seat admits, kept
-        # here, is a vocabulary that drifts from the one the refusal beside it is written from.
+        # `.value`: callers write this table to YAML and compare bare words, and
+        # `str(Verdict.SAME)` renders `'Verdict.SAME'`. Membership is checked against the
+        # comparator's own `DELTA_SEAT`.
         verdict = compare(base[key], world[key], axis, invoke=invoke)
         out[key] = verdict.value if verdict in DELTA_SEAT else _wrong_seat(key, verdict)
     return out
 
 
 def _wrong_seat(key: str, verdict: Verdict) -> str:
-    """Unreachable through `compare`, and kept because that is a promise rather than a proof.
+    """Refuse a verdict outside the delta seat.
 
-    `compare` refuses a verdict outside the seat its axis selected, and `_classify` only reaches
-    it with an axis in hand — so this frame answers only if one of those two gates is ever
-    loosened or bypassed. F2's cost is exactly this: ONE type spans both seats, so nothing
-    structurally prevents a wrong-seat member and the CALLER is what refuses one. Reported,
-    never mapped onto a member this seat does admit — that would record a guess where a
-    measurement belongs.
+    Unreachable while `compare` enforces seats, but one `Verdict` type spans both seats, so the
+    caller must refuse rather than map it onto an admitted member.
     """
     raise EpisodeError(
         f"the comparator answered {verdict.value!r} for correlation key {key!r} with an axis "
@@ -349,28 +273,20 @@ def _wrong_seat(key: str, verdict: Verdict) -> str:
 
 
 def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
-    """Per world, per shared correlation key: one member of the comparator's DELTA seat.
+    """Per world, per shared correlation key: one member of the comparator's delta seat.
 
-    `same`, `formatting`, `mutation` or `undeclared` — the seat's own set, reported as the
-    comparator answers it rather than re-spelled here (`formatting` is a member of it: a
-    difference in presentation is a real answer to "is this the difference you declared", and
-    mapping it onto `same` would be this frame overruling the one that measured).
+    `same`, `formatting`, `mutation` or `undeclared`, as the comparator answers it
+    (`formatting` is not folded into `same`).
 
-    THE PAIRING IS `keys(base) ∩ keys(world)` ON THE FORM ASKED. The family's shared capture
-    (`served/base.jsonl`) is one side and each world's own rows (`served/<world token>.jsonl`)
-    are the other. See `_pair_key` for why the asked form is the only form this can pair on.
+    Pairs `keys(base) ∩ keys(world)` on the asked form: the family's capture
+    (`served/base.jsonl`) against each world's own rows (`served/<world token>.jsonl`).
 
-    THE CONTROL'S DRIFT IS SUBTRACTED, the way the review subtracts it (design M4: "A first,
-    as the control; its mismatch keys are drift"). The base world stages nothing, so a key on
-    which IT differs from the capture is the estate moving underneath the episode — a rolling
-    index, a clock, a document that aged out — and reporting it as a world's own difference
-    turns the one measurement #921 consumes into noise. Computed mechanically, from the
-    control's own ledger, so drift costs no model call and is decided before any world is
-    classified.
+    The control's drift is subtracted: the base world stages nothing, so a key where it differs
+    from the capture is the estate moving underneath the episode (a rolling index, a clock),
+    not any world's difference. Computed mechanically before any world is classified.
 
-    Every archived world gets an entry, the control included: with its own drift keys removed
-    the control's remaining keys are `same` by construction, and an entry that is present and
-    empty is the honest record of a world that served nothing.
+    Every archived world gets an entry, the control included; an empty entry means the world
+    served nothing.
     """
     episode_dir = Path(episode_dir)
     with bind(episode_dir) as bound:

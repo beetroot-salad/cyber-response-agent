@@ -10,8 +10,7 @@ The tool bodies live in four modules, layered one way:
                   investigation: append a block, repair a row, recall the frontier.
 
 This module keeps the registration functions — the only place that knows which verbs a
-role actually gets — and re-exports the tool bodies, so the split is invisible to the 72
-files that import from here.
+role actually gets — and re-exports the tool bodies for existing importers.
 """
 
 from __future__ import annotations
@@ -43,8 +42,6 @@ from ..agent_role import AgentRole
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-# The SAME byte ruler the artifact bounds are measured with — a write tool that reports
-# "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
 from defender._env import FatalConfigError, env_int
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
@@ -159,14 +156,8 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             return _tool_read_file(ctx.deps, path, pattern, tail)
 
     if tools.write:
-        # `sequential=True` on BOTH, the same rule `append_block`/`fix_row` carry below and the
-        # close tool carries in close_tool.py: these two write a SHARED ARTIFACT, so two
-        # `ToolCallPart`s in one model response would otherwise run as concurrent tasks and one
-        # write would be lost. `edit_file` is the worse of the two — it is a read-modify-write
-        # (`_probe_read_text`, splice, `write_guarded`), so two concurrent edits on one file both
-        # read the same pre-image and one splice vanishes while both calls report success. These
-        # are granted to CORPUS_AUTHOR and LEAD_AUTHOR, whose lesson files the learning corpus is
-        # built from.
+        # `sequential=True`: tool calls in one response otherwise run concurrently, and two
+        # writes (especially read-modify-write edits) to one file would silently lose one.
         @agent.tool(sequential=True)
         async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
             """Write a file within this agent's declared write scope, replacing it whole.
@@ -191,14 +182,9 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
 def _register_investigation_verbs(agent) -> None:
     """The two verbs bound to `investigation.md` — the append and the repair.
 
-    One grant, one registration site: `fix_row` rides `append=True` rather than minting a
-    capability bit, so an agent that may grow the transcript may also repair a row it landed
-    in it. Split out of `register_tools` to keep that function under the complexity gate."""
-    # `sequential=True`: two `ToolCallPart`s in ONE model response otherwise run concurrently,
-    # and against the real write primitive that is a genuine LOST UPDATE — both calls read the
-    # same pre-image, one change reaches disk, and both report success. A `fix_row` paired with
-    # an `append_block` could discard the repair while telling the model it landed, leaving a
-    # window that looks shut and is not.
+    `fix_row` rides `append=True`: an agent that may grow the transcript may repair it."""
+    # `sequential=True`: concurrent calls in one response would lose an update while both
+    # report success.
     @agent.tool(sequential=True)
     async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
         """Append to investigation.md, the invlang work log — no path and no anchor,
@@ -222,15 +208,11 @@ def _register_investigation_verbs(agent) -> None:
 
 
 async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
-    """Offer `fix_row` only while the repair window is open.
+    """Offer `fix_row` only while the repair set is non-empty.
 
-    ERGONOMICS, not a control. The offer is computed once per model REQUEST, so a model that
-    saw the definition on an earlier turn can still emit the call after the window closed;
-    `_tool_fix_row` re-derives and refuses. The security property rests on that body.
-
-    Offered on the REPAIR set, which the body also gates on: a document whose only defect is
-    error-severity has no warn window, and offering on that would hide the verb in exactly the
-    case the close is about to demand it."""
+    Ergonomics, not a control: a model can still emit the call later, and `_tool_fix_row`
+    re-derives and refuses. Keyed on the repair set (not the warn window) so error-severity
+    rows still get the verb."""
     return tool_def if repairable_diagnostics(ctx.deps) else None
 
 
@@ -278,8 +260,7 @@ from ..tools_gather import (  # noqa: E402, F401  (re-exported — public surfac
 )
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports; each name's home is the module it is imported from.
 __all__ = [
     "Diagnostic",
     "AgentDeps",

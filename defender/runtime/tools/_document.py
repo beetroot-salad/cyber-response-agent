@@ -19,8 +19,7 @@ from defender._io import TEXT_READ_ERRORS, read_plain, write_guarded
 from defender._run_paths import RunPaths
 from .. import compaction, permission
 
-# The SAME byte ruler the artifact bounds are measured with — a write tool that reports
-# "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
+# The byte ruler the artifact bounds are measured with, so reported "bytes" match what the gate judges.
 from defender._artifact_schema import _utf8_len
 from ._deps import AgentDeps
 from ._bash import _guarded_parents, _resolved
@@ -30,12 +29,11 @@ _logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------------------
-# The repair window. A warn-family `:R attr_updates` row LANDS instead of costing a whole
+# The repair window. A warn-family `:R attr_updates` row lands instead of costing a whole
 # re-emitted block, and then gates the next write until it is repaired.
 #
-# The window is DERIVED, never stored: `warn_diagnostics` over whatever `investigation.md`
-# holds right now IS the state. Nothing caches it and no `AgentDeps` field carries it, so it
-# cannot go stale or disagree with the file.
+# The window is derived from `investigation.md` on each read, never stored, so it cannot go
+# stale or disagree with the file.
 # --------------------------------------------------------------------------------------
 
 def _investigation_path(deps: AgentDeps) -> Path:
@@ -44,58 +42,40 @@ def _investigation_path(deps: AgentDeps) -> Path:
 
 @model(frozen=True)
 class CompanionRead:
-    """ONE reading of `investigation.md`, taken once and handed to every gate that judges the
-    document as it stands — the repair window, the close's structure check, its entry price and
-    its challenge review. The close used to take four readings of the same file, one per gate,
-    each with its own decoder, and two of them could answer differently about one document: the
-    price gate decoded with replacement and collected the price, the review decoded strictly
-    and failed the run over the byte the price gate had already read past.
+    """One reading of `investigation.md`, handed to every gate that judges the document as it
+    stands (repair window, the close's structure check, entry price, challenge review), so no
+    two gates can decode the same file differently.
 
-    THE THREE ANSWERS A READ CAN GIVE:
+    Three answers:
 
-      * NEVER WRITTEN — `text == ""`. Not an error: an unwritten companion has no repair window
-        and nothing to validate, and it owes every priced keyword its whole price.
-      * READ — `text` is the document, decoded strictly with universal newlines, exactly as
-        `Path.read_text` would have handed it to the gates that used to read for themselves.
-      * COULD NOT BE READ — `text is None` and `refusal` says why: an I/O fault (EACCES, EIO), a
-        non-plain entry at the name (a symlink, a hard link, a directory, a fifo — the read
-        goes through `_io.read_plain`, the guarded read every artifact in the box-writable tree
-        takes, so a planted entry is refused at the open rather than followed or blocked on),
-        or bytes that are not UTF-8. ONE answer for all of them as far as the GATES go: the
-        per-request window derivation is empty (fail open — a wedged run is the worse failure),
-        no gate judges a lenient decode — replacing a bad byte and judging the rest would let a
-        confident disposition commit against a document the validator never checked — and the
-        HOST's forced close proceeds off an empty body (`unresolved` owes nothing and is not
-        reviewed). What the MODEL's close does with it turns on `retryable`: a fault the next
-        read may not see (an I/O error) is a refusal the model retries, and a fault no retry
-        changes (bytes that are not UTF-8, a planted entry) is decided once as a review that
-        cannot run — the host's `unresolved`. Overruling on the I/O fault too would let one
-        hiccup of the run dir's mount terminally replace a settled verdict, where the refusal
-        costs a retry and, if the fault persists, ends at the same `unresolved` through the
-        host's forced close. `append_block` refuses undecodable bytes on the way in, so an
-        undecodable companion only ever arrived some other way (an import, a hand edit)."""
+      * never written — `text == ""`: no repair window, nothing to validate, full entry price owed.
+      * read — `text` is the document, decoded strictly with universal newlines.
+      * could not be read — `text is None`, `refusal` says why: an I/O fault, a non-plain entry
+        at the name (`_io.read_plain` refuses planted links at the open), or non-UTF-8 bytes.
+        The window derivation fails open, no gate judges a lenient decode (it would let a
+        confident close commit against an unvalidated document), and the host's forced close
+        proceeds off an empty body. The model's close turns on `retryable`: an I/O fault is a
+        refusal to retry; a fault no retry changes is decided once as the host's `unresolved`.
+        Overruling on an I/O fault would let one mount hiccup replace a settled verdict."""
 
     #: The document, `""` when never written, `None` when it could not be read.
     text: str | None
     #: Why it could not be read — set exactly when `text is None`.
     refusal: str | None = None
     #: Whether a later read might succeed — set exactly when `text is None`. True for an I/O
-    #: fault; False for undecodable bytes and for a planted entry at the name, which are the
-    #: document's own state and not the mount's.
+    #: fault; False for undecodable bytes or a planted entry (the document's state, not the mount's).
     retryable: bool = False
 
 
-#: The errnos `_io.read_plain` refuses a non-plain entry with — a symlink or the
-#: `O_NOFOLLOW` race (`ELOOP`), a hard link (`EMLINK`), and the directory/fifo/socket/device
-#: shapes it folds into `ELOOP`. Read off the primitive's own contract rather than its message
-#: text, so a reworded refusal cannot silently turn a planted entry into a retryable fault.
+#: The errnos `_io.read_plain` refuses a non-plain entry with (`ELOOP` for symlinks and other
+#: non-regular shapes, `EMLINK` for hard links). Matched by errno, not message text, so a
+#: reworded refusal cannot turn a planted entry into a retryable fault.
 _PLANTED_ENTRY_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK})
 
 
 def read_companion(deps: AgentDeps) -> CompanionRead:
-    """The one read. Never raises — the read is taken on EVERY model request (`prepare=`),
-    where a raise would be a wedge — and never logs: the close's refusal and the forced
-    close's own log name the reason where it is acted on, not once per request."""
+    """The one read. Never raises (it runs on every model request via `prepare=`, where a raise
+    would wedge the run) and never logs (callers log where they act on the refusal)."""
     try:
         return CompanionRead(text=read_plain(_investigation_path(deps)))
     except FileNotFoundError:
@@ -108,11 +88,10 @@ def read_companion(deps: AgentDeps) -> CompanionRead:
 
 
 def unreadable_write_refusal(verb: str, read: CompanionRead) -> str:
-    """The write verbs' refusal over a companion that could not be read — the SAME reading the
-    verb just derived its window from, so the gate's verdict and the bytes the verb would
-    rewrite or extend are one document. A second, unguarded `Path.read_text` here used to
-    follow a symlink the guarded read had refused and could see different bytes: the gate
-    judged one reading and the write was built from another."""
+    """The write verbs' refusal over a companion that could not be read.
+
+    Takes the same reading the verb derived its window from, so the gate and the write never see
+    different bytes."""
     if read.retryable:
         return f"{verb} blocked: investigation.md could not be read ({read.refusal}); retry."  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     return (
@@ -122,26 +101,18 @@ def unreadable_write_refusal(verb: str, read: CompanionRead) -> str:
 
 
 def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
-    """The run's currently-open repair window, re-derived from disk on every call — the
-    per-request (`prepare=`) and write-gate reading. The close hands its own single read to
-    `flagged_in` instead, so its window and its structure check are judged on one document.
+    """The run's currently-open repair window, re-derived from disk on every call.
 
-    FAILS OPEN on every path that reads it. An unreadable or undecodable `investigation.md` is
-    an unrelated fault; converting it into "every write and the close are refused" would
-    manufacture the unclosable run this mechanism exists to avoid. `append_block` still refuses
-    an undecodable document for its own reason."""
+    Fails open: turning an unreadable `investigation.md` into "every write and the close are
+    refused" would make the run unclosable."""
     return flagged_in(read_companion(deps))
 
 
 def flagged_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
-    """The repair window over one reading. ABSENCE is the ordinary "no window open" case, not
-    a fault: `prepare=` runs on EVERY model request, including turn 1 before any write verb
-    has created the file — and a read that could not look is the same empty window (fail open).
+    """The repair window over one reading. An absent or unreadable document is an empty window.
 
-    A warn diagnostic carrying NO `locus` is not in the window: the window is the set of rows
-    `fix_row` can address, so counting a locus-less finding would refuse the append AND the
-    close with no row the repair verb could ever clear. No family emits one today; this keeps
-    that from being load-bearing."""
+    Diagnostics without a `locus` are excluded: the window is the rows `fix_row` can address, and
+    a locus-less finding would block the append and close with nothing the model could clear."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     if not read.text:
@@ -156,24 +127,12 @@ def flagged_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
 
 
 def committed_document_refusal(read: CompanionRead) -> str | None:
-    """The close's structural verdict on `investigation.md` as it stands — the refusal text,
-    or `None` when the document is publishable. #961.
+    """The close's structural verdict on `investigation.md` — the refusal text, or `None` when
+    the document is publishable.
 
-    Lives beside `flagged_in` and not in the close because the two are ONE reading of one
-    document, taken at the same moment — the `CompanionRead` the close hands both — and they
-    have to agree about what "cannot look" means. Splitting them put that agreement in two
-    files the first time and it did not survive the trip.
-
-    Judges `read.text` and nothing else. A document that DECODES and does not validate is the
-    author's malformed document, the close is what publishes it, and it is refused (#961). A
-    document that could not be read — `text is None` — is not this gate's question: the close
-    decides that case ONCE, before any gate, as a review that cannot run (see `CompanionRead`),
-    so this returns `None` for it and is never what stands between such a document and a
-    commit. No lenient decode is judged here: a replacement character mid-header would make
-    the validator report a broken block nobody wrote (#836).
-
-    ABSENCE is not a fault: a close on a run with no companion is the entry-price gate's
-    question, not this one's, and it asks it separately."""
+    Kept beside `flagged_in` so both agree on what "could not read" means. An unreadable
+    document (`text is None`) returns `None`: the close decides that case once, before any gate.
+    An absent document also returns `None`; that is the entry-price gate's question."""
     from defender._artifact_schema import committed_investigation_reason
 
     if not read.text:
@@ -182,56 +141,25 @@ def committed_document_refusal(read: CompanionRead) -> str | None:
 
 
 def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
-    """Every row `fix_row` may address — the REPAIR set, which is wider than the repair WINDOW.
+    """Every row `fix_row` may address — the repair set, wider than the repair window.
 
-    `flagged_diagnostics` above is the warn-severity window: the rows whose presence BLOCKS an
-    append and a close. This is the set the repair verb is allowed to touch, and the two are
-    not the same question. An ERROR-severity row blocks just as hard — `append_block` validates
-    the whole document, so a committed error refuses every later write — but it was not in the
-    window, so `fix_row` refused it and was not even offered. That left a document carrying one
-    with NO legal move: the close refuses and names `fix_row`, `fix_row` says nothing is
-    flagged, `append_block` refuses the same bytes, and append-only puts them out of reach. The
-    model then spends its whole retry budget before the framework force-closes `unresolved`,
-    discarding the disposition the run actually reached.
+    The window is warn-severity only, but an error-severity row blocks every write just as hard
+    (a rule shipped after the bytes landed can make a committed row invalid). Leaving it out of
+    the repair set would leave no legal move until the retry budget force-closes `unresolved`.
+    `fix_row` still faces `decide_write`, so this cannot widen what the model may write.
 
-    Reachable because a document valid when written can stop being valid later: a rule that
-    ships after a run's bytes landed (#962 is exactly one) judges what is already committed.
+    Excluded: diagnostics naming no row (no locus or empty `row_text` — `fix_row` reads an empty
+    `old_row` as delete), and rows outside `:R attr_updates`. The block restriction widens
+    severity, not scope: parse diagnostics exist for every block, and admitting them would put a
+    committed `:V`/`:E` record in reach of a repair.
 
-    Widening the REPAIR set cannot widen what the model may write. `fix_row` still faces
-    `decide_write` on the resulting document, so a repair that does not actually fix the row is
-    refused like any other write.
-
-    A diagnostic naming NO ROW stays out — no locus, and equally an EMPTY `row_text`. The
-    empty case is not hypothetical: the repeated-lead-id family reports at block scope
-    (`_warn(block, -1, "")`), so it carries a locus whose row is the empty string, and `fix_row`
-    reads an empty `old_row` as DELETE. Admitting it would offer the model a repair that names
-    nothing and deletes on sight, and it would quietly reverse #954's decision that a document
-    holding that repeat is refused at every write verb with no legacy exemption. The rule is
-    the one `flagged_diagnostics` already states for a locus-less finding: the set is the rows
-    `fix_row` can ADDRESS, and a row nobody can quote back is not one.
-
-    AND A ROW OUTSIDE `:R attr_updates` STAYS OUT, which is what keeps the widening a widening
-    of SEVERITY and not of SCOPE. The warn window walks that block and nothing else, so every
-    guard downstream of it inherited the scope for free: `_attr_block_columns` returns `None`
-    for a row no `:R attr_updates` block holds — its own docstring says that "cannot happen for
-    a flagged row" — and `_tool_fix_row` reads that `None` as "skip the shape guard", which is
-    the guard that makes "no verb mutates or removes a committed `:V`/`:E` record" true by
-    construction. Parse diagnostics carry a locus and a real row for EVERY block, so admitting
-    them by severity alone would put a committed `:V` declaration inside the repair set with no
-    shape guard in front of it — a `new_row` free to span lines, carry a fence delimiter, or be
-    a block header. The severity partition and the block partition are two different questions;
-    this widens exactly one of them.
-
-    FAILS OPEN like its sibling, for the same reason and via the same reader — a wedged run is
-    the worse failure. Read with the document as its OWN baseline, the reading
-    `committed_investigation_reason` takes: the repair set has to be derived from the same
-    verdict the close renders, or the verb is offered on findings the close never names."""
+    Fails open. Validated with the document as its own baseline, as
+    `committed_investigation_reason` does, so the set matches what the close reports."""
     return repairable_in(read_companion(deps))
 
 
 def repairable_in(read: CompanionRead) -> tuple[Diagnostic, ...]:
-    """`repairable_diagnostics` over one reading — the verb that repairs hands the reading it
-    derived its set from to the rewrite, the way the close hands its one read to every gate."""
+    """`repairable_diagnostics` over one reading, so the rewrite uses the same bytes."""
     from defender.skills.invlang.validate import ATTR_UPDATES_LOCUS as REPAIRABLE_BLOCK
     from defender.skills.invlang.validate import diagnose
 
@@ -262,21 +190,17 @@ def _flagged_rows(diags: tuple[Diagnostic, ...]) -> tuple[str, ...]:
 def flagged_write_refusal(
     verb: str, diags: tuple[Diagnostic, ...], *, offered_text: bool = True
 ) -> str:
-    """The gate's refusal, naming EVERY currently-flagged row and its `use:` alternatives.
+    """The gate's refusal, naming every currently-flagged row and its `use:` alternatives.
 
-    It carries the whole set rather than the most recent row because after a frontier fold the
-    model holds only a truncated PREFIX of the document (`driver._fold_decision`), so a flagged
-    row below the cut is absent from its view and this refusal is the recovery channel.
+    Lists the whole set because after a frontier fold the model may hold only a prefix of the
+    document, so this refusal is how it sees rows below the cut.
 
-    `offered_text=False` for the CLOSE, which proposed no `investigation.md` bytes of its own:
-    the full notice's "does not contain your text" would be a claim about nothing. Both
-    spellings LEAD with the same fragment, so the model still tells a refusal from an accept by
-    the first sentence."""
+    `offered_text=False` for the close, which proposed no bytes of its own. Both spellings lead
+    with the same fragment so the model can tell a refusal from an accept by the first sentence."""
     from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
 
-    # The close's opening states what the CLOSE did not do — no disposition recorded — never
-    # "nothing was committed for this run", which flatly contradicts the next sentence ("the
-    # row LANDED and is committed") and reads as "your whole investigation was discarded".
+    # The close's opening says no disposition was recorded, not "nothing was committed", which
+    # would contradict "the row LANDED" below.
     opening = (
         UNCHANGED_NOTICE if offered_text
         else f"{UNCHANGED_LEAD} — no disposition was recorded for this run."
@@ -292,9 +216,8 @@ def flagged_write_refusal(
 
 
 def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
-    """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed, and
-    never carries the unchanged-notice wording: a model that reads "warning" as "refusal"
-    re-emits the whole block, which is the cost the repair window exists to remove."""
+    """An accept that carries a warning. Leads with the bytes and never uses the
+    unchanged-notice wording, so the model does not mistake it for a refusal and re-emit."""
     from defender._artifact_schema import render_diagnostic
 
     if not diags:
@@ -311,14 +234,8 @@ def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
 def _tool_append_block(deps: AgentDeps, text: str) -> str:
     """Append to `investigation.md` — main's only write.
 
-    No path: the run has one model-authored transcript and this is its writer, the way
-    `close_investigation` is `report.md`'s. No anchor and no position either: the document is
-    validator-enforced append-only (`_check_append_only` refuses a dropped fence, a dropped
-    record, or an in-place mutation), so the anchored replace `edit_file` offers is a capability
-    the artifact never had.
-
-    Faces the identical gate the other two verbs do — same `decide_write`, same content schema,
-    same RS15 post-close refusal — on the resulting full document."""
+    No path, anchor or position: the document is validator-enforced append-only. The resulting
+    full document faces the same `decide_write`, schema and post-close refusal as other writes."""
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
@@ -326,11 +243,9 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
             "recorded disposition for this run, and a further append could silently "
             "move it. The case is closed."
         )
-    # The gate is FORCED, not chosen: `_check_closed_vocab` walks the FULL proposed document,
-    # so a landed warn row re-fires on every subsequent append anyway. Without the gate the
-    # choices are grandfathering — which dead-letters the run at persist — or a wedged document.
-    # ONE reading: the window is derived from it and the append is built on it, so the gate
-    # cannot judge one document while the write extends another (see `CompanionRead`).
+    # The validator walks the full proposed document, so a landed warn row would re-fire on
+    # every later append anyway; gating here names it for repair. One reading feeds both the
+    # window and the append, so the gate and the write see the same document.
     read = read_companion(deps)
     flagged = flagged_in(read)
     if flagged:
@@ -343,10 +258,8 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     if read.text is None:
         raise ModelRetry(unreadable_write_refusal("append_block", read))
     current = read.text
-    # Separate with a newline only when the document does not already end in one. Existing
-    # bytes are never rewritten — not even trailing whitespace — so an append cannot itself
-    # trip the append-only check it is about to face. An EMPTY append gets no separator: the
-    # separator alone would be a byte the model never sent, on a call reporting zero bytes.
+    # Existing bytes are never rewritten (not even trailing whitespace), so an append cannot
+    # trip the append-only check. An empty append gets no separator.
     sep = "\n" if current and text and not current.endswith("\n") else ""
     new_text = current + sep + text
     decision = permission.decide_write(
@@ -357,59 +270,37 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     _guarded_parents(deps, p)
     write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
-    # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count, and
-    # the 65536-byte cap it must stay under is measured the same way. invlang rows carry
-    # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
+    # UTF-8 bytes, not characters: the size cap is in bytes and invlang rows carry multi-byte
+    # symbols.
     lead = (
         f"appended {_utf8_len(text)} bytes to investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"({_utf8_len(new_text)} total)"
     )
-    # The gate ACCEPTED a warn-only document and returned no text to reuse, so the warning can
-    # only come from a SECOND derivation here, over the bytes just written. Deriving in memory
-    # keeps it deterministic without a re-read.
+    # The gate accepted a warn-only document without returning diagnostics, so derive them
+    # again in memory over the bytes just written.
     warn = _warn_over(new_text)
     recall = _frontier_recall(deps, current, new_text)
     if warn:
-        # INSIDE the warning return, not stapled after it. `_warning_return` ends with the
-        # `fix_row` instruction, and on this path that is the only legal next call — the next
-        # `append_block` is hard-refused by `flagged_diagnostics`. Appending the lessons block
-        # after it would put ~30 lines of precedent between the model and the one action it
-        # can take.
+        # Recall goes inside the warning return so the `fix_row` instruction — the only legal
+        # next call — stays last.
         return _warning_return(f"{lead} — the block LANDED.{recall}", warn)
     return lead + recall
 
 
 def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
-    """Lessons for what this append left OPEN — appended to the return, or "" (#919).
+    """Lessons for what this write left open — appended to the return, or "".
 
-    Keyed on the invlang FRONTIER (`skills/invlang/frontier.py`), not on the alert
-    signature. A lesson about what a field licenses is relevant once the field is in hand,
-    which is a fact about the document at loop N, not about which rule fired at loop 0 —
-    `runtime/orient.py` keys the cold-start block on the signature because at that point no
-    document exists yet, and that is the only place the signature is the best available key.
+    Keyed on the invlang frontier, not the alert signature: a lesson about a field matters once
+    the field is in hand. Emitted only when the write moved the frontier and changed the top
+    lessons, so the same block is not re-stapled to every write. Derivation is shared with the
+    compaction fold's frontier row (`lessons_push`), so "moved from `before`" also means "moved
+    from what the fold showed".
 
-    ON CHANGE, not on every write. The pre- and post-append documents are both already in
-    hand here, so the diff costs nothing and needs no state to remember what was said last:
-    the model gets a lessons block exactly when its own append moved the frontier, instead
-    of the same three lines re-stapled to every write until it stops reading them.
+    Not gated by `permission.decide_read`: the corpus is a fixed internal path, and the model
+    receives rendered text, not a read capability.
 
-    DERIVED, NEVER STORED, like the repair window above — nothing caches this, so it cannot
-    go stale or disagree with the file. The derivation itself — corpus, walk, match, render,
-    record — is `runtime/lessons_push.py`, shared with the compaction fold's frontier row
-    (#936): after a fold the turns that carried these returns are gone from MAIN's history,
-    and the fold re-shows the current top three from the same derivation, so this gate's
-    "moved from `before`" is also "moved from what the fold showed".
-
-    NOT gated by `permission.decide_read`, deliberately. The gate governs what the MODEL may
-    read; this is the runtime composing text to hand it, the same way `runtime/orient.py`
-    assembles the cold-start lessons block without one. The corpus is a fixed internal path
-    under `defender_dir`, never an operand the model supplies, so there is no path here for
-    it to steer — and the model receives rendered text, not a read capability it can reuse.
-
-    FAILS OPEN, and that is not optional: every caller reaches here AFTER the bytes have
-    landed, so an exception raised for a missing corpus or an unreadable frontier would
-    surface to the model as a failed tool call on a write that actually succeeded — the
-    exact lie `_warn_over` fails open to avoid.
+    Fails open: callers reach here after the bytes landed, so raising would report a failed tool
+    call on a write that succeeded.
     """
     try:
         from defender._corpus import iter_lessons
@@ -425,34 +316,11 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         corpus = lessons_push.corpus_dir(deps, lane="[tools]")
         if corpus is None:
             return ""
-        # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
-        # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
-        # tuples of frozen dataclasses, so `==` is exact, and `match_lessons`/`render` are
-        # pure functions of `(frontier, corpus)` — an unchanged frontier cannot change the
-        # block. Checking it first skips the corpus walk, which is the dominant cost here:
-        # `iter_lessons` re-reads and re-YAML-parses every lesson file on every call. It skips
-        # it on a MINORITY of appends, though, not "most" — `held` accumulates, so any append
-        # declaring a `:V` row moves the frontier. Replaying the repo's own investigations
-        # fence-by-fence, it fires on roughly half.
-        #
-        # The fence test below is the gate that actually is cheap, and it is exact:
-        # `parse_dense_companion` reads ONLY ```invlang fences and ignores every other
-        # byte, so an append that adds no fence delimiter cannot add, close, or alter one —
-        # the parse, and therefore the frontier, is identical. Prose narration between blocks
-        # is an ordinary shape on this loop and an empty `text` is an explicitly supported
-        # one; both would otherwise pay two full parses of a document
-        # growing toward the 65536-byte cap to discover they changed nothing. Guarded on
-        # `after` EXTENDING `before` so it can only fire for `append_block` — `fix_row` rewrites
-        # in place and is never a prefix extension.
-        #
-        # The window reaches TWO BYTES BACK into `before`, so a delimiter that straddled the
-        # seam — an on-disk document ending in a truncated ``` and an append supplying the last
-        # backtick — could not close a fence behind a gate that said it could not.
-        #
-        # BELT AND BRACES, not a live case: `_tool_append_block` inserts `sep = "\n"` whenever
-        # `current` does not already end in a newline, so today no ``` can span the join at
-        # all. The two bytes cost nothing and are what keeps this gate correct if that
-        # separator rule is ever relaxed; do not read them as evidence the straddle happens.
+        # Cheap exact gate first: the parser reads only ```invlang fences, so an append adding no
+        # fence delimiter cannot change the frontier (common for prose or empty appends). Only
+        # applies to prefix extensions, i.e. `append_block`; `fix_row` rewrites in place. The
+        # window reaches two bytes back into `before` so a delimiter straddling the seam is
+        # still seen (the separator rule prevents that today; this keeps it correct regardless).
         if before and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]:
             return ""
         now_frontier = frontier_from_text(after)
@@ -461,64 +329,26 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
             return ""
         if now_frontier.is_empty():
             return ""
-        # WITHHELD ON THE WRITE THAT ADVANCES THE FOLD BOUNDARY, under compaction (#936).
-        # The render that prepares MAIN's next request folds through the loop this write
-        # closed and reparents the frontier row onto the root, so THIS return is off the send
-        # path before the model reads it — a block here is tokens the model never sees and a
-        # `push` row for a lesson that was not in front of it. The frontier row carries the
-        # same top three, derived over the same document, with its own row. `fold_boundary`
-        # advances only on the write completing the pair {`:T close` for loop N, a finding in
-        # a loop past N} with every loop below N already closed — the same decision the driver
-        # makes at the next render (`driver._fold_decision`), asked here of the same bytes.
+        # Withheld on a write that advances the fold boundary under compaction: the next render
+        # folds this return away before the model reads it, and the fold's frontier row carries
+        # the same top lessons. Same decision the driver makes at the next render.
         if compaction.enabled() and (
             compaction.fold_boundary(after) > compaction.fold_boundary(before)
         ):
             return ""
-        # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
-        # every file in the corpus per call, and it is the dominant cost here — the two scores
-        # are pure functions of the same bytes, which cannot change between them.
+        # One corpus walk for both frontiers; `iter_lessons` re-parses every file per call.
         lessons = list(iter_lessons(corpus))
         hits = match_loaded(now_frontier, lessons)
-        # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
-        # open a slot no selector speaks to, and re-stapling the same three lines then teaches
-        # the model to stop reading them.
-        #
-        # Compared on `(path, score)` — WHICH lessons and in what order — rather than on the
-        # rendered text, which would cost a `yaml.safe_dump` of three lessons' frontmatter plus
-        # three `Path.resolve()` realpath syscalls built and thrown away one expression later,
-        # on every frontier-moving write.
-        #
-        # NOT on `matched`, which is the trap: it names whichever frontier item won
-        # `_best_match`'s `max`, and `max` returns the FIRST maximal element — so declaring a
-        # second, equally-scoring vertex flips the winner and re-emits a block whose lesson set,
-        # ranking and frontmatter are byte-identical. Executed against
-        # `learning/runs/fresh-01/investigation.md`, fences 3 and 7 differ in exactly one line
-        # (`matched v-003 compute class=ip-only/??/??` -> `matched v-004 compute
-        # class=ip-only/??/known-corp`) and re-staple ~1.5KB of precedent the model already
-        # holds — the churn this gate exists to prevent. `matched` still RENDERS, because it is
-        # the model's only account of why a lesson was pushed; it just does not decide.
-        #
-        # SORTED (`lessons_push.shape`), which is what keeps that true now that
-        # `_spread_over_items` exists (#935). The ranked list used to be ordered by
-        # `(-score, name)` alone, so the ORDER of these pairs was a function of the pairs
-        # themselves and comparing the list was already a comparison of the multiset. The
-        # spread re-orders on `matched` — it groups hits by which frontier item won
-        # `_best_match`'s `max` — so an unsorted comparison would let exactly the flip
-        # described above decide emission through the back door: same lessons, same scores,
-        # same frontmatter, re-stapled because one hit's `max` moved from v-003 to v-004.
-        # Sorting restores "which lessons, and at what score" as the whole question.
-        #
-        # AFTER A FOLD this is also what keeps the frontier row and the write return from
-        # double-pushing (#936): the fold's block is derived from the same on-disk document
-        # this `before` is, so "the top three moved from what the fold showed" and "the top
-        # three moved from `before`" are the same question.
+        # Quiet when the frontier moved but the lessons did not. Compared on the sorted
+        # `(path, score)` shape, not `matched`: which frontier item wins a tie is arbitrary, and
+        # flipping it would re-emit an identical block. Sorted because the spread re-orders hits
+        # by `matched`. Since the fold derives from the same document, this also prevents the
+        # fold row and the write return from double-pushing.
         if not hits or lessons_push.shape(hits) == lessons_push.shape(
             match_loaded(was_frontier, lessons)
         ):
             return ""
-        # Rendered only past the gate — the block is yaml over three frontmatters and three
-        # resolved paths, built here and nowhere earlier so a write that moved the frontier
-        # but not the top three pays for the comparison alone.
+        # Rendered only past the gate, since rendering is the costly part.
         now = render(hits, lead=WRITE_RETURN_LEAD)
         lessons_push.record(deps, hits)
         return "\n\n" + now
@@ -528,10 +358,8 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
 
 
 def _warn_over(text: str) -> tuple[Diagnostic, ...]:
-    """The window over text held in memory. FAILS OPEN for the same reason
-    `flagged_diagnostics` does, and for one more: both call sites derive AFTER the bytes have
-    landed, so a validator error raised here would surface as a failed tool call on a write
-    that succeeded."""
+    """The window over text held in memory. Fails open: callers derive after the bytes landed,
+    so raising would report a failed tool call on a write that succeeded."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     try:
@@ -543,30 +371,23 @@ def _warn_over(text: str) -> tuple[Diagnostic, ...]:
         return ()
 
 
-#: EVERY separator `str.splitlines()` honours, which is what `_tokenize_fence` splits a fence
-#: body on — so it decides where a ROW ends, and therefore what `Locus.row_text` holds.
-#: `split("\n")` alone left a row sitting after a `\v` `\f` `\x1c` `\x1d` `\x1e` `\x85`
-#: `\u2028` or `\u2029` FLAGGED but UNADDRESSABLE: `old_row` matched no whole line, so the
-#: repair refused while `append_block` and the close both refused for that same flagged row —
-#: a permanently wedged run, reachable from one `append_block` carrying one of those bytes.
-#: `\r\n` / `\r` never reach here: `read_plain` translates them on read (universal newlines).
-#: Spelled as ESCAPES, never literal codepoints: two of them are invisible line breaks and
-#: would split THIS file for anything that reads it the way the tokenizer reads a fence.
-#: Captured, not consumed, so every untouched line keeps the separator the model wrote.
+#: Every separator `str.splitlines()` honours — what the fence tokenizer splits rows on, so
+#: `Locus.row_text` must be matched against lines split the same way (splitting on `\n` alone
+#: would leave some flagged rows unaddressable and the run wedged). `\r` never reaches here
+#: (universal newlines on read). Spelled as escapes: some are invisible line breaks. Captured
+#: so untouched lines keep their original separator.
 _LINE_SEP_RE = re.compile("([\n\v\f\x1c\x1d\x1e\x85\u2028\u2029])")
 
 
 def _split_lines(text: str) -> tuple[list[str], list[str]]:
-    """`text` as the tokenizer sees it: its lines, and the separator that FOLLOWED each one
-    (`""` for the last). `lines[i] + seps[i]` reassembles the document byte for byte."""
+    """`text`'s lines as the tokenizer sees them, and the separator after each (`""` for the
+    last). `lines[i] + seps[i]` reassembles the document byte for byte."""
     parts = _LINE_SEP_RE.split(text)
     return parts[0::2], parts[1::2] + [""]
 
 
 def _attr_block_columns(text: str, row: str) -> int | None:
-    """How many cells the block carrying `row` declares. `None` when no `:R attr_updates`
-    block holds it — which cannot happen for a flagged row, since that is the only block the
-    warn family walks."""
+    """How many cells the `:R attr_updates` block carrying `row` declares, or `None`."""
     from defender.skills.invlang.parser import iter_blocks
 
     for block in iter_blocks(text):
@@ -576,23 +397,17 @@ def _attr_block_columns(text: str, row: str) -> int | None:
 
 
 def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
-    """`new_row` is ONE row of the SAME block, or it is refused.
+    """Why `new_row` is not one row of the same block, or `None` if it is.
 
-    `fix_row` is the only verb that rewrites a line INSIDE an already-open fence, and every
-    other guard on it is on `old_row` — so without this, `new_row` is the whole write surface.
-    Not belt-and-braces: `_check_append_only` never inspects `:R` rows, so a `:V` declaration
-    substituted for a flagged row draws ZERO diagnostics; an embedded newline forges a
-    well-formed second row; a fence delimiter makes the injected row vanish by closing the
-    block early; and one cell too FEW is silently padded. Only "too many cells" is caught
-    anywhere else, and by the parser rather than a guard. This is what makes "no verb mutates
-    or removes a committed :V/:E record" true by construction."""
+    `fix_row` is the only verb that rewrites a line inside an open fence, and its other guards
+    are on `old_row`, so this is the whole guard on what it writes. Nothing else catches a `:V`
+    declaration substituted for a row, an embedded line break forging a second row, a fence
+    delimiter closing the block early, or too few cells (silently padded). This keeps committed
+    `:V`/`:E` records immutable."""
     from defender.skills.invlang._cells import _split_cells
     from defender.skills.invlang.parser import HEADER_RE
 
-    # EVERY line break `str.splitlines()` honours, not just `\n`: a `new_row` carrying a \v \f
-    # \x1c \x1d \x1e or \x85 is a SECOND row (or a whole second block) to the parser while
-    # looking like one line to a `"\n" in ...` check, and its pipe count is unchanged so the
-    # cell-count arm never fires either.
+    # Every line break the parser honours, not just `\n`.
     lines = new_row.splitlines()
     if len(lines) != 1 or lines[0] != new_row:
         return "it spans more than one line"
@@ -600,9 +415,7 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
         return "it carries a fence delimiter (```), which would close the block early"
     if HEADER_RE.match(new_row.strip()):
         return "it is a block header, not a row"
-    # `cells is None` means the declaring block could not be located. Only the CELL-COUNT arm
-    # needs it, so an unlocatable block narrows the guard by one check instead of switching
-    # the whole write surface off.
+    # An unlocatable block skips only the cell-count check, not the checks above.
     if cells is None:
         return None
     got = len(_split_cells(new_row))
@@ -612,18 +425,14 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
 
 
 def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
-    """Repair ONE flagged row of `investigation.md` in place.
+    """Repair one flagged row of `investigation.md` in place.
 
-    No path and no free-form anchor: `old_row` must be one of the rows the repair window is
-    currently open on, which puts every committed `:V`/`:E` record out of reach (the warn
-    family walks `:R attr_updates` blocks and nothing else). An empty `new_row` DELETES the
-    line — the always-available escape that keeps the window closable, and the only move left
-    when the document is at its size bound.
+    `old_row` must be a row in the current repair set (`:R attr_updates` only), which keeps
+    committed `:V`/`:E` records out of reach. An empty `new_row` deletes the line — always
+    available, and the only move left at the size bound.
 
-    The window is re-derived here at call time. Being OFFERED the verb is never evidence the
-    window is still open: `prepare=` filters per-request offers and is ergonomics, so the body
-    is the guard. The resulting full document faces the same `decide_write` chain every other
-    write on this artifact faces."""
+    The set is re-derived here: `prepare=` only filters offers, so this body is the guard. The
+    result faces the same `decide_write` as every other write."""
     from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE
 
     p = _investigation_path(deps)
@@ -633,24 +442,19 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
             "committed a recorded disposition for this run, and a further repair could "
             "silently move it. The case is closed."
         )
-    # The REPAIR set, not the warn window: an error-severity row blocks every write just as
-    # hard and used to be unreachable by the one verb that could clear it. See
-    # `repairable_diagnostics`.
+    # The repair set, not the warn window: error-severity rows block writes too.
     read = read_companion(deps)
     diags = repairable_in(read)
     flagged = _flagged_rows(diags)
     if not flagged:
-        # Deliberately the SAME refusal a never-flagged `old_row` earns once the window has
-        # emptied: a repeated identical repair is idempotent-safe by construction, and a
-        # "you already did this" branch would need stored state this design avoids.
+        # A repeated repair gets this same refusal; distinguishing it would need stored state.
         raise ModelRetry(
             f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"is no row to repair."
         )
     if old_row not in flagged:
-        # Scope, not merely match: `old_row` is confined to the flagged set, and the flagged
-        # set is `:R attr_updates`-only. A verb that refused only when the text was ABSENT
-        # would happily rewrite a committed vertex row that is present.
+        # Confined to the flagged set, not merely present in the document, so a committed
+        # vertex row cannot be rewritten.
         raise ModelRetry(
             f"{UNCHANGED_NOTICE} `old_row` must be one of the rows currently flagged in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"investigation.md, quoted exactly as the warning printed it."
@@ -658,8 +462,8 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
             + "\n".join(f"  {row}" for row in flagged)
         )
 
-    # The rows above were derived from THIS reading; the rewrite is built from the same one.
-    # `flagged` is non-empty, so the document was read.
+    # The rewrite uses the same reading the flagged rows came from; non-empty `flagged` means
+    # the document was read.
     assert read.text is not None
     current = read.text
     lines, seps = _split_lines(current)
@@ -668,17 +472,10 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         raise ModelRetry(
             f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         )
-    # The repair applies to EVERY flagged occurrence — a flagged row whose text is not unique
-    # would otherwise be neither repairable nor deletable, and with the write gate the run
-    # would be unclosable. The rider keeps that safe: if the text also stands as a WHOLE LINE
-    # the window did not flag, the repair refuses rather than rewriting that too.
-    #
-    # WHOLE-LINE, not substring. The rebuild below only touches lines where
-    # `line.strip() == old_row`, so a line that merely CONTAINS the row is already out of reach
-    # and a substring count guards nothing — while refusing on one wedges the window shut (a
-    # `:T conclude` summary quoting its own flagged row makes both `fix_row(row, new)` and
-    # `fix_row(row, "")` refuse) and fires falsely when one flagged row's text is a PREFIX of
-    # another (`…|owner|svc` inside `…|owner|svc2`).
+    # The repair applies to every flagged occurrence (a duplicated flagged row would otherwise be
+    # unrepairable), but refuses if the text also stands as a whole line the window did not
+    # flag. Whole-line, not substring: only whole lines are rewritten, and a substring count
+    # would falsely refuse when a summary quotes the row or one row prefixes another.
     occurrences = flagged.count(old_row)
     if len(whole) != occurrences:
         raise ModelRetry(
@@ -688,12 +485,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         )
 
     if new_row:
-        # UNCONDITIONALLY, `cells is None` included. `_new_row_shape_reason` is written for
-        # that case — an unlocatable declaring block narrows the guard by one arm (the cell
-        # count) instead of switching the whole write surface off — and short-circuiting it
-        # here inverted that: the one shape the caller could not vouch for was the one shape
-        # the guard never saw, so a `new_row` spanning lines, carrying a fence delimiter, or
-        # spelling a block header went through untested.
+        # Always checked, including when `cells is None`; that case skips only the cell count.
         cells = _attr_block_columns(current, old_row)
         reason = _new_row_shape_reason(new_row, cells)
         if reason is not None:
@@ -703,8 +495,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
                 'an empty `new_row` to delete the line instead.'
             )
 
-    # The whole on-disk LINE is what gets rewritten — leading/trailing whitespace included —
-    # because `old_row` is matched against the STRIPPED row text the warning printed, and a
+    # Rewrite the whole line, whitespace included: `old_row` matched the stripped text, and a
     # padded line would otherwise survive its own repair.
     hit = set(whole)
     if new_row:
@@ -733,11 +524,8 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         f"{verb} {len(whole)} flagged row(s) in investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         f"({_utf8_len(new_text)} bytes total) — the change LANDED."
     )
-    # `fix_row` is a first-class FRONTIER MUTATOR, not a cosmetic repair: the window is
-    # `:R attr_updates`-only, and those rows are exactly what closes an open slot — so a
-    # repair can close one and a delete re-opens it. Without this the move goes unannounced
-    # AND unannounceable: the next `append_block` reads the repair as part of its `before`,
-    # the two frontiers match, and the block is suppressed for good.
+    # `fix_row` can move the frontier (`:R attr_updates` rows close slots; a delete reopens
+    # one). Recall must run here: the next `append_block` would see the repair in `before`.
     return _warning_return(
         lead + _frontier_recall(deps, current, new_text), _warn_over(new_text)
     )

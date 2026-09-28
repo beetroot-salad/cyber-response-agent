@@ -1,26 +1,20 @@
-"""The queue-state view (#903): what the learning loop gave up on, parked, or set aside.
+"""The queue-state view: what the learning loop gave up on, parked, or set aside.
 
-The lessons view (`serialize.py`) reads the checked-in corpus and describes the loop's
-POSTURE; this one reads the host-local state root and describes its BACKLOG — the three
-channels' dead letters, stuck records and held rows, plus what the drains quarantined. It is
-per-host and stale the moment it is built, which is why the contract names the state root
-and the CLI stamps the time.
+Reads the host-local state root (unlike `serialize.py`, which reads the checked-in corpus):
+the three channels' dead letters, stuck records and held rows, plus what the drains
+quarantined. Per-host and stale once built, so the contract names the state root and the CLI
+stamps the time.
 
-THE CHANNELS ARE A LITERAL LIST, never derived. #922's cutover records the trap: a stage
-that discovered its channels by iterating another table was silently narrowed when that
-table was deleted, with no error and no failing test. `_CHANNELS` is this page's own census;
-`drains._curator_queue_checks` answers a different question ("which queues wake the drain")
-and keeps its own.
+The channels are a literal list, never derived from another table, so deleting that table
+cannot silently narrow this page. `drains._curator_queue_checks` answers a different question
+("which queues wake the drain") and keeps its own.
 
-Every JSONL sidecar goes through the canonical tolerant reader, and a line it cannot parse is
-COUNTED rather than dropped — a page that silently skipped a torn dead letter would lose
-exactly the evidence it exists to show. A file that cannot be read at all counts as one.
+A JSONL line that cannot be parsed is counted, not dropped (a torn dead letter is exactly the
+evidence this page shows); an unreadable file counts as one.
 
-THE CONTRACT IS THE TYPED BOUNDARY. Everything under the state root is disk a person or a
-foreign copy may have edited, so every value this module emits is coerced to the type the
-contract names — a string, an int, a list of strings, a mapping, or null — and the renderer
-never converts, slices or `.get()`s a value off disk. A record that carries the wrong type
-degrades to its typed shape (`""`, `0`, `[]`, `{}`, null); nothing here raises on content.
+The contract is the typed boundary: state-root files may be hand-edited, so every emitted value
+is coerced to its contract type (string, int, list of strings, mapping, or null) and degrades to
+the empty value on a mismatch. Nothing raises on content, and the renderer never converts.
 """
 from __future__ import annotations
 
@@ -47,16 +41,14 @@ __all__ = ["build_view", "stamped_view", "dump_contract"]
 
 
 def _held_by_reason(row: dict) -> bool:
-    """The findings-shaped lanes' marker: PRESENCE of `held_reason`, never truthiness — the
-    same rule `drains._pending_queue_counts` applies, because a holder with no wording to give
-    stamps `""` and is still holding the row."""
+    """The findings-shaped lanes' marker: presence of `held_reason`, never truthiness (a holder
+    may stamp `""`) — the rule `drains._pending_queue_counts` applies."""
     return "held_reason" in row
 
 
 def _held_by_declined_offer(row: dict) -> bool:
-    """The pitfalls lane's marker: a row the curator was OFFERED and declined. `attempts` is
-    that lane's fault counter and says nothing about holds. A counter that is not an int is a
-    row nothing has counted."""
+    """The pitfalls lane's marker: a row the curator was offered and declined (`attempts` is a
+    fault counter, not a hold)."""
     return _int_or_zero(row.get(OFFERS_DECLINED_KEY)) > 0
 
 
@@ -85,9 +77,7 @@ class _ChannelSpec:
     #: Whether this lane writes a stuck record at all. The pitfalls lane retires the whole
     #: batch on any non-systemic fault, so its `stuck: null` is structural, not "no fault yet".
     has_stuck_record: bool
-    #: What a hold MEANS in this lane, as the page says it. The two lanes' holds end
-    #: differently: a findings hold waits on a fact with no writer and nothing retries it; a
-    #: pitfalls hold is re-offered to the curator every tick and retires at the offer ceiling.
+    #: What a hold means in this lane, as the page says it (the lanes' holds end differently).
     hold_means: str
     is_held: Callable[[dict], bool]
     channel: Callable[[LoopPaths], QueueChannel]
@@ -119,10 +109,8 @@ _GRAVEYARD_FIELDS = ("deadletter_reason", "attempts", "retired_at")
 def _dead_letter(record: dict, id_key: str) -> dict:
     """One graveyard record, either writer's shape, as the contract's four fields.
 
-    A record WITH `row` is the nested shape (`drain.retire`, `_graveyard_dropped_rows`): the
-    id sits beside it under the channel's key. One WITHOUT is `_retire_unkeyable`'s flat
-    shape — the row had no id, so the content is the record and `id` is null. `when` is the
-    writer's `retired_at`, null on a record older than that stamp."""
+    With `row`: the nested shape, id beside it under the channel's key. Without: the flat shape
+    of an unkeyable row, so `id` is null. `when` is null on records older than `retired_at`."""
     if "row" in record:
         rid = record.get(id_key)
         row = record["row"]
@@ -133,10 +121,8 @@ def _dead_letter(record: dict, id_key: str) -> dict:
         "id": _opt_str(rid),
         "reason": _str(record.get("deadletter_reason")),
         "when": _opt_str(record.get("retired_at")),
-        # The row is the one untyped mapping in the contract, carried as the writer stored
-        # it — through the lessons serializer's JSON-safety pass, because `json.loads` accepts
-        # a bare `NaN` and `json.dumps` would write it back, and one such value in one row
-        # makes `queues.json` unreadable to every strict reader.
+        # The one untyped mapping in the contract; JSON-safed because `json.loads` accepts a
+        # bare `NaN`, which would make `queues.json` unreadable to strict readers.
         "row": _json_safe(row if isinstance(row, dict) else {"value": row}),
     }
 
@@ -154,8 +140,8 @@ def _stuck(record: dict) -> dict:
 
 
 def _rows(path: Path) -> tuple[list[dict], int]:
-    """The canonical tolerant reader, plus the one tolerance it does not have: a sidecar that
-    cannot be READ (permissions, a bad disk) is one unreadable, not an aborted page."""
+    """The canonical tolerant reader, plus: a sidecar that cannot be read at all counts as one
+    unreadable rather than aborting the page."""
     try:
         return read_jsonl_rows_report(path)
     except TEXT_READ_ERRORS:
@@ -164,9 +150,8 @@ def _rows(path: Path) -> tuple[list[dict], int]:
 
 def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
     rows, unreadable = _rows(channel.file)
-    # COUNT by the lane's marker alone — the rule `drains._pending_queue_counts` applies, so
-    # the page's number is the wake gate's — and list the ids that are strings. A held row
-    # with no usable id is held all the same; it is counted and simply not named.
+    # Counted by the lane's marker alone (matching the drain's wake gate); only string ids are
+    # listed, but a held row without one is still counted.
     held_rows = [r for r in rows if spec.is_held(r)]
     held_ids = [r[channel.id_key] for r in held_rows if isinstance(r.get(channel.id_key), str)]
     graveyard, dead_unreadable = _rows(drain.graveyard_file(channel))
@@ -192,9 +177,7 @@ def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
 def _json_files(directory: Path) -> tuple[list[tuple[Path, dict]], int]:
     """Every readable `*.json` mapping directly under `directory`, plus how many were not.
 
-    A file that does not decode, or decodes to something other than a mapping, is one
-    unreadable — the same tolerance the sidecar reader gives a torn line. A directory that
-    cannot be listed is one unreadable and no files — listed with `iterdir`, because
+    An unlistable directory counts as one unreadable — listed with `iterdir` because
     `Path.glob` swallows the `PermissionError` and answers "empty"."""
     try:
         if not directory.is_dir():
@@ -218,9 +201,8 @@ def _json_files(directory: Path) -> tuple[list[tuple[Path, dict]], int]:
 
 
 def _markers(paths: LoopPaths) -> dict:
-    """Both failed-marker directories. `quarantine_marker` writes under its CALLER's queue dir,
-    and it has two callers: the lead-author claim (`author_queue_dir`) and the pending-delivery
-    scan (`pending_delivery_dir`). A page reading one omits the other's terminal records."""
+    """Both failed-marker directories: `quarantine_marker` writes under its caller's queue dir,
+    and it has two callers (the lead-author claim and the pending-delivery scan)."""
     rows: list[dict] = []
     unreadable = 0
     for queue, directory in (
@@ -251,15 +233,13 @@ def _deliveries(paths: LoopPaths) -> dict:
 
 
 def _tainted(paths: LoopPaths) -> dict:
-    """The tainted-worktree archive. The ROWS are read by manifest — the tarball beside each
-    is inert and stays that way; unpacking is a deliberate operator act (#747) — but `held`
-    is the writer's own count of ARCHIVES against its cap, because the two differ in exactly
-    the case the page exists to show: an archive whose manifest was never written or is torn
-    still spends a slot. `held` is null when the directory cannot be listed, so the page says
-    "?" rather than a headroom that may not exist. `verdict` is carried as the writer stored
-    it: `{}` means no scan was recorded, which must not read as clean. The directory is named
-    because it lives off the repo root, not the state root, and the header names only the
-    latter."""
+    """The tainted-worktree archive.
+
+    Rows come from manifests (tarballs stay inert; unpacking is an operator act), but `held` is
+    the writer's own archive count against its cap: an archive with a missing or torn manifest
+    still spends a slot. `held` is null when unlistable, so the page shows "?". `verdict: {}`
+    means no scan was recorded, not clean. `dir` is included because it lives off the repo root,
+    not the state root."""
     found, unreadable = _json_files(paths.quarantine_dir)
     try:
         held: int | None = held_archives(paths.quarantine_dir)
@@ -286,9 +266,8 @@ def _tainted(paths: LoopPaths) -> dict:
     }
 
 
-def build_view(paths: LoopPaths) -> dict:  # lint-dup: ok — serialize.build_view walks the checked-in corpus for the lessons page; this walks the host-local state root for the queue page. Same name by design: the two are the frontend's two api layers, and build.py calls each by module.
-    """The contract, pure over the filesystem under `paths`. No clock: `stamped_view` adds
-    `generated_at` so a test of the shape is not a test of the time."""
+def build_view(paths: LoopPaths) -> dict:  # lint-dup: ok — serialize.build_view builds the lessons page from the corpus; this builds the queue page from the state root. Same name by design: build.py calls each by module.
+    """The contract, pure over the filesystem under `paths`; no clock (see `stamped_view`)."""
     return {
         "state_root": str(paths.state_root),
         "channels": [_channel_view(spec, spec.channel(paths)) for spec in _CHANNELS],
@@ -300,11 +279,9 @@ def build_view(paths: LoopPaths) -> dict:  # lint-dup: ok — serialize.build_vi
     }
 
 
-def stamped_view(paths: LoopPaths | None = None) -> dict:  # lint-dup: ok — serialize.stamped_view stamps the lessons view; this stamps the queue view over loop_paths(). Same name by design, see build_view.
-    """`build_view` plus the build time. With no `paths`, the state root is resolved NOW —
-    `loop_paths()`, not the import-time constant, because the CLI is exactly the caller that
-    must honour a root set after import. A test hands its own `LoopPaths` so nothing here
-    reads the developer's real quarantine directory."""
+def stamped_view(paths: LoopPaths | None = None) -> dict:  # lint-dup: ok — serialize.stamped_view stamps the lessons view; this stamps the queue view. Same name by design, see build_view.
+    """`build_view` plus the build time. With no `paths`, the state root is resolved now
+    (`loop_paths()`, not the import-time constant), so a root set after import is honoured."""
     view = build_view(paths if paths is not None else loop_paths())
     view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
     return view

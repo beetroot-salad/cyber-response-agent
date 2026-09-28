@@ -2,27 +2,23 @@
 """Run the spec_graph checkers over every committed spec graph, ratcheted.
 
 The checkers (`spec-graph lint | gate | binds | claims`) ship with the spec-flow plugin and
-are run by the write-tests flow at authoring time. Nothing ran them afterwards. A graph
-therefore merged with its findings intact, and the checkers' whole value — a mechanical no
-that a persuasive rationale cannot talk around — evaporated at exactly the moment it became
-durable: the most recent spec merged carrying 24 claim-instrument findings, one of which was
-the unexecuted probe behind a shipped defect.
+run at authoring time in the write-tests flow; without this gate nothing runs them afterwards,
+so a graph can merge with its findings intact.
 
-This gate closes that. It is a RATCHET, not a hard gate, because the checkers postdate most
-of the committed corpus and a hard gate would fail on history nobody is going to rewrite:
+It is a ratchet rather than a hard gate because the checkers postdate much of the committed
+corpus:
 
-- a graph absent from the baseline must be CLEAN — every graph write-tests produces from
-  here on has to pass all four checkers;
+- a graph absent from the baseline must be clean — every new graph has to pass all four
+  checkers;
 - a baselined graph may not gain findings — its recorded count is a ceiling;
-- a baselined graph that loses findings just passes; paying debt down is never a failure,
-  and the entry is trimmed on the next `--update-baseline`.
+- a baselined graph that loses findings just passes; the entry is trimmed on the next
+  `--update-baseline`.
 
-Fingerprinting is by (graph, count), never by message text: the checkers' findings carry
-element addresses and prose that legitimately change when a rule's wording improves, and a
-baseline coupled to that churns on every unrelated edit.
+Fingerprinting is by (graph, count), never by message text, which legitimately changes when
+a rule's wording improves.
 
 Exit: 0 clean, 1 a graph gained findings or a new graph is dirty, 2 the gate could not look
-(no graphs found, a checker unavailable, a graph unreadable) — never a silent pass (#652).
+(no graphs found, a checker unavailable, a graph unreadable) — never a silent pass.
 
 Regenerate with `--update-baseline` and annotate the new entries in the PR.
 """
@@ -52,8 +48,8 @@ class GateBlind(Exception):
 
 def _load_checkers() -> dict:
     """Import the plugin's checkers. They use implicit-relative imports (`import _cli`), so
-    their own directory has to be on the path — the same contract their `spec-graph` wrapper
-    provides. A missing plugin is blindness, not cleanliness."""
+    their own directory goes on the path, as their `spec-graph` wrapper does. A missing plugin
+    is blindness, not cleanliness."""
     if not CHECKER_DIR.is_dir():
         raise GateBlind(f"spec_graph checkers not found at {CHECKER_DIR}")
     sys.path.insert(0, str(CHECKER_DIR))
@@ -81,11 +77,8 @@ def _findings_for(mods: dict, path: Path, cfg: dict) -> list[str]:
     out += [f"binds: {f}" for f in mods["binds"].check(path, cfg)]
     out += [f"claims: {f}" for f in mods["claims"].check(path, graph)]
     out += [f"claims: {f}" for f in mods["claims"].check_typing(path, graph)]
-    # Every pass check_claims' own main() runs has to be listed here too. The passes are
-    # enumerated by name rather than discovered, so a pass added to the checker and not added
-    # to this line runs at authoring time and never in CI — which is precisely the gap this
-    # gate was minted to close, re-opened one level up. `check_alphabet` (the probe-corpus
-    # pass) was added by the #869 post-mortem and is the first to have to pay this tax.
+    # Every pass check_claims' own main() runs must be listed here: passes are enumerated by
+    # name, not discovered, so a pass added to the checker and not here never runs in CI.
     out += [f"claims: {f}" for f in mods["claims"].check_alphabet(path, graph)]
     out += [f"claims: {f}" for f in mods["claims"].check_spend_points(path, graph)]
     return out
@@ -147,11 +140,8 @@ def main(
     baseline_path: Path | None = None,
     scan: Callable[[], dict[str, list[str]]] | None = None,
 ) -> int:
-    # DI seams, the house idiom: the ratchet's arms are decided by (findings, baseline) and
-    # a test must be able to hand it both without a repo full of fixture graphs. `scan` is
-    # the seam for the blindness arm specifically — the alternative is monkeypatching the
-    # module's own function out from under it, which this repo gates against for the reason
-    # it always does: a test that reaches inside stops describing the contract.
+    # DI seams: the ratchet's arms are decided by (findings, baseline), and `scan` lets a
+    # test drive the blindness arm without monkeypatching this module.
     args = sys.argv[1:] if argv is None else argv
     baseline_file = BASELINE_PATH if baseline_path is None else baseline_path
     scanner = _scan if scan is None else scan

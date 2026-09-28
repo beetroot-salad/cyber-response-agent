@@ -1,18 +1,16 @@
 """The verb registry a branched run queries through.
 
-Every query executes against the REAL adapter and the world's difference is applied on top of
-what comes back. Nothing here composes a query result: for the event stream the corpus is
-staged before the query runs and the engine does its own filtering and aggregation, and for the
-six state systems an entity patch authored once is applied wherever that entity appears. The
-governing rule is **author once, apply mechanically** — a result composed per call is the
-mid-run authoring that made the retired oracle fatal (#791).
+Every query executes against the real adapter and the world's difference is applied on top of
+what comes back; nothing here composes a query result. The event stream's corpus is staged
+before the query runs and the engine does its own filtering; the six state systems get an entity
+patch authored once and applied wherever that entity appears. A result composed per call would
+be mid-run authoring.
 
-Subclassing `ModuleVerbRegistry` is REQUIRED, not stylistic. `driver.build_agent_core` refuses
-anything failing `isinstance(verbs, VerbRegistry)`, and `VerbRegistry.decide` compares
-`verb_class_of(fn)` against the grant — so the served callables have to carry the real adapter
-bodies' decoration, which is what `functools.wraps` preserves. Coverage of all seven systems is
-then STRUCTURAL: there is no served verb that is not a wrapped one, rather than an enumeration
-someone maintains and gets wrong.
+Subclassing `ModuleVerbRegistry` is required: `driver.build_agent_core` refuses anything failing
+`isinstance(verbs, VerbRegistry)`, and `VerbRegistry.decide` compares `verb_class_of(fn)` against
+the grant, so the served callables must carry the real adapter bodies' decoration
+(`functools.wraps`). Every served verb is a wrapped one, so coverage of all seven systems is
+structural.
 """
 
 from __future__ import annotations
@@ -53,27 +51,15 @@ class EstateError(Exception):
 def validate_world_touches(derived: Any, grant: VerbGrant) -> tuple[str, ...]:
     """Validate the systems a world's difference touches against its serving grant.
 
-    THE DERIVED SET, not an authored field (D2). `World.touches` retires as something a manifest
-    spells: the systems a world touches are read off its overlay by `_family.touches_of` on every
-    read, because a stored set is a second place for the answer to live and the copy that drifts
-    is the one that stops staging. What stays is this check — a derived name can still be a name
-    this ROLE may not query, and an overlay keyed on a system outside the grant would apply no
-    difference while every ledger row read honestly.
+    The set is derived from the overlay (`_family.touches_of`), not authored, but a derived name
+    can still be one this role may not query, and an overlay keyed on a system outside the grant
+    would apply no difference while every ledger row read honestly as `passthrough`.
 
-    A declaration is authoring input, not an advisory label: it decides whether staging or
-    patches run at all. An unknown name therefore cannot be allowed to degrade to the honest
-    `passthrough` decision every real adapter makes for it. The grant is the authoritative
-    roster because a system outside it cannot be queried by this role even if an adapter file
-    happens to exist.
+    Shared by the manifest boundary (so the launcher refuses before priming an episode) and the
+    registry boundary (so programmatic callers cannot bypass it).
 
-    Kept as one helper for both the manifest boundary and this registry boundary. The launcher
-    can then refuse before priming an immutable episode, while programmatic callers cannot
-    bypass the check by constructing a world directly — and both ask the same question of the
-    same value, since neither of them authors it any more.
-
-    Typed `Any` rather than `Iterable[str]`, deliberately: what arrives is unvalidated authoring
-    input, and the shapes refused below (a bare string, a non-sequence, a non-string name) are
-    exactly the ones an annotation would have promised away without checking.
+    Typed `Any` because the input is unvalidated: the shapes refused below (a bare string, a
+    non-sequence, a non-string name) are what an `Iterable[str]` annotation would hide.
     """
     declared = derived
     if not isinstance(declared, (str, list, tuple, set, frozenset)):
@@ -102,15 +88,9 @@ def validate_world_touches(derived: Any, grant: VerbGrant) -> tuple[str, ...]:
 class ServingWorld:
     """A world as the serving path needs it: a token, the systems it touches, its difference.
 
-    The three fields every serving site reads off `ResumeWorld`, with none of the manifest half
-    a call cannot use — so a caller serving ONE call (the review's replay, a probe, this
-    module's own serve point) does not have to materialise an episode directory and a `Family`
-    to ask a question about an index name.
-
-    `touches` is passed rather than re-derived because a caller may legitimately serve a world
-    that touches LESS than its overlay would imply — the control world in a triplet is exactly
-    that: an empty overlay and an empty set, which is the world the isolation refusal has to
-    cover, since its applier returns every call untouched and threads no world label at all.
+    Lets a caller serving one call (a replay, a probe) skip materialising an episode directory
+    and a `Family`. `touches` is passed rather than re-derived because a world may touch less
+    than its overlay implies — the control world has an empty overlay and an empty set.
     """
 
     world_id: str
@@ -121,19 +101,15 @@ class ServingWorld:
 def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWorld:
     """Build a serving world from the three things a served call needs to know.
 
-    THE TOKEN, never the short manifest label. `world_id` reaches the stager's view name, the
-    ledger's row key and the confinement declaration below unfiltered, and each of those has to
-    carry the episode or two episodes' world `b` collide in one alias, one filename and one row.
+    `token` must be the episode-qualified token, never the short manifest label: `world_id`
+    reaches the stager's view name, the ledger's row key and the confinement declaration
+    unfiltered, and two episodes' world `b` would otherwise collide in all three.
 
-    The overlay is PARSED when it arrives as a document, by the manifest's own parser, so a
-    world assembled here and a world loaded from `family.yaml` carry the same object and the
-    applier has one shape to read. `{}` is the base world's own overlay and is legal — the empty
-    difference is a world, not a missing argument.
+    A document overlay is parsed by the manifest's own parser so the applier sees one shape.
+    `{}` (the base world's overlay) is legal.
     """
-    # Imported HERE rather than at module scope: the manifest module reads the corpus patterns
-    # off this package's own stager, so a top-level import
-    # would close a cycle between the two halves of the branch — and the estate must stay
-    # importable by a run that never loads a manifest at all.
+    # Local import: the manifest module reads corpus patterns off this package's stager, so a
+    # top-level import would be a cycle, and the estate must import without the manifest.
     from defender.runtime.branch._family import Overlay, parse_overlay
 
     parsed = overlay if isinstance(overlay, Overlay) else parse_overlay(overlay)
@@ -141,13 +117,10 @@ def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWor
 
 
 def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
-    """The episode tenant's configured corpus patterns, for the own-view test (#1106).
+    """The episode tenant's configured corpus patterns, for the own-view test.
 
-    The MANIFEST's record first — the set the launcher judged this family's overlays against,
-    which every production world (`ResumeWorld`) carries on its family — and only for a world
-    with no such record (one assembled without a manifest, or a manifest written before the
-    field) the patterns the serving context's tenant folder configures. A frame with neither has
-    no tenant to consult and admits no view as this world's own: the refusal, fail-closed."""
+    The manifest's recorded set first; otherwise the serving context's tenant config. With
+    neither, no view is this world's own (fail-closed)."""
     recorded = tuple(getattr(getattr(world, "family", None), "configured_patterns", ()) or ())
     if recorded:
         return recorded
@@ -158,37 +131,24 @@ def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
 def refuse_a_foreign_world_view(
     world: Any, system: str, verb: str, params: Mapping, ctx: Any = None,
 ) -> None:
-    """Refuse a call that names ANOTHER world's staged view, before anything runs (FORK-6).
+    """Refuse a call that names another world's staged view, before anything runs.
 
-    Inside one episode the siblings share a cluster, and each stages its own private corpus
-    under the view namespace. A world naming a SIBLING's view by hand reads that sibling's
-    injected documents and the effect of its exclusions — the one cross-world channel the whole
-    per-world-view scheme exists to close.
+    Siblings in an episode share a cluster, each staging a private corpus under the view
+    namespace; a world naming a sibling's view by hand would read that sibling's injected
+    documents and exclusions.
 
-    **ABOVE PER-WORLD STAGING, and that placement is what the executed probe forced.** A world
-    that DOES stage this system has its foreign name rewritten by the stager — `FROM wv-c-…`
-    comes back as `wv-a-wv-c-…`, a view of nothing — so a check written into the stager passes
-    its own test while the live hole stays open: the world that can actually make the read is
-    the CONTROL, which stages nothing, whose applier hands the parameters straight back and
-    threads no world label onto the context. Every episode with a control has exactly one such
-    sibling by construction. Asked here, above the applier, the control is covered by the same
-    line as its staging siblings.
+    This must sit above per-world staging. A staging world has a foreign name rewritten by its
+    stager into a view of nothing, so a check inside the stager looks fine while the hole stays
+    open: the world that can actually make the read is the control, which stages nothing, whose
+    applier hands the parameters straight back and threads no world label onto the context.
 
-    **AND NOT IN THE OUTBOUND HTTP GUARD**, which is where a target-fidelity check would
-    otherwise live. `guard_outbound` is handed the URL, and the index is in the URL for the
-    param-indexed arm (`/wv-a-logs-/_search`) and inside the request BODY for the query-language
-    arm (`/_query`) — so the guard can only see half the traffic, and the half it cannot see is
-    the one the probe drove through to the transport unrefused.
+    It cannot live in the outbound HTTP guard either: that guard sees only the URL, and the
+    query-language arm (`/_query`) carries the index in the request body.
 
-    Both query languages are read through the STAGER's own source reader, because which of a
-    verb's parameters addresses a corpus is vendor knowledge and has one home. The reader is not
-    handed `ctx`: an omitted index resolves to the run's configured default, which is a configured
-    pattern and cannot be a foreign view — so a config read there would be pure cost. `ctx` is
-    read only by `_configured_for`, and only for a world whose family records no corpus patterns
-    (a world assembled without a manifest; every production world carries its manifest's set),
-    where it re-reads the tenant's config on each call. A body this seam cannot parse is left to `prepare`, which parses it
-    again and raises the stager's own refusal for the world that stages; for a world that does
-    not, it is a call that names no view and there is nothing here to answer.
+    The source is read through the stager's own reader (which parameter addresses a corpus is
+    vendor knowledge). The reader gets no `ctx`: an omitted index resolves to a configured
+    pattern, which cannot be a foreign view. An unparseable body is left to `prepare`, which
+    raises the stager's refusal for a staging world.
     """
     stager = STAGERS.get(system)
     reader = getattr(stager, "source_pattern", None) if stager is not None else None
@@ -196,16 +156,11 @@ def refuse_a_foreign_world_view(
         return
     try:
         source = reader(verb, dict(params), None)
-    except Exception:  # noqa: BLE001 — see docstring: an unparseable body is `prepare`'s answer
-        # NOT UNCONDITIONALLY, though, and this is the half the docstring's "left to `prepare`"
-        # argument does not cover. `prepare` answers for a world that STAGES this system; a
-        # world that stages nothing gets its params handed straight back, and `esql` carries no
-        # index confinement at all — so an expression the reader refuses to reduce to one source
-        # (`FROM logs-*, wv-<other>-logs-`, which is exactly how a multi-source read spells a
-        # foreign view beside a legal one) reached the transport unrefused for the one world the
-        # guard's own docstring names as the one that can make the read. Nothing here parses the
-        # expression a second time: an unreducible call that MENTIONS the namespace at all is
-        # refused, and one that does not is the ordinary unparseable body `prepare` answers for.
+    except Exception:  # noqa: BLE001 — an unparseable body is `prepare`'s answer, except as below
+        # `prepare` only covers a world that stages this system; for one that stages nothing,
+        # params pass straight through and `esql` carries no index confinement. A multi-source
+        # expression (`FROM logs-*, wv-<other>-logs-`) that the reader refuses to reduce would
+        # reach the transport, so any unreducible call mentioning the namespace is refused.
         if _names_the_namespace(params):
             raise ConfinementFault(
                 "the call names the staged view namespace inside an index expression this seam "
@@ -214,9 +169,7 @@ def refuse_a_foreign_world_view(
         return
     if not isinstance(source, str) or not source.startswith(f"{VIEW_NAMESPACE}-"):
         return
-    # THE WORLD'S OWN VIEW STAYS ADMISSIBLE, so the refusal is a boundary rather than a channel
-    # that answers nothing — and only for a system this world actually stages, since a world
-    # that stages nothing has no view of its own for any name to be.
+    # The world's own view stays admissible, but only for a system it actually stages.
     if system in getattr(world, "touches", ()) and is_world_view(
             source, _configured_for(world, ctx, stager), world.world_id):
         return
@@ -228,11 +181,9 @@ def refuse_a_foreign_world_view(
 def _names_the_namespace(params: Mapping) -> bool:
     """Does any parameter value mention the staged view namespace at all?
 
-    A LAST LINE, not a parser. It is asked only where the vendor reader has already refused to
-    reduce the call to one corpus, and it answers the one question that still matters there:
-    could this call be addressing a staged view? No legitimate model-authored query names the
-    namespace — the whole scheme exists so the model never learns it — so a mention is either
-    the world's own view spelled by hand or a sibling's, and both are refusals at this seam.
+    A last line, not a parser: asked only when the vendor reader could not reduce the call to
+    one corpus. No legitimate model-authored query names the namespace, so any mention is
+    refused.
     """
     prefix = f"{VIEW_NAMESPACE}-"
     return any(prefix in value for value in params.values() if isinstance(value, str))
@@ -240,21 +191,18 @@ def _names_the_namespace(params: Mapping) -> bool:
 
 @model(frozen=True)
 class Served:
-    """One call's whole passage through the serve point, as the order produced it.
+    """One call's whole passage through the serve point.
 
-    The RECORD rather than just the answer, because the two callers need different parts of it
-    and neither may re-derive its own: `serve_one`'s simple callers want `out`, and the registry
-    wants `prepared`, `moved` and `decision` for the ledger rows it writes around the same
-    passage. Handing back only `out` is what left the registry re-spelling the order inline to
-    get at the rest.
+    `serve_one`'s simple callers want `out`; the registry also needs `prepared`, `moved` and
+    `decision` for its ledger rows, and must not re-derive them.
     """
 
     #: The params as the caller asked them, before any retarget.
     asked: dict
     #: The params the adapter was actually called with.
     prepared: dict
-    #: `asked`, but ONLY when staging moved the call — the same condition the ledger records
-    #: `asked_params` under, and the one `restore` un-echoes on.
+    #: `asked`, but only when staging moved the call — the condition the ledger records
+    #: `asked_params` under and `restore` un-echoes on.
     moved: dict | None
     #: What came back, with the world's corpus identity taken back out.
     payload: Any
@@ -266,29 +214,18 @@ class Served:
 
 def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: Any = None,
               applier: Any = None, ctx: Any = None, run: Any = None) -> Served:
-    """Serve ONE call for `world` — the serve point, above staging. THE order, spelled once.
+    """Serve one call for `world`: the single definition of the serve order.
 
-    The narrow waist every branched read passes: refuse first, then let the world's applier
-    point the call at its own corpus, then run it, then take the world's corpus identity back
-    out of what came back, then ask the world what it did to it. `WorldRegistry._served` is this
-    frame with the ledger's four row-writing arms around it, and it CALLS this one — which is
-    the whole point. Spelled twice, the fuzz suite that proves the ordering proved it of a frame
-    production never ran, and a fix to either copy left the other one unmoved.
+    Refuse, let the applier point the call at the world's corpus, run it, restore the corpus
+    identity out of the result, then ask the world what it did. `WorldRegistry._served` calls
+    this rather than re-spelling it, so the ordering tests exercise the production frame.
 
-    THE REFUSAL IS FIRST AND OUTSIDE EVERYTHING. It runs before `prepare`, so no stager gets to
-    rewrite a foreign name into a harmless one; and before the adapter is called at all, so a
-    refused cross-world read leaves no call on the wire and no row claiming one was made.
+    The refusal runs before `prepare` (so no stager can rewrite a foreign name into a harmless
+    one) and before the adapter (so a refused read leaves no call on the wire and no row).
 
-    `restore` is the mirror of `prepare` and is called on the same condition the ledger records
-    `asked_params` under — the call staging moved is the call whose echoed corpus identity has
-    to come back out.
-
-    `run` IS THE ONE THING THE TWO CALLERS DO DIFFERENTLY, so it is the one thing that is a
-    seam. A plain caller has an adapter layer and wants the call made; the registry has a FAMILY
-    TIER in front of the adapter — `_base_payload`, which answers a key the capture already
-    holds without issuing a call at all — and a restore that has to happen inside that miss. It
-    is handed `(prepared, moved)` and owes back the restored payload, so everything on either
-    side of it stays here, in one order, for both.
+    `run` is the one seam: the registry puts its family tier in front of the adapter (a
+    recorded key issues no call) with the restore inside the miss. It takes `(prepared, moved)`
+    and returns the restored payload.
     """
     refuse_a_foreign_world_view(world, system, verb, params, ctx)
     applier = (  # lint-default: ok — DI seam owning its default, the same one `WorldRegistry` resolves at construction  # noqa: E501
@@ -306,8 +243,7 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
             system, verb, adapters(system, verb, **prepared), moved, prepared, ctx)
     else:
         payload = run(prepared, moved)
-    # `moved`, not `asked`: the row must say whether staging MOVED this call, which is
-    # the same fact `restore` un-echoes on and the ledger records `asked_params` under.
+    # `moved`, not `asked`: the row must say whether staging moved this call.
     decision, out = applier.apply(system, verb, prepared, payload, world, moved)
     return Served(asked=asked, prepared=prepared, moved=moved, payload=payload,
                   decision=decision, out=out)
@@ -319,23 +255,15 @@ class WorldRegistry(ModuleVerbRegistry):
     def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
                  applier: Any = None, settings_dir: Path | None = None,
                  grant_home: str = TABLE_POINTER):
-        # `settings_dir` is the episode tenant's folder (#1106), which the ticket-comment check
-        # below reads the released status from; `None` (a registry no run built) can release
-        # nothing, so such a world's comment patch is refused rather than judged against some
-        # other tenant's mapping.
+        # `settings_dir` is the episode tenant's folder, read for the ticket-comment check's
+        # released status; `None` releases nothing, so a comment patch is refused.
         super().__init__(roster, grant, grant_home=grant_home)
-        # THE CLOCK FIRST, and read ONCE here rather than per call. A `TypeError` or an
-        # `AttributeError` raised deep inside `served` is not an `AdapterFault`, so the query
-        # tool files it as `DEFAULT_FAULT_EXIT` — which is 2, which is in
-        # `circuit_breaker.INFRA_EXIT_CODES`: two of those trip the breaker for the system and
-        # five abort the run, IN THE SIBLING AND NOT IN ITS BASE. That is the "the estate was up
-        # for one and down for the other" contamination the whole base/sibling design exists to
-        # exclude, and it would arrive from the field added to prevent a different one.
+        # Validate the clock here, once. A `TypeError` deep inside `served` is not an
+        # `AdapterFault`, so the query tool files it as an infra exit code, which trips the
+        # circuit breaker in the sibling but not its base — contaminating the comparison.
         #
-        # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware datetime in any
-        # other zone passes the weaker test and then formats a trailing `Z` that lies by its
-        # offset. Every payload stamped from it is wrong by the same amount, consistently, which
-        # is precisely the kind of wrong nothing downstream can see.
+        # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware non-UTC datetime
+        # would format a trailing `Z` that is wrong by its offset.
         if not isinstance(as_of, datetime):
             raise EstateError(
                 f"a world needs the moment it is being served as of, got {as_of!r} — without it "
@@ -349,26 +277,18 @@ class WorldRegistry(ModuleVerbRegistry):
         self.as_of = as_of
         world_id = getattr(world, "world_id", None)
         if not isinstance(world_id, str) or not world_id:
-            # `None` is the FAMILY tier's key, so no world may answer to it. A world that did
-            # would write its own applied payload into the shared slot `base_payload` reads,
-            # and every sibling would then replay one world's difference AS THE ESTATE — while
-            # each sibling's own row honestly reported `passthrough`, because from its side
-            # nothing was applied. Silent scenario INJECTION, the inverse of the deletion this
-            # ledger was built to catch, and invisible in exactly the record that should show it.
+            # `None` is the family tier's key. A world answering to it would write its applied
+            # payload into the shared base slot, and every sibling would replay that difference
+            # as the estate while its own rows honestly said `passthrough`.
             raise EstateError(
                 f"a world needs a non-empty string id, got {world_id!r} — `None` is how the "
                 "family tier spells 'the shared base', and a world claiming it would overwrite "
                 "the recording its siblings replay")
-        # Unknown names route every real response to `passthrough`, so a misspelt difference
-        # vanishes while the ledger remains internally honest. The CLI calls this before
-        # priming; this call is the non-bypassable boundary for programmatic worlds.
+        # Unknown names would route every response to `passthrough`; this is the
+        # non-bypassable boundary for programmatic worlds (the CLI also checks before priming).
         declared = validate_world_touches(getattr(world, "touches", ()), grant)
-        # AND NAMEABLE, which `str` and non-empty do not cover. A staged system derives its
-        # per-world corpus name from this id, so one a stager cannot carry does not fail a
-        # query, it fails EVERY query on that system — the sibling records a `refused` row per
-        # call and loses the whole event stream while the base keeps it. Read here, where the
-        # world arrives, for the same reason `touches` is: the answer is a property of the id,
-        # not of a call, and per-call is where it reads as a sibling that simply asked nothing.
+        # The id must also be nameable: a staged system derives its per-world view name from
+        # it, and an id the stager cannot carry fails every query on that system.
         unnameable = applier_module.unnameable(world)
         if unnameable:
             raise EstateError(
@@ -377,23 +297,13 @@ class WorldRegistry(ModuleVerbRegistry):
                 "staged call would be refused and the sibling would measure nothing")
         self.world = world
         self.ledger = ledger
-        self.applier = (  # lint-default: ok — DI seam owning its default (the stage-or-patch applier; with no patches and a world touching nothing it is the identity, which is exactly what a base world wants)  # noqa: E501
+        self.applier = (  # lint-default: ok — DI seam owning its default (with no patches and a world touching nothing it is the identity a base world wants)  # noqa: E501
             applier if applier is not None else WorldApplier())
-        # A PATCH THE APPLIER COULD NEVER APPLY IS AN AUTHORING SLIP, and `unappliable` owns
-        # both ways to write one — a system the world does not declare, and a STAGED system,
-        # whose difference is supposed to live in the documents the engine read rather than in
-        # a patch table. Either way the overlay is dropped in silence, so it is refused where
-        # both halves of a world are in hand rather than left to read as a world that changed
-        # nothing (or, for the staged half, as one that changed everything).
-        #
-        # A `Mapping` rather than a `dict`, because an applier is a DI seam and a read-only
-        # mapping is a reasonable thing to hand one; `isinstance(..., dict)` skipped the whole
-        # check for it without a word.
-        # THE EFFECTIVE TABLE, which is the world's own overlay wherever it carries one — the
-        # applier reads the patches off the world at `apply` time (D2: one authored copy), so a
-        # constructor field is only what is applied for a world assembled without a manifest.
-        # Asking the constructor field here would check a table this world will never be served
-        # from and skip the one it will.
+        # A patch the applier can never apply (a system the world does not declare, or a
+        # staged system, whose difference lives in its corpus) would be dropped silently, so
+        # refuse it here. Check the effective table — the world's own overlay where it has one —
+        # not the constructor field. `Mapping`, not `dict`: an applier may hand back a
+        # read-only mapping.
         table = getattr(self.applier, "patch_table", None)
         patches = table(world) if callable(table) else getattr(self.applier, "patches", None)
         if isinstance(patches, Mapping):
@@ -412,29 +322,15 @@ class WorldRegistry(ModuleVerbRegistry):
         self._wrapped: dict[str, dict[str, Any]] = {}
 
     def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
-        """The grant decision for a call this world's defender is making, RECORDED where it
-        turns the call away (#860).
+        """The grant decision for a call, recorded as a `refused` row when it denies the call.
 
-        A withheld verb is refused by the grant, before the seam is reached — so of every call
-        the defender makes, it was the one that left no row here, and every reader of this
-        ledger (the mechanical grader above all: "no row on H" is its `lead-set`) saw a
-        sibling that never asked. The same silence `refused` already exists to name, one
-        frame earlier: `_served`'s handler below files the isolation refusal as `refused`
-        because "a refusal that writes no row is a served response with no row", and a denial
-        is a refusal of exactly that kind — the harness's, before the call was made, against
-        the params as ASKED. So it is filed the same way, and the grader's F-1 rule for a
-        `refused` row on H (asked, not answered; excluded from the failure buckets) covers it
-        with no second surface to read and no second flag to store. The query tool's own
-        `∅.denied` row still says which LEAD asked, which this table cannot.
+        A denied verb never reaches the serve seam, so without this it leaves no row and the
+        sibling reads as never having asked (the mechanical grader's "no row on H"). It is filed
+        like any other refusal, against the params as asked.
 
-        An adapter that cannot load raises out of `decide` and is filed `fault`, for the
-        reason the handler below files a prepare-time environment fault that way: the base
-        world takes the identical failure and records `fault`, and a different word here
-        would split one outage along the base/sibling axis. Re-raised untouched — the query
-        tool's own classification of that exception is not this frame's.
-
-        `_record_beside`, both times: the decision (or the exception) is what must reach the
-        model, and a row write that fails is reported and dropped rather than replacing it.
+        An adapter that cannot load raises out of `decide` and is filed `fault`, matching what
+        the base world records for the same failure, then re-raised untouched. Rows go through
+        `_record_beside` so a failed write never replaces the decision or exception.
         """
         try:
             decision = super().decide_call(system, verb, params)
@@ -456,23 +352,13 @@ class WorldRegistry(ModuleVerbRegistry):
     def verbs(self, system: str):
         """Every verb this system declares, wrapped so no body reaches the caller unwrapped.
 
-        The wrapping is what makes the safety property structural rather than conventional:
-        `decide()` resolves through here, and so does the query tool's own second lookup
-        (`query_tool.py`'s `registry.verbs(system)[verb]`), so both routes to a callable are
-        this one.
+        Both `decide()` and the query tool's own lookup resolve through here, so every route to
+        a callable is wrapped.
 
-        WRAPPED ONCE PER SYSTEM. Both of those routes run on every `query` tool call, and
-        `_tool_list_verbs` runs `decide()` once per verb on top of its own lookup — so building
-        a fresh closure set per call is N wrappers per lookup and N(N+1) per `list_verbs`, all
-        but one of them born and discarded in the same statement. The memo is sound because
-        `served` reads its collaborators off `self` at CALL time rather than closing over them
-        here: a cached wrapper cannot go stale against an applier or ledger replaced later.
-        `super().verbs` still raises `KeyError` for an unknown system, which
-        `_list_verbs_declared` depends on, because the miss is what populates the entry.
-
-        A COPY comes back, not the memo itself — `ModuleVerbRegistry.verbs` ends `return
-        dict(verbs)` and callers may treat that freedom as theirs. Handing out the live memo
-        would let one caller's edit reach every later lookup, including `decide`'s.
+        Wrapped once per system: `list_verbs` would otherwise build N(N+1) closures. The memo is
+        safe because `served` reads its collaborators off `self` at call time. `super().verbs`
+        still raises `KeyError` for an unknown system, which `_list_verbs_declared` depends on.
+        Returns a copy so one caller's edit cannot reach later lookups.
         """
         if system not in self._wrapped:
             real = super().verbs(system)
@@ -485,82 +371,51 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
-            # UNCONDITIONAL, and that is the whole point — unlike the `world_id` declaration
-            # below, which fires only where staging MOVED the call. The two conditions look
-            # alike and are not: a declaration widens what a call may reach (`confine_index`
-            # admits a world's views by declaration, so setting it on an untouched call would
-            # admit that world's views for a read that was never retargeted), while a clock
-            # admits nothing and narrows nothing. And the adapter that makes an episode
-            # unreplayable by stamping the wall clock into its payload is host-state, which has
-            # no stager and is never staged — so a clock scoped to staged calls would miss
-            # every call it exists for. Both go through `_carrying`, which holds the GUARD and
-            # leaves the CONDITION here, where it is visible beside the other one.
+            # The clock is set on every call, unlike `world_id`, which is set only where staging
+            # moved the call: a `world_id` declaration widens what `confine_index` admits, while
+            # a clock admits nothing. Host-state (never staged) is the adapter that stamps the
+            # clock, so a clock scoped to staged calls would miss it.
             #
-            # Rebound BEFORE `applier.prepare`, so the stager and `restore` see the same moment
-            # the adapter body will. Cannot raise — `_carrying`'s guards are total and `as_of`
-            # was validated at construction — which matters because this line sits OUTSIDE the
-            # refusal handler below.
+            # Set before `prepare` so the stager, `restore` and the adapter see one moment. This
+            # line is outside the refusal handler; it cannot raise (`_carrying` is total and
+            # `as_of` was validated at construction).
             ctx = _carrying(ctx, as_of=self.as_of)
-            # WHAT THE RUN ARM REACHED, for the two recording arms below. The order itself is
-            # `serve_one`'s; the only thing this frame needs back out of it before it finishes
-            # is how far the call got, because the two rows a failure writes are different rows
-            # (see each handler). Empty until `run` is entered, which is exactly the boundary
-            # between them.
+            # How far the call got, so the failure handlers below know which row to write.
+            # Empty until `run` is entered.
             reached: dict[str, Any] = {}
 
             def run(prepared: dict, moved: dict | None) -> Any:
-                """The FAMILY TIER in front of the adapter, and the restore inside its miss."""
+                """The family tier in front of the adapter, and the restore inside its miss."""
                 reached.update(prepared=prepared, moved=moved)
                 payload, reached["base_text"] = _base_payload(
                     fn, _carrying(ctx, world_id=world.world_id) if moved is not None else ctx,
                     prepared, system, verb, ledger, moved,
-                    # BEFORE the base row is written, so the FAMILY's shared recording carries
-                    # no world's identity. That row is replayed by every sibling, and it is
-                    # made by whichever world called first — so a staged recording would hand
-                    # every other sibling the first one's view name as if it were the estate's.
+                    # Restore before the base row is written: that row is replayed by every
+                    # sibling, so it must carry no world's view name.
                     lambda served_payload: applier.restore(
                         system, verb, served_payload, moved, prepared, ctx),
                 )
                 return payload
 
             try:
-                # THE ORDER, THROUGH THE FRAME THAT OWNS IT. The refusal, the retarget, the
-                # call, the restore and the decision are `serve_one`'s — this frame supplies
-                # only the family tier (`run`) and the ledger rows around it. Spelled inline
-                # here, as it was, the 240-case isolation fuzz drove the OTHER copy: it proved
-                # the refusal came first in a frame no sibling process ever entered.
-                #
-                # `applier` is a DI seam: one that retargets IN PLACE and returns the same
-                # object leaves `prepared is params`, so `moved` is `None` for a call staging
-                # DID move — and three things then silently switch off at once (the `world_id`
-                # the adapter's confinement needs to admit this world's own view, `restore`'s
-                # un-echo of the staged identity, and the `asked_params` column
-                # `correlation_key` pairs on), with every row still reading honestly. The copy
-                # `serve_one` hands `prepare` is what keeps that comparison meaningful.
+                # `serve_one` owns the order; this frame adds the family tier and ledger rows.
+                # It also hands `prepare` a copy, so an applier that retargets in place still
+                # yields a `moved` (which drives the `world_id` declaration, `restore`'s
+                # un-echo and the `asked_params` column).
                 passage = serve_one(world, system, verb, params,
                                     applier=applier, ctx=ctx, run=run)
             except LedgerError:
-                # The table's own refusal, already accounted for. Recording a second row for it
-                # would answer "the ledger would not write this" with another write.
+                # The table's own refusal; recording another row for it would be another write.
                 raise
             except Exception as failure:
                 if "prepared" not in reached:
-                    # BEFORE THE CALL WAS MADE: the isolation refusal, or the retarget itself.
-                    # A refusal is EVIDENCE, and an unrecorded one is indistinguishable from the
-                    # sibling never asking. Recorded against the params as ASKED — the retarget
-                    # is exactly what failed, so there is no prepared form to name — then
-                    # re-raised so the query tool still turns it into the fault row the model
-                    # reads.
+                    # Before the call was made: the isolation refusal or the retarget failed.
+                    # Record it against the params as asked (an unrecorded refusal reads as
+                    # never asking), then re-raise.
                     #
-                    # WHICH class, though, is the exit code's answer and not this frame's.
-                    # `prepare` reads the run's config to resolve a default index, so an
-                    # ENVIRONMENT fault (a missing config file, a missing key) surfaces here too
-                    # — and filing that as `refused` splits one outage along the base/sibling
-                    # axis: the base world returns from `redirect` before ever reading the
-                    # config, takes the identical fault out of the adapter body below, and
-                    # records `fault`. One outage, two decision classes, divided by exactly the
-                    # thing the table exists to measure. `refused` is the capability answer,
-                    # which is the one the stager marks usage.
+                    # The exit code picks the class: `prepare` reads config, so an environment
+                    # fault surfaces here too, and the base world records the same outage as
+                    # `fault`. Only a usage-class failure is `refused`.
                     _record_beside(ledger, ServedCall(
                         system=system, verb=verb, params=dict(params),
                         payload_text=str(failure),
@@ -571,13 +426,9 @@ class WorldRegistry(ModuleVerbRegistry):
                         world_id=world.world_id,
                     ))
                     raise
-                # AN ESTATE FAULT IS A RESPONSE. `QueryCapture` catches whatever the body raises
-                # and hands the model a fault row, so the defender HAS seen an answer here — and
-                # a seam that wrote nothing would leave exactly the state this table exists to
-                # make visible, "a served response with no row". Recorded against the params as
-                # RUN, because the retarget succeeded and it is the prepared call that faulted;
-                # `asked_params` rides along for the same reason it does below, so a staged
-                # fault can still find its opposite number. Re-raised untouched.
+                # An estate fault is a response: the query tool hands the model a fault row, so
+                # this must write one too. Recorded against the params as run, with
+                # `asked_params` so a staged fault can still be paired.
                 _record_beside(ledger, ServedCall(
                     system=system, verb=verb, params=dict(reached["prepared"]),
                     payload_text=str(failure) or type(failure).__name__, source=FAULT,
@@ -588,33 +439,24 @@ class WorldRegistry(ModuleVerbRegistry):
             prepared, asked, out = passage.prepared, passage.moved, passage.out
             payload, decision, base_text = (
                 passage.payload, passage.decision, reached["base_text"])
-            # `out is payload` on every decision that changes nothing (STAGED, PASSTHROUGH), and
-            # the base text is then the served text — the same bytes `payload_text` would
-            # produce, since it is deterministic and already ran over this object. Re-dumping a
-            # multi-hundred-KB result to rediscover that is the single most expensive thing the
-            # seam did per call.
+            # When nothing changed the payload, the base text is already the served text;
+            # re-dumping a large result was the seam's most expensive per-call step.
             served_text = base_text if out is payload else payload_text(out)
-            # M2 (O3, #1007): ONE EXTRA LIVE READ, taken only on a STAGED decision, at the PLAIN
-            # ctx — never `_carrying(ctx, world_id=...)`, which would let `confine_index` admit
-            # this world's own staged views for what is supposed to be the un-rewritten base
-            # pattern. Recorded on the staged row itself (never a second ledger row: a witness
-            # row would be the FIRST row under this correlation key, under `episode._answers`'
-            # first-row-wins, and would shadow the one the sibling was actually served).
+            # One extra live read on a staged decision, at the plain ctx (a `world_id`-carrying
+            # ctx would admit this world's staged views). The result goes on the staged row
+            # itself: a separate witness row would be the first row under this correlation key
+            # and shadow the served one under `episode._answers`' first-row-wins.
             differs_from_base: bool | None = None
             base_pattern_digest: str | None = None
             if decision == STAGED and asked is not None:
                 differs_from_base, base_pattern_digest = _base_witness(fn, ctx, asked, served_text)
-            # The decision is validated by `Ledger.record`, which OWNS that vocabulary — and it
-            # raises before `out` is returned, so an applier that names no honest decision
-            # cannot serve. Re-checking it here would put the same rule in two places, and the
-            # copy that drifts is the one that stops refusing.
+            # `Ledger.record` validates the decision and raises before `out` is returned.
             ledger.record(ServedCall(
                 system=system, verb=verb, params=dict(prepared),
                 payload_text=served_text,
                 source=decision, world_id=world.world_id,
-                # Only when staging moved it. This is what lets a sibling's row find its
-                # opposite number: the prepared forms differ BY CONSTRUCTION on a staged
-                # system, so a comparison keyed on them alone pairs nothing.
+                # Only when staging moved it: prepared forms differ by construction on a staged
+                # system, so pairing needs the asked form.
                 asked_params=asked,
                 differs_from_base=differs_from_base,
                 base_pattern_digest=base_pattern_digest,
@@ -627,27 +469,17 @@ class WorldRegistry(ModuleVerbRegistry):
 def _base_witness(
     fn: Any, ctx: Any, moved: dict, staged_text: str,
 ) -> tuple[bool | None, str | None]:
-    """M2's witness: one live read of the un-rewritten base pattern, and how it compares.
+    """One live read of the un-rewritten base pattern, and how it compares to the staged text.
 
-    `moved` is the world's OWN question, as asked — the same params staging retargeted, before
-    the retarget — and `ctx` here is the PLAIN ctx the caller already holds (never one carrying
-    `world_id`), so this read reaches the base pattern rather than this world's own staged view.
+    `moved` is the world's question as asked, before the retarget; `ctx` must be the plain ctx
+    (no `world_id`), so the read reaches the base pattern.
 
-    `(None, None)` on a faulted read: `differs_from_base` MEANS the comparison was made, and a
-    witness the estate could not answer has not shown the sibling anything — recording `False`
-    there would charge a world for an outage in the estate the same way an unmeasured
-    reachability count would.
-
-    The digest is `sha256` of the base pattern's own text, through the ONE canonicalisation
-    (`comparator.canonical`) the `differs` verdict itself rests on (F5) — so a later reader can
-    trust the digest without re-issuing the read.
+    Returns `(None, None)` when unmeasurable: `differs_from_base` means a comparison was made,
+    and recording `False` would charge the world for an estate outage. The digest is `sha256` of
+    the base text through `comparator.canonical`, the same canonicalisation the verdict uses.
     """
-    # THE WHOLE WITNESS IS INSIDE THE ENVELOPE, not the adapter call alone. Everything below
-    # the read is measurement too — `payload_text` can raise on a payload it cannot dump,
-    # `canonical(...).encode("utf-8")` on a lone surrogate, `mechanical` on text it cannot
-    # parse — and a witness that raises there escapes into the SIBLING'S OWN LIVE QUERY, turning
-    # an unmeasurable extra read into a fault on the call the world was actually served. The
-    # answer is the same one the read arm already gives: unmeasured, never "no difference".
+    # Everything, not just the read, is inside the try: `payload_text`, `canonical` and
+    # `mechanical` can all raise, and an escape would fault the sibling's own served query.
     try:
         served = fn(ctx, **moved)
         base_text = payload_text(served)
@@ -661,26 +493,15 @@ def _base_witness(
 def _record_beside(ledger: Ledger, call: ServedCall) -> None:
     """Record `call` without letting the write displace the exception already in flight.
 
-    Both callers are handlers recording WHY something failed and then re-raising it. A bare
-    `ledger.record(...)` there is a second exception source in front of the `raise`: if the
-    append fails — a read-only state root, a full disk, the ledger path replaced by a directory
-    — that `OSError` propagates INSTEAD, and the original refusal never leaves this frame.
-
-    Which is worse than losing a row, because the two exceptions are not interchangeable. A
-    `StagingError` carries `USAGE_EXIT_CODE`, deliberately outside `circuit_breaker`'s
-    `INFRA_EXIT_CODES`; the `OSError` that replaced it is unrecognised, so `query_tool` files it
-    as `DEFAULT_FAULT_EXIT` — an infra code. Two of those trip the breaker for the system and
-    five abort the run, in the SIBLING and not in its base, which is exactly the "the estate was
-    up for one and down for the other" contamination the usage class was invented to prevent.
-
-    So the write failure is logged and dropped. That leaves the state the ledger
-    exists to make visible — a served response with no row — but it leaves it for a call that is
-    ALREADY failing and already reaching the model as a fault, rather than manufacturing a
-    second, differently-classed failure to announce it.
+    Callers record why something failed and then re-raise. If the append itself fails (read-only
+    root, full disk), that `OSError` would propagate instead; unlike a `StagingError`
+    (`USAGE_EXIT_CODE`), it is filed as an infra code, tripping the circuit breaker in the
+    sibling and not its base. So the write failure is logged and dropped: the call is already
+    failing and reaching the model as a fault.
     """
     try:
         ledger.record(call)
-    except Exception as write_failed:  # noqa: BLE001 — see docstring: never displace the raise
+    except Exception as write_failed:  # noqa: BLE001 — never displace the in-flight raise
         _logger.warning(f"could not record the {call.source} row for {call.system}.{call.verb} "
                         f"({write_failed!r}); the call's own failure is what propagates")
 
@@ -688,31 +509,13 @@ def _record_beside(ledger: Ledger, call: ServedCall) -> None:
 def _carrying(ctx: Any, **values: Any) -> Any:
     """`ctx` with `values` set on the fields it declares, or `ctx` untouched.
 
-    ONE GUARD, TWO CALLERS, and the two conditions stay at the call sites where they belong.
-    `served` sets `as_of` on EVERY call and `world_id` only where staging moved one; folding
-    those conditions in here is what would let one silently acquire the other's scope — a
-    declaration widens what a call may reach (`confine_index` admits a world's views by
-    declaration, so setting it on an untouched call would admit that world's views for a read
-    that was never retargeted), while a clock admits nothing and narrows nothing. Written as two
-    functions, though, the GUARD was written twice, and a guard fixed in one copy and not the
-    other is the invisible half of that.
+    The conditions for setting each field stay at the call sites; this holds only the guard.
 
-    A ctx THAT CANNOT CARRY A FIELD IS HANDED BACK UNTOUCHED rather than repaired. That is a
-    test stub, not a run: the real seam builds `VerbContext`. `replace` raises `TypeError` both
-    on a non-dataclass and on a dataclass that simply has no such field, and a `TypeError` deep
-    inside `served` is not an `AdapterFault` — the query tool files it as exit 2, an INFRA code
-    the circuit breaker reads as the estate being down for this sibling and up for its base,
-    which is the base-vs-sibling contamination this whole module exists to exclude.
-
-    `fields(ctx)` rather than `type(ctx).__dataclass_fields__`, and the difference is not
-    stylistic. `__dataclass_fields__` also holds the `ClassVar` and `InitVar` PSEUDO-fields
-    that `fields()` filters out, so a stub declaring `as_of: ClassVar[datetime]` passed the
-    membership test and reached `replace`, which raises `TypeError: __init__() got an
-    unexpected keyword argument`. `f.init` rides with it for the third shape: `replace` raises
-    `ValueError` on an `init=False` field. Either one is the exact `TypeError`-deep-inside-
-    `served` this guard exists to prevent, and the `as_of` call site sits OUTSIDE the refusal
-    handler — so it would escape with no ledger row at all. The tuple `fields()` builds per
-    call is the price of the guard actually guarding.
+    A ctx that cannot carry a field (a test stub; the real seam builds `VerbContext`) is
+    returned untouched, because `replace` raising `TypeError` inside `served` would be filed as
+    an infra fault. `fields()` rather than `__dataclass_fields__`, which also holds `ClassVar`
+    and `InitVar` pseudo-fields; `f.init` excludes `init=False` fields, on which `replace`
+    raises `ValueError`.
     """
     if not is_dataclass(ctx) or isinstance(ctx, type):
         return ctx
@@ -727,54 +530,33 @@ def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it,
 ) -> tuple[Any, str]:
     """This key's base answer and its canonical text: the family's recording, else the adapter.
 
-    THE HIT IS THE FAMILY'S; THE MISS IS THIS WORLD'S. A hit issues no adapter call at all, and
-    for a key the source run captured that is a guarantee: the base file was primed before any
-    sibling forked, so every sibling replays the same bytes. A MISS is a key the capture never
-    held — one a sibling invented, which it will, because a sibling is continuing an
-    investigation — and the `base` row written below goes into THIS world's own file, which no
-    sibling reads. So two worlds asking one invented question each read the estate live and may
-    differ; that residual is what `Ledger`'s own docstring sizes, and this frame is where it is
-    incurred. (Before the tier split this row went into a shared table and a sibling could pick
-    it up; "recorded once per family" was true of it then and is not now.)
+    A hit issues no adapter call; the base file was primed before any sibling forked, so every
+    sibling replays the same bytes for a captured key. A miss (a key a sibling invented) goes
+    live and its `base` row lands in this world's own file, which no sibling reads — so two
+    worlds asking the same invented question may see different answers.
 
-    The TEXT comes back beside the tree because the caller needs it for the served row and it
-    is already in hand on both arms — recomputed there, a memo hit paid a `loads` plus a `dumps`
-    to rediscover the string it was handed.
+    Returns the text too because the caller needs it for the served row.
 
-    THE LIVE ARM ROUND-TRIPS TOO, so both arms hand back the same shape. `payload_text` writes
-    with `default=str`, so a value JSON has no spelling for — a `datetime`, a `Decimal`, a
-    tuple — survives as itself for the world that issued the live call and comes back
-    stringified (or as a list) for every world that replays the recording. That is a difference
-    between siblings created by nothing but call order, and it reaches the decision: an entity
-    patch matches on string values, so the same query can report `passthrough` for the world
-    that ran first and `patched` for the next. The family tier exists to make the pair's answers
-    identical; normalising once here is what makes them so.
+    The live arm also round-trips through JSON so both arms return the same shape:
+    `payload_text` writes with `default=str`, and without this a `datetime` or tuple would
+    differ between the world that ran live and those replaying, changing whether a string-
+    matching entity patch applies.
     """
     recorded = ledger.base_payload(system, verb, params)
     if recorded is not None:
-        # lint-parse: ok — the payload half IS the adapter's own untyped answer, and the seam
-        # that could narrow it is the adapter, not this one: a base row is whatever the verb
-        # returned, and there is no shape seven systems share. `Any` is the honest declaration
-        # rather than a promise the runtime never made; the narrow half (the text) is typed.
+        # lint-parse: ok — the payload is the adapter's own untyped answer; there is no shape
+        # the seven systems share, and the text half is typed.
         return json.loads(recorded), recorded
     served = fn(ctx, **params)
-    # RESTORED BEFORE THE TEXT IS TAKEN, so the recording and the replay are the same bytes and
-    # neither carries the identity of the world that happened to run first. The live arm and
-    # the memo arm then hand back payloads that differ by what the world staged and nothing
-    # else — which is the whole of what a base-versus-sibling comparison is reading.
+    # Restore before taking the text, so the recording carries no world's identity.
     text = payload_text(served if restore is None else restore(served))
     ledger.record(ServedCall(
         system=system, verb=verb, params=dict(params),
         payload_text=text, source=BASE, world_id=None,
-        # THE FAMILY TIER PAIRS TOO, and on a staged system it is the only tier that can be
-        # compared unmemoized: the base key is taken AFTER `prepare`, so two siblings record
-        # two base rows under two staged spellings of one question. Without the asked form
-        # `correlation_key` falls back to `params` and `keys(A) ∩ keys(B)` is empty — the same
-        # silent-on-the-event-stream failure the world row carries `asked_params` to prevent,
-        # left in the tier beside it. `None` on every unstaged call, so the column stays absent
-        # wherever nothing was rewritten.
+        # The base key is taken after `prepare`, so on a staged system two siblings record
+        # base rows under different staged spellings; the asked form lets `correlation_key`
+        # pair them. `None` on unstaged calls.
         asked_params=asked,
     ))
-    # lint-parse: ok — same seam, same reason as the replay arm above: the payload is the
-    # adapter's own untyped answer and there is no shape seven systems share.
+    # lint-parse: ok — same reason as the replay arm: the adapter's untyped answer.
     return json.loads(text), text

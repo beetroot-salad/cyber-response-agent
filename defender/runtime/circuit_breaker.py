@@ -18,21 +18,15 @@ RUN_FAIL_KILL_LIMIT = 5
 
 INFRA_EXIT_CODES = frozenset({2, 124})
 
-#: The exit code of a call the GRANT CHECK refused — a verb withheld from the role (§7 R11's
-#: DENIED). sysexits' `EX_NOPERM`, and the one non-zero code that is neither infra nor the
-#: model's to fix: it must stay OUTSIDE `INFRA_EXIT_CODES` (a withheld verb is policy, not an
-#: unreachable estate, so it charges no breaker) and it must not read as `agent-fixable` (a
-#: denial is a policy bug or an injection attempt, and neither is fixable by retrying — #632).
-#: Since #860 a denial is a `∅.denied` sentinel row in the queries table, so the row needs a
-#: class of its own for the same reason `ticket_screen.POLICY_REFUSAL_EXIT` is distinct from
-#: the adapter's generic business code: a reader tells it apart without parsing free text.
+#: The exit code of a call the grant check refused (sysexits' `EX_NOPERM`). Neither infra (a
+#: withheld verb is policy, so it charges no breaker) nor agent-fixable (retrying cannot fix a
+#: policy bug or injection attempt). Its own class lets readers of the `∅.denied` sentinel row
+#: tell it apart without parsing text.
 DENIED_EXIT_CODE = 77
 
-#: The three values `error_class_for_exit` writes into every queries-table row. Named because
-#: readers BRANCH on them: the companion repeat guard's counted domain is the `agent-fixable`
-#: half of the above-guard rows, the `infra` half is this module's own, and `denied` is the
-#: grant check's — counted by neither guard and charged to no breaker. A reader that spelled
-#: the value itself would be one rename away from silently counting nothing.
+#: The values `error_class_for_exit` writes into every queries-table row. Readers branch on
+#: them (the repeat guard counts `agent-fixable`, the breaker `infra`; `denied` counts toward
+#: neither), so they import these rather than spelling the strings.
 INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
@@ -71,23 +65,18 @@ def _blank() -> dict:
 
 
 def _load(run_dir: Path) -> dict:
-    """§7 D3's second rider: an unreadable state must NOT read as a healthy, freshly
-    initialised breaker (`is_tripped`/`down_message` both fail closed on `_unreadable`).
-    Absence stays healthy; existing-but-unreadable (a directory squatting the name, a
-    corrupted file, a symlink aliasing state this run does not own) is a distinct state.
+    """Load breaker state. Absent is healthy; existing but unreadable (a squatting directory,
+    corrupted file, symlink) is marked `_unreadable`, which the readers treat as tripped.
 
-    Existence is `lexists`, not `exists`: `exists()` DEREFERENCES, so a planted DANGLING
-    symlink would read as "no file yet" and fail open. A live symlink is refused for the
-    mirror reason — following it reads whatever the planter aimed it at."""
+    `lexists`, not `exists`, so a planted dangling symlink doesn't read as "no file yet"; a
+    live symlink is refused too, since following it reads whatever it was aimed at."""
     p = _path(run_dir)
     if not os.path.lexists(p):
         return _blank()
     if p.is_symlink():
         return {**_blank(), "_unreadable": True}
-    # `TEXT_READ_ERRORS`, not a bare `OSError`: a text read can also fail UNDECODABLE
-    # (`UnicodeDecodeError`, a `ValueError`), and a run root the box bind-mounts rw is where
-    # non-UTF-8 bytes land for free. That decode error escapes `is_tripped`/`down_message` —
-    # outside every `try` at both call sites.
+    # `TEXT_READ_ERRORS` includes `UnicodeDecodeError`: the box can write non-UTF-8 bytes
+    # here, and the callers have no `try`.
     try:
         text = p.read_text(encoding="utf-8")
     except TEXT_READ_ERRORS:
@@ -96,16 +85,11 @@ def _load(run_dir: Path) -> dict:
         doc = json.loads(text or "{}")
     except json.JSONDecodeError:
         return {**_blank(), "_unreadable": True}
-    # `3`, `"x"` and `[…]` are all valid JSON and none of them is a breaker state; returned as
-    # the state itself, every reader's `.get(...)` raises. "Corrupted" has to include "parsed
-    # fine, wrong shape" — the shape a box writing into its own run dir produces for free.
+    # Valid JSON of the wrong shape is corrupted too; readers would raise on it.
     if not isinstance(doc, dict):
         return {**_blank(), "_unreadable": True}
-    # ...and so is a dict whose `systems` is `5`, whose per-system record is `7`, or whose
-    # `failures`/`total_failures` is `"x"`: every reader below the top level dereferences bare,
-    # from call sites outside every `try`. UNREADABLE, not coerced — coercing `{"systems": 5}`
-    # to `{}` would answer "no system is down", the fail-OPEN this function refuses.
-    # (`lead_zero._breaker_failures` coerces because its answer is a COUNT, not a gate.)
+    # Nested levels too. Marked unreadable rather than coerced: coercing `{"systems": 5}` to
+    # `{}` would fail open ("no system is down").
     if not _shape_ok(doc):
         return {**_blank(), "_unreadable": True}
     return doc or _blank()
@@ -116,9 +100,8 @@ def _is_count(value: object) -> bool:
 
 
 def _shape_ok(doc: dict) -> bool:
-    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it. An
-    ABSENT counter is spelled as the `0` those readers already default it to, so the
-    membership and type tests are one expression rather than two that could disagree."""
+    """Whether every nested level has the shape `is_tripped`/`down_message` dereference. An
+    absent counter defaults to `0`, as the readers do."""
     if not _is_count(doc.get("total_failures", 0)):
         return False
     systems = doc.get("systems", {})
@@ -135,9 +118,8 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         return {}
 
     def _mutate(state: dict) -> None:
-        # The writer coerces where `_load` refuses. It cannot fail closed — it has to leave a
-        # countable document behind — so a level it cannot read as a counter it starts over
-        # from, which is what `default=_blank` already does for the document as a whole.
+        # Unlike `_load`, the writer coerces: it must leave a countable document, so a bad
+        # level restarts from zero.
         if not isinstance(state.get("systems"), dict):
             state["systems"] = {}
         sysrec = state["systems"].get(system)
@@ -153,14 +135,9 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
     try:
         state = update_json_locked(_path(run_dir), _mutate, default=_blank)
     except (OSError, TypeError, AttributeError, ValueError) as e:
-        # §7 D3 rider #1: a refused write is contained at the writer — uncaught it propagates
-        # PAST `_drive_agent`'s four-type catch and crashes the process. Shape faults join
-        # `OSError` for when a level neither `_mutate`'s coercions nor `_shape_ok` anticipated
-        # turns up; failing the write closed is safe, since `_load` reads an unparseable
-        # document as `_unreadable`, i.e. DOWN.
-        #
-        # NEVER SILENTLY, though: a refused write means infra failures stop being counted for
-        # the rest of the run — no trip, no `RUN_FAIL_KILL_LIMIT`.
+        # Contained here: uncaught, it would escape the driver's catch and crash the process.
+        # Safe, since `_load` reads an unparseable document as down. Logged, because failures
+        # stop being counted for the rest of the run.
         _logger.warning(f"outcome for {system!r} not recorded "
                         f"({type(e).__name__}: {e}); this run's failure count no longer advances")
         return {}
