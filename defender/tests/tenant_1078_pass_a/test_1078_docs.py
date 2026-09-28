@@ -42,7 +42,10 @@ FRESH_RUN_DOCS = (
 #: A fresh-run invocation of `run.py`: the script followed by an alert argument (a `<...>`
 #: placeholder, a `*.json` path, or a shell variable), never a `--resume` (derived, D3).
 _FRESH_RUN = re.compile(r"(?<![\w-])run\.py\s+(?:<[^>]+>|\"?\$|\S+\.json)")
-SETUP_STEP = "tenant.py setup playground"
+#: The one-time setup step, naming a tenant id or the `<tenant>` placeholder: shipped docs (the
+#: handbook, run.py) use the placeholder, since the product names no lab tenant; developer docs
+#: may name the lab's own.
+SETUP_STEP = re.compile(r"tenant\.py setup (?:<tenant>|[a-z][a-z0-9-]*)")
 
 
 def _logical_lines(text: str) -> list[str]:
@@ -64,7 +67,7 @@ def _logical_lines(text: str) -> list[str]:
 
 def test_d8_fresh_run_docs():
     """Each of the eleven documented fresh-run invocations names --tenant and the one-time
-    tenant.py setup playground step.
+    `tenant.py setup <tenant>` step.
 
     Per file: every fresh-run `run.py` invocation it documents carries `--tenant`, and the
     file names the setup step. `experiments/`, `docs/archive/` and `docs/decisions/` are left
@@ -80,8 +83,8 @@ def test_d8_fresh_run_docs():
             problems.append(f"{rel}: documents no fresh-run invocation any more")
         problems += [f"{rel}: `{ln.strip()[:100]}` has no --tenant"
                      for ln in invocations if "--tenant" not in ln]
-        if SETUP_STEP not in text:
-            problems.append(f"{rel}: does not name the one-time `{SETUP_STEP}` step")
+        if not SETUP_STEP.search(text):
+            problems.append(f"{rel}: does not name the one-time `tenant.py setup` step")
     assert problems == [], "\n".join(problems)
 
 

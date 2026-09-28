@@ -6,9 +6,9 @@ The investigation is driven by the in-process PydanticAI driver
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
-Usage (every run names its tenant, and there is no default — #1078; create one once with
-    `python3 defender/scripts/tenant.py setup playground`):
-    python3 defender/run.py <alert.json> --tenant playground [--run-id ID] [--no-learn] [--model M]
+Usage (every run names its tenant, and there is no default; create one once with
+    `python3 defender/scripts/tenant.py setup <tenant>`):
+    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
 needs a real billable API key. Inside a Claude Code session the *ambient*
