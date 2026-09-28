@@ -42,7 +42,13 @@ def hosted(base: Path, monkeypatch):
     """The host's own materialisation path, with the runs base steered by the environment the
     shipped resolver already reads (never `monkeypatch.setattr` — `tests.idioms`)."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
-    return S.run_common().materialize_run_dir
+    materialize_run = S.run_common().materialize_run
+
+    def hosted_run_dir(*args, **kwargs) -> Path:
+        # The one builder answers the run's handle (#1110); these demands read its directory.
+        return materialize_run(*args, **kwargs).run_dir
+
+    return hosted_run_dir
 
 
 def _stamp(run_dir: Path) -> dict:
@@ -628,7 +634,7 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
     sibling_base = S.make_runs_base(episode_dir, "runs")
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(sibling_base))
     world = _resume_world(episode_dir, "b")
-    sibling = S.run_common().materialize_run_dir(alert, world.run_id, world=world)
+    sibling = S.run_common().materialize_run(alert, world.run_id, world=world).run_dir
     assert _stamp(sibling)["world_id"] == world.world_id, (
         "a forked sibling stamps its ResumeWorld token, which is what `served/<token>.jsonl` "
         "keys on and what D3 writes into provenance")
@@ -662,7 +668,7 @@ def test_the_base_role_sibling_of_a_family(tmp_path: Path, alert, monkeypatch):
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role (`_family.py:59`)
         world = _resume_world(episode_dir, label)
-        run = S.run_common().materialize_run_dir(alert, world.run_id, world=world)
+        run = S.run_common().materialize_run(alert, world.run_id, world=world).run_dir
         tokens[label] = _stamp(run)["world_id"]
     expected = {label: _resume_world(episode_dir, label).world_id for label in ("a", "b")}
     assert tokens == expected, (

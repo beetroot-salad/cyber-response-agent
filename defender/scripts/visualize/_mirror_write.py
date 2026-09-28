@@ -1,6 +1,6 @@
 """The run-page mirror's one write, stdlib-only so it can run as the checkout's owner (#1084 D5).
 
-`visualize_run.render_and_mirror` calls `write_page` in-process when nothing needs dropping,
+`visualize_run.mirror_page` (via `_mirror`) calls `write_page` in-process when nothing needs dropping,
 and otherwise runs THIS FILE as a script in a child whose uid/gid are the checkout owner's, the
 page bytes on stdin. Same code in both lanes; the child imports nothing from `defender`, so it
 needs no access to the package's site-packages, and it runs under `-I`.

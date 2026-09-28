@@ -534,7 +534,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     still stops before it.
 
     R11: pre-bind `run`, put the flush in a real `finally`, write `truncated_by` on all
-    three caught exits, and order `visualize()` / `render_and_mirror` AFTER the flush.
+    three caught exits, and order `visualize()` (the page render) AFTER the flush.
     G14/F7 found there is no `finally:` at this base and `run` is bound only by the
     async-with header, so an exception during `__aenter__` leaves `:421-423` unreached;
     covering only the three named exits would lose the terminal exchange of a run killed by
@@ -615,8 +615,8 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
 
 def test_the_moved_projection_is_built_after_the_run_end_flush(tmp_path):
     """For a run terminated mid-pair, the projection `run_stats.py` reads contains the
-    terminal response the run-end flush wrote, because `visualize()` / `render_and_mirror`
-    are ordered AFTER the flush and the projection reads at role=`analysis`.
+    terminal response the run-end flush wrote, because `visualize()` (the page render) is
+    ordered AFTER the flush and the projection reads at role=`analysis`.
 
     The negative control is the same store projected from its PRE-FLUSH state, which
     demonstrably loses the terminal response — proving the ordering, not the store, is what

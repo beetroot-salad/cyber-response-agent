@@ -815,7 +815,7 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
         # label is MODEL-authored: each sibling's run dir is `{episode_id}-{label}`, so a label
         # off this grammar passes the one gate that claims to hold every id rule, gets the base
         # primed, the corpus staged, the review replayed and three processes spawned — and each
-        # child then `sys.exit`s in `run_common.materialize_run_dir` on the id. Refused at the
+        # child then `sys.exit`s in `run_common.materialize_run` on the id. Refused at the
         # mint, where the old code refused it and where nothing has been spent.
         if not is_valid_run_id(f"{family.episode_id}-{label}"):
             raise FamilyError(

@@ -125,7 +125,7 @@ GIT_TIMEOUT_S = 60.0
 #: than the three subclasses that are easy to name. An absent binary is `FileNotFoundError`,
 #: but a corrupt or arch-mismatched `git` on PATH raises a BARE `OSError` (ENOEXEC), and so do
 #: fork/pipe failures under load (ENOMEM, EMFILE) — none of them a `GitError`, none a
-#: `SubprocessError`, and every one of them fatal to `materialize_run_dir` if this tuple is a
+#: `SubprocessError`, and every one of them fatal to `materialize_run` if this tuple is a
 #: hand-picked list. `_io.TEXT_READ_ERRORS` names the parent for the same reason.
 _GIT_UNREACHABLE: tuple[type[BaseException], ...] = (subprocess.SubprocessError, OSError)
 
@@ -162,7 +162,7 @@ class RunProvenance:
     model: str | None = None
     #: #1077 D3 — the tenant that owns this run, and the world it was stamped into (a bare
     #: world id for an unforked run, `<episode>.<label>` for a forked sibling). Both optional
-    #: for an OLD stamp on read; `run_common.materialize_run_dir` always supplies both. Read
+    #: for an OLD stamp on read; `run_common.materialize_run` always supplies both. Read
     #: the same tolerant way `scope`/`model` are: a wrong-typed value folds to `None` on
     #: `from_obj` rather than refusing the whole record.
     tenant_id: str | None = None
@@ -355,7 +355,7 @@ def capture_tree(
     — so every way git can refuse (absent binary, not a repository, an unborn HEAD in a
     freshly-`init`ed tree, a broken index, a `git` that cannot be exec'd, a fork that fails
     under load) lands as a record that says so in `unavailable` rather than as an exception out
-    of `materialize_run_dir`. The reason string is kept because "no sha" and "no sha BECAUSE
+    of `materialize_run`. The reason string is kept because "no sha" and "no sha BECAUSE
     there are no commits yet" send an operator at different knobs.
 
     NEVER HANGS EITHER, which is the same promise: both calls carry `GIT_TIMEOUT_S`, so a git

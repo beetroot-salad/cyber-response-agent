@@ -8,6 +8,7 @@ in test_orchestrate_thresholds.py.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import pytest
@@ -106,6 +107,84 @@ def test_env_str_validates_the_default_against_choices(monkeypatch):
     monkeypatch.delenv(_NAME, raising=False)
     with pytest.raises(FatalConfigError, match="must be one of"):
         env_str(_NAME, "typo", choices=("a", "b"))
+
+
+# ---------------------------------------------------------------------------------------
+# env_choice — the LENIENT choice (#1110 second review): one rule for every setting whose bad
+# value must cost the setting, never the process (`DEFENDER_DEPLOYMENT`, `DEFENDER_LOG_FORMAT`).
+# `env_str(choices=)` above is the STRICT twin and is unchanged. Imported inside each test, so
+# this file collects against a tree that does not have it yet.
+# ---------------------------------------------------------------------------------------
+
+_CHOICES = ("dev", "production")
+
+
+def _env_choice(default: str = "production") -> tuple[str, str | None]:
+    from defender import _env
+
+    return _env.env_choice(_NAME, default, _CHOICES)
+
+
+def _no_warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize("raw", [None, "", "   ", "\n"], ids=["unset", "empty", "spaces", "newline"])
+def test_env_choice_unset_or_empty_is_the_default_with_no_notice(monkeypatch, caplog, raw):
+    """Unset, empty, or nothing but whitespace (stripped first, then judged): the default, and
+    no notice — not setting a variable is not a mistake to report."""
+    if raw is None:
+        monkeypatch.delenv(_NAME, raising=False)
+    else:
+        monkeypatch.setenv(_NAME, raw)
+    caplog.set_level(logging.DEBUG)
+    assert _env_choice() == ("production", None)
+    assert _env_choice(default="dev") == ("dev", None), "the default is not the caller's"
+    assert _no_warnings(caplog) == []
+
+
+@pytest.mark.parametrize(("raw", "value"), [
+    ("dev", "dev"), ("production", "production"),
+    (" DEV ", "dev"), ("Production\n", "production"), ("\tdEv", "dev"),
+])
+def test_env_choice_a_choice_is_read_stripped_and_lowercased_with_no_notice(
+        monkeypatch, caplog, raw, value):
+    """A choice, whatever its case and surrounding whitespace, answers the NORMALISED choice
+    and no notice — whichever default the caller passed."""
+    monkeypatch.setenv(_NAME, raw)
+    caplog.set_level(logging.DEBUG)
+    assert _env_choice() == (value, None)
+    assert _env_choice(default="dev") == (value, None)
+    assert _no_warnings(caplog) == []
+
+
+@pytest.mark.parametrize("raw", ["staging", "development", "prod", " Yaml ", "²", "dev production"])
+def test_env_choice_anything_else_is_the_default_with_a_notice_naming_it(monkeypatch, caplog, raw):
+    """Anything else answers the DEFAULT — never a raise, never a guess at the nearest choice —
+    WITH a notice for the caller to log, naming the variable, the raw value as it was set
+    (its repr, so stray whitespace is visible), every choice, and the default it fell back to.
+    `env_choice` does not log the notice itself: its callers log it (`_env.deployment` as an
+    ERROR, `_log.configure_from_env` straight to its handler), once.
+
+    The default is shown to be named, not merely present among the choices: the same bad
+    value under two different defaults gives two different notices."""
+    monkeypatch.setenv(_NAME, raw)
+    caplog.set_level(logging.DEBUG)
+
+    value, notice = _env_choice(default="production")
+    other_value, other_notice = _env_choice(default="dev")
+
+    assert (value, other_value) == ("production", "dev"), "a bad value did not fall back"
+    assert notice is not None, f"a bad value {raw!r} gave no notice"
+    assert _NAME in notice, f"the notice does not name the variable: {notice!r}"
+    assert repr(raw) in notice, f"the notice does not show the raw value {raw!r}: {notice!r}"
+    for choice in _CHOICES:
+        assert choice in notice.replace(repr(raw), ""), (
+            f"the notice does not name the choice {choice!r}: {notice!r}")
+    assert other_notice is not None
+    assert notice != other_notice, (
+        f"the notice does not name the default it fell back to: {notice!r} == {other_notice!r}")
+    assert _no_warnings(caplog) == [], "env_choice logged the notice itself"
 
 
 

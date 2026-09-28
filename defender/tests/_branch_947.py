@@ -47,7 +47,7 @@ DEFENDER = Path(__file__).resolve().parents[1]
 #: needs vertices carrying live `??` cells, which is not a string one improvises.
 GOLDEN_INVESTIGATION = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
 
-#: The case input every real run dir holds: `materialize_run_dir` copies it in before anything
+#: The case input every real run dir holds: `materialize_run` copies it in before anything
 #: else happens, so a source run without one is not a shape a branch is ever taken from — and
 #: the sibling investigates the SAME alert, which is why it crosses over verbatim.
 ALERT_DOC = (

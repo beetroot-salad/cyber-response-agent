@@ -199,7 +199,7 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
     # Every real run dir holds its alert before anything else happens
-    # (`run_common.materialize_run_dir`), and the sibling investigates the same one — so a
+    # (`run_common.materialize_run`), and the sibling investigates the same one — so a
     # source run without one is not a shape a branch is ever taken from (#947).
     (run_dir / "alert.json").write_text(ALERT_DOC, encoding="utf-8")
     session_id = store.new_session(agent_id="main")

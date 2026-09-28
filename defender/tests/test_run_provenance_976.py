@@ -177,7 +177,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     forget — the branch launcher materialises its siblings through this same call, which is
     what makes a family's worlds comparable on their code rather than merely assumed to be.
     (The learning loop's ARCHIVED bundle is built elsewhere and carries no stamp — see
-    `run_common.materialize_run_dir`, which names that gap where a reader will meet it.)"""
+    `run_common.materialize_run`, which names that gap where a reader will meet it.)"""
     from defender import run_common
 
     runs = tmp_path / "runs"
@@ -186,7 +186,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-a1")
+    run_dir = run_common.materialize_run(alert, "20260101t000000z-a1").run_dir
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -229,7 +229,7 @@ def test_a_git_that_cannot_be_EXECUTED_is_recorded_rather_than_raised(tmp_path, 
     A `git` that resolves and cannot be exec'd raises a BARE `OSError` (ENOEXEC) — not
     `FileNotFoundError`, not a `SubprocessError` — and so do the fork/pipe failures a loaded
     host produces (ENOMEM, EMFILE). A handler that names three OSError subclasses lets every
-    one of them out of `materialize_run_dir`, which turns a record into a hard startup crash
+    one of them out of `materialize_run`, which turns a record into a hard startup crash
     that also leaves a half-built run dir behind and wedges the run id."""
     repo = _repo(tmp_path)
     fake_bin = tmp_path / "bin"
@@ -525,7 +525,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
     # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
     # run continue unstamped.
-    assert run_common.materialize_run_dir(alert, run_id) == runs / run_id
+    assert run_common.materialize_run(alert, run_id).run_dir == runs / run_id
     assert "could not stamp" in capsys.readouterr().err
     assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
 
@@ -543,7 +543,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run_dir(alert, "20260101t000000z-solo")
+    run_dir = run_common.materialize_run(alert, "20260101t000000z-solo").run_dir
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -552,7 +552,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     with pytest.raises(TypeError):
-        run_common.materialize_run_dir(alert, "20260101t000000z-handed", provenance=handed)
+        run_common.materialize_run(alert, "20260101t000000z-handed", provenance=handed)
     assert not (runs / "20260101t000000z-handed").exists()
 
 

@@ -290,6 +290,30 @@ def test_the_fallback_notice_cannot_be_hidden_by_the_level(monkeypatch, restore_
     assert _log.FORMAT_ENV in _strict(capsys.readouterr().err)["message"]
 
 
+@pytest.mark.parametrize(("value", "fmt"), [
+    ("", "json"), ("   ", "json"), ("Json", "json"), (" TEXT\n", "text"),
+], ids=["empty", "spaces", "case", "case-and-space"])
+def test_the_format_is_read_by_the_one_lenient_choice_rule(
+        monkeypatch, restore_root, capsys, value, fmt):
+    """#1110 second review: `DEFENDER_LOG_FORMAT` is read by the one lenient-choice rule
+    (`_env.env_choice`) `DEFENDER_DEPLOYMENT` is read by: stripped and lowercased, and empty —
+    or nothing but whitespace — is UNSET, the default with no notice (it used to be reported
+    as a bad value). The format really is the one chosen: the next line is JSON, or text.
+
+    Positive control: `test_an_unknown_setting_falls_back_and_says_so` — a genuinely bad value
+    on the same capture IS reported."""
+    monkeypatch.setenv(_log.FORMAT_ENV, value)
+    capsys.readouterr()
+    _log.configure_from_env()
+    assert capsys.readouterr().err == "", f"the format {value!r} was reported as a bad one"
+    logging.getLogger("defender.x").info("still logging")
+    err = capsys.readouterr().err
+    if fmt == "json":
+        assert _strict(err)["message"] == "still logging"
+    else:
+        assert err.rstrip().endswith("INFO defender.x still logging"), err
+
+
 @pytest.mark.parametrize(("main", "name"), [
     (types.SimpleNamespace(__spec__=types.SimpleNamespace(name="defender.learning.loop")),
      "defender.learning.loop"),
