@@ -28,6 +28,10 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
   `worlds.ensure()` and family stamp, the rejected episode's `worlds.ensure()`,
   `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
   `draws.ensure()`, its draw write, its framed wire log (contained) and `judge.yaml`.
+- O3 / O6 through the judge's door: while the judge is paid, exactly one descriptor is open on
+  the episode dir (the pass reads through its own `Episode`'s view, never a second `bind` by
+  path); and a pass whose episode dir is renamed mid-pass writes its draws and `judge.yaml` in
+  the moved folder (no writer reopens the episode by name).
 - H2 `review.review`'s default write (no seam injected) is the episode's `review` record.
 - H3 `staging.record_staged(episode, row)` is D1's `staged: append_durable`: through the `io=`
   seam, its ONE held call is `write(LAYOUT.staged, <row>, mode="append", durable=True)`, on the
@@ -726,6 +730,46 @@ def test_h1_judge_yaml_refuses_a_link_planted_mid_pass_and_writes_nothing_throug
     regrade(tmp_path, ep, ScriptedJudge())
     assert_plain_file(ep / "judge.yaml")
     assert J.world_rows(J.judge_record(ep))["b"]["completed_draws"] == 2
+
+
+def test_o3_the_judge_pass_reads_and_writes_through_one_held_descriptor(tmp_path, roots):
+    """O3: the pass's reads go through the view of the pass's own `Episode`, which shares its
+    handle — so while the judge is being paid, exactly ONE descriptor is open on the episode
+    dir. A pass that opens the `Episode` for its writes but keeps a `bind` of the episode dir by
+    path for its reads holds two roots, which a rename or a swap can split. Afterwards none is
+    left open."""
+    ep = judged_episode(tmp_path)
+    seen: list[list[int]] = []
+    judge = ScriptedJudge(on_first=lambda: seen.append(S.open_fds_on(ep)))
+
+    got = grade(tmp_path, ep, judge)
+
+    assert not isinstance(got, BaseException), f"the pass was refused: {got!r}"
+    assert len(seen) == 1, "the pass never reached the judge seam"
+    assert len(seen[0]) == 1, (
+        f"descriptors open on the episode dir while the judge was paid: {seen[0]}")
+    assert S.open_fds_on(ep) == [], "the pass left the episode dir open"
+
+
+def test_o6_a_judge_pass_whose_episode_dir_is_renamed_mid_pass_records_in_the_moved_folder(
+        tmp_path, roots):
+    """O6 through the judge's door: the episode is held, not remembered. The episode dir is
+    renamed while the pass runs (by the judge seam's first call); every later write — the draws
+    and `judge.yaml` — lands in the MOVED folder, and nothing reappears at the old name. A
+    writer that reopens the episode by name (an alias of `Episode.open` called on
+    `episode.dir`) finds nothing there, and the pass is refused."""
+    ep = judged_episode(tmp_path)
+    moved = ep.parent / f"{ep.name}-moved"
+
+    got = grade(tmp_path, ep, ScriptedJudge(on_first=lambda: ep.rename(moved)))
+
+    assert not isinstance(got, BaseException), (
+        f"the pass was refused after its episode dir was renamed: {got!r}")
+    assert not os.path.lexists(ep), "the pass recreated the episode dir's old name"
+    assert_plain_file(moved / "judge.yaml")
+    assert J.world_rows(J.judge_record(moved))["b"]["completed_draws"] == 2
+    assert sorted(p.name for p in (moved / "worlds" / "b" / "judge").iterdir()) == [
+        "0.yaml", "1.yaml"]
 
 
 # =======================================================================================

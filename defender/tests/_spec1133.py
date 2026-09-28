@@ -368,6 +368,11 @@ def open_fds_on(path: Path) -> list[int]:
     return sorted(out)
 
 
+def public_names(obj: Any) -> set[str]:
+    """Every name `obj` answers that does not start with `_` (`dir`, so inherited ones too)."""
+    return {n for n in dir(obj) if not n.startswith("_")}
+
+
 def warned(caplog: Any, *needles: str) -> list[str]:
     """Messages logged at WARNING or above that mention any of `needles`."""
     return [r.getMessage() for r in caplog.records
@@ -532,7 +537,8 @@ class OsSpy(PassThroughOs):
     descriptor it returned and whether that descriptor is `FD_CLOEXEC`), every `fsync`, `mkdir`,
     `close`, `dup` and `unlink`. `hook(op, args, kwargs)` runs before a relative (`dir_fd=`)
     `open` / `stat` / `mkdir` / `unlink` is delegated; `after_open(path, dir_fd, fd)` after a
-    successful `open` returns."""
+    successful `open` returns; `before_dup(fd)` once, just before the next `dup(fd)` is
+    delegated (then it is cleared)."""
 
     def __init__(self, *, watch: Path | None = None) -> None:
         self.watch = watch
@@ -545,6 +551,8 @@ class OsSpy(PassThroughOs):
         self.hook: Callable[[str, tuple[Any, ...], dict[str, Any]], None] | None = None
         #: `(path, dir_fd, fd)`, run after a successful `open` returns (before the caller sees it).
         self.after_open: Callable[[str, int | None, int], None] | None = None
+        #: `(fd)`, run once just before the next `dup(fd)` is delegated, then cleared.
+        self.before_dup: Callable[[int], None] | None = None
         self._flags: dict[int, int] = {}
 
     def _relative(self, op: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
@@ -580,6 +588,9 @@ class OsSpy(PassThroughOs):
         os.unlink(path, *args, **kwargs)
 
     def dup(self, fd: int) -> int:
+        if self.before_dup is not None:
+            hook, self.before_dup = self.before_dup, None
+            hook(fd)
         new = os.dup(fd)
         self.dups.append(new)
         return new

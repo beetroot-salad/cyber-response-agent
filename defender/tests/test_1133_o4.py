@@ -18,14 +18,16 @@ every negative has a positive control on the same address.
 - O4.4 `Ledger.for_world(episode, token)`: a plant at `served/<token>.jsonl` or at `served/`
   refuses `declare()` and `record()`.
 - O4.8.1 `Ledger.for_world(episode, <bad or non-case-stable id>)` is `LedgerError` at
-  construction, before anything is written.
+  construction, before anything is written — every id the owner's minting check refuses (a
+  newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees.
 - D4' the scratch ledger: one scratch `Episode` serves two worlds; its base is created empty
   once; a base holding rows is still the review's refusal.
 - O4.5 the priming claim, through `cli.prepare_episode`, which now returns the `Episode` (and
   closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`.
 - O4.6 / S1 the judge's draw removal: a non-plain draw (ELOOP / EMLINK) is refused, logged and
-  left, and the pass goes on; any OTHER `OSError` from the removal (EACCES, EPERM, EROFS,
-  injected through the `Episode`'s `io=` seam) stops the pass and the stale draw stays.
+  left, and the pass goes on; any OTHER `OSError` from the removal (EACCES, EPERM, EROFS, and
+  equally EIO or ENOTDIR, injected through the `Episode`'s `io=` seam) stops the pass and the
+  stale draw stays.
 - D3' `enqueue.draws_on_disk(view, label)` / `draws_on_disk_report(view, label)`: every `.yaml`
   entry of any kind is counted, and a link at `worlds/`, `worlds/<label>` or its `judge/` yields
   no draws (C13: `worlds/b -> worlds/c` never yields c's draws under b).
@@ -34,7 +36,8 @@ every negative has a positive control on the same address.
 - D3' "Changed": `learning/branch/episode.py`'s served-world read makes no minting check (a
   legacy, non-case-stable world label still reads).
 - The sibling door: `run.py --resume <manifest>` refuses a manifest not named `family.yaml`
-  before anything is spent.
+  before anything is spent; and it holds ONE descriptor on the episode dir for the run — the
+  `Episode` it hands the lifecycle.
 
 Red before rev 2: every call that hands an `Episode` (the rev-1 signatures take paths), the
 O4.8 rows, S1's propagation, the view-taking draw reader, the `grade_episode` missing-dir
@@ -401,13 +404,19 @@ def test_o4_4_a_linked_served_folder_refuses_the_world_ledgers_declare(tmp_path)
     pytest.param(7, id="int"),
     pytest.param("base", id="the-capture-itself"),
     pytest.param("e1133.Base", id="capture-case-folded"),
+    pytest.param("e1133.b\n", id="newline"),
+    pytest.param("e1133.b\x00", id="nul"),
+    pytest.param("e1133." + "b" * 250, id="longer-than-a-file-name"),
 ])
 def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world_id):
     """O4.8.1: `Ledger.for_world(episode, world_id)` builds its `served_world` record at
     construction, so a bad id — not one component, not case-stable (the owner's minting
     check, mapped to `LedgerError`), or naming the family's own capture — is a `LedgerError`
-    from `for_world` itself, before anything is written. Control on the same episode: a good
-    token builds, its `.path` / `.base_path` derive from the episode, and it declares."""
+    from `for_world` itself, before anything is written. The check is the OWNER's, whole: an id
+    a hand-rolled "one component, case-stable label" test would pass but the owner's component
+    grammar refuses (a newline, a NUL, a name longer than a file name may be) is refused at
+    construction too, not left for the first write. Control on the same episode: a good token
+    builds, its `.path` / `.base_path` derive from the episode, and it declares."""
     ledger = T.mod("learning.branch.ledger")
     ep, _host = _ledger_episode(tmp_path)
     with S.open_episode(ep) as episode:
@@ -729,15 +738,17 @@ def _stale_draw(ep: Path) -> Path:
     return draw
 
 
-@pytest.mark.parametrize("code", [errno.EACCES, errno.EPERM, errno.EROFS],
-                         ids=["EACCES", "EPERM", "EROFS"])
+@pytest.mark.parametrize("code", [errno.EACCES, errno.EPERM, errno.EROFS, errno.EIO,
+                                  errno.ENOTDIR],
+                         ids=["EACCES", "EPERM", "EROFS", "EIO", "ENOTDIR"])
 def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothing_silently(
         tmp_path, code):
-    """S1: only the core's non-plain refusal (ELOOP / EMLINK) is contained. An EACCES, EPERM or
-    EROFS from removing a stale plain draw — injected through the `Episode`'s `io=` seam: the
-    held root's `unlink` of `worlds/b/judge/0.yaml` raises it — propagates out of the draw loop
-    and stops it: draw 1 is never paid for, and the stale draw is still there for the operator
-    to see (it was never silently kept as this pass's).
+    """S1: only the core's non-plain refusal (ELOOP / EMLINK) is contained. Any other `OSError`
+    from removing a stale plain draw — the design's EACCES, EPERM and EROFS, and equally an EIO
+    or an ENOTDIR, which its parenthetical does not list — injected through the `Episode`'s
+    `io=` seam (the held root's `unlink` of `worlds/b/judge/0.yaml` raises it) propagates out of
+    the draw loop and stops it: draw 1 is never paid for, and the stale draw is still there for
+    the operator to see (it was never silently kept as this pass's).
 
     Control on the same address, no fault: the stale draw is removed and the loop goes on."""
     ep = _judged_episode(tmp_path)
@@ -999,3 +1010,30 @@ def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_pa
                   visualize=lambda _run: None, preflight=T.no_preflight)
     assert rc == 0
     assert len(lifecycle.calls) == 1
+
+
+def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path):
+    """`run.py --resume`'s door opens the episode once, around materialize -> lifecycle, and
+    that one handle serves the manifest read and the world ledger: while the lifecycle runs,
+    exactly one descriptor is open on the episode dir, and it is the `Episode` handed to the
+    lifecycle (its `.dir` the manifest's parent) — no second root held beside it by name."""
+    run = T.mod("run")
+    _base, src = T.runs_base(tmp_path)
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    seen: dict[str, Any] = {}
+
+    class Holding(Recorder):
+        def __call__(self, **kw: Any) -> dict[str, Any]:
+            seen["fds"] = S.open_fds_on(ep)
+            seen["episode"] = kw.get("episode")
+            return super().__call__(**kw)
+
+    rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=Holding(),
+                  visualize=lambda _run: None, preflight=T.no_preflight)
+    assert rc == 0
+    assert "fds" in seen, "the lifecycle never ran"
+    assert len(seen["fds"]) == 1, (
+        f"descriptors open on the episode dir while the sibling ran: {seen['fds']}")
+    assert seen["episode"] is not None, "the lifecycle was handed no Episode"
+    assert Path(seen["episode"].dir) == ep, seen["episode"].dir
+    assert S.open_fds_on(ep) == [], "the sibling's door left the episode dir open"

@@ -11,18 +11,23 @@ The held root, pinned here on the core itself (the `Episode` handle's matrices a
 * `hold_new(parent, name)` makes a missing parent (following its spelling), then makes or adopts
   `name` off the parent's handle WITHOUT following it (a link, file or FIFO there is the core's
   folder refusal, left in place), holds the descriptor it made (a later rename of the name moves
-  the held folder with it), and fsyncs the parent on an `O_RDONLY|O_DIRECTORY` handle.
+  the held folder with it), and fsyncs the parent on an `O_RDONLY|O_DIRECTORY` handle — whether
+  it made the directory or adopted one, the handle opened relative to the parent's descriptor
+  (the parent is resolved by path once), and a failed sync failing the call.
 * `Held.write` / `read` / `mkdir` / `unlink` against every plant: the core's refusal row, the
   tree unchanged, and a positive control on the same address.
 * One walk per write: during a verb every open is relative to a held descriptor (the root is
   never re-resolved by path) and each holding folder is opened once, made in the same walk.
 * Durable append: the leaf is fsynced with every byte on it, then its holding folder on a
-  directory handle opened `O_RDONLY|O_DIRECTORY` (an `O_PATH` handle cannot be fsynced).
+  directory handle opened `O_RDONLY|O_DIRECTORY` (an `O_PATH` handle cannot be fsynced). Every
+  open is relative to a held descriptor, so after a rename the MOVED folder is the one synced;
+  a failed folder sync fails the append.
 * No iterable `text`: anything but `str` / `bytes` is a `TypeError` before any I/O.
 * The view: a `Bound` over the same handle, the readers' surface only, owning nothing.
 * Lifetime (dup-per-verb): a verb in flight when `close()` lands keeps working off its own
-  descriptor, even when the root's old number has been reused for another folder; a verb after
-  `close()` raises `EBADF` and touches nothing.
+  descriptor, even when the root's old number has been reused for another folder; a close
+  landing just as a verb takes its dup cannot free the number under it (the dup and the close
+  share one lock); a verb after `close()` raises `EBADF` and touches nothing.
 * N-h: every descriptor is `O_CLOEXEC`; a child spawned while a root is held does not inherit it.
 * O6: a held root that was removed refuses every write and is never recreated; one that was
   renamed is written in its new place.
@@ -40,6 +45,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -317,12 +323,17 @@ class ParentSyncSpy(S.OsSpy):
         super().fsync(fd)
 
 
-def test_d1_hold_new_fsyncs_the_parent_on_an_o_rdonly_directory_handle(tmp_path):
+@pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
+def test_d1_hold_new_fsyncs_the_parent_on_an_o_rdonly_directory_handle(tmp_path, dir_state):
     """The new directory's own entry is made durable: `hold_new` fsyncs the PARENT (its inode),
     after the directory exists, on a handle that is a directory opened for reading — not the
-    walk's `O_PATH` handle, whose fsync is `EBADF` (C12)."""
+    walk's `O_PATH` handle, whose fsync is `EBADF` (C12). It does so whether it made the
+    directory or adopted one already there (`adopted`): an entry an earlier, crashed caller made
+    may never have been synced, so finding it is no proof it is durable."""
     parent = tmp_path / "episodes"
     parent.mkdir()
+    if dir_state == "adopted":
+        (parent / "ep-1133").mkdir()
     spy = ParentSyncSpy(parent / "ep-1133")
 
     S.hold_new(parent, "ep-1133", os_=spy).close()
@@ -348,6 +359,46 @@ def test_d1_hold_new_takes_one_path_component(tmp_path, name):
     with pytest.raises(ValueError, match=S.NAME_REFUSAL):
         S.hold_new(parent, name)
     assert S.census(tmp_path) == before
+
+
+class DirSyncFails(S.PassThroughOs):
+    """The real `os`, handed in as `os_`, except that an `fsync` of a DIRECTORY fails with
+    `EIO`, as on a filesystem that cannot make a folder's entries durable."""
+
+    def fsync(self, fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errno.EIO, "injected directory fsync failure")
+        os.fsync(fd)
+
+
+def test_d1_a_failed_parent_sync_fails_hold_new_and_leaves_nothing_open(tmp_path):
+    """The parent's fsync is what makes the new directory's entry durable, so its failure is
+    `hold_new`'s: the `EIO` propagates (a best-effort sync that swallowed it would hand back a
+    root whose entry may not survive a crash), and the descriptor on the new directory is closed
+    before it does. Control: the same call with a working fsync holds the directory."""
+    parent = tmp_path / "episodes"
+    parent.mkdir()
+    raised = S.raised_by(lambda: S.hold_new(parent, "ep-1133", os_=DirSyncFails()))
+    assert isinstance(raised, OSError), f"a failed parent fsync did not fail hold_new: {raised!r}"
+    assert raised.errno == errno.EIO, raised
+    assert S.open_fds_on(parent / "ep-1133") == [], "hold_new left the new directory open"
+
+    S.hold_new(parent, "ep-1133").close()
+
+
+def test_d1_hold_new_opens_its_parent_by_path_once_and_everything_else_relative_to_it(tmp_path):
+    """The parent is resolved by path once — `hold_new` follows the parent's spelling — and
+    every later open (the new directory's step, the parent's sync handle) is relative to that
+    descriptor: the parent is never re-resolved by name to be synced, so a parent swapped after
+    the first open is not the folder synced."""
+    parent = tmp_path / "episodes"
+    parent.mkdir()
+    spy = S.OsSpy()
+    S.hold_new(parent, "ep-1133", os_=spy).close()
+    by_path = [o for o in spy.opens if o.dir_fd is None or os.path.isabs(o.path)]
+    assert [o.path for o in by_path] == [str(parent)], (
+        f"hold_new opened by path more than its parent's one resolve: {by_path}")
+    assert spy.opens[0].path == str(parent), spy.opens
 
 
 # =======================================================================================
@@ -518,6 +569,59 @@ def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
         held.write(rel, ROW, mode="append")
         assert spy.fsyncs[at:] == [], "a plain append fsynced"
     assert leaf.read_text(encoding="utf-8") == ROW + ROW
+
+
+@pytest.mark.parametrize("rel", ["rec.jsonl", "fa/rec.jsonl"])
+def test_d1_a_failed_holding_folder_sync_fails_the_durable_append(tree, rel):
+    """The holding folder's fsync is what makes the leaf's entry durable, so its failure is the
+    durable append's: the `EIO` propagates, never swallowed as best-effort (the caller would
+    otherwise take a record whose entry may not survive a crash for a durable one). Control on
+    the same address: a plain append does not sync the folder, and succeeds."""
+    root, _host = tree
+    with S.hold(root, os_=DirSyncFails()) as held:
+        raised = S.raised_by(lambda: held.write(rel, ROW, mode="append", durable=True))
+        assert isinstance(raised, OSError), (
+            f"a failed holding-folder fsync did not fail the durable append: {raised!r}")
+        assert raised.errno == errno.EIO, raised
+        held.write(rel, ROW, mode="append")
+
+
+@pytest.mark.parametrize("rel", ["rec.jsonl", "fa/fb/rec.jsonl"])
+def test_d1_a_durable_append_opens_nothing_by_path(tree, rel):
+    """Every open a durable append makes — each holding folder, the leaf, and the holding
+    folder's sync handle — is a relative name off a held descriptor (`dir_fd`), never a path:
+    the folder synced is the one the walk holds, not whatever the name resolves to now."""
+    root, _host = tree
+    spy = S.OsSpy()
+    with S.hold(root, os_=spy) as held:
+        at = len(spy.opens)
+        held.write(rel, ROW, mode="append", durable=True)
+        opens = spy.opens[at:]
+    assert opens, "the durable append opened nothing through its os_ seam"
+    by_path = [o for o in opens if o.dir_fd is None or os.path.isabs(o.path)]
+    assert by_path == [], f"the durable append opened by path: {by_path}"
+
+
+@pytest.mark.parametrize("rel", ["rec.jsonl", "fa/rec.jsonl"])
+def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_path, rel):
+    """The root is held, not remembered, and so is the folder a durable append syncs: after the
+    held root is renamed, the append lands in the moved tree and the folder fsynced is the moved
+    holding folder (the root itself for a top-level record), on a directory handle — not a
+    lookup of the old name, which no longer exists."""
+    root = tmp_path / "root"
+    (root / "fa").mkdir(parents=True)
+    moved = tmp_path / "moved"
+    spy = S.OsSpy()
+    with S.hold(root, os_=spy) as held:
+        root.rename(moved)
+        at = len(spy.fsyncs)
+        held.write(rel, ROW, mode="append", durable=True)
+        syncs = spy.fsyncs[at:]
+    folder = (moved / rel).parent
+    assert (moved / rel).read_text(encoding="utf-8") == ROW
+    assert not os.path.lexists(root), "the durable append recreated the old name"
+    assert any(s.ino == S.inode(folder) and s.is_dir and not s.getfl & S.O_PATH
+               for s in syncs), f"the moved holding folder {folder} was not fsynced: {syncs}"
 
 
 @pytest.mark.parametrize("mode", ["create", "replace"])
@@ -708,6 +812,54 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
                 f"Held.{verb} after close raised {after!r}, not OSError(EBADF)")
         assert S.census(root) == root_before, f"Held.{verb} after close touched the root"
         assert S.census(decoy) == decoy_before, f"Held.{verb} after close touched the decoy"
+    finally:
+        if "decoy_on" in state:
+            os.close(state["decoy_on"])
+
+
+#: How long the dup waits for a close started on another thread: ample for a close that is
+#: not held off by the lock, and the only wait a correct `Held` costs.
+_CLOSE_GRACE = 0.5
+
+
+@pytest.mark.parametrize("verb", _LIFETIME_VERBS)
+def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp_path, verb):
+    """The dup and the close are one critical section. Just as a verb asks for its private dup
+    of the root (the `os_` seam's `dup`, handed the root's number), `close()` is started on
+    another thread and given a grace period. Had the verb read the root's number outside
+    `close`'s lock, that close would finish inside the grace period and free the number the verb
+    is about to dup — and the next open in a live process takes it: here a DECOY folder of the
+    same shape is put on it (`dup2`). The verb must still act on the ROOT (the record written,
+    removed or read there), leave the decoy untouched, and the close completes once the verb
+    holds its dup."""
+    root, decoy = _lifetime_trees(tmp_path, verb)
+    decoy_before = S.census(decoy)
+    spy = S.OsSpy()
+    held = S.hold(root, os_=spy)
+    state: dict[str, Any] = {}
+
+    def close_at_dup(fd: int) -> None:
+        closer = threading.Thread(target=held.close, daemon=True)
+        closer.start()
+        closer.join(_CLOSE_GRACE)
+        state["closer"] = closer
+        if not closer.is_alive():
+            # The close finished while the verb was about to dup the number it just freed.
+            taken = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            if taken != fd:
+                os.dup2(taken, fd, inheritable=False)
+                os.close(taken)
+            state["decoy_on"] = fd
+
+    spy.before_dup = close_at_dup
+    try:
+        got = S.held_verb(held, verb, _lifetime_name(verb), _payload(verb, "in-flight"))
+        assert "closer" in state, f"Held.{verb} took no dup through its os_ seam"
+        state["closer"].join(S.DEADLINE)
+        assert not state["closer"].is_alive(), "close() never completed once the verb had its dup"
+        assert S.census(decoy) == decoy_before, (
+            f"the {verb} acted through the root's number after close freed it (now the decoy's)")
+        _assert_acted_on_root(root, verb, got)
     finally:
         if "decoy_on" in state:
             os.close(state["decoy_on"])

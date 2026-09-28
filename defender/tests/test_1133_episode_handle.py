@@ -19,7 +19,10 @@ What each section pins:
 
 - Tables and typed classes: the shipped tables equal the spec's, row for row; each record's
   CLASS grants exactly its row's verbs (so no class can grant a verb the matrices never
-  exercise), and each instance answers exactly those.
+  exercise), and each instance answers exactly those. A record's whole public surface, class
+  and instance, is `.path` plus its row's verbs (no `unlink` "convenience" on the shared base);
+  a folder's is `.path` and `.ensure()`; the `Episode`'s and a world's are the surface D2'
+  names and the table's records and folders, nothing more.
 - Doors: `open` / `create` return the `Episode` itself, a context manager that releases the
   held root on exit; there is no public bare constructor.
 - The `io=` seam (a recorder offering ONLY `hold` / `hold_new`): opening is exactly one `hold`
@@ -39,8 +42,9 @@ What each section pins:
   never recreates it; one whose dir was renamed writes into the moved folder.
 - O3: `view()` is a `Bound` (readers and `close` only) reading through the same handle.
 - Lifetime: after `close()`, a write raises `EBADF` and lands nowhere.
-- The durable chain: `Episode.create` fsyncs the episodes root, and `staged.append_durable`
-  fsyncs `staged.yaml` then the episode dir (the `os_` seam, reached through the `io=` seam).
+- The durable chain: `Episode.create` fsyncs the episodes root (whether it made the episode
+  dir or adopted one), and `staged.append_durable` fsyncs `staged.yaml` then the episode dir
+  (the `os_` seam, reached through the `io=` seam).
 - No iterable text: a record's write verb refuses anything but `str` / `bytes`.
 - Name checks run before any held call.
 
@@ -152,6 +156,49 @@ def test_d2_records_sharing_a_verb_set_share_their_class_and_others_do_not(opene
         assert len(classes) == 1, f"the verb set {sorted(verbs)} is spread over {classes}"
     all_classes = [next(iter(c)) for c in by_verbs.values()]
     assert len(set(all_classes)) == len(all_classes), "two verb sets share one class"
+
+
+@pytest.mark.parametrize(("key", "granted"), list(S.RECORD_VERBS.items()))
+def test_d2_a_record_exposes_no_public_name_beyond_path_and_its_rows_verbs(opened, key, granted):
+    """The record's whole public surface is `.path` plus its row's verbs — on its CLASS and on
+    the instance. A verb spelled outside the six the matrices know (an `unlink` or `remove`
+    "convenience" on the shared base, a `held` accessor) is a write the matrices never
+    exercise, so it is not there at all."""
+    rec = S.resolve(opened, key)
+    want = {"path", *granted}
+    assert S.public_names(type(rec)) == want, (
+        f"{key}: its class {type(rec).__name__} exposes "
+        f"{sorted(S.public_names(type(rec)) - want)} beyond `path` and its row {sorted(granted)}")
+    assert S.public_names(rec) == want, (
+        f"{key}: the instance exposes {sorted(S.public_names(rec) - want)} beyond `path` and "
+        f"its row {sorted(granted)}")
+
+
+@pytest.mark.parametrize("key", list(S.FOLDERS))
+def test_d2_a_folder_exposes_no_public_name_beyond_path_and_ensure(opened, key):
+    """A folder's whole public surface, on its class and on the instance, is `.path` and
+    `.ensure()`."""
+    folder = S.resolve(opened, key)
+    assert S.public_names(type(folder)) == {"path", "ensure"}, S.public_names(type(folder))
+    assert S.public_names(folder) == {"path", "ensure"}, S.public_names(folder)
+
+
+def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
+    """D2': an `Episode` answers its two doors (`open`, `create`), `.dir`, `.view()`,
+    `.close()`, and the record table's records and folders by name — its episode-root ones, and
+    `world(label)`, which answers the `world.*` ones. Nothing else is public: no accessor for the
+    held root, no second constructor, no write outside the records."""
+    top = {k for k in (*S.RECORD_VERBS, *S.FOLDERS) if not k.startswith("world.")}
+    in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
+                if k.startswith("world.")}
+    episode_class = {"open", "create", "close", "view", "world", *top}
+    assert S.public_names(S.Episode()) == episode_class, (
+        f"the Episode class exposes {sorted(S.public_names(S.Episode()) - episode_class)} "
+        f"beyond the design's surface, and lacks {sorted(episode_class - S.public_names(S.Episode()))}")
+    assert S.public_names(opened) == {"dir", *episode_class}, sorted(S.public_names(opened))
+    world = opened.world(S.LABEL)
+    assert S.public_names(type(world)) == in_world, sorted(S.public_names(type(world)))
+    assert S.public_names(world) == in_world, sorted(S.public_names(world))
 
 
 @pytest.mark.parametrize("key", list(S.RECORD_VERBS))
@@ -617,12 +664,20 @@ def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
     assert S.census(tree.tmp) == before
 
 
-def test_d1_the_staging_records_durable_chain_is_leaf_then_episode_dir_then_episodes_root(tree):
+@pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
+def test_d1_the_staging_records_durable_chain_is_leaf_then_episode_dir_then_episodes_root(
+        tree, dir_state):
     """`staged.yaml`'s whole chain is durable when `append_durable` returns: `Episode.create`
     fsyncs the episodes root (the episode dir's own entry), and the durable append fsyncs the
     leaf (every byte on it) and then the episode dir holding it, on a directory handle that is
-    not `O_PATH`. Observed through the `os_` seam, reached through the `io=` seam."""
+    not `O_PATH`. Observed through the `os_` seam, reached through the `io=` seam.
+
+    The episodes root is fsynced whether `create` made the episode dir or adopted one already
+    there (`adopted`): an entry an earlier, crashed launcher made may never have been synced, so
+    adopting it is no proof it is durable."""
     fresh = tree.episodes / "ep-durable"
+    if dir_state == "adopted":
+        fresh.mkdir()
     staged = fresh / LAYOUT.staged
     spy = S.OsSpy(watch=staged)
     rec_io = S.RecordingIo(os_=spy)

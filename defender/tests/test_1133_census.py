@@ -65,9 +65,15 @@ call `hold` and `hold_new`, so the check is not vacuous.
   present or not.
 * *Calls.* `EpisodePaths(`, `base_file(` and `staged_path(` are called only in `NB_READERS`:
   the root-binding readers and path-typed functions D3' names, and the O5 carve-outs.
-* *Doors.* `Episode.open` / `Episode.create` are called only in the doors D3' names
-  (`DOORS`) plus `review.review` / `replay_one` for the scratch; and each door in
-  `DOORS_REQUIRED` does call its verb, so the scan is not vacuous.
+* *Doors.* `Episode.open` / `Episode.create` are used — called, or referenced any other way
+  (a module-level alias's right-hand side, an argument, a local alias) — only in the doors D3'
+  names (`DOORS`) plus `review.review` / `replay_one` for the scratch. The scan resolves import
+  aliases, module attributes and module-level assignment aliases of the class or of a door
+  (`module_aliases`, keyed by the door scan's own resolver), counts a door verb on a value's
+  class (`type(ep).open`), and keys any `getattr` / `vars` reach into the class as a hit of
+  its own. Each door in `DOORS_REQUIRED` does call its verb, so the scan is not vacuous; and
+  the `Episode`'s public class/static methods are exactly `open` and `create`, with no public
+  function in `_episode_handle`, so there is no third door the scan does not look for.
 
 Every scan is self-tested on synthetic source: each violating shape is collected, each compliant
 shape is not. A module that is missing or does not parse fails the scan.
@@ -82,6 +88,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import importlib
 import inspect
 from collections.abc import Iterable
 from pathlib import Path
@@ -282,8 +289,10 @@ def _ref_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
     return None
 
 
-def module_aliases(tree: ast.Module, env: Any) -> dict[str, str]:
-    """Module-level `NAME = <vocabulary entry>` bindings (chains followed), name -> entry."""
+def module_aliases(tree: ast.Module, env: Any, key: Any = _value_key) -> dict[str, str]:
+    """Module-level `NAME = <entry>` bindings (chains followed), name -> entry. `key(node, env,
+    aliases)` says what entry an expression names: the census vocabulary (`_value_key`) unless
+    another is given (the door scan's `_door_key`)."""
     aliases: dict[str, str] = {}
     changed = True
     while changed:
@@ -297,9 +306,9 @@ def module_aliases(tree: ast.Module, env: Any) -> dict[str, str]:
                 continue
             if not isinstance(target, ast.Name):
                 continue
-            key = _value_key(value, env, aliases)
-            if key is not None and aliases.get(target.id) != key:
-                aliases[target.id] = key
+            named = key(value, env, aliases)
+            if named is not None and aliases.get(target.id) != named:
+                aliases[target.id] = named
                 changed = True
     return aliases
 
@@ -998,18 +1007,63 @@ def o5_calls(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
     return out
 
 
+_EPISODE = "Episode"
+_DOOR_VERBS = frozenset({"open", "create"})
+#: The builtins that reach into a class by name: a hit on `Episode` whatever attribute they ask.
+_CLASS_REACH = frozenset({"builtins.getattr", "builtins.vars"})
+
+
+def _class_of_value(node: ast.expr, env: Any) -> bool:
+    """`type(v)` or `v.__class__`: a value's class, which may be an `Episode`."""
+    if isinstance(node, ast.Call):
+        return _astlib().callee(node, env) == "builtins.type" and len(node.args) == 1
+    return isinstance(node, ast.Attribute) and node.attr == "__class__"
+
+
+def _door_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
+    """What an expression names among the handle's doors: `"Episode"` (the class), `"Episode.open"`
+    / `"Episode.create"`, or `None`. Resolved through import aliases, module attributes and
+    module-level assignment aliases (`_Ep = Episode`, `_reopen = Episode.open`); a door verb on a
+    value's class (`type(ep).open`, `ep.__class__.create`) counts as the door."""
+    if isinstance(node, ast.Name) and node.id in aliases:
+        return aliases[node.id]
+    if isinstance(node, ast.Attribute) and node.attr in _DOOR_VERBS and (
+            _class_of_value(node.value, env) or _door_key(node.value, env, aliases) == _EPISODE):
+        return f"{_EPISODE}.{node.attr}"
+    if not isinstance(node, (ast.Name, ast.Attribute)):
+        return None
+    parts = (_astlib().origin(node, env) or ast.unparse(node)).split(".")
+    if parts[-1] == _EPISODE:
+        return _EPISODE
+    if len(parts) >= 2 and parts[-2] == _EPISODE and parts[-1] in _DOOR_VERBS:
+        return f"{_EPISODE}.{parts[-1]}"
+    return None
+
+
 def o5_doors(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
-    """Every `(module, scope, verb)` call of `Episode.open` / `Episode.create`, resolved through
-    import aliases and module attributes."""
+    """Every `(module, scope, verb)` use of `Episode.open` / `Episode.create` — a call, and any
+    other reference (a module-level alias's right-hand side, an argument, a default) — resolved
+    through import aliases, module attributes and module-level assignment aliases (the census's
+    `module_aliases`), plus a door verb on a value's class; and every `getattr` / `vars` reach
+    into the `Episode` class (verb `getattr` / `vars`), whatever it asks for."""
     env = _astlib().module_env(tree)
+    aliases = module_aliases(tree, env, _door_key)
+    seen = _Scoped()
+    seen.visit(tree)
     out = set()
-    for where, call in _scoped_calls(tree):
-        origin = _astlib().callee(call, env)
-        dotted = origin if origin is not None else (
-            ast.unparse(call.func) if isinstance(call.func, ast.Attribute) else "")
-        parts = dotted.split(".")
-        if len(parts) >= 2 and parts[-2] == "Episode" and parts[-1] in ("open", "create"):
-            out.add((module, where, parts[-1]))
+    for where, call in seen.calls:
+        named = _door_key(call.func, env, aliases)
+        if named is not None and named != _EPISODE:
+            out.add((module, where, named.rsplit(".", 1)[1]))
+        reach = _astlib().callee(call, env)
+        if reach in _CLASS_REACH and call.args and (
+                _class_of_value(call.args[0], env)
+                or _door_key(call.args[0], env, aliases) == _EPISODE):
+            out.add((module, where, reach.removeprefix("builtins.")))
+    for where, node in seen.refs:
+        named = _door_key(node, env, aliases)
+        if named is not None and named != _EPISODE:
+            out.add((module, where, named.rsplit(".", 1)[1]))
     return out
 
 
@@ -1096,8 +1150,11 @@ def test_o5_the_call_and_door_scans_see_every_spelling():
     `base_file(` / `staged_path(` are collected bare, through an import alias, as a module
     attribute, on any receiver, and in a nested scope; `Episode.open` / `Episode.create` bare,
     through an import alias and as a module attribute. A different callee sharing a verb name
-    (`bound.open(...)`, `Path.open()`, `record.create(...)`) is not a door, a mention that is not
-    a call is not collected, and the containment check scopes a nested `def` to its function."""
+    (`bound.open(...)`, `Path.open()`, `record.create(...)`) is not a door; a mention that is not
+    a call is not collected by the CALL scan, but IS by the door scan (a door handed on as a
+    value is still a door used there — `test_o5_the_door_scan_sees_aliases_references_getattr_and_
+    a_values_class` has the rest); and the containment check scopes a nested `def` to its
+    function."""
     source = '''
 import defender._episode_handle
 from defender._episode_handle import Episode
@@ -1130,6 +1187,9 @@ def opens(d, bound, record):
     bound.open("x")
     d.open()
     record.create("x")
+
+
+def mentions():
     kinds = (Paths, Episode.open)
     return kinds
 
@@ -1142,11 +1202,99 @@ def base_file(d):
         ("m", "uses", "EpisodePaths"), ("m", "uses", "base_file"),
         ("m", "uses", "staged_path"), ("m", "outer.inner", "EpisodePaths"),
     }, sorted(o5_calls("m", tree))
-    assert o5_doors("m", tree) == {("m", "opens", "open"), ("m", "opens", "create")}, (
-        sorted(o5_doors("m", tree)))
+    assert o5_doors("m", tree) == {
+        ("m", "opens", "open"), ("m", "opens", "create"), ("m", "mentions", "open"),
+    }, sorted(o5_doors("m", tree))
     assert _allowed(("m", "outer.inner", "EpisodePaths"), {("m", "outer")})
     assert not _allowed(("m", "outer_more", "EpisodePaths"), {("m", "outer")})
     assert not _allowed(("n", "outer", "EpisodePaths"), {("m", "outer")})
+
+
+def test_o5_the_door_scan_sees_aliases_references_getattr_and_a_values_class():
+    """The door scan's controls for the spellings a plain call scan misses, on synthetic
+    source. Each is collected in the scope it sits in:
+
+    * a module-level alias of a door (`_reopen = Episode.open`): its right-hand side at
+      `<module>`, and every call through it (`_reopen(d)`) or hand-off of it (`run(_reopen, d)`)
+      in its own function;
+    * a module-level alias of the class (`_Ep = Episode`), a door reached through it
+      (`_Ep.open(d)`), and a chained alias (`_make = _Ep.create`, then `_make(d)`);
+    * a door referenced, not called (`pool.submit(Episode.create, d)`, a local `opener =
+      Episode.open`);
+    * `getattr(Episode, ...)` / `vars(<module>.Episode)`, keyed `getattr` / `vars` whatever
+      they ask for;
+    * a door verb on a value's class (`type(ep).open(d)`, `ep.__class__.create(d)`).
+
+    Not collected: the class itself as a type (annotations, `isinstance`), the class aliased
+    with no door taken off it, and other callees sharing a verb name."""
+    source = '''
+from pathlib import Path
+from defender._episode_handle import Episode
+from defender import _episode_handle
+
+_reopen = Episode.open
+_Ep = Episode
+_make = _Ep.create
+
+
+def via_method_alias(d):
+    with _reopen(d) as ep:
+        return ep
+
+
+def via_class_alias(d):
+    return _Ep.open(d)
+
+
+def via_chained_alias(d):
+    return _make(d)
+
+
+def handed_on(d, run):
+    return run(_reopen, d)
+
+
+def by_reference(d, pool):
+    return pool.submit(Episode.create, d)
+
+
+def by_local_alias(d):
+    opener = Episode.open
+    return opener(d)
+
+
+def by_getattr(d):
+    return getattr(Episode, "open")(d)
+
+
+def by_vars(d):
+    return vars(_episode_handle.Episode)["create"](d)
+
+
+def by_value_class(ep, d):
+    return type(ep).open(d)
+
+
+def by_dunder_class(ep, d):
+    return ep.__class__.create(d)
+
+
+def fine(episode: Episode, other: "Episode | None", bound, record, d: Path) -> Episode:
+    bound.open("x")
+    record.create("x")
+    d.open()
+    kind = _Ep
+    return isinstance(episode, Episode) and kind and type(bound).__name__
+'''
+    got = o5_doors("m", ast.parse(source))
+    assert got == {
+        ("m", "<module>", "open"), ("m", "<module>", "create"),
+        ("m", "via_method_alias", "open"), ("m", "via_class_alias", "open"),
+        ("m", "via_chained_alias", "create"), ("m", "handed_on", "open"),
+        ("m", "by_reference", "create"), ("m", "by_local_alias", "open"),
+        ("m", "by_getattr", "getattr"), ("m", "by_vars", "vars"),
+        ("m", "by_value_class", "open"), ("m", "by_dunder_class", "create"),
+    }, sorted(got)
 
 
 def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_readers():
@@ -1175,3 +1323,23 @@ def test_o5_only_the_doors_open_or_create_an_episode():
         "opens or creates an Episode outside a door (take the door's Episode instead):\n"
         + "".join(f"  {e}\n" for e in extra))
     assert not missing, f"a door that must open or create its Episode does not: {missing}"
+
+
+def test_o5_the_episodes_only_constructors_are_its_two_doors():
+    """The door scan keys on `Episode.open` / `Episode.create`, so those must be the only ways to
+    have an `Episode`: its public class- and static methods are exactly `open` and `create`
+    (a third, `Episode.at(d)`, would be a door no scan looks for), and `_episode_handle`
+    defines no public module-level function (an `open_episode(d)` wrapper would be one too)."""
+    handle_mod = importlib.import_module("defender._episode_handle")
+    episode = handle_mod.Episode
+    constructors = {
+        n for n in dir(episode) if not n.startswith("_")
+        and isinstance(inspect.getattr_static(episode, n), (classmethod, staticmethod))}
+    assert constructors == {"open", "create"}, (
+        f"the Episode's public class/static methods are {sorted(constructors)}, not exactly "
+        "the doors open and create")
+    functions = {n for n, v in vars(handle_mod).items() if not n.startswith("_")
+                 and inspect.isfunction(v) and v.__module__ == handle_mod.__name__}
+    assert functions == set(), (
+        f"_episode_handle defines public functions {sorted(functions)}: a door outside "
+        "Episode.open / Episode.create")
