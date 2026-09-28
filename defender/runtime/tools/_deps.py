@@ -55,7 +55,7 @@ def _overflow_filter_hint(
 ) -> str:
     sql_shim = permission.command_shape.SQL_SHIM
     if _lane_admits(policy, f"{sql_shim} 'SELECT 1'"):
-        reducer = f'{sql_shim} "SELECT count(*) FROM data"'
+        reducer = f'{sql_shim} "DESCRIBE data"'
     else:
         return (
             "You have no bash reducer for this. Narrow it with the read tool's substring "

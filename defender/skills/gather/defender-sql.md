@@ -1,6 +1,6 @@
 ---
 name: defender-gather-sql
-description: The defender-sql quirks that cost a query — how the payload becomes the table `data`, the binding each payload shape needs, and the results that lie (a TEXT-typed number, a count over a truncated payload). Read before writing SQL over a payload; assumes you know SQL.
+description: The defender-sql quirks that cost a query — how the payload becomes the table `data`, the binding each payload shape needs, and the results that lie (a count over a truncated payload, a list compared as a value). Read before writing SQL over a payload; assumes you know SQL.
 ---
 
 You know SQL. What follows is only what this tool does differently, and the places
@@ -10,16 +10,18 @@ a query that looks right returns something wrong.
 
 It parses to one table named `data` — no wrapper envelope to reach through. A
 top-level object yields ONE row whose columns are its keys; a top-level array
-yields one row per element. External access is disabled, so nothing here reaches a
-file or the network.
+yields one row per element. Or, with `--rows`/`--names`, `data` is the declared
+rows: one row per row, one column per name (below). External access is disabled,
+so nothing here reaches a file or the network.
 
 `DESCRIBE data` names the columns, and for a nested column it prints the field
 names AND types inside it — one call, before you guess at a shape. On a query error
 the tool prints the columns plus the idiom for that shape.
 
 **Its exit codes are its own, not the `query` tool's:** `1` = query error, fix the
-SQL; `2` = the payload never arrived or is not JSON. A `2` here is *not* the
-data-source outage `failure-modes.md` sends you to escalate.
+SQL — or a wrong `--rows`/`--names` declaration, fix that; `2` = the payload never
+arrived or is not JSON. A `2` here is *not* the data-source outage
+`failure-modes.md` sends you to escalate.
 
 ## The binding each shape needs
 
@@ -36,26 +38,41 @@ SELECT h.<field> FROM (SELECT unnest(hits) h FROM data) WHERE h.<other> = '<valu
   `Candidate bindings: : "unnest"`.
 - `@`-prefixed and dotted field names need double quotes (`h."@timestamp"`).
 
-**Positional rows behind a column header** — `{columns, values, row_count}`.
-`unnest(values)` yields a POSITIONAL JSON array, NOT a struct, so `v.<field>`
-fails. `SELECT columns FROM data` names the positions; index 1-based and unpack:
+**Positional rows behind a list of column names** — ES|QL's `{columns, values}`,
+or any payload whose rows are bare arrays. Undeclared, the whole payload is ONE row
+(`count(*)` answers 1, and the tool says so on stderr). Declare where the rows and
+the names are, and they become a table with those names:
 
-```sql
-SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
+```bash
+cat <payload> | defender-sql --rows values --names columns '<SQL>'
 ```
 
-`->>'$'` returns **TEXT**. Cast before comparing or summing a number
-(`(v[3]->>'$')::BIGINT`), or the comparison is lexical and the sum fails.
+`--rows` is the list of rows, `--names` a list of strings or of objects with a
+`name`; a nested layout is a path (`--rows tables[0].rows --names tables[0].columns`).
+A wrong declaration exits `1` and names the defect.
 
-**Parenthesise every `->>`.** `->>` binds more loosely than the operators written
-before it (`=`, `<>`, AND, OR, NOT, `||` …) and takes that whole expression as its
-JSON: `'x' = v[1]->>'$'` reads `('x' = v[1])` as the JSON, and so does everything
-before a second `->>` after an AND. The answer is an error or a silent, wrong
-count. The tool refuses those shapes; write:
+- **Double-quote a dotted or `@` name** (`"source.ip"`). Unquoted, `source.ip`
+  fails; single-quoted, `'source.ip'` is a string constant and compares silently
+  false.
+- **Each column is typed from its own JSON values:** all numbers → a number, so
+  compare and sum with no cast; all text → text, so a time stays the source's own
+  string; all booleans → boolean.
+- **A column that holds lists** (a multi-valued field) is a LIST: `=` on it fails.
+  Filter with `list_contains("host.ip", '10.0.0.5')`; to count or group its
+  elements, `unnest` it in a subquery first — `GROUP BY` on the column itself groups
+  whole lists. The tool names every list column on stderr.
+- **A column of mixed kinds or objects** is JSON: unpack it with `(col->>'$')`.
 
 ```sql
-SELECT v[1]->>'$' FROM (SELECT unnest(values) v FROM data) WHERE (v[2]->>'$') = '203.0.113.7' AND (v[1]->>'$')::BIGINT > 9
+SELECT "source.ip", failed FROM data WHERE "source.ip" = '203.0.113.7' AND failed > 9
 ```
+
+**Parenthesise every `->>`** (a JSON column, or a JSON source). `->>`
+binds more loosely than the operators written before it (`=`, `<>`, AND, OR, NOT,
+`||` …) and takes that whole expression as its JSON: `'x' = col->>'$'` reads `('x' = col)` as
+the JSON, and so does everything before a second `->>` after an AND. The answer is
+an error or a silent, wrong count. The tool refuses those shapes; write
+`(col->>'$') = 'x' AND (other->>'$') = 'y'`.
 
 **Flat** — the payload's keys ARE `data`'s columns; no `unnest`.
 

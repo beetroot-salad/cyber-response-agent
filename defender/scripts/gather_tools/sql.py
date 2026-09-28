@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -71,7 +72,7 @@ _MISBOUND = (
     "defender-sql: query error: `->>` binds more loosely than the operators before it (`=`, "
     "`<>`, AND, OR, NOT, `||` …), so here it takes that whole expression as its JSON — which "
     "errors on some rows and answers a silent, wrong count on others. Parenthesise every `->>`: "
-    "`(v[1]->>'$') = '<value>' AND (v[2]->>'$') = '<value>'`. (An expression you mean as the "
+    "`(col->>'$') = '<value>' AND (other->>'$') = '<value>'`. (An expression you mean as the "
     "JSON goes in `CAST(<expression> AS JSON)->>'<path>'`.)"
 )
 _UNCHECKABLE = (
@@ -125,36 +126,46 @@ def _arrow_refusal(con, sql: str) -> str | None:
     return None
 
 
-def _shape_hint(con, message: str) -> str:
+def _shape_hint(con, message: str, *, declared: bool = False) -> str:
+    if declared:
+        return _declared_hint(con, message)
     try:
         cols = _top_level_columns(con)
     except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
         return ""
-    colset = set(cols)
     # Each branch punctuates itself, so a copyable query does not get a trailing period.
-    if "hits" in colset:
+    if "hits" in cols:
         idiom = (
             "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
             f"    SELECT h.\"@timestamp\", h.message {_HITS_FROM} "
             "WHERE h.<field> = '<value>'"
         )
-    elif "values" in colset and "columns" in colset:
-        try:
-            order = ", ".join(
-                f"{i + 1}={c['name']}"
-                for i, c in enumerate(con.execute("SELECT columns FROM data").fetchone()[0])
-            )
-        except Exception:  # noqa: BLE001
-            order = "see `SELECT columns FROM data`"
-        idiom = (
-            "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
-            f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unpack the JSON: "
-            "`(v[2]->>'$') = '<value>'`."
-        )
     else:
         idiom = ("flat/array shape — the payload's keys ARE `data`'s columns; "
                  "`SELECT * FROM data`, no `unnest`.")
     return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}{_error_note(message)}"
+
+
+def _declared_hint(con, message: str) -> str:
+    """The query-error hint over a declared table: its columns and types, plus the clause for
+    the two errors a declared column's type causes — a list compared as a scalar, and a JSON
+    column compared as text."""
+    try:
+        described = con.execute("DESCRIBE data").fetchall()
+    except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
+        return ""
+    cols = ", ".join(f"{_quote_ident(row[0])} {row[1]}" for row in described)
+    low = message.lower()
+    clause = ""
+    if "[]" in message and ("conversion" in low or "cast" in low):
+        clause = ("\n  A LIST column holds lists, not values: filter with "
+                  "`list_contains(<col>, '<value>')`, or `unnest` the column in a subquery to get "
+                  "one row per element.")
+    elif "malformed json" in low:
+        clause = ("\n  A JSON column holds JSON, not text: compare `(<col>->>'$')`, or "
+                  "`CAST(<col> AS VARCHAR)` for its JSON text.")
+    return (f"\n  hint: `data` has the declared columns [{cols}]; double-quote a name that "
+            f"holds `.`, `@` or other punctuation.{clause}")
 
 
 def _disambiguate_columns(columns: list[str]) -> tuple[list[str], list[str]]:
@@ -211,6 +222,266 @@ def _truncation_note(con) -> str:
     )
 
 
+def _declared_truncation_note(payload: object) -> str:
+    """The flagged path's truncation note, read off the parsed envelope: under the flag the
+    envelope's own fields are not in `data`, so `_truncation_note` cannot see them."""
+    if not (isinstance(payload, dict) and payload.get("truncated") is True):
+        return ""
+    return (
+        "defender-sql: note — the payload declares `truncated`: these rows are not all that "
+        "matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated "
+        "payload cannot support an absence refutation."
+    )
+
+
+def _list_column_note(con) -> str:
+    """O4: a list column never answers silently as if it held scalars."""
+    try:
+        lists = [row[0] for row in con.execute("DESCRIBE data").fetchall()
+                 if row[1].endswith("[]")]
+    except Exception:  # noqa: BLE001
+        return ""
+    if not lists:
+        return ""
+    named = ", ".join(_quote_ident(name) for name in lists)
+    first = _quote_ident(lists[0])
+    return (
+        f"defender-sql: note — list column(s) {named}: each cell is a LIST, not a value. Filter with "
+        f"`list_contains({first}, '<value>')`; to count or group its elements, `unnest` it in a "
+        "subquery first. `GROUP BY` or `count(DISTINCT …)` on the column itself groups whole "
+        "lists, not their elements."
+    )
+
+
+#: A payload key echoed into a copyable command only when it is this plain.
+_ECHOABLE_KEY = re.compile(r"[A-Za-z0-9_@-]+")
+#: A list of objects carrying a string `name`, as `DESCRIBE` spells its type.
+_NAMED_STRUCTS = re.compile(r'STRUCT\((?:.*, )?"?name"? VARCHAR(?:, .*)?\)\[\]')
+
+
+def _positional_rows_note(con) -> str:
+    """O6: the note an UNFLAGGED run prints when the payload holds positional rows.
+
+    Detected by type only — a top-level column that is a list of lists, whatever its element
+    type — never by key name. Unflagged, such a payload is one row, so `count(*)` answers 1
+    without an error; this is the only thing that says so.
+    """
+    try:
+        described = con.execute("DESCRIBE data").fetchall()
+        rows_keys = [name for name, typ, *_ in described if typ.endswith("[][]")]
+        if not rows_keys:
+            return ""
+        rows_key = rows_keys[0]
+        names_key = None
+        for name, typ, *_ in described:
+            if name == rows_key or not (typ == "VARCHAR[]" or _NAMED_STRUCTS.fullmatch(typ)):
+                continue
+            lengths = con.execute(
+                f"SELECT len({_quote_ident(name)}), len({_quote_ident(rows_key)}[1]) "
+                "FROM data LIMIT 1").fetchone()
+            if lengths and lengths[0] is not None and lengths[0] == lengths[1]:
+                names_key = name
+                break
+    except Exception:  # noqa: BLE001 — advisory only
+        return ""
+    rows_arg = rows_key if _ECHOABLE_KEY.fullmatch(rows_key) else "<key>"
+    names_arg = (names_key if names_key is not None and _ECHOABLE_KEY.fullmatch(names_key)
+                 else "<names-key>")
+    where = f"under {rows_key}" if rows_arg == rows_key else "under a top-level key"
+    # The declaration ends the note, so a copy of it carries no trailing punctuation.
+    return (
+        f"defender-sql: note — this payload holds positional rows {where}. Undeclared, the "
+        "whole payload is ONE row of `data`, so `count(*)` answers 1. Declare them: "
+        f"--rows {rows_arg} --names {names_arg}"
+    )
+
+
+class _Refused(Exception):
+    """A defect in the `--rows`/`--names` declaration or its payload, with its exit code."""
+
+    def __init__(self, message: str, code: int = EXIT_QUERY_ERROR) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+_PATH = re.compile(r"[^.\[\]]+(?:\[\d+\])?(?:\.[^.\[\]]+(?:\[\d+\])?)*")
+_PATH_STEP = re.compile(r"([^.\[\]]+)(?:\[(\d+)\])?")
+
+
+def _resolve(payload: object, path: str, flag: str) -> object:
+    if not _PATH.fullmatch(path):
+        raise _Refused(f"{flag} {path!r} is not a path: write `key`, `key.key` or `key[n]`.")
+    node = payload
+    for step in _PATH_STEP.finditer(path):
+        key, index = step.group(1), step.group(2)
+        if not isinstance(node, dict) or key not in node:
+            raise _Refused(f"{flag} {path!r} does not resolve: no key {key!r} there.")
+        node = node[key]
+        if index is not None:
+            if not isinstance(node, list) or int(index) >= len(node):
+                raise _Refused(f"{flag} {path!r} does not resolve: {key!r} has no "
+                               f"element [{index}].")
+            node = node[int(index)]
+    return node
+
+
+_ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _column_names(declared: object, path: str) -> list[str]:
+    if not isinstance(declared, list):
+        raise _Refused(f"--names {path!r} is not a list.")
+    if not declared:
+        raise _Refused(f"--names {path!r} names no columns.")
+    if all(isinstance(item, str) for item in declared):
+        names = list(declared)
+    elif all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in declared):
+        names = [item["name"] for item in declared]
+    else:
+        raise _Refused(f"--names {path!r} must be all strings, or all objects with a string "
+                       "`name`.")
+    seen: dict[str, str] = {}
+    for name in names:
+        if not name or any(unicodedata.category(ch) == "Cc" for ch in name):
+            raise _Refused(f"--names {path!r} holds an empty name or one with a control "
+                           f"character: {name!r}.")
+        # duckdb folds identifiers by ASCII case only, so that is the clash it would refuse.
+        folded = name.translate(_ASCII_FOLD)
+        if folded in seen:
+            raise _Refused(f"--names {path!r} names a column twice: {seen[folded]!r} and "
+                           f"{name!r} are the same column to the engine.")
+        seen[folded] = name
+    return names
+
+
+def _kind(value: object) -> str:
+    # `bool` first: `isinstance(True, int)` holds.
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, list):
+        return "list"
+    return "object"
+
+
+def _scalar_type(values: list) -> str:
+    kinds = {_kind(v) for v in values}
+    if not kinds or kinds == {"str"}:
+        return "VARCHAR"
+    if kinds == {"bool"}:
+        return "BOOLEAN"
+    if kinds == {"int"}:
+        if all(-(1 << 63) <= v < (1 << 63) for v in values):
+            return "BIGINT"
+        if all(-(1 << 127) <= v < (1 << 127) for v in values):
+            return "HUGEINT"
+        return "JSON"
+    if kinds <= {"int", "float"}:
+        return "DOUBLE"
+    return "JSON"
+
+
+def _column_type(cells: list) -> tuple[str, bool]:
+    """@owns column_type — the declared table's column types: `(sql_type, wrap)`, where `wrap`
+    says a non-list cell is stored as a one-element list.
+
+    A column's type is a function of that column's own JSON values only — never of a sibling
+    column, of what a string's text looks like, or of a vendor's declared type (O2).
+    """
+    present = [cell for cell in cells if cell is not None]
+    if not any(isinstance(cell, list) for cell in present):
+        return _scalar_type(present), False
+    elements = [el for cell in present for el in (cell if isinstance(cell, list) else [cell])
+                if el is not None]
+    if any(isinstance(el, (list, dict)) for el in elements):
+        return "JSON", False
+    return f"{_scalar_type(elements)}[]", True
+
+
+def _quote_ident(name: str) -> str:
+    """How payload text enters statement text, and the only way: as one double-quoted
+    identifier. Control characters never reach it; `_column_names` refuses them."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: str) -> object:
+    """M1+M2: load the declared rows as `data`, one column per declared name.
+
+    Payload text enters statement text only as `_quote_ident` identifiers, and only after the
+    sandbox is locked: the unlocked load sees synthetic keys `c0…cN` and types from
+    `_column_type`'s fixed vocabulary. Returns the parsed payload.
+    """
+    if len(raw) > _MAX_OBJECT_SIZE:
+        raise _Refused(f"stdin is over the {_MAX_OBJECT_SIZE}-byte cap.", EXIT_INPUT_ERROR)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise _Refused(f"stdin is not one JSON document (--rows/--names need one; NDJSON "
+                       f"cannot be declared): {exc}", EXIT_INPUT_ERROR) from None
+    rows = _resolve(payload, rows_path, "--rows")
+    names = _column_names(_resolve(payload, names_path, "--names"), names_path)
+    if not isinstance(rows, list) or not all(isinstance(row, list) for row in rows):
+        raise _Refused(f"--rows {rows_path!r} is not a list of lists (one list per row).")
+    for i, row in enumerate(rows):
+        if len(row) != len(names):
+            raise _Refused(f"--rows {rows_path!r}: row {i} holds {len(row)} values but "
+                           f"--names {names_path!r} names {len(names)} columns.")
+
+    types = [_column_type([row[k] for row in rows]) for k in range(len(names))]
+    ndjson = os.path.join(scratch, "rows.ndjson")
+    with open(ndjson, "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps({
+                f"c{k}": ([cell] if wrap and cell is not None and not isinstance(cell, list)
+                          else cell)
+                for k, (cell, (_, wrap)) in enumerate(zip(row, types, strict=True))
+            }))
+            handle.write("\n")
+    columns = "{" + ", ".join(f"'c{k}': '{typ}'" for k, (typ, _) in enumerate(types)) + "}"
+    con.execute(
+        "CREATE TABLE _rows AS SELECT * FROM read_json(?, format='newline_delimited', "
+        f"columns={columns}, maximum_object_size={_MAX_OBJECT_SIZE})",
+        [ndjson],
+    )
+    _lock(con)
+    select = ", ".join(f"c{k} AS {_quote_ident(name)}" for k, name in enumerate(names))
+    con.execute(f"CREATE TABLE data AS SELECT {select} FROM _rows")
+    con.execute("DROP TABLE _rows")
+    return payload
+
+
+def _inferred_load(con, raw: bytes, scratch: str) -> None:
+    """The unflagged load: `read_json_auto` over the payload as it came, then the lock."""
+    import duckdb
+
+    payload_path = os.path.join(scratch, "data.json")
+    with open(payload_path, "wb") as handle:
+        handle.write(raw)
+    try:
+        con.execute(
+            "CREATE TABLE data AS SELECT * FROM "
+            f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
+            [payload_path],
+        )
+    except duckdb.Error as exc:
+        raise _Refused(f"stdin is not valid JSON or NDJSON: {exc}", EXIT_INPUT_ERROR) from None
+    _lock(con)
+
+
+def _lock(con) -> None:
+    # A zoned value crosses into Python in the session's zone, which otherwise follows the
+    # host's: a plain timestamp cast to a zoned one, or a day bucket, would shift by the host's
+    # offset, and an empty `TZ` names a zone pytz cannot resolve.
+    con.execute("SET TimeZone='UTC'")
+    con.execute("SET enable_external_access=false")
+    con.execute("SET lock_configuration=true")
+
+
 def _no_runtime(module: str) -> int:
     if os.environ.get("DEFENDER_BOX"):
         # Inside a box the runtime comes from the image (the mount is read-only), so the
@@ -235,13 +506,22 @@ def _no_runtime(module: str) -> int:
 _MISSING_MODULE = re.compile(r"Required module '([^']+)' failed to import")
 
 
-def _run(sql: str) -> int:
+def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) -> int:
+    if (rows_path is None) != (names_path is None):
+        print("defender-sql: --rows and --names go together: --rows says where the positional "
+              "rows are, --names where their column names are. Pass both, or neither.",
+              file=sys.stderr)
+        return EXIT_QUERY_ERROR
+    declared = rows_path is not None
+
     try:
         import duckdb
     except ImportError:
         return _no_runtime("duckdb")
 
-    raw = sys.stdin.buffer.read()
+    # Under the flag the payload is parsed in Python, so the cap is checked before that; one
+    # byte over is enough to know.
+    raw = sys.stdin.buffer.read(_MAX_OBJECT_SIZE + 1) if declared else sys.stdin.buffer.read()
     if not raw.strip():
         print(
             "defender-sql: no input on stdin — the payload is empty. This is NOT an "
@@ -253,31 +533,25 @@ def _run(sql: str) -> int:
 
     scratch = tempfile.mkdtemp(prefix="defender-sql-")
     try:
-        payload_path = os.path.join(scratch, "data.json")
-        with open(payload_path, "wb") as handle:
-            handle.write(raw)
-
         con = duckdb.connect(":memory:")
         try:
-            con.execute(
-                "CREATE TABLE data AS SELECT * FROM "
-                f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
-                [payload_path],
-            )
-        except duckdb.Error as exc:
-            print(f"defender-sql: stdin is not valid JSON or NDJSON: {exc}",
-                  file=sys.stderr)
-            return EXIT_INPUT_ERROR
+            payload: object = None
+            if rows_path is not None and names_path is not None:
+                payload = _declared_load(con, raw, rows_path, names_path, scratch)
+            else:
+                _inferred_load(con, raw, scratch)
+        except _Refused as exc:
+            print(f"defender-sql: {exc}", file=sys.stderr)
+            return exc.code
 
-        # A zoned value crosses into Python in the session's zone, which otherwise follows the
-        # host's: a plain timestamp cast to a zoned one, or a day bucket, would shift by the host's
-        # offset, and an empty `TZ` names a zone pytz cannot resolve.
-        con.execute("SET TimeZone='UTC'")
-        con.execute("SET enable_external_access=false")
-        con.execute("SET lock_configuration=true")
+        # Printed on every run past the load, success or error: each says something the
+        # answer alone would hide.
+        shape_notes = [n for n in ((_list_column_note(con),) if declared
+                                   else (_positional_rows_note(con),)) if n]
 
         if refusal := _arrow_refusal(con, sql):
-            print(f"{refusal}{_shape_hint(con, refusal)}", file=sys.stderr)
+            print(f"{refusal}{_shape_hint(con, refusal, declared=declared)}", *shape_notes,
+                  sep="\n", file=sys.stderr)
             return EXIT_QUERY_ERROR
 
         # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
@@ -287,8 +561,9 @@ def _run(sql: str) -> int:
         except duckdb.Error as exc:
             if missing := _MISSING_MODULE.search(str(exc)):
                 return _no_runtime(missing.group(1))
-            print(f"defender-sql: query error: {exc}{_shape_hint(con, str(exc))}",
-                  file=sys.stderr)
+            print(f"defender-sql: query error: {exc}"
+                  f"{_shape_hint(con, str(exc), declared=declared)}", *shape_notes,
+                  sep="\n", file=sys.stderr)
             return EXIT_QUERY_ERROR
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -302,10 +577,9 @@ def _run(sql: str) -> int:
                 for record in records]
         json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")
-        if renamed:
-            print(_collision_note(renamed), file=sys.stderr)
-        note = _truncation_note(con)
-        if note:
+        notes = [_collision_note(renamed) if renamed else "", *shape_notes,
+                 _declared_truncation_note(payload) if declared else _truncation_note(con)]
+        for note in filter(None, notes):
             print(note, file=sys.stderr)
         return EXIT_OK
     finally:
@@ -323,14 +597,28 @@ def main() -> int:
                     "no native aggregation (see skills/connect/adapter.md).",
         epilog="the payload IS the table — there is no wrapper envelope to reach "
                "through. example: defender-<system> query '<filter>' | defender-sql "
-               f"\"SELECT h.user, count(*) c {_HITS_FROM} GROUP BY 1 ORDER BY c DESC\"",
+               f"\"SELECT h.user, count(*) c {_HITS_FROM} GROUP BY 1 ORDER BY c DESC\". "
+               "Positional rows behind a list of column names, declared: "
+               "defender-<system> query '<query>' | defender-sql --rows values --names columns "
+               "'SELECT \"source.ip\", count(*) c FROM data GROUP BY 1 ORDER BY c DESC'",
+    )
+    parser.add_argument(
+        "--rows", metavar="PATH",
+        help="Where the payload's positional rows are (a list of lists), e.g. `values` or "
+             "`tables[0].rows`. With --names, `data` holds one row per row, one column per "
+             "name, each column typed from its own JSON values.",
+    )
+    parser.add_argument(
+        "--names", metavar="PATH",
+        help="Where the rows' column names are: a list of strings, or of objects with a "
+             "`name`, e.g. `columns`. Goes with --rows.",
     )
     parser.add_argument(
         "sql",
         help="A read-only SQL query over the `data` table (the parsed stdin payload).",
     )
     args = parser.parse_args()
-    return _run(args.sql)
+    return _run(args.sql, args.rows, args.names)
 
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
