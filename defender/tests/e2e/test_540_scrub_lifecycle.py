@@ -1476,16 +1476,21 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
 
     The refusal is asserted as BOTH a raise and the absence of any emitted argv: a start that
     refused only after handing the daemon a split spec would not be a refusal."""
-    runs_base = tmp_path / "runs"
-    runs_base.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
+    from defender import _tenant
+
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
+    tenant_id = "t540"
+    _tenant.create_tenant(data_root, tenant_id)
+    runs_base = _tenant.runs_base_for(tenant_id)
+    runs_base.mkdir(parents=True)
     fixture = tmp_path / "fixtures"
     fixture.mkdir()
     alert = fixture / "evil:x:ro,y --privileged.json"
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, None)
+        run_common.materialize_run(alert, None, tenant_id=tenant_id)
     assert list(runs_base.iterdir()) == [], (
         "the hostile id created run artifacts before it was refused"
     )

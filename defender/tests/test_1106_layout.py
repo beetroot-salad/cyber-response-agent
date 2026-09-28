@@ -276,32 +276,6 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
             control, run_dir=run_dir, defender_dir=T.DEFENDER, policy=policy), role
 
 
-# =============================================================================================
-# D4 — the bridge: the record mints `playground`, and an existing record is never remapped.
-# =============================================================================================
-
-def test_the_default_tenant_id_is_playground():
-    assert T.mod("_tenant").DEFAULT_TENANT_ID == "playground"
-
-
-def test_a_fresh_runs_base_mints_the_playground_tenant(tmp_path):
-    tenant = T.mod("_tenant")
-    record = tenant.ensure_tenant(tmp_path / "runs")
-    assert record.tenant_id == "playground"
-    assert tenant.read_tenant(tmp_path / "runs").tenant_id == "playground"
-
-
-def test_an_existing_default_record_is_read_back_as_written_not_remapped(tmp_path):
-    """D4: `default` is not quietly turned into `playground` — it hits D3 at run start, where
-    the refusal names the record file (`e2e/test_1106_run_start.py`). The control: a
-    `playground` record reads back as `playground`."""
-    tenant = T.mod("_tenant")
-    T.plant_tenant_record(tmp_path / "legacy", "default")
-    assert tenant.ensure_tenant(tmp_path / "legacy").tenant_id == "default"
-    T.plant_tenant_record(tmp_path / "current", "playground")
-    assert tenant.ensure_tenant(tmp_path / "current").tenant_id == "playground"
-
-
 def test_no_live_markdown_still_points_at_the_retired_environment_path():
     """The pointers follow the move (K1's markdown census). Several are FUNCTIONAL, not prose:
     `/connect` tells its agent where to write a new system's `config.env` and table rows, and

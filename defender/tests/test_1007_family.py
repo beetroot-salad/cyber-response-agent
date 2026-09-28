@@ -46,6 +46,10 @@ def family_episode(tmp_path: Path, monkeypatch, *, labels=("b", "c"),
 
 
 def grade(ep: Path, judge, **kw):
+    """#1078 D4/J48: `grade_episode`'s `runs_base` is a required keyword; this wrapper's
+    default (a harmless, never-created sibling dir) covers every indirect caller that does not
+    care which base is threaded."""
+    kw.setdefault("runs_base", ep.parent / "runs-base")
     return W.mod("learning.judge").grade_episode(ep, judge=judge, **kw)
 
 

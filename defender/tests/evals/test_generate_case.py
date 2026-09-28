@@ -161,7 +161,7 @@ def test_control_offsets_are_settable_because_a_default_window_can_be_dead():
     whose 7-day control lands on 07-19 — dead, along with 07-14..07-16 and 07-18..07-24.
     A dead window is not an empty baseline; it is a third of the evidence discarded."""
     parser = generate_case.build_parser()
-    required = ["--scenario", "x", "--case-id", "c", "--split", "dev",
+    required = ["--scenario", "x", "--tenant", "playground", "--case-id", "c", "--split", "dev",
                 "--activity-family", "f"]
     assert parser.parse_args(required).offsets_days is None, (
         "absent means controls.py keeps its own default")
@@ -186,7 +186,8 @@ def test_the_offsets_reach_controls_py(tmp_path, monkeypatch):
         # stubs above, which the baseline already carries; the recruiter takes no deps object.
         generate_case, "_assemble", lambda *a, **k: None)
     generate_case._recruit([
-        "--scenario", "persistence-authorized-keys", "--case-id", "case-x",
+        "--scenario", "persistence-authorized-keys", "--tenant", "playground",
+        "--case-id", "case-x",
         "--split", "dev", "--activity-family", "persistence/T1098.004",
         "--cases-dir", str(tmp_path / "cases"), "--offsets-days", "14,21,28"])
     controls = [c for c in seen if c and c[1].endswith("controls.py")]
@@ -276,7 +277,8 @@ def test_the_guard_runs_before_the_stack_is_touched(catalog, tmp_path, monkeypat
     # `main` reads the module-level CATALOG at call time, which is what the patch above
     # replaces — the guard takes its catalog as a required argument precisely so a
     # default bound at import time cannot outlive it.
-    rc = generate_case._recruit(["--scenario", "local-only", "--target", "db-1",
+    rc = generate_case._recruit(["--scenario", "local-only", "--tenant", "playground",
+                             "--target", "db-1",
                              "--case-id", "case-x", "--split", "dev",
                              "--activity-family", "persistence/T1098.004",
                              "--cases-dir", str(tmp_path / "cases")])
@@ -328,7 +330,8 @@ def test_source_alone_autofills_the_target_in_main(catalog, tmp_path, monkeypatc
     monkeypatch.setattr(generate_case, "CATALOG", catalog)
     monkeypatch.setattr(generate_case, "fire", fake_fire)
     with pytest.raises(SystemExit):
-        generate_case._recruit(["--scenario", "local-only", "--source", "db-1",
+        generate_case._recruit(["--scenario", "local-only", "--tenant", "playground",
+                            "--source", "db-1",
                             "--case-id", "case-src", "--split", "dev",
                             "--activity-family", "persistence/T1098.004",
                             "--cases-dir", str(tmp_path / "cases")])
@@ -413,7 +416,8 @@ def test_the_occupancy_guard_precedes_every_side_effect(tmp_path, catalog, monke
     monkeypatch.setattr(generate_case, "fire", explode)
     cases = tmp_path / "cases"
     (cases / "case-x" / "hidden").mkdir(parents=True)
-    rc = generate_case._recruit(["--scenario", "retargetable", "--case-id", "case-x",
+    rc = generate_case._recruit(["--scenario", "retargetable", "--tenant", "playground",
+                             "--case-id", "case-x",
                              "--split", "dev", "--activity-family", "f",
                              "--cases-dir", str(cases)])
     assert rc == 2

@@ -381,9 +381,13 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
-    episode_dir: Path, *, judge: Any = None, runs_base: Path | None = None,
+    episode_dir: Path, *, runs_base: Path, judge: Any = None,
     draws: int | None = None, git_show: Any = None, queue_dir: Path | None = None,
 ) -> EpisodeGrade:
+    """#1078 D4/J48 (design correction R-A3): `runs_base` is a REQUIRED keyword — no tool
+    falls back to a default base or skips its check when it has none. It threads into both the
+    world-label collision probe (`family._check_world_labels`) and the sibling union
+    (`render.sibling_union`)."""
     import yaml
 
     episode_dir = Path(episode_dir)
@@ -440,7 +444,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     # and every `render`, so the mechanical rows and the prompt come off the same documents.
     samples = family_mod.read_samples_record(bound)
     grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review,
-                                    samples=samples, bound=bound)
+                                    samples=samples, bound=bound, runs_base=runs_base)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]
 
     # Per-pass facts, resolved once and threaded into every render: every world shares one

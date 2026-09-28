@@ -566,7 +566,8 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(world="c")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
+    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+                            runs_base=ep.parent / "runs-base")
 
     rows = [r for r in W.queue_rows(W.questioner_channel(paths)) if r["provenance"] == "model"]
     assert {r["world"] for r in rows} == {"b", "c"}, (
@@ -596,7 +597,8 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
         findings=[W.world_finding(bucket="undiscriminating-family",
                                   evidence=FAMILY_EVIDENCE)]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
+    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+                            runs_base=ep.parent / "runs-base")
 
     family_rows = [r for r in W.queue_rows(W.questioner_channel(paths))
                    if "family" in r["finding_id"]]
@@ -628,7 +630,8 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         W.world_finding(bucket="a-second-family-reading", evidence=FAMILY_EVIDENCE),
     ]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
+    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+                            runs_base=ep.parent / "runs-base")
 
     ids = [r["finding_id"] for r in W.queue_rows(W.questioner_channel(paths))
            if "/family/" in r["finding_id"]]
@@ -724,10 +727,10 @@ def test_a_re_grade_appends_no_second_mechanical_world_finding(tmp_path, monkeyp
             capture_replays=[W.replay_entry("k1", differs=False)]))})
 
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            queue_dir=paths.pending_dir)
+                            queue_dir=paths.pending_dir, runs_base=ep.parent / "runs-base")
     (ep / W.JUDGE_NAME).unlink()        # force a genuine re-grade, not the existing-record path
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            queue_dir=paths.pending_dir)
+                            queue_dir=paths.pending_dir, runs_base=ep.parent / "runs-base")
 
     mech = [r for r in W.queue_rows(W.questioner_channel(paths))
             if r.get("provenance") == "mechanical"]
@@ -754,7 +757,8 @@ def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
         outcome="discard",
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
+    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+                            runs_base=ep.parent / "runs-base")
 
     assert [r for r in W.queue_rows(paths.findings)] == [], (
         "a discard episode still enqueued a defender row")
@@ -785,7 +789,8 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
     judge = W.FakeJudge(W.reply_document(
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir)
+    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+                            runs_base=ep.parent / "runs-base")
 
     for channel in (paths.findings, W.questioner_channel(paths)):
         rows = [r for r in W.queue_rows(channel) if r.get("world") == "c" or "/c/" in

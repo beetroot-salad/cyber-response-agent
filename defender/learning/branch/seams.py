@@ -101,12 +101,13 @@ class EpisodeAdapters:
         return replace(self, ctx=replace(self.ctx, world_id=world_id))
 
 
-def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
+def adapter_seam(episode_dir: Path, tenant: Any, *, runs_base: Path) -> EpisodeAdapters:
     """The production read side the review replays through.
 
     Uses the episode tenant's gather grant, the same one every sibling serves through: a review
     that could reach a verb no sibling can would measure a world through a door the family
-    cannot open. `tenant` is the launcher's resolved `RunTenant`.
+    cannot open. `tenant` is the launcher's resolved `RunTenant`, and `runs_base` that tenant's
+    runs base.
 
     Not a `WorldRegistry`: `replay_one` stages the call and applies the world's difference
     itself, so a world registry underneath would apply it twice and write ledger rows into a
@@ -122,5 +123,5 @@ def adapter_seam(episode_dir: Path, tenant: Any) -> EpisodeAdapters:
         registry=ModuleVerbRegistry(
             read_roster(adapters_under(DEFENDER_DIR)), tenant.grants.gather,
             grant_home=tenant.table_pointer),
-        ctx=verb_context(Path(episode_dir), tenant.settings),
+        ctx=verb_context(Path(episode_dir), tenant.settings, runs_base=runs_base),
     )

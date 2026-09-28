@@ -50,6 +50,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _tenant_paths():
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
+
+
 def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams):
     """Drive one episode through the real launcher.
 
@@ -82,7 +87,7 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams)
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                       *argv_extra],
                      spawn=spawn, door=door, **seams)
-    return rc, spawn, _cli().episode_dir_for(T.EPISODE_ID)
+    return rc, spawn, _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
 
 
 # ---------------------------------------------------------------------------------------
@@ -340,7 +345,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
         assert builder in src, f"the launcher never reaches {builder}"
 
     ep = T.episode(tmp_path)
-    assert callable(seams.adapter_seam(ep, _tenants1106.playground_run_tenant())), "the review has no production adapter layer"
+    assert callable(seams.adapter_seam(ep, _tenants1106.playground_run_tenant(), runs_base=tmp_path / "runs")), "the review has no production adapter layer"
     assert callable(seams.model_seam(ep)), "the questioner has no production model call"
 
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half
@@ -702,7 +707,7 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
     naming the launcher's path, or `agreed.model` None."""
     from defender.tests import _judge_921 as J
 
-    ep = _cli().episode_dir_for(T.EPISODE_ID)
+    ep = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     launcher_moment = T.source_capture(dirty=True, model=None)
     # The judge seam is scripted because an ACCEPTED family is graded at the tail of the
     # launch, and its production value is a real model call.
@@ -786,7 +791,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     def attempt():
         barrier.wait()
         try:
-            results.append(cli.prepare_episode(T.EPISODE_ID, src))
+            results.append(cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths()))
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)
 
@@ -796,7 +801,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     for t in threads:
         t.join()
     assert sum(isinstance(r, Exception) for r in results) == 1, results
-    rows = (cli.episode_dir_for(T.EPISODE_ID) / "served" / "base.jsonl")
+    rows = (cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()) / "served" / "base.jsonl")
     assert not rows.exists() or len(rows.read_text(encoding="utf-8").splitlines()) == \
         len({line for line in rows.read_text(encoding="utf-8").splitlines()})
 
@@ -807,12 +812,12 @@ def test_947_a_relaunch_adopts_an_episode_dir_holding_no_manifest(tmp_path):
     remedy, while a directory that DOES hold a manifest is still refused."""
     base, src = T.runs_base(tmp_path)
     cli = _cli()
-    ep = cli.episode_dir_for(T.EPISODE_ID)
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     (ep / "served").mkdir(parents=True, exist_ok=True)
-    assert cli.prepare_episode(T.EPISODE_ID, src) is not None
+    assert cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths()) is not None
     T.write_family(ep)
     with pytest.raises(T.refusals()):
-        cli.prepare_episode(T.EPISODE_ID, src)
+        cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths())
 
 
 # ---------------------------------------------------------------------------------------

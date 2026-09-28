@@ -121,14 +121,15 @@ def container_name(run_id: str) -> str:
 
 
 def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
-    """The infra env every box needs: the shims and package location."""
-    return {
-        "DEFENDER_DIR": str(defender_dir),
-        "DEFENDER_RUN_DIR": str(run_dir),
-        "DEFENDER_RUNS_BASE": str(run_dir.parent),
-        "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
-        "PYTHONPATH": str(defender_dir.parent),
-    }
+    """The infra env every box needs: the shims and package location. `DEFENDER_RUNS_BASE` is
+    derived from the run dir, never read from the environment."""
+    env: dict[str, str] = {}
+    env["DEFENDER_DIR"] = str(defender_dir)
+    env["DEFENDER_RUN_DIR"] = str(run_dir)
+    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env["PATH"] = f"{defender_dir / 'bin'}:{_BOX_PATH}"
+    env["PYTHONPATH"] = str(defender_dir.parent)
+    return env
 
 
 def _derived_infra_env(workdir: Path) -> dict[str, str]:

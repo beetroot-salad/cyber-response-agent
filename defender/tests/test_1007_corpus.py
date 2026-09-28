@@ -691,7 +691,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
 
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            queue_dir=paths.pending_dir)
+                            queue_dir=paths.pending_dir, runs_base=ep.parent / "runs-base")
 
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     allowed = {Path(W.JUDGE_NAME), Path(W.REVIEW_NAME), Path(W.SAMPLES_NAME)}

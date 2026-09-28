@@ -164,7 +164,7 @@ def test_a_missing_sample_sets_sample_unavailable_and_refuses_shape_invention(
                           samples={W.ALERTS_PATTERN: dict(W.SAMPLE_DOCUMENT)})
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(bucket="shape-invention")]))
 
-    result = judge_mod.grade_episode(ep, judge=judge)
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is True, (
@@ -189,7 +189,7 @@ def test_a_present_sample_admits_a_shape_invention_finding(tmp_path, monkeypatch
     ep = rendered_episode(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(bucket="shape-invention")]))
 
-    result = judge_mod.grade_episode(ep, judge=judge)
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is False
@@ -220,7 +220,7 @@ def test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_patt
         ep = rendered_episode(tmp_path / label, monkeypatch)
         prepare(ep)
 
-        result = judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()))
+        result = judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()), runs_base=ep.parent / "runs-base")
 
         row = {r["world"]: r for r in result.worlds}["b"]
         assert row["sample_unavailable"] is True, (
@@ -286,7 +286,7 @@ def test_a_case_differing_overlay_pattern_misses_the_sample_and_refuses_the_find
         bucket="shape-invention", pattern=W.EVENTS_PATTERN.upper(),
         evidence=[f"samples.yaml#{W.EVENTS_PATTERN.upper()}"])]))
 
-    result = judge_mod.grade_episode(ep, judge=judge)
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is True, (
@@ -319,7 +319,7 @@ def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
         W.world_finding(bucket="another-unlisted-bucket", evidence=["review.yaml#worlds"]),
     ]))
 
-    result = judge_mod.grade_episode(ep, judge=judge)
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
 
     buckets = [f["bucket"] for f in {r["world"]: r for r in result.worlds}["b"]["world_findings"]]
     assert "a-bucket-nobody-listed" not in buckets, (
@@ -361,7 +361,7 @@ def test_a_two_pattern_world_names_each_patterns_sample_availability_independent
                         evidence=[f"{W.SAMPLES_NAME}#{W.ALERTS_PATTERN}"]),
     ]))
 
-    result = judge_mod.grade_episode(ep, judge=judge)
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
     prompt = render_prompt(ep)
 
     row = {r["world"]: r for r in result.worlds}["b"]
@@ -711,7 +711,7 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
         base.write_text("", encoding="utf-8")
         return capture.PrimeReport(primed=1)
 
-    adopted = cli.prepare_episode(W.EPISODE_ID, src, prime=prime)
+    adopted = cli.prepare_episode(W.EPISODE_ID, src, tenant=W.current_tenant_paths(), prime=prime)
 
     assert adopted == ep, (
         f"prepare_episode returned {adopted!r} rather than adopting {ep} — a re-entered attempt "
@@ -757,7 +757,9 @@ def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
 
     record = review.review(family_mod.parse_family(doc), episode_dir=ep,
                            adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
-                           door=W.FakeDoor(), invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                           door=W.FakeDoor(), invoke=W.FakeAgent("same"),
+                           settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+                           runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]
     assert "stale" not in json.dumps(block), (

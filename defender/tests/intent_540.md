@@ -93,7 +93,7 @@ The constraint research behind the resolution, recorded because it is the reason
 **Ordering.** The one surviving piece of `RSD §The run.py lifecycle seam`, with its insertion point corrected by code grounding (C47) — the scrub belongs at **`run.py` lines 161–167**, *before* the first host consumer, which is the `sorted(run_dir.iterdir())` at `:167`. Revision 1 placed it after `cross_check_tables`; that was wrong and would have let the first consumer read an untainted-unknown tree.
 
 ```
-materialize_run_dir(alert, run_id)      # run_dir must exist to bind rw  # lint-stale-ref: ok — #540's record of the pre-#1110 builder
+materialize_run(alert, run_id)      # run_dir must exist to bind rw  # lint-stale-ref: ok — #540's record of the pre-#1110 builder
 box = start_box(run_dir, DEFENDER_DIR)
 try:
     run_investigation(..., box=box)

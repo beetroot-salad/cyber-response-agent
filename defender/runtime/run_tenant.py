@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender._corpus import QueryTemplate, iter_query_templates, query_catalog_dir
+from defender._tenant import TenantId, TenantRefused
 from defender._tenants import TenantDir
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import VerbGrant
@@ -45,7 +46,7 @@ class RunTenant:
     correlation: CorrelationDispatch | None
 
     @property
-    def tenant_id(self) -> str:
+    def tenant_id(self) -> TenantId:
         return self.dir.tenant_id
 
     @property
@@ -93,12 +94,6 @@ def refusals() -> tuple[type[Exception], ...]:
     return (DispositionError, LeadZeroConfigError, CorrelationDispatchError, GrantError)
 
 
-class TenantRefused(Exception):
-    """The one refusal `resolve_tenant` raises: every reason a tenant cannot be used, from its
-    id and folder (`TenantDirError`) to its table and lead-zero config (`refusals()`), each
-    message naming the file an operator edits. Entry points catch THIS and report it."""
-
-
 def resolve_tenant(
     tenants_root: Path, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
     box_mounted: tuple[Path, ...] = (),
@@ -110,12 +105,9 @@ def resolve_tenant(
       * the folder is not inside a tree a box mounts (`defender_dir`, plus `box_mounted`,
         e.g. the runs base): the settings half is host-only;
       * the content rules (`resolve_run_tenant`)."""
-    from defender._tenants import TenantDirError, tenant_dir
+    from defender._tenants import tenant_dir
 
-    try:
-        folder = tenant_dir(tenants_root, tenant_id)
-    except TenantDirError as refusal:
-        raise TenantRefused(str(refusal)) from refusal
+    folder = tenant_dir(tenants_root, tenant_id)
     for mounted in (Path(defender_dir), *box_mounted):
         if folder.settings.is_relative_to(Path(mounted).resolve()):
             raise TenantRefused(

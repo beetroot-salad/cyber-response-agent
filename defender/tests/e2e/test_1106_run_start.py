@@ -2,8 +2,8 @@
 (O4, C9, D4, M5), end to end through `run.py`'s real `main`.
 
 `run.py` is the entry point that resolves the tenants root (`--tenants-root`, defaulting to
-`<checkout>/knowledge/tenants`) and hands it down (D2). The run's tenant is the one its runs
-base's `_tenant.json` records (D4 — this issue introduces no other source). Before
+`<checkout>/knowledge/tenants`) and hands it down (D2). The run's tenant is the one its
+request names (`--tenant`, #1078 — there is no default). Before
 `start_box` the run resolves `tenant_dir(root, tenant)`, loads the table and lead-zero, runs
 the lead-zero agreement check and checks gather's grant is not empty (M5) — every refusal
 naming the path an operator must fix.
@@ -13,7 +13,7 @@ composed over its existing seams: a recording `start_box` (so "never reached" is
 observation), and — on the path that does reach it — the REAL `_drive_investigation` over a
 recording registry class and a recording driver, so what the run hands its box, its verb
 registry, its driver and its ticket writer is captured as the INBOUND payload each fake
-received. No new seam is added to `main`; nothing is monkeypatched but the runs-base env var
+received. No new seam is added to `main`; nothing is monkeypatched but the data-root env var
 `main` already reads.
 
 The positive half is O1/O2/O3 at the run level: ONE process runs tenant A then tenant B, and
@@ -73,8 +73,9 @@ class TicketWriterRecorder:
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """An alert, a tenants root outside the checkout, and a `runs_base(tenant_id | None)`
-    factory that points `main` at a fresh runs base (planting its tenant record when given)."""
+    """An alert, a tenants root outside the checkout, and a `runs_base(tenant_id)` factory that
+    points `main` at a fresh data root holding that tenant's row and returns its runs base; the
+    tenant then rides on every argv below as `--tenant` (#1078)."""
     alert_dir = tmp_path / "alerts" / "a-1106"
     alert_dir.mkdir(parents=True)
     alert = alert_dir / "alert.json"
@@ -85,16 +86,17 @@ def world(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learning-state"))
     counter = iter(range(1000))
+    chosen: dict[str, str] = {}
 
-    def runs_base(tenant_id: str | None) -> Path:
-        base = tmp_path / f"runs-{next(counter)}"
-        base.mkdir()
-        if tenant_id is not None:
-            T.plant_tenant_record(base, tenant_id)
-        monkeypatch.setenv("DEFENDER_RUNS_BASE", str(base))
-        return base
+    def runs_base(tenant_id: str) -> Path:
+        data_root = tmp_path / f"data-{next(counter)}"
+        monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
+        tenant = T.mod("_tenant")
+        tenant.create_tenant(data_root, tenant_id)
+        chosen["tenant"] = tenant_id
+        return tenant.runs_base_for(tenant_id)
 
-    return {"alert": alert, "root": root, "runs_base": runs_base}
+    return {"alert": alert, "root": root, "runs_base": runs_base, "chosen": chosen}
 
 
 def _run():
@@ -123,7 +125,8 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     stderr — the exit mechanism is not what is pinned; the TIMING (never reaching `start_box`)
     and the NAMED PATH are."""
     start = StartBoxRecorder(stop=True)
-    argv = [str(world["alert"]), "--tenants-root", str(world["root"]), "--no-learn", *extra]
+    argv = [str(world["alert"]), "--tenant", world["chosen"]["tenant"],
+            "--tenants-root", str(world["root"]), "--no-learn", *extra]
     text = ""
     try:
         rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p: None,
@@ -155,34 +158,15 @@ def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(worl
     assert _names(text, world["root"] / "ghost"), text
 
 
-def test_a_legacy_default_record_refuses_naming_the_record_file(world, capsys):
-    """D4: a runs base whose record still says `default` is not remapped to `playground` — it
-    is D3's refusal, and the path it names is the RECORD, which is what the operator edits."""
-    T.plant_tenant(world["root"], "acme")
-    base = world["runs_base"]("default")
-    text, _ = _refusal(world, capsys)
-    assert _names(text, base / "_tenant.json"), text
-
-
-def test_a_legacy_default_record_refuses_even_when_a_default_folder_exists(world, capsys):
-    """D4/N10: `default` is the retired bootstrap value and is never a run's tenant — refused
-    on the id itself, not only because no folder happens to carry the name. A complete tenant
-    planted AS `default` must not be accepted; the refusal names the record file."""
-    T.plant_tenant(world["root"], "default")
-    base = world["runs_base"]("default")
-    text, _ = _refusal(world, capsys)
-    assert _names(text, base / "_tenant.json"), text
-
-
-def test_a_fresh_runs_base_runs_as_playground_and_refuses_on_its_missing_mapping(world, capsys):
-    """O4's second named case, reached through D4's bridge: a FRESH runs base runs as
-    `playground`, the injected root's playground lacks `mapping.yaml`, and the run refuses
-    naming that file — rather than reaching the ticket screen's quiet "serve no comments". And
-    refused, it leaves NO tenant record: a base gets its tenant choice only when a run dir is
-    actually built there (the run-dir builder creates it), never from a run that stopped."""
+def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(world, capsys):
+    """O4's second named case: the injected root's `playground` lacks `mapping.yaml`, and a run
+    for it refuses naming that file — rather than reaching the ticket screen's quiet "serve no
+    comments". And refused, it leaves NO runs-base record: a base gets its tenant record only
+    when a run dir is actually built there (the run-dir builder creates it), never from a run
+    that stopped."""
     T.plant_tenant(world["root"], T.PLAYGROUND_ID,
                    omit=("systems/case-history/mapping.yaml",))
-    base = world["runs_base"](None)
+    base = world["runs_base"](T.PLAYGROUND_ID)
     text, _ = _refusal(world, capsys)
     assert _names(
         text, world["root"] / T.PLAYGROUND_ID / "settings" / "systems" / "case-history"
@@ -285,7 +269,8 @@ def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world,
     start = StartBoxRecorder(stop=True)
     with pytest.raises(_StartBoxReached):
         _run().main(
-            [str(world["alert"]), "--tenants-root", str(world["root"]), "--no-learn"],
+            [str(world["alert"]), "--tenant", "acme", "--tenants-root", str(world["root"]),
+             "--no-learn"],
             lifecycle=_lifecycle(start), visualize=lambda p: None, preflight=lambda m: 0)
     assert len(start.calls) == 1, start.calls
     _args, kwargs = start.calls[0]
@@ -340,7 +325,8 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             investigate=lambda driven=driven, **kw: (
                 driven.append(kw) or {"output": "done", "requests": 0}))
         rc = run.main(
-            [str(world["alert"]), "--tenants-root", str(root), "--no-learn", "--update-ticket"],
+            [str(world["alert"]), "--tenant", tenant_id, "--tenants-root", str(root),
+             "--no-learn", "--update-ticket"],
             lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p: None,
             preflight=lambda m: 0, ticket_writer=writer)
         assert rc == 0, capsys.readouterr().err
@@ -376,6 +362,7 @@ def test_the_default_tenants_root_is_the_checkouts_when_none_is_given(world, cap
     world["runs_base"](T.PLAYGROUND_ID)
     start = StartBoxRecorder(stop=True)
     with pytest.raises(_StartBoxReached):
-        _run().main([str(world["alert"]), "--no-learn"], lifecycle=_lifecycle(start),
+        _run().main([str(world["alert"]), "--tenant", T.PLAYGROUND_ID, "--no-learn"],
+                    lifecycle=_lifecycle(start),
                     visualize=lambda p: None, preflight=lambda m: 0)
     assert Path(start.calls[0][1]["tenant_agent"]) == T.PLAYGROUND_AGENT.resolve()

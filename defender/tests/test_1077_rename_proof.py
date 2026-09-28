@@ -49,7 +49,7 @@ _TOKEN = "zq7"
 #: and breaks things that have nothing to do with D7.
 _SKIP_NAMES = frozenset({
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED", "LEAD_ID_BODY", "GATHER_RAW_SHAPE",
-    "GATE_METADATA_KEY", "DEFAULT_TENANT_ID", "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX",
+    "GATE_METADATA_KEY", "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX",
     "JSONL_EXT",
 })
 _SKIP_VALUES = frozenset({".json", ".db", ".jsonl", "json"})

@@ -11,11 +11,11 @@ No reader discovers the tenants root (not from `PATHS`, `__file__`, `DEFENDER_DI
 an entry point is handed it, or uses `default_tenants_root(<its own checkout>)`, and passes it
 down.
 
-`tenant_dir` is the one place a tenant id becomes a path. It checks the id's grammar and that
-the folder and each half resolve to exactly `<root>/<id>/<half>` (catching `A/agent ->
+`tenant_dir` is the one place a tenant id becomes a path. It checks the id (`TenantId`) and
+that the folder and each half resolve to exactly `<root>/<id>/<half>` (catching `A/agent ->
 ../B/agent`, which stays inside the root), and refuses any link inside the folder, since a
-linked file would hand one tenant another's settings. The retired id `default` names no
-tenant. Anything absent is a `TenantDirError` naming the path, with no fallback.
+linked file would hand one tenant another's settings. Anything absent is a `TenantDirError`
+naming the path, with no fallback.
 """
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ import argparse
 import dataclasses
 import os
 from pathlib import Path
+
+from defender._tenant import TenantId, TenantRefused
 
 #: Files required at start, relative to `settings/`. A system's `config.env` is not here: some
 #: adapters need none, and its absence is the per-call `ConfigFault` (exit 2, trips the breaker).
@@ -40,16 +42,17 @@ AGENT_HALF = "agent"
 TEMPLATE_DIRNAME = "tenant-template"
 
 
-class TenantDirError(ValueError):
+class TenantDirError(TenantRefused):
     """A tenant id or folder this resolver will not stand behind: a malformed id, an escape
-    through a link, or an absent folder, half or required file. Always names the id or path."""
+    through a link, or an absent folder, half or required file. Always names the id or path.
+    One of the tenant refusals (`_tenant.TenantRefused`), which every entry point catches."""
 
 
 @dataclasses.dataclass(frozen=True)
 class TenantDir:
     """One tenant's two halves, both RESOLVED paths under `<root>/<tenant_id>/`."""
 
-    tenant_id: str
+    tenant_id: TenantId
     settings: Path
     agent: Path
 
@@ -65,28 +68,12 @@ def template_dir(repo_root: Path) -> Path:
     return Path(repo_root) / "knowledge" / TEMPLATE_DIRNAME
 
 
-def _check_id(tenant_id: str) -> None:
-    if (
-        not isinstance(tenant_id, str)
-        or not tenant_id
-        or tenant_id.startswith(".")
-        or "/" in tenant_id
-        or "\\" in tenant_id
-        or "\0" in tenant_id
-        or Path(tenant_id).name != tenant_id
-    ):
-        raise TenantDirError(
-            f"tenant id {tenant_id!r} is not a single plain name (no path separator, no "
-            "leading dot, not empty)"
-        )
-    from defender._tenant import is_usable_tenant_id
-
-    if not is_usable_tenant_id(tenant_id):
-        # Refused on the id so a folder named `default` cannot revive the retired value.
-        raise TenantDirError(
-            f"tenant id {tenant_id!r} is the retired bootstrap value (#1106 D4) and names no "
-            "tenant; name the tenant this runs base or command is for"
-        )
+def _check_id(tenant_id: object) -> TenantId:
+    """The id as a `TenantId` (the one grammar runs and records use too), or `TenantDirError`."""
+    try:
+        return TenantId(tenant_id)
+    except TenantRefused as bad:
+        raise TenantDirError(str(bad)) from bad
 
 
 def _refuse_links(folder: Path, tenant_id: str) -> None:
@@ -126,9 +113,9 @@ def _half(tenant_real: Path, tenant_id: str, name: str) -> Path:
     return half
 
 
-def tenant_dir(tenants_root: Path, tenant_id: str) -> TenantDir:
+def tenant_dir(tenants_root: Path, tenant_id: object) -> TenantDir:
     """Resolve `tenant_id` under `tenants_root` to its two halves, or raise `TenantDirError`."""
-    _check_id(tenant_id)
+    tenant_id = _check_id(tenant_id)
     root = Path(tenants_root)
     folder = root / tenant_id
     if not folder.exists():
@@ -163,8 +150,8 @@ def add_tenant_arguments(parser: argparse.ArgumentParser, *, reads: str) -> None
     `reads` says what the command takes from the tenant's `settings/`, for `--help`."""
     parser.add_argument(
         "--tenant", default=None,
-        help=f"the tenant whose settings/ {reads}; default the bridge's bootstrap tenant "
-             "(#1106 D4, until #1078)")
+        help=f"the tenant whose settings/ {reads}; required wherever the command reads a "
+             "tenant — there is no default tenant")
     parser.add_argument(
         "--tenants-root", type=Path, default=None,
         help="the folder holding one sub-folder per tenant; default <checkout>/knowledge/tenants, "
@@ -177,15 +164,18 @@ def entry_tenant_args(
     """An operator command's `(tenants root, tenant id)`, from its own arguments.
 
     The tenants root defaults to the checkout holding `defender_dir`, so a command pointed at a
-    worktree reads that worktree's tenants. The tenant id defaults to `DEFAULT_TENANT_ID`."""
-    from defender._tenant import DEFAULT_TENANT_ID
-
+    worktree reads that worktree's tenants. The tenant id is the request's own: none is a
+    `TenantDirError`, since there is no default tenant."""
+    if tenant_id is None:
+        raise TenantDirError("--tenant is required: there is no default tenant")
     root = tenants_root if tenants_root is not None else default_tenants_root(
         Path(defender_dir).parent)
-    return root, tenant_id if tenant_id is not None else DEFAULT_TENANT_ID
+    return root, tenant_id
 
 
-def entry_tenant(defender_dir: Path, tenants_root: Path | None, tenant_id: str | None) -> TenantDir:
+def entry_tenant(
+    defender_dir: Path, tenants_root: Path | None, tenant_id: str | None,
+) -> TenantDir:
     """An operator command's tenant folder, or `TenantDirError` — for a command that only reads
     a file from it. A command that uses the tenant's grants goes through
     `run_tenant.resolve_tenant`."""

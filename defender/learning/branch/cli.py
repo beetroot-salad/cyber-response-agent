@@ -68,7 +68,8 @@ from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.estate.stagers.elastic import configured_patterns  # noqa: E501 # lint-shippable: ok — the one import of the per-vendor stager's configured-pattern reader; the vendor knowledge stays behind it
 from defender.learning.branch.ledger import Ledger, LedgerError, base_file
-from defender.run_common import REPO_ROOT, resolve_runs_base
+from defender import _tenant
+from defender.run_common import REPO_ROOT
 from defender.runtime import branch, session_store
 from defender.runtime.branch import _family
 from defender.runtime.branch._family import (
@@ -101,29 +102,31 @@ class LauncherRefused(SystemExit):
 # ---------------------------------------------------------------------------------------
 
 
-def episodes_root() -> Path:
+def episodes_root(*, tenant: Any) -> Path:
     """The configured root every episode directory is a child of.
 
-    Must be outside the runs base (or runs-base walkers count siblings as ordinary runs) and
-    outside the checkout (or an untracked episode dir makes every sibling's provenance stamp
-    dirty, so no family can complete). Being configured also keeps it independent of the runs
-    base.
+    Must be outside the data root (every tenant's tree lives there, so walkers indexing a
+    tenant's runs or episodes would count it) and outside the checkout (or an untracked episode
+    dir makes every sibling's provenance stamp dirty, so no family can complete). Being
+    configured also keeps it independent of the data root. `tenant` is the launcher's
+    `TenantPaths`; its folder's parent is the data root.
     """
     raw = os.environ.get(EPISODES_BASE_ENV)
     if not raw:
         raise LauncherRefused(
             f"[branch] {EPISODES_BASE_ENV} is not set — an episode's directory is a CONFIGURED "
-            "location, and there is deliberately no default: derived from the runs base it "
-            "would be walked by every consumer that indexes runs, and derived from the checkout "
-            "it would dirty the tree every sibling stamps itself against. Name a directory "
-            "outside both")
+            "location, and there is deliberately no default: derived from the data root it "
+            "would be walked by every consumer that indexes a tenant's runs, and derived from "
+            "the checkout it would dirty the tree every sibling stamps itself against. Name a "
+            "directory outside both")
     # Resolved even when it does not exist yet (every first launch): an unresolved relative path
     # has `.parents == (Path("."),)`, so neither refusal below would fire.
     root = Path(raw)
     candidate = root.resolve()
+    data_root = Path(tenant.dir).parent.resolve()
     for forbidden, why in (
-        (resolve_runs_base(), "the runs base — every walker of that tree descends into every "
-                              "directory under it, so an episode there is indexed as runs"),
+        (data_root, "the data root — every tenant's tree lives there, so an episode inside it "
+                    "would be indexed as a tenant's own runs or episodes"),
         (REPO_ROOT, "the checkout — an untracked directory there is what a sibling's own "
                     "provenance stamp reports as a dirty tree"),
     ):
@@ -131,6 +134,12 @@ def episodes_root() -> Path:
         if candidate == forbidden or forbidden in candidate.parents:
             raise LauncherRefused(
                 f"[branch] {EPISODES_BASE_ENV}={root} resolves inside {why}")
+    # A base containing the data root (its parent, say) is refused too; one containing the
+    # checkout is not.
+    if candidate in data_root.parents:
+        raise LauncherRefused(
+            f"[branch] {EPISODES_BASE_ENV}={root} contains the data root {data_root} — keep "
+            "episodes and tenants' trees apart")
     # Return the resolved path the refusals judged: paths built from it reach child processes,
     # which would re-resolve a relative one against their own cwd.
     return candidate
@@ -144,7 +153,7 @@ def refuse_bad_episode_id(episode_id: str) -> None:  # lint-dup: ok — one rule
         raise LauncherRefused(f"[branch] {bad}") from bad
 
 
-def episode_dir_for(episode_id: str) -> Path:
+def episode_dir_for(episode_id: str, *, tenant: Any) -> Path:
     """Where one episode's shared records live.
 
     A single path component under the configured episodes root. The id is checked here because
@@ -152,7 +161,7 @@ def episode_dir_for(episode_id: str) -> Path:
     separator would plant the capture outside the root or onto another episode's.
     """
     refuse_bad_episode_id(episode_id)
-    return episodes_root() / episode_id
+    return episodes_root(tenant=tenant) / episode_id
 
 
 def episode_id_for(source_run_id: str, branch_message_id: int) -> str:
@@ -165,22 +174,6 @@ def episode_id_for(source_run_id: str, branch_message_id: int) -> str:
     return f"{source_run_id}-n{branch_message_id}".casefold()
 
 
-def refuse_distant_source(source_run_dir: Path) -> None:
-    """Refuse a source that is not an ordinary run dir directly under the configured runs base.
-
-    `open_source_store` resolves the store from `run_dir.parent`, so a source parked elsewhere
-    resolves to a database that is not its own and fails later with a misleading message.
-
-    Not called on the launch path: siblings live under the episode dir and the manifest names
-    the source by absolute path, and `open_source_store` (called on every launch) refuses the
-    same mismatch with the store in hand. Kept as the earlier pre-check for the ordinary layout.
-    """
-    base = resolve_runs_base().resolve()
-    if Path(source_run_dir).resolve().parent != base:
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir} does not live directly under {base} — a "
-            "source's own session store is resolved from its parent, and one parked elsewhere "
-            "resolves to a database that was never its own")
 
 
 # ---------------------------------------------------------------------------------------
@@ -189,7 +182,7 @@ def refuse_distant_source(source_run_dir: Path) -> None:
 
 
 def prepare_episode(
-    episode_id: str, source_run_dir: Path,
+    episode_id: str, source_run_dir: Path, *, tenant: Any,
     prime: Callable[[Path, Path], PrimeReport] = prime_base,
 ) -> Path:
     """Prime the family's base once, exclusively, and hand back the episode directory.
@@ -203,7 +196,7 @@ def prepare_episode(
 
     `prime` is injectable so a test can observe whether priming ran.
     """
-    episode = episode_dir_for(episode_id)
+    episode = episode_dir_for(episode_id, tenant=tenant)
     refuse_claimed_episode(episode, episode_id)
     # Only a directory that got no further than a mid-prime death is adoptable: a world ledger
     # left by an earlier attempt would be absorbed first-row-wins and silently answer this
@@ -340,28 +333,24 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
     before anything is spent.
 
     Siblings, the review and the manifest check all use this tenant, so it is read from the
-    source's runs-base record (`_tenant.tenant_of_run`), which the box cannot write; the stamp
-    in the box's run dir could have been rewritten by a model. The stamp must agree with the
-    record. A missing tenant or the retired `default` gets no fallback: a family on a tenant
-    nobody chose may not measure the source's estate."""
+    source's runs-base record (`_tenant.tenant_of_run_dir`), which the box cannot write; the
+    stamp in the box's run dir could have been rewritten by a model. The stamp must agree with
+    the record, and a stamp with no tenant gets no fallback: a family on a tenant nobody chose
+    may not measure the source's estate."""
     from defender import _tenant
 
-    stamp = _stamp_of(source_run_dir)
-    if stamp is None:
-        raise _no_stamp(source_run_dir)
     try:
-        record = _tenant.tenant_of_run(source_run_dir)
-    except _tenant.TenantRecordCorrupt as refusal:
+        # The record, at the source's tenant location under the data root, naming a tenant
+        # whose row exists (#1078 D3/O5) — a source anywhere else is refused, never trusted,
+        # and before its box-writable stamp is read at all.
+        tenant_id = _tenant.tenant_of_run_dir(source_run_dir)
+    except _tenant.TenantRefused as refusal:
         raise LauncherRefused(
             f"[branch] source run {source_run_dir}'s tenant: its runs base's record is the "
             f"authority for it, and {refusal}") from refusal
-    tenant_id = record.tenant_id
-    if not _tenant.is_usable_tenant_id(tenant_id):
-        raise LauncherRefused(
-            f"[branch] source run {source_run_dir}'s runs base names no usable tenant "
-            f"({tenant_id!r}, in {_tenant.record_path(Path(source_run_dir).parent)}) — an "
-            "episode's siblings run on the source's tenant, and there is no fallback tenant to "
-            "run them on")
+    stamp = _stamp_of(source_run_dir)
+    if stamp is None:
+        raise _no_stamp(source_run_dir)
     if stamp.get("tenant_id") != tenant_id:
         raise LauncherRefused(
             f"[branch] source run {source_run_dir}'s stamp names tenant "
@@ -521,10 +510,11 @@ def sibling_runs_base(episode_dir: Path) -> Path:
 
 
 def sibling_argv(
-    episode_dir: Path, world_label: str, *, model: str | None = None,
+    episode_dir: Path, world_label: str, *, tenant_id: _tenant.TenantId, model: str | None = None,
     tenants_root: Path | None = None,
 ) -> list[str]:
-    """One sibling's command line: the manifest, which arm of it this process is, and the model.
+    """One sibling's command line: the manifest, which arm of it this process is, its tenant
+    and the model.
 
     Everything else a sibling needs is derived from the manifest. `sys.executable` so the child
     uses the same venv interpreter.
@@ -533,7 +523,10 @@ def sibling_argv(
     agree on the default model rather than the one the preflight checked.
     """
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
-            "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label]
+            "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label,
+            # EVERY RUN NAMES ITS TENANT (#1078), a sibling included: the episode's, which this
+            # launcher resolved once. The child checks it against the source's record.
+            "--tenant", tenant_id]
     if model is not None:
         argv += ["--model", model]
     # So the child uses the tenants root the launcher resolved, not its own default.
@@ -551,7 +544,7 @@ SPAWN_FAILED_EXIT = 70
 def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every arm runs on
     episode_dir: Path, world_labels: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
-    tenant_id: str | None, tenants_root: Path,
+    tenant_id: _tenant.TenantId | None, tenants_root: Path,
 ) -> dict[str, int]:
     """Start every accepted sibling together, and wait for all of them.
 
@@ -559,16 +552,19 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
     run serially they would be compared across a moving estate, which the primed capture and
     shared T0 exist to prevent.
 
-    Each child's `DEFENDER_RUNS_BASE` is inside the episode, keeping siblings out of runs-base
-    walkers' reach.
+    Each child's runs base is inside the episode: the child derives it from the manifest, so
+    the launcher exports no `DEFENDER_RUNS_BASE`, and siblings stay out of runs-base walkers'
+    reach.
 
-    The child's tenant record (`_tenant.json` in its runs base) is seeded with the episode's
-    `tenant_id` before it starts, since a sibling reads its tenant from there; `tenants_root`
-    rides on each command line. A missing or retired tenant refuses before anything is written.
+    `spawn` is the process seam.
+
+    The child's runs-base record is seeded with the episode's `tenant_id` before it starts, and
+    `--tenant` and `tenants_root` ride on each command line. No tenant refuses before anything
+    is written.
     """
     from defender import _tenant
 
-    if not _tenant.is_usable_tenant_id(tenant_id):
+    if tenant_id is None or not _tenant.is_valid_tenant_id(tenant_id):
         # A ValueError, not `LauncherRefused`: `_episode_tenant` already resolved the tenant, so
         # this is a caller bug and takes the episode's normal abort path.
         raise ValueError(
@@ -578,11 +574,9 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
     episode_dir = Path(episode_dir)
     runs = sibling_runs_base(episode_dir)
     guarded_mkdir(runs, base=episode_dir)
-    seeded = _tenant.ensure_tenant(runs, tenant_id=tenant_id)
-    if seeded.tenant_id != tenant_id:
-        raise ValueError(
-            f"{_tenant.record_path(runs)} already names tenant {seeded.tenant_id!r}, not the "
-            f"episode's {tenant_id!r} — refused before any sibling started")
+    # Minted with the episode's tenant, or read back and refused when it names another
+    # (`TenantRefused`, a ValueError) — before any sibling started.
+    _tenant.ensure_runs_base_record(runs, tenant_id)
     labels = list(world_labels)
     if not labels:
         return {}
@@ -591,11 +585,11 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
 
     def launch_one(label: str) -> None:
         env = dict(os.environ)
-        env["DEFENDER_RUNS_BASE"] = str(runs)
         # Rendezvous first, so "started together" does not depend on the pool's scheduling.
         ready.wait(timeout=30)
         exits[label] = start(
-            sibling_argv(episode_dir, label, model=model, tenants_root=tenants_root), env=env)
+            sibling_argv(episode_dir, label, tenant_id=tenant_id, model=model,
+                         tenants_root=tenants_root), env=env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
         futures = {label: pool.submit(launch_one, label) for label in labels}
@@ -1047,6 +1041,10 @@ def _launch(  # noqa: PLR0913 — see `main`
     tenants_root = (ns.tenants_root if ns.tenants_root is not None
                     else default_tenants_root(REPO_ROOT))
     tenant = _episode_tenant(source, tenants_root)
+    # ...and the same tenant's tree under the data root (#1078 D4): the episodes root's
+    # data-root refusal and the grade's runs base are handed this, never re-derive it.
+    tenant_paths = _tenant.TenantPaths(_tenant.resolve_data_root(), tenant.tenant_id)
+    runs_base = tenant_paths.runs
     write_door = (staging_mod.write_door_from_env(staging_mod.host_context(tenant.settings))
                   if door is None else door)
     questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
@@ -1054,7 +1052,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     live_capture = ((lambda: _provenance.capture_tree(REPO_ROOT)) if live_tree is None
                     else live_tree)
     episode_id = episode_id_for(source.name, ns.branch_message_id)
-    episode_dir = episode_dir_for(episode_id)
+    episode_dir = episode_dir_for(episode_id, tenant=tenant_paths)
     token, patterns, source_stamp = preflight_episode(
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
@@ -1068,7 +1066,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     try:
         author = seams.model_seam(episode_dir) if questioner is None else questioner
         compare_with = seams.model_seam(episode_dir) if invoke is None else invoke
-        read_side = seams.adapter_seam(episode_dir, tenant) if adapters is None else adapters
+        read_side = (seams.adapter_seam(episode_dir, tenant, runs_base=runs_base)
+                     if adapters is None else adapters)
     except Exception as unbuildable:  # noqa: BLE001 — every seam's own fault class, and the answer is the same refusal
         raise LauncherRefused(
             f"[branch] the launcher could not build its model and adapter seams "
@@ -1078,7 +1077,7 @@ def _launch(  # noqa: PLR0913 — see `main`
 
     # From here on the episode spends, and after the first staging append there are live
     # cluster names only this process knows about, so everything runs inside the teardown guard.
-    episode_dir = prepare_episode(episode_id, source)
+    episode_dir = prepare_episode(episode_id, source, tenant=tenant_paths)
     # Tells the `finally` whether an exception is already heading to the operator; only this
     # frame knows (see `_teardown_without_masking`).
     aborting = False
@@ -1091,7 +1090,7 @@ def _launch(  # noqa: PLR0913 — see `main`
             episode_dir=episode_dir, token=token, patterns=patterns, door=write_door,
             questioner=author, adapters=read_side, invoke=compare_with, spawn=spawn,
             judge=judge, lessons_dir=questioner_lessons_dir, teardown=teardown,
-            tenant=tenant, tenants_root=tenants_root)
+            tenant=tenant, tenants_root=tenants_root, runs_base=runs_base)
     except SystemExit:
         aborting = True
         raise
@@ -1157,7 +1156,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     ns: argparse.Namespace, *, source: Path, source_stamp: dict, episode_id: str,
     episode_dir: Path, token: str, patterns: Sequence[str], door: Any, questioner: Any,
     adapters: Any, invoke: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
-    teardown: Any = None, tenant: RunTenant, tenants_root: Path,
+    teardown: Any = None, tenant: RunTenant, tenants_root: Path, runs_base: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`, inside the teardown guard.
 
@@ -1188,7 +1187,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
     with clock.step(Step.REVIEW):
         record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
-                                   door=door, invoke=invoke, settings_dir=tenant.settings)
+                                   door=door, invoke=invoke, settings_dir=tenant.settings,
+                                   runs_base=runs_base)
     if record.get("episode", {}).get("decision") == REJECTED:
         # Any rejected world ends the whole episode: a family missing an arm measures nothing,
         # and running the rest would look like a completed comparison.
@@ -1218,7 +1218,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # judge's entry is recorded before a held hand-back failure is raised.
     with _cluster_released(teardown, episode_id=episode_id):
         with clock.step(Step.JUDGE):
-            _grade(episode_dir, episode_id=episode_id, judge=judge)
+            _grade(episode_dir, episode_id=episode_id, judge=judge, runs_base=runs_base)
         # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
         # non-fatal.
         _render_page(episode_dir, episode_id=episode_id)
@@ -1274,13 +1274,13 @@ def _render_page(episode_dir: Path, *, episode_id: str) -> None:
                         f"({render_failed!r})")
 
 
-def _grade(episode_dir: Path, *, episode_id: str, judge: Any) -> None:
-    """The grade, the body of the `JUDGE` frame; any failure is logged, never raised."""
+def _grade(episode_dir: Path, *, episode_id: str, judge: Any, runs_base: Path) -> None:
+    """The grade, the body of the `JUDGE` frame; any failure is logged, never raised.
+    `runs_base` is the tenant's, threaded from the launcher."""
     try:
         from defender.learning import judge as judge_mod
-        from defender.run_common import resolve_runs_base
 
-        judge_mod.grade_episode(episode_dir, judge=judge, runs_base=resolve_runs_base())
+        judge_mod.grade_episode(episode_dir, judge=judge, runs_base=runs_base)
     # Imports are inside the `try` too, so an import or config fault is a judge failure
     # rather than reaching `_launch`'s abort arm with a false "no sibling started" message.
     except Exception as judge_failed:  # noqa: BLE001 — a judge failure is non-fatal, see below
@@ -1459,7 +1459,6 @@ __all__ = [
     "parse_branch_args",
     "prepare_episode",
     "refuse_bad_episode_id",
-    "refuse_distant_source",
     "sibling_argv",
     "sibling_runs_base",
     "start_family",

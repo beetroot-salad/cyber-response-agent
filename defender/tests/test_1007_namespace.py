@@ -69,7 +69,7 @@ def launch(tmp_path: Path, monkeypatch, *, argv_extra=(), **seams):
     cli = W.mod("learning.branch.cli")
     rc = cli.main([str(src), str(W.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
                    *argv_extra], spawn=W.FakeSpawn(), **seams)
-    return rc, door, cli.episode_dir_for(W.EPISODE_ID)
+    return rc, door, cli.episode_dir_for(W.EPISODE_ID, tenant=W.current_tenant_paths())
 
 
 def written_bytes(root: Path) -> str:
@@ -114,7 +114,7 @@ def test_the_launcher_answers_to_no_operator_named_episode_token(tmp_path, monke
         f"{refused.value.code!r} — the operator door onto the episode's namespace is still open")
     assert not [n for n in door.created() if OPERATOR_NAMED in n], (
         f"the operator's token reached the cluster: the door created {door.created()}")
-    root = Path(W.mod("learning.branch.cli").episodes_root())
+    root = Path(W.mod("learning.branch.cli").episodes_root(tenant=W.current_tenant_paths()))
     if root.is_dir():
         assert OPERATOR_NAMED not in written_bytes(root), (
             "the operator's token was written under the episodes root")

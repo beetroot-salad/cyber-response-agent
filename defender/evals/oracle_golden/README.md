@@ -319,7 +319,13 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
 2. Fire a catalog attack (`playground-v2/attacks/runner.py run <scenario>`); the
    per-run metadata record it writes under `runs/<id>/` is the ground truth.
 3. When the rule fires, project the alert to fixture shape and run
-   `defender/run.py <alert.json> --run-id <slug> --no-learn`.
+   `defender/run.py <alert.json> --tenant playground --run-id <slug> --no-learn` (every run
+   names its tenant, and there is no default — #1078; run
+   `python3 defender/scripts/tenant.py setup playground` once, from the main checkout, with
+   `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
+   the same user that runs defender; a destination already occupied makes setup refuse, naming
+   it in the message — adopting an existing (B)/(C) installation whose old entries are
+   root-owned may need setup run as root, that adoption case only).
 4. Author `story.md` from that record — state **only what happened** (an invented
    step makes the oracle "wrong" for a story reason), and **nothing about the
    evaluation**: no result class, no "a faithful oracle would…", no mention of

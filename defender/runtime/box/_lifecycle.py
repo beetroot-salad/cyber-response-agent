@@ -51,7 +51,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
     subjects = [
-        ("run dir", run_dir, "Set DEFENDER_RUNS_BASE to a path"),
+        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
     ]
     if tenant_agent is not None:

@@ -691,9 +691,14 @@ def test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_l
     # The real run appears under the operator's runs base — `runs_base` writes an ORDINARY
     # finished run (its provenance stamp, its capture, its close), not a directory hand-placed
     # at a name no production path makes.
-    J.runs_base(tmp_path)
+    #
+    # #1078: the collision check is keyed on an explicit `runs_base=` the caller threads in —
+    # `resolve_runs_base()`'s old env-var auto-detection is gone (D4/D5), so the base this test
+    # just wrote to has to be handed to `grade_family` directly, the same way #1078's own
+    # production callers now thread it.
+    base, _source_run_dir = J.runs_base(tmp_path)
     with pytest.raises(J.refusals()) as raised:
-        family_mod.grade_family(ep)
+        family_mod.grade_family(ep, runs_base=base)
     assert colliding in str(raised.value), (
         "the manifest was refused without naming the label that collided; the operator has to "
         "rename one of the two and the message is the only thing that says which")

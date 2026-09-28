@@ -352,8 +352,8 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
         (kw["run_dir"] / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
-    T.mod("run").main([str(src / "alert.json"), "--no-learn"], lifecycle=lifecycle,
-                      visualize=lambda p: None, preflight=T.no_preflight)
+    T.mod("run").main([str(src / "alert.json"), "--tenant", base.parent.name, "--no-learn"],
+                      lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
     tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]
     assert seen["ctx"] == {"run_id": seen["run_dir"].name, "tenant_id": tenant}
     assert _log.current_context() == {}, "the binding outlived the run"
@@ -371,8 +371,9 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
 
     capsys.readouterr()
     with pytest.raises(RuntimeError, match="lifecycle blew up"):
-        T.mod("run").main([str(src / "alert.json"), "--no-learn"], lifecycle=lifecycle,
-                          visualize=lambda p: None, preflight=T.no_preflight)
+        T.mod("run").main([str(src / "alert.json"), "--tenant", base.parent.name, "--no-learn"],
+                          lifecycle=lifecycle, visualize=lambda p: None,
+                          preflight=T.no_preflight)
     tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]
     [crash] = [ln for ln in capsys.readouterr().err.splitlines() if " CRITICAL " in ln]
     assert "the run failed" in crash

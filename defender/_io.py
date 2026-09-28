@@ -609,6 +609,77 @@ def stage_name(path: Path) -> Path:
     return path.with_name(f"{path.name}.staged-{secrets.token_hex(8)}")
 
 
+def open_unnamed(directory: Path) -> int:
+    """A write descriptor on a NEW, UNNAMED file in `directory` (`O_TMPFILE`): it has no name,
+    and so no reader can see it, until `_link_unnamed` gives it one. `OSError(EOPNOTSUPP)`
+    where the platform has no such open at all, the same answer a filesystem without it gives.
+    The name-source seam `write_guarded(open_unnamed=)` defaults to."""
+    flag = getattr(os, "O_TMPFILE", None)
+    if flag is None:
+        raise OSError(errno.EOPNOTSUPP, "no O_TMPFILE on this platform", str(directory))
+    return os.open(directory, flag | os.O_WRONLY, 0o644)
+
+
+#: What an unnamed open answers on a filesystem (NFS, virtiofs, FUSE) or kernel that cannot make
+#: one — the create lane then falls back. Any other errno is a real failure of the write.
+_NO_UNNAMED_FILES = frozenset({errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL})
+
+
+def _create_unnamed(
+    path: Path, text: str | bytes, open_unnamed: Callable[[Path], int],
+) -> bool:
+    """`create`'s complete-or-absent lane (#1078 J16/J63): the body is written in full, synced
+    and set to 0644 on an unnamed file, which is then given `path`'s name in one `linkat`. No
+    reader ever sees the name absent-then-empty or partial, the file never has two names (its
+    link count goes 0 -> 1), and a crash before the link leaves nothing in the directory.
+
+    The link passes the directory as a descriptor, so CPython calls `linkat(AT_SYMLINK_FOLLOW)`
+    through `/proc/self/fd/N` — unprivileged. Without the descriptor it calls plain `link(2)`,
+    which does not follow that magic link and fails `EXDEV` on every host.
+
+    True when this lane wrote the file; False when this filesystem or host cannot make an
+    unnamed file (or has no `/proc`), and the caller falls back. An occupied name raises
+    `FileExistsError` (the ordinary create race); anything else propagates."""
+    try:
+        fd = open_unnamed(path.parent)
+    except OSError as e:
+        if e.errno in _NO_UNNAMED_FILES:
+            return False
+        raise
+    try:
+        os.fchmod(fd, 0o644)
+        data = text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8")
+        # Buffered: the file object loops over a short `os.write` until every byte has landed.
+        with os.fdopen(fd, "wb", closefd=False) as f:
+            f.write(data)
+        os.fsync(fd)
+        dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.link(f"/proc/self/fd/{fd}", path.name, dst_dir_fd=dir_fd, follow_symlinks=True)
+        except FileNotFoundError:
+            if not os.path.isdir("/proc/self/fd"):
+                return False
+            raise
+        finally:
+            os.close(dir_fd)
+    finally:
+        os.close(fd)
+    return True
+
+
+def _create_named(path: Path, text: str | bytes) -> None:
+    """`create`'s fallback where no unnamed file can be made: ONE `O_CREAT|O_EXCL|O_NOFOLLOW`
+    open of the target itself, then the write (see `write_guarded` for its residue)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        _write_all(fd, text)
+    except BaseException:
+        # Ours to remove: the create succeeded, so the half-written entry is this call's.
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        raise
+
+
 def _mark_alias(exc: OSError, *, is_alias: bool) -> OSError:
     exc.write_guarded_alias = is_alias  # type: ignore[attr-defined]
     return exc
@@ -671,22 +742,27 @@ def locked_for_rewrite(path: Path, *, binary: bool = False) -> Iterator[Any]:
 
 def write_guarded(
     path: Path, text: str | bytes, *, mode: str = "replace",
-    stage_name: Callable[[Path], Path] = stage_name, **kw: object,
+    stage_name: Callable[[Path], Path] = stage_name,
+    open_unnamed: Callable[[Path], int] = open_unnamed, **kw: object,
 ) -> None:
     """The single write seam every shared-tree writer routes through.
 
     Modes:
       * `replace` — stage under an unpredictable name, then `os.replace` into place (replaces
         a planted symlink without following it).
-      * `create` — one `O_CREAT|O_EXCL|O_NOFOLLOW` open, for write-once records; an occupied
-        name raises `FileExistsError`. Not staged-then-linked, since the target would briefly
-        have two names and guarded readers refuse that; a reader racing the single `write()`
-        sees an empty record and refuses it as corrupt.
+      * `create` — for write-once records; an occupied name raises `FileExistsError`. The body
+        is written to an unnamed file and linked to the name in one step (`_create_unnamed`),
+        so a reader sees the name absent or the file complete, and the file never has two
+        names (a named stage hard-linked into place would, and guarded readers refuse that).
+        Where the filesystem cannot make an unnamed file it falls back to one
+        `O_CREAT|O_EXCL|O_NOFOLLOW` open: a reader racing the write can then see an empty
+        record (and refuses it as corrupt), and a crash can leave a partial one.
       * `append` — the JSONL lane, `O_NOFOLLOW` at open.
       * `update` — locked read-modify-write via `locked_for_rewrite`.
 
-    `text` may be `bytes`. `**kw` accepts only `encoding` (ignored; utf-8 is pinned): swallowing
-    other keywords would let a misspelt `mode=` silently truncate a file meant for appending."""
+    `text` may be `bytes`. `stage_name` and `open_unnamed` are the name and unnamed-open seams.
+    `**kw` accepts only `encoding` (ignored; utf-8 is pinned): swallowing other keywords would
+    let a misspelt `mode=` silently truncate a file meant for appending."""
     unexpected = set(kw) - {"encoding"}
     if unexpected:
         raise TypeError(
@@ -710,16 +786,10 @@ def write_guarded(
             raise
     elif mode == "create":
         # Precheck first so a planted entry is the marked alias refusal; an EEXIST from the
-        # open is then the ordinary create race, unmarked.
+        # link (or the fallback's open) is then the ordinary create race, unmarked.
         _refuse_unless_plain(path)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
-        try:
-            _write_all(fd, text)
-        except BaseException:
-            # The create succeeded, so the half-written entry is ours to remove.
-            with contextlib.suppress(OSError):
-                os.remove(path)
-            raise
+        if not _create_unnamed(path, text, open_unnamed):
+            _create_named(path, text)
     elif mode == "append":
         _refuse_unless_plain(path)
         fd = open_nofollow_fd(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
