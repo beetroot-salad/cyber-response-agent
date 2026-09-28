@@ -219,3 +219,54 @@ def test_d2_rooted_unlink_is_judged_on_the_entry_not_by_following_it(scratch):
     assert stat.S_ISLNK(os.lstat(leaf).st_mode)
     assert target.read_text(encoding="utf-8") == PRIOR
     assert os.lstat(target).st_nlink == 1
+
+
+# ---------------------------------------------------------------------------------------
+# the folder walk under an interrupt
+# ---------------------------------------------------------------------------------------
+
+class InterruptAfterFirstClose(S.PassThroughOs):
+    """The real `os`, handed in as `os_`: every `close` is recorded, and the first one is
+    followed by a `KeyboardInterrupt`, as a signal landing just after the walk released the
+    folder it stepped out of. A second close of a number the walk already closed would, in a
+    live process, close whatever that number now names (another reader's handle)."""
+
+    def __init__(self) -> None:
+        self.closed: list[int] = []
+        self.failed: list[OSError] = []
+
+    def close(self, fd: int) -> None:
+        try:
+            os.close(fd)
+        except OSError as e:
+            self.failed.append(e)
+            raise
+        self.closed.append(fd)
+        if len(self.closed) == 1:
+            raise KeyboardInterrupt("mid-walk")
+
+
+@pytest.mark.parametrize("op", ["write", "unlink", "mkdir"])
+def test_an_interrupt_mid_walk_never_closes_a_descriptor_twice(scratch, op):
+    """Found while moving the episode page's write onto the core (#1133): the walk down the
+    folders closed the folder it left, then took the next one, so an interrupt between the two
+    left the `finally` closing the same number again. Each descriptor the walk opens is closed
+    at most once, whatever the interrupt; the interrupt itself still propagates.
+
+    Control, same address, no interrupt: the op completes and every close succeeds."""
+    root, leaf, _host = scratch
+    leaf.write_text(PRIOR, encoding="utf-8")
+    ops = {
+        "write": lambda os_: _io.rooted_write(root, DEEP, ROW, mode="replace", os_=os_),
+        "unlink": lambda os_: _io.rooted_unlink(root, DEEP, os_=os_),
+        "mkdir": lambda os_: _io.rooted_mkdir(root, DEEP.parent, os_=os_),
+    }
+    spy = InterruptAfterFirstClose()
+    with pytest.raises(KeyboardInterrupt):
+        ops[op](spy)
+    assert spy.failed == [], f"{op}: a close failed after the interrupt: {spy.failed}"
+    assert len(spy.closed) == len(set(spy.closed)), (
+        f"{op}: a descriptor number was closed twice: {spy.closed}")
+
+    control = S.PassThroughOs()
+    ops[op](control)
