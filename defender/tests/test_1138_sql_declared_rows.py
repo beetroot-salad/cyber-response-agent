@@ -484,6 +484,13 @@ _DEFECTS: dict[str, _Defect] = {
     "name-with-a-tab": _Defect(
         _FLAGS + (_SQL,), _recs(["a\tb"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
         _FLAGS + (_SQL,), _recs(["a-b"], [[1]]), 1),
+    # DEL and the C1 range are control characters too (Unicode `Cc`), not only ord < 32.
+    "name-with-a-del": _Defect(
+        _FLAGS + (_SQL,), _recs(["a\x7fb"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
+        _FLAGS + (_SQL,), _recs(["a~b"], [[1]]), 1),
+    "name-with-a-c1-control": _Defect(
+        _FLAGS + (_SQL,), _recs(["a\x85b"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
+        _FLAGS + (_SQL,), _recs(["a\u2026b"], [[1]]), 1),
     # -- two names equal under ASCII case folding -> 1
     "ascii-case-clash": _Defect(
         _FLAGS + (_SQL,), _recs(["Host", "host"], [["a", "b"]]), EXIT_QUERY_ERROR, ("Host", "host"),
@@ -601,6 +608,49 @@ def test_o4_the_note_names_every_list_column_and_is_absent_without_one():
     assert control.stderr.strip() == "", control.stderr
 
 
+#: List columns whose element type is not VARCHAR: a note or hint keyed on the spelling
+#: `VARCHAR[]` misses every one of them. (id, cells, type, a lead's natural scalar `=`, the
+#: `list_contains` form of it, the rows that form selects.)
+_OTHER_LISTS = [
+    ("bigint", [[22, 443], 80, [8080]], "BIGINT[]", "multi = 22", "list_contains(multi, 22)", 1),
+    ("boolean", [[True], [False, True], False], "BOOLEAN[]", "multi = true",
+     "list_contains(multi, true)", 2),
+    ("double", [[0.5, 1.5], 2.5, [1.5]], "DOUBLE[]", "multi = 1.5", "list_contains(multi, 1.5)", 2),
+]
+
+
+@pytest.mark.parametrize(("cells", "typ", "scalar_eq", "contains", "n"),
+                         [c[1:] for c in _OTHER_LISTS], ids=[c[0] for c in _OTHER_LISTS])
+def test_o4_a_list_column_of_any_element_type_gets_the_note_and_the_list_clause(
+        cells, typ, scalar_eq, contains, n):
+    """O4 for a list of numbers or booleans, not only of strings: the column is a list column
+    (a scalar cell wrapped), every flagged run over it names it with `list_contains` and
+    `unnest`, a scalar `=` on it fails loudly with the list clause in the hint, and the
+    `list_contains` form answers. The control is the same payload's scalar column alone: no note."""
+    payload = {"hdr": ["host", "multi"], "recs": [[f"h{i}", c] for i, c in enumerate(cells)]}
+    assert _schema(payload, rows="recs", names="hdr") == [("host", "VARCHAR"), ("multi", typ)]
+
+    proc = _flag(payload, "SELECT count(*) AS n FROM data", rows="recs", names="hdr")
+    assert _ok(proc) == [{"n": len(cells)}]
+    assert "multi" in proc.stderr, proc.stderr
+    assert "list_contains" in proc.stderr, proc.stderr
+    assert "unnest" in proc.stderr, proc.stderr
+    assert "host" not in proc.stderr, "the note named the scalar column as a list"
+
+    failed = _flag(payload, f"SELECT count(*) AS n FROM data WHERE {scalar_eq}", rows="recs", names="hdr")
+    assert_query_error(failed, f"a scalar = on a {typ} column answered")
+    # The query holds no `list_contains`, so the word on stderr is the tool's hint.
+    assert "list_contains" in failed.stderr, (
+        f"the error hint on a {typ} column does not name the list form: {failed.stderr!r}")
+    assert _ok(_flag(payload, f"SELECT count(*) AS n FROM data WHERE {contains}",
+                     rows="recs", names="hdr")) == [{"n": n}]
+
+    scalar_only = {"hdr": ["host"], "recs": [[f"h{i}"] for i in range(len(cells))]}
+    control = _flag(scalar_only, "SELECT count(*) AS n FROM data", rows="recs", names="hdr")
+    assert _ok(control) == [{"n": len(cells)}]
+    assert control.stderr.strip() == "", control.stderr
+
+
 def test_o4_a_scalar_cell_in_a_list_column_is_a_one_element_list_and_null_and_empty_survive():
     """O4: a non-list cell is wrapped as a one-element list, `null` stays NULL, `[]` stays
     empty — so `unnest` yields one row per address and `len` tells an empty list from a null."""
@@ -640,6 +690,39 @@ def test_o5_a_hostile_name_loads_as_that_literal_name_and_creates_nothing():
     assert _ok(_flag(payload, "SHOW TABLES", rows="recs", names="hdr")) == [{"name": "data"}]
 
 
+#: Names holding a single quote — the delimiter of every SQL string literal, e.g. a
+#: `columns={'<name>': '<type>'}` map — alone, beside a double quote, and shaped to close such
+#: a literal and run DDL after it.
+_SINGLE_QUOTED = [
+    "o'brien",
+    'x\'"); CREATE TABLE pwned(a INT); --',
+    "a': 'VARCHAR'}); CREATE TABLE pwned2(a INT); --",
+]
+
+
+def _ident(name: str) -> str:
+    """`name` as a double-quoted SQL identifier — the lead's own spelling of it."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def test_o5_a_name_holding_a_single_quote_loads_as_that_literal_name_and_creates_nothing():
+    """O5 for the OTHER quote: a name holding `'` — alone, with `"`, and crafted to break out of
+    a single-quoted literal — reaches no statement as text. Each is one column with exactly that
+    name (in `DESCRIBE data` and as a result key), each can be selected and filtered on by its
+    quoted name, and the catalog holds `data` and nothing else."""
+    payload = {"hdr": [*_SINGLE_QUOTED, "ok"],
+               "recs": [["v0", "v1", "v2", 1], ["w0", "w1", "w2", 2]]}
+    assert _schema(payload, rows="recs", names="hdr") == [
+        *((n, "VARCHAR") for n in _SINGLE_QUOTED), ("ok", "BIGINT")]
+    picked = ", ".join(_ident(n) for n in _SINGLE_QUOTED)
+    for i, name in enumerate(_SINGLE_QUOTED):
+        assert _ok(_flag(payload, f"SELECT {picked}, ok FROM data WHERE {_ident(name)} = 'w{i}'",
+                         rows="recs", names="hdr")) == [
+            {**{n: f"w{j}" for j, n in enumerate(_SINGLE_QUOTED)}, "ok": 2}]
+    assert _ok(_flag(payload, "SELECT table_name FROM information_schema.tables",
+                     rows="recs", names="hdr")) == [{"table_name": "data"}]
+
+
 @pytest.mark.parametrize("hostile", [
     "SELECT * FROM read_json('/etc/hostname')",
     "SELECT * FROM read_text('/etc/hostname')",
@@ -670,6 +753,10 @@ _TYPINGS = {
                    "values": [[1, 2], [3, 4]]},
     "TIMESTAMP[][]": {"columns": [{"name": "@timestamp", "type": "date"}],
                       "values": [["2026-08-07T11:32:52.000Z"], ["2026-08-07T11:33:10.000Z"]]},
+    "DOUBLE[][]": {"columns": [{"name": "ratio", "type": "double"}, {"name": "score", "type": "double"}],
+                   "values": [[1.5, 2.5], [3.5, 4.5]]},
+    "BOOLEAN[][]": {"columns": [{"name": "ok", "type": "boolean"}, {"name": "seen", "type": "boolean"}],
+                    "values": [[True, False], [False, True]]},
 }
 
 
@@ -718,21 +805,50 @@ def test_o6_the_note_detects_by_type_and_names_this_payloads_own_keys(payload, n
     assert "--names columns" not in proc.stderr
 
 
-@pytest.mark.parametrize("key", ["my rows", "$(id)", "a;b", "x.y", "r`id`"])
-def test_o6_a_key_outside_the_safe_set_is_not_echoed_into_the_command(key):
+@pytest.mark.parametrize("slot", ["rows", "names"])
+@pytest.mark.parametrize("key", ["my rows", "$(id)", "a;b", "x.y", "r`id`", "my names"])
+def test_o6_a_key_outside_the_safe_set_is_not_echoed_into_the_command(key, slot):
     """O6 (security): the note hands the lead a command to copy, so a payload key reaches it
-    only when it matches `[A-Za-z0-9_@-]+`. A key with a space, `$(`, `;`, `.` or a backtick is
-    not echoed at all — the note still says to declare the rows, generically. The control is a
-    safe key on the same shape, which IS echoed."""
-    proc = _plain({key: [[1, 2]], "hdr": ["a", "b"]}, "SELECT 1 AS one")
+    only when it matches `[A-Za-z0-9_@-]+` — the rows key AND the names key. A key with a space,
+    `$(`, `;`, `.` or a backtick is not echoed at all; the note still says to declare the rows,
+    and the SAFE key beside it is still echoed. The control is both keys safe on the same shape,
+    and both echoed."""
+    payload = {key: [[1, 2]], "hdr": ["a", "b"]} if slot == "rows" else {"recs": [[1, 2]], key: ["a", "b"]}
+    proc = _plain(payload, "SELECT 1 AS one")
     assert _ok(proc) == [{"one": 1}]
     assert "--rows" in proc.stderr, proc.stderr
     assert "--names" in proc.stderr, proc.stderr
     assert key not in proc.stderr, f"an unsafe payload key was echoed into the note: {proc.stderr!r}"
+    safe_beside = "--names hdr" if slot == "rows" else "--rows recs"
+    assert safe_beside in proc.stderr, f"the safe key beside it was not echoed: {proc.stderr!r}"
 
     safe = _plain({"r_ok-1@x": [[1, 2]], "hdr": ["a", "b"]}, "SELECT 1 AS one")
     assert _ok(safe) == [{"one": 1}]
     assert "--rows r_ok-1@x --names hdr" in safe.stderr, safe.stderr
+
+
+_NOTE_DECLARATION = re.compile(r"--rows (\S+) --names (\S+)")
+
+
+@pytest.mark.parametrize(("payload", "declared", "sql", "rows"), [
+    ({"tags": ["a", "b", "c"], "fields": ["host", "n"], "rows": [["web-1", 1], ["db-1", 2]]},
+     ("rows", "fields"), "SELECT host FROM data WHERE n = 2", [{"host": "db-1"}]),
+    ({"schema": [{"name": "x"}, {"name": "y"}, {"name": "z"}], "cols": [{"name": "host"}, {"name": "n"}],
+      "data_rows": [["web-1", 1], ["db-1", 2]]},
+     ("data_rows", "cols"), "SELECT host FROM data WHERE n = 1", [{"host": "web-1"}]),
+], ids=["string-lists", "name-object-lists"])
+def test_o6_the_names_key_is_the_candidate_whose_length_matches_the_rows(payload, declared, sql, rows):
+    """O6: `<names-key>` is the top-level list of names whose LENGTH equals the rows' width — not
+    merely the first list of names in key order. Here a list of the wrong length comes first,
+    so a note naming the first candidate names the wrong key. The declaration taken out of
+    stderr, run as printed, answers."""
+    proc = _plain(payload, "SELECT 1 AS one")
+    assert _ok(proc) == [{"one": 1}]
+    found = _NOTE_DECLARATION.search(proc.stderr)
+    assert found, f"no declaration on stderr: {proc.stderr!r}"
+    assert found.groups() == declared, proc.stderr
+    printed = ("--rows", found.group(1), "--names", found.group(2))
+    assert _ok(run_sql_py(*printed, sql, stdin=json.dumps(payload))) == rows
 
 
 @pytest.mark.parametrize(("payload", "sql", "rows"), [
