@@ -324,6 +324,20 @@ def test_the_disk_path_is_offered_when_the_view_elides(tmp_path):
     assert "defender-sql" in view
 
 
+def test_the_full_payload_footer_offers_a_reduction_correct_for_any_shape(tmp_path):
+    """#1138 O8: the `full payload` arm's example reduction must be right on every payload
+    shape. `SELECT count(*) FROM data` answers 1 over this very envelope — the search-hits
+    object is ONE row of `data` (C4) — so it was a confident wrong count offered as the way in.
+    `DESCRIBE data` is right on any shape. The premise assertion pins that this IS the
+    full-payload arm, the one that offered the count."""
+    view = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
+    assert f"full payload: {tmp_path / RUN}" in view, "premise: this view is the full-payload arm"
+    footer = view.partition(f"full payload: {tmp_path / RUN}")[2]
+    assert "defender-sql" in footer, footer
+    assert "DESCRIBE data" in footer, footer
+    assert "count(*)" not in view, "the full-payload footer offers a whole-payload count"
+
+
 def test_a_server_capped_payload_is_never_offered_a_count_over_its_own_file(tmp_path):
     """The file on disk holds the SERVER'S SLICE. `SELECT count(*)` over it returns the cap —
     the number the same view's prose says never to count — so the footer must not advertise it.
