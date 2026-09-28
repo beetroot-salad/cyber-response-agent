@@ -37,6 +37,7 @@ from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
 from ..comparator import Verdict, canonical, mechanical
 from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCall, payload_text
+from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT, params_too_deep
 from . import applier as applier_module
 from .applier import WorldApplier
 from .stagers.dispatch import STAGERS
@@ -371,6 +372,12 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
+            # A call the ledger could not record is refused before it is served or keyed: the
+            # table's own refusal, so no FAULT row is filed against params it cannot store.
+            if params_too_deep(params):
+                raise LedgerError(
+                    f"{system}.{verb} was not served: its params nest deeper than "
+                    f"{PARAMS_NESTING_LIMIT} levels, so no row could record it")
             # The clock is set on every call, unlike `world_id`, which is set only where staging
             # moved the call: a `world_id` declaration widens what `confine_index` admits, while
             # a clock admits nothing. Host-state (never staged) is the adapter that stamps the

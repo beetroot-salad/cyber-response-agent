@@ -654,8 +654,13 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
     return rows, unreadable
 
 
+class JsonTooDeep(ValueError):
+    """`json_safe(..., deeper="refuse")` met a container past `max_depth`."""
+
+
 def json_safe(value: Any, *, non_finite: Literal["text", "null"],
-              max_depth: int | None = None, naive_is_utc: bool = False) -> Any:
+              max_depth: int | None = None, deeper: Literal["repr", "refuse"] = "repr",
+              naive_is_utc: bool = False) -> Any:
     """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
     booleans and null are left as the encoder would write them.
 
@@ -668,10 +673,17 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
     A non-finite float goes the way the caller says: `"text"` keeps it, spelled as the
     Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a
     reader diagnosing; `"null"` makes it missing, for a reader computing over the field.
-    `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
+    `max_depth` bounds the walk. By default a deeper value is cut to its repr, for a caller
+    handed arbitrary objects (a log). `deeper="refuse"` instead raises `JsonTooDeep` at the
+    first container that would sit deeper than `max_depth` levels, for a caller whose data must
+    be stored whole or not at all. Either way the walk never recurses past `max_depth`, so a
+    cyclic value ends too."""
     if non_finite not in ("text", "null"):
         raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
-    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth, naive_is_utc)
+    if deeper not in ("repr", "refuse"):
+        raise ValueError(f"deeper must be 'repr' or 'refuse', not {deeper!r}")
+    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth,
+                       deeper == "refuse", naive_is_utc)
     return _json_safe_walk(value, rules, 0)
 
 
@@ -679,6 +691,7 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
 class _JsonRules:
     non_finite: str
     max_depth: int
+    refuse_deeper: bool
     naive_is_utc: bool
 
 
@@ -690,7 +703,11 @@ def _json_safe_walk(v: Any, rules: _JsonRules, depth: int) -> Any:
             return v
         return None if rules.non_finite == "null" else _non_finite_text(v)
     if depth >= rules.max_depth:
-        return repr(v)
+        if not rules.refuse_deeper:
+            return repr(v)
+        # Only a container adds a level; a date at the limit is still one text value.
+        if isinstance(v, (Mapping, list, tuple, set, frozenset)):
+            raise JsonTooDeep(f"a value nests deeper than {rules.max_depth} levels")
     if isinstance(v, Mapping):
         return {_json_key(k, rules): _json_safe_walk(x, rules, depth + 1) for k, x in v.items()}
     if isinstance(v, (list, tuple, set, frozenset)):

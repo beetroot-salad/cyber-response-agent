@@ -106,6 +106,30 @@ def safe_load(text: str) -> Any:
         return yaml.safe_load(text)
 
 
+class AliasRefused(yaml.YAMLError):
+    """A document that must be a tree reused a node by alias."""
+
+
+class _TreeLoader(yaml.SafeLoader):
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        # Refused as the alias is met, before anything is expanded: an alias graph of a few
+        # hundred bytes can stand for billions of values, and an alias can close a cycle.
+        if self.check_event(yaml.AliasEvent):
+            event = self.peek_event()
+            raise AliasRefused(
+                f"line {event.start_mark.line + 1}: the document reuses a node by alias "
+                f"(*{event.anchor}); write the value out in full")
+        return super().compose_node(parent, index)
+
+
+def safe_load_tree(text: str) -> Any:
+    """`safe_load` for a model-authored document, which must be a tree: any alias (including a
+    `<<` merge) is `AliasRefused`, a `YAMLError`. Everything that walks the result can then
+    assume no shared or cyclic values."""
+    with _construction_errors_as_yaml_errors():
+        return yaml.load(text, Loader=_TreeLoader)  # noqa: S506 — a SafeLoader subclass
+
+
 class Readings(NamedTuple):
     """One document, read twice from one node tree (`safe_load_typed_and_spelled`)."""
 

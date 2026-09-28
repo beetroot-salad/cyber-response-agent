@@ -255,7 +255,7 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
             raise BranchError(
                 f"{what}: the questioner's reply is not one bare document: {shape}") from shape
         try:
-            doc = _yaml.safe_load(text)
+            doc = _yaml.safe_load_tree(text)
         except yaml.YAMLError as e:
             raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
     if not isinstance(doc, dict):

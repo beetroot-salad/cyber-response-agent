@@ -549,7 +549,7 @@ def _read_document(path: Path) -> object:
     if text is None:
         raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
     try:
-        return _yaml.safe_load(text)
+        return _yaml.safe_load_tree(text)
     except yaml.YAMLError as bad:
         raise FamilyError(f"the manifest at {path} could not be read: {bad}") from bad
 
@@ -567,10 +567,17 @@ def write_family(episode_dir: Path, doc: dict) -> Path:
     manifest = EpisodePaths(episode_dir).family
     # Guarded: a link planted at the manifest's name would send the family's contract out of the
     # episode.
+    # No aliases: the reader refuses them, so a value the doc shares is written out each time.
     write_guarded(
         manifest,
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
+        yaml.dump(doc, Dumper=_TreeDumper, sort_keys=False, allow_unicode=True,
+                  default_flow_style=False))
     return manifest
+
+
+class _TreeDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
 
 
 def manifest_digest(path: Path) -> str:

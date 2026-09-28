@@ -27,9 +27,9 @@ from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import (
     PARAMS_NESTING_LIMIT,
+    ParamsTooDeep,
     _json_safe_params,
     _request_key,
-    row_reads_back,
 )
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
@@ -349,14 +349,14 @@ class Ledger:
         # Persist first, memoize only on success: otherwise a failed append leaves a memo hit
         # with no row behind it, served without an adapter call.
         # Serialise outside the lock; only the write needs mutual exclusion.
-        row = call.row()
-        # A row this table's reader skips would be an answer served with no record behind it.
-        # `LedgerError`, not `RuntimeError`: `_served` re-raises the table's own refusal, where
+        # `LedgerError`, not `ParamsTooDeep`: `_served` re-raises the table's own refusal, where
         # any other exception would be re-filed as a FAULT row carrying the same params.
-        if not row_reads_back(row):
+        try:
+            row = call.row()
+        except ParamsTooDeep as too_deep:
             raise LedgerError(
-                f"{call.system}.{call.verb} was not recorded: its row could not be read back "
-                f"(params nested past {PARAMS_NESTING_LIMIT})")
+                f"{call.system}.{call.verb} was not recorded: its params nest deeper than "
+                f"{PARAMS_NESTING_LIMIT} levels") from too_deep
         key = call.key
         with self._lock:
             append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount

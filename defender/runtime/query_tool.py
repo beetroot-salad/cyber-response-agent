@@ -138,8 +138,8 @@ DECLARED_ARGS = frozenset({"system", "verb", "params", "query_id"})
 #: What the model is told, and the row records, for a call whose arguments nest too deep to
 #: store. Fixed host text: pydantic's own error would echo the input.
 PARAMS_TOO_DEEP = (
-    f"params nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a query record can "
-    "carry — the call was not run. Send flatter params."
+    f"the call's arguments nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a query "
+    "record can carry — the call was not run. Send flatter arguments."
 )
 
 def _fault_exit(e: BaseException) -> int:
