@@ -269,6 +269,33 @@ def test_a_cyclic_value_is_too_deep_and_the_walk_terminates(build):
     assert run_to_completion(lambda: params_too_deep(value)) is True
 
 
+def _shared_in_sequences(value: Any) -> dict:
+    return {"filt": [value, value, (value, value)]}
+
+
+def _yaml_anchor_reused() -> Any:
+    """An anchor aliased twice — the ordinary YAML way to repeat a block, and no cycle."""
+    return _yaml.safe_load("a: &h {host: x, tags: [p, q]}\nb: *h\nc: [*h, *h]")
+
+
+@pytest.mark.parametrize("build", [
+    lambda: _shared_under_two_keys({"host": "x"}),
+    lambda: _shared_under_two_keys(dict_chain(LIMIT - 1)),
+    lambda: _shared_in_sequences({"k": "v"}),
+    _yaml_anchor_reused,
+], ids=["shared-flat", "shared-at-the-limit", "shared-in-sequences", "yaml-anchor-reused"])
+def test_a_value_reached_twice_is_not_a_cycle(build):
+    """A shared reference is not a cycle: the cleaner writes it once per place it appears, at
+    the depth it appears, so it is no deeper than one copy. Refusing it would turn away an
+    ordinary manifest (a YAML anchor reused) and an ordinary call. Paired with the cyclic arm
+    above: the predicate must tell "seen before" from "contains itself"."""
+    from defender.scripts.gather_tools.record_query import params_too_deep
+
+    value = build()
+    assert not _is_cyclic(value), "the fixture is a cycle, so this arm tests nothing"
+    assert run_to_completion(lambda: params_too_deep(value)) is False
+
+
 def _is_cyclic(value: Any) -> bool:
     stack, seen = [(value, frozenset())], 0
     while stack and seen < 10_000:
@@ -332,7 +359,14 @@ _SHAPES: dict[str, Callable[[int], dict]] = {
     "deep-key": lambda d: {"filt": {tuple_chain(d): "v"}},
     # Not a container the cleaner walks: it is written as its text.
     "deque": lambda d: {"filt": _deque_chain(d)},
+    # ONE value reached by two keys — a shared reference, not a cycle. The cleaner writes it
+    # twice at the same depth, so it is exactly as deep as one copy.
+    "shared": lambda d: _shared_under_two_keys(dict_chain(d - 1)),
 }
+
+
+def _shared_under_two_keys(value: Any) -> dict:
+    return {"filt": value, "also": value}
 
 
 def _deque_chain(depth: int) -> Any:

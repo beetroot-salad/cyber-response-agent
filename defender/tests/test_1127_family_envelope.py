@@ -26,7 +26,7 @@ import pytest
 
 from defender import _yaml
 from defender._io import JSON_NESTING_LIMIT
-from defender.runtime.branch._family import FamilyError, load_family
+from defender.runtime.branch._family import FamilyError, load_family, parse_family
 from defender.tests import _triplet_947 as T
 from defender.tests.test_1127_params_nesting_limit import (
     dict_chain,
@@ -111,3 +111,41 @@ def test_a_cyclic_envelope_built_by_a_yaml_anchor_is_refused_and_the_load_termin
 
     assert _names_the_limit(str(refused.value)), \
         f"the refusal does not name the limit: {refused.value}"
+
+
+def test_the_in_memory_parse_refuses_too_not_only_the_file_reader(tmp_path):
+    """M4's placement: the check lives in `parse_family`, not in the file reader. The
+    questioner's authoring path (`cli._author`) hands `parse_family` the document it just
+    decoded and reviews the in-memory `Family` — no file is read — so a check that only
+    `load_family` ran would let the review run a too-deep envelope before `write_family`.
+
+    Paired on the same entry point: the document at the limit parses, envelope whole."""
+    at_limit = T.family_doc()
+    at_limit["discriminator"]["envelope"]["params"] = envelope_params(LIMIT)
+    one_past = T.family_doc()
+    one_past["discriminator"]["envelope"]["params"] = envelope_params(LIMIT + 1)
+
+    family = parse_family(at_limit)
+    assert family.discriminator["envelope"]["params"] == envelope_params(LIMIT)
+
+    with pytest.raises(FamilyError) as refused:
+        parse_family(one_past)
+    assert _names_the_limit(str(refused.value)), \
+        f"the refusal does not name the limit: {refused.value}"
+
+
+def test_an_envelope_that_reuses_a_yaml_anchor_loads(tmp_path):
+    """A reused anchor is the ordinary way to repeat a block in YAML, and it makes a SHARED
+    reference, not a cycle. The envelope stays shallow, so the manifest must load — a check
+    that called any container seen twice "too deep" would refuse it. The cyclic arm above is
+    the complementary condition on the same splice."""
+    path = manifest(tmp_path, '{"query": ' + json.dumps(_query())
+                    + ', "a": &h {"host": "x"}, "b": *h, "c": [*h]}')
+    doc = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    params = doc["discriminator"]["envelope"]["params"]
+    assert params["a"] is params["b"], "the spliced anchor was not reused"
+
+    family = run_to_completion(lambda: load_family(path))
+
+    assert family.discriminator["envelope"]["params"] == {
+        "query": _query(), "a": {"host": "x"}, "b": {"host": "x"}, "c": [{"host": "x"}]}
