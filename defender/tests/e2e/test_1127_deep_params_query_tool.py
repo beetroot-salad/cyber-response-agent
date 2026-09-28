@@ -1,29 +1,34 @@
 """#1127 end to end — a `query` call whose params nest past the limit is a counted rejection.
 
 The query tool is the one place a MODEL authors the params the queries table stores. Driven on
-this base (the issue's C1/C3/C12/C13, re-measured through this harness):
+the pre-#1127 base (the issue's C1/C3/C12/C13, measured through this harness):
 
-* params nested 100+ deep (the map counted) are written as a row its own reader skips, so the
-  lead's rejection budget and both repeat guards — which read `lead_rows` — never see them. A
-  model, or alert text steering it, can be rejected forever by nesting deep (C3);
-* from about 600 levels `_rejection_guard`'s key recurses out of the rejection handler and the
-  RUN dies with `RecursionError` (C12);
-* the next row reuses the unreadable row's seq and overwrites its payload sidecar (C13);
-* a deep call pydantic accepts reaches the verb, and a deep call to a withheld verb is audited
+* params nested 100+ deep (the map counted) were written as a row its own reader skips, so the
+  lead's rejection budget and both repeat guards — which read `lead_rows` — never saw them. A
+  model, or alert text steering it, could be rejected forever by nesting deep (C3);
+* from about 600 levels `_rejection_guard`'s key recursed out of the rejection handler and the
+  RUN died with `RecursionError` (C12);
+* the next row reused the unreadable row's seq and overwrote its payload sidecar (C13);
+* a deep call pydantic accepts reached the verb, and a deep call to a withheld verb was audited
   as a policy denial with an unreadable `∅.denied` row;
-* the model is handed pydantic's own error, which echoes the whole argument body.
+* the model was handed pydantic's own error, which echoes the whole argument body.
 
-The design (issue #1127, M2): `QueryCapture.wrap_tool_validate` treats a too-deep call as an
-argument-schema rejection whether or not pydantic refused it — judged on the BYTES when the
-arguments arrive as text (`_io.json_nesting_depth`), on the value (`params_too_deep`) when they
-arrive as a dict — stores its params as `{}` BEFORE `_rejection_guard`, and answers with a fixed
-host sentence naming the limit. `_execute` never runs.
+The design (issue #1127, M2, as amended after the review of PR #1139):
+`QueryCapture.wrap_tool_validate` treats a too-deep call as an argument-schema rejection whether
+or not pydantic refused it — judged on the BYTES when the arguments arrive as text (argument
+depth past `PARAMS_NESTING_LIMIT + 1`, the argument object being one level above params), on the
+value (`params_too_deep`) when they arrive as a dict — stores its params as `{}` BEFORE
+`_rejection_guard`, and answers with one fixed host sentence saying the call's ARGUMENTS nest too
+deep and naming the limit, 32. `_execute` never runs. And the limit leaves room: a call AT it
+runs, and every line of the run's wire log, which embeds the arguments a few levels down, still
+reads back.
 
 Everything between the two replay models is production code (dispatch, the query tool, its
-validate hook, both guards, the queries table, the denial stream, the session store). Fakes
-enter only at the harness's `verbs=` seam. The depths are chosen for the three regimes the
-design names and each arm asserts its own regime as a precondition, because where pydantic and
-`json.loads` stop depends on their parsers and on the stack:
+validate hook, both guards, the queries table, the denial stream, the session store, the wire
+log). Fakes enter only at the harness's `verbs=` seam. Beyond the boundary (32 runs, 33 is
+refused, in both forms) the depths are chosen for the regimes where pydantic and `json.loads`
+stop, and each arm asserts its own regime as a precondition, because those stops depend on
+their parsers and on the stack:
 
 * ACCEPTED (150) — pydantic's JSON parser accepts it; the call would run;
 * REFUSED (300) — pydantic refuses it (`json_invalid`, a fixed parser bound near 200) but
@@ -31,13 +36,14 @@ design names and each arm asserts its own regime as a precondition, because wher
 * RECURSION (680) — as REFUSED, and past where C12's key recursion killed the run;
 * UNDECODABLE (5000) — `json.loads` itself cannot decode it, so only the byte scan knows.
 
-Dict arguments are driven at ACCEPTED only: the harness's own serialization of a model
-response refuses a dict nested ~250 deep before the tool sees it, and a real provider sends
-text anyway.
+Dict arguments are driven at ONE_PAST and ACCEPTED only: the harness's own serialization of a
+model response refuses a dict nested ~250 deep before the tool sees it, and a real provider
+sends text anyway.
 
-RED today at every regime except UNDECODABLE's counting arms, which already write a readable
-`{}` row (the arguments decode to nothing) and are kept as the controls the change must not
-break. The UNDECODABLE model-text arm is red: pydantic's echo carries the body.
+Against HEAD 7ae2c429 (limit 99): every ONE_PAST (33) arm is RED — the call runs; every arm
+that reads the model's answer is RED — the sentence names 99 and speaks of "params"; the
+at-the-limit and wire-log arms are GREEN (32 runs today too), as are the counting arms at the
+far regimes, which the 99 limit already refuses.
 """
 from __future__ import annotations
 
@@ -87,9 +93,9 @@ pytestmark = pytest.mark.e2e
 
 B = rq.REJECTION_BUDGET
 
-#: The deepest params map a readable row carries (the map counted as 1): the reader's bound
-#: less the row's own level.
-LIMIT = JSON_NESTING_LIMIT - 1
+#: The deepest params map a call may carry (the map counted as 1). Spelled: the product
+#: constant it must equal is pinned in `test_1127_params_nesting_limit`.
+LIMIT = 32
 
 #: The first depth a row cannot carry. Pydantic accepts it in either form, so it is where an
 #: off-by-one at the tool shows: one level more lenient and the call runs.
@@ -131,7 +137,7 @@ def _chain_text(depth: int) -> str:
 def deep_params(depth: int) -> dict:
     """Params nested `depth` deep with the map itself counted, carrying both sentinels. The
     deep part rides under `filt`, a param the fake verb DECLARES as a dict, so a call pydantic
-    accepts is otherwise a valid call — today it runs."""
+    accepts is otherwise a valid call — before #1127 it ran."""
     return {"filt": {SENTINEL_KEY: _chain(depth - 2)}, "native_query": SENTINEL_VALUE}
 
 
@@ -295,9 +301,13 @@ def denied_verbs(r) -> list[str]:
 
 
 def names_the_limit(text: str) -> bool:
-    from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT
+    return re.search(rf"(?<!\d){LIMIT}(?!\d)", text) is not None
 
-    return re.search(rf"(?<!\d){PARAMS_NESTING_LIMIT}(?!\d)", text) is not None
+
+def speaks_of_the_arguments(text: str) -> bool:
+    """The sentence says the call's ARGUMENTS nest too deep — what the byte scan judges — not
+    only its params."""
+    return "argument" in text.lower()
 
 
 def model_text_in(text: str) -> list[str]:
@@ -317,8 +327,9 @@ def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tm
     reads it, it is in the rejection domain both guards count, and its params are `{}` — the
     value the guard keyed on (so the repeat identity and the stored one are the same `{}`).
 
-    At RECURSION today the run itself dies with `RecursionError` out of the rejection handler
-    (C12); at ONE_PAST/ACCEPTED/REFUSED the row is written and never read again. UNDECODABLE
+    Before #1127, at RECURSION the run itself died with `RecursionError` out of the rejection
+    handler (C12); at ACCEPTED/REFUSED the row was written and never read again, and at ONE_PAST
+    (33) the call runs until the limit is 32. UNDECODABLE
     (and the list-shaped params, which the schema refuses and the row stores as `{}`) already
     hold today and must keep holding."""
     assert_regime(shape)
@@ -342,7 +353,7 @@ def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tm
 @pytest.mark.parametrize("shape", WOULD_RUN, ids=lambda s: s.name)
 def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape):
     """O2, at the only regime where it can fail: pydantic ACCEPTS the arguments and the call
-    is otherwise valid (`filt` is a declared dict param), so today the verb runs with them.
+    is otherwise valid (`filt` is a declared dict param), so unrefused the verb runs with them.
     ONE_PAST is the boundary: a check one level too lenient runs exactly that call.
 
     Paired on the same lead: a shallow call through the same verb and the same declared param
@@ -360,8 +371,8 @@ def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape
 
 @pytest.mark.parametrize("form", ["dict", "text"])
 def test_a_call_at_the_limit_runs_and_is_recorded_whole(tmp_path, form):
-    """The positive control at the boundary, through the tool: params nested exactly
-    `PARAMS_NESTING_LIMIT` deep are a normal call. The verb receives them whole, and the lead
+    """The positive control at the boundary, through the tool: params nested exactly 32 deep
+    (the limit) are a normal call, in either form. The verb receives them whole, and the lead
     writes exactly one readable `elastic.query` row carrying them whole — no cut, no refusal. A
     check stricter than the row's own limit fails here."""
     shape = Shape(f"{form}-at-limit", form, LIMIT)
@@ -377,13 +388,45 @@ def test_a_call_at_the_limit_runs_and_is_recorded_whole(tmp_path, form):
     assert len(own_raw_lines(r)) == 1
 
 
+@pytest.mark.parametrize("form", ["dict", "text"])
+def test_a_call_at_the_limit_leaves_every_wire_log_line_readable(tmp_path, form):
+    """A's margin, on the real wire log (`observe.RequestLogger`, `wire_logs/llm_requests.jsonl`):
+    the log embeds a call's arguments a few levels under each record, so a limit only one
+    under the reader's bound would make a call AT the limit write lines `read_jsonl_rows`
+    skips. At 32 the call runs and every line the run logged reads back.
+
+    Non-vacuous by construction: the deep call's arguments are in the log (its sentinel key),
+    and in the dict form they are carried as structure, deeper than the limit itself — so the
+    lines checked really do nest the params plus the log's own wrapping."""
+    shape = Shape(f"{form}-at-limit", form, LIMIT)
+    assert_regime(shape)
+    r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
+    assert [c.verb for c in rec.calls] == ["query"], "the call at the limit did not run"
+
+    path = RunPaths(r.run_dir).wire_log
+    lines = ([line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+             if path.is_file() else [])
+    assert lines, "the run wrote no wire log, so this arm tests nothing"
+    carrying = [line for line in lines if SENTINEL_KEY in line]
+    assert carrying, "the call's arguments never reached the wire log, so this arm tests nothing"
+    if form == "dict":
+        assert max(json_nesting_depth(line) for line in carrying) > LIMIT, \
+            "the wire log carried the arguments flattened, so the margin was not exercised"
+
+    skipped = [(json_nesting_depth(line), line[:80]) for line in lines
+               if parse_jsonl_row(line) is None]
+    assert skipped == [], \
+        f"the wire log holds lines its reader skips (reader bound {JSON_NESTING_LIMIT}): {skipped}"
+    assert len(read_jsonl_rows(path)) == len(lines)
+
+
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED], ids=lambda s: s.name)
 def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(tmp_path, shape):
     """C11 and the design's non-obligation: schema validation already runs before the grant
     check, and a too-deep call is refused AT validation — so a deep call to a verb the grant
     withholds is a counted schema rejection, with no policy-denial record and no `∅.denied`
-    row. Today pydantic accepts it, the grant check denies it, and both are written (the row
-    unreadable).
+    row. Unrefused, pydantic accepts it, the grant check denies it, and both are written (before
+    #1127, the row unreadable).
 
     Paired on the same lead: a shallow call to the same withheld verb IS a denial — one audit
     record and one `∅.denied` row — so the absences below are about depth, not about a denial
@@ -409,9 +452,10 @@ def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(t
 @pytest.mark.parametrize("system", ["elastic", SENTINEL_SYSTEM], ids=["declared", "undeclared"])
 @pytest.mark.parametrize("shape", EVERY_SHAPE, ids=lambda s: s.name)
 def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape, system):
-    """O4: the answer to a too-deep call is a fixed host sentence naming the limit — no
-    `input_value`, no `loc`, no `type=`, no fragment of the params. Pydantic's own error, which
-    is what the model is handed today whenever pydantic refused, echoes the whole body.
+    """O4: the answer to a too-deep call is a fixed host sentence saying the call's arguments
+    nest too deep and naming the limit — no `input_value`, no `loc`, no `type=`, no fragment
+    of the params. Pydantic's own error, which
+    is what the model was handed before #1127 whenever pydantic refused, echoes the whole body.
 
     The row is held to the same line: its params are `{}` and nothing the model sent is on it.
     Paired on the same lead: a SHALLOW call carrying the same sentinel keeps it — the table
@@ -444,6 +488,8 @@ def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape, system
             f"the deep call's row carries a fragment of its params: {deep_row[:300]}"
 
     assert names_the_limit(told), f"the answer does not name the limit: {told[:300]!r}"
+    assert speaks_of_the_arguments(told), \
+        f"the answer does not say the call's arguments nest too deep: {told[:300]!r}"
 
 
 def test_every_too_deep_call_is_answered_with_the_same_sentence(tmp_path):
@@ -468,7 +514,8 @@ def test_every_too_deep_call_is_answered_with_the_same_sentence(tmp_path):
     assert len(set(answers)) == 1, \
         "the too-deep calls were answered differently: " + " | ".join(a[:80] for a in answers)
     assert model_text_in(answers[0]) == []
-    assert names_the_limit(answers[0])
+    assert names_the_limit(answers[0]), f"the answer does not name the limit: {answers[0][:300]!r}"
+    assert speaks_of_the_arguments(answers[0])
 
 
 # ── O3 / security control: the rejection budget counts them at every depth ───────────────
@@ -489,7 +536,8 @@ def test_a_budget_of_too_deep_calls_ends_the_lead_exactly_as_shallow_rejections_
     the schema-rejection path, door included, so that call is neither rowed nor retried — the
     count stays exactly `B`.
 
-    Today the deep rows are unreadable, the budget never counts them, and the lead runs on."""
+    Before #1127 the deep rows were unreadable, the budget never counted them, and the lead ran
+    on."""
     assert_regime(shape)
     deep, deep_rec = drive(tmp_path, "deep", [
         *[deep_call(shape, system=f"ghost{i}") for i in range(B)],
@@ -519,8 +567,8 @@ def test_calls_too_deep_to_decode_still_count_toward_the_budget(tmp_path):
     toward the identity-blind budget. Two of them plus `B - 2` distinct shallow rejections end
     the lead at the budget; the same `B - 2` shallow rejections alone do not.
 
-    Green today — the undecodable body already becomes a readable `{}` row — and pinned so the
-    byte scan that now routes it cannot drop its row."""
+    Green before #1127 — the undecodable body already became a readable `{}` row — and
+    pinned so the byte scan that now routes it cannot drop its row."""
     assert_regime(TEXT_UNDECODABLE)
     shallow = [_bad_args(f"ghost{i}") for i in range(B - 2)]
     mixed, mixed_rec = drive(tmp_path, "mixed", [
@@ -547,8 +595,8 @@ def test_repeating_one_too_deep_call_trips_the_repeat_guard(tmp_path, shape):
     the same shallow schema rejection three times does (the `shallow-control` case, same
     oracle). The stored `{}` is the guard's identity, so live and replayed counts agree.
 
-    Today at ACCEPTED the call runs three times; at REFUSED its rows are never read. At
-    UNDECODABLE it already trips — kept as a control."""
+    Before #1127, at ACCEPTED the call ran three times; at REFUSED its rows were never read. At
+    UNDECODABLE it already tripped — kept as a control."""
     call = _bad_args("ghostone") if shape is None else deep_call(shape)
     if shape is not None:
         assert_regime(shape)
@@ -571,8 +619,8 @@ def test_repeating_one_too_deep_call_trips_the_repeat_guard(tmp_path, shape):
 def test_a_too_deep_call_neither_reuses_a_seq_nor_rewrites_a_sidecar(tmp_path, shape):
     """C13 through the tool: a valid call, the too-deep call, another valid call. Each row gets
     its own seq, and no payload sidecar, once written, ever changes — watched at every model
-    request from inside the one run. Today the deep row is unreadable, so the third call is
-    handed its seq and overwrites its sidecar (the verb's answers differ, so the overwrite is
+    request from inside the one run. Before #1127 the deep row was unreadable, so the third call
+    was handed its seq and overwrote its sidecar (the verb's answers differ, so the overwrite is
     visible in the bytes)."""
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [

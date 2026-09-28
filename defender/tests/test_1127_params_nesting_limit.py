@@ -1,32 +1,36 @@
 """#1127 — the queries table's writer and its reader agree on what a row is.
 
 `read_jsonl_rows` refuses any line nested deeper than `_io.JSON_NESTING_LIMIT` (100), judged on
-the bytes. A row wraps `params` in one level, so a params map nested 100 deep (the map itself
-counted as 1) is written today and never read again: `lead_rows` skips it, `_next_seq` reuses
-its seq, and the next row overwrites its payload sidecar (C1, C13).
+the bytes. Before #1127 a params map nested 100 deep (the map itself counted as 1) was written
+and never read again: `lead_rows` skipped it, `_next_seq` reused its seq, and the next row
+overwrote its payload sidecar (C1, C13).
 
-The design (issue #1127, "Intent + design (discuss-issue, settled)") answers with a REFUSAL,
-never a cut:
+The design (issue #1127, as amended after the review of PR #1139) answers with a REFUSAL, never
+a cut:
 
-* M1 — `record_query.PARAMS_NESTING_LIMIT = JSON_NESTING_LIMIT - 1`, and one predicate,
-  `params_too_deep(value)`, that walks the Python value the way `_io._json_safe_walk` does: a
-  level per `Mapping` or list/tuple/set/frozenset, values not keys, stopping once past the
-  limit so a cyclic value terminates.
-* M3 — `append_query_row` raises `RuntimeError` when the line it would write fails
-  `_io.parse_jsonl_row`, and checks BEFORE `persist_payload`, so a refusal leaves no sidecar.
+* A — `record_query.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
+  reader's bound less one: far enough under the reader that a line embedding params a few
+  levels down (a wire-log record, a ledger row) still reads back. `params_too_deep(value)` stays
+  the one public predicate. It walks the Python value the way `_io._json_safe_walk` does — a
+  level per `Mapping` or list/tuple/set/frozenset, values not keys — and stops once past the
+  limit, so a cyclic value is too deep and the walk terminates.
+* B — the cleaner every params writer goes through (`record_query._json_safe_params`, used by
+  `append_query_row` and by `ServedCall.row()`) raises the typed `record_query.ParamsTooDeep`, a
+  `ValueError`, past the limit — before `append_query_row` persists the seq's payload sidecar,
+  and never the `RecursionError` an unbounded walk hits a few thousand levels down.
 
-M1 and M3 are two copies of one rule (a value walk and a byte scan), so the arm that matters
-most here is the DIFFERENTIAL: across depths 1..150 and every container kind, the predicate's
-answer and the written line's readability must agree. It is asserted on the line the writer
-actually wrote, read back off disk, never on the writer's allow/deny alone.
+The arm that matters most is the DIFFERENTIAL: across depths 1..60 and every container kind,
+the predicate, the cleaner and the line the writer wrote agree, and they flip at exactly 33. It
+is asserted on the line read back off disk, never on the writer's allow/deny alone.
 
-RED today: `PARAMS_NESTING_LIMIT` and `params_too_deep` do not exist (imported inside each
-test so one missing name does not mask the writer arms), and `append_query_row` writes the
-deep row. The depth-99 and depth-98 arms are the positive controls and pass today.
+Against HEAD 7ae2c429 (limit 99, a `RuntimeError` backstop, an unbounded cleaner): every arm
+at depth 33 is RED because the row is written; the depth-3000 and cyclic-writer arms are RED
+with `RecursionError`; the `ParamsTooDeep` type arm is RED because the name does not exist. The
+depth-31/32 controls, the predicate's cycle and shared-reference arms and the deep-key arm are
+GREEN and must stay so.
 """
 from __future__ import annotations
 
-import threading
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
@@ -34,18 +38,26 @@ from types import MappingProxyType
 from typing import Any
 
 import pytest
+import yaml
 
-from defender import _yaml
-from defender._io import JSON_NESTING_LIMIT, parse_jsonl_row
+from defender._io import parse_jsonl_row
 from defender._run_paths import RunPaths
-from defender.scripts.gather_tools.record_query import append_query_row, lead_rows
+from defender.scripts.gather_tools import record_query as rq
+from defender.scripts.gather_tools.record_query import append_query_row, lead_rows, params_too_deep
 
 LEAD = "l-001"
 
-#: The deepest params map a readable row can carry: the row wraps params in one level. Derived
-#: from the reader's own bound rather than spelled, so these arms move with the reader; the
-#: constant the implementation exports is pinned against it separately.
-LIMIT = JSON_NESTING_LIMIT - 1
+#: The deepest params map a row may carry, the map itself counted as 1. SPELLED, not derived
+#: from the reader's bound: the amended design makes it a product constant, pinned once below,
+#: and every arm here is about that number.
+LIMIT = 32
+
+#: Far past the limit and past where a recursive walk of the value exhausts the interpreter's
+#: stack — the depth that tells a bounded refusal from a `RecursionError`.
+FAR = 3000
+
+#: The differential's range: the limit, and as far again past it.
+DEPTHS = 60
 
 
 # ── builders ──────────────────────────────────────────────────────────────────────────────
@@ -121,7 +133,7 @@ def _run_dir(root: Path) -> Path:
     return run_dir
 
 
-def _append(run_dir: Path, params: dict, payload_text: str = "[]") -> dict:
+def _append(run_dir: Path, params: Any, payload_text: str = "[]") -> dict:
     return append_query_row(
         run_dir, lead_id=LEAD, system="elastic", verb="query", query_id="elastic.query",
         params=params, raw_command="elastic query", payload_text=payload_text, exit_code=0,
@@ -142,59 +154,97 @@ def _sidecar(run_dir: Path, seq: int) -> Path:
     return RunPaths(run_dir).payload(LEAD, seq)
 
 
-def _write_and_read_back(run_dir: Path, params: dict) -> bool:
-    """Drive the real writer once and report whether the line it wrote is a row its reader
-    accepts. A refusal counts as "not readable" — and must have written nothing."""
-    before = _lines(run_dir)
+def _sidecars(run_dir: Path) -> list[Path]:
+    return sorted(RunPaths(run_dir).gather_raw.rglob("*.json"))
+
+
+# ── the refusal, judged by what was raised ─────────────────────────────────────────────────
+
+
+def too_deep_error() -> type[BaseException]:
+    """`record_query.ParamsTooDeep`, resolved when an arm needs it, so a missing name fails
+    that arm with a plain message instead of failing every arm at collection."""
+    error = getattr(rq, "ParamsTooDeep", None)
+    assert isinstance(error, type), "record_query.ParamsTooDeep does not exist"
+    return error
+
+
+def raised(fn: Callable[[], Any]) -> Exception | None:
+    """What `fn` raised, or `None` if it returned. Captured rather than asserted through
+    `pytest.raises`, so a `RecursionError` from a 3000-level walk is reported by its name
+    rather than as a thousand-frame traceback, and no deep value reaches pytest's repr."""
     try:
-        _append(run_dir, params)
-    except RuntimeError:
+        fn()
+    except Exception as e:
+        return e
+    return None
+
+
+def assert_refused_as_too_deep(err: Exception | None, what: str) -> None:
+    """B's refusal, exactly: raised, not a stack overflow, not an internal error, and the typed
+    `ParamsTooDeep`. (`RecursionError` IS a `RuntimeError`, so it is named first.)"""
+    assert err is not None, f"{what} was accepted — nothing refused it"
+    assert not isinstance(err, RecursionError), \
+        f"{what} blew the stack (RecursionError) instead of being refused"
+    assert not isinstance(err, RuntimeError), \
+        f"{what} was refused as an internal error ({type(err).__name__}), not as ParamsTooDeep"
+    assert isinstance(err, too_deep_error()), \
+        f"{what} was refused with {type(err).__name__}: {str(err)[:200]}"
+
+
+def _write_outcome(run_dir: Path, params: Any) -> str:
+    """Drive the real writer once: "readable" (one line, its reader accepts it), "unreadable"
+    (one line, its reader skips it) or "refused" (`ParamsTooDeep`, and nothing written — no
+    line, no sidecar). Any other raise fails the arm."""
+    before, sidecars = _lines(run_dir), _sidecars(run_dir)
+    err = raised(lambda: _append(run_dir, params))
+    if err is not None:
+        assert_refused_as_too_deep(err, "the writer")
         assert _lines(run_dir) == before, "the writer refused the row but still appended a line"
-        return False
+        assert _sidecars(run_dir) == sidecars, \
+            "the writer refused the row but still persisted a payload sidecar"
+        return "refused"
     after = _lines(run_dir)
     assert len(after) == len(before) + 1, "the writer returned without appending exactly one line"
-    return parse_jsonl_row(after[-1]) is not None
+    return "readable" if parse_jsonl_row(after[-1]) is not None else "unreadable"
 
 
-def run_to_completion(fn: Callable[[], Any], *, seconds: float = 10.0) -> Any:
-    """Run `fn` and return its result, failing if it does not finish — "terminates" made an
-    assertion rather than a hang. A raise inside is re-raised here."""
-    box: dict[str, Any] = {}
-
-    def target() -> None:
-        try:
-            box["value"] = fn()
-        except BaseException as e:  # noqa: BLE001 — carried back to the test thread
-            box["error"] = e
-
-    worker = threading.Thread(target=target, daemon=True)
-    worker.start()
-    worker.join(seconds)
-    assert not worker.is_alive(), f"did not terminate within {seconds}s"
-    if "error" in box:
-        raise box["error"]
-    return box["value"]
+def _cleaner_refuses(params: Any) -> bool:
+    """The params cleaner both writers share, asked directly: does it refuse `params`? A
+    refusal must be `ParamsTooDeep`; any other raise fails the arm."""
+    err = raised(lambda: rq._json_safe_params(params))
+    if err is None:
+        return False
+    assert_refused_as_too_deep(err, "the params cleaner")
+    return True
 
 
-# ── M1: one owner for the limit ────────────────────────────────────────────────────────────
+# ── A: one owner for the limit ─────────────────────────────────────────────────────────────
 
 
-def test_the_params_limit_is_the_readers_bound_less_the_rows_own_level():
-    """M1: `PARAMS_NESTING_LIMIT = JSON_NESTING_LIMIT - 1` — derived from the reader's bound,
-    because the row (and the ledger row) put `params` directly under the row object."""
-    from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT
+def test_the_params_limit_is_the_product_constant_32():
+    """A: `PARAMS_NESTING_LIMIT = 32` — a product constant, no longer the reader's bound less
+    one. That it leaves room for the lines that embed params is pinned on the real wire log
+    (`e2e/test_1127_deep_params_query_tool.py`)."""
+    assert rq.PARAMS_NESTING_LIMIT == LIMIT == 32
 
-    assert PARAMS_NESTING_LIMIT == JSON_NESTING_LIMIT - 1 == 99
+
+def test_params_too_deep_is_a_typed_value_error_not_an_internal_error():
+    """B: the refusal is the typed `ParamsTooDeep`, a `ValueError` — a bad VALUE, which each
+    caller maps to its own refusal (`Ledger.record` to `LedgerError`) — and not a
+    `RuntimeError`, which `WorldRegistry._served`'s `except Exception` would re-file as a
+    FAULT row carrying the same deep params."""
+    error = too_deep_error()
+    assert issubclass(error, ValueError)
+    assert not issubclass(error, RuntimeError)
 
 
 @pytest.mark.parametrize("chain", [
     dict_chain, list_chain, tuple_chain, frozenset_chain, proxy_chain, mixed_chain,
 ], ids=lambda c: c.__name__)
 def test_the_predicate_admits_the_limit_and_refuses_one_past_it(chain):
-    """M1 at the boundary, for every container kind `_json_safe_walk` counts. The params map
-    itself is level 1."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
+    """The predicate at the boundary, for every container kind `_json_safe_walk` counts. The
+    params map itself is level 1."""
     assert params_too_deep(params_of_depth(LIMIT - 1, chain)) is False
     assert params_too_deep(params_of_depth(LIMIT, chain)) is False
     assert params_too_deep(params_of_depth(LIMIT + 1, chain)) is True
@@ -204,8 +254,6 @@ def test_the_predicate_admits_the_limit_and_refuses_one_past_it(chain):
 def test_the_predicate_counts_the_params_map_itself():
     """The off-by-one C1 found: the map is a level. A bare chain of `LIMIT + 1` dicts IS a
     params map nested `LIMIT + 1` deep, and a flat map is depth 1, not 0."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
     assert params_too_deep({}) is False
     assert params_too_deep({"a": 1, "b": "x"}) is False
     assert params_too_deep(dict_chain(LIMIT)) is False
@@ -216,8 +264,6 @@ def test_the_predicate_walks_values_not_keys():
     """`json_safe` turns every key into text, so a key's own nesting never reaches the row: a
     tuple key nested far past the limit is a short string on disk. The predicate must not count
     it — and the written line proves the row really is shallow."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
     params = {"filt": {tuple_chain(LIMIT + 50): "v", frozenset_chain(LIMIT + 50): "w"}}
     assert params_too_deep(params) is False
     # The complementary condition on the same shape: the same depth moved into the VALUE.
@@ -226,15 +272,18 @@ def test_the_predicate_walks_values_not_keys():
 
 def test_a_deep_key_is_written_as_a_readable_row(tmp_path):
     """The positive half of the keys arm, on the writer: the deep-keyed params map is written
-    and read back as one row. Green today; it stays green only if M3 judges the BYTES."""
+    and read back as one row, its key as text. A cleaner that counted keys would refuse it."""
     run_dir = _run_dir(tmp_path)
     params = {"filt": {tuple_chain(LIMIT + 50): "v"}}
 
-    assert _write_and_read_back(run_dir, params) is True
+    assert _write_outcome(run_dir, params) == "readable"
     rows = lead_rows(run_dir, LEAD)
     assert len(rows) == 1
     assert list(rows[0]["params"]["filt"]) == [str(tuple_chain(LIMIT + 50))], \
         "the deep key did not reach the row as text"
+
+
+# ── cycles and shared references, in process ───────────────────────────────────────────────
 
 
 def _dict_that_holds_itself() -> dict:
@@ -250,23 +299,37 @@ def _params_holding_a_list_that_holds_itself() -> dict:
 
 
 def _yaml_anchor_cycle() -> Any:
-    """C10's shape, through the repo's own loader: an anchor whose body aliases itself."""
-    return _yaml.safe_load("p: &a {k: [*a]}")["p"]
+    """C10's shape: an anchor whose body aliases itself. Built with PyYAML's own safe loader,
+    which still honours aliases — the repo's manifest loader refuses them (C), but a cyclic
+    VALUE can still reach the predicate from any other producer."""
+    return yaml.safe_load("p: &a {k: [*a]}")["p"]
 
 
-@pytest.mark.parametrize("build", [
-    _dict_that_holds_itself, _params_holding_a_list_that_holds_itself, _yaml_anchor_cycle,
-], ids=lambda b: b.__name__)
+CYCLES = [_dict_that_holds_itself, _params_holding_a_list_that_holds_itself, _yaml_anchor_cycle]
+
+
+@pytest.mark.parametrize("build", CYCLES, ids=lambda b: b.__name__)
 def test_a_cyclic_value_is_too_deep_and_the_walk_terminates(build):
-    """M1: the walk stops once past the limit, so a cycle — which a YAML anchor builds (C10) —
-    terminates and is refused. A cycle has no finite depth; answering "shallow" would let it
-    through to a writer whose own cleaner recurses on it."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
+    """The walk stops once past the limit, so a cycle terminates and is refused. A cycle has no
+    finite depth; answering "shallow" would let it through to a writer. Run in process: a walk
+    that did not stop would hang this test, which is the failure."""
     value = build()
-    # The fixture really is cyclic: some container reaches itself again.
     assert _is_cyclic(value), "the fixture is not a cycle, so this arm tests nothing"
-    assert run_to_completion(lambda: params_too_deep(value)) is True
+    assert params_too_deep(value) is True
+
+
+@pytest.mark.parametrize("build", CYCLES, ids=lambda b: b.__name__)
+def test_the_writer_refuses_a_cyclic_value_as_too_deep_and_writes_nothing(tmp_path, build):
+    """B on a cycle: the bounded cleaner refuses it as `ParamsTooDeep` — the cycle is past any
+    limit — rather than recursing into `RecursionError`, and nothing reaches the table or the
+    payload directory."""
+    run_dir = _run_dir(tmp_path)
+    value = build()
+    assert _is_cyclic(value), "the fixture is not a cycle, so this arm tests nothing"
+
+    assert _write_outcome(run_dir, value) == "refused"
+    assert _lines(run_dir) == []
+    assert _sidecars(run_dir) == []
 
 
 def _shared_in_sequences(value: Any) -> dict:
@@ -275,7 +338,7 @@ def _shared_in_sequences(value: Any) -> dict:
 
 def _yaml_anchor_reused() -> Any:
     """An anchor aliased twice — the ordinary YAML way to repeat a block, and no cycle."""
-    return _yaml.safe_load("a: &h {host: x, tags: [p, q]}\nb: *h\nc: [*h, *h]")
+    return yaml.safe_load("a: &h {host: x, tags: [p, q]}\nb: *h\nc: [*h, *h]")
 
 
 @pytest.mark.parametrize("build", [
@@ -286,14 +349,11 @@ def _yaml_anchor_reused() -> Any:
 ], ids=["shared-flat", "shared-at-the-limit", "shared-in-sequences", "yaml-anchor-reused"])
 def test_a_value_reached_twice_is_not_a_cycle(build):
     """A shared reference is not a cycle: the cleaner writes it once per place it appears, at
-    the depth it appears, so it is no deeper than one copy. Refusing it would turn away an
-    ordinary manifest (a YAML anchor reused) and an ordinary call. Paired with the cyclic arm
-    above: the predicate must tell "seen before" from "contains itself"."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
+    the depth it appears, so it is no deeper than one copy. Paired with the cyclic arm above:
+    the predicate must tell "seen before" from "contains itself"."""
     value = build()
     assert not _is_cyclic(value), "the fixture is a cycle, so this arm tests nothing"
-    assert run_to_completion(lambda: params_too_deep(value)) is False
+    assert params_too_deep(value) is False
 
 
 def _is_cyclic(value: Any) -> bool:
@@ -310,7 +370,7 @@ def _is_cyclic(value: Any) -> bool:
     return False
 
 
-# ── C1 / M3: the writer refuses exactly what its reader would skip ─────────────────────────
+# ── C1 / B: the writer refuses exactly what is past the limit ──────────────────────────────
 
 
 @pytest.mark.parametrize("depth", [LIMIT - 1, LIMIT])
@@ -329,14 +389,17 @@ def test_a_row_at_or_under_the_limit_is_written_verbatim_and_read_back(tmp_path,
     assert _sidecar(run_dir, 0).read_text(encoding="utf-8") == '["ok"]'
 
 
-@pytest.mark.parametrize("depth", [LIMIT + 1, LIMIT + 2])
-def test_a_row_past_the_limit_is_refused_before_anything_is_written(tmp_path, depth):
-    """C1's unreadable side, refused (M3): `RuntimeError`, no line, and — because the check runs
-    before `persist_payload` — no sidecar for the seq the row would have taken."""
+@pytest.mark.parametrize("depth", [LIMIT + 1, LIMIT + 2, FAR])
+def test_a_row_past_the_limit_is_refused_as_too_deep_before_anything_is_written(tmp_path, depth):
+    """B: `ParamsTooDeep` — exactly, at one past the limit and at a depth where an unbounded
+    walk overflows the stack — with no line, and, because the cleaner runs before
+    `persist_payload`, no sidecar for the seq the row would have taken."""
     run_dir = _run_dir(tmp_path)
+    params = params_of_depth(depth)
 
-    with pytest.raises(RuntimeError):
-        _append(run_dir, params_of_depth(depth), payload_text='["deep"]')
+    assert_refused_as_too_deep(
+        raised(lambda: _append(run_dir, params, payload_text='["deep"]')),
+        f"a depth-{depth} params row")
 
     assert _lines(run_dir) == [], "the refused row still reached the table"
     assert not _sidecar(run_dir, 0).exists(), \
@@ -344,7 +407,7 @@ def test_a_row_past_the_limit_is_refused_before_anything_is_written(tmp_path, de
     assert lead_rows(run_dir, LEAD) == []
 
 
-# ── M1 ⇔ M3: the differential ──────────────────────────────────────────────────────────────
+# ── the differential: predicate ⇔ cleaner ⇔ written line ───────────────────────────────────
 
 
 _SHAPES: dict[str, Callable[[int], dict]] = {
@@ -364,6 +427,9 @@ _SHAPES: dict[str, Callable[[int], dict]] = {
     "shared": lambda d: _shared_under_two_keys(dict_chain(d - 1)),
 }
 
+#: Shapes whose written depth never grows with `d`: nothing may ever be refused.
+_NEVER_DEEP = ("deep-key", "deque")
+
 
 def _shared_under_two_keys(value: Any) -> dict:
     return {"filt": value, "also": value}
@@ -377,51 +443,56 @@ def _deque_chain(depth: int) -> Any:
 
 
 @pytest.mark.parametrize("shape", list(_SHAPES))
-def test_the_predicate_and_the_written_line_agree_at_every_depth(tmp_path, shape):
-    """THE DIFFERENTIAL (M1 ⇔ M3). For every depth 1..150: `params_too_deep(p)` is False
-    exactly when the line `append_query_row` writes for `p` is a row `parse_jsonl_row` reads
-    (a refusal is "not readable").
+def test_the_predicate_the_cleaner_and_the_written_line_agree_at_every_depth(tmp_path, shape):
+    """THE DIFFERENTIAL. For every depth 1..60: `params_too_deep(p)` is False exactly when the
+    shared cleaner accepts `p` and `append_query_row` writes a line its reader reads back; it
+    is True exactly when the cleaner and the writer refuse `p` with `ParamsTooDeep` and nothing
+    is written. And the flip is at exactly `LIMIT + 1`.
 
     Asserted on the written LINE, read back off disk — not on whether the writer allowed the
-    call — because the predicate and the writer are two copies of one rule, and the only way
-    to know they are the same rule is to compare what each says about the same value."""
-    from defender.scripts.gather_tools.record_query import params_too_deep
-
+    call — because the predicate and the cleaner are two copies of one rule, and the only way to
+    know they are the same rule is to compare what each says about the same value."""
     build = _SHAPES[shape]
     disagreements = []
-    seen_outcomes = set()
-    for depth in range(1, 151):
+    refused_at = set()
+    for depth in range(1, DEPTHS + 1):
         params = build(depth)
         predicted_ok = not params_too_deep(params)
-        readable = _write_and_read_back(_run_dir(tmp_path / f"d{depth}"), params)
-        seen_outcomes.add(readable)
-        if predicted_ok != readable:
-            disagreements.append((depth, predicted_ok, readable))
+        cleaner_ok = not _cleaner_refuses(params)
+        outcome = _write_outcome(_run_dir(tmp_path / f"d{depth}"), params)
+        if outcome == "refused":
+            refused_at.add(depth)
+        expected = "readable" if predicted_ok else "refused"
+        if (cleaner_ok, outcome) != (predicted_ok, expected):
+            disagreements.append((depth, predicted_ok, cleaner_ok, outcome))
 
     assert disagreements == [], (
-        f"{shape}: the predicate and the written line disagree at (depth, predicted_ok, "
-        f"readable) {disagreements[:5]}")
-    if shape in ("deep-key", "deque"):
-        assert seen_outcomes == {True}, f"{shape} is never deep on disk, yet a row was refused"
+        f"{shape}: the predicate, the cleaner and the written line disagree at (depth, "
+        f"predicted_ok, cleaner_ok, outcome) {disagreements[:5]}")
+    if shape in _NEVER_DEEP:
+        assert refused_at == set(), \
+            f"{shape} is never deep on disk, yet depths {sorted(refused_at)} were refused"
     else:
-        assert seen_outcomes == {True, False}, \
-            f"{shape} never crossed the limit, so the agreement above is vacuous"
+        assert refused_at == set(range(LIMIT + 1, DEPTHS + 1)), (
+            f"{shape}: {len(refused_at)} depths refused, the first "
+            f"{min(refused_at, default=None)}; expected exactly {LIMIT + 1}..{DEPTHS}")
 
 
 # ── C13: a refusal never costs the next row its seq or its sidecar ─────────────────────────
 
 
 def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(tmp_path):
-    """C13 on the backstop path. Today the deep row is written (seq 1, sidecar `1.json`), is
-    unreadable, so `_next_seq` hands seq 1 out again and the next row OVERWRITES that sidecar.
+    """C13 on the writer. Were the deep row written unreadable (seq 1, sidecar `1.json`),
+    `_next_seq` would hand seq 1 out again and the next row would OVERWRITE that sidecar.
     Refused before `persist_payload`, the deep call leaves no seq and no file behind, and every
     sidecar that exists keeps its bytes."""
     run_dir = _run_dir(tmp_path)
     first = _append(run_dir, {"native_query": "FROM a"}, payload_text='["first"]')
     first_bytes = _sidecar(run_dir, 0).read_bytes()
 
-    with pytest.raises(RuntimeError):
-        _append(run_dir, params_of_depth(LIMIT + 1), payload_text='["deep"]')
+    assert_refused_as_too_deep(
+        raised(lambda: _append(run_dir, params_of_depth(LIMIT + 1), payload_text='["deep"]')),
+        "the one-past-the-limit row")
     assert not _sidecar(run_dir, 1).exists(), \
         "the refused row persisted a sidecar at the seq the next row will be handed"
 
