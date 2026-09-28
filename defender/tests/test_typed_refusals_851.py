@@ -287,7 +287,11 @@ def test_f23_a_numeric_rule_id_orients_instead_of_raising(tmp_path):
     """The shape a hand-authored or foreign-SIEM alert file carries. `orientation()` must
     return its text; the id is a `str` by the time either consumer (`re.escape`, and the
     `subprocess.run` argv in the corpus-vocab section) sees it."""
-    out = orient.orientation(tmp_path, DEFENDER, _alert(tmp_path, 5710), systems=())
+    # The run dir one level down: `run_env` makes its parent the shims' corpus root, and
+    # `tmp_path`'s parent is the xdist worker's whole basetemp.
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = orient.orientation(run_dir, DEFENDER, _alert(tmp_path, 5710), systems=())
     assert isinstance(out, str)
     assert "## invlang grammar" in out
     assert orient._alert_signature(_alert(tmp_path, 5710)) == "5710"

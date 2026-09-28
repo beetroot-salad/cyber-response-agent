@@ -374,17 +374,23 @@ def _shipped_baseline_entries() -> dict[str, str]:
     return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
 
 
-def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries():
+@pytest.fixture(scope="module")
+def real_tree_findings():
+    """The real tree scanned ONCE for the module — the two demands below read the same scan."""
+    return _GATE._scan()
+
+
+def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries(real_tree_findings):
     """Equality, in both directions: a real-tree finding the baseline does not carry is a new
     burial candidate, and a baseline entry that no longer fires is a burial the ratchet is
     still carrying. The baseline is EMPTY today — the one collision it carried (#923's bypass
     branching on the literal `inconclusive`) went with #992, which names that member once in
     the vocabulary — so this is no longer a real-tree positive control; the synthetic fixtures
     above are the positive controls, and the real tree is the negative one."""
-    assert {f.fingerprint for f in _GATE._scan()} == set(_shipped_baseline_entries())
+    assert {f.fingerprint for f in real_tree_findings} == set(_shipped_baseline_entries())
 
 
-def test_its_motivating_finding_is_fixed_and_not_baselined():
+def test_its_motivating_finding_is_fixed_and_not_baselined(real_tree_findings):
     """#879 itself, now closed. `_close_investigation_async` charged the `false-positive`
     entry price by branching on the literal, leaving `benign` — the table's other key —
     with no reader at the close; it now dispatches through `disposition_entry_price`, which
@@ -402,7 +408,7 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
     covers the ONE site the gate was written for being clean for the right reason.
     """
     at_the_close = [
-        f for f in _GATE._scan()
+        f for f in real_tree_findings
         if f.fingerprint.startswith("defender/runtime/close_tool.py:")
     ]
     baseline = _shipped_baseline_entries()
