@@ -330,8 +330,8 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     a relocated episode rather than a walk that sees nothing."""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
     tenant_id = T.mod("_tenant").tenant_of_run_dir(src)
-    ordinary = T.mod("run_common").materialize_run_dir(
-        src / "alert.json", "20260728t170000z-other", tenant_id=tenant_id)
+    ordinary = T.mod("run_common").materialize_run(
+        src / "alert.json", "20260728t170000z-other", tenant_id=tenant_id).run_dir
     assert ordinary.parent == base
     found = sorted(p.parent.name for p in base.rglob("provenance.json"))
     assert found == sorted([T.SOURCE_RUN_ID, ordinary.name])

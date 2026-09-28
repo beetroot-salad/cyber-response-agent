@@ -747,7 +747,7 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
 
     THE CHILD'S RUNS BASE IS INSIDE THE EPISODE. That is the whole of the containment decision:
     #1078 D2 has the child DERIVE `EpisodePaths(world.episode_dir).runs` itself, inside
-    `materialize_run_dir`'s sibling arm, from the manifest it already resolves — so this
+    `materialize_run`'s sibling arm, from the manifest it already resolves — so this
     launcher composes no `DEFENDER_RUNS_BASE` for it any more (J46: the retired knob is never
     exported, whatever an operator's own shell still carries).
 

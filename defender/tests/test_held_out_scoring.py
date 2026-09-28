@@ -51,7 +51,7 @@ def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_pa
 
 def test_run_id_conventions_that_do_claim_a_fixture(tmp_path: Path):
     """Anchored at either end, on a `-` boundary: the bare `--run-id <slug>`, a
-    `<slug>-<attempt>` suffix, and the `{utc_timestamp}-<slug>` shape `materialize_run_dir`
+    `<slug>-<attempt>` suffix, and the `{utc_timestamp}-<slug>` shape `materialize_run`
     mints when no `--run-id` is passed."""
     for name in (SLUG, f"{SLUG}-attempt2", f"20260718T101500Z-{SLUG}"):
         runs = _runs(tmp_path / name, name)

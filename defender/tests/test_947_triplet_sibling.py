@@ -407,11 +407,23 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
+    tenant = T.mod("_tenant").read_tenant(base)
+
+    def materialize(*_a, **_kw):
+        # #1110: the seam answers the run's tenant-bound HANDLE, built the way the real builder
+        # builds it (the tenant record at the runs base, then `Run.for_tenant`) — `main` keeps
+        # it for the post-run page render and reads the run dir off it.
+        order.append("materialize")
+        run_dir = T.sibling_run_dir(base, "b", stamp=False)
+        return T.sym("_run_handle", "Run").for_tenant(
+            tenant.tenant_id, run_dir.name, runs_base=base)
+
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
                 preflight=lambda m: order.append("preflight") or 0,
-                materialize=lambda *a, **kw: order.append("materialize") or
-                T.sibling_run_dir(base, "b", stamp=False))
+                materialize=materialize)
     assert order == ["preflight", "materialize", "lifecycle"]
+    assert rec.kwargs["run_dir"] == base / f"{T.EPISODE_ID}-b", (
+        "the lifecycle was not handed the run dir of the handle the builder answered")
 
 
 def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):

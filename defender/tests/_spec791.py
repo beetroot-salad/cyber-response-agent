@@ -323,6 +323,8 @@ class SpecTail:
         #: no-argument shape: a `record_calls` entry missing `truncated_by` (or holding `None`
         #: for a tail built with `truncated_by=` set) means the wiring, not the lane, is dead.
         self.record_calls: list[dict[str, Any]] = []
+        #: Every `Run` handle the render step was handed, in order (#1110).
+        self.visualized: list[Any] = []
         #: The settings folder each ticket leg was handed (#1106: the writer no longer finds
         #: its mapping and store config itself — `run.py` hands it the run's tenant folder).
         #: Kept apart from `record_calls` so that list stays the exit-class record it was.
@@ -340,8 +342,12 @@ class SpecTail:
         return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by,
                 "closed_before_cut": self._closed_before_cut}
 
-    def visualize(self, run_dir: Path) -> None:
-        self._note("visualize", run_dir)
+    def visualize(self, run: Any) -> None:
+        # #1110: the seam is handed the run's tenant-bound `Run` handle, not a bare path — the
+        # step saves the page through it. Kept whole in `visualized` so a demand can ask what
+        # handle the tail was given; the step itself is noted against the handle's run dir.
+        self.visualized.append(run)
+        self._note("visualize", run.run_dir)
 
     def open_case_ticket(self, run_dir: Path, *, settings_dir: Any = None) -> None:
         self.ticket_settings.append(settings_dir)

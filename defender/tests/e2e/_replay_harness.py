@@ -367,12 +367,12 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
 
     Takes no `run_id`/`salt`: it seeds NOTHING salted. Both were parameters only because this
     used to write the run's retired metadata file (#647); the trust token is now minted in
-    process by `run_common.materialize_run_dir` and threaded as a value, so there is nothing
+    process by `run_common.materialize_run` and threaded as a value, so there is nothing
     on disk for this to seed. Keeping the parameters would let a test pass `salt=` and believe
     it had set up a salted run dir — setup a test can silently pass without.
 
     THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976). What that buys is FILE-SET
-    parity with `run_common.materialize_run_dir` — `test_salt_origin_647`'s parity arm, the
+    parity with `run_common.materialize_run` — `test_salt_origin_647`'s parity arm, the
     same trap #647's was built to catch pointing the other way. It is NOT message 0's listing:
     `workspace_map._unlisted()` suppresses the stamp, so a replayed message 0 is byte-identical
     either way, and a reader deciding whether the other hand-built run-dir fixtures need one

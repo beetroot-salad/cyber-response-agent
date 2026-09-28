@@ -82,8 +82,10 @@ RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 @pytest.fixture(autouse=True)
 def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     """Every test's run-page mirror lands in a per-test tmp dir, never in a real checkout's
-    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION; the resolver's refusal
-    under pytest (`MirrorRootRefused`) is the detector for any test that removes it.
+    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION. For a test that removes
+    it, the resolver still refuses the real checkout under pytest (`MirrorRootRefused`), so no
+    copy lands there — but since #1110 a refused copy is a logged WARNING, not a failed render,
+    so that refusal surfaces as a warning in the test's log, never as a failing test.
 
     `mktemp`, not `tmp_path`: several suites snapshot or list their own `tmp_path`, and an
     extra entry there would be a change they never made. The dir sits beside it instead.
@@ -93,6 +95,23 @@ def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     mirror = tmp_path_factory.mktemp("run-visualizations")
     monkeypatch.setenv(RUN_VISUALIZATIONS_ENV, str(mirror))
     return mirror
+
+
+#: The deployment type (#1110 M4): `dev` turns the run page's local copy on; unset means
+#: `production`. Spelled here for the same reason as the override above — this conftest never
+#: imports `_env`.
+DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
+
+
+@pytest.fixture(autouse=True)
+def deployment_unset(monkeypatch) -> None:
+    """Every test starts `production` (#1110 M5): the variable is removed whether or not the
+    shell that launched pytest inherited the devcontainer's `DEFENDER_DEPLOYMENT: dev`. CI does
+    not use compose and the devcontainer does, so without this the copy-side behaviour of the
+    suite would depend on which of the two ran it. A test about the dev copy declares it with
+    its own `monkeypatch.setenv(DEPLOYMENT_ENV, "dev")`, which wins (same function-scoped
+    instance, later)."""
+    monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
 
 
 @pytest.fixture(autouse=True)

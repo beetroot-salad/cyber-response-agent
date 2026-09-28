@@ -112,7 +112,7 @@ def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
 
 def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path, monkeypatch):
     """A run id whose dir was removed and reused (the operator's retry) starts with NO run-end
-    record beside it: `materialize_run_dir` clears a stale sidecar host-side, before the box
+    record beside it: `materialize_run` clears a stale sidecar host-side, before the box
     exists, so an attempt that ends before writing its own (a setup failure, an unhandled
     fault) cannot be archived under the previous attempt's exit class."""
     from defender import _tenant
@@ -125,12 +125,12 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
     _tenant.create_tenant(data_root, tenant_id)
     run_common = S.mod("run_common")
 
-    run_dir = run_common.materialize_run_dir(alert, "case-1047-retry", tenant_id=tenant_id)
+    run_dir = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
     S.plant_sidecar(run_dir, truncated_by="aborted")
     import shutil
     shutil.rmtree(run_dir)
 
-    again = run_common.materialize_run_dir(alert, "case-1047-retry", tenant_id=tenant_id)
+    again = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
 
     assert again == run_dir
     assert not S.sidecar_path(again).exists(), (

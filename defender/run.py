@@ -46,6 +46,7 @@ from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_paths import EpisodePaths  # noqa: E402
@@ -499,7 +500,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     """The source run's alert, or the refusal that says it is not a plain file.
 
     THE SOURCE RUN DIR IS A PRIOR BOX'S WRITABLE BIND. `alert.json` there is model-writable, so
-    an entry at that name may be a link the model planted, and `materialize_run_dir` admits it
+    an entry at that name may be a link the model planted, and `materialize_run` admits it
     with `alert.is_file()` and copies it with `shutil.copy` — both of which FOLLOW a link. Asked
     here, before the copy, so bytes from outside the source run never arrive in this run's own
     dir under the case input's name, where the visualizer and the archive read them as the alert.
@@ -543,11 +544,12 @@ def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> A
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run_dir(
+def _materialize_run(
     alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None,
     world: Any = None,
-) -> Path:
-    """Build this run's directory, stamped with the code and the model it will run on — and,
+) -> Run:
+    """Build this run's directory, and answer its tenant-bound handle, stamped with the code
+    and the model it will run on — and,
     for a forked sibling, with the world and lineage the manifest already declares (`world`,
     the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
     path), and `tenant_id` the tenant the request named. A runs-base record naming another
@@ -562,11 +564,10 @@ def _materialize_run_dir(
     drives follows from `run_dir` alone.
     """
     try:
-        run_dir = _run.materialize_run_dir(alert, run_id, tenant_id=tenant_id, model=model,
-                                           world=world)
+        run = _run.materialize_run(alert, run_id, tenant_id=tenant_id, model=model, world=world)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
-    return run_dir
+    return run
 
 
 def _resolve_tenant_id(ns: argparse.Namespace) -> _tenant.TenantId:
@@ -590,11 +591,11 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
-    visualize: Callable[[Path], None] = _run.visualize,
+    visualize: Callable[[Run], None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
-    materialize: Callable[..., Path] = _materialize_run_dir,
+    materialize: Callable[..., Run] = _materialize_run,
 ) -> int:
     # The tail's three UNDRIVABLE dependencies — the credentialed investigation lifecycle, the
     # HTML render, the case-ticket endpoint — take an injection seam, each defaulting to
@@ -663,7 +664,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
     # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
     # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+    # The handle, not just its directory: the post-run step saves the run page through it.
+    run = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+    run_dir = run.run_dir
 
     # EVERY LOG LINE FROM HERE ON NAMES THIS RUN — its crash included — by the tenant this
     # process resolved once above and hands inward as one value.
@@ -736,9 +739,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             _logger.info("enqueued for catalog curation")
 
         try:
-            visualize(run_dir)
-        except _run.VisualizeFailed as e:
-            _logger.warning(f"{e}")
+            visualize(run)
+        except _run.VisualizeFailed:
+            _logger.warning("the run page was not saved", exc_info=True)
         return 0
 
 if __name__ == "__main__":

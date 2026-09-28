@@ -75,7 +75,7 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     # later episode while `PrimeReport` reported a clean prime of the new one. Green run, wrong
     # capture, nothing in the record to say so: the same shape the empty-prime raise below
     # refuses, arriving through the door beside it. Retrying a partly-failed episode is the
-    # ordinary way in — `materialize_run_dir` exits on an existing run dir, which invites
+    # ordinary way in — `materialize_run` exits on an existing run dir, which invites
     # exactly the re-run — so this is the common path, not the exotic one.
     if base_path.exists() or base_path.is_symlink():
         raise LedgerError(

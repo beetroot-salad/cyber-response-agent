@@ -23,7 +23,7 @@ what manufactures the read PR's fixtures.
 - **Realistic lifecycle — the defender records, a person closes (#767).** A ticket
   pre-exists when the alert is raised; the defender investigates and RECORDS its
   findings onto it as a comment; a person reviews the case and closes it. Modeled
-  as a thin **bridge** (open ticket at `materialize_run_dir`) + a post-run
+  as a thin **bridge** (open ticket at `materialize_run`) + a post-run
   **comment**. The close is the person's act and doubles as the release: a later
   run's gather is served a case's comments only once its status is the mapping's
   `released.status` (`closed`). What makes that status MEAN "a person did this" is

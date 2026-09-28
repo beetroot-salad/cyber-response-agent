@@ -316,7 +316,7 @@ def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypat
     EpisodePaths(ep).runs whatever the invoking cwd.
 
     Observed on what the materialize seam is handed: the world's `episode_dir`, the root
-    `materialize_run_dir`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
+    `materialize_run`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
     _src, manifest = _sibling(tmp_path, data_root, "acme")
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
@@ -442,13 +442,13 @@ def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path
     (base / H.RECORD_NAME).write_text(body, encoding="utf-8")
     alert = H.plant_alert(tmp_path / "in")
     with pytest.raises(SystemExit) as refused:
-        H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+        H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None)
     said = H.refusal_text(refused.value)
     assert said.startswith("[run.py] "), said
     assert str(base / H.RECORD_NAME) in said, said
 
     (base / H.RECORD_NAME).unlink()
-    run_dir = H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+    run_dir = H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None).run_dir
     assert Path(run_dir).is_dir()
 
 

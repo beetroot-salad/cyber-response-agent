@@ -550,7 +550,7 @@ def test_a_sibling_that_already_has_its_alert_is_not_refused_as_seeded(tmp_path)
     not carry" — the resume proceeds.
 
     The constraint the arm above has to live inside, and the reason `alert.json` cannot simply
-    join the list `refuse_seeded_run_dir` reads: `materialize_run_dir` writes the alert into
+    join the list `refuse_seeded_run_dir` reads: `materialize_run` writes the alert into
     EVERY run dir before anything else happens, so a refusal that counted it would refuse every
     branch taken through the ordinary entry point — the same trap `_holds_content`'s own
     docstring records for an empty `gather_raw/`."""

@@ -104,7 +104,7 @@ def _pass_a_sibling(tmp_path: Path, root: Path, episodes: Path) -> tuple[Path, P
 
 def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[Path, Path, Any]:
     """A REAL pass-A sibling materialize: a source at `<root>/<T>/runs/`, an episode under the
-    configured episodes root, and `materialize_run_dir(..., world=<that world>)` as the sibling
+    configured episodes root, and `materialize_run(..., world=<that world>)` as the sibling
     process calls it. Returns (episode dir, sibling run dir, world)."""
     src = root / TID / "runs" / T.SOURCE_RUN_ID
     if not src.exists():
@@ -113,8 +113,8 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
     if not (ep / "family.yaml").exists():
         T.episode(episodes.parent, doc=T.family_doc(source_run_dir=str(src)), root=episodes)
     world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
-    run_dir = H.run_common().materialize_run_dir(
-        src / "alert.json", world.run_id, tenant_id=TID, world=world)
+    run_dir = H.run_common().materialize_run(
+        src / "alert.json", world.run_id, tenant_id=TID, world=world).run_dir
     return ep, Path(run_dir), world
 
 
@@ -396,7 +396,7 @@ def test_branch_launch_after_the_data_root_changes_underneath_a_valid_run(
     H.set_data_root(monkeypatch, old_root)
     H.make_tenant(old_root, TID)
     alert = H.plant_alert(tmp_path / "in")
-    run_dir = Path(H.run_common().materialize_run_dir(alert, "r1", tenant_id=TID))
+    run_dir = H.run_common().materialize_run(alert, "r1", tenant_id=TID).run_dir
     assert run_dir == old_root / TID / "runs" / "r1"
     H.set_data_root(monkeypatch, data_root)
     H.make_tenant(data_root, TID)
@@ -735,9 +735,9 @@ def test_episodes_base_reached_through_a_symlink_into_the_data_root(
 
 def test_g_r7_episode_dir_reader_coherence(tmp_path, monkeypatch, data_root):
     """episodes_root, refuse_claimed_episode and visualize_episode — the three existing readers of
-    episode_dir left unmoved while materialize_run_dir's sibling arm
+    episode_dir left unmoved while materialize_run's sibling arm
     (EpisodePaths(world.episode_dir).runs, C8) newly reads it this pass — resolve the same path
-    materialize_run_dir now threads; driving a sibling run and then each of the three readers
+    materialize_run now threads; driving a sibling run and then each of the three readers
     over the same episode_dir observes agreement, not a stale copy."""
     episodes = _episodes_root(tmp_path, monkeypatch)
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)

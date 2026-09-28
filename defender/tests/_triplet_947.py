@@ -680,7 +680,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     # that wants more lands its own rows on top; one that lands this same call again writes a
     # duplicate the primer skips, so the primed key set is unchanged for it.
     capture_call(src)
-    # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run_dir` writes one at the single
+    # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run` writes one at the single
     # place a run the box will execute is ever created, so a source run without one is not a run
     # any production path could have produced — and the containment walks read exactly this file
     # to tell an ordinary run from an episode's contents.
@@ -805,7 +805,7 @@ def source_stamp(src: Path, **overrides: Any) -> Path:
 
     `runs_base` stamps the source with `provenance_record()` (commit `deadbee`, clean, scope
     `repo`); a scenario about the anchor's other shapes rewrites it here with the same builder,
-    so the file on disk is always one `materialize_run_dir` could have written. Absence and
+    so the file on disk is always one `materialize_run` could have written. Absence and
     aliasing are NOT spelled here: a scenario about a missing or planted stamp unlinks or
     symlinks the real path itself, because the fault has to be the real one.
     """

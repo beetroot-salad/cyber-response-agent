@@ -11,7 +11,7 @@ tenant to exist first (D1's row). That file was deleted while `_tenant.py` was r
 demand it discharged that is STILL TRUE under #1078 is restored here, under its ORIGINAL
 function name, so `spec_graph_1077.yaml`'s existing `discharged_by:` pointers resolve
 unchanged. Adapted only where the API changed: a real tenant id in place of the retired
-`"default"` bootstrap, `ensure_runs_base_record`/`materialize_run_dir(tenant_id=...)` in place
+`"default"` bootstrap, `ensure_runs_base_record`/`materialize_run(tenant_id=...)` in place
 of `ensure_tenant`/the `DEFENDER_RUNS_BASE`-env-routed `hosted` fixture, and a direct
 `_create_once`/`_link_tmpfile`-wrapping seam in place of the retired `io=` fault-injection
 kwarg.
@@ -52,7 +52,7 @@ def tenant_root(tmp_path, monkeypatch) -> Path:
 
 
 def _materialize(alert: Path, run_id: str | None, tenant_id: str = T_ID, **kw):
-    return H.run_common().materialize_run_dir(alert, run_id, tenant_id=tenant_id, **kw)
+    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id, **kw).run_dir
 
 
 def _record(base: Path) -> dict:

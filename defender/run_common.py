@@ -6,7 +6,6 @@ import contextlib
 import hashlib
 import logging
 import os
-import subprocess
 import sys
 import dataclasses as _dataclasses
 from pathlib import Path
@@ -22,10 +21,9 @@ from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
+from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
-
-VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
@@ -69,11 +67,12 @@ def _setup_state(run: Run) -> str:
     return "setup"
 
 
-def materialize_run_dir(
+def materialize_run(
     alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None = None,
     world: ResumeWorld | None = None,
-) -> Path:
-    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE.
+) -> Run:
+    """Build (or finish building) the run directory for `run_id`, THROUGH THE HANDLE, and
+    return that tenant-bound handle — the one the run's later records are saved through.
 
     `tenant_id` is the tenant the request named. The runs-base record is created HERE when
     absent — the one place a runs base gets its tenant choice, so an invocation refused earlier
@@ -166,7 +165,7 @@ def materialize_run_dir(
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
-    return run_dir
+    return run
 
 
 def _admit_run_id(alert: Path, run_id: str | None) -> str:
@@ -235,7 +234,7 @@ def _stamp(
     hand that promise straight back. The failure is real and unexceptional — ENOSPC on the runs
     base, a read-only remount, an alias planted where a previous run left one — and it arrives
     AFTER the run dir exists. (Before #1077 an escaping `OSError` also burned the run id —
-    `materialize_run_dir` refused a dir that already existed; decision 3 made an interrupted
+    the run builder refused a dir that already existed; decision 3 made an interrupted
     setup resumable, so a retry now finishes what the first call left undone and re-stamps.)
 
     The asymmetry with the alert write above is the point, not an oversight. A run without its
@@ -288,21 +287,22 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
-class VisualizeFailed(Exception):
-    """The visualizer subprocess exited non-zero; the caller must not treat the run dir
-    as rendered — a page left over from a prior render is not proof this one succeeded."""
+def visualize(run: Run) -> None:
+    """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
+    (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
+    copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
+    been scrubbed, so the model never had a chance to rewrite its own report.
 
-
-def visualize(run_dir: Path) -> None:
-    proc = subprocess.run(
-        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True, encoding="utf-8"
-    )
-    if proc.stdout.strip():
-        _logger.info(proc.stdout.strip())
-    if proc.returncode != 0:
-        raise VisualizeFailed(
-            f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
+    Only the load is decided here. The renderer is imported lazily — it reads its stylesheet at
+    import time, and nothing but this step needs it — and inside the `try`, so a renderer that
+    cannot even load is a `VisualizeFailed` like any other failed render, and never reaches the
+    run's exit code.
+    """
+    try:
+        from defender.scripts.visualize import visualize_run as vr
+    except Exception as e:
+        raise VisualizeFailed("the renderer could not be loaded") from e
+    vr.publish_page(run)
 
 
 def cross_check_tables(run_dir: Path) -> None:

@@ -198,7 +198,7 @@ def refuse_colliding_run_id(run_id: str) -> Exception | None:
     coincidences that keep a run dir and the tenant record apart today (the leading
     underscore outside the run-id character space, the stale-sidecar clear's exact keying,
     both runs-base walkers' `is_dir()` filter), none of which is a constraint anything
-    enforces. Returns the refusal rather than raising it — the caller (`materialize_run_dir`)
+    enforces. Returns the refusal rather than raising it — the caller (`materialize_run`)
     decides how to surface it."""
     if run_id == TENANT_RECORD_NAME:
         return ValueError(
