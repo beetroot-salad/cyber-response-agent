@@ -25,7 +25,7 @@ have to special-case (issue #261).
 
 Each shim collapses all those forms to one stable `defender-*` token that
 `runtime/permission.py` allowlists in-process. `run_common.run_env` puts this
-dir first on `PATH` and exports `DEFENDER_DIR` / `DEFENDER_RUNS_BASE`, so the
+dir first on `PATH` and exports `DEFENDER_DIR` / `DEFENDER_RUNS_BASE` (derived, `<T>/runs`), so the
 shims resolve from any cwd.
 
 ## Conventions
@@ -48,7 +48,7 @@ shims resolve from any cwd.
   its venv-first lookup unconditionally, by design (#1092 non-obligation).
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
-  root, so the agent never passes a path.
+  root (derived, `<T>/runs`), so the agent never passes a path.
 - The surviving shims (`defender-invlang`, `defender-lessons`, `defender-sql`) are the
   NON-adapter set (`hooks/_cmd_segments.NON_ADAPTER_SHIMS`) and stay allowed on the reader
   lane. `defender-sql` runs sandboxed SQL over a payload piped into it — the tier-2

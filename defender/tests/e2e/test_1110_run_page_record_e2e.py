@@ -340,21 +340,25 @@ class _ReplayLifecycle:
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail: a runs
     base and a learning state root under tmp (distinct — the runs base refuses to share one),
-    and a key per provider so nothing credentialed is reached. Answers the runs base."""
+    and a key per provider so nothing credentialed is reached. The runs base is the request
+    tenant's (#1078: `_main` names it with `--tenant`), under this test's own data root.
+    Answers the runs base."""
+    from defender import _tenant
     from defender.runtime import providers
+    from defender.tests._data_root_1078 import ensure_d9_tenant
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
-    runs_base = tmp_path / "runs"
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    return runs_base
+    return _tenant.runs_base_for(_tenant.TenantId(ensure_d9_tenant()))
 
 
 def _main(**seams: Callable[..., Any]) -> int:
     from defender import run as run_py
 
-    return run_py.main([str(GOLDEN / "alert.json"), "--no-learn"],
+    from defender.tests._data_root_1078 import D9_TENANT_ID
+
+    return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
                        preflight=lambda _model: 0, **seams)
 
 
@@ -1199,7 +1203,8 @@ def _stamp_tenant(run_dir: Path, stamp: str) -> str | None:
     (no `tenant_id`); `unreadable` — not JSON at all."""
     path = RunPaths(run_dir).provenance
     if stamp == "tenant":
-        tenant = _tenant.ensure_tenant(run_dir.parent).tenant_id
+        tenant = _tenant.ensure_runs_base_record(
+            run_dir.parent, _tenant.TenantId("playground")).tenant_id
         prov = _provenance.read(path)
         assert prov is not None, "precondition: the harness stamped the run"
         path.write_text(dataclasses.replace(prov, tenant_id=tenant).as_json(), encoding="utf-8")

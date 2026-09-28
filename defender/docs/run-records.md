@@ -24,9 +24,10 @@ census) and the page's former per-kind reader/writer tables retired with it.
 
 ## The model this page uses
 
-- **Tenant** owns worlds and runs, recorded at `<runs_base>/_tenant.json` (`defender/_tenant.py`).
-  No code carries more than one tenant today; the record is the sole authority for the tenant a
-  run stamps.
+- **Tenant** owns worlds and runs (`defender/_tenant.py`). Every run names its tenant on the
+  request (#1078, no default); the tenant exists once its row `<data root>/<T>/tenant.json` does.
+  Each runs base also records the tenant it serves at `<runs_base>/_tenant.json`, created once,
+  and a run whose request names another tenant is refused rather than stamped.
 - **World** — an environment as investigated. A *base* world is the capture unchanged
   (`role: "A"`, `runtime/branch/_family.py:59`, exactly one per family, `:503-507`); an
   *overlay* world is a base world plus a one-axis overlay (`World.overlay`, `:289-300`). Two
@@ -45,7 +46,8 @@ census) and the page's former per-kind reader/writer tables retired with it.
 - **Alert → run** is one-to-many.
 
 Locations are relative to one of four roots: `<run>` (the run dir), `<runs_base>` (its
-parent — also where the tenant record lives), `<sessions>` (`<runs_base>/../sessions`,
+parent — `<data root>/<T>/runs` for a tenant's own runs, `<episode>/runs` for a family's
+siblings — also where the runs-base record lives), `<sessions>` (`<runs_base>/../sessions`,
 `runtime/session_store.py`), and `<episode>` = `$DEFENDER_EPISODES_BASE/<episode_id>`
 (`learning/branch/cli.py`). The episodes base is a *configured* location with no default: it
 must sit outside the runs base, so no runs-base walker counts a sibling as an ordinary run, and
@@ -111,6 +113,7 @@ unreachable by root containment rather than by a named deny.
 | archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
 | tenant | 2 | `_tenant.json` | — | — | tenant | D2: created once when absent |
+| tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->
 

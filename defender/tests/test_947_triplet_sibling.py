@@ -42,8 +42,9 @@ def _run():
     return T.mod("run")
 
 
-def _resume_argv(manifest, world="b"):
-    return ["--resume", str(manifest), "--world", world]
+def _resume_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
+    """A sibling's command line — naming its tenant, as every run does (#1078)."""
+    return ["--resume", str(manifest), "--world", world, "--tenant", tenant]
 
 
 class _Recorder:
@@ -136,10 +137,11 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     assert sorted(p.name for p in base.iterdir()) == before
 
 
-def test_947_resume_refuses_update_ticket(tmp_path):
+def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     """The resume path refuses the ticket flag outright rather than accepting and ignoring it:
     the two ticket calls are ordered around the curation marker, so suppressing one of them
-    would break the pairing instead of the obligation."""
+    would break the pairing instead of the obligation. (The requested tenant exists, so the
+    refusal is the flag's, not the tenant's.)"""
     manifest = T.write_family(tmp_path / "ep")
     assert _run().parse_args(_resume_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
@@ -197,8 +199,9 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     unset still reaches the curation lane, so the sibling's silence is a refusal rather than a
     channel that never carries anything."""
     base, src = T.runs_base(tmp_path)
+    tenant_id = T.mod("_tenant").tenant_of_run_dir(src)
     seen: list[str] = []
-    _run().main([str(src / "alert.json")], lifecycle=_Recorder([]),
+    _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p: None, preflight=T.no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen, "an ordinary run reached no curation lane"
@@ -320,21 +323,14 @@ def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_p
     assert world.family.configured_patterns == T.CONFIGURED
 
 
-def test_a_sibling_resumes_a_pre_1106_manifest_through_its_seeded_tenant_record(
-        tmp_path, monkeypatch):
-    """The entry point end to end: a sibling's runs base holds the tenant record the launcher
-    seeded; `run.py --resume` on a manifest that records no configured set looks that tenant
-    up — reading the record, never minting one — and judges the overlays against its patterns,
+def test_a_sibling_resumes_a_pre_1106_manifest_through_its_requested_tenant(tmp_path):
+    """The entry point end to end: `run.py --resume --tenant T` on a manifest that records no
+    configured set looks T's settings up and judges the overlays against its patterns,
     reaching the lifecycle with the world. The loader-level control is the test above."""
-    from defender import _tenant
-
     base, src = T.runs_base(tmp_path)
     doc = T.family_doc(source_run_dir=str(src))
     del doc["configured_patterns"]
     ep = T.episode(tmp_path, doc=doc)
-    sibling_base = tmp_path / "sibling-runs"
-    _tenant.ensure_tenant(sibling_base, tenant_id=T1106.PLAYGROUND_ID)
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(sibling_base))
     lifecycle = _Recorder([])
     rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
                       "--tenants-root", str(T1106.TENANTS_ROOT)],
@@ -344,44 +340,20 @@ def test_a_sibling_resumes_a_pre_1106_manifest_through_its_seeded_tenant_record(
     assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
 
 
-def test_a_sibling_on_an_unseeded_runs_base_is_refused_not_run_as_the_bootstrap_tenant(
-        tmp_path, monkeypatch):
-    """A sibling's tenant is the episode's, which only the branching launcher's seeded record
-    carries. Resumed by hand on a runs base nobody seeded, the sibling must refuse — naming the
-    record — rather than create a `playground` record and run that tenant's settings against the
-    episode's staged corpus. Nothing is written. The control is the seeded resume above."""
-    from defender import _tenant
-
-    base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    unseeded = tmp_path / "unseeded-runs"
-    unseeded.mkdir()
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(unseeded))
-    lifecycle = _Recorder([])
-    with pytest.raises(SystemExit) as refused:
-        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
-                     "--tenants-root", str(T1106.TENANTS_ROOT)],
-                    lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
-    assert "seeded by the branching launcher" in str(refused.value), refused.value
-    assert lifecycle.order == []
-    assert not _tenant.record_path(unseeded).exists()
-    assert list(unseeded.iterdir()) == []
-
-
 def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_refused(
-        tmp_path, monkeypatch):
-    """A sibling runs on the EPISODE's tenant — the source run's, read from its runs-base record.
-    Resumed by hand on a runs base whose record names another tenant, it must refuse naming
-    both, not run that tenant's grants and endpoints against the episode's staged corpus. The
-    control is the seeded resume above (the two records agree)."""
+        tmp_path):
+    """A sibling runs on the EPISODE's tenant — the one its request names, which the source
+    run's runs-base record agrees with. Its own runs base (`<episode>/runs`) holding a record
+    that names another tenant must refuse naming both, not stamp that tenant's record over a
+    run of the episode's staged corpus. The control is the resume above."""
     from defender import _tenant
 
     base, src = T.runs_base(tmp_path)
     assert _tenant.read_tenant(base).tenant_id == T1106.PLAYGROUND_ID
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    other = tmp_path / "other-runs"
-    _tenant.ensure_tenant(other, tenant_id="acme")
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(other))
+    other = ep / "runs"
+    other.mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(other, "acme")
     lifecycle = _Recorder([])
     with pytest.raises(SystemExit) as refused:
         _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
@@ -435,9 +407,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
-    # The faked builder skips the real one's tenant record, which `main` reads for its log
-    # context; create it here as the real builder would.
-    tenant = T.mod("_tenant").ensure_tenant(base)
+    tenant = T.mod("_tenant").read_tenant(base)
 
     def materialize(*_a, **_kw):
         # #1110: the seam answers the run's tenant-bound HANDLE, built the way the real builder

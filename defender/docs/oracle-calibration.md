@@ -192,9 +192,16 @@ estimate invites the point estimate to be read.
 
 3. **Capture the alert and investigate it.**
 
+   Every run names its tenant, and there is no default (#1078): run
+   `python3 defender/scripts/tenant.py setup playground` once, from the main checkout, with
+   `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
+   the same user that runs defender; a destination already occupied makes setup refuse, naming
+   it in the message. (Adopting an existing (B)/(C) installation whose old entries are
+   root-owned may need setup run as root — that adoption case only.)
+
    ```bash
    experiments/oracle-telemetry-fidelity/extract_alert.py <rule_id> <since-iso> <out.json>
-   python3 defender/run.py <out.json> --run-id <slug> --no-learn
+   python3 defender/run.py <out.json> --tenant playground --run-id <slug> --no-learn
    ```
 
    The run's leads + queries become the oracle-visible envelope. Prefer this over

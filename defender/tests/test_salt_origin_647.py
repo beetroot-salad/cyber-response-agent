@@ -80,8 +80,13 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
     Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
     `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
     run-scoped salt for a builder to originate."""
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "runs"))
-    return run_common.materialize_run(golden / "alert.json", run_id).run_dir
+    from defender import _tenant
+
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
+    tenant_id = "t647"
+    _tenant.create_tenant(data_root, tenant_id)
+    return run_common.materialize_run(golden / "alert.json", run_id, tenant_id=tenant_id).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:

@@ -27,7 +27,7 @@ Usage:
 Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
 ``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
 where the learn worker persists each case's ``report.md`` + ``lessons_loaded.jsonl``.
-Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
+Override with ``--runs-dir`` (e.g. a tenant's ephemeral ``<T>/runs`` for
 ``--no-learn`` dev runs that are never persisted). Lessons: ``defender/lessons/``,
 overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
 and so inherits the corpus discovery rules (underscore-skip, warn on a malformed lesson).

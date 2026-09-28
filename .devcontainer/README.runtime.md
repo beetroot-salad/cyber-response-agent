@@ -27,10 +27,27 @@ docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
 # `playground` tenant, so the repo's knowledge/ is mounted
 docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
     defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
+```
 
-# live investigation — needs the LLM key and the tenants root
+Every run names its tenant, and there is no default (#1078), so create yours once:
+
+```bash
+docker run --rm --env-file .env -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
+    defender-runtime python3 defender/scripts/tenant.py setup playground
+```
+
+Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
+default data root) to a MOUNTED host folder — the row it writes is what every later run is
+checked against, so a data root inside the throwaway container is gone when setup exits — and
+no run, fork or drain in flight on any checkout of the host, as the same user that runs
+defender; a destination already occupied makes setup refuse, naming it in the message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
+setup run as root — that adoption case only.)
+
+```bash
+# live investigation — needs the LLM key, the tenants root and the same data root
 docker run --rm --env-file .env -v "<HOST_TENANTS_ROOT>":/workspace/knowledge/tenants:ro \
-    defender-runtime python3 defender/run.py <alert.json>
+    -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
+    defender-runtime python3 defender/run.py <alert.json> --tenant playground
 ```
 
 **Tenant folders are mounted, never baked (#1106).** A tenant's folder holds its settings

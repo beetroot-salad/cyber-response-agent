@@ -64,10 +64,18 @@ The runtime agent has no unit tests — it's evaluated by running real alerts th
 
 ```bash
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
-python3 defender/run.py <alert.json>                 # one investigation → run dir under /tmp/defender-runs/; --no-learn skips curation enqueue
+export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
+python3 defender/scripts/tenant.py setup playground    # once, before the first run
+python3 defender/run.py <alert.json> --tenant playground   # one investigation → run dir under $DEFENDER_DATA_ROOT/playground/runs/; --no-learn skips curation enqueue
 python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>   # fork a finished run into a family of worlds and grade it
 python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 ```
+
+Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
+default data root) and no run, fork or drain in flight on any checkout of the host, as the same
+user that runs defender; a destination already occupied makes setup refuse, naming it in the
+message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
+setup run as root — that adoption case only.)
 
 **Running the suite as root fails five tests that are not broken.** Four are the
 accounting-failure tests in `tests/test_budget_enforcement_631.py`
@@ -81,7 +89,7 @@ before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 
-Each run writes to `$DEFENDER_RUNS_BASE/{run_id}/` (default `/tmp/defender-runs/`): `alert.json` (read-only input), `provenance.json` (the commit the run was made against and whether that tree was dirty — the only file here that is a fact ABOUT the run rather than content it produced, stamped by the host at run-dir creation before any agent exists; see `_provenance.py` for what a sha does and does not pin, and note it is deliberately absent from the model-facing workspace map), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious|unresolved` — is the headline the learning loop parses; the same frontmatter also carries the review gate's `outcome`/`cause`/`failure_kind`, which today only the visualizer reads), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `wire_logs/llm_requests.jsonl` + `tool_trace.jsonl` (observability — `wire_logs/llm_requests.jsonl` is the run's ONE wire log: the main agent, every gather subagent as `gather:{lead_id}`, and every review stage as `review:{lens}` write through the same `RequestLogger`, which is what makes all three priceable; it sits under `wire_logs/` rather than at the run root because MAIN's and GATHER's run-dir read shape `under(run, SEG)` is ONE segment, so the subdirectory is what keeps a log holding gather's raw payloads and MAIN's transcript unreadable by both of them — `_run_paths.WIRE_LOG_DIR`, which also records why that argument covers those two roles and no others), `runtime.html`, and the **two append-only tables**, written live during the run:
+Each run writes to `<T>/runs/{run_id}/` (`run_dir.parent`, under the tenant's data root): `alert.json` (read-only input), `provenance.json` (the commit the run was made against and whether that tree was dirty — the only file here that is a fact ABOUT the run rather than content it produced, stamped by the host at run-dir creation before any agent exists; see `_provenance.py` for what a sha does and does not pin, and note it is deliberately absent from the model-facing workspace map), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious|unresolved` — is the headline the learning loop parses; the same frontmatter also carries the review gate's `outcome`/`cause`/`failure_kind`, which today only the visualizer reads), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `wire_logs/llm_requests.jsonl` + `tool_trace.jsonl` (observability — `wire_logs/llm_requests.jsonl` is the run's ONE wire log: the main agent, every gather subagent as `gather:{lead_id}`, and every review stage as `review:{lens}` write through the same `RequestLogger`, which is what makes all three priceable; it sits under `wire_logs/` rather than at the run root because MAIN's and GATHER's run-dir read shape `under(run, SEG)` is ONE segment, so the subdirectory is what keeps a log holding gather's raw payloads and MAIN's transcript unreadable by both of them — `_run_paths.WIRE_LOG_DIR`, which also records why that argument covers those two roles and no others), `runtime.html`, and the **two append-only tables**, written live during the run:
 
 | Table | Where | Key |
 |---|---|---|
@@ -146,9 +154,9 @@ until then ran on the questioner's definition. `git show e9e11a48` is the deleti
 
 ## Conventions
 
-- Runs live outside the repo (`/tmp/defender-runs/`) so transcripts stay out of git.
+- Runs live outside the repo, under `$DEFENDER_DATA_ROOT/<tenant>/runs/` (`<T>/runs`), so transcripts stay out of git. There is no default data root (#1078) — every run and every `tenant.py setup` names one.
 - **Status and diagnostics go through logging, not `print`** (`_log.py`): `logging.getLogger(__name__)` everywhere — a program's own module included, since `configure` names `__main__` as the module it is — with the level chosen at each call. Every program's `__main__` block calls `configure_from_env()` first, or says why not with `# lint-log-setup: ok — <reason>` (a model tool whose stderr the model reads); `scripts/lint/lint_log_setup.py` gates it. Output is JSON on the error stream by default (`DEFENDER_LOG_FORMAT=text` for people, `DEFENDER_LOG_LEVEL`). Argparse usage errors, a `sys.exit("…")` refusal of a program's arguments, and a crash's traceback stay plain text; a run's own crash is logged inside its context by `_log.run_context`, which `run.main` uses. `_log.log_context(run_id=..., tenant_id=...)` stamps a run onto every line inside it; a thread-pool worker starts without it, so bind inside the worker or submit through `contextvars.copy_context().run`. The handler writes to whatever `sys.stderr` is at that moment and the test session configures logging once (`tests/conftest.py`), so `capsys` sees log lines as a terminal would. `print` stays for a command's own output (stdout) and for text a model reads back as a tool result. Logs go to stderr until #1114.
-- **In the devcontainer, set `DEFENDER_RUNS_BASE=/workspace/.defender-runs`** (gitignored) — the default `/tmp/defender-runs` is not a path this container shares with the docker daemon, so the box cannot resolve its bind source and `start_box` fails with a C46/DooD `BoxFault`.
+- **In the devcontainer, set `DEFENDER_DATA_ROOT=/workspace/.defender-data`** (gitignored) — a data root outside the container's own tree that is not on any path this container shares with the docker daemon leaves the box unable to resolve its bind source, and `start_box` fails with a C46/DooD `BoxFault`.
 
 ## Lint gates
 

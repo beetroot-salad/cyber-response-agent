@@ -382,7 +382,7 @@ def test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write
     # seam is pinned as a demand rather than worked around (schema.md, `kind: seam`).
     record = review.review(family, episode_dir=ep, adapters=W.FakeAdapters(),
                            door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                           write=writer, settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                           write=writer, settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
 
     review_writes = [c for c in writer.calls if str(c[0][0]).endswith(W.REVIEW_NAME)]
     assert len(review_writes) == 1, (

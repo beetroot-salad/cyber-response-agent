@@ -671,11 +671,15 @@ def test_no_reader_writer_census_is_derived_from_accessor_callers():
 def test_every_kind_in_the_tsv_has_exactly_one_accessor_that_owns_its_name(tmp_path: Path):
     """Walking `run-records-kinds.tsv` — excluding the appendix-only kinds — finds exactly one
     owner accessor per kind."""
+    from defender.tests import _data_root_1078 as D
+
     appendix = S.appendix_only()
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base))
     episode_dir = S.make_episode_dir(tmp_path)
     by_kind = {a.kind: a for a in S.ACCESSOR_FOR_KIND}
+    tenant_id = D.ensure_d9_tenant()
+    data_root = D.current_data_root()
 
     walked, homeless = 0, []
     for row in S.kinds_rows():
@@ -687,7 +691,8 @@ def test_every_kind_in_the_tsv_has_exactly_one_accessor_that_owns_its_name(tmp_p
             homeless.append(kind)
             continue
         try:
-            got = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir)
+            got = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
+                            data_root=data_root, tenant_id=tenant_id)
         except AttributeError:
             homeless.append(f"{kind} (no {acc.owner}.{acc.attr})")
             continue

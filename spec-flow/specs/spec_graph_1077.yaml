@@ -444,9 +444,12 @@ demands:
       - "interacts(materialize_run_dir->tenant_record)"
     discharged_by: test_the_tenant_record_is_created_once_under_the_runs_base
     seed_docstring: >-
-      The first materialisation creates `<runs_base>/_tenant.json` with `tenant_id="default"`,
+      The first materialisation creates `<runs_base>/_tenant.json` naming the request's tenant,
       a fresh `base_world_id` and a `created_at`, and a second materialisation reuses it
-      unchanged.
+      unchanged. (#1078 D1/O1 retire the built-in `tenant_id="default"` bootstrap this demand
+      originally named — every request now names its own tenant, with no default; the restored
+      test drives the request's own tenant id instead. The create-once/reuse-unchanged claim is
+      unaffected.)
     note: >-
       CLUSTER G CLOSED at §7 (decision 13). The LOCATION question DISSOLVED: per-runs-base
       placement stands as designed, because the design's own data model already lets one tenant
@@ -1305,16 +1308,21 @@ demands:
     binds: ["tenant_record.identity", "runs_base.identity"]
     discharged_by: test_a_second_runs_base_is_live_in_the_same_process
     seed_docstring: >-
-      Two runs bases live at once — a sibling's `<episode>/runs` alongside its parent's — and
-      each independently creates and reads its OWN `_tenant.json`, each defaulting to
-      `tenant_id="default"` and each minting its own `base_world_id`; the tenant record is 1:1
-      with its runs base, not a process-wide singleton, and no refusal fires when both are live.
+      Two runs bases live at once — a sibling's `<episode>/runs` alongside the tenant's own
+      `<data root>/<tenant>/runs` — and each independently creates and reads its OWN
+      `_tenant.json`, each minting its own `base_world_id`; the tenant record is 1:1 with its
+      runs base, not a process-wide singleton, and no refusal fires when both are live. (#1078
+      D1/O1 retire the built-in `tenant_id="default"` bootstrap this demand originally
+      contrasted against — every base's record now names the SAME request tenant, never a
+      per-base default — so the restored test drives both bases under one real tenant id; the
+      surviving claim is 1:1-with-its-runs-base/no-process-singleton/no-refusal-when-both-live.)
     note: >-
       OUTCOME TRANSCRIBED AND CONFIRMED. `45-dispositions.md` carries the `(s29) CONVERGED`
       text, and §7 decision 13 dissolved the apparent conflict behind it: 'a single built-in
       tenant' names the per-base bootstrap default, and a sibling's own record is a new
       BASE-WORLD record for the same tenant, because the design's data model already lets one
-      tenant own several base worlds.
+      tenant own several base worlds. #1078 retired the per-base bootstrap default itself (see
+      seed_docstring); the 1:1-with-its-runs-base structural claim survives unchanged.
   - id: s30_tenant_record_path_occupied_by_a_non_regular_file
     kind: domain-outcome
     form: test
@@ -1337,10 +1345,13 @@ demands:
     binds: ["tenant_record.domain.distinguished[non_default_tenant_id]"]
     discharged_by: test_a_tenant_record_whose_tenant_id_is_not_the_built_in_default
     seed_docstring: >-
-      A tenant record whose `tenant_id` is not the built-in 'default' is read and stamped as-is:
-      the record is the sole authority for the stamped tenant, `'default'` is only D2's
-      creation-time bootstrap value, and the handle neither refuses the record nor rewrites it.
+      A tenant record is read and stamped exactly as it names its tenant: the record is the
+      sole authority for the stamped tenant, and the handle neither refuses nor rewrites it.
       Runs stamped under a previous value keep that value, with no reconciliation performed.
+      (#1078 D1/O1 retire the built-in `tenant_id="default"` bootstrap this demand originally
+      contrasted against — there is no default any more to contrast a non-default id with — so
+      the restored test drives two ordinary, differently-spelled tenant ids directly; the
+      surviving claim is 'the record is the sole authority, no rewrite happens'.)
     note: >-
       OUTCOME TRANSCRIBED (`(s31) CONVERGED` in `45-dispositions.md`) and extended by §7
       decision 13: a stamp disagreeing with the record at its current base is left alone, which
@@ -2344,7 +2355,11 @@ demands:
     discharged_by: test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads
     seed_docstring: >-
       The loser of a tenant-record create race discards the value it was about to write and reads
-      the winner's record instead, with no retry and no error surfaced.
+      the winner's record instead, with no retry and no error surfaced. (
+      `test_1078_records.py::test_o6_record_create_exclusive`, in `spec_graph_1078-pass-a.yaml`'s
+      own suite, is a fuller real N-way threaded race over the same `_create_once` lane; this
+      restored test keeps the deterministic-hook shape that isolates the LOSER's own behaviour
+      specifically.)
     note: >-
       Loser-re-reads is the only resolution under which O4 ("both stamp fields equal the RECORD's
       values") holds for both racers.

@@ -42,7 +42,8 @@ class SpawnRecorder:
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **_kw: Any) -> int:
         env = dict(env or {})
-        runs = Path(env.get("DEFENDER_RUNS_BASE", ""))
+        # The child's runs base is its episode's `runs/` (#1078 D2), the manifest's sibling.
+        runs = Path(argv[argv.index("--resume") + 1]).parent / "runs"
         try:
             record = T.mod("_tenant").read_tenant(runs).tenant_id
         except Exception as e:  # noqa: BLE001 — "no readable record at spawn" is the observation
@@ -92,16 +93,17 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     assert len(spawn.launches) == 2
     for launch in spawn.launches:
         assert launch["tenant_at_spawn"] == "acme", launch
-        assert Path(launch["env"]["DEFENDER_RUNS_BASE"]) == ep / "runs"
-        assert _child_tenants_root(launch["argv"]).resolve() == root.resolve()
+        argv = launch["argv"]
+        assert argv[argv.index("--tenant") + 1] == "acme", argv
+        assert _child_tenants_root(argv).resolve() == root.resolve()
     assert T.mod("_tenant").read_tenant(ep / "runs").tenant_id == "acme"
 
 
-@pytest.mark.parametrize("tenant_id", [None, "default"])
+@pytest.mark.parametrize("tenant_id", [None, "Not A Tenant"])
 def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_path, tenant_id):
-    """N10: a legacy family — its stamp carries no tenant, or the retired `default` — gets no
-    fallback. Nothing is spawned and no record is minted (a minted record would be the
-    fallback, just written down)."""
+    """A family with no tenant, or an id no tenant can have, gets no fallback — there is no
+    default tenant (#1078). Nothing is spawned and no record is minted (a minted record would
+    be the fallback, just written down)."""
     cli = T.mod("learning.branch.cli")
     ep = tmp_path / "episode"
     ep.mkdir()
@@ -127,13 +129,10 @@ def _launch(tmp_path: Path, *, stamp_tenant: str | None, root: Path,
     it, with the SOURCE run's stamp naming `stamp_tenant`, its runs base's record naming
     `record_tenant` (the same tenant unless a scenario says otherwise; `None` leaves the
     fixture's own record) and `--tenants-root root`."""
-    base, src = P.runs_base(tmp_path)
-    P.source_stamp(src, tenant_id=stamp_tenant)
     record = stamp_tenant if record_tenant is _AS_STAMPED else record_tenant
-    if record is not None:
-        _tenant = T.mod("_tenant")
-        _tenant.record_path(base).unlink()
-        _tenant.ensure_tenant(base, tenant_id=record)
+    # The source sits at its record's tenant location (#1078 O5); `None` keeps the fixture's.
+    base, src = P.runs_base(tmp_path, tenant_id=record)
+    P.source_stamp(src, tenant_id=stamp_tenant)
     spawn = SpawnRecorder()
     outcome: Any
     try:
@@ -211,7 +210,8 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     assert probed, door.ops
     assert probed[0] == TENANT_PATTERNS[0], probed
     assert not {"logs-*", P.ALERTS_PATTERN} & set(probed), probed
-    manifest = T.mod("learning.branch.cli").episode_dir_for(P.EPISODE_ID) / "family.yaml"
+    manifest = T.mod("learning.branch.cli").episode_dir_for(
+        P.EPISODE_ID, tenant=P.current_tenant_paths()) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert tuple(doc["configured_patterns"]) == TENANT_PATTERNS, doc["configured_patterns"]
 
@@ -249,11 +249,8 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
         configs=T.config_texts("acme", events_index=P.EVENTS_PATTERN,
                                alerts_index=P.ALERTS_PATTERN))
     questioner = P.FakeAgent(P.family_doc(), P.world_doc("b"), P.world_doc("c"))
-    base, src = P.runs_base(tmp_path)
+    base, src = P.runs_base(tmp_path, tenant_id="acme")
     P.source_stamp(src, tenant_id="acme")
-    _tenant = T.mod("_tenant")
-    _tenant.record_path(base).unlink()
-    _tenant.ensure_tenant(base, tenant_id="acme")
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
@@ -295,7 +292,7 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B, marker="bravo")
     tenant = T.tenants().tenant_dir(tmp_path / "tenants", "bravo")
     ep = P.episode(tmp_path)
-    side = seams.adapter_seam(ep, T.run_tenant(tenant))
+    side = seams.adapter_seam(ep, T.run_tenant(tenant), runs_base=tmp_path / "runs")
     assert {(s, v) for s, v, _ in side.registry.grant.entries} == set(T.GATHER_PAIRS_B)
     assert side.registry.decide("identity", "get-user").outcome == "GRANTED"
     denied = side.registry.decide("identity", "can-access")

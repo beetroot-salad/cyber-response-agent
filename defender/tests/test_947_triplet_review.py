@@ -50,7 +50,13 @@ def _compare():
 
 
 def _run_review(episode_dir, *, adapters=None, door=None, invoke=None, doc=None, **kw):
+    from pathlib import Path
+
     fam = T.mod("runtime.branch._family").parse_family(doc if doc is not None else T.family_doc())
+    # #1078 D4: `review()`'s `runs_base` is a required keyword; this harness defaults it to a
+    # harmless, never-created sibling dir for every caller that does not care which base is
+    # threaded.
+    kw.setdefault("runs_base", Path(episode_dir).parent / "runs-base")
     return _review().review(
         fam, episode_dir=episode_dir, adapters=adapters or T.FakeAdapters(),
         door=door or T.FakeDoor(counts={"logs-000001": 3}), invoke=invoke or T.FakeAgent("same"),
@@ -73,25 +79,32 @@ def test_947_review_registry_uses_a_scratch_ledger_with_an_empty_base(tmp_path):
     assert not list(ledger.base_rows())
 
 
-def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, monkeypatch):
+def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, monkeypatch,
+                                                                  d9_tenant):
     """The replay's verb context is host-side over the episode dir: its tree is the episode
     directory rather than any run dir, it carries no capture recorder at all, and the environment
     the host composes for it names that directory as the run dir and the CONFIGURED runs base as
     the runs base its adapter subprocesses inherit — never the episode dir's own parent, which
     after §7 round 2 is the EPISODES ROOT, a location that is not a runs base and that no
     runs-base walk may reach."""
+    # #1078 D4 (review row, brief R2, settled s104): the base is THREADED — the launcher passes
+    # `runs_base_for(T)` — never read off the (retired) `DEFENDER_RUNS_BASE` knob, whose stale
+    # configured value `configured_layout` still exports here. Composed under the data root
+    # `d9_tenant` was created in, before `configured_layout` points the process at its own.
+    runs_base = T.sym("_tenant", "runs_base_for")(d9_tenant)
     base, _src, root = T.configured_layout(tmp_path, monkeypatch)
     ep = T.episode(tmp_path, root=root)
-    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS)
+    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS, runs_base=runs_base)
     assert ctx.run_dir == ep
     assert ctx.capture is None
     assert ctx.env["DEFENDER_RUN_DIR"] == str(ep)
     # `run_common.run_env` sets DEFENDER_RUNS_BASE = run_dir.parent unconditionally
     # (`run_common.py:119`), which is F10's precondition — "correct here only because the episode
     # dir is a direct child of the runs base" — and after two relocations that is false. The
-    # review COMPOSES the configured runs base instead; inheriting the parent would point every
+    # review COMPOSES the tenant's runs base instead; inheriting the parent would point every
     # replay subprocess at the tree holding every episode.
-    assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
+    assert ctx.env["DEFENDER_RUNS_BASE"] == str(runs_base)
+    assert ctx.env["DEFENDER_RUNS_BASE"] != str(base), "the replay read the retired knob"
     assert ctx.env["DEFENDER_RUNS_BASE"] != str(ep.parent), (
         "the replay's subprocesses resolve their runs base to the EPISODES ROOT")
 
@@ -142,8 +155,11 @@ def test_947_an_uncaptured_key_does_reach_the_adapter(tmp_path):
     ep = T.episode(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1")])
     adapters = T.FakeAdapters()
+    # #1078 D4: verb_context/replay_one take the runs base as a required keyword — a plain tmp
+    # dir here, since this test is about the capture memo, not which base is threaded.
+    ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS, runs_base=tmp_path / "runs")
     _review().replay_one(("elastic", "esql", {"query": "FROM logs-* | LIMIT 1"}),
-                         episode_dir=ep, adapters=adapters)
+                         episode_dir=ep, adapters=adapters, ctx=ctx)
     assert ("elastic", "esql") in adapters.asked
 
 
@@ -235,7 +251,13 @@ def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path,
                   live_tree=T.source_capture(),
                   questioner=T.FakeAgent(
                       T.family_doc(worlds=[T.base_world(), patched]), patched))
-    ep = cli.episode_dir_for(T.EPISODE_ID)
+    import os
+    from pathlib import Path
+
+    from defender import _tenant
+
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant.TenantPaths(
+        Path(os.environ["DEFENDER_DATA_ROOT"]), "acme"))
     assert rc != 0
     assert spawn.launches == [], "a sibling started for a rejected episode"
     doc = T.review_doc(ep)

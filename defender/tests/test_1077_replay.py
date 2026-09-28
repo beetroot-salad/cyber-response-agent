@@ -451,8 +451,11 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     # THE CONTRAST, in one test: the SAME obstruction on an IDENTITY-BEARING write fails loudly
     # rather than being recorded and shrugged off.
     (base / S.TENANT_RECORD_NAME).mkdir()
-    with pytest.raises(OSError):  # noqa: PT011 — the real primitive picks the errno, not us
-        S.tenant().ensure_tenant(base)
+    # #1078: `ensure_tenant` is renamed `ensure_runs_base_record(runs_base, tenant_id)` — the
+    # obstruction still fails loudly, as the one tenant refusal (demand #0) rather than a
+    # bare OSError.
+    with pytest.raises(S.tenant().TenantRefused):
+        S.tenant().ensure_runs_base_record(base, "census-tenant")
 
 
 # ---------------------------------------------------------------------------------------

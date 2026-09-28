@@ -58,9 +58,12 @@ def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_p
     assert (td.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_A
 
 
-def test_the_tenant_dir_error_is_a_value_error():
+def test_the_tenant_dir_error_is_a_tenant_refusal():
+    """The folder resolver's refusal is one of the tenant refusals every entry catches (#1078's
+    one refusal class) — and not a `ValueError`, which pydantic would wrap inside a validator."""
     _, error = _resolver()
-    assert issubclass(error, ValueError)
+    assert issubclass(error, T.mod("_tenant").TenantRefused)
+    assert not issubclass(error, ValueError)
 
 
 def test_the_required_settings_are_exactly_d3s_three_files():
@@ -80,9 +83,10 @@ def test_a_tenant_without_any_config_env_still_resolves(tmp_path):
 
 # ---- O5: the id ----------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bad_id", ["../x", "a/b", ".hidden", "", "..", "."])
+@pytest.mark.parametrize("bad_id", ["../x", "a/b", ".hidden", "", "..", ".", "Acme_Corp"])
 def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, bad_id):
-    """An id with a path separator, `..`, a leading dot, or no name at all is refused — and
+    """An id with a path separator, `..`, a leading dot, no name at all, or anything else
+    outside the one tenant-id grammar a run is held to (`Acme_Corp`) is refused — and
     refused even when the place it would reach EXISTS and is a complete tenant, so the refusal
     is the id's grammar and not an accident of what is on disk. The positive control is the
     same plant reached by a plain id."""
@@ -92,6 +96,7 @@ def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, ba
     T.plant_tenant(tmp_path, "x")                       # root/../x
     T.plant_tenant(root / "a", "b")                     # root/a/b
     T.plant_tenant(root, ".hidden")                     # root/.hidden
+    T.plant_tenant(root, "Acme_Corp")                   # root/Acme_Corp
     T.plant_tenant(root, "acme")
     message = _refusal(root, bad_id)
     if bad_id:
@@ -347,19 +352,6 @@ def test_a_directory_the_link_check_cannot_read_is_refused_not_skipped(tmp_path)
     finally:
         hidden.chmod(0o755)
     assert "could not be checked" in message, message
-
-
-def test_a_folder_named_default_is_not_a_tenant(tmp_path):
-    """N10 on the resolver itself: the retired bootstrap id names no tenant even when a
-    complete folder carries its name — so a run, a branch, an operator command and CI all
-    refuse it the same way. Control: the same folder under another name resolves."""
-    root = tmp_path / "tenants"
-    T.plant_tenant(root, "default")
-    T.plant_tenant(root, "acme")
-    tenant_dir, _ = _resolver()
-    assert tenant_dir(root, "acme").tenant_id == "acme"
-    message = _refusal(root, "default")
-    assert "retired" in message, message
 
 
 # ---- D2: the root is an input, and its default belongs to the entry point ---------------------

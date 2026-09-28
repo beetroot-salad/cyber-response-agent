@@ -28,24 +28,6 @@ _logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
 
-DEFAULT_RUNS_BASE = Path("/tmp/defender-runs")
-
-
-def resolve_runs_base() -> Path:
-    base = Path(os.environ.get("DEFENDER_RUNS_BASE", str(DEFAULT_RUNS_BASE)))
-    from defender._env import FatalConfigError
-    from defender.learning.core.config import learning_state_root
-
-    if base.resolve() == learning_state_root().resolve():
-        raise FatalConfigError(
-            "DEFENDER_RUNS_BASE and the learning state root "
-            "(DEFENDER_LEARNING_STATE_DIR) resolve to the same directory "
-            f"({base.resolve()}): the enforced runtime budget pool would be spent by "
-            "unenforced learning agents. Point them at distinct directories."
-        )
-    return base
-
-
 _GENERIC_ALERT_STEMS = {"alert"}
 
 
@@ -81,42 +63,41 @@ def _setup_state(run: Run) -> str:
 
 
 def materialize_run(
-    alert: Path, run_id: str | None, *, model: str | None = None,
-    world: ResumeWorld | None = None, tenant_id: str | None = None,
-    expected_record: _tenant.TenantRecord | None = None,
+    alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None = None,
+    world: ResumeWorld | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id` and return the tenant-bound
     handle the run's later records are saved through.
 
-    `tenant_id` is the tenant the caller resolved, and `expected_record` the tenant record it
-    resolved it from (`None` if the base had none); with no `tenant_id` the record decides.
-    The record is created here when absent, then a record naming another tenant or differing
-    from `expected_record` is refused rather than stamped.
+    `tenant_id` is the tenant the request named. The runs-base record is created here when
+    absent; a record naming another tenant is refused rather than stamped.
 
     Every write is a guarded write-once verb (written when absent, kept when equal, refused
     when different), so resuming needs no ordering of checks and follows no planted link.
     `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
+
+    Order: the tenant's row must exist before anything is created; the runs base is the
+    tenant's own (`<data root>/<T>/runs`) or, for a fork, its episode's `runs/`; then the
+    runs-base record, then `Run.for_tenant` as the race backstop.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     run_id = _admit_run_id(alert, run_id)
-    runs_base = resolve_runs_base()
+    data_root = _tenant.resolve_data_root()
+    # An unknown tenant leaves no runs base at all.
+    _tenant.require_tenant(data_root, tenant_id)
+    if world is not None:
+        from defender._episode_paths import EpisodePaths
+
+        runs_base = EpisodePaths(world.episode_dir).runs
+    else:
+        runs_base = _tenant.TenantPaths(data_root, tenant_id).runs
     # The runs base is the host-controlled trust root; nothing above it is judged.
     guarded_mkdir(runs_base, base=runs_base)
     # The tenant record comes before the provenance stamp (which must match it) and before the
     # box exists. Unlike the stamp, its failures propagate: a forged tenant is worse than no run.
-    if tenant_id is None:
-        tenant_record = _tenant.ensure_tenant(runs_base)
-        chosen = tenant_record.tenant_id
-    else:
-        tenant_record = _tenant.ensure_tenant(runs_base, tenant_id=tenant_id)
-        chosen = tenant_id
-    if expected_record is not None and tenant_record != expected_record:
-        raise _tenant.TenantRecordMismatch(
-            f"the tenant record at {_tenant.record_path(runs_base)} changed after this run's "
-            f"tenant was chosen from it (read {expected_record}, now {tenant_record}) — the "
-            "run would be stamped with a record its settings were not resolved from")
-    run = Run.for_tenant(chosen, run_id, runs_base=runs_base)
+    tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant_id)
+    run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
 

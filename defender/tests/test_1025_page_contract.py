@@ -240,7 +240,7 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     launcher = _cli()
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
-    episode_dir = launcher.episode_dir_for(T.EPISODE_ID)
+    episode_dir = launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
     judge = _PlantingJudge(episode_dir, outside, default=J.as_reply_text(J.reply_doc()))
     launch = ST._launch(tmp_path, judge=judge)
     err = capsys.readouterr().err
@@ -290,7 +290,7 @@ def test_1025_held_teardown_fault_after_a_completed_grade(tmp_path):
     """
     with pytest.raises(_cli().LauncherRefused, match="teardown did not verify"):
         ST._launch(tmp_path, door=ST._StickyDoor())
-    ep = _cli().episode_dir_for(T.EPISODE_ID)
+    ep = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
     assert (ep / "judge.yaml").is_file(), "the control failed: the grade did not land"
     timing = hook_page(ep).text_of("stage-timing")
     assert "judge" in timing, timing
@@ -671,7 +671,7 @@ def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, m
     assert page.text_of("sec-records").count("absent") >= 3, page.text_of("sec-records")
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID))
+    questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
     # The abort above still primes the capture before the interrupt lands (priming precedes the
@@ -708,7 +708,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
             E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
         ST._launch(tmp_path)
     assert seen["hit"], "the interrupt never landed inside the launcher's render"
-    launched = _cli().episode_dir_for(T.EPISODE_ID)
+    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
     assert (launched / "judge.yaml").is_file(), "the grade was not on disk before the render"
     assert not (launched / E.PAGE_NAME).exists(), "a partial page was left by the interrupt"
     assert not [p for p in launched.iterdir() if p.name.startswith(".")], "a staged temp is left"
@@ -805,7 +805,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
             self.episode_dir.chmod(0o555)
             return reply
 
-    launched = _cli().episode_dir_for(T.EPISODE_ID)
+    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
     judge = _ReadOnlyJudge(launched, default=J.as_reply_text(J.reply_doc()))
     try:
         launch = ST._launch(tmp_path, judge=judge)

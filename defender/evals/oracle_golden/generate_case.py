@@ -11,7 +11,7 @@ override anyway, so every lead would investigate a host the activity never ran o
 
   fire       playground-v2/attacks/runner.py run <scenario> --seed --user --target
   alert      the rule's own alert if one fired, else synthesised from the runner record
-  envelope   defender/run.py <alert.json> --run-id <slug> --no-learn
+  envelope   defender/run.py <alert.json> --tenant playground --run-id <slug> --no-learn
   story      story_from_run.py <meta.json> <story.md>
   assemble   RETIRED — see the refusal in `main`
   controls   controls.py cases/<id>
@@ -35,8 +35,9 @@ the split a case lands on.
 Baseline generators stay **on**: the oracle's answer is a signed diff over baseline, so
 with them off `+noise` cannot occur and `+event` is easier than production.
 
-Usage:
-  generate_case.py --scenario cross-tier-ssh-probe --target web-2 \\
+Usage (every run names its tenant, and there is no default — #1078; create one once with
+`python3 defender/scripts/tenant.py setup playground`):
+  generate_case.py --scenario cross-tier-ssh-probe --tenant playground --target web-2 \\
       --case-id case-010-... --split held-out --activity-family data-access/T1021.004
 """
 from __future__ import annotations
@@ -284,19 +285,31 @@ def synthesise_alert(meta: dict, out_path: Path) -> dict:
     return alert
 
 
-def investigate(alert: Path, run_id: str) -> Path:
+def investigate(
+    alert: Path, run_id: str, *, tenant_id: object, run: Runner = subprocess.run,
+) -> Path:
     """One defender investigation — the LLM cost floor, and the envelope source.
 
     `run.py` refuses to reuse a run dir, so a retry takes the next free suffix and the
-    failed attempt's transcript survives.
+    failed attempt's transcript survives. `tenant_id` is checked before anything is spent;
+    the child `run.py` is handed it as `--tenant`.
     """
-    env_base = Path(os.environ.get("DEFENDER_RUNS_BASE", "/tmp/defender-runs"))
+    from defender import _tenant
+
+    tenant = _tenant.request_tenant(tenant_id)
+    env_base = _tenant.runs_base_for(tenant)
     candidate, attempt = run_id, 1
     while (env_base / candidate).exists():
         attempt += 1
         candidate = f"{run_id}-{attempt}"
-    _run([sys.executable, DEFENDER_RUN, str(alert), "--run-id", candidate, "--no-learn"],
-         timeout=3600, label="investigate")
+    proc = run(
+        [sys.executable, DEFENDER_RUN, str(alert), "--run-id", candidate,
+         "--tenant", tenant, "--no-learn"],
+        capture_output=True, text=True, encoding="utf-8", timeout=3600, cwd=REPO_ROOT,
+        check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"investigate failed ({proc.returncode}):\n"
+                           f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
     run_dir = env_base / candidate
     if not run_dir.is_dir():
         raise RuntimeError(f"defender run dir missing: {run_dir}")
@@ -353,6 +366,8 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scenario", required=True)
+    p.add_argument("--tenant", required=True,
+                   help="the tenant this case's investigation runs under (#1078 D4/J32)")
     p.add_argument("--rule", default=None,
                    help="detection rule to wait for; omit to take whichever rule the "
                         "activity actually raises (the usual case)")
@@ -391,9 +406,16 @@ def _assemble(run_dir: Path, story: Path, controls_yaml: Path, case_dir: Path) -
 
 def main(argv: list[str] | None = None) -> int:
     """Parse, then refuse before the stack is touched: with no assemble step, a recruitment
-    run would produce nothing usable. Argument validation still runs.
+    run would produce nothing usable. Argument validation still runs, `--tenant` first.
     """
-    build_parser().parse_args(argv)
+    ns = build_parser().parse_args(argv)
+    from defender import _tenant
+
+    try:
+        _tenant.request_tenant(ns.tenant)
+    except _tenant.TenantRefused as refused:
+        print(f"[generate_case] {refused}", file=sys.stderr)
+        return 2
     print("!! generate_case.py cannot assemble a case: the assembler retired with the "
           "oracle in #922. The steps it drove are listed in this file's docstring; the "
           "existing cases under cases/ are still readable and scorable.", file=sys.stderr)
@@ -460,7 +482,7 @@ def _recruit(argv: list[str] | None = None) -> int:
         f"operation_window: [\"{meta.get('started_at')}\", \"{meta.get('finished_at')}\"]\n",
         encoding="utf-8")
 
-    run_dir = investigate(alert, f"golden-{ns.case_id}")
+    run_dir = investigate(alert, f"golden-{ns.case_id}", tenant_id=ns.tenant)
     _assemble(run_dir, story, controls_yaml, case_dir)
 
     write_environment(case_dir / "environment.yaml", ns.capture_environment)

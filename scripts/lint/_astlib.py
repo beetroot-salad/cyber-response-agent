@@ -204,6 +204,9 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
     "defender._run_paths.SessionPaths",
+    # The tenant's own layout owner (#1078 D1): a join onto `TenantPaths(root, T).runs` is
+    # owner-derived exactly as one onto `EpisodePaths(ep).runs` is.
+    "defender._tenant.TenantPaths",
 })
 
 #: The owner modules' module-level singletons — stateless layout values a caller imports rather

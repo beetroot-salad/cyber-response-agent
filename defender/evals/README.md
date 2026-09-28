@@ -21,13 +21,25 @@ never the reverse.
 |---|---|---|
 | `held_out.py` | **Primary** — disposition accuracy | Does the *current* defender's disposition match ground truth on the labeled held-out alerts? This is the loop's north-star metric. |
 
-Run it by hand:
+Run it by hand. Every run names its tenant, and there is no default (#1078) — set up your
+tenant once:
 
 ```bash
-# Primary: score against ground truth (runs dir defaults to $DEFENDER_RUNS_BASE).
-# It walks fixtures/held-out/ and finds each fixture's run by run-id, so launch
-# scored runs as: run.py <fixture>/alert.json --run-id <slug> --no-learn
-python3 defender/evals/held_out.py "$DEFENDER_RUNS_BASE"
+export DEFENDER_DATA_ROOT=/path/outside/the/checkout
+python3 defender/scripts/tenant.py setup playground
+```
+
+Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
+default data root) and no run, fork or drain in flight on any checkout of the host, as the same
+user that runs defender; a destination already occupied makes setup refuse, naming it in the
+message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
+setup run as root — that adoption case only.)
+
+```bash
+# Primary: score against ground truth. It walks fixtures/held-out/ and finds each
+# fixture's run by run-id, so launch scored runs as:
+#   run.py <fixture>/alert.json --tenant playground --run-id <slug> --no-learn
+python3 defender/evals/held_out.py --tenant playground
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor

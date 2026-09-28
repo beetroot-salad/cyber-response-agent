@@ -355,7 +355,7 @@ def sibling_union(
             notes["runs_base_unreadable"] = listing.reason
             return siblings, notes
         if listing.absent:
-            # The configured runs base need not exist (e.g. a typo); nobody looked.
+            # The runs base need not exist (a tenant with no run yet, or a typo); nobody looked.
             notes["runs_base_missing"] = True
             return siblings, notes
         for run_id in listing.dirs():

@@ -2,24 +2,27 @@
 """Primary-metric harness: score defender held-out runs against ground truth.
 
 Walks the FIXTURE set (``defender/fixtures/held-out/``), locates each fixture's run
-under the runs dir (``$DEFENDER_RUNS_BASE``, or the ``runs_dir`` argument) by run-id
+under the runs dir (``--tenant``'s ``<T>/runs``, or the ``runs_dir`` argument) by run-id
 convention, and reports defender disposition correctness.
 
 Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
 carries no labels and no pointer back to its fixture.
 
-Launch the runs this scores with (see ``index_runs``)::
+Every run names its tenant, and there is no default (#1078): create one once with
+``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
+(see ``index_runs``)::
 
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
-        --run-id <slug> --no-learn
+        --tenant playground --run-id <slug> --no-learn
 
 ``--no-learn`` keeps a scored run out of the learning corpora.
 
 A run without a parseable ``report.md`` (missing, bad frontmatter, disposition outside
 the closed enum, or crashed) counts as **wrong**, so regressions cannot hide behind crashes.
 
-Usage:
-  python3 defender/evals/held_out.py [<runs_dir>]
+Usage (exactly one of the two — never both, never neither):
+  python3 defender/evals/held_out.py --tenant playground
+  python3 defender/evals/held_out.py <runs_dir>
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ from defender._yaml import safe_load
 from defender._model import model
 from defender._report import read_report
 from defender._run_paths import RunPaths
-from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR, resolve_runs_base
+from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
@@ -190,15 +193,33 @@ def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
 
 
 def main(argv: list[str]) -> int:
+    """#1078 D4/C27/N9: exactly one of a positional runs dir or `--tenant` is required — never
+    both, never neither — and the two branches are strictly separate. `--tenant` resolves
+    `runs_base_for(T)` (grammar, then `require_tenant`, each refusal surfaced verbatim); the
+    positional branch never touches `DEFENDER_DATA_ROOT` at all (§7 J50) — it scores exactly
+    the directory it is given. `--help` resolves neither."""
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    default = str(resolve_runs_base())
-    p.add_argument("runs_dir", nargs="?", default=default,
-                   help=f"directory of run dirs (default: {default})")
+    p.add_argument("runs_dir", nargs="?", default=None,
+                   help="directory of run dirs (mutually exclusive with --tenant)")
+    p.add_argument("--tenant", default=None,
+                   help="score runs_base_for(tenant) instead of a positional directory")
     p.add_argument("--fixtures-dir", type=Path, default=FIXTURES_DIR,
                    help=f"held-out fixtures dir (default: {FIXTURES_DIR})")
     ns = p.parse_args(argv)
-    runs_dir = Path(ns.runs_dir)
+    if (ns.runs_dir is None) == (ns.tenant is None):
+        p.error("exactly one of a positional runs dir or --tenant is required")
+    if ns.tenant is not None:
+        from defender import _tenant
+
+        try:
+            tenant_id = _tenant.request_tenant(ns.tenant)
+        except _tenant.TenantRefused as refused:
+            print(f"[held_out] {refused}", file=sys.stderr)
+            return 2
+        runs_dir = _tenant.runs_base_for(tenant_id)
+    else:
+        runs_dir = Path(ns.runs_dir)
     if not runs_dir.is_dir():
         print(f"runs dir does not exist: {runs_dir}", file=sys.stderr)
         return 2

@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import threading
 import time
@@ -622,14 +623,50 @@ def branchable_investigation() -> str:
 SOURCE_TENANT = "playground"
 
 
-def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Path, Path]:
+def current_tenant_paths() -> Any:
+    """#1078: the ONE tenant O10 permits in this test's `DEFENDER_DATA_ROOT` (whichever
+    `runs_base()`, `d9_tenant` or the like already created there), as a `_tenant.TenantPaths` —
+    for callers (`episode_dir_for`, `prepare_episode`) that need the tenant rather than its
+    runs base alone."""
+    from defender import _tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    existing = sorted(p.name for p in root.iterdir()
+                      if (p / "tenant.json").is_file()) if root.is_dir() else []
+    tenant_id = existing[0] if existing else SOURCE_TENANT
+    return _tenant.TenantPaths(root, tenant_id)
+
+
+def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
+              tenant_id: str | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
+    the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
+    tenant created (and its runs-base record minted) on first use, so `tenant_of_run_dir` and
+    the launcher's own derivation see an ordinary, well-formed tenant location.
+
+    O10 permits only ONE tenant per data root, so when `tenant_id` is not given this reuses
+    whichever tenant already exists there (e.g. one a `d9_tenant` fixture already created)
+    rather than colliding with it, and falls back to `SOURCE_TENANT` for a still-empty root.
 
     The source carries the two artifacts a sibling seeds from — `alert.json` and
     `investigation.md` — because both are model-writable (the run dir is a prior box's rw bind)
     and the containment demands drive exactly those reads.
     """
-    base = tmp_path / "defender-runs"
+    from defender import _tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    if tenant_id is None:
+        existing = sorted(p.name for p in root.iterdir()
+                          if (p / "tenant.json").is_file()) if root.is_dir() else []
+        tenant_id = existing[0] if existing else SOURCE_TENANT
+    if not (root / tenant_id / "tenant.json").is_file():
+        _tenant.create_tenant(root, tenant_id)
+    base = _tenant.runs_base_for(tenant_id)
+    base.mkdir(parents=True, exist_ok=True)
+    if not (base / "_tenant.json").is_file():
+        _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
@@ -648,10 +685,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Pa
     # any production path could have produced — and the containment walks read exactly this file
     # to tell an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
-        json.dumps(provenance_record(tenant_id=SOURCE_TENANT)), encoding="utf-8")
-    # ...and the runs base's own tenant record, which every ordinary run's base holds (run
-    # start creates it) and which the launcher reads the source's tenant from (#1106).
-    mod("_tenant").ensure_tenant(base, tenant_id=SOURCE_TENANT)
+        json.dumps(provenance_record(tenant_id=tenant_id)), encoding="utf-8")
     seed_source_session(base, src)
     return base, src
 
@@ -913,9 +947,17 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     Returns `(runs_base, source_run_dir, episodes_root)`. The episodes root is a sibling of the
     runs base here only because `tmp_path` is where a test may write; what the demands assert is
     that it is READ FROM CONFIGURATION and is neither inside the runs base nor inside the
-    checkout. Both roots are steered with `monkeypatch.setenv` because `resolve_runs_base` is
-    already an environment-read; nothing here patches a module attribute.
+    checkout.
+
+    #1078: `runs_base()`'s base IS the source's real tenant runs base now (the launcher's own
+    derivation needs it to be). Pointed at its OWN fresh data root under `tmp_path` — isolated
+    from whatever tenant an ambient fixture (`d9_tenant`) may already have created — so O10's
+    one-tenant-per-root rule never collides with it, and this base is trivially distinct from
+    `runs_base_for` of any other tenant. The retired `DEFENDER_RUNS_BASE` knob is still set
+    here, to `base` itself — today's "stale configured value" a child inherits unchanged
+    (J46) — never one the launcher composes.
     """
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
     base, src = runs_base(tmp_path)
     root = tmp_path / "episodes-root"
     monkeypatch.setenv(RUNS_BASE_ENV, str(base))

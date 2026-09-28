@@ -69,7 +69,6 @@ from defender.learning.branch.ledger import (
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
-from defender.run_common import resolve_runs_base
 from defender.runtime.branch._family import (
     BASE_ROLE,
     episode_token_for,
@@ -582,7 +581,9 @@ def world_label_names_directory(episode_id: str, label: str) -> bool:
     return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
 
 
-def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
+def _check_world_labels(
+    episode_id: str, worlds: list[dict[str, Any]], *, runs_base: Path | None,
+) -> None:
     """Refuse a world label that cannot be used as a name, before any path is built from it.
 
     - Reserved labels (`base`, `family`, `family_<n>`): re-checked here because `grade_episode`
@@ -606,10 +607,9 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
                 f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
                 "per-world path this pass reads and writes, so a label off that grammar reads "
                 "and writes outside the world it names")
-    try:
-        base = resolve_runs_base()
-    except Exception:  # noqa: BLE001 — an unconfigured runs base means nothing to collide with
+    if runs_base is None:
         return
+    base = Path(runs_base)
     for world in worlds:
         label = world.get("world_id")
         # Wider than `is_dir()`: anything at the name (a file, a link, a broken link) is
@@ -629,10 +629,6 @@ def mapping_key(mapping: dict[str, Any]) -> str:
     Shared by served ledger rows and the manifest's discriminator envelope, whose keys must
     agree for the drift check to match a recorded key at all."""
     params = mapping.get("params")
-    # Keys stringified first: `request_key` sorts keys, and mixed `int`/`str` keys (possible in
-    # the model-authored envelope YAML) raise `TypeError`. Ledger rows are already string-keyed.
-    if isinstance(params, dict):
-        params = {str(k): v for k, v in params.items()}
     return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
                        params if isinstance(params, dict) else {})
 
@@ -1240,6 +1236,7 @@ def grade_family(
     episode_dir: Path, *, manifest: dict[str, Any] | None = None,
     review: dict[str, Any] | None = None, review_reader: Any = None,
     samples: dict[str, Any] | None = None, bound: Bound | None = None,
+    runs_base: Path | None = None,
 ) -> FamilyGrade:
     """The mechanical pass: per-world facts and a bucket per non-control world, plus the
     family's `verdict_word`. Self-contained over `episode_dir`, order-independent across worlds.
@@ -1253,18 +1250,20 @@ def grade_family(
     episode_dir = Path(episode_dir)
     with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
         return _grade_family(bound, episode_dir, manifest=manifest, review=review,
-                             review_reader=review_reader, samples=samples)
+                             review_reader=review_reader, samples=samples,
+                             runs_base=runs_base)
 
 
 def _grade_family(
     bound: Bound, episode_dir: Path, *, manifest: dict[str, Any] | None,
     review: dict[str, Any] | None, review_reader: Any, samples: dict[str, Any] | None,
+    runs_base: Path | None = None,
 ) -> FamilyGrade:
     doc = manifest if manifest is not None else read_manifest(bound)
     holding_system = _holding_system(doc)
     worlds = _non_control_worlds(doc)
     episode_id = episode_id_of(doc)
-    _check_world_labels(episode_id, worlds)
+    _check_world_labels(episode_id, worlds, runs_base=runs_base)
     episode_token = episode_token_for(episode_id)
     review_doc = review if review is not None else (
         read_review_record(bound, reader=review_reader) or {})

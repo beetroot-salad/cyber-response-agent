@@ -58,6 +58,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _tenant_paths():
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
+
+
 def _timing():
     return T.mod("learning.branch.timing")
 
@@ -142,7 +147,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, rows=(), **seams) -> Launch:
     base, src = T.runs_base(tmp_path)
     for row in rows:
         T.capture_call(src, **row)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:
@@ -166,7 +171,7 @@ def _abort(tmp_path, raises: type[BaseException], **seams) -> tuple[Path, str, s
     before = now_iso()
     with pytest.raises(raises):
         _launch(tmp_path, **seams)
-    return _cli().episode_dir_for(T.EPISODE_ID), before, now_iso()
+    return _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), before, now_iso()
 
 
 def _rejecting_seams() -> dict:
@@ -578,7 +583,7 @@ def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path)
     is not one `parse_iso_utc` accepts or lies outside the launch, when two steps' intervals
     overlap, or when the rows are not on disk until the launcher exits.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     sibling = _WatchingSibling(episode_dir)
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     seen_by_judge: list[list[str]] = []
@@ -618,7 +623,7 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
     The one scenario in this file that spends real wall time (about a second), because it is
     the only way a whole-second clock can tell the two apart.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     sibling = _WatchingSibling(episode_dir, hold=1.1)
     launch = _launch(tmp_path, spawn=sibling)
     assert launch.rc == 0, "the control failed: the accepted episode did not launch cleanly"
@@ -688,14 +693,14 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     cli = _cli()
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = _Interrupting(cli.episode_dir_for(T.EPISODE_ID))
+    questioner = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
     ep, _before, _after = _abort(tmp_path, cli.LauncherRefused, questioner=questioner)
     assert questioner.calls > 0, "the control failed: the questioner seam was never reached"
     assert questioner.seen == [[]], f"the questioner saw {questioner.seen} before it ran"
     assert _raw_rows(ep) == [], "a step that raised was recorded"
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-review"))
-    comparator = _Interrupting(cli.episode_dir_for(T.EPISODE_ID))
+    comparator = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
     seams = _rejecting_seams()
     seams["invoke"] = comparator
     ep, before, after = _abort(tmp_path, cli.LauncherRefused, **seams)
@@ -706,7 +711,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-runs"))
-    family = _Interrupting(cli.episode_dir_for(T.EPISODE_ID))
+    family = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
     ep, before, after = _abort(tmp_path, cli.LauncherRefused, spawn=family)
     assert family.calls > 0, "the control failed: the process seam was never reached"
     assert all(seen == ["questioner", "staging", "review"] for seen in family.seen), (
@@ -718,7 +723,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-verify"))
     outside = tmp_path / "outside-verify.md"
     outside.write_text("untouched\n", encoding="utf-8")
-    planting = _PlantingSibling(cli.episode_dir_for(T.EPISODE_ID), outside=outside)
+    planting = _PlantingSibling(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), outside=outside)
     ep, before, after = _abort(tmp_path, cli.LauncherRefused, spawn=planting)
     assert planting.launches, "the control failed: no sibling was spawned"
     assert outside.read_text(encoding="utf-8") == "untouched\n", (
@@ -728,7 +733,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-judge"))
-    judge = _Interrupting(cli.episode_dir_for(T.EPISODE_ID))
+    judge = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, judge=judge)
     assert judge.calls > 0, "the control failed: the judge seam was never reached"
     assert judge.seen == [["questioner", "staging", "review", "runs", "verify"]], (
@@ -811,7 +816,7 @@ def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     with pytest.raises(_cli().LauncherRefused, match="teardown did not verify"):
         _launch(tmp_path, door=_StickyDoor(), judge=judge)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     assert judge.calls > 0, "the control failed: the judge seam was never reached"
     assert (episode_dir / "judge.yaml").exists(), "the control failed: the grade did not land"
     rows = _raw_rows(episode_dir)
@@ -832,7 +837,7 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     Six refusals, one per step, each named on stderr; the reader refuses the squatted name
     rather than answering no entries for an episode that ran every step.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     episode_dir.mkdir(parents=True)
     EpisodePaths(episode_dir).timing.mkdir()
 

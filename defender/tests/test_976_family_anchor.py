@@ -52,6 +52,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _tenant_paths():
+    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    return T.current_tenant_paths()
+
+
 #: A commit no fixture, no message and no argv could carry by accident — C13's sweep needs a
 #: value whose absence from every launch payload is a fact about the launcher, not about luck.
 ANCHOR = "c0ffee976anchor"
@@ -100,7 +105,7 @@ def _prepare(tmp_path, *, live_tree=None, siblings_at: str | None = "deadbee",
     `incomplete` for a reason this suite is not about.
     """
     _base, src = T.runs_base(tmp_path)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID)
+    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     return Launch(
         src=src, episode_dir=episode_dir,
         spawn=J.FakeSibling(episode_dir, commit=siblings_at) if spawn is None else spawn,

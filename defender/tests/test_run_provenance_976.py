@@ -16,10 +16,21 @@ from pathlib import Path
 
 import pytest
 
-from defender import _git, _provenance  # type: ignore[import-not-found]
+from defender import _git, _provenance, _tenant  # type: ignore[import-not-found]
 from defender._provenance import RunProvenance  # type: ignore[import-not-found]
 from defender._run_paths import PROVENANCE, RunPaths  # type: ignore[import-not-found]
 from defender.tests._repo import seed_repo  # type: ignore[import-not-found]
+
+TENANT_ID = "t976"
+
+
+def _tenant_runs_base(tmp_path, monkeypatch):
+    """A fresh tenant's runs base — every run names its tenant, and there is no default
+    (#1078); this is the test's stand-in for the old, directly-controllable runs base."""
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
+    _tenant.create_tenant(data_root, TENANT_ID)
+    return _tenant.runs_base_for(TENANT_ID)
 
 
 #: The seeded file's path, spelled once: every dirt arm below edits, removes or renames it, and
@@ -180,13 +191,11 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     `run_common.materialize_run`, which names that gap where a reader will meet it.)"""
     from defender import run_common
 
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    _tenant_runs_base(tmp_path, monkeypatch)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run(alert, "20260101t000000z-a1").run_dir
+    run_dir = run_common.materialize_run(alert, "20260101t000000z-a1", tenant_id=TENANT_ID).run_dir
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -511,21 +520,20 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     materialisation over the wedged directory rather than `_stamp` alone.)"""
     from defender import run_common
 
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    runs = _tenant_runs_base(tmp_path, monkeypatch)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
     # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
     run_id = "20260101t000000z-wedge"
-    (runs / run_id).mkdir()
+    (runs / run_id).mkdir(parents=True)
     (runs / run_id / PROVENANCE).mkdir()
 
     # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
     # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
     # run continue unstamped.
-    assert run_common.materialize_run(alert, run_id).run_dir == runs / run_id
+    assert run_common.materialize_run(
+        alert, run_id, tenant_id=TENANT_ID).run_dir == runs / run_id
     assert "could not stamp" in capsys.readouterr().err
     assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
 
@@ -538,12 +546,11 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     sibling's."""
     from defender import run_common
 
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    runs = _tenant_runs_base(tmp_path, monkeypatch)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run(alert, "20260101t000000z-solo").run_dir
+    run_dir = run_common.materialize_run(
+        alert, "20260101t000000z-solo", tenant_id=TENANT_ID).run_dir
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -552,7 +559,8 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     with pytest.raises(TypeError):
-        run_common.materialize_run(alert, "20260101t000000z-handed", provenance=handed)
+        run_common.materialize_run(
+            alert, "20260101t000000z-handed", tenant_id=TENANT_ID, provenance=handed)
     assert not (runs / "20260101t000000z-handed").exists()
 
 

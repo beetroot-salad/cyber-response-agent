@@ -2,7 +2,7 @@
 
 ## Topology
 
-- Three dispatches with single-writer outputs. The mechanical leaf runs first because it may repair the suite; after it completes, the two readers may run in parallel. Reader findings route through §7, never straight into the diff.
+- Three dispatches with single-writer outputs. The mechanical leaf runs first because it may repair the suite (the phase-E author ran the same tools before returning, so its repairs should be rare — record each in the frontier, since a pattern of them is a finding on phase E); after it completes, the two readers may run in parallel. Reader findings route through §7, never straight into the diff.
 - **Mechanical-gate leaf** (Sonnet, high effort — the toolchain computes the findings; Opus here re-buys what the tools already know, the same economy as phase D's gate leaf): inputs = the suite, the spec_graph, the full frontier chain. Output: `90-mechanical.md`, including the conservation questions for the blind reader.
 - **Blind conservation reader** (Sonnet, high effort — the isolation is the instrument, not the model): inputs = the tests and the generated questions **only** — never the intent doc, and the dispatch prompt must not paraphrase it; the isolation is the instrument. Output: `91-blind.md`.
 - **Cold reconciler** (Opus, xhigh effort, fresh — never the orchestrator, never the phase-E author): inputs = the full frontier chain, the artifact, the working diff. Output: `92-reconciliation.md`.
@@ -23,6 +23,8 @@ spec-graph calls <suite-dir>                    # AST: every test reaches the ta
 spec-graph nullstub <suite-dir> --python <interp>   # null-stub discrimination, classified per test
 spec-graph frontiers <frontiers-dir>            # frontmatter conservation over the whole chain
 ```
+
+Run the suite only through these commands or by its own files — never the project's full suite, and never a background run polled from a sleep loop (author.md, "Run only this suite's files").
 
 Then work the residue the tools name and the checks only you can run:
 

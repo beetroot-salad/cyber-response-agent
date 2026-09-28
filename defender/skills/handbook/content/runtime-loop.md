@@ -1,9 +1,14 @@
 # Runtime loop
 
-The online investigation. `python3 defender/run.py <alert.json>` runs the
+The online investigation. `python3 defender/run.py <alert.json> --tenant <tenant>` runs the
 in-process PydanticAI driver against `defender/SKILL.md`; the agent works through
 the loop in a run dir and exits. `run.py` handles everything after (projection,
-transcript, learning loop).
+transcript, learning loop). Every run names its tenant, and there is no default; run
+`python3 defender/scripts/tenant.py setup <tenant>` once, from the main checkout, with
+`DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as the
+same user that runs defender; a destination already occupied makes setup refuse, naming it in
+the message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may
+need setup run as root — that adoption case only.)
 
 `defender/SKILL.md` is the authoritative spec. This file summarizes the
 shape; read the SKILL for the exact discipline.
