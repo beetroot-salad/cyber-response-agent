@@ -146,15 +146,10 @@ def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
 def test_a_sub_collection_member_for_a_kind_nothing_writes(run_dir):
     """A kind with no writer still gets an accessor, for D1's stated reason: the gate's
     answer-key set and payload-cap shape key on `source_refs` and `ticket_reads`."""
-    writers = [
-        p for p in DEFENDER.rglob("*.py")
-        if not p.relative_to(DEFENDER).as_posix().startswith("tests/")
-        and "source_refs.yaml" in p.read_text(encoding="utf-8", errors="replace")
-        and "write" in p.read_text(encoding="utf-8", errors="replace")]
     owner = S.RunPaths(run_dir)
     assert owner.source_refs.is_relative_to(run_dir), (
-        f"the accessor exists whether or not anything writes the kind (writer candidates: "
-        f"{[p.name for p in writers]}; claim R9 says there is no writer in the repo)")
+        "the accessor exists whether or not anything writes the kind (claim R9 says there is "
+        "no writer in the repo)")
     assert owner.ticket_read(0).is_relative_to(run_dir)
 
 
@@ -653,7 +648,7 @@ def test_a_public_name_function_that_other_modules_import_today(run_dir):
     stale = []
     for py in DEFENDER.rglob("*.py"):
         rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith("tests/"):
+        if rel.startswith(("tests/", ".venv/")):
             continue
         text = py.read_text(encoding="utf-8", errors="replace")
         for gone in ("review_trace_path", "review_record_path"):

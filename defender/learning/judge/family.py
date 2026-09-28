@@ -629,10 +629,6 @@ def mapping_key(mapping: dict[str, Any]) -> str:
     Shared by served ledger rows and the manifest's discriminator envelope, whose keys must
     agree for the drift check to match a recorded key at all."""
     params = mapping.get("params")
-    # Keys stringified first: `request_key` sorts keys, and mixed `int`/`str` keys (possible in
-    # the model-authored envelope YAML) raise `TypeError`. Ledger rows are already string-keyed.
-    if isinstance(params, dict):
-        params = {str(k): v for k, v in params.items()}
     return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
                        params if isinstance(params, dict) else {})
 

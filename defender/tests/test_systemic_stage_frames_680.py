@@ -48,7 +48,7 @@ from defender.tests._frames680 import (
     _lead_author_prompt,
     _main_bash,
     _pitfalls_prompt,
-    _python_sources,
+    _parsed_sources,
     _shape,
     assert_producer_shape,
     _shared_wrap,
@@ -280,8 +280,7 @@ def test_d1_shared_wrap_seam():
 
     definitions = {"wrap": [], "wrap_fresh": []}
     imports = []
-    for path in _python_sources():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in _parsed_sources():
         for node in ast.walk(tree):
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -318,8 +317,7 @@ def test_d2_legacy_frame_helpers_are_unreachable():
     """No production prompt builder can define, import, alias, attribute-reference, or call `_section` or `data_section` after all callers move to `wrap`."""
     offenders: list[str] = []
     retired = {"_section", "data_section"}
-    for path in _python_sources():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in _parsed_sources():
         for node in ast.walk(tree):
             names = []
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

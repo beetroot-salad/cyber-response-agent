@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from defender._frontmatter import strip_frontmatter
@@ -15,6 +15,10 @@ _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
 
 _SHIM_TIMEOUT_S = 20
+
+#: Runs one read-only shim (`argv` under `env`) and returns its stripped stdout, or `None` when
+#: it failed or printed nothing — which drops that section, as a failed shim always has.
+ShimRunner = Callable[[list[str], dict[str, str]], "str | None"]
 
 
 def _shim(argv: list[str], env: dict[str, str]) -> str | None:
@@ -82,10 +86,10 @@ def _invlang_grammar(defender_dir: Path) -> str | None:
     )
 
 
-def _build_lessons_section(env: dict[str, str], sig: str | None) -> str | None:
-    tags = _shim(["defender-lessons", "--tags"], env)
+def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunner) -> str | None:
+    tags = shim(["defender-lessons", "--tags"], env)
     hits = (
-        _shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
+        shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
         if sig else None
     )
     lesson_lines = []
@@ -103,10 +107,12 @@ def _build_lessons_section(env: dict[str, str], sig: str | None) -> str | None:
     return None
 
 
-def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | None:
+def _build_corpus_vocab_section(
+    env: dict[str, str], sig: str | None, shim: ShimRunner,
+) -> str | None:
     if not sig:
         return None
-    vocab_out = _shim(
+    vocab_out = shim(
         ["defender-invlang", "hypothesis-vocabulary", "--signature", sig], env
     )
     if vocab_out:
@@ -120,7 +126,11 @@ def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | N
 def orientation(
     run_dir: Path, defender_dir: Path, alert_path: Path,
     *, systems: Sequence[str], lead_zero_section: str | None = None,
+    shim: ShimRunner | None = None,
 ) -> str:
+    """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
+    subprocesses; omitted, they run for real."""
+    run_shim = shim if shim is not None else _shim
     try:
         from defender import run_common
         env = run_common.run_env(defender_dir, run_dir)
@@ -160,11 +170,11 @@ def orientation(
     if grammar:
         sections.append(grammar)
 
-    lessons = _build_lessons_section(env, sig)
+    lessons = _build_lessons_section(env, sig, run_shim)
     if lessons:
         sections.append(lessons)
 
-    corpus = _build_corpus_vocab_section(env, sig)
+    corpus = _build_corpus_vocab_section(env, sig, run_shim)
     if corpus:
         sections.append(corpus)
 

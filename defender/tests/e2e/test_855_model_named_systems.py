@@ -85,10 +85,10 @@ from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, Turn, mater
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, ROW_KEYS, elastic_ok, q  # noqa: E402
-# The COMPANION guard's replay oracle, imported rather than re-written: O3 is the claim that
-# the live verdict and a replay over the recorded table are one predicate, and a second copy
-# of the oracle here could only ever agree with itself.
-from defender.tests.e2e.test_repeat_breaker_807 import INCOMPLETE_IDIOM, _replay_rejections  # noqa: E402
+# O3's replay parity (live verdict == the companion guard's oracle over the recorded table) is
+# `test_1017_query_row_surface.py::test_the_replay_through_the_surface_agrees_with_the_live_run`'s,
+# which checks it through the typed surface and over the raw rows alike.
+from defender.tests.e2e.test_repeat_breaker_807 import INCOMPLETE_IDIOM  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -781,41 +781,6 @@ def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     assert rows[0]["system"], "item 1's row names no system, so the claim below is vacuous"
     assert rows[0]["system_key"] == "", \
         "item 1 dispatches a system of record; nothing was coarsened, so nothing is keyed"
-
-
-def test_the_replay_of_the_recorded_table_agrees_with_the_live_run(tmp_path):
-    """O3 — the guard recovers its identity from the ROW ALONE, so #807's replay oracle over
-    the table a run left must reach the run's own verdict. The identity that separates two
-    ghosts is stored, not derived from the other columns (the string it fingerprints is by
-    design absent), so a column the oracle does not read is a column the offline replay is
-    blind to — and the replay is how a recorded run's dead ends are audited at all.
-
-    Driven over BOTH tables in one test on purpose. An oracle that had simply stopped counting
-    above-guard rows agrees with the live run on the distinct-ghost table and disagrees with it
-    on the repeated-ghost one, so the "no trip" arm alone certifies nothing."""
-    rec = VerbRecorder()
-    distinct = _run(tmp_path / "distinct", run_id="d871-replay-run-on", verbs=elastic_ok(rec),
-                    turns=[
-                        _bad_args("ghostone"), _bad_args("ghosttwo"), _bad_args("ghostthree"),
-                        q("elastic", "query", PARAMS), DONE,
-                    ])
-    same = _run(tmp_path / "same", run_id="d871-replay-trip", turns=[
-        _bad_args("ghostone"), _bad_args("ghostone"), _bad_args("ghostone"), DONE,
-    ])
-
-    assert len(rec.calls) == 1, \
-        "the corrected call never executed, so the parity below is over the wrong table"
-    assert not _dead_end(distinct), \
-        "the live run did not run on, so the parity below is over the wrong table"
-    assert _replay_rejections(distinct.rows) == [], \
-        "the replay refuses a lead the live run let run on"
-
-    assert _dead_end(same), "the live run did not trip, so the parity below is over the wrong table"
-    assert _trip_row_written(same), \
-        "the live run ended on something other than the guard, so the parity below is over " \
-        "the wrong table"
-    assert _replay_rejections(same.rows) == [(LEAD, 2, "repeat")], \
-        "the replay misses the trip the live run took, on the table that run wrote"
 
 
 def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):

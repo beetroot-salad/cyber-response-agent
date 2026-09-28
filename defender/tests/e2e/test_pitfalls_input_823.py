@@ -230,22 +230,38 @@ def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT co
     return Turn(tool_calls=[("bash", {"command": f"cat {payload} | {SQL} '{sql}'"})])
 
 
+@pytest.fixture(scope="module")
+def failing_reducer_run(tmp_path_factory, checkout_roster):
+    """ONE run of the O1 scenario — a query, then the taught reduce over the payload it wrote,
+    which the shim refuses — shared by the demands below that only READ its tables, leads and
+    box. A scenario with another turn sequence or its own box drives its own.
+
+    Module-scoped, so it is built before the function-scoped conftest fixtures: it holds the
+    checkout's capabilities for the drive itself, as `_held_capabilities` does for a test."""
+    from defender.skills.invlang.validate import hold_capabilities, release_capabilities
+
+    root = tmp_path_factory.mktemp("failing-reducer")
+    run_dir = materialize(root, GOLDEN_AB3)
+    hold_capabilities(checkout_roster)
+    try:
+        return _run(root, run_dir=run_dir, run_id="d823-shim", turns=[
+            q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
+        ])
+    finally:
+        release_capabilities()
+
+
 # O1 — an agent-fixable gather failure produces exactly one curator-readable record, WHATEVER
 #      tool it came through. Today `_tool_bash` (`runtime/tools.py:156-181`) writes nothing, so
 #      every shim failure is invisible to the whole offline loop.
 
 
-def test_failing_reducer_shim_writes_one_row(tmp_path):
+def test_failing_reducer_shim_writes_one_row(failing_reducer_run):
     """failing_reducer_shim_writes_one_row — a `defender-sql` reduce that exits non-zero
     appends ONE queries-table row carrying the sentinel identity, the verb `bash`, the argv
     that failed, the shim's own exit code, and the `agent-fixable` class the curator's filter
     (`lead_extraction.py:98`) gates on."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-shim", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        _reduce(run_dir),
-        DONE,
-    ])
+    r = failing_reducer_run
     assert len(r.own_rows) == 2, "the query row plus exactly one shim row"
     shim = r.own_rows[1]
     assert shim["query_id"] == BASH_SHIM_QUERY_ID
@@ -258,7 +274,7 @@ def test_failing_reducer_shim_writes_one_row(tmp_path):
     assert "unnest" in shim["payload_digest"], "the shim's own diagnosis is the lesson"
 
 
-def test_shim_row_keeps_the_frozen_twelve_key_contract(tmp_path):
+def test_shim_row_keeps_the_frozen_twelve_key_contract(failing_reducer_run):
     """shim_row_keeps_the_frozen_twelve_key_contract — the shim row is an ordinary queries row,
     not a variant with a key of its own. Every existing reader of this table
     (`lead_repository`, the visualizer, the breaker's replay) walks the same frozen keys, and
@@ -269,10 +285,7 @@ def test_shim_row_keeps_the_frozen_twelve_key_contract(tmp_path):
     `payload_sha256` and #871 added `system_key` — columns every writer fills, which is the
     opposite of the per-writer key this test refuses. The assertion imports `ROW_KEYS` rather
     than restating it, so it tracks the contract instead of the number."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-keys", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
-    ])
+    r = failing_reducer_run
     assert set(r.rows[1]) == ROW_KEYS
     # #871 by VALUE, not just by name: this is the only place the shim lane's own answer for
     # the fourteenth column is observed on a row this lane actually wrote. Its `system` is read
@@ -421,14 +434,11 @@ def test_main_lane_shim_failure_writes_no_row(tmp_path):
 #      in #821/#828. The system comes from the PAYLOAD the reducer reads instead.
 
 
-def test_shim_row_takes_the_system_of_the_payload_it_reduces(tmp_path):
+def test_shim_row_takes_the_system_of_the_payload_it_reduces(failing_reducer_run):
     """shim_row_takes_the_system_of_the_payload_it_reduces — the reduce reads
     `gather_raw/{lead}/{seq}.json`; that row's `system` is the shim row's system. The argv says
     only `defender-sql`, so any argv-derived attribution names a system that does not exist."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-system", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
-    ])
+    r = failing_reducer_run
     assert r.rows[0]["system"] == "elastic", "the query row's system moved"
     assert r.rows[1]["system"] == "elastic"
     assert record_query.derive_system([SQL, "SELECT 1"]) == "sql", (
@@ -437,15 +447,12 @@ def test_shim_row_takes_the_system_of_the_payload_it_reduces(tmp_path):
     )
 
 
-def test_no_record_names_a_system_absent_from_the_run(tmp_path):
+def test_no_record_names_a_system_absent_from_the_run(failing_reducer_run):
     """no_record_names_a_system_absent_from_the_run — the negative universal, over the whole
     table: every row's system is one this run actually dispatched. 'sql' and 'jq' are the
     concrete refutations; the assertion is the general one, so a new shim cannot reintroduce
     the class."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-nophantom", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
-    ])
+    r = failing_reducer_run
     assert r.shim_rows, "no shim row was written, so the universal below is vacuous"
     dispatched = {row["system"] for row in r.rows if row["query_id"] != BASH_SHIM_QUERY_ID}
     for row in r.rows:
@@ -478,7 +485,7 @@ def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     assert shim_pitfalls[0]["system"] == "", "a system was invented for it"
 
 
-def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
+def test_shim_row_reaches_the_curator_and_nothing_else(failing_reducer_run):
     """shim_row_reaches_the_curator_and_nothing_else — O1's oracle, end to end through the real
     join, the real extraction and the three real collectors: the shim row lands in the pitfalls
     residue, mints no `_draft/` template, and is not handed to the lead-author. The record
@@ -488,10 +495,7 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     Since #870 M5′ the record's `system` is `""` however the reduce was attributed: the
     payload it opened selects nothing about whose mistake the SQL was, and the row is routed
     by its sentinel `query_id` to the reducer surface."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-route", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
-    ])
+    r = failing_reducer_run
     pitfalls = collect_general_failures(r.own_leads(), r.run_dir)
     assert len(pitfalls) == 1, "the shim failure did not reach the pitfalls curator"
     rec = pitfalls[0]

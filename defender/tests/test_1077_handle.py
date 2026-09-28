@@ -227,7 +227,7 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
     hits = []
     for py in sorted(DEFENDER.rglob("*.py")):
         rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith("tests/") or rel == f"{S.HANDLE_MODULE}.py":
+        if rel.startswith(("tests/", ".venv/")) or rel == f"{S.HANDLE_MODULE}.py":
             continue
         try:
             _text, tree = astlib.read_and_parse(py, rel)

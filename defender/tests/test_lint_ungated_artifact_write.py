@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from defender.tests._by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_ungated_artifact_write")
@@ -258,6 +260,7 @@ def test_the_ratchet_and_the_blind_scope(tmp_path):
     assert _GATE.main([], scope=tmp_path / "nope", baseline_path=baseline) == 2
 
 
+@pytest.mark.gate
 def test_the_real_tree_is_clean(tmp_path):
     """The shipped baseline is EMPTY and the real scope scans clean — the two together are
     what make an entry appearing in that file a regression someone chose, rather than debt
