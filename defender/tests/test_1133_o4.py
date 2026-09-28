@@ -22,9 +22,10 @@ Every plant is a real filesystem entry.
   `for_world(...).path` makes no minting check (a reader's use) while `declare()` does.
 - O4.5 the priming claim is the core's exclusive create (mode 0644, was 0600); an alias at the
   claim is the same `LedgerError` an occupied claim raises; the claim's `delete()` in the
-  launcher's `finally` logs and suppresses its own refusal, so a planted directory never masks
-  the primer's exception (today `unlink` raises `IsADirectoryError` over it) and a planted link
-  is left in place (today `unlink` removes it).
+  launcher's `finally` logs and suppresses EVERY refusal it can raise — a directory, a link, a
+  hard link or a FIFO at the claim, `served/` swapped for a plain file or for a link — so none
+  masks the primer's exception (today `unlink` raises `IsADirectoryError` over a directory) and
+  each plant is left in place (today `unlink` removes a link).
 - O4.6 the judge's draw removal: a link at a malformed draw's name is refused and left in place
   (today `unlink` removes it); the refusal is logged and the loop continues; a later disk read
   counts that name unreadable. D3's `draws_on_disk_report` counts every `.yaml` entry of any kind.
@@ -518,31 +519,78 @@ class PrimerFailed(Exception):
     """The primer's own failure, which the claim's release must never mask."""
 
 
-def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_exception(
-        tmp_path, roots, caplog):
-    """The claim's `delete()` runs in `prepare_episode`'s `finally`. Here the primer swaps the
-    claim for a DIRECTORY and then fails: the delete is refused (a non-plain entry), that
-    refusal is logged and suppressed, and the primer's own exception is what propagates. The
-    directory is left in place.
-
-    Today `claim.unlink(missing_ok=True)` raises `IsADirectoryError` from the `finally`, which
-    replaces the primer's exception."""
-    cli, src, tenant, ep = _prime_setup(tmp_path)
-
-    def swap_then_fail(claim: Path) -> None:
-        claim.unlink()
+def _swap_claim(kind: str, claim: Path, host: Path) -> Any:
+    """Replace the held claim with a `kind` plant (every one a real entry), and answer a check
+    that the plant is still there as planted. `served-file` and `served-link` swap the claim's
+    holding folder itself: a plain file there (the walk's ENOTDIR), or a link to a host folder
+    that holds a `.priming` of its own (the walk's ELOOP; a release that followed it would
+    delete the host's file)."""
+    served = claim.parent
+    claim.unlink()
+    if kind == "directory":
         claim.mkdir()
         (claim / "keep").write_text("kept\n", encoding="utf-8")
+        return lambda: claim.is_dir() and (claim / "keep").read_text(encoding="utf-8") == "kept\n"
+    if kind == "symlink":
+        target = host / "claim-target"
+        target.write_bytes(S.HOST_BYTES)
+        claim.symlink_to(target)
+        return lambda: (claim.is_symlink() and os.readlink(claim) == str(target)
+                        and target.read_bytes() == S.HOST_BYTES)
+    if kind == "hardlink":
+        other = host / "other-name-of-the-claim"
+        other.write_bytes(S.HOST_BYTES)
+        os.link(other, claim)
+        return lambda: os.lstat(claim).st_nlink == 2 and other.read_bytes() == S.HOST_BYTES
+    if kind == "fifo":
+        os.mkfifo(claim)
+        return lambda: stat.S_ISFIFO(os.lstat(claim).st_mode)
+    served.rmdir()
+    if kind == "served-file":
+        served.write_bytes(S.HOST_BYTES)
+        return lambda: stat.S_ISREG(os.lstat(served).st_mode) and served.read_bytes() == (
+            S.HOST_BYTES)
+    if kind == "served-link":
+        elsewhere = host / "served-elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / claim.name).write_bytes(S.HOST_BYTES)
+        served.symlink_to(elsewhere, target_is_directory=True)
+        return lambda: (served.is_symlink() and os.readlink(served) == str(elsewhere)
+                        and (elsewhere / claim.name).read_bytes() == S.HOST_BYTES)
+    raise AssertionError(kind)
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink", "hardlink", "fifo", "served-file",
+                                  "served-link"])
+def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_exception(
+        tmp_path, roots, caplog, kind):
+    """The claim's `delete()` runs in `prepare_episode`'s `finally`, and suppresses EVERY
+    refusal it can raise, not a chosen few errnos. Here the primer swaps the claim for a plant
+    and then fails: a directory, a FIFO or a link at the claim (the core's ELOOP), a hard link
+    (EMLINK), `served/` swapped for a plain file (the walk's ENOTDIR) or for a link to a host
+    folder (the walk's ELOOP). Each time the delete is refused, that refusal is logged and
+    suppressed, the primer's own exception is what propagates, and the plant is left exactly as
+    planted (nothing deleted through a link).
+
+    Today `claim.unlink(missing_ok=True)` raises `IsADirectoryError` over a directory, which
+    replaces the primer's exception, and removes a link.
+
+    Control on the same address: `test_o4_5_the_priming_claim_is_the_cores_exclusive_create_
+    mode_0644_released_after` (nothing swapped, the claim is released)."""
+    cli, src, tenant, ep = _prime_setup(tmp_path)
+    host = tmp_path / "host"
+    host.mkdir()
+    still_planted: dict[str, Any] = {}
+
+    def swap_then_fail(claim: Path) -> None:
+        still_planted["check"] = _swap_claim(kind, claim, host)
         raise PrimerFailed("the primer failed")
 
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed):
         cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=Primed(swap_then_fail))
-    claim = ep / "served" / ".priming"
-    assert claim.is_dir(), "the planted directory at the claim was removed"
-    assert (claim / "keep").read_text(encoding="utf-8") == "kept\n", (
-        "the planted directory at the claim was emptied")
-    assert warned(caplog, ".priming", "aliased"), "the refused release was not logged"
+    assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
+    assert warned(caplog, ".priming"), "the refused release was not logged"
 
 
 def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
