@@ -19,7 +19,7 @@ placed under `tests/e2e/` loses its docstring and its demand reports as a prose 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -148,8 +148,15 @@ def test_the_wrappers_read_reaches_todays_reader_unchanged(base, run_dir):
 
     assert got == S.io().read_guarded(S.RunPaths(run_dir).report)[0] == "# report\n", (
         "the wrapper's read did not return today's reader's own result")
-    assert "read_guarded" in recorder.ops, (
-        f"the wrapper reached {recorder.ops} — not today's guarded reader")
+    # #1111: the guarded reader is the ROOTED one — handed the record's trust root and its name
+    # relative to it, walked no-follow — not the path-based `read_guarded`, which judged only
+    # the leaf. The result is the same for a plain record, as asserted above.
+    reads = [(Path(a["root"]), PurePosixPath(a["name"]))
+             for a in recorder.arguments("rooted_read")]
+    assert reads == [(run_dir, PurePosixPath("report.md"))], (
+        f"the wrapper reached {recorder.ops} — not the rooted guarded reader")
+    assert "read_guarded" not in recorder.ops, (
+        f"the wrapper still reached the path-based reader: {recorder.ops}")
 
 
 def test_the_wrapper_adds_no_parsing_or_validation_of_its_own(base, run_dir):
@@ -441,18 +448,31 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     recorder = S.RecordingIo()
     run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base, io=recorder)
 
+    # #1111: the guarded seams are the ROOTED ones (`rooted_write` / `rooted_locked_for_rewrite`,
+    # handed the run dir and the record's name under it), never the path-based ones they replace.
     S.member(run, "documents", "report").write(S.report_text("# a report\n"))
-    assert "write_guarded" in recorder.ops, f"the document write reached {recorder.ops}"
+    writes = recorder.arguments("rooted_write")
+    assert [(Path(a["root"]), PurePosixPath(a["name"]), a["mode"]) for a in writes] == [
+        (run_dir, PurePosixPath("report.md"), "replace")], (
+        f"the document write reached {recorder.ops}")
 
-    before = len(recorder.ops)
+    before = len(recorder.invocations)
     S.member(run, "tables", "queries").append([{"q": 1}])
-    assert "write_guarded" in recorder.ops[before:], f"the table append reached {recorder.ops}"
+    appended = [S.bound_arguments(op, a, kw) for op, a, kw in recorder.invocations[before:]
+                if op == "rooted_write"]
+    assert [(PurePosixPath(a["name"]), a["mode"]) for a in appended] == [
+        (PurePosixPath("executed_queries.jsonl"), "append")], (
+        f"the table append reached {recorder.ops[before:]} — not ONE guarded append of the batch")
     assert "append_jsonl" not in recorder.ops, (
         "`_io.append_jsonl` is the unguarded pre-#771 primitive `lint_unguarded_tree_write` "
         "flags — a table append through the handle lands through the guarded append lane")
 
     S.member(run, "observability", "budget").update({"spent": 1})
-    assert "locked_for_rewrite" in recorder.ops, f"the locked state reached {recorder.ops}"
+    locked = recorder.arguments("rooted_locked_for_rewrite")
+    assert [(Path(a["root"]), PurePosixPath(a["name"])) for a in locked] == [
+        (run_dir, PurePosixPath("budget.json"))], f"the locked state reached {recorder.ops}"
+    assert not {"write_guarded", "locked_for_rewrite", "guarded_mkdir"} & set(recorder.ops), (
+        f"a writer method still reached a path-based seam: {recorder.ops}")
 
     assert S.member(run, "observability", "wire_log").logger_factory is S.mod(
         "runtime.observe").RequestLogger, "the wire log's writer is today's RequestLogger"
@@ -830,9 +850,16 @@ def test_the_write_method_creates_the_directory_the_path_accessor_no_longer_does
     assert not (run_dir / "wire_logs").exists()
     _ = trace.path
     assert not (run_dir / "wire_logs").exists(), "the path accessor created the holding directory"
-    assert "guarded_mkdir" not in recorder.ops, f"the path accessor reached {recorder.ops}"
+    assert not {"rooted_mkdir", "guarded_mkdir"} & set(recorder.ops), (
+        f"the path accessor reached {recorder.ops}")
 
     trace.append([{"role": S.ROLE}])
     assert (run_dir / "wire_logs").is_dir(), "the write method did not create its directory"
-    assert "guarded_mkdir" in recorder.ops, (
-        "the side effect did not disappear, it relocated to the method that needs it")
+    # #1111: through the rooted mkdir, on the run dir, of the record's holding folder.
+    made = [(Path(a["root"]), PurePosixPath(a["folder_name"]))
+            for a in recorder.arguments("rooted_mkdir")]
+    assert (run_dir, PurePosixPath("wire_logs")) in made, (
+        "the side effect did not disappear, it relocated to the method that needs it: "
+        f"{recorder.ops}")
+    assert "guarded_mkdir" not in recorder.ops, (
+        f"the path-based mkdir is still used: {recorder.ops}")

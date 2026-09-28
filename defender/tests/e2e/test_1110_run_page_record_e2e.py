@@ -8,7 +8,8 @@ builder builds it); where the handle's backend is observed, a pass-through recor
 through the handle's own `io=` seam and the assertion is on the CALL it captured.
 
 - O1: the page the post-run step renders is saved as the run's `runtime_html` record through
-  the run's handle — one whole-document `write_guarded(<record>, <page>, mode="replace")`, the
+  the run's handle — one whole-document `rooted_write(<run dir>, <record's name>, <page>,
+  mode="replace")` (#1111: the handle's writes walk from the record's trust root), the
   page being exactly what `render_page` generates (which itself writes nothing, M1). Also
   through `run.py main`, with the handle the real builder materialized.
 - O2/S1: with `DEFENDER_DEPLOYMENT` unset or `production`, a render changes nothing outside the
@@ -55,6 +56,7 @@ from __future__ import annotations
 
 import dataclasses
 import errno
+import inspect
 import json
 import logging
 import os
@@ -64,7 +66,7 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -123,13 +125,34 @@ class IoCall:
     args: tuple
     kwargs: dict
 
+    def bound(self) -> dict[str, Any]:
+        """The call's arguments by name, bound against the real `_io` function's signature, so
+        a positional and a keyword spelling of the same call read the same."""
+        bound = inspect.signature(getattr(_io, self.op)).bind(*self.args, **self.kwargs)
+        bound.apply_defaults()
+        return dict(bound.arguments)
+
+    @property
+    def target(self) -> Path:
+        """A rooted call's record: its trust root joined with the name relative to it."""
+        b = self.bound()
+        return Path(b["root"]) / PurePosixPath(b["name"])
+
+    @property
+    def text(self) -> Any:
+        return self.bound()["text"]
+
+    @property
+    def mode(self) -> Any:
+        return self.bound()["mode"]
+
 
 class ArgRecordingIo:
     """A pass-through recorder over the real `defender._io`, entering through the `Run`
     handle's `io=` injection seam (never `monkeypatch.setattr`). Every operation still really
-    happens; each is recorded WITH its arguments — `_spec1077.RecordingIo` keeps only the path,
-    and the page text and the write mode are the payload O1 is about. Total over `_io`, since
-    `Run.for_tenant` and the handle's own mkdir also reach through it."""
+    happens; each is recorded WITH its arguments — `_spec1077.RecordingIo`'s `calls` keep only
+    the path, and the page text and the write mode are the payload O1 is about. Total over
+    `_io`, since `Run.for_tenant` and the handle's own mkdir also reach through it."""
 
     def __init__(self) -> None:
         self.calls: list[IoCall] = []
@@ -148,7 +171,9 @@ class ArgRecordingIo:
         return call
 
     def writes_to(self, path: Path) -> list[IoCall]:
-        return [c for c in self.calls if c.op == "write_guarded" and Path(c.args[0]) == path]
+        """Every `rooted_write` of the record at `path` (#1111: the handle writes a record as
+        its trust root plus its name under it)."""
+        return [c for c in self.calls if c.op == "rooted_write" and c.target == path]
 
 
 class _RecordReplacedAfterWriteIo(ArgRecordingIo):
@@ -161,11 +186,13 @@ class _RecordReplacedAfterWriteIo(ArgRecordingIo):
         self._record = record
         self._other = other
 
-    def write_guarded(self, path: Any, text: Any, *args: Any, **kwargs: Any) -> Any:
-        self.calls.append(IoCall("write_guarded", (path, text, *args), dict(kwargs)))
-        result = _io.write_guarded(path, text, *args, **kwargs)
-        if Path(path) == self._record:
-            _io.write_guarded(path, self._other, mode="replace")
+    def rooted_write(self, *args: Any, **kwargs: Any) -> Any:
+        call = IoCall("rooted_write", args, dict(kwargs))
+        self.calls.append(call)
+        result = _io.rooted_write(*args, **kwargs)
+        if call.target == self._record:
+            b = call.bound()
+            _io.rooted_write(b["root"], b["name"], self._other, mode="replace")
         return result
 
 
@@ -281,7 +308,7 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
     """O1 (and M1). `render_page(run_dir)` GENERATES the page and writes nothing — the run
     dir's listing is unchanged by it. The post-run step `run_common.visualize(run)` then hands
     that page to the run's own handle: the `io` injected into the tenant-bound handle captures
-    exactly one `write_guarded` of the `runtime_html` record, a whole-document `replace`, whose
+    exactly one `rooted_write` of the `runtime_html` record, a whole-document `replace`, whose
     text IS the generated page (and carries this run's final turn). The write really happened:
     the record on disk holds the same text.
 
@@ -307,9 +334,9 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
         f"the handle's io saw {len(writes)} writes of {record.name}; ops: "
         f"{[c.op for c in io.calls]}")
     (write,) = writes
-    assert write.kwargs.get("mode") == "replace", (
-        f"the page record was not written as a whole-document replace: {write.kwargs!r}")
-    assert _text(write.args[1]) == page, "the handle was handed something other than the page"
+    assert write.mode == "replace", (
+        f"the page record was not written as a whole-document replace: {write.bound()!r}")
+    assert _text(write.text) == page, "the handle was handed something other than the page"
     assert record.read_text(encoding="utf-8") == page, "the record on disk is not the page"
 
 
@@ -396,8 +423,8 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
         f"the run's handle saw {len(writes)} writes of {record.name}; ops: "
         f"{sorted({c.op for c in io.calls})}")
     (write,) = writes
-    assert write.kwargs.get("mode") == "replace"
-    page = _text(write.args[1])
+    assert write.mode == "replace"
+    page = _text(write.text)
     assert MARKER in page, "the record written is not this run's page"
     assert page == _renderer().render_page(run.run_dir)
     assert record.read_text(encoding="utf-8") == page
@@ -677,7 +704,7 @@ def test_1110_m2_the_dev_copy_is_the_in_memory_page_not_the_record_read_back(
     run_common.visualize(run)
 
     (write,) = io.writes_to(record)
-    assert _text(write.args[1]) == page, "the handle was not handed this step's page"
+    assert _text(write.text) == page, "the handle was not handed this step's page"
     assert record.read_text(encoding="utf-8") == other, (
         "positive control: the other driver's replace did not land, so a read-back is invisible")
     copy = run_visualizations_dir / run_dir.name / PAGE
@@ -1083,8 +1110,8 @@ def test_1110_publish_page_saves_the_record_and_answers_what_the_copy_did(
 
     page = vr.render_page(run_dir)
     (write,) = io.writes_to(record)
-    assert write.kwargs.get("mode") == "replace", f"not a whole-document replace: {write.kwargs!r}"
-    assert _text(write.args[1]) == page, "the handle was handed something other than the page"
+    assert write.mode == "replace", f"not a whole-document replace: {write.bound()!r}"
+    assert _text(write.text) == page, "the handle was handed something other than the page"
     assert record.read_text(encoding="utf-8") == page
     assert len(_infos_naming(caplog, str(record))) == 1, (
         f"the saved record was not logged once at INFO: {[r.getMessage() for r in caplog.records]!r}")

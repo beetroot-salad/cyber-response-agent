@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -706,35 +707,54 @@ class IoFault:
     before_write: Callable[[Path], None] | None = None
 
 
+def bound_arguments(op: str, args: tuple, kwargs: dict) -> dict[str, Any]:
+    """One recorded `_io` call's arguments BY NAME, bound against the real function's own
+    signature with its defaults applied — so a positional and a keyword spelling of the same
+    call read the same, and a seam test asserts on `root` / `name` / `mode` / `text` rather than
+    on argument positions (#1111 O8)."""
+    bound = inspect.signature(getattr(io(), op)).bind(*args, **kwargs)
+    bound.apply_defaults()
+    return dict(bound.arguments)
+
+
 class RecordingIo:
     """A pass-through recorder over the real `defender._io`, entering through the owner's
     `io=` injection seam (never `monkeypatch.setattr` — `scripts/lint/lint_monkeypatch.py`).
 
     It records every operation the owner asks of it, with the path, so a `kind: seam` demand
-    can assert on the CAPTURED INBOUND CALL rather than on a canned return value.
+    can assert on the CAPTURED INBOUND CALL rather than on a canned return value. `calls` keeps
+    each call's first argument (the path, or a rooted call's trust root); `invocations` keeps
+    every argument, which is where a seam test reads a rooted call's name, mode and payload.
     """
 
     def __init__(self, fault: IoFault | None = None) -> None:
         self.fault = fault or IoFault()
         self.calls: list[tuple[str, Path]] = []
+        self.invocations: list[tuple[str, tuple, dict]] = []
         self._real = io()
 
     @property
     def ops(self) -> list[str]:
         return [name for name, _ in self.calls]
 
+    def arguments(self, op: str) -> list[dict[str, Any]]:
+        """Every recorded call of `op`, in order, its arguments bound by name."""
+        return [bound_arguments(name, a, kw) for name, a, kw in self.invocations if name == op]
+
     def _dispatch(self, name: str):
         real = getattr(self._real, name)
 
-        def call(path, *a, **kw):
+        def call(*a, **kw):
+            path = a[0] if a else next(iter(kw.values()))
             self.calls.append((name, Path(path)))
+            self.invocations.append((name, a, dict(kw)))
             prior = sum(1 for n, _ in self.calls[:-1] if n == name)
             if name in self.fault.fail_on and self.fault.raise_after <= prior:
                     raise self.fault.error or FileExistsError(
                         f"{path}: staged create collided (write_guarded O_EXCL, claim C19)")
             if name.startswith("write") and self.fault.before_write is not None:
                 self.fault.before_write(Path(path))
-            return real(path, *a, **kw)
+            return real(*a, **kw)
 
         return call
 
