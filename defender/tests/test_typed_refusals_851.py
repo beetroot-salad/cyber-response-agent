@@ -325,6 +325,8 @@ def test_f23_a_signature_carrying_a_nul_orients_instead_of_raising(tmp_path):
     than through the regex: the identical invariant breach, one line over."""
     alert = _alert(tmp_path, "rule\x00id")
     assert orient._alert_signature(alert) == "rule\x00id"
-    out = orient.orientation(tmp_path, DEFENDER, alert, systems=())
+    run_dir = tmp_path / "run"  # not `tmp_path`: its parent is the worker's basetemp (see f23 above)
+    run_dir.mkdir()
+    out = orient.orientation(run_dir, DEFENDER, alert, systems=())
     assert isinstance(out, str)
     assert "## invlang grammar" in out

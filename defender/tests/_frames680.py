@@ -14,6 +14,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+import ast
+import functools
 import importlib.util
 import inspect
 import re
@@ -525,3 +527,9 @@ def _python_sources() -> list[Path]:
         for p in DEFENDER.rglob("*.py")
         if ".venv" not in p.parts and "tests" not in p.relative_to(DEFENDER).parts
     ]
+
+
+@functools.cache
+def _parsed_sources() -> tuple[tuple[Path, ast.Module], ...]:
+    """Every production source parsed once per process: d1 and d2 each walk the whole set."""
+    return tuple((p, ast.parse(p.read_text(encoding="utf-8"))) for p in _python_sources())

@@ -20,6 +20,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+import pytest
 
 from defender.tests import _spec1077 as S
 from defender.tests._by_path import DEFENDER, load_lint_gate
@@ -542,6 +543,7 @@ def test_the_gates_own_data_files_spell_every_name_it_bans(tmp_path: Path):
 # The allow-list and the migration's intermediate states
 # ---------------------------------------------------------------------------------------
 
+@pytest.mark.gate
 def test_gate_passes_with_an_empty_allow_list():
     """The gate passes over the whole swept tree — the five `defender/` directories plus its top
     level, per §7 decision 5's carve-out — with an empty allow-list.

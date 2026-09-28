@@ -194,6 +194,7 @@ def test_a_new_tenant_copied_from_the_template_keeps_the_gate_green(tmp_path):
     assert "newco" in out, out
 
 
+@pytest.mark.gate
 def test_the_gate_checks_the_real_repos_tenants_and_template():
     """The no-argument path CI runs: green over the committed tree, and it names the playground
     tenant and the template it covered."""

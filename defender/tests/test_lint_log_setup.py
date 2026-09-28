@@ -57,5 +57,6 @@ def test_a_setup_that_does_not_run_first_or_is_not_ours_does_not_count(src):
     assert _verdict(src) == [False]
 
 
+@pytest.mark.gate
 def test_the_real_tree_is_clean():
     assert _GATE._scan() == []

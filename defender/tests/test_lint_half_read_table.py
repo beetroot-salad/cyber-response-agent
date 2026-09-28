@@ -380,6 +380,7 @@ def real_tree_findings():
     return _GATE._scan()
 
 
+@pytest.mark.gate
 def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries(real_tree_findings):
     """Equality, in both directions: a real-tree finding the baseline does not carry is a new
     burial candidate, and a baseline entry that no longer fires is a burial the ratchet is
@@ -390,6 +391,7 @@ def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries(real_t
     assert {f.fingerprint for f in real_tree_findings} == set(_shipped_baseline_entries())
 
 
+@pytest.mark.gate
 def test_its_motivating_finding_is_fixed_and_not_baselined(real_tree_findings):
     """#879 itself, now closed. `_close_investigation_async` charged the `false-positive`
     entry price by branching on the literal, leaving `benign` — the table's other key —
@@ -404,8 +406,8 @@ def test_its_motivating_finding_is_fixed_and_not_baselined(real_tree_findings):
     dispatch itself regressing into a literal branch. (Nothing fires here today: #992 spells
     the ceiling member as `CEILING_DISPOSITION` rather than a literal.)
 
-    Not `gate`-marked: the code-smells step's exit-0 check covers the tree being clean; this
-    covers the ONE site the gate was written for being clean for the right reason.
+    `gate`-marked with the demand above: both read the real-tree scan, and while the baseline
+    is empty any finding at this file already fails the code-smells step.
     """
     at_the_close = [
         f for f in real_tree_findings

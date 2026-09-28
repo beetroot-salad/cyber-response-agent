@@ -247,7 +247,7 @@ def test_the_tenant_records_created_at_is_read_by_nobody(base):
     readers = []
     for py in (S.DEFENDER).rglob("*.py"):
         rel = py.relative_to(S.DEFENDER).as_posix()
-        if rel.startswith("tests/") or rel == f"{S.TENANT_MODULE}.py":
+        if rel.startswith(("tests/", ".venv/")) or rel == f"{S.TENANT_MODULE}.py":
             continue
         if "created_at" in py.read_text(encoding="utf-8", errors="replace") and "tenant" in rel:
             readers.append(rel)

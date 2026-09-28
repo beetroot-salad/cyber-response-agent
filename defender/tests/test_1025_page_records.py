@@ -669,8 +669,9 @@ def test_1025_the_page_module_reads_every_record_through_its_package_reader_spel
         assert checkout_bound not in names | imported, f"the page names {checkout_bound}"
     shipped = R._shipped_modules()
     assert PAGE_PATH in shipped
+    constants = {m: R._string_constants(src, m) for m, src in shipped.items()}
     for name in RECORD_NAMES:
-        homes = [m for m, src in shipped.items() if name in R._string_constants(src, m)]
+        homes = [m for m, strings in constants.items() if name in strings]
         assert len(homes) == 1, (name, homes)
 
 
