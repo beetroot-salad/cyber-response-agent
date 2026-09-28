@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
@@ -231,8 +232,9 @@ def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
     import yaml
 
     payload = "a story\nepisode_id: hijacked\n- not a list item\n"
-    ep = tmp_path / "ep"
-    manifest = _family().write_family(ep, T.family_doc(base_story=payload))
+    # `write_family` takes the `Episode` and no longer makes the dir (#1133 rev 2).
+    with Episode.create(tmp_path / "ep") as episode:
+        manifest = _family().write_family(episode, T.family_doc(base_story=payload))
     reread = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     assert reread["base_story"] == payload
     assert reread["episode_id"] == T.EPISODE_ID
@@ -288,13 +290,13 @@ def test_947_the_manifest_digest_is_recorded_in_the_review_and_rechecked_on_resu
     resumes from it: a manifest edited between review and run refuses rather than running the
     edited document."""
     fam = _family()
-    ep = T.episode(tmp_path)
     doc = T.family_doc()
-    manifest = fam.write_family(ep, doc)
-    recorded = fam.manifest_digest(manifest)
-    fam.write_family(ep, T.family_doc(base_story="edited after review"))
-    with pytest.raises(_refusal()) as bad:
-        fam.check_manifest_digest(manifest, recorded)
+    with Episode.open(T.episode(tmp_path)) as episode:
+        fam.write_family(episode, doc)
+        recorded = fam.manifest_digest(episode)
+        fam.write_family(episode, T.family_doc(base_story="edited after review"))
+        with pytest.raises(_refusal()) as bad:
+            fam.check_manifest_digest(episode, recorded)
     assert "digest" in str(bad.value)
 
 
@@ -405,9 +407,9 @@ def test_947_the_patch_table_renderer_escapes_an_invented_entity_as_a_key(tmp_pa
 
     fam = _family()
     entity = "host.with.dots-01"
-    ep = tmp_path / "ep"
-    manifest = fam.write_family(ep, T.family_doc(worlds=[T.base_world(), T.world_doc(
-        "b", ov=T.overlay(patches={"identity": {entity: {"owner": "platform"}}}))]))
+    with Episode.create(tmp_path / "ep") as episode:
+        manifest = fam.write_family(episode, T.family_doc(worlds=[T.base_world(), T.world_doc(
+            "b", ov=T.overlay(patches={"identity": {entity: {"owner": "platform"}}}))]))
     table = yaml.safe_load(manifest.read_text(encoding="utf-8"))["worlds"][1]["overlay"]["patches"]
     assert list(table["identity"]) == [entity]
     assert table["identity"][entity] == {"owner": "platform"}

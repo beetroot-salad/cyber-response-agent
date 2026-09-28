@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
@@ -53,22 +54,22 @@ def test_947_live_alias_serves_base_minus_exclude_plus_inject(cluster, tmp_path)
     a query through the view returns the base documents the predicate did not remove together
     with every injected document, and the same query through the base pattern returns neither
     the injection nor the effect of the exclusion."""
-    ep = T.episode(tmp_path)
-    staging = T.mod("learning.branch.staging")
-    world = T.mod("runtime.branch._family").parse_world(T.world_doc("b", ov=T.overlay(
-        elastic=T.elastic_overlay(inject=[{"_id": "inj-1", "process": {"name": "sshd"}}],
-                                  exclude={"term": {"process.name": "nc"}}))))
-    staging.stage_world(world, episode_dir=ep, episode_token=T.EPISODE_TOKEN,
-                        configured_patterns=T.CONFIGURED, door=cluster)
-    try:
-        through_view = cluster.count(VIEW, query={"match_all": {}})
-        base_total = cluster.count(T.EVENTS_PATTERN, query={"match_all": {}})
-        excluded = cluster.count(T.EVENTS_PATTERN, query={"term": {"process.name": "nc"}})
-        assert through_view == base_total - excluded + 1
-        assert cluster.count(VIEW, query={"term": {"process.name": "nc"}}) == 0
-        assert cluster.count(T.EVENTS_PATTERN, query={"ids": {"values": ["inj-1"]}}) == 0
-    finally:
-        staging.teardown(ep, door=cluster)
+    with Episode.open(T.episode(tmp_path)) as episode:
+        staging = T.mod("learning.branch.staging")
+        world = T.mod("runtime.branch._family").parse_world(T.world_doc("b", ov=T.overlay(
+            elastic=T.elastic_overlay(inject=[{"_id": "inj-1", "process": {"name": "sshd"}}],
+                                      exclude={"term": {"process.name": "nc"}}))))
+        staging.stage_world(world, episode=episode, episode_token=T.EPISODE_TOKEN,
+                            configured_patterns=T.CONFIGURED, door=cluster)
+        try:
+            through_view = cluster.count(VIEW, query={"match_all": {}})
+            base_total = cluster.count(T.EVENTS_PATTERN, query={"match_all": {}})
+            excluded = cluster.count(T.EVENTS_PATTERN, query={"term": {"process.name": "nc"}})
+            assert through_view == base_total - excluded + 1
+            assert cluster.count(VIEW, query={"term": {"process.name": "nc"}}) == 0
+            assert cluster.count(T.EVENTS_PATTERN, query={"ids": {"values": ["inj-1"]}}) == 0
+        finally:
+            staging.teardown(episode, door=cluster)
 
 
 def test_947_an_injected_document_outside_the_t0_window_is_invisible(cluster, tmp_path):
@@ -77,23 +78,23 @@ def test_947_an_injected_document_outside_the_t0_window_is_invisible(cluster, tm
     is inclusive. THE INCLUSIVE READING WAS DECIDED WITHOUT A PROBE and is what this test is for:
     the first run against a real cluster settles it, and a red here is the answer, not a
     regression."""
-    ep = T.episode(tmp_path)
-    staging = T.mod("learning.branch.staging")
-    docs = [{"_id": "before", "@timestamp": "2026-07-28T16:18:44Z"},
-            {"_id": "at", "@timestamp": T.AS_OF},
-            {"_id": "after", "@timestamp": "2026-07-28T16:18:46Z"}]
-    world = T.mod("runtime.branch._family").parse_world(
-        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(inject=docs))))
-    staging.stage_world(world, episode_dir=ep, episode_token=T.EPISODE_TOKEN,
-                        configured_patterns=T.CONFIGURED, door=cluster)
-    try:
-        bounded = {"range": {"@timestamp": {"lte": T.AS_OF}}}
-        assert cluster.count(VIEW, query={"bool": {"must": [bounded, {"ids": {
-            "values": ["after"]}}]}}) == 0
-        assert cluster.count(VIEW, query={"bool": {"must": [bounded, {"ids": {
-            "values": ["at"]}}]}}) == 1
-    finally:
-        staging.teardown(ep, door=cluster)
+    with Episode.open(T.episode(tmp_path)) as episode:
+        staging = T.mod("learning.branch.staging")
+        docs = [{"_id": "before", "@timestamp": "2026-07-28T16:18:44Z"},
+                {"_id": "at", "@timestamp": T.AS_OF},
+                {"_id": "after", "@timestamp": "2026-07-28T16:18:46Z"}]
+        world = T.mod("runtime.branch._family").parse_world(
+            T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(inject=docs))))
+        staging.stage_world(world, episode=episode, episode_token=T.EPISODE_TOKEN,
+                            configured_patterns=T.CONFIGURED, door=cluster)
+        try:
+            bounded = {"range": {"@timestamp": {"lte": T.AS_OF}}}
+            assert cluster.count(VIEW, query={"bool": {"must": [bounded, {"ids": {
+                "values": ["after"]}}]}}) == 0
+            assert cluster.count(VIEW, query={"bool": {"must": [bounded, {"ids": {
+                "values": ["at"]}}]}}) == 1
+        finally:
+            staging.teardown(episode, door=cluster)
 
 
 def test_947_an_alias_spanning_a_colliding_document_id_answers_once_per_index(cluster, tmp_path):
@@ -104,29 +105,29 @@ def test_947_an_alias_spanning_a_colliding_document_id_answers_once_per_index(cl
     document — if it does not, the filter silently deletes the world's own injection and
     `injection_unreachable_rejects` rejects every world whose predicate overlaps its own
     documents. A red on either is the answer, not a regression."""
-    ep = T.episode(tmp_path)
-    staging = T.mod("learning.branch.staging")
-    family = T.mod("runtime.branch._family")
-    colliding = cluster.any_base_document_id(T.EVENTS_PATTERN)
-    world = family.parse_world(T.world_doc("b", ov=T.overlay(
-        elastic=T.elastic_overlay(inject=[{"_id": colliding, "process": {"name": "sshd"}}],
-                                  exclude={"term": {"process.name": "nc"}}))))
-    # PO-C25's world: the exclusion's own term is what its injected document carries.
-    self_excluding = family.parse_world(T.world_doc("c", ov=T.overlay(
-        elastic=T.elastic_overlay(inject=[{"_id": "self-excluded", "process": {"name": "nc"}}],
-                                  exclude={"term": {"process.name": "nc"}}))))
-    for w in (world, self_excluding):
-        staging.stage_world(w, episode_dir=ep, episode_token=T.EPISODE_TOKEN,
-                            configured_patterns=T.CONFIGURED, door=cluster)
-    try:
-        assert cluster.count(VIEW, query={"ids": {"values": [colliding]}}) == 2
-        assert cluster.count(INJECT, query={"ids": {"values": [colliding]}}) == 1
-        own = T.mod("scripts.adapters.confinement").world_view(
-            T.EVENTS_PATTERN, T.world_token("c"))
-        assert cluster.count(f"{own}.inject",
-                             query={"ids": {"values": ["self-excluded"]}}) == 1
-        assert cluster.count(own, query={"ids": {"values": ["self-excluded"]}}) == 1, (
-            "the world's alias-wide exclusion removed its own injection — PO-C25 answered NO, "
-            "and injection_unreachable_rejects then rejects every self-overlapping world")
-    finally:
-        staging.teardown(ep, door=cluster)
+    with Episode.open(T.episode(tmp_path)) as episode:
+        staging = T.mod("learning.branch.staging")
+        family = T.mod("runtime.branch._family")
+        colliding = cluster.any_base_document_id(T.EVENTS_PATTERN)
+        world = family.parse_world(T.world_doc("b", ov=T.overlay(
+            elastic=T.elastic_overlay(inject=[{"_id": colliding, "process": {"name": "sshd"}}],
+                                      exclude={"term": {"process.name": "nc"}}))))
+        # PO-C25's world: the exclusion's own term is what its injected document carries.
+        self_excluding = family.parse_world(T.world_doc("c", ov=T.overlay(
+            elastic=T.elastic_overlay(inject=[{"_id": "self-excluded", "process": {"name": "nc"}}],
+                                      exclude={"term": {"process.name": "nc"}}))))
+        for w in (world, self_excluding):
+            staging.stage_world(w, episode=episode, episode_token=T.EPISODE_TOKEN,
+                                configured_patterns=T.CONFIGURED, door=cluster)
+        try:
+            assert cluster.count(VIEW, query={"ids": {"values": [colliding]}}) == 2
+            assert cluster.count(INJECT, query={"ids": {"values": [colliding]}}) == 1
+            own = T.mod("scripts.adapters.confinement").world_view(
+                T.EVENTS_PATTERN, T.world_token("c"))
+            assert cluster.count(f"{own}.inject",
+                                 query={"ids": {"values": ["self-excluded"]}}) == 1
+            assert cluster.count(own, query={"ids": {"values": ["self-excluded"]}}) == 1, (
+                "the world's alias-wide exclusion removed its own injection — PO-C25 answered NO, "
+                "and injection_unreachable_rejects then rejects every self-overlapping world")
+        finally:
+            staging.teardown(episode, door=cluster)

@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1077 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -732,7 +733,8 @@ def test_the_family_record_carries_the_familys_base_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     family = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert family["base_world_id"] == tenant_record.base_world_id, (
@@ -749,7 +751,8 @@ def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     agreed = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))["agreed"]
     assert agreed["tenant_id"] == FAMILY_TENANT, (
@@ -769,7 +772,8 @@ def test_family_stamps_agreed_dict_is_all_slots_bound_minus_world_id(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     agreed = stamp["agreed"]
@@ -787,7 +791,8 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
                       tenant_id="tenant-one" if i == 0 else "tenant-two",
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "incomplete", report["reason"]
     assert "tenant" in report["reason"], (
         f"a family spanning tenants is a fault, added to `_member_faults`: {report['reason']}")
@@ -804,7 +809,8 @@ def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
             fields["tenant_id"] = FAMILY_TENANT
         S.plant_stamp(d, **fields, world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "incomplete", report["reason"]
     reason = report["reason"]
     named_fault = (
@@ -826,7 +832,8 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
     (dirs[2] / "provenance.json").unlink()      # not yet stamped
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     reason = report["reason"]
     counted = (
         f"the comparison must record how many siblings it skipped, so an unstamped sibling "
@@ -857,7 +864,8 @@ def test_verify_family_still_compares_only_commit_scope_and_model(tmp_path):
     for d in dirs:
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", (
         f"siblings differ on world_id BY DESIGN; if it reached the comparison every family "
         f"would be incomplete: {report['reason']}")

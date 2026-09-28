@@ -36,6 +36,7 @@ from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode ten
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
 
 TOKEN_B = T.world_token("b")
@@ -57,10 +58,13 @@ def _run_review(episode_dir, *, adapters=None, door=None, invoke=None, doc=None,
     # harmless, never-created sibling dir for every caller that does not care which base is
     # threaded.
     kw.setdefault("runs_base", Path(episode_dir).parent / "runs-base")
-    return _review().review(
-        fam, episode_dir=episode_dir, adapters=adapters or T.FakeAdapters(),
-        door=door or T.FakeDoor(counts={"logs-000001": 3}), invoke=invoke or T.FakeAgent("same"),
-        **kw, settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+    # `review` takes the `Episode` handle, not the dir (#1133 rev 2).
+    with Episode.open(episode_dir) as episode:
+        return _review().review(
+            fam, episode=episode, adapters=adapters or T.FakeAdapters(),
+            door=door or T.FakeDoor(counts={"logs-000001": 3}),
+            invoke=invoke or T.FakeAgent("same"),
+            **kw, settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
 
 
 # ---------------------------------------------------------------------------------------
@@ -74,9 +78,12 @@ def test_947_review_registry_uses_a_scratch_ledger_with_an_empty_base(tmp_path):
     and the review would agree with itself, so the review's ledger holds no base rows."""
     ep = T.episode(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1")])
-    ledger = _review().scratch_ledger(ep)
-    assert ledger.base_payload("k1") is None
-    assert not list(ledger.base_rows())
+    # `scratch_ledger` takes the scratch `Episode` the review creates, no longer the episode
+    # dir it made its own temp tree from (#1133 rev 2).
+    with Episode.create(tmp_path / "scratch") as scratch:
+        ledger = _review().scratch_ledger(scratch, world_label="review")
+        assert ledger.base_payload("k1") is None
+        assert not list(ledger.base_rows())
 
 
 def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, monkeypatch,

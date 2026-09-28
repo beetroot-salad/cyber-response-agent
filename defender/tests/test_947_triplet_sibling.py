@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
@@ -316,8 +317,8 @@ def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_p
     del doc["configured_patterns"]
     assert "captured_patterns" not in doc, "the capture must not name the pattern on its own"
     ep = T.episode(tmp_path, doc=doc)
-    with pytest.raises(_family.FamilyError, match="logs"):
-        _family.load_family(ep / "family.yaml")
+    with Episode.open(ep) as episode, pytest.raises(_family.FamilyError, match="logs"):
+        _family.load_family(episode)
     world = _run().resume_world(
         ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
     assert world.family.configured_patterns == T.CONFIGURED

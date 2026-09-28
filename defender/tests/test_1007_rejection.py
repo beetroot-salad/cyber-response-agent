@@ -14,6 +14,7 @@ from __future__ import annotations
 from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant's settings the review reads
 
 
+from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
 
 
@@ -53,13 +54,14 @@ def test_injected_retrieved_is_the_envelopes_own_hits_and_present_is_the_door_co
     ep = W.episode(tmp_path, doc=doc, root=root)
     W.base_capture(ep, [W.captured_row(key="k1")])
 
-    record = review.review(
-        family_mod.parse_family(doc), episode_dir=ep,
-        adapters=W.FakeAdapters({("elastic", "esql"): {"hits": [injected[0]]},
-                                 ("elastic", "query"): {"hits": [injected[0]]}}),
-        door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 3}),
-        invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
-        runs_base=ep.parent / "runs-base")
+    with Episode.open(ep) as episode:
+        record = review.review(
+            family_mod.parse_family(doc), episode=episode,
+            adapters=W.FakeAdapters({("elastic", "esql"): {"hits": [injected[0]]},
+                                     ("elastic", "query"): {"hits": [injected[0]]}}),
+            door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 3}),
+            invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+            runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]
     assert block["injected_present"] == 3, (
@@ -177,13 +179,14 @@ def test_the_review_admits_a_world_that_is_unreachable_by_capture(tmp_path, monk
     ep = W.episode(tmp_path, doc=doc, root=root)
     W.base_capture(ep, [W.captured_row(key="k1")])
 
-    record = review.review(
-        family_mod.parse_family(doc), episode_dir=ep,
-        adapters=W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "i1"}]},
-                                 ("elastic", "esql"): {"hits": [{"_id": "i1"}]}}),
-        door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 1}),
-        invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
-        runs_base=ep.parent / "runs-base")
+    with Episode.open(ep) as episode:
+        record = review.review(
+            family_mod.parse_family(doc), episode=episode,
+            adapters=W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "i1"}]},
+                                     ("elastic", "esql"): {"hits": [{"_id": "i1"}]}}),
+            door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 1}),
+            invoke=W.FakeAgent("same"), settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+            runs_base=ep.parent / "runs-base")
 
     entry = record["worlds"]["b"]
     assert entry["reachability"]["reachable_by_capture"] is False, (

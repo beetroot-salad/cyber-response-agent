@@ -36,6 +36,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender._episode_handle import Episode  # noqa: E402
 from defender.learning.lead_repository import joined  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
@@ -867,7 +868,8 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
         if (world / name).is_file():
             (r.run_dir / name).write_text((world / name).read_text(encoding="utf-8"),
                                           encoding="utf-8")
-    T.mod("learning.branch.archive").archive_episode(ep, {"b": r.run_dir})
+    with Episode.open(ep) as episode:
+        T.mod("learning.branch.archive").archive_episode(episode, {"b": r.run_dir})
     assert (world / "executed_queries.jsonl").is_file()
     assert not (world / "policy_denials.jsonl").exists(), \
         "the archive grew a second stream for what the table already carries"

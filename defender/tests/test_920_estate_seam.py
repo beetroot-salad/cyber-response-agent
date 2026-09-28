@@ -58,6 +58,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender._episode_handle import Episode  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.applier import WorldApplier  # noqa: E402
@@ -926,8 +927,9 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
     capture.parent.mkdir(parents=True, exist_ok=True)
     capture.touch()
 
-    with pytest.raises(LedgerError, match="family's own capture"):
-        Ledger.for_world(episode_root, "base")
+    with Episode.open(episode_root) as episode, \
+            pytest.raises(LedgerError, match="family's own capture"):
+        Ledger.for_world(episode, "base")
 
     assert capture.read_text(encoding="utf-8") == ""
 

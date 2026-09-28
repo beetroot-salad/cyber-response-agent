@@ -39,6 +39,7 @@ import pytest
 from defender._io import append_jsonl, read_jsonl_rows
 from defender._run_paths import RunPaths
 from defender.runtime.verbs import read_roster
+from defender._episode_handle import Episode
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
     CAPTURED,
@@ -151,6 +152,13 @@ def episode(tmp_path: Path) -> tuple[Path, Path]:
     return root, root / SERVED_DIRNAME / BASE_FILENAME
 
 
+def _prime(run_dir: Path, root: Path):
+    """`prime_base` over an `Episode` opened on the episode root: it takes the handle, not the
+    base path (#1133 rev 2)."""
+    with Episode.open(root) as ep:
+        return capture_mod().prime_base(run_dir, ep)
+
+
 def counts(report) -> dict:
     """The whole tally, as one comparable object.
 
@@ -197,7 +205,7 @@ def test_a_captured_call_becomes_a_family_row_the_ledger_can_read(tmp_path):
                 json.dumps({"owner": "estate", "role": "canary"}))
     root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert counts(report) == {"primed": 1, "duplicates": 0, "failed": 0,
                               "sentinels": 0, "unreadable": 0}
@@ -205,7 +213,8 @@ def test_a_captured_call_becomes_a_family_row_the_ledger_can_read(tmp_path):
     assert [(r["source"], r["world_id"]) for r in rows] == [(CAPTURED, None)]
     assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == (
         "cmdb", "get-host", {"host": "canary-1"})
-    hit = Ledger.for_world(root, "w1").base_payload("cmdb", "get-host", {"host": "canary-1"})
+    with Episode.open(root) as ep:
+        hit = Ledger.for_world(ep, "w1").base_payload("cmdb", "get-host", {"host": "canary-1"})
     assert hit is not None, "the primed row is not reachable through the key a sibling asks with"
     assert json.loads(hit) == {"owner": "estate", "role": "canary"}
 
@@ -227,9 +236,9 @@ def test_a_primed_payload_is_canonical_rather_than_the_sidecars_own_bytes(tmp_pa
     assert sidecar != payload_text(UNSORTED_PAYLOAD), (
         "the fixture's sidecar is already canonical, so a verbatim copy would pass this arm")
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}), sidecar)
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    capture_mod().prime_base(run_dir, base)
+    _prime(run_dir, root)
 
     assert read_jsonl_rows(base)[0]["payload_text"] == payload_text(UNSORTED_PAYLOAD)
 
@@ -249,22 +258,23 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
                 json.dumps({"owner": "estate", "host": "canary-1"}))
     root, base = episode(tmp_path)
-    capture_mod().prime_base(run_dir, base)
+    _prime(run_dir, root)
 
     class World:
         world_id = "w1"
         touches = ()
 
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
-                        ledger=Ledger.for_world(root, "w1"), as_of=T0)
-    ctx = run_ctx(tmp_path)
+    with Episode.open(root) as ep:
+        reg = WorldRegistry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
+                            ledger=Ledger.for_world(ep, "w1"), as_of=T0)
+        ctx = run_ctx(tmp_path)
 
-    payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+        payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    assert payload == {"owner": "estate", "host": "canary-1"}, (
-        f"the sibling was served {payload} — the live estate, not the run's own capture")
-    assert read_jsonl_rows(Path(ctx.run_dir) / "adapter-calls.jsonl") == [], (
-        "the adapter ran for a key the capture already holds")
+        assert payload == {"owner": "estate", "host": "canary-1"}, (
+            f"the sibling was served {payload} — the live estate, not the run's own capture")
+        assert read_jsonl_rows(Path(ctx.run_dir) / "adapter-calls.jsonl") == [], (
+            "the adapter ran for a key the capture already holds")
 
 
 # 2. what it refuses to take
@@ -288,9 +298,9 @@ def test_the_five_counters_partition_a_realistic_table(tmp_path):
     append_call(run_dir, call_row("l-002", 1, "cmdb", "list-hosts", {}), None)
     append_call(run_dir, call_row("l-003", 0, "cmdb", "get-host", {"host": "canary-1"}),
                 json.dumps({"owner": "asked-again"}))
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert counts(report) == {"primed": 1, "duplicates": 1, "failed": 1,
                               "sentinels": 1, "unreadable": 1}
@@ -314,9 +324,9 @@ def test_every_shipped_sentinel_is_skipped_by_the_shared_predicate(tmp_path, que
                 json.dumps({"owner": "estate"}))
     append_call(run_dir, call_row("l-001", 1, "cmdb", "list-hosts", {}, query_id=query_id),
                 json.dumps({"hosts": []}))
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert (report.primed, report.sentinels) == (1, 1)
     assert [r["verb"] for r in read_jsonl_rows(base)] == ["get-host"]
@@ -339,9 +349,9 @@ def test_a_failed_call_is_skipped_even_when_its_payload_reads_perfectly(tmp_path
     append_call(run_dir, call_row("l-002", 0, "cmdb", "get-host", {"host": "gone-9"},
                                   exit_code=64, payload_status="error"),
                 json.dumps({"error": "HTTP 404 from http://cmdb:8080/hosts/gone-9"}))
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert counts(report)["failed"] == 1
     assert counts(report)["unreadable"] == 0, "a system's refusal was filed as a lost payload"
@@ -376,9 +386,9 @@ def test_a_payload_this_episode_cannot_read_is_counted_not_guessed(
     extra = {} if payload_path is None else {"payload_path": payload_path}
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}, **extra),
                 sidecar)
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert counts(report) == {"primed": 1, "duplicates": 0, "failed": 0,
                               "sentinels": 0, "unreadable": 1}, label
@@ -400,9 +410,9 @@ def test_a_malformed_capture_table_line_is_counted_before_the_tolerant_reader_dr
                 json.dumps({"hosts": ["canary-1"]}))
     with RunPaths(run_dir).executed_queries.open("a", encoding="utf-8") as fh:
         fh.write(physical_line + "\n")
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert counts(report) == {"primed": 1, "duplicates": 0, "failed": 0,
                               "sentinels": 0, "unreadable": 1}
@@ -425,9 +435,9 @@ def test_a_repeated_question_keeps_the_answer_the_run_saw_first(tmp_path):
                 json.dumps({"owner": "first"}))
     append_call(run_dir, call_row("l-004", 0, "cmdb", "get-host", {"host": "canary-1"}),
                 json.dumps({"owner": "second"}))
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert (report.primed, report.duplicates) == (1, 1)
     assert json.loads(read_jsonl_rows(base)[0]["payload_text"]) == {"owner": "first"}
@@ -448,9 +458,9 @@ def test_a_key_spelled_in_another_order_is_the_same_captured_question(tmp_path):
     append_call(run_dir, call_row("l-002", 0, "elastic", "query",
                                   {"limit": 5, "native_query": "x"}),
                 json.dumps({"hits": ["later"]}))
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
-    report = capture_mod().prime_base(run_dir, base)
+    report = _prime(run_dir, root)
 
     assert (report.primed, report.duplicates) == (1, 1)
 
@@ -468,15 +478,16 @@ def test_priming_an_existing_base_is_refused_without_changing_its_first_capture(
     append_call(first, row, json.dumps({"owner": "first"}))
     append_call(second, row, json.dumps({"owner": "second"}))
     root, base = episode(tmp_path)
-    capture_mod().prime_base(first, base)
+    _prime(first, root)
     original = base.read_bytes()
 
     with pytest.raises(LedgerError, match="already holds a primed base"):
-        capture_mod().prime_base(second, base)
+        _prime(second, root)
 
     assert base.read_bytes() == original
-    payload = Ledger.for_world(root, "w1").base_payload(
-        "cmdb", "get-host", {"host": "canary-1"})
+    with Episode.open(root) as ep:
+        payload = Ledger.for_world(ep, "w1").base_payload(
+            "cmdb", "get-host", {"host": "canary-1"})
     assert payload is not None
     assert json.loads(payload) == {"owner": "first"}
 
@@ -505,10 +516,10 @@ def test_priming_nothing_is_refused_rather_than_reported(tmp_path, label):
                                       exit_code=1, payload_status="error"), "")
     elif label == "empty-table":
         RunPaths(run_dir).executed_queries.write_text("", encoding="utf-8")
-    _root, base = episode(tmp_path)
+    root, base = episode(tmp_path)
 
     with pytest.raises(LedgerError):
-        capture_mod().prime_base(run_dir, base)
+        _prime(run_dir, root)
 
 
 def test_a_refused_priming_leaves_no_base_a_sibling_could_open(tmp_path):
@@ -525,10 +536,10 @@ def test_a_refused_priming_leaves_no_base_a_sibling_could_open(tmp_path):
     root, base = episode(tmp_path)
 
     with pytest.raises(LedgerError):
-        capture_mod().prime_base(run_dir, base)
+        _prime(run_dir, root)
 
     assert not base.is_file(), (
         "a refused priming left a base file behind — every later sibling opens it, finds "
         "nothing, and goes live for the whole episode with nothing red anywhere")
-    with pytest.raises(LedgerError):
-        Ledger.for_world(root, "w1")
+    with Episode.open(root) as ep, pytest.raises(LedgerError):
+        Ledger.for_world(ep, "w1")

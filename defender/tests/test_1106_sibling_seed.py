@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T
 from defender.tests import _triplet_947 as P
 
@@ -88,7 +89,9 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     ep.mkdir()
     root = tmp_path / "tenants"
     spawn = SpawnRecorder()
-    exits = cli.start_family(ep, ["b", "c"], spawn=spawn, tenant_id="acme", tenants_root=root)
+    with Episode.open(ep) as episode:
+        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme",
+                                 tenants_root=root)
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.launches) == 2
     for launch in spawn.launches:
@@ -108,8 +111,9 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
     ep = tmp_path / "episode"
     ep.mkdir()
     spawn = SpawnRecorder()
-    with pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
-        cli.start_family(ep, ["b"], spawn=spawn, tenant_id=tenant_id,
+    with Episode.open(ep) as episode, \
+            pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
+        cli.start_family(episode, ["b"], spawn=spawn, tenant_id=tenant_id,
                          tenants_root=tmp_path / "tenants")
     assert not isinstance(caught.value, TypeError), (
         f"start_family does not take the episode's tenant yet: {caught.value!r}")
