@@ -207,7 +207,9 @@ def _run(sql: str) -> int:
         columns, renamed = _disambiguate_columns(columns)
         # `null` for a non-finite float: the model computes over these rows, and a column that
         # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
-        rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null")
+        # Zone-less timestamps are UTC: the engine converts an offset to UTC when it loads one.
+        rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null",
+                          naive_is_utc=True)
                 for record in cursor.fetchall()]
         json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")

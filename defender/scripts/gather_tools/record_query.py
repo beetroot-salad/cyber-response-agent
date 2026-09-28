@@ -119,16 +119,14 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
-    return json.dumps(
-        [system, verb, params if isinstance(params, dict) else {}],
-        sort_keys=True, default=str,
-    )
+    # Cleaned here, not by each caller, so live params and a stored row's key alike.
+    call = [system, verb, params if isinstance(params, dict) else {}]
+    return json.dumps(json_safe(call, non_finite="text"), sort_keys=True)
 
 
 def _json_safe_params(value: Any) -> Any:
     # Text for a non-finite float: the record is what a reader diagnoses a query from, and a
-    # `threshold` of infinity is not a missing one. It is also the repeat key's input
-    # (`_request_key`), so what this returns is the identity two calls are compared on.
+    # `threshold` of infinity is not a missing one. The same rule `_request_key` keys by.
     return json_safe(value, non_finite="text")
 
 
@@ -551,7 +549,7 @@ def _trip(
 
     The cheap `system_key` compare runs before the per-row `json.dumps`, which matters for
     `rejection_trip` where many rows differ by system key."""
-    key_request = _request_key(system, verb, _json_safe_params(params))
+    key_request = _request_key(system, verb, params)
     key_system = as_str(system_key)
     matches = [
         r for r in rows

@@ -39,8 +39,8 @@ _DENIAL_PARAM_DIGEST_LEN = 16
 
 
 def _params_digest(params: Any) -> str:
-    # Text for a non-finite float: as `null` it would share a digest with a `null` param, and
-    # this is the rule the query record stores the same call by.
+    # The rule the query record keys the same call by, so a denial and a repeat identify a
+    # call alike.
     normalized = json_safe(params, non_finite="text")
     text = json.dumps(normalized, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_DENIAL_PARAM_DIGEST_LEN]

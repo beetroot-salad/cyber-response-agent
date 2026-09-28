@@ -100,12 +100,9 @@ def request_key(system: str, verb: str, params: Any) -> str:
     """The canonical identity of one question.
 
     Delegates to `record_query._request_key` so this table and `executed_queries.jsonl` key the
-    same `(system, verb, params)` identically and can be joined. `_json_safe_params` is applied
-    for the same reason: otherwise a non-finite float keys as the bare token `Infinity` here and
-    the string `"Infinity"` there.
+    same `(system, verb, params)` identically and can be joined.
     """
-    return _request_key(
-        system, verb, _json_safe_params(params) if isinstance(params, dict) else {})
+    return _request_key(system, verb, params)
 
 
 def correlation_key_of(row: Any) -> str | None:
