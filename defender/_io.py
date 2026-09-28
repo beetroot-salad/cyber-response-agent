@@ -580,8 +580,7 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
 
 
 def json_safe(value: Any, *, non_finite: Literal["text", "null"],
-              max_depth: int | None = None, naive_is_utc: bool = False,
-              durations_as_seconds: bool = False) -> Any:
+              max_depth: int | None = None, naive_is_utc: bool = False) -> Any:
     """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
     booleans and null are left as the encoder would write them.
 
@@ -590,8 +589,6 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
     knows its zone in UTC as `2026-01-01T10:00:00.000000Z` — one fixed width, so every
     timestamp in one output reads alike. `naive_is_utc` is for a caller whose zone-less
     timestamps are known to be UTC; any other zone-less one is written without a zone.
-    `durations_as_seconds` writes a duration as its number of seconds, for a reader computing
-    over it; otherwise it is Python's text (`1 day, 2:00:00`).
 
     A non-finite float goes the way the caller says: `"text"` keeps it, spelled as the
     Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a
@@ -599,8 +596,7 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
     `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
     if non_finite not in ("text", "null"):
         raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
-    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth, naive_is_utc,
-                       durations_as_seconds)
+    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth, naive_is_utc)
     return _json_safe_walk(value, rules, 0)
 
 
@@ -609,7 +605,6 @@ class _JsonRules:
     non_finite: str
     max_depth: int
     naive_is_utc: bool
-    durations_as_seconds: bool
 
 
 def _json_safe_walk(v: Any, rules: _JsonRules, depth: int) -> Any:
@@ -619,8 +614,6 @@ def _json_safe_walk(v: Any, rules: _JsonRules, depth: int) -> Any:
         if math.isfinite(v):
             return v
         return None if rules.non_finite == "null" else _non_finite_text(v)
-    if rules.durations_as_seconds and isinstance(v, _dt.timedelta):
-        return v.total_seconds()
     if depth >= rules.max_depth:
         return repr(v)
     if isinstance(v, Mapping):

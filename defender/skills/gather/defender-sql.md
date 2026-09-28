@@ -49,26 +49,6 @@ SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
 
 **Flat** — the payload's keys ARE `data`'s columns; no `unnest`.
 
-## Times are text
-
-Every field comes back spelled exactly as the source wrote it — `@timestamp` included —
-so you can quote it or bind it into the next query unchanged. To compare, sort, `MIN`/`MAX`
-or bucket times, cast to `::TIMESTAMPTZ`:
-
-```sql
-SELECT min(h."@timestamp"::TIMESTAMPTZ) AS first FROM (SELECT unnest(hits) h FROM data)
-```
-
-- **Uncast, the comparison is lexical** and silently wrong across spellings: `.` sorts
-  below `Z`, so `10:00:00.5Z` is the `MIN` of it and `10:00:00Z`, and an offset such as
-  `+02:00` is compared as characters, not converted.
-- **Never `::TIMESTAMP`** — it drops the offset instead of converting it, so
-  `12:00:00+02:00` becomes 12:00 UTC.
-- A time the query computes comes back as one form, UTC with six fraction digits:
-  `2026-01-01T10:00:00.000000Z`. The session's zone is UTC, so `date_trunc('day', …)`
-  buckets on UTC days.
-- A duration (`max(t) - min(t)`) comes back as a number of seconds.
-
 ## Results that lie
 
 - **A count over a truncated payload.** When `truncated` is set the rows are only

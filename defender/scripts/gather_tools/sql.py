@@ -26,12 +26,6 @@ EXIT_NO_RUNTIME = 69
 
 _MAX_OBJECT_SIZE = 1 << 30
 
-#: A format no text matches, handed to the loader as its date and timestamp format: the engine
-#: otherwise guesses from the rows whether a field is a time, so the same field came back
-#: converted in one payload and as text in the next (#1125). Text keeps the source's spelling;
-#: the lead casts (`::TIMESTAMPTZ`) when it needs a time.
-_NO_TIME_GUESS = "~text~%Y"
-
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.
 _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
@@ -39,26 +33,6 @@ _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
 
 def _top_level_columns(con) -> list[str]:
     return [row[0] for row in con.execute("DESCRIBE data").fetchall()]
-
-
-def _is_esql(columns) -> bool:
-    return "values" in columns and "columns" in columns
-
-
-def _esql_rows_as_json(con) -> None:
-    """Make every position of an ES|QL row JSON, as a row of mixed types already is.
-
-    The engine types a row whose values share one type as that type, so `v[N]->>'$'` — the
-    one idiom the lead is taught — failed on an all-text row and read an all-number one
-    through a cast."""
-    types = dict((row[0], row[1]) for row in con.execute("DESCRIBE data").fetchall())
-    # A `values` with no rows is a flat list, and has no positions to retype.
-    if not _is_esql(types) or not types["values"].endswith("[][]"):
-        return
-    con.execute(
-        'CREATE OR REPLACE TABLE data AS SELECT * REPLACE '
-        '(list_transform("values", r -> list_transform(r, x -> to_json(x))) AS "values") FROM data'
-    )
 
 
 def _error_note(message: str) -> str:
@@ -98,7 +72,7 @@ def _shape_hint(con, message: str) -> str:
             f"    SELECT h.\"@timestamp\", h.message {_HITS_FROM} "
             "WHERE h.<field> = '<value>'"
         )
-    elif _is_esql(colset):
+    elif "values" in colset and "columns" in colset:
         try:
             order = ", ".join(
                 f"{i + 1}={c['name']}"
@@ -211,23 +185,18 @@ def _run(sql: str) -> int:
         try:
             con.execute(
                 "CREATE TABLE data AS SELECT * FROM "
-                f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE}, "
-                "dateformat=?, timestampformat=?)",
-                [payload_path, _NO_TIME_GUESS, _NO_TIME_GUESS],
+                f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
+                [payload_path],
             )
-            _esql_rows_as_json(con)
         except duckdb.Error as exc:
             print(f"defender-sql: stdin is not valid JSON or NDJSON: {exc}",
                   file=sys.stderr)
             return EXIT_INPUT_ERROR
 
-        # The engine's zone otherwise follows the host's, and a day bucket would start at the
-        # host's midnight.
-        con.execute("SET TimeZone='UTC'")
         con.execute("SET enable_external_access=false")
         con.execute("SET lock_configuration=true")
 
-        # The fetch is inside: handing a value to Python can fail in the engine too.
+        # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
         try:
             cursor = con.execute(sql)
             records = cursor.fetchall()
@@ -238,12 +207,11 @@ def _run(sql: str) -> int:
 
         columns = [col[0] for col in cursor.description] if cursor.description else []
         columns, renamed = _disambiguate_columns(columns)
-        # `null` for a non-finite float and seconds for a duration: the model computes over
-        # these rows, and a column that is number-or-null reads as one type where `"NaN"` or
-        # `"1 day, 2:00:00"` would be a string among numbers. Zone-less timestamps are UTC: the
-        # session's zone is UTC, so a zoned value cast to a plain one lands in UTC.
+        # `null` for a non-finite float: the model computes over these rows, and a column that
+        # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
+        # Zone-less timestamps are UTC: the engine converts an offset to UTC when it loads one.
         rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null",
-                          naive_is_utc=True, durations_as_seconds=True)
+                          naive_is_utc=True)
                 for record in records]
         json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")
