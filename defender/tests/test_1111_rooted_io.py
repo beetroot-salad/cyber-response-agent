@@ -59,9 +59,14 @@ import errno
 import fcntl
 import json
 import os
+import random
 import shutil
+import signal
 import stat
+import subprocess
+import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -105,6 +110,9 @@ O6_ROWS: dict[str, tuple[type[OSError], int, bool]] = {
     "folder_link_outside": (OSError, errno.ELOOP, False),
     "folder_file": (NotADirectoryError, errno.ENOTDIR, False),
     "folder_fifo": (NotADirectoryError, errno.ENOTDIR, False),
+    # A device node is "any other non-plain leaf" too (see the device and posing tests below).
+    "char_device": (OSError, errno.ELOOP, False),
+    "block_device": (OSError, errno.ELOOP, False),
 }
 
 #: What a planted entry holds, or what a link or hard link reaches: the bytes a read that
@@ -1509,3 +1517,429 @@ def test_rooted_locked_for_rewrite_refuses_a_name_outside_the_grammar(scratch, n
     with pytest.raises(ValueError), lock(scratch.root, name):  # noqa: PT011
         pass
     assert census(scratch.tmp) == before
+
+
+# =======================================================================================
+# Three holes an adversary greened the first commit through: a device at the leaf, the race
+# window between the leaf's check and its open, and `create`'s DEFAULT lane. The seam takes
+# an `os_=` module (the `_io.bind(root, *, os_=os)` idiom), and every os call it makes goes
+# through it: the leaf's pre-open check is `os_.stat(<leaf>, dir_fd=<parent>,
+# follow_symlinks=False)`, the opened leaf is judged by `os_.fstat`, and `create`'s unnamed lane
+# names its file with `os_.link("/proc/self/fd/<N>", <leaf>, dst_dir_fd=<parent>,
+# follow_symlinks=True)`. The fakes below are pass-throughs over the real `os`.
+# =======================================================================================
+
+class PassThroughOs:
+    """The real `os` module, handed in as the seam's `os_`: every attribute is the real one
+    unless a subclass overrides it."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(os, name)
+
+
+#: Real device nodes. /dev/null's numbers open and swallow writes, so a leaf judge that lets a
+#: character device through reads '' and takes an append. Whether the block device opens
+#: depends on the host's device policy; the judge must refuse it either way, by its type.
+DEVICES = {"char_device": (stat.S_IFCHR, os.makedev(1, 3)),
+           "block_device": (stat.S_IFBLK, os.makedev(7, 200))}
+
+
+def plant_device(path: Path, kind: str) -> Planted:
+    fmt, dev = DEVICES[kind]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.mknod(path, fmt | 0o600, dev)
+    except PermissionError:
+        pytest.skip("making a device node needs CAP_MKNOD, which CI's non-root runner lacks; "
+                    "the posing tests below pin the same row on every host")
+    return Planted(kind, path)
+
+
+#: The seam ops a leaf judge guards: both reads, each write mode, and the lock.
+SEAM_OPS = ("read", "read_bytes", "create", "replace", "append", "lock")
+
+
+def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
+    """One seam op on `DEEP`, with `kw` (an `os_=`) passed through."""
+    if op == "read":
+        return lambda: _io.rooted_read(s.root, DEEP, **kw)
+    if op == "read_bytes":
+        return lambda: _io.rooted_read(s.root, DEEP, binary=True, **kw)
+    if op in MODES:
+        return lambda: _io.rooted_write(s.root, DEEP, f"{op} landed\n", mode=op, **kw)
+
+    def lock() -> None:
+        with _io.rooted_locked_for_rewrite(s.root, DEEP, **kw) as f:
+            f.seek(0)
+            f.truncate()
+            f.write("lock landed\n")
+
+    return lock
+
+
+def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any], *,
+                        fifo: Path | None = None) -> None:
+    """A read answers `(None, reason)`; every write mode and the lock raise O6's row for
+    `kind`. Promptly, either way."""
+    if op.startswith("read"):
+        got = in_time(fn, fifo=fifo)
+        assert got[0] is None, f"{op} of a {kind} leaf returned {got[0]!r}"
+        assert isinstance(got[1], str), f"{op} of a {kind} leaf gave no reason: {got!r}"
+    else:
+        assert_row(raised_by(fn, fifo=fifo), kind, where=f"{op} of a {kind} leaf")
+
+
+def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
+    """The positive control: the same op, on a plain file (or, for `create`, on no file),
+    lands."""
+    target = s.real_folders()
+    if op.startswith("read"):
+        target.write_bytes(b"plain\n")
+        want = b"plain\n" if op == "read_bytes" else "plain\n"
+        assert seam_op(s, op, **kw)() == (want, None), f"control: {op} of a plain file"
+        return
+    if op == "create" and os.path.lexists(target):
+        target.unlink()
+    seam_op(s, op, **kw)()
+    assert target.read_text(encoding="utf-8").endswith(f"{op} landed\n"), f"control: {op}"
+
+
+# -- hole 1: a device at the leaf ----------------------------------------------------------
+
+@pytest.mark.parametrize("op", SEAM_OPS)
+@pytest.mark.parametrize("kind", sorted(DEVICES))
+def test_o1_o2_o6_a_device_node_at_the_leaf_is_refused_as_non_plain(scratch, kind, op):
+    """O1/O2/O6: a character or block device at the record's name is "any other non-plain
+    leaf". A read is `(None, reason)` (a /dev/null that read back '' would be a leak of
+    whatever the device yields); every write mode and the lock raise the unmarked ELOOP row
+    and write nothing into it. Control: the node removed, the same op lands.
+
+    Real device nodes, so it runs where `mknod` of a device is allowed and skips elsewhere;
+    `test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports` pins the
+    row on every host."""
+    planted = plant_device(scratch.root / DEEP, kind)
+    before = census(scratch.tmp)
+    assert_seam_refused(op, kind, seam_op(scratch, op))
+    assert census(scratch.tmp) == before
+
+    planted.remove()
+    assert_seam_lands(scratch, op)
+
+
+def test_o1_o2_a_device_node_at_any_members_address_is_refused_through_the_handle(tree):
+    """The same, through the handle, for every member (O4): a character device at a record's
+    address reads `None`, and the member's verb raises the non-plain row (an `observability`
+    append records it as a partial failure, O7). Control: the node removed, the verb lands."""
+    for m in READABLE:
+        planted = plant_device(tree.path(m), "char_device")
+        assert tree.handle(m).read() is None, f"{m}: a device at its address read back"
+        planted.remove()
+    for m in WRITABLE:
+        planted = plant_device(tree.path(m), "char_device")
+        run = tree.run()
+        h = tree.handle(m, run=run)
+        raised = raised_by(verb_call(h, m, "refused"))
+        if m.group == "observability" and m.verb == "append":
+            assert raised is None, f"O7: {m}'s refused leaf append raised {raised!r}"
+            assert run.partial_failures == (f"{m.name}: append failed",)
+        else:
+            assert_row(raised, "char_device", where=f"{m}.{m.verb}")
+        planted.remove()
+        verb_call(h, m, "landed")()
+        assert_landed(tree.path(m), m, "landed")
+
+
+class _PosesAs(PassThroughOs):
+    """Reports one real, plain, single-linked file's `stat` / `lstat` / `fstat` (the calls
+    named in `on`) as another kind: its file-type bits swapped for `fmt`, and/or its link count
+    for `nlink`. Every other entry's answers are the real ones, matched by device and inode, so
+    only the leaf is posed."""
+
+    def __init__(self, target: Path, *, fmt: int, nlink: int | None = None,
+                 on: tuple[str, ...] = ("stat", "fstat")) -> None:
+        real = os.lstat(target)
+        self._identity = (real.st_dev, real.st_ino)
+        self._fmt = fmt
+        self._nlink = nlink
+        self._on = on
+
+    def _pose(self, st: os.stat_result, call: str) -> os.stat_result:
+        if call not in self._on or (st.st_dev, st.st_ino) != self._identity:
+            return st
+        fields = list(st)  # (mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime)
+        fields[0] = self._fmt | stat.S_IMODE(st.st_mode)
+        if self._nlink is not None:
+            fields[3] = self._nlink
+        return os.stat_result(fields)
+
+    def stat(self, *a: Any, **kw: Any) -> os.stat_result:
+        return self._pose(os.stat(*a, **kw), "stat")
+
+    def lstat(self, *a: Any, **kw: Any) -> os.stat_result:
+        return self._pose(os.lstat(*a, **kw), "stat")
+
+    def fstat(self, fd: int) -> os.stat_result:
+        return self._pose(os.fstat(fd), "fstat")
+
+
+#: A type-bit pattern no `S_IF*` constant names: a deny-list of the known non-plain kinds
+#: lets it through; the allow-list (`S_ISREG` and one name) does not.
+_UNKNOWN_TYPE = 0o030000
+
+#: What `_PosesAs` makes a plain file look like: `(file-type bits, link count or None)`.
+POSES: dict[str, tuple[int, int | None]] = {
+    "as_char_device": (stat.S_IFCHR, None),
+    "as_block_device": (stat.S_IFBLK, None),
+    "as_fifo": (stat.S_IFIFO, None),
+    "as_socket": (stat.S_IFSOCK, None),
+    "as_directory": (stat.S_IFDIR, None),
+    "as_unknown_type": (_UNKNOWN_TYPE, None),
+    "as_symlink": (stat.S_IFLNK, None),
+    "as_hard_linked": (stat.S_IFREG, 2),
+}
+O6_ROWS.update({
+    **{pose: (OSError, errno.ELOOP, False) for pose in POSES},
+    "as_symlink": (OSError, errno.ELOOP, True),
+    "as_hard_linked": (OSError, errno.EMLINK, True),
+})
+
+
+@pytest.mark.parametrize("op", SEAM_OPS)
+@pytest.mark.parametrize("pose", sorted(POSES))
+def test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports(
+        scratch, pose, op):
+    """O1/O2/O6 on every host: the leaf is plain only when it is a regular file with one name
+    (`S_ISREG` and `st_nlink == 1`), never "not one of the kinds a test plants". A real plain
+    file whose `stat` and `fstat` report a device, a FIFO, a socket, a directory or a type no
+    `S_IF*` constant names is refused (read `(None, reason)`; each write mode and the lock the
+    unmarked ELOOP row); reported as a symlink, the marked ELOOP; as a regular file with two
+    names, the marked EMLINK. The file is unchanged. Control: the same op through an unposed
+    pass-through lands."""
+    target = scratch.real_folders()
+    target.write_bytes(b"plain\n")
+    fmt, nlink = POSES[pose]
+    before = census(scratch.tmp)
+    assert_seam_refused(op, pose, seam_op(scratch, op, os_=_PosesAs(target, fmt=fmt,
+                                                                    nlink=nlink)))
+    assert census(scratch.tmp) == before, f"{op} changed a leaf posing {pose}"
+
+    assert_seam_lands(scratch, op, os_=PassThroughOs())
+
+
+# -- hole 2: the race window between the leaf's check and its open ------------------------
+
+@pytest.mark.parametrize("op", ["read", "read_bytes", "append", "lock"])
+@pytest.mark.parametrize("pose", sorted(p for p in POSES if p != "as_symlink"))
+def test_o2_o3_the_opened_leaf_is_rejudged_on_its_descriptor(scratch, pose, op):
+    """M1's change from today: the leaf is judged again on the descriptor it was opened as,
+    so what the pre-open check saw is not the last word. Here the pre-open `stat` answers
+    truthfully (a plain file) and only `fstat` of the opened leaf reports another kind: the
+    read is `(None, reason)`, and `append` and the lock (the modes that open the leaf itself)
+    raise that kind's row and write nothing. Control: unposed, the op lands."""
+    target = scratch.real_folders()
+    target.write_bytes(b"plain\n")
+    fmt, nlink = POSES[pose]
+    before = census(scratch.tmp)
+    posing = _PosesAs(target, fmt=fmt, nlink=nlink, on=("fstat",))
+    assert_seam_refused(op, pose, seam_op(scratch, op, os_=posing))
+    assert census(scratch.tmp) == before, f"{op} wrote into a leaf its descriptor called {pose}"
+
+    assert_seam_lands(scratch, op, os_=PassThroughOs())
+
+
+class _SwapsAfterCheck(PassThroughOs):
+    """Answers the leaf's pre-open no-follow `stat` (relative to its parent's descriptor)
+    truthfully, THEN runs `swap`, which replaces the leaf with a plant: the race window between
+    the check and the open, made deterministic. `swapped` says whether that check ran."""
+
+    def __init__(self, leaf: str, swap: Callable[[], None] | None) -> None:
+        self._leaf = leaf
+        self._swap = swap
+        self.swapped = False
+
+    def stat(self, path: Any, *a: Any, **kw: Any) -> os.stat_result:
+        try:
+            return os.stat(path, *a, **kw)
+        finally:
+            if (not self.swapped and kw.get("dir_fd") is not None
+                    and kw.get("follow_symlinks") is False and os.fspath(path) == self._leaf):
+                self.swapped = True
+                if self._swap is not None:
+                    self._swap()
+
+
+@pytest.mark.parametrize("op", ["append", "lock"])
+@pytest.mark.parametrize("swap", ["hardlink", "fifo", "symlink"])
+def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descriptor(
+        scratch, swap, op):
+    """M1: "a plant that slipped into the race window is refused on the descriptor, and ENXIO
+    from a reader-less FIFO folds into the non-plain row". The leaf passes its pre-open check
+    as a plain file and is then replaced, before the open, by a hard link to a host file (the
+    marked EMLINK: the host file's bytes and mtime unchanged), a FIFO (the unmarked ELOOP,
+    promptly: the open does not block), or a symlink to a host file (the marked ELOOP). The
+    plant is left in place. Control: the same pass-through with no swap lands."""
+    target = scratch.real_folders()
+    target.write_bytes(b"plain\n")
+    host_file = scratch.host / "host-file"
+    host_file.write_bytes(HOST_BYTES)
+
+    def plant_now() -> None:
+        target.unlink()
+        if swap == "hardlink":
+            os.link(host_file, target)
+        elif swap == "fifo":
+            os.mkfifo(target)
+        else:
+            target.symlink_to(host_file)
+
+    host_before = (host_file.read_bytes(), os.stat(host_file).st_mtime_ns)
+    racing = _SwapsAfterCheck(target.name, plant_now)
+    raised = raised_by(seam_op(scratch, op, os_=racing), fifo=target if swap == "fifo" else None)
+    assert racing.swapped, (
+        "no pre-open `os_.stat(<leaf>, dir_fd=<parent>, follow_symlinks=False)` ran "
+        f"(the {op} raised {raised!r})")
+    assert_row(raised, swap, where=f"{op} into a {swap} swapped in after the check")
+    assert (host_file.read_bytes(), os.stat(host_file).st_mtime_ns) == host_before, (
+        f"the {op} went through the swapped-in {swap} into the host file")
+    kind = stat.S_IFMT(os.lstat(target).st_mode)
+    assert kind == {"hardlink": stat.S_IFREG, "fifo": stat.S_IFIFO, "symlink": stat.S_IFLNK}[swap]
+
+    target.unlink()
+    target.write_bytes(b"plain\n")
+    control = _SwapsAfterCheck(target.name, None)
+    assert_seam_lands(scratch, op, os_=control)
+    assert control.swapped, "control: the pre-open check did not run"
+
+
+# -- hole 3: create's DEFAULT lane --------------------------------------------------------
+
+class _RecordsCreate(PassThroughOs):
+    """Records every `link`, with whether the record's name already existed at that moment
+    (a real `lstat`, before delegating), and every `open` of the record's name that carried
+    `O_CREAT`."""
+
+    def __init__(self, target: Path) -> None:
+        self._target = target
+        self.links: list[dict[str, Any]] = []
+        self.creating_opens: list[tuple[str, int]] = []
+
+    def link(self, src: Any, dst: Any, *a: Any, **kw: Any) -> None:
+        self.links.append({
+            "src": os.fspath(src), "dst": os.fspath(dst), "dst_dir_fd": kw.get("dst_dir_fd"),
+            "follow_symlinks": kw.get("follow_symlinks", True),
+            "name_existed": os.path.lexists(self._target)})
+        return os.link(src, dst, *a, **kw)
+
+    def open(self, path: Any, flags: int, *a: Any, **kw: Any) -> int:
+        if os.path.basename(os.fspath(path)) == self._target.name and flags & os.O_CREAT:
+            self.creating_opens.append((os.fspath(path), flags))
+        return os.open(path, flags, *a, **kw)
+
+
+def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_opens_the_name(
+        scratch):
+    """The addendum: "a reader sees the name either absent or complete, and the file never
+    has two names", for the DEFAULT `open_unnamed` (every production write-once record takes
+    it). The record's name comes into being in one `link` from a `/proc/self/fd/` source,
+    relative to the parent's descriptor, at a moment it did not exist; the name itself is never
+    opened with `O_CREAT` (a named create would expose it empty while the body is written).
+    The record lands whole, single-linked, 0644."""
+    target = scratch.real_folders()
+    recorder = _RecordsCreate(target)
+    _io.rooted_write(scratch.root, DEEP, "body\n", mode="create", os_=recorder)
+
+    assert recorder.creating_opens == [], (
+        f"the default create opened the record's name with O_CREAT: {recorder.creating_opens}")
+    assert len(recorder.links) == 1, f"not one link names the record: {recorder.links}"
+    (link,) = recorder.links
+    assert link["src"].startswith("/proc/self/fd/"), f"not an unnamed file's link: {link}"
+    assert link["dst"] == target.name, link
+    assert link["dst_dir_fd"] is not None, f"not linked relative to the parent: {link}"
+    assert link["follow_symlinks"] is True, link
+    assert link["name_existed"] is False, "the name existed before its one link"
+    assert target.read_text(encoding="utf-8") == "body\n"
+    _assert_single_plain_0644(target)
+
+
+#: A child looping over the handle's production write-once write (run setup's alert), each in
+#: a fresh run dir, until it is killed.
+_ALERT_CRASH_CHILD = r"""
+import os, sys
+from pathlib import Path
+from defender._run_handle import Run
+root = Path(sys.argv[1])
+body = b"A" * (int(sys.argv[2]) - 1) + b"\n"
+print("ready", flush=True)
+i = 0
+while True:
+    run_id = f"r{i}"
+    os.mkdir(root / run_id)
+    Run.under(root, run_id).facts.alert.write(body)
+    i += 1
+"""
+
+#: The odds, measured before authoring with this loop's shape: against an exploit-shaped
+#: lane (a named `O_CREAT|O_EXCL` open of `alert.json`, then the write), 7 of 16 kills left a
+#: torn alert at 1 MiB, so 16 kills all missing one has odds near (9/16)**16, about 1e-4. The
+#: real lane left none. It is a probabilistic backstop through the handle; the deterministic
+#: pin is the `os_` test above.
+ALERT_BODY_BYTES = 1 << 20
+ALERT_KILLS = 16
+
+
+def _alert_leftovers(root: Path, body: bytes) -> tuple[list[str], int]:
+    """Every run dir the killed child made holds nothing, or one whole single-named alert."""
+    bad: list[str] = []
+    whole = 0
+    for d in sorted(root.iterdir()):
+        names = sorted(os.listdir(d))
+        if names not in ([], [RUN_LAYOUT.alert.name]):
+            bad.append(f"{d.name}: stray entries {names}")
+            continue
+        if not names:
+            continue
+        alert = d / RUN_LAYOUT.alert.name
+        st = os.lstat(alert)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            bad.append(f"{d.name}: the alert is not one plain name ({st})")
+        elif alert.read_bytes() != body:
+            bad.append(f"{d.name}: a torn alert of {st.st_size} bytes")
+        else:
+            whole += 1
+    return bad, whole
+
+
+def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_path):
+    """The addendum's complete-or-absent guarantee through the handle's production write-once
+    write, `run.facts.alert.write(...)`, where no `os_` can be injected: a real SIGKILL of a
+    child looping over it in fresh run dirs leaves every run dir with no alert or the whole
+    alert, one name, nothing else beside it. Non-vacuity: the child did write whole alerts."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{S.REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
+    body = b"A" * (ALERT_BODY_BYTES - 1) + b"\n"
+    torn: list[str] = []
+    whole = 0
+    for kill in range(ALERT_KILLS):
+        root = tmp_path / f"kill-{kill}"
+        root.mkdir()
+        child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
+            [sys.executable, "-c", _ALERT_CRASH_CHILD, str(root), str(ALERT_BODY_BYTES)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert child.stdout is not None
+            assert child.stderr is not None
+            assert child.stdout.readline().strip() == "ready", child.stderr.read()
+            time.sleep(random.uniform(0.02, 0.15))
+            if child.poll() is not None:
+                pytest.fail(f"the alert-writing child died on its own: {child.stderr.read()}")
+            child.send_signal(signal.SIGKILL)
+        finally:
+            child.wait(timeout=30)
+            for stream in (child.stdout, child.stderr):
+                if stream is not None:
+                    stream.close()
+        bad, landed = _alert_leftovers(root, body)
+        torn += [f"kill {kill}: {b}" for b in bad]
+        whole += landed
+    assert torn == [], "a kill left a torn or stray alert:\n" + "\n".join(torn)
+    assert whole > 0, "the child wrote no whole alert, so the kills observed nothing"
