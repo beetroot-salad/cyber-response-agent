@@ -173,6 +173,15 @@ def call_args_too_deep(args: Any) -> bool:
     return isinstance(args, Mapping) and any(params_too_deep(v) for v in args.values())
 
 
+def row_reads_back(row: dict) -> bool:
+    """Would this row, once written, be read back by its table's reader?
+
+    The reader's own predicate on the encoded line, so a writer asking this cannot disagree
+    with `lead_rows` or the branch ledger's reader. Shared by the two tables that store params:
+    `append_query_row` and `Ledger.record` each refuse a row this says no to."""
+    return parse_jsonl_row(json.dumps(row)) is not None
+
+
 def _json_safe_params(value: Any) -> Any:
     # Text for a non-finite float: the record is what a reader diagnoses a query from, and a
     # `threshold` of infinity is not a missing one. The same rule `_request_key` keys by.
@@ -296,7 +305,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
         )
     # A row its own reader skips would drop out of every count and hand its seq to the next row.
-    if parse_jsonl_row(json.dumps(row)) is None:
+    if not row_reads_back(row):
         raise RuntimeError(
             f"internal: append_query_row refused a row for {lead_id} seq {seq} that the "
             f"table's reader could not read back (params nested past {PARAMS_NESTING_LIMIT})"

@@ -22,13 +22,14 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
-from defender._io import append_jsonl, parse_jsonl_row, read_jsonl_rows
+from defender._io import append_jsonl, read_jsonl_rows
 from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import (
     PARAMS_NESTING_LIMIT,
     _json_safe_params,
     _request_key,
+    row_reads_back,
 )
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
@@ -352,7 +353,7 @@ class Ledger:
         # A row this table's reader skips would be an answer served with no record behind it.
         # `LedgerError`, not `RuntimeError`: `_served` re-raises the table's own refusal, where
         # any other exception would be re-filed as a FAULT row carrying the same params.
-        if parse_jsonl_row(json.dumps(row)) is None:
+        if not row_reads_back(row):
             raise LedgerError(
                 f"{call.system}.{call.verb} was not recorded: its row could not be read back "
                 f"(params nested past {PARAMS_NESTING_LIMIT})")
