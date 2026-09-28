@@ -1,0 +1,513 @@
+"""#1127 end to end — a `query` call whose params nest past the limit is a counted rejection.
+
+The query tool is the one place a MODEL authors the params the queries table stores. Driven on
+this base (the issue's C1/C3/C12/C13, re-measured through this harness):
+
+* params nested 100+ deep (the map counted) are written as a row its own reader skips, so the
+  lead's rejection budget and both repeat guards — which read `lead_rows` — never see them. A
+  model, or alert text steering it, can be rejected forever by nesting deep (C3);
+* from about 600 levels `_rejection_guard`'s key recurses out of the rejection handler and the
+  RUN dies with `RecursionError` (C12);
+* the next row reuses the unreadable row's seq and overwrites its payload sidecar (C13);
+* a deep call pydantic accepts reaches the verb, and a deep call to a withheld verb is audited
+  as a policy denial with an unreadable `∅.denied` row;
+* the model is handed pydantic's own error, which echoes the whole argument body.
+
+The design (issue #1127, M2): `QueryCapture.wrap_tool_validate` treats a too-deep call as an
+argument-schema rejection whether or not pydantic refused it — judged on the BYTES when the
+arguments arrive as text (`_io.json_nesting_depth`), on the value (`params_too_deep`) when they
+arrive as a dict — stores its params as `{}` BEFORE `_rejection_guard`, and answers with a fixed
+host sentence naming the limit. `_execute` never runs.
+
+Everything between the two replay models is production code (dispatch, the query tool, its
+validate hook, both guards, the queries table, the denial stream, the session store). Fakes
+enter only at the harness's `verbs=` seam. The depths are chosen for the three regimes the
+design names and each arm asserts its own regime as a precondition, because where pydantic and
+`json.loads` stop depends on their parsers and on the stack:
+
+* ACCEPTED (150) — pydantic's JSON parser accepts it; the call would run;
+* REFUSED (300) — pydantic refuses it (`json_invalid`, a fixed parser bound near 200) but
+  `json.loads` decodes it, so the host can still read who sent it;
+* RECURSION (680) — as REFUSED, and past where C12's key recursion killed the run;
+* UNDECODABLE (5000) — `json.loads` itself cannot decode it, so only the byte scan knows.
+
+Dict arguments are driven at ACCEPTED only: the harness's own serialization of a model
+response refuses a dict nested ~250 deep before the tool sees it, and a real provider sends
+text anyway.
+
+RED today at every regime except UNDECODABLE's counting arms, which already write a readable
+`{}` row (the arguments decode to nothing) and are kept as the controls the change must not
+break. The UNDECODABLE model-text arm is red: pydantic's echo carries the body.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Any
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from pydantic import TypeAdapter, ValidationError  # noqa: E402
+
+from defender._io import (  # noqa: E402
+    JSON_NESTING_LIMIT,
+    json_nesting_depth,
+    parse_jsonl_row,
+    read_jsonl_rows,
+)
+from defender._run_paths import RunPaths  # noqa: E402
+from defender.runtime import session_store  # noqa: E402
+from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+from defender.tests._verb_authorization_632 import (  # noqa: E402
+    DONE,
+    LEAD,
+    ScopedFakeVerbs,
+    evidence_snapshot,
+    grant_of,
+    q,
+    run_gather,
+)
+from defender.tests.e2e._replay_harness import Turn, VerbRecorder  # noqa: E402
+from defender.tests.e2e.test_1015_rejection_budget import (  # noqa: E402
+    _assert_budget_stop,
+    _terminator,
+)
+from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
+    _above_guard,
+    _bad_args,
+    _dead_end,
+)
+from defender.tests.e2e.test_repeat_breaker_807 import _replay_rejections  # noqa: E402
+
+pytestmark = pytest.mark.e2e
+
+B = rq.REJECTION_BUDGET
+
+#: The deepest params map a readable row carries (the map counted as 1): the reader's bound
+#: less the row's own level.
+LIMIT = JSON_NESTING_LIMIT - 1
+
+ACCEPTED = 150
+REFUSED = 300
+RECURSION = 680
+UNDECODABLE = 5000
+
+#: Distinctive, digit-free strings placed inside the deep params: one as a KEY in the deep part,
+#: one as the VALUE of the shallow `native_query`. Digit-free so a search for the limit's own
+#: number can never be satisfied by one of them.
+SENTINEL_KEY = "ZqNestCanaryKey"
+SENTINEL_VALUE = "ZqNestCanaryValue"
+
+#: The valid call a lead makes when nothing stopped it.
+VALID = {"native_query": "FROM logs"}
+
+
+# ── the calls ──────────────────────────────────────────────────────────────────────────────
+
+
+def _chain(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = {"k": value}
+    return value
+
+
+def _chain_text(depth: int) -> str:
+    """`_chain(depth)` as JSON text, built as a STRING: `json.dumps` cannot spell the deepest
+    regime at all, and that regime is the point."""
+    return '{"k":' * depth + '"leaf"' + "}" * depth
+
+
+def deep_params(depth: int) -> dict:
+    """Params nested `depth` deep with the map itself counted, carrying both sentinels. The
+    deep part rides under `filt`, a param the fake verb DECLARES as a dict, so a call pydantic
+    accepts is otherwise a valid call — today it runs."""
+    return {"filt": {SENTINEL_KEY: _chain(depth - 2)}, "native_query": SENTINEL_VALUE}
+
+
+def deep_params_text(depth: int) -> str:
+    return (f'{{"filt": {{"{SENTINEL_KEY}": {_chain_text(depth - 2)}}}, '
+            f'"native_query": "{SENTINEL_VALUE}"}}')
+
+
+def deep_args_text(system: str, verb: str, depth: int) -> str:
+    """The whole argument body as a provider sends it. `params` first, so an echo of the input
+    shows the params before anything a truncation could cut."""
+    return (f'{{"params": {deep_params_text(depth)}, "system": {json.dumps(system)}, '
+            f'"verb": {json.dumps(verb)}}}')
+
+
+@dataclass(frozen=True)
+class Shape:
+    """One way a too-deep call arrives: as a dict or as text, at one of the four regimes."""
+
+    name: str
+    form: str
+    depth: int
+
+
+DICT_ACCEPTED = Shape("dict-accepted", "dict", ACCEPTED)
+TEXT_ACCEPTED = Shape("text-accepted", "text", ACCEPTED)
+TEXT_REFUSED = Shape("text-refused", "text", REFUSED)
+TEXT_RECURSION = Shape("text-recursion", "text", RECURSION)
+TEXT_UNDECODABLE = Shape("text-undecodable", "text", UNDECODABLE)
+
+EVERY_SHAPE = [DICT_ACCEPTED, TEXT_ACCEPTED, TEXT_REFUSED, TEXT_RECURSION, TEXT_UNDECODABLE]
+
+
+def deep_call(shape: Shape, *, system: str = "elastic", verb: str = "query") -> Turn:
+    if shape.form == "dict":
+        args: Any = {"params": deep_params(shape.depth), "system": system, "verb": verb}
+    else:
+        args = deep_args_text(system, verb, shape.depth)
+    return Turn(tool_calls=[("query", args)])
+
+
+_ARGS = TypeAdapter(dict[str, Any])
+
+
+def assert_regime(shape: Shape) -> None:
+    """The precondition every arm states for its own shape: the bytes are exactly as deep as
+    claimed, and pydantic and `json.loads` stop where the regime says they do — asserted in
+    THIS process, since both limits are the parser's and the stack's, not the design's."""
+    text = deep_args_text("elastic", "query", shape.depth)
+    assert json_nesting_depth(text) == shape.depth + 1, "the builder's depth arithmetic moved"
+    if shape.depth <= ACCEPTED:
+        _ARGS.validate_json(text)
+        assert json.loads(text)["params"] == deep_params(shape.depth), \
+            "the dict and text forms of one shape are not the same call"
+        return
+    with pytest.raises(ValidationError):
+        _ARGS.validate_json(text)
+    if shape.depth < UNDECODABLE:
+        assert json.loads(text)["system"] == "elastic"
+    else:
+        with pytest.raises(RecursionError):
+            json.loads(text)
+
+
+# ── the estate ─────────────────────────────────────────────────────────────────────────────
+
+
+def registry(rec: VerbRecorder) -> ScopedFakeVerbs:
+    """`elastic` declaring two verbs with a dict-typed `filt`, only `query` granted — so
+    `esql` is DECLARED AND WITHHELD (a denial). Each verb records what it was handed and
+    answers with the query it was asked, so two calls' payload sidecars never share bytes."""
+
+    def query(ctx: VerbContext, *, native_query: str, filt: dict | None = None) -> list[dict]:
+        rec.record("query", ctx, {"native_query": native_query, "filt": filt})
+        return [{"answered": native_query, "call": len(rec.calls)}]
+
+    def esql(ctx: VerbContext, *, native_query: str, filt: dict | None = None) -> list[dict]:
+        rec.record("esql", ctx, {"native_query": native_query, "filt": filt})
+        return [{"answered": native_query, "call": len(rec.calls)}]
+
+    return ScopedFakeVerbs({"elastic": {"query": query, "esql": esql}},
+                           grant_of("gather", [("elastic", "query")]))
+
+
+def drive(tmp_path, name: str, turns: list[Turn], *, watch: bool = False):
+    rec = VerbRecorder()
+    r = run_gather(tmp_path / name, verbs=registry(rec), turns=turns,
+                   run_id=f"d1127-{name}", watch=watch)
+    return r, rec
+
+
+# ── observations ───────────────────────────────────────────────────────────────────────────
+
+
+def raw_lines(r) -> list[str]:
+    """The queries table's physical lines — every one, including those its reader skips."""
+    table = RunPaths(r.run_dir).executed_queries
+    if not table.is_file():
+        return []
+    return [line for line in table.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def unreadable(r) -> list[str]:
+    return [line[:120] for line in raw_lines(r) if parse_jsonl_row(line) is None]
+
+
+def own_raw_lines(r) -> list[str]:
+    needle = f'"lead_id": {json.dumps(LEAD)}'
+    return [line for line in raw_lines(r) if needle in line]
+
+
+def retry_texts(r) -> list[str]:
+    """What each gather call's answer added to the model's context, one entry per call: the
+    delta between consecutive flattened request histories. A retry prompt or a tool result
+    lands here; the model's own call arguments never do (they carry no `content`)."""
+    seen = r.gather.seen
+    for earlier, later in zip(seen, seen[1:], strict=False):
+        assert later.startswith(earlier), "the model's history is not append-only"
+    return [later[len(earlier):] for earlier, later in zip(seen, seen[1:], strict=False)]
+
+
+def denied_verbs(r) -> list[str]:
+    path = RunPaths(r.run_dir).policy_denials
+    return [rec.get("verb") for rec in read_jsonl_rows(path)] if path.is_file() else []
+
+
+def names_the_limit(text: str) -> bool:
+    from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT
+
+    return re.search(rf"(?<!\d){PARAMS_NESTING_LIMIT}(?!\d)", text) is not None
+
+
+def model_text_in(text: str) -> list[str]:
+    """Every fragment of the call's own arguments, or of pydantic's rendering of them, that
+    `text` carries."""
+    fragments = (SENTINEL_KEY, SENTINEL_VALUE, "input_value", "'input'", "'loc'", "type=",
+                 '{"k"', "{'k'")
+    return [f for f in fragments if f in text]
+
+
+# ── O1 / O3 / C12: every too-deep call leaves exactly one readable, counted row ────────────
+
+
+@pytest.mark.parametrize("shape", EVERY_SHAPE, ids=lambda s: s.name)
+def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tmp_path, shape):
+    """O1 and O3's "any deep call leaving no row": the call leaves exactly ONE row, its reader
+    reads it, it is in the rejection domain both guards count, and its params are `{}` — the
+    value the guard keyed on (so the repeat identity and the stored one are the same `{}`).
+
+    At RECURSION today the run itself dies with `RecursionError` out of the rejection handler
+    (C12); at ACCEPTED/REFUSED the row is written and never read again. UNDECODABLE already
+    holds today — the arguments decode to nothing — and must keep holding."""
+    assert_regime(shape)
+    r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
+
+    assert unreadable(r) == [], "the run wrote a line its own reader skips"
+    rows = r.own_rows
+    assert len(rows) == 1, f"the deep call left {len(rows)} readable rows, not one"
+    row = rows[0]
+    assert rq.in_rejection_domain(row), \
+        f"the deep call's row is outside the rejection domain: {row['query_id']!r}, " \
+        f"{row['error_class']!r} — neither guard counts it"
+    assert row["params"] == {}
+    assert len(own_raw_lines(r)) == 1
+    assert rec.calls == [], "a too-deep call reached the verb"
+
+
+# ── O2: a too-deep call never runs ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED], ids=lambda s: s.name)
+def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape):
+    """O2, at the only regime where it can fail: pydantic ACCEPTS the arguments and the call
+    is otherwise valid (`filt` is a declared dict param), so today the verb runs with them.
+
+    Paired on the same lead: a shallow call through the same verb and the same declared param
+    does run, and the verb receives exactly the params the model sent."""
+    assert_regime(shape)
+    shallow = {"native_query": "FROM logs", "filt": {"a": 1}}
+    r, rec = drive(tmp_path, shape.name, [
+        deep_call(shape), q("elastic", "query", shallow), DONE])
+
+    assert [(c.verb, c.params) for c in rec.calls] == [("query", shallow)], \
+        "the verb was called for the too-deep call, or not for the shallow one"
+    assert [row["query_id"] for row in r.own_rows] == [rq.ABOVE_GUARD_QUERY_ID, "elastic.query"]
+
+
+@pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED], ids=lambda s: s.name)
+def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(tmp_path, shape):
+    """C11 and the design's non-obligation: schema validation already runs before the grant
+    check, and a too-deep call is refused AT validation — so a deep call to a verb the grant
+    withholds is a counted schema rejection, with no policy-denial record and no `∅.denied`
+    row. Today pydantic accepts it, the grant check denies it, and both are written (the row
+    unreadable).
+
+    Paired on the same lead: a shallow call to the same withheld verb IS a denial — one audit
+    record and one `∅.denied` row — so the absences below are about depth, not about a denial
+    path that stopped firing."""
+    assert_regime(shape)
+    r, rec = drive(tmp_path, shape.name, [
+        q("elastic", "esql", VALID), deep_call(shape, verb="esql"), DONE])
+
+    assert denied_verbs(r).count("esql") == 1, \
+        f"expected the shallow call's one denial record, got {denied_verbs(r)}"
+    denied_needle = f'"query_id": {json.dumps(rq.DENIED_QUERY_ID)}'
+    assert sum(denied_needle in line for line in own_raw_lines(r)) == 1, \
+        "the deep call wrote a `∅.denied` row (or the shallow one did not)"
+    rejections = _above_guard(r)
+    assert [(row["system"], row["verb"], row["params"]) for row in rejections] == [
+        ("elastic", "esql", {})], "the deep call was not recorded as a schema rejection"
+    assert rec.calls == [], "a withheld verb ran"
+
+
+# ── O4: the model is told why, and nothing it sent comes back ──────────────────────────────
+
+
+@pytest.mark.parametrize("shape", EVERY_SHAPE, ids=lambda s: s.name)
+def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape):
+    """O4: the answer to a too-deep call is a fixed host sentence naming the limit — no
+    `input_value`, no `loc`, no `type=`, no fragment of the params. Pydantic's own error, which
+    is what the model is handed today whenever pydantic refused, echoes the whole body.
+
+    The row is held to the same line: its params are `{}` and nothing the model sent is on it.
+    Paired on the same lead: a SHALLOW call carrying the same sentinel keeps it — the table
+    stores a normal call's params verbatim, so the absence on the deep row is the refusal's
+    doing, not a table that never held model text."""
+    assert_regime(shape)
+    r, _rec = drive(tmp_path, shape.name, [
+        q("elastic", "query", {"native_query": SENTINEL_VALUE}), deep_call(shape), DONE])
+
+    answers = retry_texts(r)
+    assert len(answers) == 2, "the lead did not make exactly the two scripted calls"
+    told = answers[1]
+    assert told.strip(), "the model was told nothing about its too-deep call"
+    assert model_text_in(told) == [], \
+        f"the answer to a too-deep call carries model text or pydantic's rendering: {told[:300]!r}"
+
+    rows = r.own_rows
+    assert len(rows) == 2, "the deep call's row was not read back"
+    assert rows[0]["params"] == {"native_query": SENTINEL_VALUE}, \
+        "the shallow call's params were not stored verbatim, so the negative below is vacuous"
+    deep_row = json.dumps(rows[1], ensure_ascii=False)
+    assert rows[1]["params"] == {}
+    for sentinel in (SENTINEL_KEY, SENTINEL_VALUE):
+        assert sentinel not in deep_row, \
+            f"the deep call's row carries a fragment of its params: {deep_row[:300]}"
+
+    assert names_the_limit(told), f"the answer does not name the limit: {told[:300]!r}"
+
+
+def test_every_too_deep_call_is_answered_with_the_same_sentence(tmp_path):
+    """O4's "fixed": one host sentence, whatever the regime and whatever the call named. Five
+    distinct too-deep calls on one lead — each keys differently, so neither guard fires below
+    the budget — must each be answered with the same text. A sentence that varied with the
+    call would be carrying the call."""
+    verbs = ["query", "esql", "alerts", "health-check", "list"]
+    turns = [deep_call(shape, verb=verb) for shape, verb in zip(EVERY_SHAPE, verbs, strict=True)]
+    r, rec = drive(tmp_path, "fixed", [*turns, DONE])
+
+    answers = retry_texts(r)
+    assert len(answers) == len(EVERY_SHAPE)
+    assert len(set(answers)) == 1, \
+        "the too-deep calls were answered differently: " + " | ".join(a[:80] for a in answers)
+    assert model_text_in(answers[0]) == []
+    assert names_the_limit(answers[0])
+    assert rec.calls == []
+
+
+# ── O3 / security control: the rejection budget counts them at every depth ───────────────
+
+
+@pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED, TEXT_REFUSED],
+                         ids=lambda s: s.name)
+def test_a_budget_of_too_deep_calls_ends_the_lead_exactly_as_shallow_rejections_do(
+        tmp_path, shape):
+    """THE SECURITY CONTROL (the design's negative universal: no rejected call escapes the
+    lead's rejection count by the shape of its params). `REJECTION_BUDGET` too-deep calls,
+    each naming a different undeclared system so the repeat guard stays silent, end the lead
+    at the budget — and the SAME count of shallow schema rejections is the paired control,
+    held to the same oracle: the terminator, the budget phrase on the trip row, main's
+    summary, the replay's verdict, and the valid call after the stop never running.
+
+    Today the deep rows are unreadable, the budget never counts them, and the lead runs on."""
+    assert_regime(shape)
+    deep, deep_rec = drive(tmp_path, "deep", [
+        *[deep_call(shape, system=f"ghost{i}") for i in range(B)],
+        q("elastic", "query", VALID), DONE])
+    shallow, shallow_rec = drive(tmp_path, "shallow", [
+        *[_bad_args(f"ghost{i}") for i in range(B)],
+        q("elastic", "query", VALID), DONE])
+
+    for label, r, rec in (("shallow", shallow, shallow_rec), ("deep", deep, deep_rec)):
+        assert len(_above_guard(r)) == B, \
+            f"{label}: {len(_above_guard(r))} counted rejections against a budget of {B}"
+        _assert_budget_stop(r)
+        assert _replay_rejections(r.rows) == [(LEAD, B - 1, "budget")], \
+            f"{label}: the replay of the table disagrees"
+        assert rec.calls == [], f"{label}: the lead ran on past its dead end"
+
+    assert unreadable(deep) == []
+    assert [row["params"] for row in _above_guard(deep)] == [{}] * B
+    assert len({row["system_key"] for row in _above_guard(deep)}) == B, \
+        "the deep calls did not key distinctly, so the REPEAT guard could have taken this stop"
+
+
+def test_calls_too_deep_to_decode_still_count_toward_the_budget(tmp_path):
+    """The security control's third regime: arguments `json.loads` cannot decode at all. They
+    carry no readable system, verb or params, so every such call keys alike and three in a row
+    are the repeat guard's (the arm below); what this arm shows is that each one still COUNTS
+    toward the identity-blind budget. Two of them plus `B - 2` distinct shallow rejections end
+    the lead at the budget; the same `B - 2` shallow rejections alone do not.
+
+    Green today — the undecodable body already becomes a readable `{}` row — and pinned so the
+    byte scan that now routes it cannot drop its row."""
+    assert_regime(TEXT_UNDECODABLE)
+    shallow = [_bad_args(f"ghost{i}") for i in range(B - 2)]
+    mixed, mixed_rec = drive(tmp_path, "mixed", [
+        deep_call(TEXT_UNDECODABLE), deep_call(TEXT_UNDECODABLE), *shallow,
+        q("elastic", "query", VALID), DONE])
+    alone, alone_rec = drive(tmp_path, "alone", [*shallow, q("elastic", "query", VALID), DONE])
+
+    rows = _above_guard(mixed)
+    assert len(rows) == B
+    assert [row["params"] for row in rows[:2]] == [{}, {}]
+    _assert_budget_stop(mixed)
+    assert mixed_rec.calls == [], "the lead ran on past its dead end"
+
+    assert len(_above_guard(alone)) == B - 2
+    assert _terminator(alone) is None, "the control lead was stopped without the deep calls"
+    assert not _dead_end(alone)
+    assert [c.verb for c in alone_rec.calls] == ["query"], "the control lead's valid call never ran"
+
+
+@pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_REFUSED, TEXT_UNDECODABLE, None],
+                         ids=lambda s: s.name if s else "shallow-control")
+def test_repeating_one_too_deep_call_trips_the_repeat_guard(tmp_path, shape):
+    """O3's repeat half: the same too-deep call three times trips `rejection_trip`, exactly as
+    the same shallow schema rejection three times does (the `shallow-control` case, same
+    oracle). The stored `{}` is the guard's identity, so live and replayed counts agree.
+
+    Today at ACCEPTED the call runs three times; at REFUSED its rows are never read. At
+    UNDECODABLE it already trips — kept as a control."""
+    call = _bad_args("ghostone") if shape is None else deep_call(shape)
+    if shape is not None:
+        assert_regime(shape)
+    r, rec = drive(tmp_path, shape.name if shape else "shallow",
+                   [call] * rq.REPEAT_THRESHOLD + [q("elastic", "query", VALID), DONE])
+
+    rows = _above_guard(r)
+    assert len(rows) == rq.REPEAT_THRESHOLD
+    assert _terminator(r) == session_store.TRUNCATED_BY_DEAD_END
+    assert "turned back at seq" in rows[-1]["payload_digest"], \
+        "the lead was not stopped by the repeat guard"
+    assert _replay_rejections(r.rows) == [(LEAD, rq.REPEAT_THRESHOLD - 1, "repeat")]
+    assert rec.calls == [], "the lead ran on past its dead end"
+
+
+# ── C13: a too-deep call never costs another row its seq or its sidecar ────────────────────
+
+
+@pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_REFUSED], ids=lambda s: s.name)
+def test_a_too_deep_call_neither_reuses_a_seq_nor_rewrites_a_sidecar(tmp_path, shape):
+    """C13 through the tool: a valid call, the too-deep call, another valid call. Each row gets
+    its own seq, and no payload sidecar, once written, ever changes — watched at every model
+    request from inside the one run. Today the deep row is unreadable, so the third call is
+    handed its seq and overwrites its sidecar (the verb's answers differ, so the overwrite is
+    visible in the bytes)."""
+    assert_regime(shape)
+    r, rec = drive(tmp_path, shape.name, [
+        q("elastic", "query", {"native_query": "FROM a"}), deep_call(shape),
+        q("elastic", "query", {"native_query": "FROM b"}), DONE], watch=True)
+
+    assert [(row["seq"], row["query_id"]) for row in r.own_rows] == [
+        (0, "elastic.query"), (1, rq.ABOVE_GUARD_QUERY_ID), (2, "elastic.query")]
+    assert [c.params["native_query"] for c in rec.calls] == ["FROM a", "FROM b"]
+
+    prefix = f"gather_raw/{LEAD}/"
+    states = [*r.snapshots, evidence_snapshot(r.run_dir)]
+    for earlier, later in zip(states, states[1:], strict=False):
+        for name, content in earlier.items():
+            if name.startswith(prefix):
+                assert later.get(name) == content, f"payload sidecar {name} was rewritten"
+    final = states[-1]
+    assert "FROM a" in final[f"{prefix}0.json"].decode("utf-8")
+    assert "FROM b" in final[f"{prefix}2.json"].decode("utf-8")
