@@ -877,14 +877,22 @@ def test_the_docs_hits_idiom_is_literal_and_runs(doc):
     assert _rows(_HITS, runnable) == [{"user": "alice"}, {"user": "bob"}]
 
 
-# ---- `->>` binds looser than AND/OR/NOT --------------------------------------------------------
-# `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `v[1] ->> (('$' = 'x') AND v[2]) ->> …`, so
-# the hint's own filter form broke the moment a lead added a second condition, and duckdb answers
-# `Failed to cast value to numerical: "<value>"` — often a timestamp, so it read as a time
-# problem. 9 wasted calls in the gather runs surveyed by experiments/sql-time-contract (step 0).
+# ---- `->>` binds more loosely than the operators before it ---------------------------------------
+# `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `((v[1]->>'$') = 'x' AND v[2]) ->> '$' = 'y'`,
+# and `'x' = v[1]->>'$'` as `('x' = v[1]) ->> '$'`: the arrow takes everything written before it as
+# its JSON. duckdb then answers `Failed to cast value to numerical: "<value>"` (often a timestamp,
+# so it read as a time problem) or a silent, wrong count. The hint's own filter form broke the
+# moment a lead added a second condition; 10 calls in the gather runs surveyed by
+# experiments/sql-time-contract (step 0) were lost to it.
 
 _UNNESTED_VALUES = "FROM (SELECT unnest(values) v FROM data)"
 _HINT_FILTER = re.compile(r"unpack the JSON: `([^`]+)`")
+#: An ES|QL keyword column holding digits (a Windows event code): the value-first form is silently
+#: wrong here, where on the fixture's numeric column it happens to be right.
+_KEYWORD = json.dumps({
+    "columns": [{"name": "event.code", "type": "keyword"}, {"name": "n", "type": "long"}],
+    "values": [["4625", 1], ["4624", 2]], "row_count": 2,
+})
 
 
 def test_the_hint_filter_form_survives_a_second_condition(esql):
@@ -903,45 +911,96 @@ def test_the_hint_filter_form_survives_a_second_condition(esql):
     assert _rows(esql, count + f"NOT {where('203.0.113.7')}") == [{"n": 2}]
 
 
-def test_a_misbound_arrow_that_would_error_is_refused_with_its_fix(esql):
-    """duckdb would name only the symptom (`Failed to cast value to numerical`); the tool refuses
-    first and names the cause, and the same query parenthesised runs and selects."""
+def test_a_misbound_arrow_is_refused_with_its_cause_its_fix_and_the_payloads_positions(esql):
+    """duckdb would name only the symptom (`Failed to cast value to numerical`). The tool refuses
+    first, names the cause and the fix, keeps the positional map the lead needs to write it, and
+    the same query parenthesised runs and selects."""
     unwrapped = "v[1]->>'$' = '412' AND v[2]->>'$' = '203.0.113.7'"
     proc = _sql(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {unwrapped}")
     assert_query_error(proc, "the unparenthesised AND was not refused")
-    assert "binds looser than AND/OR/NOT" in proc.stderr, proc.stderr
-    assert "Parenthesise each one" in proc.stderr, proc.stderr
+    assert "binds more loosely than" in proc.stderr, proc.stderr
+    assert "Parenthesise every `->>`" in proc.stderr, proc.stderr
+    assert _positions(json.loads(esql)) in _hint(proc)
     wrapped = "(v[1]->>'$') = '412' AND (v[2]->>'$') = '203.0.113.7'"
     assert _rows(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {wrapped}") == [{"n": 1}]
 
 
-@pytest.mark.parametrize("where", [
-    "v[2]->>'$' = '203.0.113.7' AND v[1]->>'$' = '412'",
-    "v[2]->>'$' = '203.0.113.7' OR v[1]->>'$' = '3'",
-    "row_count = 3 AND v[1]->>'$' = '412'",
-    "NOT v[1]->>'$' = '412'",
+@pytest.mark.parametrize(("payload", "where", "truth"), [
+    ("esql", "v[2]->>'$' = '203.0.113.7' AND v[1]->>'$' = '412'", 1),
+    ("esql", "v[2]->>'$' = '203.0.113.7' OR v[1]->>'$' = '3'", 2),
+    ("esql", "row_count = 3 AND v[1]->>'$' = '412'", 1),
+    ("esql", "NOT v[1]->>'$' = '412'", 2),
+    ("keyword", "'4625' = v[1]->>'$'", 1),
+    ("keyword", "'4625' <> v[1]->>'$'", 1),
 ])
-def test_a_misbound_arrow_that_would_answer_a_silent_zero_is_refused(esql, where):
-    """The other orders of the same mistake do not error in duckdb: they answer a confident,
-    wrong count — 0 where the parenthesised query finds the row. Refused, not run."""
-    assert_query_error(_sql(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {where}"),
+def test_a_misbound_arrow_that_would_answer_a_silent_wrong_count_is_refused(
+        esql, payload, where, truth):
+    """These do not error in duckdb: they answer a confident, wrong count. Refused, not run; the
+    same filter with every arrow parenthesised gives the truth."""
+    data = esql if payload == "esql" else _KEYWORD
+    assert_query_error(_sql(data, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {where}"),
                        "a misbound arrow ran")
     wrapped = re.sub(r"(v\[\d\]->>'\$')", r"(\1)", where)
-    assert _rows(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {wrapped}") \
-        != [{"n": 0}], "the parenthesised query should find the row the misbound one hid"
+    assert _rows(data, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {wrapped}") \
+        == [{"n": truth}]
 
 
-def test_a_json_arrow_on_a_real_json_value_is_not_refused(esql):
-    """The refusal keys on a true/false SOURCE for the arrow, not on the arrow: the doc's own
-    projection, a single-condition filter and an arrow inside a parenthesised comparison run."""
+@pytest.mark.parametrize("statement", [
+    "CREATE TEMP TABLE r AS SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) "
+    "WHERE v[2]->>'$' = '203.0.113.7' AND v[1]->>'$' = '412'; SELECT * FROM r",
+    "PIVOT (SELECT v[1]->>'$' = '412' AND v[2]->>'$' = 'x' AS k FROM (SELECT unnest(values) v "
+    "FROM data)) ON k USING count(*)",
+])
+def test_an_arrow_the_parse_cannot_show_is_refused(esql, statement):
+    """duckdb describes only SELECT statements; anything else holding an arrow cannot be checked,
+    so it is refused rather than run unchecked."""
+    proc = _sql(esql, statement)
+    assert_query_error(proc, "an unchecked statement with an arrow ran")
+    assert "single SELECT" in proc.stderr, proc.stderr
+
+
+def test_a_syntax_error_near_an_arrow_gets_duckdbs_own_message(esql):
+    """A query duckdb cannot parse has no tree to check either; its own parser error, which names
+    the spot, is what the lead needs — not the uncheckable-statement refusal."""
+    proc = _sql(esql, 'SELECT data->>"$.[\\"@timestamp\\"]" FROM data')
+    assert_query_error(proc, "a syntax error was not reported")
+    assert "syntax error" in proc.stderr, proc.stderr
+    assert "single SELECT" not in proc.stderr, proc.stderr
+
+
+def test_a_json_arrow_on_a_json_source_is_not_refused(esql):
+    """The refusal keys on the arrow's SOURCE. The doc's projection, a single-condition filter
+    with the arrow first, IN, an arrow chained on an arrow, a CAST — the escape the refusal names
+    for an expression meant as the JSON — and statements with no arrow at all run."""
     for query in (f"SELECT v[2]->>'$' AS ip {_UNNESTED_VALUES}",
                   f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE v[2]->>'$' = '203.0.113.7'",
                   f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE v[2]->>'$' IN ('203.0.113.7')",
-                  f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE '412' = v[1]->>'$'",
-                  # the arrow comes first and the AND after it, so this one parses as written
                   f"SELECT count(*) AS n {_UNNESTED_VALUES}, data "
-                  "WHERE v[2]->>'$' = '203.0.113.7' AND row_count = 3"):
-        assert _sql(esql, query).returncode == EXIT_OK, query
+                  "WHERE v[2]->>'$' = '203.0.113.7' AND row_count = 3",
+                  f"SELECT CAST('{{\"a\": ' || (v[1]->>'$') || '}}' AS JSON)->>'a' AS a {_UNNESTED_VALUES}",
+                  "SELECT to_json(columns[1])->>'name' AS c FROM data",
+                  "SELECT to_json(columns[1])->>'$'->>'name' AS c FROM data",
+                  """SELECT j->>'a' AS a FROM (SELECT '{"a": 1}'::JSON AS j)""",
+                  """SELECT '{"a": 1}'->>'a' AS a""",
+                  """SELECT (SELECT '{"a": 1}'::JSON)->>'a' AS a""",
+                  """SELECT CASE WHEN true THEN '{"a": 1}'::JSON END->>'a' AS a""",
+                  """SELECT coalesce(NULL, '{"a": 1}'::JSON)->>'a' AS a""",
+                  """SELECT '{"a": {"b": 1}}'::JSON->'a'->>'b' AS b""",
+                  "DESCRIBE data",
+                  "SUMMARIZE data"):
+        proc = _sql(esql, query)
+        assert proc.returncode == EXIT_OK, (query, proc.stderr)
+
+
+def test_an_operator_expression_meant_as_the_json_is_refused_and_its_cast_runs(esql):
+    """The parse keeps no parentheses, so `('{' || x || '}')->>'a'` reads exactly like a misbound
+    `'{' || x || '}'->>'a'`; it is refused, and the CAST the refusal names runs."""
+    concat = "'{\"a\": ' || (v[1]->>'$') || '}'"
+    proc = _sql(esql, f"SELECT ({concat})->>'a' AS a {_UNNESTED_VALUES}")
+    assert_query_error(proc, "an operator expression as an arrow's source ran")
+    assert "CAST(<expression> AS JSON)" in proc.stderr, proc.stderr
+    assert _rows(esql, f"SELECT CAST({concat} AS JSON)->>'a' AS a {_UNNESTED_VALUES}") == [
+        {"a": "412"}, {"a": "9"}, {"a": "3"}]
 
 
 def test_the_docs_combined_filter_is_literal_and_runs(doc, esql):
@@ -949,5 +1008,5 @@ def test_the_docs_combined_filter_is_literal_and_runs(doc, esql):
     example = ("SELECT v[1]->>'$' FROM (SELECT unnest(values) v FROM data) "
                "WHERE (v[2]->>'$') = '203.0.113.7' AND (v[1]->>'$')::BIGINT > 9")
     assert example in doc, "the doc's combined ES|QL filter changed"
-    assert "binds looser than" in doc, "the doc dropped WHY the parentheses are needed"
+    assert "binds more loosely than" in doc, "the doc dropped WHY the parentheses are needed"
     assert [list(r.values()) for r in _rows(esql, example)] == [["412"]]

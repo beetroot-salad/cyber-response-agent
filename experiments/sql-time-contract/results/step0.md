@@ -229,13 +229,21 @@ cost of one extra call. It happens because ES|QL `values` are JSON text, which i
 | OTHER-TIME | 21 (11 material, 10 minor) | n/a | 18 deepseek, 3 glm-flash, 0 kimi. 12 of 21 rest on `query` payloads only, with no SQL output involved. |
 
 **Wasted SQL calls that are not time handling** (for scale):
-- **9 `->>` precedence errors**: #41, #54, #55, #56, #65, #67, #80, #94, #96. DuckDB binds `->>`
-  looser than `AND`/`OR`/`IN`/`LIKE`. `EXPLAIN` of `v[4]->>'$' > 'a' AND v[4]->>'$' < 'b'` shows
+- **10 misbound `->>` calls**: the 9 that failed with its signature error, #41, #54, #55, #56,
+  #65, #67, #80, #94, #96, plus one (ds-flash-F1-t4 `l-007`, seq 155) that carried the same
+  misbinding but failed first on a GROUP BY error. DuckDB's `->>` takes everything written before
+  it as its JSON: every operator to its left, `=`/`<>`/`AND`/`OR`/`NOT`/`||`, binds tighter.
+  `IN` and `LIKE` written *after* it bind correctly. (Corrected after review of PR #1132; this
+  line first said "looser than `AND`/`OR`/`IN`/`LIKE`" and counted 9.) `EXPLAIN` of
+  `v[4]->>'$' > 'a' AND v[4]->>'$' < 'b'` shows
   `CAST(((v[4]->>'$') > 'a') AND CAST(v[4] AS BOOLEAN)) AS JSON) ->> '$' < 'b'`, so the tool
-  answers `Failed to cast value to numerical: "<value>"`. In 4 of the 9 (#41, #55, #56, #80) the
+  answers `Failed to cast value to numerical: "<value>"`, or on other values a silent wrong count. In 4 of the 9 (#41, #55, #56, #80) the
   value quoted in the error is a timestamp, so the error *looks* time-related but isn't. #94/#96
   fail the same way on `"Read ssh information"`. This is the largest single source of wasted SQL
   calls in the corpus, and it is the same under every time contract.
+- **Extraction fix (after review of PR #1132):** `step0_extract.py` first cut 37 of the 107 `sql`
+  fields short (shell `'"'"'` splicing). It now splits commands with `shlex`. Re-running it
+  changes those 37 fields and no count here: still 20 dispatches, 107 calls, 56 touching a time.
 - **12 bash-surface blocks** in current-F1-t0 (`\'` inside single quotes). That dispatch ended with
   "exceeded max retries".
 - **16 identical `SELECT sha256`** calls in current-F1-t3 (a loop until the request limit).

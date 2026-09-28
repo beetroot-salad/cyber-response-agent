@@ -47,10 +47,11 @@ SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
 `->>'$'` returns **TEXT**. Cast before comparing or summing a number
 (`(v[3]->>'$')::BIGINT`), or the comparison is lexical and the sum fails.
 
-**Parenthesise every `->>` in a filter.** `->>` binds looser than AND/OR/NOT, so
-`v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` reads `(v[1]->>'$' = 'x') AND v[2]` as the
-JSON, and answers either an error or a silent, wrong 0. The tool refuses that
-shape; write:
+**Parenthesise every `->>`.** `->>` binds more loosely than the operators written
+before it (`=`, `<>`, AND, OR, NOT, `||` …) and takes that whole expression as its
+JSON: `'x' = v[1]->>'$'` reads `('x' = v[1])` as the JSON, and so does everything
+before a second `->>` after an AND. The answer is an error or a silent, wrong
+count. The tool refuses those shapes; write:
 
 ```sql
 SELECT v[1]->>'$' FROM (SELECT unnest(values) v FROM data) WHERE (v[2]->>'$') = '203.0.113.7' AND (v[1]->>'$')::BIGINT > 9

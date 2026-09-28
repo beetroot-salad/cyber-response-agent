@@ -12,6 +12,7 @@ import ast
 import glob
 import json
 import os
+import shlex
 import re
 
 ROOT = "/workspace/experiments"
@@ -49,7 +50,21 @@ def args_of(part):
 
 
 def extract_sql(command: str) -> str | None:
-    """The SQL argument of the defender-sql invocation (best effort)."""
+    """The SQL argument of the defender-sql invocation, as the shell would pass it.
+
+    `shlex` undoes `'"'"'` splicing and backslashes inside double quotes, which the hand scan
+    below does not; the hand scan stays as the fallback for a command shlex cannot split."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    for k, tok in enumerate(tokens[:-1]):
+        if tok.endswith("defender-sql"):
+            return tokens[k + 1]
+    return _extract_sql_by_hand(command)
+
+
+def _extract_sql_by_hand(command: str) -> str | None:
     i = command.find("defender-sql")
     if i < 0:
         return None
@@ -147,14 +162,14 @@ def main() -> None:
             d = (r["run"], r["agent"])
             if d != cur:
                 cur = d
-                fh.write(f"\n\n######## {r['experiment']}/{r['run']} {r['agent']} {r['model']} {r['commit'][:8]}\n")
+                fh.write(f"\n\n######## {r['experiment']}/{r['run']} {r['agent']} {r['model']} {(r['commit'] or '')[:8]}\n")
             fh.write(f"\n=== seq {r['seq']} {r['call_id']} exit={r['exit']} time={r['time']}"
                      f" tb={r['traceback']}\n$ {r['command']}\n--- result ---\n{r['result'][:3000]}\n")
     # dispatch summary
     disp = {}
     for r in records:
         d = disp.setdefault((r["experiment"], r["run"], r["lead"]),
-                            {"model": r["model"].split("/")[-1], "commit": r["commit"][:8],
+                            {"model": (r["model"] or "").split("/")[-1], "commit": (r["commit"] or "")[:8],
                              "n": 0, "t": 0, "t_ok": 0, "sql_err": 0, "blocked": 0,
                              "no_result": 0, "precedence": 0, "tb": 0})
         d["n"] += 1
