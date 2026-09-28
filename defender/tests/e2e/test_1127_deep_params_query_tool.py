@@ -16,10 +16,11 @@ the pre-#1127 base (the issue's C1/C3/C12/C13, measured through this harness):
 The design (issue #1127, M2, as amended after the review of PR #1139):
 `QueryCapture.wrap_tool_validate` treats a too-deep call as an argument-schema rejection whether
 or not pydantic refused it — judged on the BYTES when the arguments arrive as text (argument
-depth past `PARAMS_NESTING_LIMIT + 1`, the argument object being one level above params), on the
-value (`params_too_deep`) when they arrive as a dict — stores its params as `{}` BEFORE
-`_rejection_guard`, and answers with one fixed host sentence saying the call's ARGUMENTS nest too
-deep and naming the limit, 32. `_execute` never runs. And the limit leaves room: a call AT it
+depth past `PARAMS_NESTING_LIMIT + 1`, the argument object being one level above each argument),
+on each argument's value (`params_too_deep`) when they arrive as a dict, so a deep `query_id` is
+refused exactly as deep params are — stores its params as `{}` BEFORE `_rejection_guard`, and
+answers with one fixed host sentence saying the call's ARGUMENTS nest too deep (never "params
+nest") and naming the limit, 32. `_execute` never runs. And the limit leaves room: a call AT it
 runs, and every line of the run's wire log, which embeds the arguments a few levels down, still
 reads back.
 
@@ -40,10 +41,9 @@ Dict arguments are driven at ONE_PAST and ACCEPTED only: the harness's own seria
 model response refuses a dict nested ~250 deep before the tool sees it, and a real provider
 sends text anyway.
 
-Against HEAD 7ae2c429 (limit 99): every ONE_PAST (33) arm is RED — the call runs; every arm
-that reads the model's answer is RED — the sentence names 99 and speaks of "params"; the
-at-the-limit and wire-log arms are GREEN (32 runs today too), as are the counting arms at the
-far regimes, which the 99 limit already refuses.
+Against 7ae2c429 (limit 99, before the amendment) every ONE_PAST (33) arm was RED — the call
+ran — and every arm reading the model's answer RED — the sentence named 99 and spoke of
+"params"; the at-the-limit and wire-log arms, and the counting arms at the far regimes, GREEN.
 """
 from __future__ import annotations
 
@@ -153,10 +153,16 @@ def deep_list_text(depth: int) -> str:
     return "[" * depth + json.dumps(SENTINEL_VALUE) + "]" * depth
 
 
+#: Params that are shallow but carry both sentinels — for the shapes whose excess depth is in
+#: ANOTHER argument, so a refusal that stored them, or echoed them, shows.
+SHALLOW_PARAMS = deep_params(2)
+
+
 @dataclass(frozen=True)
 class Shape:
     """One way a too-deep call arrives: as a dict, as text, or as text whose params are a
-    list, at one of the regimes."""
+    list, at one of the regimes — or, in the `qid-*` forms, with shallow params and the depth
+    in `query_id`, an argument that is not params at all."""
 
     name: str
     form: str
@@ -164,8 +170,12 @@ class Shape:
 
 
 def args_text(shape: Shape, system: str, verb: str) -> str:
-    """The whole argument body as a provider sends it. `params` first, so an echo of the input
-    shows the params before anything a truncation could cut."""
+    """The whole argument body as a provider sends it. The deep argument first, so an echo of
+    the input shows it before anything a truncation could cut."""
+    if shape.form.startswith("qid-"):
+        return (f'{{"query_id": {deep_list_text(shape.depth)}, '
+                f'"params": {json.dumps(SHALLOW_PARAMS)}, "system": {json.dumps(system)}, '
+                f'"verb": {json.dumps(verb)}}}')
     params = (deep_list_text(shape.depth) if shape.form == "list-text"
               else deep_params_text(shape.depth))
     return (f'{{"params": {params}, "system": {json.dumps(system)}, '
@@ -180,9 +190,12 @@ TEXT_LIST = Shape("text-list", "list-text", ACCEPTED)
 TEXT_REFUSED = Shape("text-refused", "text", REFUSED)
 TEXT_RECURSION = Shape("text-recursion", "text", RECURSION)
 TEXT_UNDECODABLE = Shape("text-undecodable", "text", UNDECODABLE)
+#: One past the limit in `query_id`, params shallow: the scan covers EVERY argument.
+DICT_QUERY_ID = Shape("dict-query-id", "qid-dict", ONE_PAST)
+TEXT_QUERY_ID = Shape("text-query-id", "qid-text", ONE_PAST)
 
 EVERY_SHAPE = [DICT_ONE_PAST, TEXT_ONE_PAST, DICT_ACCEPTED, TEXT_ACCEPTED, TEXT_LIST,
-               TEXT_REFUSED, TEXT_RECURSION, TEXT_UNDECODABLE]
+               TEXT_REFUSED, TEXT_RECURSION, TEXT_UNDECODABLE, DICT_QUERY_ID, TEXT_QUERY_ID]
 
 #: The otherwise-valid calls pydantic accepts, which would therefore RUN unless refused.
 WOULD_RUN = [DICT_ONE_PAST, TEXT_ONE_PAST, DICT_ACCEPTED, TEXT_ACCEPTED]
@@ -191,6 +204,9 @@ WOULD_RUN = [DICT_ONE_PAST, TEXT_ONE_PAST, DICT_ACCEPTED, TEXT_ACCEPTED]
 def deep_call(shape: Shape, *, system: str = "elastic", verb: str = "query") -> Turn:
     if shape.form == "dict":
         args: Any = {"params": deep_params(shape.depth), "system": system, "verb": verb}
+    elif shape.form == "qid-dict":
+        args = {"query_id": json.loads(deep_list_text(shape.depth)), "params": SHALLOW_PARAMS,
+                "system": system, "verb": verb}
     else:
         args = args_text(shape, system, verb)
     return Turn(tool_calls=[("query", args)])
@@ -214,6 +230,19 @@ def assert_regime(shape: Shape) -> None:
     THIS process, since both limits are the parser's and the stack's, not the design's."""
     text = args_text(shape, "elastic", "query")
     assert json_nesting_depth(text) == shape.depth + 1, "the builder's depth arithmetic moved"
+    if shape.form.startswith("qid-"):
+        # The depth is all in `query_id`; params are shallow. Pydantic's parser reads it, the
+        # SCHEMA refuses `query_id` (not a string), and that error would carry the body.
+        decoded = json.loads(text)
+        assert decoded["params"] == SHALLOW_PARAMS
+        assert json_nesting_depth(json.dumps(decoded["params"])) == 2
+        assert json_nesting_depth(json.dumps(decoded["query_id"])) == shape.depth
+        with pytest.raises(ValidationError) as refused:
+            _QueryArgs.model_validate_json(text)
+        assert [err["type"] for err in refused.value.errors()] == ["string_type"]
+        assert SENTINEL_VALUE in str(refused.value.errors()), \
+            "pydantic's own error no longer echoes the input, so the O4 arm is vacuous here"
+        return
     if shape.form == "list-text":
         # The parser reads it and `json.loads` decodes it; the SCHEMA refuses it, and the error
         # pydantic would hand the model carries the body.
@@ -304,10 +333,13 @@ def names_the_limit(text: str) -> bool:
     return re.search(rf"(?<!\d){LIMIT}(?!\d)", text) is not None
 
 
-def speaks_of_the_arguments(text: str) -> bool:
-    """The sentence says the call's ARGUMENTS nest too deep — what the byte scan judges — not
-    only its params."""
-    return "argument" in text.lower()
+def assert_speaks_of_the_arguments(text: str) -> None:
+    """D's wording: the sentence says the call's ARGUMENTS nest too deep — what the scan
+    judges, every argument — and never that params nest, which is wrong for a call whose
+    params are shallow and its `query_id` deep."""
+    assert re.search(r"\barguments? nest", text, re.IGNORECASE), \
+        f"the answer does not say the call's arguments nest too deep: {text[:300]!r}"
+    assert "params nest" not in text.lower(), f"the answer says params nest: {text[:300]!r}"
 
 
 def model_text_in(text: str) -> list[str]:
@@ -327,11 +359,13 @@ def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tm
     reads it, it is in the rejection domain both guards count, and its params are `{}` — the
     value the guard keyed on (so the repeat identity and the stored one are the same `{}`).
 
+    The `query_id` shapes put the depth in an argument that is not params: the row still
+    stores `{}`, not the shallow params the call carried — the call is refused as a whole.
+
     Before #1127, at RECURSION the run itself died with `RecursionError` out of the rejection
-    handler (C12); at ACCEPTED/REFUSED the row was written and never read again, and at ONE_PAST
-    (33) the call runs until the limit is 32. UNDECODABLE
+    handler (C12); at ACCEPTED/REFUSED the row was written and never read again. UNDECODABLE
     (and the list-shaped params, which the schema refuses and the row stores as `{}`) already
-    hold today and must keep holding."""
+    held and must keep holding."""
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
 
@@ -488,8 +522,7 @@ def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape, system
             f"the deep call's row carries a fragment of its params: {deep_row[:300]}"
 
     assert names_the_limit(told), f"the answer does not name the limit: {told[:300]!r}"
-    assert speaks_of_the_arguments(told), \
-        f"the answer does not say the call's arguments nest too deep: {told[:300]!r}"
+    assert_speaks_of_the_arguments(told)
 
 
 def test_every_too_deep_call_is_answered_with_the_same_sentence(tmp_path):
@@ -515,7 +548,7 @@ def test_every_too_deep_call_is_answered_with_the_same_sentence(tmp_path):
         "the too-deep calls were answered differently: " + " | ".join(a[:80] for a in answers)
     assert model_text_in(answers[0]) == []
     assert names_the_limit(answers[0]), f"the answer does not name the limit: {answers[0][:300]!r}"
-    assert speaks_of_the_arguments(answers[0])
+    assert_speaks_of_the_arguments(answers[0])
 
 
 # ── O3 / security control: the rejection budget counts them at every depth ───────────────

@@ -14,8 +14,9 @@ The design (issue #1127, as amended after the review of PR #1139):
   `parse_family`, so the questioner's in-memory authoring path is refused too.
 * C — aliases are refused AT LOAD: `defender._yaml.safe_load_tree(text)` raises a
   `yaml.YAMLError` subclass on any alias, and it is the loader behind `_family._read_document`
-  (so `load_family` raises `FamilyError`, chained from that `YAMLError`) and behind the
-  questioner's reply parser (so an aliased reply is a `BranchError` like any malformed YAML).
+  (so `load_family` raises `FamilyError`, chained from that `YAMLError`, for an alias ANYWHERE
+  in the manifest, not only in the envelope) and behind the questioner's reply parser (so an
+  aliased reply to ANY of its calls is a `BranchError` like any malformed YAML).
   `write_family` therefore dumps with no aliases, so a document holding one object twice still
   round-trips through `load_family`.
 
@@ -23,11 +24,10 @@ Every manifest arm goes through `load_family(path)` over YAML text — the ancho
 in the text. The alias bomb is loaded in a CHILD PROCESS under a timeout: a loader that expands
 it does not return, and a hang must fail the arm, not the run.
 
-Against HEAD 7ae2c429 (limit 99, aliases honoured): the depth-33 arms, the reused-anchor
-refusal, the alias-bomb arm (the child is killed at its timeout), the cyclic anchor's route, the
-questioner alias arms, `write_family`'s no-alias pin and every `safe_load_tree` arm are RED. The
-depth-31/32 controls, the longhand controls, the unparseably-deep manifest and the round trip's
-own equality are GREEN.
+Against 7ae2c429 (limit 99, aliases honoured, before the amendment) the depth-33 arms, every
+alias refusal, the alias-bomb arms (the envelope one killed at its timeout), `write_family`'s
+no-alias pin and every `safe_load_tree` arm were RED; the depth-31/32 controls, the longhand
+controls, the unparseably-deep manifest and the round trip's own equality GREEN.
 """
 from __future__ import annotations
 
@@ -68,20 +68,35 @@ def envelope_params(depth: int, chain: Callable[[int], Any] = dict_chain) -> dic
     return {"query": _query(), "filt": chain(depth - 1)}
 
 
+def spliced(doc: dict, splices: dict[str, str]) -> str:
+    """`doc` as text, each placeholder string in it replaced by YAML text. JSON is YAML flow
+    style, so every field not spliced is the document's own; the splices are where the YAML
+    that JSON cannot spell (anchors, aliases) goes. Placeholders are spliced in document order,
+    so an anchor placed earlier than its alias stays earlier."""
+    text = json.dumps(doc)
+    for placeholder, yaml_text in splices.items():
+        assert text.count(json.dumps(placeholder)) == 1, f"placeholder {placeholder} not placed"
+        text = text.replace(json.dumps(placeholder), yaml_text)
+    return text
+
+
 def family_text(params_yaml: str) -> str:
     """The shared fixture's family document as text, its `discriminator.envelope.params`
-    replaced by `params_yaml` spliced in as YAML text. JSON is YAML flow style, so every other
-    field is the fixture's own document."""
+    replaced by `params_yaml` spliced in as YAML text."""
     doc = T.family_doc()
     doc["discriminator"]["envelope"]["params"] = _PLACEHOLDER
-    return json.dumps(doc).replace(json.dumps(_PLACEHOLDER), params_yaml)
+    return spliced(doc, {_PLACEHOLDER: params_yaml})
+
+
+def write_manifest(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "family.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def manifest(tmp_path: Path, params_yaml: str) -> Path:
     """A real `family.yaml` whose envelope params are `params_yaml`."""
-    path = tmp_path / "family.yaml"
-    path.write_text(family_text(params_yaml), encoding="utf-8")
-    return path
+    return write_manifest(tmp_path, family_text(params_yaml))
 
 
 def _names_the_limit(message: str) -> bool:
@@ -245,14 +260,36 @@ def test_safe_load_tree_refuses_what_safe_load_refuses_as_a_yaml_error(text):
         f"refused with {type(err).__name__}, not a YAMLError"
 
 
-def _alias_bomb(levels: int = 9, fan_out: int = 10) -> str:
-    """Envelope params that are a few hundred bytes of text and `fan_out ** levels` leaves once
+def _bomb_members(levels: int = 9, fan_out: int = 10) -> str:
+    """Mapping members that are a few hundred bytes of text and `fan_out ** levels` leaves once
     expanded: each anchor is a list of `fan_out` aliases of the one before. Depth is only
     `levels + 1`, far under the limit — only the alias count makes it expensive."""
     parts = ['"l0": &l0 [' + ", ".join(['"x"'] * fan_out) + "]"]
     for i in range(1, levels):
         parts.append(f'"l{i}": &l{i} [' + ", ".join([f"*l{i - 1}"] * fan_out) + "]")
-    return "{" + f'"query": {json.dumps(_query())}, ' + ", ".join(parts) + "}"
+    return ", ".join(parts)
+
+
+def _bomb_in_envelope_params() -> tuple[str, str]:
+    """The bomb as envelope params, where the review's depth walk would visit every leaf."""
+    bomb = "{" + f'"query": {json.dumps(_query())}, ' + _bomb_members() + "}"
+    return family_text(bomb), bomb
+
+
+def _bomb_in_a_world_overlay() -> tuple[str, str]:
+    """The bomb OUTSIDE the envelope: in world b's staged elastic document, which no depth
+    check reads — only a loader that refuses aliases everywhere refuses it."""
+    doc = T.family_doc()
+    world = doc["worlds"][1]
+    assert world["world_id"] == "b"
+    (staged,) = world["overlay"]["elastic"].values()
+    assert staged["inject"] == [{"_id": "i1"}]
+    staged["inject"] = "__INJECT__"
+    bomb = '[{"_id": "i1", ' + _bomb_members() + "}]"
+    return spliced(doc, {"__INJECT__": bomb}), bomb
+
+
+_BOMBS = {"envelope-params": _bomb_in_envelope_params, "world-overlay": _bomb_in_a_world_overlay}
 
 
 def _expanded_leaves(value: Any, memo: dict[int, int] | None = None) -> int:
@@ -288,19 +325,21 @@ print(json.dumps({"outcome": outcome, "yaml_cause": yaml_cause,
 """
 
 
-def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path):
-    """C against the billion-laughs shape, in envelope params where the review walks it:
-    `load_family` refuses it with a `FamilyError` from the YAML loader in well under two
-    seconds. Today PyYAML builds it cheaply (shared references), then the depth walk visits
-    every one of its 10**9 leaves and does not return.
+@pytest.mark.parametrize("placement", list(_BOMBS))
+def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path, placement):
+    """C against the billion-laughs shape, wherever it sits: `load_family` refuses it with a
+    `FamilyError` from the YAML loader in well under two seconds. In envelope params the
+    pre-amendment loader built it cheaply (shared references) and the depth walk then visited
+    every one of its 10**9 leaves; in a world's overlay nothing walks it, so only refusing
+    aliases EVERYWHERE in the document refuses it.
 
     Loaded in a child process under a timeout, timed inside the child: a hang is killed and
     fails this arm; nothing is left spinning."""
-    bomb = _alias_bomb()
+    text, bomb = _BOMBS[placement]()
     assert len(bomb) < 1024, "the bomb is not small"
-    assert _expanded_leaves(yaml.safe_load(bomb)) >= 10**9, \
+    assert _expanded_leaves(yaml.safe_load(text)) >= 10**9, \
         "the fixture is not a bomb, so this arm tests nothing"
-    path = manifest(tmp_path, bomb)
+    path = write_manifest(tmp_path, text)
 
     try:
         child = subprocess.run(
@@ -317,6 +356,66 @@ def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path)
     assert result["yaml_cause"], "the alias bomb was refused, but not by the YAML loader"
     assert result["elapsed"] < BOMB_LOAD_SECONDS, \
         f"refusing the alias bomb took {result['elapsed']:.2f}s — it was walked, not refused"
+
+
+def _scalar_across_top_level_fields() -> str:
+    """`continuation_prompt` anchored, `base_story` its alias."""
+    doc = T.family_doc()
+    prompt = doc["continuation_prompt"]
+    doc["continuation_prompt"], doc["base_story"] = "__PROMPT__", "__STORY__"
+    return spliced(doc, {"__PROMPT__": "&s " + json.dumps(prompt), "__STORY__": "*s"})
+
+
+def _sequence_across_top_level_fields() -> str:
+    """`configured_patterns` anchored, `captured_patterns` its alias."""
+    doc = T.family_doc()
+    patterns = doc["configured_patterns"]
+    doc["configured_patterns"], doc["captured_patterns"] = "__CONFIGURED__", "__CAPTURED__"
+    return spliced(doc, {"__CONFIGURED__": "&p " + json.dumps(patterns), "__CAPTURED__": "*p"})
+
+
+def _mapping_inside_a_world_overlay() -> str:
+    """Inside world c's patches: one host's patch anchored, a second host's the alias."""
+    doc = T.family_doc()
+    world = doc["worlds"][2]
+    assert world["world_id"] == "c"
+    world["overlay"] = "__OVERLAY__"
+    return spliced(doc, {"__OVERLAY__": '{"patches": {"identity": {"web-1": &o {"owner": '
+                                         '"platform"}, "web-2": *o}}}'})
+
+
+_OUTSIDE_THE_ENVELOPE = {
+    "scalar-across-top-level-fields": _scalar_across_top_level_fields,
+    "sequence-across-top-level-fields": _sequence_across_top_level_fields,
+    "mapping-inside-a-world-overlay": _mapping_inside_a_world_overlay,
+}
+
+
+@pytest.mark.parametrize("where", list(_OUTSIDE_THE_ENVELOPE))
+def test_an_alias_outside_the_envelope_is_refused_at_load(tmp_path, where):
+    """C is about the DOCUMENT, not the envelope: an alias anywhere in the manifest — across
+    two top-level fields, inside a world's overlay — is refused by the loader, as the
+    envelope's are. A reader that honoured aliases and only checked the envelope would load
+    every one of these."""
+    text = _OUTSIDE_THE_ENVELOPE[where]()
+    assert _has_alias(text), "the fixture carries no alias, so this arm tests nothing"
+    assert yaml.safe_load(text)["discriminator"] == T.family_doc()["discriminator"], \
+        "the splice touched the discriminator, so this arm is not outside the envelope"
+
+    assert_refused_at_load(raised(lambda: load_family(write_manifest(tmp_path, text))),
+                           f"an alias {where}")
+
+
+@pytest.mark.parametrize("where", list(_OUTSIDE_THE_ENVELOPE))
+def test_the_same_document_written_longhand_loads(tmp_path, where):
+    """The paired control: each document above with its aliases expanded — the same values,
+    written out — loads, so the refusal is about the alias, not about what it carried."""
+    text = json.dumps(yaml.safe_load(_OUTSIDE_THE_ENVELOPE[where]()))
+    assert _anchors_and_aliases(text) == []
+
+    family = load_family(write_manifest(tmp_path, text))
+
+    assert family.episode_id == T.EPISODE_ID
 
 
 def _envelope_params_on_disk(path: Path) -> Any:
@@ -455,3 +554,55 @@ def test_the_same_questioner_reply_written_longhand_is_accepted(tmp_path):
 
     assert agent.calls == 3
     assert family["discriminator"] == doc["discriminator"]
+
+
+#: Seat B's reply (call 2) with its story's text reused as its axis through an alias.
+_SEAT_B_ALIASED = ("world_id: b\nrole: B\nstory: &s a story\naxis: *s\n"
+                   "disposition_declared: malicious\nlabel_basis: policy-rule\noverlay: {}\n")
+#: The same reply, the alias written out.
+_SEAT_B_LONGHAND = ("world_id: b\nrole: B\nstory: a story\naxis: a story\n"
+                    "disposition_declared: malicious\nlabel_basis: policy-rule\noverlay: {}\n")
+#: Seat B's reply carrying the bomb under a key the questioner never reads — so no check of
+#: the COMPOSED world would ever see it; only the loader can refuse it.
+_SEAT_B_BOMB = ("world_id: b\nrole: B\nstory: a story\naxis: an axis\n"
+                "disposition_declared: malicious\nlabel_basis: policy-rule\noverlay: {}\n"
+                "scratch: {" + _bomb_members() + "}\n")
+
+_ALIASED_SEAT_REPLIES = {"reused-scalar": _SEAT_B_ALIASED, "bomb-in-an-unread-key": _SEAT_B_BOMB}
+
+
+def _family_reply() -> str:
+    return _fenced(yaml.safe_dump(T.family_doc(), sort_keys=False))
+
+
+@pytest.mark.parametrize("kind", list(_ALIASED_SEAT_REPLIES))
+def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path, kind):
+    """C on every questioner call, not only call 1: seat B's reply (call 2) is parsed by the
+    same alias-refusing loader — `BranchError` naming seat B, chained from the loader's
+    `YAMLError` — and the episode stops there: seat C is never called."""
+    text = _ALIASED_SEAT_REPLIES[kind]
+    assert _has_alias(text), "the reply carries no alias, so this arm tests nothing"
+    agent = T.FakeAgent(_family_reply(), _fenced(text), _seats()[1])
+
+    err = raised(lambda: _author(tmp_path, agent))
+
+    assert err is not None, "an aliased seat reply was accepted"
+    assert isinstance(err, T.sym("runtime.branch", "BranchError")), \
+        f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
+    assert "seat B" in str(err), f"the refusal does not name seat B: {str(err)[:200]}"
+    assert isinstance(err.__cause__, yaml.YAMLError), \
+        f"refused, but not as malformed YAML (cause: {type(err.__cause__).__name__})"
+    assert agent.calls == 2, "the questioner went on to seat C after refusing seat B"
+
+
+def test_the_same_seat_reply_written_longhand_is_accepted(tmp_path):
+    """The paired control: seat B's reply with the alias written out composes, seat C is
+    called, and world b carries the story seat B wrote."""
+    assert _anchors_and_aliases(_SEAT_B_LONGHAND) == []
+    assert yaml.safe_load(_SEAT_B_LONGHAND) == yaml.safe_load(_SEAT_B_ALIASED)
+    agent = T.FakeAgent(_family_reply(), _fenced(_SEAT_B_LONGHAND), _seats()[1])
+
+    family = _author(tmp_path, agent)
+
+    assert agent.calls == 3
+    assert family["worlds"][1]["story"] == "a story"
