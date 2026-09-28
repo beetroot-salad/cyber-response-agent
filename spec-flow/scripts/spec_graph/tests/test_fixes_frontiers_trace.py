@@ -114,6 +114,72 @@ def test_frontiers_both_settled_spellings_is_a_finding(tmp_path):
     assert "consensus" in p.stdout and "settled" in p.stdout
 
 
+# check_frontiers --only: a leaf lints its own frontier before returning, while its
+# phase siblings may still be half-written beside it.
+
+def _only_chain(d: Path) -> None:
+    d.mkdir()
+    _frontier(d, "20-demands.md", "phase: A\nstatus: complete\ninventory: {demands: 4}\n")
+    _frontier(d, "30-premises-author.md",
+              "phase: B\nstatus: complete\ninventory: {premises: 7}\n"
+              "inputs: [{path: 20-demands.md, inventory_echo: {demands: 4}}]\n")
+    # A sibling lens mid-write: its digest overruns the cap.
+    _frontier(d, "30-premises-dependency.md",
+              "phase: B\nstatus: complete\ninventory: {premises: 3}\n",
+              digest="\n".join(f"line {i}" for i in range(20)))
+
+
+def test_frontiers_only_ignores_a_broken_sibling(tmp_path):
+    d = tmp_path / "frontiers"
+    _only_chain(d)
+    p = run_script("check_frontiers.py", str(d), "--only", "30-premises-author.md",
+                   cwd=tmp_path)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "30-premises-dependency.md" not in p.stdout
+
+
+def test_frontiers_only_reports_the_named_file(tmp_path):
+    d = tmp_path / "frontiers"
+    _only_chain(d)
+    p = run_script("check_frontiers.py", str(d), "--only", "30-premises-dependency.md",
+                   cwd=tmp_path)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "30-premises-dependency.md" in p.stdout and "digest" in p.stdout
+
+
+def test_frontiers_only_still_reconciles_echoes_against_the_chain(tmp_path):
+    # The named file's echo is checked against its producer, which the flag must still load.
+    d = tmp_path / "frontiers"
+    _only_chain(d)
+    _frontier(d, "30-premises-author.md",
+              "phase: B\nstatus: complete\ninventory: {premises: 7}\n"
+              "inputs: [{path: 20-demands.md, inventory_echo: {demands: 5}}]\n")
+    p = run_script("check_frontiers.py", str(d), "--only", "30-premises-author.md",
+                   cwd=tmp_path)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "20-demands.md" in p.stdout
+
+
+def test_frontiers_only_naming_no_frontier_exits_2(tmp_path):
+    # A typo'd name must not read as a clean pass.
+    d = tmp_path / "frontiers"
+    _only_chain(d)
+    p = run_script("check_frontiers.py", str(d), "--only", "30-premises-autor.md",
+                   cwd=tmp_path)
+    assert p.returncode == 2, p.stdout + p.stderr
+
+
+def test_frontiers_only_naming_a_sidecar_payload_exits_2(tmp_path):
+    # A `.py` payload exists on disk but is no frontier — its `.md` sidecar is what gets
+    # linted. Naming the payload must not read as a clean pass over nothing.
+    d = tmp_path / "frontiers"
+    _only_chain(d)
+    (d / "42-answers-copy1.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    p = run_script("check_frontiers.py", str(d), "--only", "42-answers-copy1.py",
+                   cwd=tmp_path)
+    assert p.returncode == 2, p.stdout + p.stderr
+
+
 # trace
 
 def test_trace_drivers_bad_base_ref_exits_2(make_repo):

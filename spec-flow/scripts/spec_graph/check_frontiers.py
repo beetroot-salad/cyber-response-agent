@@ -21,14 +21,19 @@ What is checked, per `*.md` file in the frontiers directory:
   source count is the LARGEST `premises` echo, not their sum: an escalation sidecar echoes
   a subset of the same premises (phases/answer.md, (b)), never new ones.
 
+`--only <file>` lints that one frontier and reports nothing else — the leaf's pre-return
+self-check, run while its phase siblings may still be half-written beside it. The rest of
+the chain is still loaded, so the named file's echoes reconcile against their producers.
+
 `--resume` prints the chain's state (file, phase, status, staleness against its inputs)
 and where to re-enter: the first frontier that is blocked, unparseable, or older than an
 input. Informational — always exits 0 when the directory exists.
 
 Usage:
-    spec-graph frontiers [dir] [--resume]
+    spec-graph frontiers [dir] [--resume | --only <file>]
 (default dir: <repo root>/.spec-flow/frontiers)
-Exit codes: 0 clean, 1 findings, 2 the directory is missing or holds no frontiers.
+Exit codes: 0 clean, 1 findings, 2 the directory is missing or holds no frontiers, or
+`--only` names no frontier in it.
 """
 from __future__ import annotations
 
@@ -241,10 +246,12 @@ def _lint_dispositions(
         )
 
 
-def check(directory: Path) -> list[str]:
+def check(directory: Path, only: str | None = None) -> list[str]:
     frontiers = _load(directory)
     findings: list[str] = []
     for name, f in frontiers.items():
+        if only is not None and name != only:
+            continue
         if f.error:
             findings.append(f"{name}: {f.error}.")
             continue
@@ -306,8 +313,9 @@ def resume(directory: Path) -> int:
 
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
-    opts, args = _cli.parse_argv(argv, flags={"--resume"})
+    opts, args = _cli.parse_argv(argv, valued={"--only"}, flags={"--resume"})
     do_resume = opts["resume"]
+    only = Path(opts["only"]).name if opts["only"] else None
     directory = Path(args[0]) if args else _config.repo_root() / ".spec-flow" / "frontiers"
     if not directory.is_dir():
         if do_resume:
@@ -320,10 +328,16 @@ def main(argv: list[str]) -> int:
     if not any(directory.glob("*.md")):
         print(f"check_frontiers: no *.md frontiers under {directory}", file=sys.stderr)
         return 2
-    findings = check(directory)
+    if only is not None and not (only.endswith(".md") and (directory / only).is_file()):
+        # A sidecar's `.py` payload is not a frontier; name its `.md` sidecar instead.
+        print(f"check_frontiers: --only {only} names no frontier (*.md) in {directory}",
+              file=sys.stderr)
+        return 2
+    findings = check(directory, only)
     for f in findings:
         print(f"  CONSERVATION {f}")
-    print(f"\n[check_frontiers] {len(findings)} finding(s) over {directory}.")
+    scope = f"{directory}/{only}" if only else str(directory)
+    print(f"\n[check_frontiers] {len(findings)} finding(s) over {scope}.")
     return 1 if findings else 0
 
 
