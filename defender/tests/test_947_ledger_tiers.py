@@ -337,13 +337,15 @@ def test_a_failed_write_leaves_no_memo_behind_it(tmp_path):
     after exactly this.
 
     The fault is a real primitive rather than an authored exception: the ledger's own path is a
-    DIRECTORY, so the real `append_jsonl` takes the real `IsADirectoryError` from the real
-    open."""
+    DIRECTORY, so the real append is refused by the real primitive. #1133 O4.4 / D3: the append
+    now goes through the rooted core (`io.rooted_write(path.parent, path.name, mode="append")`
+    for a directly constructed ledger), which refuses a directory at the name as a non-plain
+    entry before opening it; it was `append_jsonl`'s `IsADirectoryError` from the open."""
     root = episode(tmp_path)
     ledger = Ledger(root / SERVED_DIRNAME / "w1.jsonl", base_path=base_file(root))
     ledger.path.mkdir(parents=True)
 
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(OSError, match="non-plain"):
         ledger.record(ServedCall(
             system="cmdb", verb="get-host", params={"host": "canary-1"},
             payload_text='{"owner": "never landed"}', source=BASE, world_id=None))

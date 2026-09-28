@@ -679,18 +679,19 @@ def test_one_writer_seam_asked_to_name_a_file_under_three_different_roots(
 
 
 def test_the_priming_locks_raw_exclusive_open_is_not_converted_to_a_guarded_write(tmp_path: Path):
-    """The priming lock's low-level exclusive `os.open` is preserved exactly and is not converted
-    to a guarded write by the name move.
+    """The priming lock is not converted to a guarded write by the name move.
 
     NEGATIVE. Positive control: demand d19 — the tenant record, a NEW seam, DOES go through
     `write_guarded`; here the pre-existing seam must be untouched.
+
+    #1133 O4.5 retires this test's former first assertion (that the claim stays a RAW exclusive
+    `os.open`, flagged fact F11): the claim is now the `Episode` handle's exclusive create on
+    the rooted core (`priming_lock.create`), pinned by
+    `test_1133_o4.py::test_o4_5_the_priming_claim_is_the_cores_exclusive_create_mode_0644_released_after`.
+    It is still not a `write_guarded` call.
     """
     cli = S.branch_cli()
     source = inspect.getsource(cli)
-    assert "os.O_CREAT | os.O_EXCL | os.O_WRONLY" in source, (
-        "flagged fact F11: `served/.priming` is a RAW exclusive `os.open` today, and the "
-        "security dive's universal (2) is scoped to NEW seams — the name move must not "
-        "quietly convert it")
     assert "write_guarded(claim" not in source
     assert "write_guarded(served" not in source
     # The NAME moves to the owner; the SEAM does not.
