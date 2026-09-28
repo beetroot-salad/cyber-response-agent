@@ -81,7 +81,26 @@ def _lead_ref_errors(text: str) -> list[str]:
             if "undeclared lead" in e or "cites_leads" in e]
 
 
-def test_joined_sees_l000_as_a_non_orphan_lead(tmp_path):
+@pytest.fixture(scope="module")
+def lead_zero_hits_run(tmp_path_factory, checkout_roster):
+    """ONE run in which lead-0 resolves the alert's ancestors (`answer_hits(DOCS)`), shared by
+    the demands below that only READ what it left: the join surface, the narration cross-check,
+    `investigation.md` and message 0. A demand that writes into the run dir or beside it drives
+    its own.
+
+    Module-scoped, so it is built before the function-scoped conftest fixtures: it holds the
+    checkout's capabilities for the drive itself, as `_held_capabilities` does for a test."""
+    from defender.skills.invlang.validate import hold_capabilities, release_capabilities
+
+    hold_capabilities(checkout_roster)
+    try:
+        return run(tmp_path_factory.mktemp("lead-zero-hits"), run_id="lz808-hits",
+                   answer=answer_hits(DOCS))
+    finally:
+        release_capabilities()
+
+
+def test_joined_sees_l000_as_a_non_orphan_lead(lead_zero_hits_run):
     """d11 — `lead_repository.joined(run_dir)`, the single read/join surface every downstream
     consumer uses, returns `l-000` as a NON-ORPHAN lead: a leads row with a goal and
     dimensions, joined to the query rows lead-0 wrote under it.
@@ -89,7 +108,7 @@ def test_joined_sees_l000_as_a_non_orphan_lead(tmp_path):
     `orphan=True` is the shape a claim that silently failed produces — rows under a lead id
     with no leads row — and r14/E4 (executed) show `claim_lead` reports SUCCESS on exactly
     that path, so "the claim returned 0" is not evidence that this holds."""
-    res = run(tmp_path, run_id="lz808-joined", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
 
     leads = {lead.lead_id: lead for lead in lead_repository.joined(res.run_dir)}
     assert L0 in leads, f"l-000 is absent from the join surface: {sorted(leads)}"
@@ -122,7 +141,7 @@ def test_the_join_surface_carries_lead_zeros_provenance_to_its_readers(tmp_path)
         "a pre-schema row joined as harness-authored — absence must read as model-authored"
 
 
-def test_the_narration_cross_check_no_longer_warns_on_the_harness_lead(tmp_path):
+def test_the_narration_cross_check_no_longer_warns_on_the_harness_lead(lead_zero_hits_run):
     """R7 `interacts(cross_check_tables->lead_id)` — the narration cross-check knows about the
     reserved ids, so a run that used lead-0 exactly as intended reports `ok: True` and no
     `missing_from_narration` entry for them.
@@ -131,7 +150,7 @@ def test_the_narration_cross_check_no_longer_warns_on_the_harness_lead(tmp_path)
     in `investigation.md` and reported `missing_from_narration: ['l-000'], ok: False`. Left
     alone it fires on EVERY run — a warning that is always on is a warning nobody reads, and
     it is the cheapest possible way to hide the run where the check would have been right."""
-    res = run(tmp_path, run_id="lz808-xcheck", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
 
     assert res.investigation, (
         "no investigation.md was written for this run — the cross-check has nothing to read "
@@ -147,7 +166,7 @@ def test_the_narration_cross_check_no_longer_warns_on_the_harness_lead(tmp_path)
     assert xcheck["ok"] is True, f"the cross-check failed a correct run: {xcheck}"
 
 
-def test_the_harness_writes_lead_zeros_declaring_l_findings_row(tmp_path):
+def test_the_harness_writes_lead_zeros_declaring_l_findings_row(lead_zero_hits_run):
     """K11/N6 — the HARNESS writes lead-0's declaring `:L findings` row into
     `investigation.md`, making lead-0 the first non-MAIN writer of that file. The row carries
     the reserved id and a NON-EMPTY `name`, because `_check_lead_refs` treats a finding id
@@ -157,7 +176,7 @@ def test_the_harness_writes_lead_zeros_declaring_l_findings_row(tmp_path):
     This is what makes the residual injection vector MAIN's CITATION of the row rather than
     its authorship: with the harness authoring lead-0's row, steered content can no longer
     reach that row's goal or disposition language at all."""
-    res = run(tmp_path, run_id="lz808-lrow", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
 
     doc = res.investigation
     assert ":L findings" in doc, \
@@ -172,7 +191,7 @@ def test_the_harness_writes_lead_zeros_declaring_l_findings_row(tmp_path):
         f"the harness's own row does not validate: {_lead_ref_errors(doc)}"
 
 
-def test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error(tmp_path):
+def test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error(lead_zero_hits_run):
     """R7 `interacts(invlang_validate->lead_id)` — MAIN citing lead-0's evidence VALIDATES:
     a grounded row naming `l-000` as its `resolved_by` produces zero "undeclared lead" errors
     against the document the harness wrote.
@@ -183,7 +202,7 @@ def test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error(tmp_
     by a `:R` / `:T` row or a lead sub-block, but no `:L findings` row declares it"`. Left
     unhandled, "MAIN cites lead-0's evidence" — the entire point of the change — is a REFUSED
     WRITE, and the control below shows the validator really would refuse it."""
-    res = run(tmp_path, run_id="lz808-cite", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
     citation = (f"\n```invlang\n{_AUTHZ_HEADER}\n"
                 f"{L0}||e-001|ac1|unauthorized|approved-source-list|\"x\"\n```\n")
 
@@ -205,7 +224,7 @@ def test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error(tmp_
 
 
 
-def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):
+def test_main_is_told_the_reserved_ids_are_already_taken(lead_zero_hits_run):
     """R7 `interacts(main_agent->lead_id)` — MAIN is TOLD which ids the harness reserved,
     rather than finding out by collision. Both reserved ids are named in what MAIN is handed
     before it picks its own.
@@ -215,7 +234,7 @@ def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):
     collision-then-retry. F5 claims both ids at run start before MAIN's first turn, which
     makes the leads table right; this demand makes what MAIN READS right, and they are
     different surfaces."""
-    res = run(tmp_path, run_id="lz808-told", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
 
     for lead in (L0, L3):
         assert lead in res.message_zero, (
@@ -224,7 +243,7 @@ def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):
         )
 
 
-def test_message_zeros_run_dir_listing_names_the_queries_table(tmp_path):
+def test_message_zeros_run_dir_listing_names_the_queries_table(lead_zero_hits_run):
     """R7 `interacts(workspace_map->run_dir_listing)` — message 0's own run-dir listing names
     `executed_queries.jsonl`, because lead-0's rows are appended BEFORE `orientation()` runs
     and the queries table is not one of the names `workspace_map._unlisted()` suppresses
@@ -235,7 +254,7 @@ def test_message_zeros_run_dir_listing_names_the_queries_table(tmp_path):
     so this is not cosmetic: a new name appears in it on every run, the design does not
     mention it, and the reader that renders it is one of two that must agree about a run dir
     lead-0 now writes into before the first model turn."""
-    res = run(tmp_path, run_id="lz808-listing", answer=answer_hits(DOCS))
+    res = lead_zero_hits_run
 
     match = RUN_DIR_SECTION.search(res.message_zero)
     assert match, "message 0 carries no run-dir listing at all"
