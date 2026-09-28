@@ -193,7 +193,7 @@ def prepare_episode(
 ) -> Path:
     """Prime the family's base once, exclusively, and hand back the episode directory.
 
-    The claim is an atomic `O_CREAT|O_EXCL`, not check-then-act: two launchers on one source and
+    The claim is the core's exclusive create, not check-then-act: two launchers on one source and
     branch point derive one episode id, and both priming would stack two captures that
     `_absorb` reads first-row-wins.
 

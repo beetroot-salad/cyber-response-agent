@@ -41,6 +41,7 @@ from defender import _yaml
 from defender._clock import now_iso
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
+from defender import _io
 from defender._io import Bound, bind
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -330,15 +331,16 @@ def read_staged(bound: Bound) -> list[dict] | None:
     return list(rows)
 
 
-def record_staged(episode_dir: Path, row: Mapping[str, Any]) -> dict:
+def record_staged(episode_dir: Path, row: Mapping[str, Any], *, io: Any = _io) -> dict:
     """Append one row to `staged.yaml`, flushed and fsynced before returning.
 
     This file is the only record that a cluster write was about to happen, so a row still in a
     userspace buffer when the launcher is killed is a live name nothing on disk names: teardown
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
-    whole list would open a window where the record is shorter than the cluster.
+    whole list would open a window where the record is shorter than the cluster. `io` is the
+    episode handle's I/O seam.
     """
-    episode = Episode(Path(episode_dir))
+    episode = Episode(Path(episode_dir), io=io)
     # Made from its parent, so a symlinked `episodes/<id>/` is refused rather than followed: it
     # would put the record where teardown won't look.
     episode.create_dir()
