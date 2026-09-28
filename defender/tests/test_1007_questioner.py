@@ -280,7 +280,7 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     # PATH, and the shim lives there. Both readers' roots are repo constants anyway, so this is
     # the only tree either of them could ever read.
     env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir)
-    section = orient._build_lessons_section(env, "rule-v2-cross-tier-ssh-pivot")
+    section = orient._build_lessons_section(env, "rule-v2-cross-tier-ssh-pivot", orient._shim)
 
     assert section, ("the lessons shim produced nothing at all, so the two assertions below "
                      "hold vacuously — check that defender/bin is on the built PATH")
