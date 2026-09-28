@@ -662,18 +662,20 @@ def _create_unnamed(
         os.close(fd)
 
 
-def _link_unnamed(fd: int, dir_fd: int, leaf: str, text: str | bytes) -> bool:
+def _link_unnamed(
+    fd: int, dir_fd: int, leaf: str, text: str | bytes, *, os_: Any = os,
+) -> bool:
     """The body of `create`'s unnamed lane, shared by the path and rooted seams: write `text`
     in full to the unnamed `fd`, sync it, set 0644, then name it `leaf` in `dir_fd`. False when
     the host has no `/proc` to link through. The caller owns both descriptors."""
-    os.fchmod(fd, 0o644)
+    os_.fchmod(fd, 0o644)
     data = text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8")
     # Buffered: the file object loops over a short `os.write` until every byte has landed.
-    with os.fdopen(fd, "wb", closefd=False) as f:
+    with os_.fdopen(fd, "wb", closefd=False) as f:
         f.write(data)
-    os.fsync(fd)
+    os_.fsync(fd)
     try:
-        os.link(f"/proc/self/fd/{fd}", leaf, dst_dir_fd=dir_fd, follow_symlinks=True)
+        os_.link(f"/proc/self/fd/{fd}", leaf, dst_dir_fd=dir_fd, follow_symlinks=True)
     except FileNotFoundError:
         if not os.path.isdir("/proc/self/fd"):
             return False
@@ -828,13 +830,13 @@ def write_guarded(
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
 
 
-def _write_all(fd: int, text: str | bytes) -> None:
+def _write_all(fd: int, text: str | bytes, *, os_: Any = os) -> None:
     """Write `text` to a fresh descriptor and close it (text or bytes to match)."""
     if isinstance(text, (bytes, bytearray)):
-        with os.fdopen(fd, "wb") as fb:
+        with os_.fdopen(fd, "wb") as fb:
             fb.write(text)
     else:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os_.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
 
 
@@ -928,27 +930,29 @@ def open_unnamed_at(dir_fd: int) -> int:
     return os.open(".", flag | os.O_WRONLY | os.O_CLOEXEC, 0o644, dir_fd=dir_fd)
 
 
-def _open_root(root: Path) -> int:
+def _open_root(root: Path, os_: Any) -> int:
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
-    return os.open(Path(root), _ROOT_FLAGS)
+    return os_.open(Path(root), _ROOT_FLAGS)
 
 
-def _open_folder(dir_fd: int, component: str, where: Path, *, create: bool) -> int:
+def _open_folder(
+    os_: Any, dir_fd: int, component: str, where: Path, *, create: bool,
+) -> int:
     """One folder below the root, opened no-follow off its parent (made first, off the same
     descriptor, when `create` and absent). An absent folder is `FileNotFoundError`."""
     if create:
         with contextlib.suppress(FileExistsError):  # whatever stands there is judged below
-            os.mkdir(component, dir_fd=dir_fd)  # lint-unguarded-tree-write: ok — the rooted mkdir, relative to a no-follow descriptor
-    fd = os.open(component, _STEP_FLAGS, dir_fd=dir_fd)
+            os_.mkdir(component, dir_fd=dir_fd)  # lint-unguarded-tree-write: ok — the rooted mkdir, relative to a no-follow descriptor
+    fd = os_.open(component, _STEP_FLAGS, dir_fd=dir_fd)
     try:
-        st = os.fstat(fd)
+        st = os_.fstat(fd)
     except BaseException:
-        os.close(fd)
+        os_.close(fd)
         raise
     if stat.S_ISDIR(st.st_mode):
         return fd
-    os.close(fd)
+    os_.close(fd)
     if stat.S_ISLNK(st.st_mode):
         raise OSError(errno.ELOOP, "refusing to create through a symlinked path component",
                       str(where))
@@ -956,37 +960,39 @@ def _open_folder(dir_fd: int, component: str, where: Path, *, create: bool) -> i
 
 
 @contextlib.contextmanager
-def _rooted_folder(root: Path, folders: tuple[str, ...], *, create: bool) -> Iterator[int]:
+def _rooted_folder(
+    os_: Any, root: Path, folders: tuple[str, ...], *, create: bool,
+) -> Iterator[int]:
     """A descriptor on `root/<folders>`, walked no-follow from the root."""
-    fd = _open_root(root)
+    fd = _open_root(root, os_)
     try:
         where = Path(root)
         for component in folders:
             where = where / component
-            step = _open_folder(fd, component, where, create=create)
-            os.close(fd)
+            step = _open_folder(os_, fd, component, where, create=create)
+            os_.close(fd)
             fd = step
         yield fd
     finally:
-        os.close(fd)
+        os_.close(fd)
 
 
-def _refuse_unless_plain_at(dir_fd: int, leaf: str, where: Path) -> None:
+def _refuse_unless_plain_at(os_: Any, dir_fd: int, leaf: str, where: Path) -> None:
     """:func:`_refuse_unless_plain` for `leaf` in the folder `dir_fd`."""
     try:
-        st = os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
+        st = os_.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError:
         return
     _refuse_unless_plain_stat(st, where)
 
 
-def _open_leaf_at(dir_fd: int, leaf: str, flags: int, where: Path) -> int:
+def _open_leaf_at(os_: Any, dir_fd: int, leaf: str, flags: int, where: Path) -> int:
     """Judge `leaf`, then open it no-follow and non-blocking (a planted FIFO must not wedge the
     open) and judge the descriptor. The caller owns the returned fd."""
-    _refuse_unless_plain_at(dir_fd, leaf, where)
+    _refuse_unless_plain_at(os_, dir_fd, leaf, where)
     try:
-        fd = os.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o644,
-                     dir_fd=dir_fd)
+        fd = os_.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o644,
+                      dir_fd=dir_fd)
     except OSError as e:
         if e.errno == errno.ENXIO:  # a reader-less FIFO planted since the check
             raise _mark_alias(
@@ -994,48 +1000,49 @@ def _open_leaf_at(dir_fd: int, leaf: str, flags: int, where: Path) -> int:
                         str(where)), is_alias=False) from None
         raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
     try:
-        _refuse_unless_plain_stat(os.fstat(fd), where)
+        _refuse_unless_plain_stat(os_.fstat(fd), where)
     except BaseException:
-        os.close(fd)
+        os_.close(fd)
         raise
     return fd
 
 
 @overload
 def rooted_read(
-    root: Path, name: str | PurePath, *, binary: Literal[False] = False,
+    root: Path, name: str | PurePath, *, binary: Literal[False] = False, os_: Any = os,
 ) -> tuple[str | None, str | None]: ...
 @overload
 def rooted_read(
-    root: Path, name: str | PurePath, *, binary: Literal[True],
+    root: Path, name: str | PurePath, *, binary: Literal[True], os_: Any = os,
 ) -> tuple[bytes | None, str | None]: ...
 def rooted_read(
-    root: Path, name: str | PurePath, *, binary: bool = False,
+    root: Path, name: str | PurePath, *, binary: bool = False, os_: Any = os,
 ) -> tuple[str | bytes | None, str | None]:
     """The text (or, with `binary`, the exact bytes) of the plain, single-linked regular file at
     `name` under `root` — or `(None, reason)` when it is absent (the root included) or refused,
-    as :func:`read_guarded` answers. A name outside the relative-name grammar is `ValueError`."""
+    as :func:`read_guarded` answers. A name outside the relative-name grammar is `ValueError`.
+    `os_` is the `os` seam, as :func:`bind`'s."""
     spelling, parts = _parse_name(name)
     try:
-        root_fd = _open_root(root)
+        root_fd = _open_root(root, os_)
     except OSError as e:
         return None, str(e)
     try:
-        kind, payload = _walk_chain(os, root_fd, parts)
+        kind, payload = _walk_chain(os_, root_fd, parts)
     finally:
-        os.close(root_fd)
+        os_.close(root_fd)
     if kind == "absent":
         return None, f"{spelling}: {os.strerror(errno.ENOENT)}"
     if kind == "refused":
         return None, f"{spelling}: {payload}"
     fd, st = payload
     if not _classify_leaf_file(fd, st):
-        os.close(fd)
+        os_.close(fd)
         return None, f"{spelling}: {ALIAS_READ_REFUSAL}"
     try:
-        fh = os.fdopen(fd, "rb") if binary else os.fdopen(fd, "r", encoding="utf-8")
+        fh = os_.fdopen(fd, "rb") if binary else os_.fdopen(fd, "r", encoding="utf-8")
     except OSError as e:
-        os.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
+        os_.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
         return None, f"{spelling}: {e}"
     try:
         with fh:
@@ -1044,7 +1051,7 @@ def rooted_read(
         return None, f"{spelling}: {e}"
 
 
-def rooted_mkdir(root: Path, folder_name: str | PurePath) -> None:
+def rooted_mkdir(root: Path, folder_name: str | PurePath, *, os_: Any = os) -> None:
     """Make `root/<folder_name>`: the root itself if missing, following links (as
     :func:`guarded_mkdir` makes its base), then each missing folder below it relative to its
     parent, never through a link. `"."` names the root itself, the holding folder of a record
@@ -1053,55 +1060,56 @@ def rooted_mkdir(root: Path, folder_name: str | PurePath) -> None:
     root = Path(root)
     # `is_dir()` follows on purpose: a host-chosen symlinked root must keep working.
     if not root.is_dir():
-        os.makedirs(root, exist_ok=True)
-    with _rooted_folder(root, folders, create=True):
+        os_.makedirs(root, exist_ok=True)
+    with _rooted_folder(os_, root, folders, create=True):
         pass
 
 
 def rooted_write(
     root: Path, name: str | PurePath, text: str | bytes, *, mode: str,
     stage_name: Callable[[str], str] = staged_leaf,
-    open_unnamed: Callable[[int], int] = open_unnamed_at,
+    open_unnamed: Callable[[int], int] = open_unnamed_at, os_: Any = os,
 ) -> None:
     """:func:`write_guarded`'s `create` / `replace` / `append`, for `name` under `root`. The
     folders are walked, never made (:func:`rooted_mkdir` makes them): a missing one, or a
     missing root, is `FileNotFoundError`. `stage_name` and `open_unnamed` are the leaf-name and
-    unnamed-open seams."""
+    unnamed-open seams; `os_` is the `os` seam, as :func:`bind`'s."""
     _spelling, parts = _parse_name(name)
     if mode not in _ROOTED_MODES:
         raise ValueError(f"unknown rooted_write mode: {mode!r}")
     leaf = parts[-1]
     where = Path(root).joinpath(*parts)
-    with _rooted_folder(Path(root), parts[:-1], create=False) as dir_fd:
+    with _rooted_folder(os_, Path(root), parts[:-1], create=False) as dir_fd:
         if mode == "create":
-            _rooted_create(dir_fd, leaf, where, text, open_unnamed)
+            _rooted_create(os_, dir_fd, leaf, where, text, open_unnamed)
         elif mode == "replace":
-            _refuse_unless_plain_at(dir_fd, leaf, where)
+            _refuse_unless_plain_at(os_, dir_fd, leaf, where)
             staged = stage_name(leaf)
             try:
-                fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-                             | os.O_CLOEXEC, 0o644, dir_fd=dir_fd)
+                fd = os_.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                              | os.O_CLOEXEC, 0o644, dir_fd=dir_fd)
             except OSError as e:
                 raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
             try:
-                _write_all(fd, text)
-                os.rename(staged, leaf, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+                _write_all(fd, text, os_=os_)
+                os_.rename(staged, leaf, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
             except BaseException:
                 with contextlib.suppress(OSError):
-                    os.unlink(staged, dir_fd=dir_fd)
+                    os_.unlink(staged, dir_fd=dir_fd)
                 raise
         else:
-            _write_all(_open_leaf_at(dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                                     where), text)
+            fd = _open_leaf_at(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
+            _write_all(fd, text, os_=os_)
 
 
 def _rooted_create(
-    dir_fd: int, leaf: str, where: Path, text: str | bytes, open_unnamed: Callable[[int], int],
+    os_: Any, dir_fd: int, leaf: str, where: Path, text: str | bytes,
+    open_unnamed: Callable[[int], int],
 ) -> None:
     """`create` in the folder `dir_fd`: #1078's complete-or-absent lane (an unnamed file linked
     to `leaf` once written), else one named `O_EXCL` create. An occupied name is the ordinary
     create race, `FileExistsError`, unmarked; a planted entry is refused first, marked."""
-    _refuse_unless_plain_at(dir_fd, leaf, where)
+    _refuse_unless_plain_at(os_, dir_fd, leaf, where)
     try:
         fd = open_unnamed(dir_fd)
     except OSError as e:
@@ -1109,36 +1117,36 @@ def _rooted_create(
             raise
     else:
         try:
-            if _link_unnamed(fd, dir_fd, leaf, text):
+            if _link_unnamed(fd, dir_fd, leaf, text, os_=os_):
                 return
         finally:
-            os.close(fd)
-    fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-                 0o644, dir_fd=dir_fd)
+            os_.close(fd)
+    fd = os_.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                  0o644, dir_fd=dir_fd)
     try:
-        _write_all(fd, text)
+        _write_all(fd, text, os_=os_)
     except BaseException:
         # Ours to remove: the create succeeded, so the half-written entry is this call's.
         with contextlib.suppress(OSError):
-            os.unlink(leaf, dir_fd=dir_fd)
+            os_.unlink(leaf, dir_fd=dir_fd)
         raise
 
 
 @contextlib.contextmanager
 def rooted_locked_for_rewrite(
-    root: Path, name: str | PurePath, *, binary: bool = False,
+    root: Path, name: str | PurePath, *, binary: bool = False, os_: Any = os,
 ) -> Iterator[Any]:
     """:func:`locked_for_rewrite` for `name` under `root`: the folders walked (never made), the
     record judged, opened (created when absent) and judged again on its descriptor, then the
     exclusive lock. Yields the locked handle at position 0."""
     _spelling, parts = _parse_name(name)
     where = Path(root).joinpath(*parts)
-    with _rooted_folder(Path(root), parts[:-1], create=False) as dir_fd:
-        fd = _open_leaf_at(dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
+    with _rooted_folder(os_, Path(root), parts[:-1], create=False) as dir_fd:
+        fd = _open_leaf_at(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
     try:
-        opener = os.fdopen(fd, "r+b") if binary else os.fdopen(fd, "r+", encoding="utf-8")
+        opener = os_.fdopen(fd, "r+b") if binary else os_.fdopen(fd, "r+", encoding="utf-8")
     except BaseException:
-        os.close(fd)
+        os_.close(fd)
         raise
     with opener as f:
         fcntl.flock(f, fcntl.LOCK_EX)
