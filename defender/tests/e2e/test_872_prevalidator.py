@@ -33,6 +33,7 @@ pytest.importorskip("pydantic_ai")
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
+    DOOMED_CHILD_MEM_LIMIT_MB,
     EncoderFault,
     SpyEncoder,
     agent_run,
@@ -389,8 +390,8 @@ print(json.dumps({{
         '    value = {"a": value, "b": value}\n'
         "T.agent_run(toolset=T.foreign_toolset(value), capabilities=%s)\n"
     )
-    gated_bomb = run_isolated(bomb % "True", timeout=90.0)
-    plain_bomb = run_isolated(bomb % "False", timeout=90.0)
+    gated_bomb = run_isolated(bomb % "True", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
+    plain_bomb = run_isolated(bomb % "False", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not gated_bomb.timed_out, (
         "the guarded walk did not terminate on a 2**28-node payload — the node budget is not "
         "bounding the walk's own cost, which is the half a smaller k cannot prove"

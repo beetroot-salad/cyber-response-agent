@@ -34,6 +34,7 @@ process is not a test result.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -80,6 +81,13 @@ RUN_ID = "toon-872"
 #: child peaks at ~96 MB RSS, so this is ~20x headroom: no honest payload reaches it, and
 #: the expansion bomb (`S7`) hits it long before the kernel's OOM killer would fire.
 CHILD_MEM_LIMIT_MB = 2048
+
+#: The lower ceiling for a child that is EXPECTED to die of allocation: the undeliverable
+#: 2**28-node bomb, whose passthrough serializes until it hits whatever ceiling it is given.
+#: At 2 GB that took ~13 s per arm, all of it spent reaching the limit. A benign `agent_run`
+#: child peaks at ~310 MB of address space, so this still leaves the import and the walk
+#: well clear of it; both arms get the same ceiling, so parity is unaffected.
+DOOMED_CHILD_MEM_LIMIT_MB = 768
 
 #: The six printable characters a JSON escape of U+0000 spells, written as an escape of an
 #: escape so no artifact in this run can carry the raw byte itself. Four files in this run's
@@ -730,7 +738,7 @@ class ChildOutcome:
         return self.returncode == 0 and not self.timed_out
 
 
-def _child_limits() -> None:
+def _child_limits(mem_limit_mb: int) -> None:
     """Bound the child's address space and forbid core dumps. Runs in the forked child.
 
     `RLIMIT_AS` is the containment, not tidiness. Without it the expansion bomb's failure
@@ -751,7 +759,7 @@ def _child_limits() -> None:
         import resource
     except ImportError:  # pragma: no cover — POSIX-only; CI and the devcontainer are Linux
         return
-    limit = CHILD_MEM_LIMIT_MB * 1024 * 1024
+    limit = mem_limit_mb * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
@@ -761,7 +769,7 @@ def run_isolated(
     *,
     timeout: float = 60.0,
     pythonpath: bool = True,
-    mem_limit: bool = True,
+    mem_limit_mb: int = CHILD_MEM_LIMIT_MB,
 ) -> ChildOutcome:
     """Run a snippet in a child interpreter with a wall clock AND a memory ceiling.
 
@@ -785,7 +793,7 @@ def run_isolated(
         proc = subprocess.run(
             [sys.executable, "-c", source],
             capture_output=True, text=True, timeout=timeout, env=env, check=False,
-            preexec_fn=_child_limits if mem_limit else None,  # noqa: PLW1509 — see _child_limits
+            preexec_fn=functools.partial(_child_limits, mem_limit_mb),  # noqa: PLW1509 — see _child_limits
         )
     except subprocess.TimeoutExpired as exc:
         return ChildOutcome(
