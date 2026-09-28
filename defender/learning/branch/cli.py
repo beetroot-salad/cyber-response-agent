@@ -160,18 +160,23 @@ def episodes_root(*, tenant: Any) -> Path:
     # sibling's own provenance stamp then reports as a dirty tree.
     root = Path(raw)
     candidate = root.resolve()
+    data_root = Path(tenant.dir).parent.resolve()
     for forbidden, why in (
-        (Path(tenant.dir).parent, "the data root — every tenant's tree lives there, so an "
-                                  "episode inside it would be indexed as a tenant's own runs "
-                                  "or episodes"),
+        (data_root, "the data root — every tenant's tree lives there, so an episode inside it "
+                    "would be indexed as a tenant's own runs or episodes"),
         (REPO_ROOT, "the checkout — an untracked directory there is what a sibling's own "
                     "provenance stamp reports as a dirty tree"),
     ):
         forbidden = Path(forbidden).resolve()
-        if (candidate == forbidden or forbidden in candidate.parents
-                or candidate in forbidden.parents):
+        if candidate == forbidden or forbidden in candidate.parents:
             raise LauncherRefused(
                 f"[branch] {EPISODES_BASE_ENV}={root} resolves inside {why}")
+    # A base CONTAINING the data root is refused too (#1078 d4, J44: `/tmp` for a data root of
+    # `/tmp/defender-data`) — the data root only; a base containing the checkout is not.
+    if candidate in data_root.parents:
+        raise LauncherRefused(
+            f"[branch] {EPISODES_BASE_ENV}={root} contains the data root {data_root} — keep "
+            "episodes and tenants' trees apart")
     # THE RESOLVED PATH, which is what "RESOLVED UNCONDITIONALLY" above is about. Returned
     # unresolved, a relative `DEFENDER_EPISODES_BASE` made every path built from it relative:
     # `sibling_runs_base` reached a child process as `DEFENDER_RUNS_BASE`, and the manifest

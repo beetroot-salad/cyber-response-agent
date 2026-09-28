@@ -615,6 +615,19 @@ def _episodes_root_for(tenant_paths):
     return H.branch_cli().episodes_root(tenant=tenant_paths)
 
 
+def test_an_episodes_base_containing_the_checkout_is_accepted(tmp_path, monkeypatch):
+    """Only a base INSIDE the checkout dirties it; one that merely contains the checkout
+    (`$HOME` for a checkout at `$HOME/cyber-response-agent`) puts every episode beside it, and
+    is accepted — unlike a base containing the data root, which d4 refuses. Nothing is created."""
+    root = tmp_path / "defender-data"
+    H.set_data_root(monkeypatch, root)
+    containing = H.branch_cli().REPO_ROOT.resolve().parent
+    assert root.resolve() not in {containing, *containing.parents}
+    assert containing not in root.resolve().parents, "the fixture's data root sits under it"
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(containing))
+    assert _episodes_root_for(H.TenantPaths(root, TID)) == containing
+
+
 @pytest.mark.parametrize("member", [
     "inside-tenant-runs", "equal-data-root", "containing-data-root", "inside-data-root-other",
     "tenant-folder", "tenant-episodes", "outside-data-root",

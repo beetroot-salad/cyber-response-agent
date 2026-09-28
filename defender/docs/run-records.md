@@ -24,9 +24,10 @@ census) and the page's former per-kind reader/writer tables retired with it.
 
 ## The model this page uses
 
-- **Tenant** owns worlds and runs, recorded at `<runs_base>/_tenant.json` (`defender/_tenant.py`).
-  No code carries more than one tenant today; the record is the sole authority for the tenant a
-  run stamps.
+- **Tenant** owns worlds and runs (`defender/_tenant.py`). Every run names its tenant on the
+  request (#1078, no default); the tenant exists once its row `<data root>/<T>/tenant.json` does.
+  Each runs base also records the tenant it serves at `<runs_base>/_tenant.json`, created once,
+  and a run whose request names another tenant is refused rather than stamped.
 - **World** — an environment as investigated. A *base* world is the capture unchanged
   (`role: "A"`, `runtime/branch/_family.py:59`, exactly one per family, `:503-507`); an
   *overlay* world is a base world plus a one-axis overlay (`World.overlay`, `:289-300`). Two
@@ -45,7 +46,8 @@ census) and the page's former per-kind reader/writer tables retired with it.
 - **Alert → run** is one-to-many.
 
 Locations are relative to one of four roots: `<run>` (the run dir), `<runs_base>` (its
-parent — also where the tenant record lives), `<sessions>` (`<runs_base>/../sessions`,
+parent — `<data root>/<T>/runs` for a tenant's own runs, `<episode>/runs` for a family's
+siblings — also where the runs-base record lives), `<sessions>` (`<runs_base>/../sessions`,
 `runtime/session_store.py`), and `<episode>` = `$DEFENDER_EPISODES_BASE/<episode_id>`
 (`learning/branch/cli.py`). The episodes base is a *configured* location with no default: it
 must sit outside the runs base, so no runs-base walker counts a sibling as an ordinary run, and
@@ -88,7 +90,7 @@ unreachable by root containment rather than by a named deny.
 | ticket_write | 1 | `ticket_write.json` | — | — | run.observability.ticket_write |  |
 | ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive |
 | session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
-| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | mirrored to `<main checkout>/run-visualizations/`, written as the checkout's owner (`visualize_run.render_and_mirror`, #1084) |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |

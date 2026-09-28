@@ -102,16 +102,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
     p.add_argument("--tenants-root", type=Path, default=None,
-                   help="the folder holding one sub-folder per tenant (#1106); default "
-                        "<this checkout>/knowledge/tenants. The run's tenant is the one its "
-                        "runs base's tenant record names")
+                   help="the folder holding one sub-folder per tenant's settings (#1106); "
+                        "default <this checkout>/knowledge/tenants")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
     p.add_argument("--tenant", default=None,
-                   help="the tenant this run belongs to; required on a fresh run (there is no "
-                        "default), and optional on --resume, where it is derived from the "
-                        "source run and merely checked if given")
+                   help="the tenant this run belongs to; required on every run, --resume "
+                        "included (there is no default). On --resume it must be the source "
+                        "run's tenant, as its runs-base record names it")
     ns = p.parse_args(argv)
     if ns.resume is not None and ns.alert is not None:
         p.error(

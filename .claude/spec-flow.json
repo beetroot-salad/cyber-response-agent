@@ -167,7 +167,7 @@
           "defender/run_common.py::materialize_run_dir"
         ],
         "readers": [
-          "defender/run_common.py::resolve_runs_base",
+          "defender/_tenant.py::runs_base_for",
           "defender/evals/held_out.py::index_runs",
           "defender/learning/ops/trace_lesson.py::in_context_cases"
         ],
@@ -377,8 +377,13 @@
         "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `scripts/_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
       },
       "tenant_root": {
-        "writers": [],
-        "readers": [],
+        "writers": [
+          "defender/_tenant.py::create_tenant"
+        ],
+        "readers": [
+          "defender/_tenant.py::require_tenant",
+          "defender/_tenant.py::tenant_of_run_dir"
+        ],
         "grep": [
           "tenant.json",
           "TenantPaths",

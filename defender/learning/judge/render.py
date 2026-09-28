@@ -430,11 +430,11 @@ def sibling_union(
             notes["runs_base_unreadable"] = listing.reason
             return siblings, notes
         if listing.absent:
-            # NAMED, not folded into the empty union. `run_common.resolve_runs_base()` returns
-            # whatever `DEFENDER_RUNS_BASE` says (or its compiled default) and never checks that
-            # the directory exists — `defender/CLAUDE.md` documents the devcontainer having to
-            # override that knob — so a typo or an unset knob left the walk unattempted and the
-            # prompt then asserted "This is a first-run alert: no sibling trial is recorded".
+            # NAMED, not folded into the empty union. The runs base a caller threads here is a
+            # path, never checked to exist (#1078: `runs_base_for(T)`, composed from the data
+            # root) — a tenant with no run yet, or a mistyped root, has none — so the walk went
+            # unattempted and the prompt then asserted "This is a first-run alert: no sibling
+            # trial is recorded".
             # That is the same unstated absence `runs_base_unset` exists for, one step further
             # along: nobody looked, and the views must say so rather than state the absence as
             # a fact (C11).
