@@ -54,6 +54,17 @@ def _check_label(label: object, *, what: str = "label") -> str:
     return label
 
 
+def check_minted_token(token: object) -> str:
+    """A served-world token being minted (`<episode token>.<label>`): a plain component whose
+    label, the text after the last dot, is case-stable (`_family.world_token_for` forbids dots
+    in labels). Readers of an existing token use the shape check on `LAYOUT.served_world`."""
+    token = _check_component(token, what="token")
+    _head, sep, label = token.rpartition(".")
+    if sep and not is_case_stable_id(label):
+        raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+    return token
+
+
 # ==========================================================================================
 # THE LAYOUT — every episode record as a path relative to the episode dir.
 #
@@ -307,6 +318,11 @@ class EpisodeLayout:
         stage = _check_component(stage, what="stage")
         return PurePosixPath(WIRE_LOG_DIR) / f"{stage}{TRACE_SUFFIX}"
 
+    def wire_log(self, name: str) -> PurePosixPath:
+        """`wire_logs/<name>` — an episode-root wire log by its full file name (the judge's
+        framed trace, named by `WIRE_LOG_NAMES`). One component."""
+        return PurePosixPath(WIRE_LOG_DIR) / _check_component(name, what="wire log name")
+
     def sibling_run_dir(self, episode_id: str, label: str) -> PurePosixPath:
         """`runs/<episode_id>-<label>`. The label must be case-stable and `-`-free: episode ids
         always contain `-`, so a `-`-free label keeps `ep-a-b` unambiguously `(ep-a, b)`."""
@@ -418,11 +434,7 @@ class EpisodePaths:
         after the last dot (`_family.world_token_for` forbids dots in labels) and must be
         case-stable.
         """
-        token = _check_component(token, what="token")
-        _head, sep, label = token.rpartition(".")
-        if sep and not is_case_stable_id(label):
-            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
-        return self._at(LAYOUT.served_world(token), what="served_world")
+        return self._at(LAYOUT.served_world(check_minted_token(token)), what="served_world")
 
     def judge_draw(self, label: str, n: int) -> Path:
         """`worlds/<label>/judge/<n>.yaml`."""

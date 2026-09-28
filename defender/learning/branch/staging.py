@@ -39,9 +39,9 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
+from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
-from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import artifact_file
+from defender._io import Bound, bind
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
 from defender.scripts.adapters.elastic_adapter import (
@@ -338,17 +338,14 @@ def record_staged(episode_dir: Path, row: Mapping[str, Any]) -> dict:
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
     whole list would open a window where the record is shorter than the cluster.
     """
-    path = staged_path(episode_dir)
-    # The episode dir is box-writable, so its components are judged rather than followed: a
-    # symlinked `episodes/<id>/` would put the record where teardown won't look.
-    guarded_mkdir(path.parent, base=path.parent.parent)
+    episode = Episode(Path(episode_dir))
+    # Made from its parent, so a symlinked `episodes/<id>/` is refused rather than followed: it
+    # would put the record where teardown won't look.
+    episode.create_dir()
     entry = yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
-    # `open_guarded` rather than `write_guarded(mode="append")`, because the append lane does
-    # not fsync. Both apply the same alias refusal.
-    with open_guarded(path, "a") as handle:
-        handle.write(entry)
-        handle.flush()
-        os.fsync(handle.fileno())
+    # The durable append: on disk before this returns, and nothing below the episode dir is
+    # followed.
+    episode.staged.append_durable(entry)
     return dict(row)
 
 
@@ -497,15 +494,20 @@ def merge_review(path: Path, key: str, block: dict) -> None:
     The single merger for `review.yaml` outside the review itself, shared by teardown and
     `cli._record_episode_outcome` so both write the file with one serialisation.
 
-    `artifact_file`, not `is_file()`: the episode dir is box-writable, and `is_file()` follows a
-    link planted at the name, merging into and overwriting whatever it points at.
+    Read and replaced through the episode handle: a link, hard link or other non-plain entry at
+    the name is neither read nor written through (the read answers nothing, and the replace
+    refuses it). A `path` that is not an episode's review record is refused.
     """
     path = Path(path)
+    episode = Episode(path.parent)
+    if path != episode.review.path:
+        raise ValueError(f"{path} is not an episode's review record ({LAYOUT.review})")
     doc: dict[str, Any] = {}
-    if artifact_file(path):
+    text, _reason = episode.review.read()
+    if text is not None:
         try:
-            loaded = _yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
+            loaded = _yaml.safe_load(text)
+        except yaml.YAMLError:
             loaded = None
         if isinstance(loaded, dict):
             doc = loaded
@@ -514,11 +516,10 @@ def merge_review(path: Path, key: str, block: dict) -> None:
         held.update(block)
     else:
         doc[key] = dict(block)
-    guarded_mkdir(path.parent, base=path.parent.parent)
-    write_guarded(
-        path,
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False),
-        encoding="utf-8")
+    # Made from its parent, as the other creation doors do.
+    episode.create_dir()
+    episode.review.write(
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
 
 
 def sweep_glob(episode_token: str) -> str:

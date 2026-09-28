@@ -28,8 +28,7 @@ from typing import Any
 import yaml
 
 from defender import _yaml
-from defender._episode_paths import EpisodePaths
-from defender._io import guarded_mkdir, read_guarded, write_guarded
+from defender._episode_handle import Episode
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
     RUN_ID_ALLOWED,
@@ -533,12 +532,23 @@ def load_family(
                         configured_patterns=configured_patterns)
 
 
+def _read_manifest(path: Path) -> tuple[str | None, str | None]:
+    """The manifest's text, read as its episode's `family` record: the episode dir is the trust
+    root and nothing below it is followed, so a planted link is never read or certified. A path
+    that is not an episode's manifest is refused."""
+    path = Path(path)
+    manifest = Episode(path.parent).family
+    if path != manifest.path:
+        raise FamilyError(
+            f"{path} is not an episode manifest — the manifest is its episode dir's "
+            f"{manifest.path.name}")
+    return manifest.read()
+
+
 def _read_document(path: Path) -> object:
     """The manifest deserialized but not yet narrowed; typed `object` so only `parse_family`
     produces a `Family`."""
-    # Guarded: the episode dir is reachable from a sibling box's rw bind, so the manifest may be
-    # a planted link. `read_guarded` checks the open descriptor, leaving no check-then-act window.
-    text, refusal = read_guarded(path)
+    text, refusal = _read_manifest(path)
     if text is None:
         raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
     try:
@@ -553,25 +563,21 @@ def write_family(episode_dir: Path, doc: dict) -> Path:
     Scalars are model-authored; an f-string writer would let one carrying `episode_id: hijacked`
     on a second line inject a key.
     """
-    episode_dir = Path(episode_dir)
-    # The episode dir is its own trust root: its parent is the host-controlled episodes root,
-    # and everything below it is reachable from a sibling box's rw bind.
-    guarded_mkdir(episode_dir, base=episode_dir.parent)
-    manifest = EpisodePaths(episode_dir).family
-    # Guarded: a link planted at the manifest's name would send the family's contract out of the
-    # episode.
-    write_guarded(
-        manifest,
+    episode = Episode(Path(episode_dir))
+    # Made from its parent, so a link at the episode dir's own name is refused; the manifest is
+    # then written without following anything below the episode dir.
+    episode.create_dir()
+    episode.family.write(
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
-    return manifest
+    return episode.family.path
 
 
 def manifest_digest(path: Path) -> str:
     """The manifest's content digest, recorded in the review and re-checked on resume.
 
-    Uses the same guarded read as `_read_document`, so a planted link is never certified.
+    Uses the same read as `_read_document`, so a planted link is never certified.
     """
-    text, refusal = read_guarded(Path(path))
+    text, refusal = _read_manifest(path)
     if text is None:
         raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

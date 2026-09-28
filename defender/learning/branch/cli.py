@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import errno
 import json
 import logging
 import os
@@ -54,8 +55,9 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
+from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
-from defender._io import guarded_mkdir, load_json_artifact, write_guarded
+from defender._io import load_json_artifact
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender._tenants import default_tenants_root
@@ -82,6 +84,10 @@ from defender.runtime.branch._family import (
 )
 
 _logger = logging.getLogger(__name__)
+
+#: The core's refusals of a non-plain entry at a name (a link, a hard link, a FIFO, a
+#: directory): at the priming claim they mean what an occupied claim means.
+_CLAIM_REFUSALS = (errno.ELOOP, errno.EMLINK)
 
 #: Where episodes live. No default: deriving it from the runs base would put `episodes/` inside
 #: the tree corpus walkers descend and inside the checkout provenance is stamped from.
@@ -209,18 +215,22 @@ def prepare_episode(
             "earlier attempt — those rows are absorbed first-row-wins and would answer this "
             "episode's live reads with the earlier one's estate. Remove the episode directory "
             "to re-prime it")
-    served = base_file(episode).parent
-    # The episode dir is the trust root: everything at or above it is host-controlled, while
-    # everything below is reachable from a sibling box's rw bind.
-    guarded_mkdir(served, base=episode)
-    claim = EpisodePaths(episode).priming_lock
+    # The episode dir is the trust root: nothing below it is followed.
+    handle = Episode(episode)
+    handle.served.ensure()
+    claim = handle.priming_lock
     try:
-        os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    except FileExistsError as taken:
+        claim.create("")
+    except OSError as taken:
+        # Occupied (`FileExistsError`), or anything at the name that is not a plain file (the
+        # core's refusal, left in place): either way this launcher does not hold the claim.
+        if not isinstance(taken, FileExistsError) and taken.errno not in _CLAIM_REFUSALS:
+            raise
         raise LedgerError(
-            f"another launcher is priming episode {episode_id!r} ({claim} exists) — a family's "
-            "capture is written once, before any sibling forks. If no launcher is running, that "
-            "file is the wreck of one that was killed mid-prime; remove it to retry") from taken
+            f"another launcher is priming episode {episode_id!r} ({claim.path} exists) — a "
+            "family's capture is written once, before any sibling forks. If no launcher is "
+            "running, that file is the wreck of one that was killed mid-prime; remove it to "
+            "retry") from taken
     try:
         report = prime(Path(source_run_dir), base_file(episode))
     except LedgerError as nothing_to_prime:
@@ -231,7 +241,7 @@ def prepare_episode(
         # with a session was already refused by `branch.validate` at preflight.
         if not _is_empty_capture(nothing_to_prime):
             raise
-        write_guarded(base_file(episode), "")
+        handle.served_base.create("")
         _logger.warning(
             f"{source_run_dir} captured no replayable query — the family's base is "
             "EMPTY, so every key each sibling asks reaches the live estate and any difference "
@@ -239,8 +249,13 @@ def prepare_episode(
             "replayed; read it before comparing.")
         return episode
     finally:
-        # Released on every exit, so a refused prime does not make the episode unbranchable.
-        claim.unlink(missing_ok=True)
+        # Released on every exit, so a refused prime does not make the episode unbranchable. A
+        # refusal here (something not plain at the claim's name, left for the reap scan) is
+        # logged, never raised: it must not mask the exception this `finally` is unwinding.
+        try:
+            claim.delete()
+        except OSError as stuck:
+            _logger.warning(f"could not release the priming claim {claim.path}: {stuck}")
     # Log the skips too: each is a key read live rather than replayed.
     _logger.info(
         f"primed {report.primed} captured row(s) into {base_file(episode)}; "
@@ -573,7 +588,7 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
     start = _default_spawn if spawn is None else spawn
     episode_dir = Path(episode_dir)
     runs = sibling_runs_base(episode_dir)
-    guarded_mkdir(runs, base=episode_dir)
+    Episode(episode_dir).runs.ensure()
     # Minted with the episode's tenant, or read back and refused when it names another
     # (`TenantRefused`, a ValueError) — before any sibling started.
     _tenant.ensure_runs_base_record(runs, tenant_id)
@@ -834,7 +849,7 @@ def verify_family(
     reason = "; ".join(reasons)
     # `worlds/` exists whatever the outcome; the recorded outcome, not its absence, says why it
     # may be empty.
-    guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
+    Episode(Path(episode_dir)).worlds.ensure()
     # Only scrub-verified siblings are archived: an unscrubbed tree is uncertified.
     from defender.learning.branch import archive as archive_mod
 
@@ -919,8 +934,7 @@ def _write_family_stamp(
         "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)}
     if base_world_id is not None:
         doc["base_world_id"] = base_world_id
-    write_guarded(
-        EpisodePaths(episode_dir).family_stamp,
+    Episode(Path(episode_dir)).family_stamp.write(
         json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
@@ -1172,12 +1186,12 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     with clock.step(Step.STAGING):
         # The staging record exists from the moment staging begins, so its absence can only
         # mean "staging never started".
-        staged = staging_mod.staged_path(episode_dir)
-        if not staged.exists():
+        # Exclusive: a record already there (a re-entered episode) is kept and appended to,
+        # and anything not plain at the name is refused rather than followed or replaced.
+        with contextlib.suppress(FileExistsError):
             # A comment, not `[]`: rows are appended as YAML list items, and appending after a
             # literal `[]` makes the record unparseable, which teardown refuses to act on.
-            write_guarded(
-                staged,
+            Episode(Path(episode_dir)).staged.create(
                 f"# staged names for episode {episode_id} — one row per name, appended BEFORE "
                 "the name is created\n")
         for world in runnable_worlds(family):
@@ -1195,7 +1209,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _record_episode_outcome(episode_dir, outcome=REJECTED, reason=str(
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
-        guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
+        Episode(Path(episode_dir)).worlds.ensure()
         _logger.info(f"episode {episode_id}: rejected before any sibling started")
         return 1
 
@@ -1303,10 +1317,10 @@ def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
     import yaml
 
     doc = dict(samples)
-    path = EpisodePaths(episode_dir).samples
-    write_guarded(path, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
-                                       default_flow_style=False))
-    return path
+    record = Episode(Path(episode_dir)).samples
+    record.write(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
+                                default_flow_style=False))
+    return record.path
 
 
 def _author(

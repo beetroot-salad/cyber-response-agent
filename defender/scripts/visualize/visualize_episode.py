@@ -26,7 +26,8 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])
     sys.path.insert(0, _root)
 
 from defender._clock import parse_iso_utc
-from defender._io import Bound, bind, write_guarded
+from defender._episode_handle import Episode
+from defender._io import Bound, bind
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
@@ -1235,9 +1236,9 @@ def _encode_page(html_text: str) -> bytes:
 
 
 def _write_page(episode_dir: Path, html_text: str) -> Path:
-    page_path = EpisodePaths(Path(episode_dir)).learning_html
-    write_guarded(page_path, _encode_page(html_text), mode="replace")
-    return page_path
+    page = Episode(Path(episode_dir)).learning_html
+    page.write(_encode_page(html_text))
+    return page.path
 
 
 def render_episode(episode_dir: Path) -> Path:

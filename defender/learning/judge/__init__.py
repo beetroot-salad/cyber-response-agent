@@ -32,7 +32,8 @@ from pydantic import AfterValidator, TypeAdapter, ValidationError
 from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
+from defender._episode_handle import Episode  # noqa: E402
+from defender._io import Bound, bind  # noqa: E402
 from defender._run_paths import WIRE_LOG_NAMES  # noqa: E402
 from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
@@ -168,10 +169,6 @@ def _known_keys(record: type, doc: dict[Any, Any]) -> dict[Any, Any]:
     return {k: v for k, v in doc.items() if not isinstance(k, str) or k in names}
 
 
-def _judge_yaml_path(episode_dir: Path) -> Path:
-    return EpisodePaths(episode_dir).judge
-
-
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
     # Screened read: this is the idempotency record in a box-reachable tree, and a planted one
     # would stop the pass from ever running. Nothing at the name is an ordinary ungraded episode.
@@ -244,7 +241,7 @@ def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threade
         episode_dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
         lessons_commit=lessons_commit, union=union, manifest=manifest,
         review=review, samples=samples, bound=bound)
-    guarded_mkdir(EpisodePaths(episode_dir).world(label).draws, base=episode_dir)
+    Episode(Path(episode_dir)).world(label).draws.ensure()
     return run_mod._build_prompt(judge_input)
 
 
@@ -261,8 +258,8 @@ def _run_world_draws(
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
-    world = EpisodePaths(episode_dir).world(label)
-    world_dir = world.dir
+    world_dir = EpisodePaths(episode_dir).world(label).dir
+    world = Episode(Path(episode_dir)).world(label)
 
     completed = 0
     spread: Counter[str] = Counter()
@@ -294,7 +291,13 @@ def _run_world_draws(
                 # wire log), and an earlier pass's file at this index is removed so a disk
                 # re-read cannot queue its findings as this pass's.
                 malformed += 1
-                world.draw(n).unlink(missing_ok=True)
+                try:
+                    world.draw(n).delete()
+                except OSError as stuck:
+                    # Something not plain at the draw's name is left for the reap scan, and a
+                    # later disk read counts it unreadable; it costs this draw, not the pass.
+                    _logger.warning(f"world {label!r}: the earlier draw {world.draw(n).path.name} "
+                                    f"was not removed ({stuck})")
                 continue
             doc = run_mod._draw_document(reply, world_dir=world_dir, scope=scope)
             completed += 1
@@ -305,8 +308,7 @@ def _run_world_draws(
         documents[n] = doc
         # Not contained: a link planted at this sink refuses the pass. The draw file is what
         # the enqueue reads back, so an aliased one is not an observability fault.
-        write_guarded(world.draw(n), yaml.safe_dump(doc, sort_keys=False),
-                      mode="replace")
+        world.draw(n).write(yaml.safe_dump(doc, sort_keys=False))
     return completed, dict(spread), documents, malformed
 
 
@@ -320,17 +322,15 @@ def _write_wire_log(
     Its own file name (from `agent_id`), not the wiring's `trace_name`: `run_stage` streams the
     real request/response records to that path, and a replace-mode write there would destroy
     them."""
-    from defender.runtime.observe import stage_trace_path
-
     # Name sanitisation and the framed suffix come from `WIRE_LOG_NAMES`, so the episode page
     # can pair this file with the unframed trace the seam writes.
-    path = stage_trace_path(Path(episode_dir), WIRE_LOG_NAMES.agent_framed_trace(agent_id))
+    name = WIRE_LOG_NAMES.agent_framed_trace(agent_id)
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
-           "wire_log_written_at": path.name}
+           "wire_log_written_at": name}
     # Best-effort: a planted link (`OSError`) or an unserialisable reply (`TypeError`) here
     # must not cost the grade.
     try:
-        write_guarded(path, json.dumps(row) + "\n", mode="replace")
+        Episode(Path(episode_dir)).wire_log(name).write(json.dumps(row) + "\n")
     except Exception as unwritable:  # noqa: BLE001 — observability, never the grade
         _logger.warning(f"the wire log for {agent_id} could not be written ({unwritable!r}); the "
                         "draw itself is unaffected")
@@ -522,7 +522,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     try:
         family_prompt = run_mod._build_family_prompt(manifest=manifest, grade=grade,
                                                       review=review)
-        guarded_mkdir(EpisodePaths(episode_dir).world("family").draws, base=episode_dir)
+        Episode(Path(episode_dir)).world("family").draws.ensure()
         family_completed, _family_spread, family_documents, family_malformed = (
             _run_world_draws(episode_dir, "family", judge=judge, draws=configured_draws,
                              model=model, effort=effort, prompt=family_prompt,
@@ -674,8 +674,7 @@ def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
     # The stamp is present or absent, never null.
     if doc["not_graded"] is None:
         del doc["not_graded"]
-    write_guarded(_judge_yaml_path(episode_dir), yaml.safe_dump(doc, sort_keys=False),
-                 mode="replace")
+    Episode(Path(episode_dir)).judge.write(yaml.safe_dump(doc, sort_keys=False))
 
 
 __all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade"]

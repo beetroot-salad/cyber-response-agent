@@ -37,7 +37,7 @@ from typing import Annotated, Any
 import yaml
 from pydantic import SkipValidation
 
-from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_guarded
+from defender._io import read_jsonl_rows, read_jsonl_rows_report
 from defender.run_common import DEFENDER_DIR, run_env
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -55,6 +55,7 @@ from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
 from .estate.registry import refuse_a_foreign_world_view
 from .estate.stagers.dispatch import STAGERS
+from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
 
 from .ledger import (
@@ -132,6 +133,7 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
         base.write_text(  # lint-unguarded-tree-write: ok — the same fresh host-made scratch tree as the mkdir above; no box mounts it and no model can plant a component in it  # noqa: E501
             "", encoding="utf-8")
     book = ScratchLedger(path=scratch.served_world(world_label), base_path=base)
+    book._episode = Episode(root)
     if any(book.base_rows()):
         # A base holding rows (the episode's capture, or a reused scratch tree) would answer every
         # captured key from the recording and the review would agree with itself.
@@ -241,7 +243,10 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # no
     tests can observe the single write. `settings_dir` is the episode tenant's `settings/`
     folder, carried by the replay's verb context.
     """
-    write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
+    sink = Episode(Path(episode_dir)).review
+    # A `(path, text)` seam; the default writes through the episode's `review` record and so
+    # ignores the path, which is that record's own.
+    write = write if write is not None else (lambda _path, text: sink.write(text))  # lint-default: ok — DI seam owning its own default  # noqa: E501
     episode_dir = Path(episode_dir)
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
     context = verb_context(episode_dir, settings_dir, runs_base=runs_base)
@@ -266,10 +271,8 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # no
         # an episode's `served/` somewhere no reader expects one.
         shutil.rmtree(scratch, ignore_errors=True)
     record = _record(family, worlds=worlds, unreadable=unreadable)
-    # `write_guarded`, not `write_atomic` (the same lane): `write_atomic` marks queue-file
-    # rewriters for a census, and a review record is not a queue.
     write(
-        EpisodePaths(episode_dir).review,
+        sink.path,
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
 

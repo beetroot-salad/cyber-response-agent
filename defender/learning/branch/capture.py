@@ -16,10 +16,13 @@ such read records a `base` row in the world's own file, so counting them sizes t
 
 from __future__ import annotations
 
-from defender._model import model
+import json
 from pathlib import Path
 
-from defender._io import append_jsonl, load_json_artifact, read_text_soft
+from defender._model import model
+from defender._episode_handle import Episode
+from defender._episode_paths import LAYOUT
+from defender._io import load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
 
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
@@ -56,9 +59,15 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     a post-branch row is only reached if a sibling independently re-asks that question. Slicing
     would cost determinism on exactly those keys.
     """
-    # Refuse a second prime: `append_jsonl` appends, and `_absorb` is first-row-wins, so the
-    # earlier source's answers would silently stay the estate while `PrimeReport` reported a
-    # clean prime. Retrying a partly-failed episode makes this a common path.
+    # The base is its episode's `served_base` record; a path that is not one is refused.
+    base_path = Path(base_path)
+    episode = Episode(base_path.parent.parent)
+    if base_path != episode.served_base.path:
+        raise ValueError(f"{base_path} is not an episode's primed base ({LAYOUT.served_base})")
+    # Refuse a second prime: `_absorb` is first-row-wins, so the earlier source's answers would
+    # silently stay the estate while `PrimeReport` reported a clean prime. Retrying a
+    # partly-failed episode makes this a common path. (The exclusive create below refuses one
+    # too; this names the case.)
     if base_path.exists() or base_path.is_symlink():
         raise LedgerError(
             f"{base_path} already holds a primed base — a family's capture is written once, "
@@ -96,9 +105,15 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
             "nothing in the record to say so. The counts name which rule skipped them: "
             "`failed` is a non-zero exit, `sentinels` never reached a system, `unreadable` is "
             "a payload this episode could not read back")
-    # No mkdir: `append_jsonl` creates the parent.
-    append_jsonl(  # lint-unguarded-tree-write: ok — the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs rather than one of them, so it is not bound into any box  # noqa: E501
-        base_path, out)
+    # Written whole by one exclusive create: a reader sees no base or all of it, and a racing
+    # second primer is the "already primed" refusal.
+    text = "".join(json.dumps(row) + "\n" for row in out)  # lint-jsonl-io: ok — the rows are handed whole to the rooted create  # noqa: E501
+    try:
+        episode.served_base.create(text)
+    except FileExistsError as taken:
+        raise LedgerError(
+            f"{base_path} already holds a primed base — a family's capture is written once, "
+            "before any sibling forks") from taken
     # Named fields, not `**counts`: a field mismatch would raise after the base file is
     # written, leaving the episode id permanently unusable.
     return PrimeReport(

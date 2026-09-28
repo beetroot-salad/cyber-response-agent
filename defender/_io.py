@@ -312,9 +312,11 @@ def _descend(
         for component in folders:
             where = where / component
             step = _step(os_, fd, component, where, create=create)
-            if fd != start_fd:
-                os_.close(fd)
-            fd = step
+            # Hand over before closing: an interrupt between the two can leak `left`, but the
+            # `finally` never closes it a second time (a number another open may now hold).
+            left, fd = fd, step
+            if left != start_fd:
+                os_.close(left)
         yield fd
     finally:
         if fd != start_fd:
@@ -1116,16 +1118,19 @@ def rooted_mkdir(root: Path, folder_name: str | PurePath, *, os_: Any = os) -> N
 
 def rooted_write(
     root: Path, name: str | PurePath, text: str | bytes, *, mode: str,
-    stage_name: Callable[[str], str] = staged_leaf,
+    durable: bool = False, stage_name: Callable[[str], str] = staged_leaf,
     open_unnamed: Callable[[int], int] = open_unnamed_at, os_: Any = os,
 ) -> None:
     """:func:`write_guarded`'s `create` / `replace` / `append`, for `name` under `root`. The
     folders are walked, never made (:func:`rooted_mkdir` makes them): a missing one, or a
-    missing root, is `FileNotFoundError`. `stage_name` and `open_unnamed` are the leaf-name and
-    unnamed-open seams."""
+    missing root, is `FileNotFoundError`. `durable` (append only) flushes and `fsync`s the leaf
+    before closing it, for a record whose rows must be on disk when the call returns.
+    `stage_name` and `open_unnamed` are the leaf-name and unnamed-open seams."""
     _spelling, parts = _parse_name(name)
     if mode not in _ROOTED_MODES:
         raise ValueError(f"unknown rooted_write mode: {mode!r}")
+    if durable and mode != "append":
+        raise ValueError(f"durable applies to the append mode only, not {mode!r}")
     leaf = parts[-1]
     where = Path(root, *parts)
     with _rooted(os_, root, parts[:-1]) as dir_fd:
@@ -1136,7 +1141,38 @@ def rooted_write(
         else:
             _leaf_present(os_, dir_fd, leaf, where)
             fd = _open_leaf(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
-            _write_all(fd, text, os_=os_)
+            if durable:
+                _write_synced(fd, text, os_=os_)
+            else:
+                _write_all(fd, text, os_=os_)
+
+
+def _write_synced(fd: int, text: str | bytes, *, os_: Any = os) -> None:
+    """:func:`_write_all`, with the bytes flushed and the descriptor `fsync`ed before it is
+    closed."""
+    data = text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8")
+    with os_.fdopen(fd, "wb") as fb:
+        fb.write(data)
+        fb.flush()
+        os_.fsync(fd)
+
+
+def rooted_unlink(root: Path, name: str | PurePath, *, os_: Any = os) -> bool:
+    """Remove the plain file at `name` under `root`: `True` when one was removed, `False` when
+    nothing is there (the root or a holding folder included). The folders are walked no-follow,
+    and the entry is judged by a no-follow stat before the unlink: a link, a hard link or any
+    other non-plain entry is the core's refusal and is left in place for the reap scan. The
+    stat and the unlink are two steps, so an entry swapped between them is removed as found."""
+    _spelling, parts = _parse_name(name)
+    where = Path(root, *parts)
+    try:
+        with _rooted(os_, root, parts[:-1]) as dir_fd:
+            if not _leaf_present(os_, dir_fd, parts[-1], where):
+                return False
+            os_.unlink(parts[-1], dir_fd=dir_fd)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _create_at(

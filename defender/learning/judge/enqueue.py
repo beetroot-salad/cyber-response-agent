@@ -20,7 +20,8 @@ from typing import Any
 
 import yaml
 
-from defender._io import bind, guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
+from defender._io import (
+    ENTRY_FILE, Bound, bind, guarded_mkdir, read_jsonl_rows_report, write_guarded)
 from defender._run_paths import artifact_dir, artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
@@ -341,32 +342,43 @@ def draws_on_disk_report(draw_dir: Path) -> tuple[dict[int, dict[str, Any]], Dra
     if not artifact_dir(draw_dir):
         return {}, report
     out: dict[int, dict[str, Any]] = {}
-    for path in draw_dir.glob("*.yaml"):
-        # `isdigit()` alone admits superscripts and non-ASCII digits, which `int()` rejects.
-        if not (path.stem.isascii() and path.stem.isdigit()):
-            report.unreadable += 1
-            continue
-        # Canonical spelling only: `01.yaml` and `1.yaml` would collapse onto one key over an
-        # unordered glob, making `finding_id` (the idempotency key) nondeterministic.
-        if path.stem != str(int(path.stem)):
-            report.skipped += 1
-            continue
-        # Screened leaf read: a linked, hard-linked or undecodable entry counts as unreadable.
-        text, _refusal = read_guarded(path)
-        if text is None:
-            report.unreadable += 1
-            continue
-        try:
-            # `_yaml.safe_load` converts a deep-nesting `RecursionError` into a handled class.
-            doc = _yaml_safe_load(text) or {}
-        except (ValueError, yaml.YAMLError):
-            report.unreadable += 1
-            continue
-        if isinstance(doc, dict):
-            out[int(path.stem)] = doc
-        else:
-            report.unreadable += 1
+    with bind(Path(draw_dir)) as bound:
+        listed = bound.entries().entries or {}
+        for name in sorted(n for n in listed if n.endswith(".yaml")):
+            text = _draw_text(bound, name, listed[name], report)
+            if text is None:
+                continue
+            try:
+                # `_yaml.safe_load` converts a deep-nesting `RecursionError` into a handled class.
+                doc = _yaml_safe_load(text) or {}
+            except (ValueError, yaml.YAMLError):
+                report.unreadable += 1
+                continue
+            if isinstance(doc, dict):
+                out[int(Path(name).stem)] = doc
+            else:
+                report.unreadable += 1
     return dict(sorted(out.items())), report
+
+
+def _draw_text(bound: Bound, name: str, kind: str, report: DrawsSkipReport) -> str | None:
+    """One listed `<n>.yaml`'s text, or `None` with the reason counted on `report`."""
+    stem = Path(name).stem
+    # `isdigit()` alone admits superscripts and non-ASCII digits, which `int()` rejects.
+    if not (stem.isascii() and stem.isdigit()):
+        report.unreadable += 1
+        return None
+    # Canonical spelling only: `01.yaml` and `1.yaml` would collapse onto one key over an
+    # unordered listing, making `finding_id` (the idempotency key) nondeterministic.
+    if stem != str(int(stem)):
+        report.skipped += 1
+        return None
+    # A link, directory or other non-file entry is unreadable, judged without following it;
+    # the no-follow read then refuses a hard link and undecodable bytes.
+    text = bound.read(name).text if kind == ENTRY_FILE else None
+    if text is None:
+        report.unreadable += 1
+    return text
 
 
 def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:

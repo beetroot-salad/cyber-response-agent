@@ -451,7 +451,7 @@ def test_1049_an_archived_documents_refusal_names_the_document_not_the_root(tmp_
 def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(tmp_path):
     """read_grade over a judge.yaml with a wrong-typed field, a non-string key, a row without
     its world or an entry naming no lane raises JudgeRefused 'judge.yaml is not a family grade
-    record: <bad>' — the name, not _judge_yaml_path(episode_dir) — and <bad> carries no root
+    record: <bad>' — the name, not the record's full path under the episode dir — and <bad> carries no root
     (c-14: episode_dir IS a field of EpisodeGrade, and still names nothing in <bad>). Positive
     control: the sound record reads back with that field set to the episode dir.
     """
