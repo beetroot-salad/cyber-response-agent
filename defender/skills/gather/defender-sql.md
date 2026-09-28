@@ -47,6 +47,15 @@ SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
 `->>'$'` returns **TEXT**. Cast before comparing or summing a number
 (`(v[3]->>'$')::BIGINT`), or the comparison is lexical and the sum fails.
 
+**Parenthesise every `->>` in a filter.** `->>` binds looser than AND/OR/NOT, so
+`v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` reads `(v[1]->>'$' = 'x') AND v[2]` as the
+JSON, and answers either an error or a silent, wrong 0. The tool refuses that
+shape; write:
+
+```sql
+SELECT v[1]->>'$' FROM (SELECT unnest(values) v FROM data) WHERE (v[2]->>'$') = '203.0.113.7' AND (v[1]->>'$')::BIGINT > 9
+```
+
 **Flat** — the payload's keys ARE `data`'s columns; no `unnest`.
 
 ## Results that lie

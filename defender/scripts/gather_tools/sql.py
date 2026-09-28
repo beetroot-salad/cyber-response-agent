@@ -60,6 +60,32 @@ def _error_note(message: str) -> str:
     return ""
 
 
+# duckdb binds `->>` looser than AND/OR/NOT, so
+# `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `((v[1]->>'$' = 'x') AND v[2]) ->> '$' = 'y'`
+# — which errors on some rows and answers a silent, wrong 0 on others, the fake absence a lead
+# cannot tell from a real one.
+
+
+def _misbound_arrow(con, sql: str) -> bool:
+    """Whether the query applies a JSON arrow to a true/false value, read off duckdb's own parse."""
+    try:
+        tree = json.loads(con.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
+    except Exception:  # noqa: BLE001 — advisory only; the query itself reports what is wrong with it
+        return False
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if node.get("class") == "FUNCTION" and node.get("function_name") == "->>":
+                source = (node.get("children") or [{}])[0]
+                if source.get("class") == "CONJUNCTION" or source.get("type") == "OPERATOR_NOT":
+                    return True
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return False
+
+
 def _shape_hint(con, message: str) -> str:
     try:
         cols = _top_level_columns(con)
@@ -84,7 +110,7 @@ def _shape_hint(con, message: str) -> str:
         idiom = (
             "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
             f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unpack the JSON: "
-            "`v[2]->>'$' = '<value>'`."
+            "`(v[2]->>'$') = '<value>'`."
         )
     else:
         idiom = ("flat/array shape — the payload's keys ARE `data`'s columns; "
@@ -210,6 +236,15 @@ def _run(sql: str) -> int:
         con.execute("SET TimeZone='UTC'")
         con.execute("SET enable_external_access=false")
         con.execute("SET lock_configuration=true")
+
+        if _misbound_arrow(con, sql):
+            print(
+                "defender-sql: query error: `->>` binds looser than AND/OR/NOT, so this query "
+                "reads a true/false value as JSON — it can answer a silent, wrong 0. "
+                "Parenthesise each one: `(v[1]->>'$') = '<value>' AND (v[2]->>'$') = '<value>'`.",
+                file=sys.stderr,
+            )
+            return EXIT_QUERY_ERROR
 
         # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
         try:
