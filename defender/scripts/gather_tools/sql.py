@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -145,25 +146,35 @@ def _truncation_note(con) -> str:
     )
 
 
+def _no_runtime(module: str) -> int:
+    if os.environ.get("DEFENDER_BOX"):
+        # Inside a box the runtime comes from the image (the mount is read-only), so the
+        # remedy is rebuilding it.
+        print(
+            f"defender-sql: {module} is not installed in this box image "
+            "(run `python3 defender/scripts/box_image.py build` to rebuild it).",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"defender-sql: {module} is not installed "
+            "(cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').",
+            file=sys.stderr,
+        )
+    return EXIT_NO_RUNTIME
+
+
+#: duckdb imports some modules only to hand a value to Python (`pytz` for a zoned timestamp),
+#: so one missing from the install surfaces as an engine error on the query that returns such a
+#: value — a deployment fault, not the lead's query.
+_MISSING_MODULE = re.compile(r"Required module '([^']+)' failed to import")
+
+
 def _run(sql: str) -> int:
     try:
         import duckdb
     except ImportError:
-        if os.environ.get("DEFENDER_BOX"):
-            # Inside a box `duckdb` comes from the image (the mount is read-only), so the
-            # remedy is rebuilding it.
-            print(
-                "defender-sql: duckdb is not installed in this box image "
-                "(run `python3 defender/scripts/box_image.py build` to rebuild it).",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "defender-sql: duckdb is not installed "
-                "(cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').",
-                file=sys.stderr,
-            )
-        return EXIT_NO_RUNTIME
+        return _no_runtime("duckdb")
 
     raw = sys.stdin.buffer.read()
     if not raw.strip():
@@ -193,12 +204,20 @@ def _run(sql: str) -> int:
                   file=sys.stderr)
             return EXIT_INPUT_ERROR
 
+        # A zoned value crosses into Python in the session's zone, which otherwise follows the
+        # host's: a plain timestamp cast to a zoned one, or a day bucket, would shift by the host's
+        # offset, and an empty `TZ` names a zone pytz cannot resolve.
+        con.execute("SET TimeZone='UTC'")
         con.execute("SET enable_external_access=false")
         con.execute("SET lock_configuration=true")
 
+        # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
         try:
             cursor = con.execute(sql)
+            records = cursor.fetchall()
         except duckdb.Error as exc:
+            if missing := _MISSING_MODULE.search(str(exc)):
+                return _no_runtime(missing.group(1))
             print(f"defender-sql: query error: {exc}{_shape_hint(con, str(exc))}",
                   file=sys.stderr)
             return EXIT_QUERY_ERROR
@@ -207,10 +226,11 @@ def _run(sql: str) -> int:
         columns, renamed = _disambiguate_columns(columns)
         # `null` for a non-finite float: the model computes over these rows, and a column that
         # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
-        # Zone-less timestamps are UTC: the engine converts an offset to UTC when it loads one.
+        # Zone-less timestamps are UTC: the engine converts an offset to UTC when it loads one,
+        # and the session's zone is UTC.
         rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null",
                           naive_is_utc=True)
-                for record in cursor.fetchall()]
+                for record in records]
         json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")
         if renamed:

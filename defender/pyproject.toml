@@ -49,6 +49,10 @@ runtime = [
     # is needed. Sources with a native aggregating query language
     # (elastic → ES|QL) never reach for it.
     "duckdb>=1.5,<2",
+    # pytz — duckdb imports it to hand a zoned timestamp to Python, but does not declare
+    # it; without it every zoned result (`::TIMESTAMPTZ`, `now()`, `to_timestamp`) fails
+    # at fetch (#1126).
+    "pytz",
     # sqlite — the session store (per-case message log + recorded views, the
     # substrate compaction and session forking both select over) uses the
     # STDLIB `sqlite3`, so there is deliberately NO pip entry for it here. Two
@@ -61,13 +65,16 @@ runtime = [
     # .devcontainer/Dockerfile.dev for that purpose.
 ]
 # The owned box image's package set (#1092 D1) — what the sandbox's granted, non-adapter shims
-# actually import: `duckdb` for `defender-sql` (the rest of the closure — pydantic,
+# actually import: `duckdb` for `defender-sql`, with `pytz`, which duckdb imports undeclared for a
+# zoned timestamp (#1126) (the rest of the closure — pydantic,
 # typing-extensions — is already core, see `dependencies` above). Deliberately narrower than
 # `runtime`: the LLM/MCP stack never enters the boundary the box image ships. Synced with
 # `--extra box` into the image's `/usr/local` (see `box.Dockerfile`), from the SAME lock as
 # the host venv (O1).
 box = [
     "duckdb>=1.5,<2",
+    # duckdb's undeclared import for zoned timestamps — see `runtime` (#1126).
+    "pytz",
 ]
 dev = [
     "pytest>=8.0",

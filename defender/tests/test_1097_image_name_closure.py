@@ -97,7 +97,7 @@ PLANTED_OUTSIDE = ("devdep", "devtool", "rtlib")
 #: pydantic's `email` extra — nothing asks for it and the image does not install them, but
 #: amendment 2 walks every optional list of a reached entry, so they are hashed (the superset).
 REAL_CLOSURE_NAMES = sorted([
-    "annotated-types", "duckdb", "pydantic", "pydantic-core", "pyyaml", "typing-extensions",
+    "annotated-types", "duckdb", "pydantic", "pydantic-core", "pytz", "pyyaml", "typing-extensions",
     "typing-inspection",
     "dnspython", "email-validator", "idna",
 ])
@@ -372,13 +372,13 @@ def test_a_string_extra_on_a_link_walks_exactly_like_no_extra_and_is_no_fault(tm
 
 def test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package():
     """Over THIS checkout's `uv.lock`, with the root that `pyproject.toml`'s `[project].name`
-    names, `box_closure` returns exactly the seven packages the image installs —
-    annotated-types, duckdb, pydantic, pydantic-core, pyyaml, typing-extensions and
+    names, `box_closure` returns exactly the eight packages the image installs —
+    annotated-types, duckdb, pydantic, pydantic-core, pytz, pyyaml, typing-extensions and
     typing-inspection — PLUS email-validator, dnspython and idna, which only pydantic's `email`
     extra reaches (nothing asks for it; amendment 2 walks every optional list of a reached
     entry, the superset cost it records), each at its locked version — and none of the packages
     the `dev` or `runtime` extras reach directly (pytest, ruff, mypy, pydantic-ai-slim, toons,
-    …). `duckdb`, which `runtime` also names, is in: it is `box`'s."""
+    …). `duckdb` and `pytz`, which `runtime` also names, are in: they are `box`'s."""
     pyproject = tomllib.loads((DEFENDER / "pyproject.toml").read_text(encoding="utf-8"))
     lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
     root_name = pyproject["project"]["name"]
@@ -394,7 +394,7 @@ def test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_
     extras = root.get("optional-dependencies", {})
     other = {d["name"] for extra in ("dev", "runtime") for d in extras.get(extra, [])}
     assert {"pytest", "ruff", "mypy", "pydantic-ai-slim", "toons"} <= other, sorted(other)
-    assert sorted(other & set(names)) == ["duckdb"], sorted(other & set(names))
+    assert sorted(other & set(names)) == ["duckdb", "pytz"], sorted(other & set(names))
 
 
 # ---- O1: what does NOT rename the image --------------------------------------------------------
@@ -890,12 +890,13 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
         "an idna version (pydantic's email extra)": {"lock_bytes": version_line("idna", "99.0.0")},
         "a duckdb sdist hash byte": {"lock_bytes": hash_byte("duckdb", "sdist")},
         "a second box edge": {"lock_bytes": _replace_once(
-            lock_text, 'box = [\n    { name = "duckdb" },\n]', 'box = [\n    { name = "duckdb" },\n    { name = "pyyaml" },\n]')},
+            lock_text, 'box = [\n    { name = "duckdb" },\n    { name = "pytz" },\n]',
+            'box = [\n    { name = "duckdb" },\n    { name = "pytz" },\n    { name = "pyyaml" },\n]')},
         "[tool.uv] package": {"manifest": _replace_once(pyproject_text, "package = false", "package = true")},
         "a core requirement, unlocked": {"manifest": _replace_once(
             pyproject_text, 'dependencies = [\n', 'dependencies = [\n    "planted-1097",\n')},
         "the box requirement, unlocked": {"manifest": _replace_once(
-            pyproject_text, 'box = [\n    "duckdb>=1.5,<2",\n]', 'box = [\n    "duckdb>=1.5,<3",\n]')},
+            pyproject_text, 'box = [\n    "duckdb>=1.5,<2",\n', 'box = [\n    "duckdb>=1.5,<3",\n')},
     }
     for i, (what, edit) in enumerate(moving.items()):
         assert tree(f"move-{i}", **edit) != baseline, f"{what} did not rename the image"
