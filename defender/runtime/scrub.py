@@ -6,7 +6,7 @@ import logging
 import os
 import stat
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass  # stdlib, deliberately — see the note below
+from dataclasses import dataclass
 from pathlib import Path
 
 from defender._io import write_guarded
@@ -17,12 +17,10 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Finding:
-    """One entry the walk refused, carrying what triage actually runs on.
+    """One entry the walk refused, with what triage needs.
 
-    For a symlink the planted payload IS the `target` string — there are no bytes to inspect
-    — so a report naming only the path drops the difference between build tooling leaving a
-    relative link and something reaching for `/root/.ssh/id_rsa`. `None` for every other
-    refused shape (FIFO, socket, device, hard link); none of them has a target to read.
+    For a symlink the `target` string is the planted payload, and distinguishes a harmless
+    relative link from one reaching for e.g. `/root/.ssh/id_rsa`. `None` for other shapes.
     """
 
     path: Path
@@ -45,9 +43,8 @@ class Finding:
 class RunTainted(Exception):
     """A boxed run's tree holds something that may not survive it.
 
-    Carries `findings` — EVERY offending entry, not just the first. The message renders them
-    for the operator; the attribute is what the quarantine manifest reads without re-parsing
-    prose.
+    `findings` holds every offending entry, for the quarantine manifest; the message renders
+    them for the operator.
     """
 
     def __init__(self, message: str, findings: Sequence[Finding] = ()) -> None:
@@ -57,22 +54,18 @@ class RunTainted(Exception):
 
 _PERMITTED = (stat.S_ISREG, stat.S_ISDIR)
 
-# An in-box RCE can plant an unbounded number of entries into an operator-facing message. Cap
-# what is RENDERED, never what is COLLECTED — `findings` holds the full set, and the tail is
-# announced rather than dropped silently.
+# The box can plant unboundedly many entries: cap what is rendered (announcing the tail), never
+# what is collected.
 _MESSAGE_CAP = 20
 
 
 def _check_entry(entry: Path) -> Finding | None:
-    """Judge one entry. Returns a finding rather than raising: the walk has to reach every
-    entry before anything propagates, or a tree with five planted things reports one."""
+    """Judge one entry. Returns rather than raises so the walk reports every finding."""
     st = entry.lstat()
     if not any(pred(st.st_mode) for pred in _PERMITTED):
         target = None
         if stat.S_ISLNK(st.st_mode):
-            # Never dereferences: `readlink` reads the link's OWN contents, and the walk
-            # below runs with followlinks=False — the scrub never follows what it is
-            # refusing.
+            # `readlink` reads the link itself; the scrub never follows what it refuses.
             try:
                 target = os.readlink(entry)
             except OSError:  # raced away between lstat and readlink — the type still damns it
@@ -90,14 +83,10 @@ def _check_entry(entry: Path) -> Finding | None:
 
 
 def _unreadable(path: Path, err: OSError) -> Finding:
-    """An entry the walk could not judge is REFUSED, never skipped.
+    """An entry the walk could not judge is refused, never skipped.
 
-    An entry it failed to `lstat`, or a directory it failed to list, is precisely what the
-    scrub cannot claim is a regular file or a directory. Failing closed also keeps the walk's
-    own errors from becoming silences: `os.walk`'s default `onerror` DROPS an unlistable
-    directory (certifying a subtree it never read), and an `OSError` propagating out of
-    `scrub` would discard every finding already collected and deny the caller the `RunTainted`
-    its quarantine handler keys on.
+    `os.walk`'s default `onerror` silently drops an unlistable directory, and a propagating
+    `OSError` would discard the findings collected and the `RunTainted` the caller keys on.
     """
     return Finding(
         path=path, kind="unreadable", filemode="?", nlink=0, target=None,
@@ -121,10 +110,8 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
     return "\n".join(lines)
 
 
-#: §7 D8 — the scan's verdict lives BESIDE the tree it judges, keyed by the tree's own name.
-#: In-tree it would be both PLANTABLE (an alias at the verdict's own name) and FORGEABLE (the
-#: box is root on that mount, and the consumer rule below fails closed on absence alone).
-# (the suffix is the owner's: `_run_paths.SCRUB_VERDICT_SUFFIX`, reached through `RunPaths.scrub_verdict`)
+# The scan's verdict lives beside the tree it judges, keyed by the tree's name. In-tree the box
+# (root on that mount) could plant or forge it.
 
 
 def verdict_path(tree: Path) -> Path:
@@ -133,9 +120,8 @@ def verdict_path(tree: Path) -> Path:
 
 
 def _write_verdict(tree: Path, doc: dict) -> None:
-    """Write the verdict sidecar, BEST-EFFORT on every arm. An unwritten verdict leaves the
-    tree unverified, which `tree_verified` already reads as such; what must not happen is the
-    marker's own write failure REPLACING the signal its caller is holding."""
+    """Write the verdict sidecar, best-effort: a missing verdict already reads as unverified,
+    and a write failure must not replace the signal the caller is holding."""
     try:
         write_guarded(verdict_path(tree), json.dumps(doc))
     except OSError as e:
@@ -143,19 +129,17 @@ def _write_verdict(tree: Path, doc: dict) -> None:
 
 
 def write_did_not_run(tree: Path, reason: str) -> None:
-    """§7 D2 — a caller that SKIPPED the walk (the box was not provably dead) records that
-    explicitly, rather than leaving the tree indistinguishable from one nobody has judged yet.
-    Called on a teardown fault and on a startup fault, keyed on the run dir or on each WRITABLE
-    mount source. Best-effort, for the reason `_write_verdict` carries."""
+    """Record that the walk was skipped (the box was not provably dead), so the tree is
+    distinguishable from one never judged. Used on teardown and startup faults, per run dir or
+    writable mount source. Best-effort."""
     _write_verdict(tree, {"ran": False, "reason": reason})
 
 
 def tree_verified(tree: Path) -> bool:
-    """§7 D2/D6 — a tree whose verdict is absent, or does not record `ran: true`, reads as
-    UNVERIFIED. `ran: true` says only that the walk COMPLETED: the scan permits any regular
-    file, so an artifact the box emptied, rewrote or removed is indistinguishable from an
-    untouched one. The audit obligation is discharged against redirection only; this is NOT a
-    contents-intact claim."""
+    """Whether the verdict records `ran: true`; absent or anything else reads as unverified.
+
+    This only says the walk completed (no redirection); it is not a contents-intact claim,
+    since the scan permits any regular file the box may have rewritten."""
     p = verdict_path(tree)
     if not p.is_file():
         return False
@@ -172,12 +156,9 @@ Lister = Callable[..., Iterator[tuple[str, list[str], list[str]]]]
 def scrub(run_dir: Path, *, lister: Lister = os.walk) -> None:
     """Walk `run_dir` and refuse anything that is not a plain regular file or directory.
 
-    `lister` is the walk seam — a partial or malformed walk cannot be produced
-    deterministically any other way. Every walk writes a verdict OUTSIDE the tree (§7 D8)
-    before returning or raising: `ran: true` when every entry reached was fully classified
-    (findings may still be non-empty — completing and finding taint is not the same as not
-    completing); `ran: false` when an entry vanished or became unreadable between listing and
-    inspection. A partially-walked tree is an unverified tree, whatever it found."""
+    `lister` is the walk seam, for producing partial walks in tests. Every walk writes a
+    verdict outside the tree before returning or raising: `ran: true` if every entry reached
+    was classified (findings may still exist), `ran: false` if any became unreadable."""
     findings: list[Finding] = []
 
     def refuse_unwalkable(err: OSError) -> None:
@@ -204,9 +185,7 @@ def scrub(run_dir: Path, *, lister: Lister = os.walk) -> None:
 
     if not findings:
         return
-    # os.walk yields in filesystem order, so sort: the same tainted tree must produce the same
-    # message twice or the report is not something an operator can diff or cite. By PATH, not
-    # by `str(path)` — the two disagree wherever a separator meets a character below '/'
-    # (`a/b` vs `a-c/x`), and path order is what a reader compares against.
+    # Sort for a deterministic report. By `Path`, not `str`: they disagree where a separator
+    # meets a character below '/' (`a/b` vs `a-c/x`).
     findings.sort(key=lambda f: f.path)
     raise RunTainted(_render_findings(run_dir, findings), findings)

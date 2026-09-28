@@ -1,58 +1,37 @@
-"""The QUESTIONER: a deny-all role that authors one family of sibling worlds (#947 M1/O1).
+"""The questioner: a deny-all role that authors one family of sibling worlds.
 
-WHAT THIS IS. An operator names a finished run and a branch point; three sibling worlds are
-then run from that point. This module owns the authoring half — the three model calls that turn
-the captured past into a `family.yaml` the launcher validates, stages and runs. It owns nothing
-else: it opens no cluster, spawns no process and writes no manifest.
+An operator names a finished run and a branch point; sibling worlds are then run from that
+point. This module owns the authoring half — the model calls that turn the captured past into a
+`family.yaml` the launcher validates, stages and runs. It opens no cluster, spawns no process
+and writes no manifest.
 
-WHY THE ROLE GRANTS NOTHING. `QUESTIONER_DEF` was modelled on the retired oracle's definition:
-`tools=ToolSet()`, no `bash_shapes`, no `write_shapes`,
-no `verb_grant`. Every one of those is an OMISSION rather than an empty grant line, and that is
-deliberate — `AgentDefinition`'s defaults are deny-all, so a questioner that could reach
-anything would have to have a grant ADDED to it in this file, in a diff, where a reviewer sees
-it. A definition that spelled its own empty grants would make the same widening a one-word
-edit. The role needs nothing: its whole input is inlined in the user prompt by the host, and
-its whole output is one YAML document.
+The role grants nothing, by omission: `tools=ToolSet()`, no `bash_shapes`, `write_shapes` or
+`verb_grant`. `AgentDefinition`'s defaults are deny-all, so any widening has to add a grant in
+this file where a reviewer sees it; spelled-out empty grants would make widening a one-word
+edit. The role needs nothing: its input is inlined by the host and its output is one YAML
+document.
 
-WHY THE HOST FANS OUT, NOT THE MODEL. Three calls, host-orchestrated, exactly as the oracle's
-per-lead fan-out is (`pipeline/oracle/run.py`). A "diff tool" the model could call would be a
-new capability class inside a deny-all role (design N9); the seat structure — one family call,
-then one call per authored world — is a property of the experiment, so the host owns it.
+The host, not the model, fans out (one family call, then one call per authored world): a tool
+the model could call would be a new capability inside a deny-all role.
 
-WHY THREE CALLS SHARE ONE ROLE KEY. `agent_role.py` states the rule, and it is ONE KEY PER
-PACKAGE — not one key per grant. These three calls plus the comparator's share this key because
-all four are the branch package's machinery, and nothing about a call's identity is keyed on
-the role. What separates them is the `agent_id` they carry — `questioner`, `questioner:b`,
-`questioner:c` — which is what the wire log and the per-id trace partition on, so a duplicate id
-would silently overwrite a call's trace rather than fail.
+WHY THREE CALLS SHARE ONE ROLE KEY: the rule (`agent_role.py`) is one key per package, not per
+grant. These calls and the comparator's are all branch-package machinery. They are told apart by
+`agent_id` (`questioner`, `questioner:b`, `questioner:c`), which the wire log and per-id trace
+partition on, so a duplicate id would silently overwrite a trace. Another package (e.g. the
+family judge) holds its own key even with an equally empty policy, so a grant added here cannot
+reach it.
 
-The rule is NOT "a second deny-all key is waste", which is what this paragraph used to say and
-which #1008 refuted by taking one: the family judge is its own package and holds its own key
-even though its policy is empty in exactly the way this one is. Two empty policies are the
-intended cost — it is what stops a grant added HERE from silently reaching a role in another
-package.
+Every input is wrapped in an untrusted frame, including Call 1's own reply before it seeds the
+world calls: the capture (leads, alert, investigation document) was written in a box's rw bind
+and is attacker-reachable, and a model restating it does not clean it.
 
-WHY EVERY INPUT IS WRAPPED, INCLUDING OUR OWN OUTPUT. The questioner's entire input is the
-CAPTURED PAST: joined leads, an alert and an investigation document, all written in a run dir
-that was a box's rw bind, all reachable by whoever the investigation was about. So each reaches
-the prompt inside an untrusted frame, and Call 1's own reply is re-wrapped before it seeds
-Calls 2 and 3 — taint does not stop being taint because a model has restated it. A payload that
-steered the base story must not reach the world-authoring calls as trusted framing.
+Messages go through `learning._prompt.stage_user_message` so they carry the reader contract, and
+the frames are passed literally so `scripts/lint/lint_stage_prompt_frames.py` can inspect them.
 
-THROUGH `learning._prompt.stage_user_message`, like every other stage that assembles a model
-message, and that is a correction rather than a flourish. Assembled by f-string this role — the
-one role whose ENTIRE input is attacker-reachable capture — was the only one whose message
-carried no reader contract, so nothing in the prompt said that only run-salted frames delimit
-sections or that a heading inside a frame is data. The gate that watches for exactly this
-(`scripts/lint/lint_stage_prompt_frames.py`) inspects the ARGUMENTS to `stage_user_message`, so
-a stage that never calls it is a stage the gate cannot see; the frames below are spelled at the
-call literally, not splatted from a list, so they are arguments the gate reads.
-
-ONE SALT PER CALL, minted after the bodies are in hand and re-minted while it occurs in any of
-them (`_untrusted.message_salt`). Per call and not per family, because Call 1's reply is framed
-into Calls 2 and 3: a salt Call 1's model had already seen would be a delimiter the framed
-party holds, which is #875 F-1 exactly. Shared across one message's sections, because that is
-what makes the contract's "matching run-salted frame tags in this message" true of a SET.
+One salt per call (`_untrusted.message_salt`), not per family: Call 1's reply is framed into the
+later calls, so a salt Call 1's model had seen would be a delimiter the framed party holds. One
+salt is shared across a message's sections, so "matching frame tags in this message" holds for
+the set.
 """
 from __future__ import annotations
 
@@ -77,22 +56,18 @@ from defender.runtime.agent_role import AgentRole
 from defender.runtime.branch import BranchError
 from defender.skills.invlang.parser import scan_fences
 
-#: One model call per seat, and never a retry loop inside one: a questioner that could ask
-#: again on its own would spend the operator's money without an operator in the room.
+#: One model call per seat, no retries: a retry loop would spend money with no operator present.
 QUESTIONER_REQUEST_LIMIT = 1
 
 #: The untrusted frame tag every captured artifact this role sees is wrapped in.
 UNTRUSTED_TAG = "untrusted"
 
-#: The seats, in the order the family lists them. The ROLE letter is a property of the seat,
-#: not of what the model returned in it: a family whose worlds are told apart by their roles is
-#: only readable if the roles are distinct, and a model asked to name its own role can hand
-#: back two `B`s. The launcher's `parse_family` refuses that; assigning by seat means it never
-#: has to.
+#: The seats, in family order. The role letter is assigned by seat, not taken from the reply,
+#: so roles are always distinct (a model could return two `B`s).
 WORLD_SEATS: tuple[str, ...] = ("B", "C")
 
-#: World A is not authored at all. It IS the capture: an empty overlay stages nothing, and a
-#: null axis says so — there is no difference to declare, which is what makes it the control.
+#: World A is not authored: it is the capture (empty overlay, null axis), which makes it the
+#: control.
 BASE_WORLD_ID = "a"
 BASE_WORLD_ROLE = "A"
 
@@ -107,11 +82,7 @@ _QUESTIONER_DENY_REASON = (
 
 
 def questioner_model() -> str:
-    """The questioner's model, read at CALL time so an env override reaches it.
-
-    Lives here rather than in `learning/core/config.py` for the same reason the prompts do: the
-    branch experiment is one package, and a stage's model thunk read at import would freeze
-    before any test or operator could steer it (`config.py`'s own note on the frozen read)."""
+    """The questioner's model, read at call time so an env override reaches it."""
     return env_str("QUESTIONER_MODEL", "kimi-k3")
 
 
@@ -121,19 +92,12 @@ def questioner_effort() -> str:
 
 @model(frozen=True)
 class QuestionerDeps:
-    """Frozen, and carrying NOTHING but its role — zero fields, deliberately.
+    """Frozen, with no fields: only a `role` ClassVar naming the call.
 
-    A field here would be a channel: a run dir, a world label or a trajectory reachable from
-    inside a deny-all call is exactly the state this role is defined not to have. `role` is a
-    `ClassVar`, so it is not a field either; it is how the registry and the trace name the call.
-
-    This is why it does NOT subclass `AgentDeps`, and the departure is the point rather than an
-    oversight. `AgentDeps` IS the run scope — run dir, compiled policy, box executor, cwd
-    anchor — so inheriting it would give the questioner exactly the eleven fields this class
-    exists to not have, and every one of them is a handle on a tree the role may not touch.
-    Nothing binds it: `bind(QUESTIONER_DEF, …)` refuses by name (`agent_definition.bind`), the
-    way the curator's non-bindable definition already does, because there is no run for a role
-    whose entire input is inlined in one prompt by the host."""
+    A field would be a channel to state (a run dir, a world label) this role must not have. It
+    does not subclass `AgentDeps`, which is the run scope (run dir, policy, box executor).
+    `bind(QUESTIONER_DEF, …)` refuses by name: there is no run for a role whose whole input is
+    inlined by the host."""
 
     role: ClassVar[AgentRole] = AgentRole.QUESTIONER
 
@@ -149,31 +113,20 @@ QUESTIONER_DEF = AgentDefinition(
 
 
 def _prompt(name: str) -> str:
-    """One shipped prompt, read from THIS package.
-
-    The prompts live under `learning/branch/questioner/` and not under `learning/pipeline/`:
-    the pipeline tree is on its way out (#922), and a prompt parked there would be deleted with
-    a stage that has nothing to do with this one."""
+    """One shipped prompt, read from this package."""
     return (_PROMPTS / name).read_text(encoding="utf-8")
 
 
 def _measurement_header(source_run_dir: Path, episode_dir: Path,
                        stageable_patterns: Sequence[str] = ()) -> str:
-    """The names this family is being authored FOR, as host text.
+    """The names this family is being authored for, as host text.
 
-    Host text and not a frame: all of them are names the operator and the host chose (a
-    runs-base entry, an episode directory, and the deployment's own configured corpus
-    patterns), so none is attacker-influenced the way the artifacts INSIDE those directories
-    are. They are in the prompt because a questioner that could not say which run and which
-    episode it is authoring for cannot say so in the story either, and the story is what a
-    later reader uses to tell one episode's worlds from another's.
+    Unframed because the operator and host chose these names (run, episode, configured
+    patterns); none is attacker-influenced. The run and episode let the story identify which
+    episode it belongs to.
 
-    THE STAGEABLE PATTERNS ARE STATED, not left to be inferred from the capture. The loader
-    refuses an overlay keyed on any pattern outside this set — and it refuses at
-    `parse_family`, after all three calls have been paid for. A prompt that says "a base
-    pattern the environment already declares" without saying WHICH is asking the model to
-    guess a bounded domain, and a plausible guess (an alert index for a runtime sensor this
-    deployment does not run) aborts the episode.
+    The stageable patterns are stated explicitly: `parse_family` refuses an overlay keyed on
+    any other pattern, after all calls have been paid for, so the model must not guess.
     """
     stageable = ", ".join(f"`{p}`" for p in stageable_patterns)
     return (
@@ -187,17 +140,11 @@ def _measurement_header(source_run_dir: Path, episode_dir: Path,
 
 
 def _corpus_section(samples: Any) -> str:
-    """One real document per corpus, as a framed section — the answer to "what does a document
-    here look like".
+    """One real document per corpus, so the author can match field names and value shapes.
 
-    UNTRUSTED, with the rest of the capture. These are documents out of the monitored estate,
-    which is the same attacker-influenced material the leads and the alert carry; the sample is
-    shown so the author can MATCH a shape, never so it can be obeyed.
-
-    A pattern whose every query came back empty is listed with no document rather than omitted.
-    "Asked, and held nothing" is a fact about this deployment an author needs — it is the
-    difference between a corpus that is live and one that is not — and dropping the key would
-    leave the two indistinguishable.
+    Untrusted like the rest of the capture. A pattern whose queries all came back empty is
+    listed with no document rather than omitted: "asked, and held nothing" distinguishes a dead
+    corpus from a live one.
     """
     if not isinstance(samples, dict) or not samples:
         return ""
@@ -215,13 +162,10 @@ def _corpus_section(samples: Any) -> str:
 
 @model(frozen=True)
 class _Capture:
-    """The three captured inputs as rendered SECTION BODIES, ready to be framed.
+    """The captured inputs as rendered section bodies, ready to be framed.
 
-    Spelled once because every call gets all three: a world author that could not see the
-    capture would be authoring against Call 1's summary of it, which is the one artifact in
-    this fan-out that no human wrote. Rendered once because they are routinely hundreds of
-    kilobytes and cannot vary between seats — but not FRAMED once, because a frame's salt
-    belongs to the message it delimits and each call in the fan-out is a message of its own.
+    Every call gets the capture itself, not just Call 1's summary of it. Rendered once (they are
+    large and identical across seats) but framed per call, since each message has its own salt.
     """
 
     leads: str
@@ -231,23 +175,18 @@ class _Capture:
     lessons: str = ""
 
 
-#: #1007 M8: the questioner's own lessons — count-capped like the defender's own view, and the
-#: same 20-row convention the judge's prompt already uses.
+#: Cap on the questioner's own lessons in a prompt (same 20-row convention as the judge's).
 _QUESTIONER_LESSONS_CAP = 20
 
 
 def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[str]) -> str:
     """Every candidate lesson path, read, screened and selected — the section body, or "".
 
-    `lessons` is the RAW candidate list — file paths the launcher globbed off
-    `defender/lessons-questioner/`, none of them read yet. This is where they are actually
-    opened: a lesson whose frontmatter declares its OWN selection key (`pattern`) TWICE is
-    refused outright (`_yaml.duplicate_top_level_key` — `split_frontmatter`'s plain
-    `safe_load` resolves a repeat last-wins in silence, which would let a model-authored value
-    become the document's own structure and steer this selector), and a lesson whose `pattern`
-    is not one this episode's capture named is simply not selected. Count-capped after
-    selection, never before — a corpus with more matching lessons than the cap must not read as
-    empty because the cap fell on the wrong end.
+    `lessons` is the launcher's unread glob of `defender/lessons-questioner/`. A lesson with a
+    duplicated top-level frontmatter key is skipped (`safe_load` resolves repeats last-wins
+    silently, which would let a model-authored value steer the `pattern` selector). A lesson
+    whose `pattern` is not stageable in this episode is not selected. The cap applies after
+    selection, so matching lessons are never crowded out.
     """
     if not lessons:
         return ""
@@ -266,20 +205,13 @@ def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[st
             fm, raw, body = split_frontmatter(text)
         except FrontmatterError:
             continue
-        # THE RAW FRONTMATTER ALONE, never the whole file: `duplicate_top_level_key` parses its
-        # argument as one YAML document, and the body below the closing fence is markdown, not
-        # YAML — `duplicate_top_level_key` returns `False` on any parse trouble rather than
-        # raising (`_yaml.py`'s own contract), so checking the whole text would just read as
-        # "no duplicate" silently on every ordinary lesson, and this guard would never fire —
-        # not because an exception is caught, but because the check itself goes blind.
+        # The raw frontmatter only: on the whole file (markdown body included) the YAML parse
+        # fails and `duplicate_top_level_key` returns `False`, so the guard would never fire.
         if duplicate_top_level_key(raw):
             continue
-        # `isinstance` FIRST, exactly as `enqueue._validate_row` does over its own set and for
-        # the same reason: `pattern` is model-authored frontmatter (the curator copies it
-        # verbatim and nothing type-checks it on write), so `pattern: [logs-*]` is UNHASHABLE
-        # and `x not in <set>` raises `TypeError` — out of a frame the launcher's own refusal
-        # handler does not name, so one such lesson turns every later episode into a bare
-        # traceback until a human deletes the file.
+        # `isinstance` first: `pattern` is unchecked model-authored frontmatter, and an
+        # unhashable value (`[logs-*]`) would raise `TypeError` on the set lookup, breaking
+        # every later episode until the file is deleted.
         pattern = fm.get("pattern")
         if not isinstance(pattern, str) or pattern not in stageable:
             continue
@@ -308,20 +240,15 @@ def _capture_sections(*, leads: Any, alert: Any, frontier: str,
 def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     """One model reply as a mapping.
 
-    Two shapes reach here and both are real. A driver that already parsed the reply hands back
-    a dict, and it is taken as-is; a raw model hands back text, which is parsed as YAML (which
-    subsumes JSON). Anything else — a list, a scalar, a `None` from an empty completion — is a
-    refusal naming the call, because a questioner that returned no document must not be
-    composed into a family that then reads as merely incomplete.
+    A dict (already parsed by the driver) is taken as-is; text is parsed as YAML. Anything else
+    is a refusal naming the call, so a missing document never composes into a family that reads
+    as merely incomplete.
     """
     doc: Any = reply
     if isinstance(reply, str):
-        # ONE BARE DOCUMENT, OR A REFUSAL NAMING THE CALL (#1018). The same shape rule the
-        # judge's `validate_reply` applies: exactly one document, bare or inside exactly one
-        # code fence, nothing before or after it. A reply holding two candidate documents (a
-        # draft and its correction, a document and a schema example) is refused rather than
-        # guessed at — the cost is this episode, and a family composed from the wrong document
-        # is worse. `BranchError` is what the launcher already turns into `LauncherRefused`.
+        # Exactly one document, bare or in one code fence (the judge's rule too). A reply with
+        # two candidate documents is refused rather than guessed at. The launcher turns
+        # `BranchError` into `LauncherRefused`.
         try:
             text = reply_document_text(reply)
         except MalformedReply as shape:
@@ -340,20 +267,11 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
 
 
 def _captured_disposition(source_run_dir: Path) -> str | None:
-    """The disposition the SOURCE RUN itself published, or `None` if it published none.
+    """The disposition the source run itself published in `report.md`, or `None`.
 
-    World A is the capture, so the verdict it declares is the one the real investigation
-    actually reached — and that is written down, in the source run's `report.md`, rather than
-    something a model has to remember. This is the last of the three places to look precisely
-    because it is the most authoritative: it is consulted when neither call-1 field named one.
-
-    Read through `_report.read_report`, which owns what a report headline MEANS (its
-    frontmatter split and the `normalized_disposition` vocabulary), and screened first with
-    `artifact_file` for the same reason `read_frontier` screens: the source run dir is a prior
-    box's rw bind, and `read_report` reaches the file through `is_file()`/`read_text_soft`,
-    which follow a planted link. A report that cannot be read is not an error here — the two
-    call-1 fields are the primary sources, and `parse_family` names the field if all three are
-    silent."""
+    Screened with `artifact_file` first: the source run dir is a prior box's rw bind, and
+    `read_report` follows symlinks. An unreadable report is not an error here; `parse_family`
+    names the field if no source supplies it."""
     report = RunPaths(source_run_dir).report
     if not artifact_file(report):
         return None
@@ -361,12 +279,7 @@ def _captured_disposition(source_run_dir: Path) -> str | None:
 
 
 def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
-    """The base world Call 1 declared, if it declared one.
-
-    Call 1 is asked for the family half, and a model that has just written the base STORY often
-    writes the base WORLD beside it. Taking that entry when it is there means the capture's
-    declared disposition comes from the call that read the capture; the seat invariants are
-    re-imposed on it either way."""
+    """The base world Call 1 declared, if it declared one (seat invariants are re-imposed)."""
     worlds = family.get("worlds")
     if not isinstance(worlds, list):
         return {}
@@ -381,22 +294,12 @@ def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
 def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
     """World A, composed rather than authored by a call of its own.
 
-    A IS the capture, so there is nothing for a model to choose: its overlay is empty, its axis
-    is the null sentinel that says it declares no difference, and its role is the base letter.
-    Those are imposed here and never read back from a reply — they are what makes A the control,
-    and a model that returned a non-empty overlay for it would have staged an edit into the
-    world the other two are measured against.
+    Empty overlay, null axis and the base role are imposed, never read from a reply: they make A
+    the control, and a non-empty overlay would edit the world the others are measured against.
 
-    The declared DISPOSITION is not imposed, because it is a claim about a real investigation.
-    Three places are asked, in this order, and every one of them is a place the answer was
-    already written rather than one this module could invent:
-
-    1. Call 1's `base_disposition` — the field the prompt asks for by name;
-    2. the base-role entry in Call 1's own `worlds` list, when the reply carried one;
-    3. the source run's published `report.md` headline — the verdict the investigation reached.
-
-    If all three are silent the key is left ABSENT, so `parse_family` refuses naming
-    `disposition_declared` rather than this module defaulting a verdict into the manifest."""
+    The declared disposition is taken from, in order: Call 1's `base_disposition`, the base
+    entry in Call 1's `worlds`, the source run's `report.md`. If all are silent the key is left
+    absent so `parse_family` refuses rather than a verdict being defaulted."""
     world: dict[str, Any] = _declared_base_world(family)
     declared = (
         family.get("base_disposition")
@@ -420,13 +323,8 @@ def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
 
 
 def _family_prompt(header: str, capture: _Capture) -> str:
-    """Call 1's whole message: the task, the names it authors for, then the framed capture.
-
-    THE TASK AND THE HEADER STAY OUTSIDE THE FRAMES, and that is what the frames are for. Both
-    are host text — a shipped prompt file and two directory names the operator and the host
-    chose — and a message whose every byte sat inside a frame would be a message with no
-    instruction in it. `stage_user_message` puts the reader contract at the head of the framed
-    region, so what follows the contract is exactly the region it speaks about.
+    """Call 1's whole message: the task and header (host text, unframed), then the framed
+    capture.
     """
     salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.corpora,
                         capture.lessons)
@@ -438,10 +336,8 @@ def _family_prompt(header: str, capture: _Capture) -> str:
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
             *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
-            # #1007 M8: the questioner's own lessons, call 1 ONLY — this is the call that
-            # names the discriminator and picks the base story, the two things a world's own
-            # findings have anything to say about; the overlay-authoring seats (`_world_prompt`)
-            # never see them.
+            # Lessons go to Call 1 only: it names the discriminator and base story, which is
+            # what the lessons are about.
             *([wrap(capture.lessons, UNTRUSTED_TAG, salt)] if capture.lessons else []),
         )
     )
@@ -451,14 +347,8 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
                   capture: _Capture) -> str:
     """The prompt for one world-authoring seat.
 
-    `family_reply` is re-wrapped here, and that is the point of the function: it is Call 1's
-    OWN output, and Call 1 read attacker-influenced text. Handing it over as host framing would
-    let a payload that steered the base story instruct the two calls that decide what gets
-    staged and run.
-
-    AND IN THIS MESSAGE'S OWN SALT, which is minted below and which Call 1's model has never
-    seen — the reply was already in hand when it was minted. A family-wide salt would hand the
-    framed party the delimiter of the frame its own words arrive in."""
+    `family_reply` is re-wrapped as untrusted (Call 1 read attacker-influenced text), in this
+    message's own salt, minted after the reply exists so Call 1's model has never seen it."""
     seeded = titled_section(f"Call 1's output (seat {seat} authors against this)", family_reply)
     salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.corpora)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
@@ -472,10 +362,8 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
             wrap(capture.leads, UNTRUSTED_TAG, salt),
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
-            # THE SEAT SEES THE CORPORA TOO, though it authors no overlay. Its story has to be
-            # true of the documents call 1 staged, and a story that names a field the corpus
-            # does not carry — or a value in a shape it never holds — describes a world the
-            # overlay did not build.
+            # The seat sees the corpora too: its story must match the fields and value shapes
+            # of the staged documents.
             *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
         )
     )
@@ -484,32 +372,16 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
 def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     """The source run's investigation document as it stood after `fences_at` invlang fences.
 
-    SCREENED FIRST, and that is the whole reason this function exists rather than a `read_text`
-    at the call site. `source_run_dir` is a prior box's rw bind: every artifact in it was
-    written by a model, and an entry there may be a symlink that model planted. The shipped
-    readers of this same file (`_frontier.frontier_at_branch`, `_seed.seed_investigation`) go
-    through `read_text_soft`, which FOLLOWS a link — so a link planted at `investigation.md`
-    hands the target's bytes to whoever reads it, and here that is a model prompt. `artifact_file`
-    is the repo's `lstat`-ing regular-file screen: it judges the ENTRY, not what it points at,
-    and a link fails it.
+    `source_run_dir` is a prior box's rw bind, so `investigation.md` may be a planted symlink;
+    it is read without following links, since the bytes go into a model prompt. The refusal
+    names the file, not the link target (which the planter chose).
 
-    The refusal names the file, not the resolved target: the operator needs to know which
-    artifact of theirs is not what it claims to be, and naming the target would print whatever
-    path the planter chose.
-
-    WHAT IT RETURNS is the invlang PREFIX — the fenced content as of the branch point — rather
-    than a rendering of the derived `Frontier` struct. The prefix is what the investigation
-    itself is written in, so the questioner reads the same text the investigator wrote; a prose
-    rendering of the open slots would be a second projection of invlang that could disagree with
-    `skills/invlang` about what the document says.
+    Returns the invlang prefix itself rather than a rendering of the derived `Frontier`, so the
+    questioner reads what the investigator wrote and there is no second projection of invlang.
     """
     document = RunPaths(source_run_dir).investigation
-    # `read_guarded`, not `artifact_file` then `read_text`. The lstat-then-read pair is a
-    # check-then-act window on a path in a prior box's rw bind: the entry can be replaced
-    # between the two, and the bytes that then reach this prompt are the link target's.
-    # `read_guarded` asks plainness of the OPEN DESCRIPTOR, so there is no window — which is
-    # exactly why `_seed.seed_investigation` was moved onto it for this same file in this same
-    # tree, and it is the seam `defender/CLAUDE.md` names for reads out of a box-writable tree.
+    # `read_guarded` checks the open descriptor, so there is no check-then-act window between
+    # an lstat and the read in which the entry could be swapped.
     text, refusal = read_guarded(document)
     if text is None:
         raise BranchError(
@@ -522,28 +394,18 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     return "\n\n".join(f"```invlang\n{body}\n```" for body in kept)
 
 
-#: The fields a SEAT authors. Everything else about a world — which world it is and what its
-#: difference IS — is the family's plan, declared by Call 1, because the plan has to be coherent
-#: ACROSS the worlds: two seats each choosing their own id, or each staging their own corpus,
-#: compose into a family whose arms are not a comparison of anything. A seat elaborates; it does
-#: not re-plan.
+#: The fields a seat authors. Everything else (world id, overlay) is Call 1's plan, which must be
+#: coherent across worlds; a seat elaborates, it does not re-plan.
 SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_declared",
                                                   "label_basis"})
 
 
 def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
-    """The non-base worlds Call 1 planned, in the order it planned them.
+    """The non-base worlds Call 1 planned, in order.
 
-    THE PLAN IS CALL 1'S, and that is what makes the fan-out a fan-out. Call 1 reads the capture
-    once and decides which differences are worth authoring — the ids, the axes and the overlays
-    that will actually be staged; calls 2 and 3 then write one world's STORY each, against that
-    plan and against the same capture. A family whose overlays were each chosen by a call that
-    had not seen its sibling's would be a set of unrelated worlds rather than a triplet with a
-    discriminator, and it is the discriminator that makes the comparison mean anything.
-
-    THE COUNT COMES FROM HERE TOO. A family the plan declares with one non-base world costs one
-    seat call, not two — the fan-out is as wide as the plan, so a plan the launcher then refuses
-    is refused after one call rather than after a fixed three.
+    Call 1 decides ids, axes and overlays so the worlds form one comparison around a
+    discriminator; each seat call then writes one world's story. The fan-out is as wide as the
+    plan.
     """
     worlds = family.get("worlds")
     if not isinstance(worlds, list):
@@ -557,16 +419,12 @@ def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
 def _seat_letter(index: int) -> str:
     """The role letter for the `index`-th non-base seat: B, then C, then onward.
 
-    ASSIGNED, never taken from a reply. A role is the world's NAME in every report and in the
-    identity gate's distinctness rule, so a model that returned the same letter for two seats
-    would compose a family whose arms cannot be told apart — and it would do so silently, since
-    each reply is honest on its own. The seat is a fact about the fan-out, which is the
-    launcher's, so the launcher's side of the seam sets it.
+    Assigned, never taken from a reply, so two seats can never share a role.
     """
     return WORLD_SEATS[index] if index < len(WORLD_SEATS) else chr(ord("B") + index)
 
 
-def author_family(  # noqa: PLR0913 — one keyword per captured input plus #1007's own `lessons`; the caller already resolves every optional at the boundary (its docstring), so splitting this would re-coalesce them somewhere else
+def author_family(  # noqa: PLR0913 — one keyword per captured input plus `lessons`; the caller resolves every optional at the boundary, so splitting this would re-coalesce them elsewhere
     *,
     source_run_dir: Path,
     episode_dir: Path,
@@ -578,38 +436,24 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus #100
     corpus_samples: Any = None,
     lessons: Any = None,
 ) -> dict[str, Any]:
-    """Author one family document: three model calls, one role key, three identities.
+    """Author one family document: one family call plus one call per planned world.
 
-    Returns the RAW composed dict rather than a parsed `Family`. Validation belongs to the
-    launcher, which calls `runtime.branch._family.parse_family` on the document it is about to
-    write — one validator, at the boundary where the refusal can name the field and abort the
-    episode before anything is staged or paid for. A second validation here would be a second
-    opinion about what a family IS.
+    Returns the raw composed dict; the launcher validates it with `parse_family`, the single
+    validator, before anything is staged.
 
-    `source_run_dir` and `episode_dir` are NAMED, never read: only their names reach the prompt
-    (`_measurement_header`), because a caller that could not say which run and which episode a
-    family was authored for could compose one for the wrong episode. The captured inputs
-    themselves arrive already read (`leads`, `alert`, `frontier`) — the host owns every read of a
-    model-writable tree; see `read_frontier` for what such a read has to do.
+    `source_run_dir` and `episode_dir` are only named in the prompt, never read. The captured
+    inputs arrive already read: the host owns every read of a model-writable tree.
 
-    The composition is fixed here and nowhere else: base world A, then the two authored worlds
-    in seat order, their roles assigned BY SEAT. The family-level fields come from Call 1. The
-    launcher supplies the derived half (`episode_id`, `source_run_dir`, `source_run_id`,
-    `branch_message_id`, `fences_at`, `as_of`) and the operator's `continuation_prompt`, because
-    those are facts about the measurement rather than anything a model may choose.
+    Composition: base world A, then the authored worlds in seat order with roles assigned by
+    seat. The launcher adds the measurement facts (`episode_id`, `source_run_dir`,
+    `source_run_id`, `branch_message_id`, `fences_at`, `as_of`, `continuation_prompt`).
 
-    `lessons` (#1007 M8) is the RAW candidate list of questioner-corpus lesson paths — the
-    launcher's own glob of `defender/lessons-questioner/`, none of them read yet. This
-    function is where they are opened, screened and selected against `stageable_patterns`, and
-    reach ONLY call 1 (`_family_prompt`) — the call that names the discriminator and the base
-    story, never a seat's own overlay-authoring call.
+    `lessons` is the unread candidate list of questioner-corpus paths; they are screened and
+    selected against `stageable_patterns` and reach Call 1 only.
     """
     header = _measurement_header(Path(source_run_dir), Path(episode_dir),
                                  stageable_patterns)
-    # RENDERED ONCE, ABOVE THE FAN-OUT. Every call in this function is handed the same capture
-    # — the joined leads, the alert and the whole frontier, routinely hundreds of kilobytes —
-    # and spelled inside the seat loop it was rebuilt per seat for a value that cannot vary
-    # between them. The FRAMING is per call, because the salt is (see `_world_prompt`).
+    # Rendered once for all calls; framing is per call because the salt is.
     capture = _capture_sections(leads=leads, alert=alert, frontier=frontier,
                                 corpus_samples=corpus_samples, lessons=lessons,
                                 stageable_patterns=stageable_patterns)
@@ -639,10 +483,8 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus #100
             agent_id=f"questioner:{seat.lower()}",
         )
         authored = _reply_document(reply, what=f"the call authoring seat {seat}")
-        # THE PLAN UNDERNEATH, THE SEAT'S OWN FIELDS ON TOP, THE ROLE IMPOSED LAST. Written the
-        # other way round — the seat's whole document with the plan as a fallback — a seat that
-        # echoed the prompt's example overlay back would silently stage a difference the family
-        # never planned, and the launcher would review a world nobody authored.
+        # Plan underneath, only seat-authored fields on top, role last: otherwise a seat that
+        # echoed the prompt's example overlay would stage a difference nobody planned.
         world = {**plan,
                  **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
                  "role": seat}

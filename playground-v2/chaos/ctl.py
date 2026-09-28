@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""M1 — the chaos control plane: `list`, `plan`, `activate`, `revert`, `status`, `audit`.
+"""The chaos control plane: `list`, `plan`, `activate`, `revert`, `status`, `audit`.
 
 Every mutation travels over `docker --context soc-playground exec`
-(`DockerExecSeam`) — CMDB via a `python3 -c <urllib>` round trip, Elasticsearch
-via `curl` inside the `elasticsearch` container. No path from outside the
-containers, and no long-lived controller process — the two properties that
-keep the controller itself out of the telemetry the agent-under-test reads
-(O7).
+(`DockerExecSeam`), with no host-side network path and no long-lived controller
+process, which keeps the controller out of the telemetry the agent-under-test reads.
 
 A fault is a change to named resources — a host's CMDB overlay, an ingest
 pipeline — and the controller records what each one held *before* it
 touched it:
 
     plan     everything that can fail without a side effect: resolve profile
-             + seed against the container's baked inventory, run the O4
+             + seed against the container's baked inventory, run the
              guard on the resolved mutations, snapshot each resource's
              before-state, refuse if an active record already owns one
     apply    re-snapshot and refuse if the world moved since the plan; write
@@ -29,10 +26,8 @@ touched it:
 `activate` is plan + apply in one call. `attacks/runner.py --chaos` calls
 them separately so nothing that can fail runs after the synthetic CR is posted.
 
-`activate`/`revert`/`status` all take an injectable `execer=` so tests never
-need the live stack — see chaos/tests/_fakes.py:FakeExecSeam. The functions
-also take explicit `profiles_dir=`/`rules_dir=`/`ledger_dir=` for the same
-reason; omitted, they default to this package's own committed locations.
+`execer=`, `profiles_dir=`, `rules_dir=` and `ledger_dir=` are injectable so tests
+never need the live stack.
 """
 from __future__ import annotations
 
@@ -51,12 +46,8 @@ from typing import Any, Optional
 import yaml
 
 HERE = Path(__file__).resolve().parent
-# Runnable both as `import chaos.ctl` (a package import already puts
-# playground-v2/ on sys.path — see chaos/tests/conftest.py) and as a direct
-# script (`./ctl.py ...`, matching attacks/runner.py's usage shape), where
-# sys.path[0] is this directory, not its parent. Absolute imports below need
-# playground-v2/ on the path either way; the insert is a no-op when it's
-# already there.
+# Run as a script, sys.path[0] is this directory; the absolute imports need
+# playground-v2/ on the path.
 if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
 
@@ -95,19 +86,13 @@ def _fingerprint(resources: list[dict[str, Any]]) -> str:
 class DockerExecSeam:
     """The real exec seam. Nothing else in this module talks to the stack.
 
-    Every call shells `docker --context soc-playground exec` into the target
-    container itself; there is no host-side network path to the stub or to
-    Elasticsearch (O7 — a direct host-side HTTP call would show up as a
-    gateway-IP flow in the agent's own Zeek telemetry, which is exactly what
-    keeps the controller invisible to the agent-under-test). `run=` is an
-    injection seam over `subprocess.run` so a test can assert on the argv
-    without actually shelling out — see chaos/tests/test_m1_real_seam.py.
+    Every call execs into the target container: a host-side HTTP call would show
+    up as a gateway-IP flow in the agent's own Zeek telemetry. `run=` replaces
+    `subprocess.run` in tests.
 
-    Contract (chaos/seam.py): each call returns the backend's payload or
-    raises SeamError / SeamNotFound. The in-container command prints the
-    response body followed by the HTTP status on its own last line; a
-    non-zero exit is a transport failure, and a 2xx whose body is not JSON
-    is an error too — never a payload a caller could mistake for "absent".
+    The in-container command prints the body then the HTTP status on its own last
+    line. A non-zero exit is a transport failure, and a 2xx with a non-JSON body
+    is an error, never a payload a caller could mistake for "absent".
     """
 
     def __init__(self, run: Any = subprocess.run) -> None:
@@ -184,8 +169,8 @@ class DockerExecSeam:
 
 
 class ChaosApplyError(RuntimeError):
-    """A mutation did not reach the stack — nothing about it may be recorded
-    as ground truth (O5): a failed injection is not an injection."""
+    """A mutation did not reach the stack; nothing about it may be recorded as
+    ground truth."""
 
 
 class OverlapRefused(RuntimeError):
@@ -202,11 +187,9 @@ class PlanStale(RuntimeError):
 
 # -- resources ----------------------------------------------------------------
 #
-# A resource is {kind, name, before, after, patches, applied}. `before` is
-# what the stack held when the plan was made (None = absent), `after` is
-# what it holds once every patch has landed, `patches` are the calls that
-# get it there, `applied` flips as each resource lands and is what
-# revert/status read.
+# A resource is {kind, name, before, after, patches, applied}. `before` is the
+# state at plan time (None = absent), `after` the state once every patch lands;
+# `applied` is what revert/status read.
 
 
 def _snapshot(kind: str, name: str, execer: Any) -> Optional[dict[str, Any]]:
@@ -338,10 +321,9 @@ def plan(
     ledger_dir = Path(ledger_dir) if ledger_dir is not None else DEFAULT_LEDGER_DIR
 
     profile = load_profile(profile_id, profiles_dir=profiles_dir)
-    # The guard is a precondition, not a report: nothing below this line runs
-    # until it clears, so a refused profile mutates nothing (O4). Checked on
-    # the parameters first (no stack read needed to refuse) and again on the
-    # resolved mutations, which is the check that actually gates the push.
+    # The guard runs before anything else, so a refused profile mutates nothing.
+    # Checked on the parameters (no stack read needed) and again on the resolved
+    # mutations, which is the check that gates the push.
     check_profile(profile, rules_dir=rules_dir)
     effective_seed = seed if seed is not None else profile.seed
     mutations = resolve_mutations(profile, seed=effective_seed, inventory=_baked_inventory(execer))
@@ -541,7 +523,7 @@ def status(
     profiles_dir: Optional[Path] = None,  # accepted for symmetry with activate/revert; unused
     ledger_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Reconcile the ledger against live state (O1).
+    """Reconcile the ledger against live state.
 
     Persistence is asymmetric — the CMDB overlay is in-memory (a container
     restart silently reverts it) and an ingest-pipeline processor lives in
@@ -576,13 +558,9 @@ def status(
         {"type": "malformed-ledger-file", "file": name, "error": error} for name, error in sorted(malformed.items())
     ]
 
-    # The reconciled expectation: baked inventory with every applied
-    # overlay laid on top, and every applied pipeline's after-state. Diffing
-    # *this* against live — rather than only each record's own claim — is
-    # what catches drift the ledger never predicted: a stray overlay nobody's
-    # record explains is exactly the asymmetric-persistence case, and a
-    # ledger-only check can't see it when the ledger itself is what went
-    # stale (lost on a restart, or empty because the edit was made by hand).
+    # Expected state is the baked inventory plus every applied overlay and
+    # pipeline. Diffing that against live, not just each record's claim, catches
+    # drift the ledger never predicted (e.g. a hand edit, or a lost ledger).
     expected_hosts: dict[str, dict[str, Any]] = {name: dict(rec) for name, rec in baked_hosts.items()}
     owner_of: dict[tuple[str, str], dict[str, Any]] = {}  # (host, field | "*") -> record
     expected_pipelines: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}  # name -> (after, record)
@@ -718,7 +696,8 @@ def run_audit(
     execer: Any = None,
     ledger_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """M7 — sample agent-reachable payloads and check them against the ledger (O6).
+    """Sample agent-reachable payloads and check them against the ledger.
+
 
     Live-only: needs the stack. The decision half (`chaos.audit`) is pinned
     by the unit suite; this sampling half is not.

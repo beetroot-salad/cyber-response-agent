@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""spec-graph check #7 — null-stub discrimination, mechanized (the phase-F kill for
-vacuous greens).
+"""spec-graph check #7 — null-stub discrimination (catches vacuous greens).
 
 Write a throwaway no-op implementation of the target, run the suite against it once:
 every test must fail, each on its own demand-specific assertion. A test green against a
@@ -178,9 +177,8 @@ def _write_stub(stub_dir: Path, targets: dict[str, set[str]], root: Path) -> Non
     for dotted in targets:
         parts = dotted.split(".")
         if any(other.startswith(dotted + ".") for other in targets):
-            # A dotted ancestor of another target must be a PACKAGE: a pkg/mod.py file
-            # would shadow pkg/mod/, and the child target's import would die as a
-            # collection error blamed on the suite.
+            # An ancestor of another target must be a package, or pkg/mod.py would shadow
+            # pkg/mod/ and the child's import would fail.
             mod = stub_dir.joinpath(*parts) / "__init__.py"
         else:
             mod = stub_dir.joinpath(*parts).with_suffix(".py")
@@ -206,10 +204,8 @@ _PYTEST_SECTIONS = {
 
 
 def _has_pytest_config(d: Path) -> bool:
-    # A packaging-only setup.cfg (or plain pyproject.toml) in a subdir must not hijack
-    # the cwd away from the project's real pytest config. The substring match mirrors
-    # pytest's "does the section exist" rule closely enough: a commented-out section is
-    # the only false positive, and it costs a plausible-but-different cwd, not a verdict.
+    # A packaging-only setup.cfg/pyproject.toml must not hijack the cwd. The substring match
+    # only misfires on a commented-out section, which costs a different cwd, not a verdict.
     if (d / "pytest.ini").is_file():
         return True
     for name, section in _PYTEST_SECTIONS.items():
@@ -223,10 +219,7 @@ def _has_pytest_config(d: Path) -> bool:
 
 
 def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
-    # Walk `parents`, not a hand-rolled `d = d.parent` loop: at the filesystem root
-    # `Path("/").parent` is `/` again, so a suite_dir OUTSIDE the repo tree never reached
-    # either guard (`d == root` never true, `d != root.parent` never false) and spun forever.
-    # `parents` is finite whatever the two paths' relationship.
+    # `parents` is finite even when suite_dir is outside the repo (`Path("/").parent` is `/`).
     for d in (suite_dir, *suite_dir.parents):
         if _has_pytest_config(d):
             return d
@@ -238,11 +231,8 @@ def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
 def _owning_graphs(suite_dir: Path, cfg: dict) -> list[Path]:
     """Every committed graph whose `tests:` resolves to this suite.
 
-    The suite is reached three ways — a graph path, a directory, or the corpus glob — and only
-    the first carries the graph's identity. `spec-graph nullstub <suite-dir>` is the form the
-    write-tests skill actually emits, so without this reverse map the two invocations that
-    matter most keep the #949 defect: no graph beside the suite, no `handoff.nullstub_passes`,
-    and every consciously recorded pass comes back a finding.
+    Needed because `spec-graph nullstub <suite-dir>` (the form write-tests emits) carries
+    no graph identity, yet the graphs hold `handoff.nullstub_passes`.
     """
     return [g for g in _config.artifacts(cfg) if _suite.suite_dir_from_arg(g) == suite_dir]
 
@@ -250,36 +240,27 @@ def _owning_graphs(suite_dir: Path, cfg: dict) -> list[Path]:
 def _recorded_passes(suite_dir: Path, graphs: Sequence[Path] = ()) -> set[str]:
     """Test names recorded as legitimate null-stub passes ("<test> — <class>").
 
-    Read from the GRAPHS THAT NAME THIS SUITE as well as from any graph beside it. The sibling
-    glob was the whole of it while a graph lived next to its tests; once `tests:` moved the
-    corpus into one directory, a graph that names this suite is by construction NOT a sibling of
-    it, so the glob found nothing and every consciously recorded pass came back a NULLSTUB-PASS
-    finding — advising the author to record it in the very block that already records it.
+    Read from the graphs that name this suite via `tests:` (which live elsewhere) as well as
+    any graph beside it.
     """
     candidates = sorted(suite_dir.glob("spec_graph_*.yaml"))
     candidates += [g for g in graphs if g.is_file() and g not in candidates]
     recorded: set[str] = set()
     for g in candidates:
-        # A malformed sibling graph must not kill the stub run — skip it; its shape is
-        # check_lint's finding, not this check's.
+        # A malformed graph is check_lint's finding; skip it.
         try:
             handoff = _cli.load_graph(g).get("handoff") or {}
         except (OSError, ValueError, yaml.YAMLError, TypeError):
             continue
         if not isinstance(handoff, dict):
             continue
-        # The list guard belongs HERE and not on the `or []`: a scalar `nullstub_passes` is
-        # truthy, so it survives the coalesce and `for entry in 5` raises TypeError OUTSIDE the
-        # try above — a traceback behind exit 1 for the malformed-graph case this loop's own
-        # comment promises to skip. A bare STRING is the quieter half: it iterates CHARACTERS
-        # into the allow-list, so every real recorded pass reverts to a finding and single-letter
-        # test names are silently whitelisted.
+        # A truthy scalar survives `or []`: a number would raise outside the try, and a string
+        # would whitelist its characters. Skip anything but a list.
         passes = handoff.get("nullstub_passes") or []
         if not isinstance(passes, list):
             continue
         for entry in passes:
-            # The documented separator is the em-dash ONLY; also splitting on "--"
-            # truncated legitimate ids (test_flag[--residue] → "test_flag[").
+            # Em-dash only: splitting on "--" would truncate ids like test_flag[--residue].
             recorded.add(str(entry).split("—", 1)[0].strip())
     return recorded
 
@@ -290,8 +271,8 @@ def _drive_pytest(
 ) -> subprocess.CompletedProcess[str]:
     """Generate the stub + report plugin, then run the suite against them.
 
-    The stub dir leads `PYTHONPATH` and the cwd is the project's own pytest rootdir —
-    the project's pytest config must apply to the run being measured.
+    The stub dir leads `PYTHONPATH`; the cwd is the project's pytest rootdir so its config
+    applies.
     """
     _write_stub(stub_dir, targets, root)
     (stub_dir / "nullstub_report.py").write_text(_PLUGIN, encoding="utf-8")
@@ -311,12 +292,9 @@ def _drive_pytest(
 def _collect_results(
     suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool
 ) -> dict[str, dict] | None:
-    """The per-test report, or None when the run could not happen — this function owns
-    the whole exit-2 vocabulary (no report, no tests collected, a shadowed stub, a
-    timeout, an unwritable report, a broken interpreter) and prints its own reason.
-
-    None is "could not look", never "looked and found nothing": every branch below is a
-    run that proves nothing about discrimination, and must not certify clean.
+    """The per-test report, or None (could not look, exit 2) when the run proves nothing:
+    no report, no tests collected, a shadowed stub, a timeout, an unreadable report, or a
+    broken interpreter. Prints its own reason.
     """
     root = _config.repo_root(suite_dir)
     # resolve(): the shadow check compares module __file__ origins against this dir.
@@ -331,15 +309,12 @@ def _collect_results(
         payload: dict = json.loads(report_file.read_text(encoding="utf-8"))
         results: dict[str, dict] = payload.get("results", {})
         if not results:
-            # An empty report is "nothing ran", never "everything discriminated": a suite that
-            # silently stopped collecting (renamed files, a conftest that imports but registers
-            # nothing) would otherwise certify clean — the one outcome this check exists to deny.
+            # An empty report means nothing ran, not that everything discriminated.
             print(f"check_stub: pytest collected no tests under {suite_dir} — the run proves "
                   f"nothing about discrimination.\n{proc.stdout[-2000:]}", file=sys.stderr)
             return None
-        # `python -m pytest` puts the cwd ahead of PYTHONPATH, so a target that EXISTS on
-        # disk (the modify-existing case; namespace packages merge path entries) resolves
-        # to the REAL module — every verdict below would silently measure real code.
+        # `python -m pytest` puts the cwd ahead of PYTHONPATH, so a target that exists on disk
+        # can resolve to the real module; then every verdict would measure real code.
         shadowed = [
             f"{t} imported from {f}"
             for t, f in sorted((payload.get("origins") or {}).items())
@@ -359,8 +334,7 @@ def _collect_results(
               f"pytest run under `{python}` broke mid-write.", file=sys.stderr)
         return None
     except OSError as e:
-        # A missing or broken interpreter is "could not look" (exit 2), never a
-        # traceback — an uncaught traceback exits 1 and would read as findings.
+        # A missing or broken interpreter is could-not-look, not a traceback (exit 1).
         print(f"check_stub: could not run `{python} -m pytest` — {e}", file=sys.stderr)
         return None
     finally:
@@ -379,11 +353,10 @@ def _verdict(nodeid: str, r: dict, recorded: set[str]) -> str | None:
     if outcome == "failed" and (msg.startswith("AssertionError") or msg.startswith("Failed")):
         return None
     if outcome == "passed":
-        # A parametrized nodeid ends in `[case]`; a recorded bare name covers every
-        # case, and a recorded full id covers just its own.
+        # A recorded bare name covers every `[case]`; a full id covers just its own.
         bare = test[: test.find("[")] if "[" in test and test.endswith("]") else test
         if test in recorded or bare in recorded:
-            return None  # an examined pass — recorded with its class in the graph
+            return None
         return (
             f"NULLSTUB-PASS {nodeid}: green against a do-nothing target — binds nothing. "
             f"Strengthen it, or record it with its class in handoff.nullstub_passes."
@@ -438,19 +411,11 @@ def main(argv: list[str]) -> int:
     keep = opts["keep"]
     cfg = _config.load(opts["config"])
     if args:
-        # Absolute BEFORE use: run() moves cwd to the pytest rootdir, so a relative
-        # suite/graph arg handed to pytest would resolve against the wrong base
-        # (run from repo/tests with arg `spec`, pytest would hunt <rootdir>/spec).
+        # Resolve first: pytest runs from the rootdir, so a relative arg would resolve wrong.
         p = Path(args[0]).resolve()
         suite_dir = _suite.suite_dir_from_arg(p)
-        # Needed by `_recorded_passes`: the graph names the suite AND carries the
-        # `handoff.nullstub_passes` allow-list, and the two stopped being the same file.
-        #
-        # EVERY owning graph, not just the one named. pytest is handed the whole suite directory,
-        # and a suite is named by MANY graphs now that `tests:` moved the corpus together — so an
-        # allow-list read from one graph under-reads the run it is filtering, and every pass
-        # recorded by a sibling graph comes back a NULLSTUB-PASS finding. The named graph is
-        # unioned in rather than assumed present: it may be uncommitted, or outside the glob.
+        # Every graph naming this suite contributes recorded passes, since pytest runs the
+        # whole directory. The named graph is added in case it is uncommitted or off-glob.
         graphs = _owning_graphs(suite_dir, cfg)
         if p.is_file() and p not in graphs:
             graphs.append(p)
@@ -462,14 +427,8 @@ def main(argv: list[str]) -> int:
             return 2
         suite_dir = dirs[0].resolve()
         graphs = _owning_graphs(suite_dir, cfg)
-    # NO `has_tests` preflight here, deliberately (#949). `_collect_results` already owns this
-    # exact refusal and owns it ACCURATELY: it asks the project's own pytest what it collected
-    # ("pytest collected no tests under {suite_dir} — the run proves nothing about
-    # discrimination", exit 2). A filename guard in front of it is a second, weaker oracle for
-    # the same question — it does not descend the way `pytest <suite_dir>` does, and it cannot
-    # see a `python_files` override — so it refuses ordinary `tests/unit/test_x.py` and
-    # `*_spec.py` layouts that pytest collects fine. `check_calls` keeps its guard because its
-    # scan really is flat; this one's is not, so the accurate answer is the only one worth having.
+    # No `has_tests` preflight: `_collect_results` asks pytest what it collected, which
+    # descends and honours `python_files`, unlike the flat guard `check_calls` uses.
     root = _config.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
     for t in explicit:

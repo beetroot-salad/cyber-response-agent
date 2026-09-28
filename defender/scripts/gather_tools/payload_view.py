@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """What a captured query payload looks like by the time a lead reads it.
 
-THE RULE: a payload small enough to reason from arrives **whole and uncommented**; one too large
-arrives **structurally reduced, with every reduction marked where it happened**. Size decides,
-and nothing else does — in particular NOT the payload's key names. A whitelist of bulk-array
-names cannot work here: the systems are bespoke and each names its list after its contents
-(`values`, `entries`, `packages`, `hosts`, `tickets`, `keys`, …), an open range no list keeps up
-with. Every identification below is structural — by count, by size, by type — never by name.
+A payload small enough to reason from arrives whole and uncommented; a larger one arrives
+structurally reduced, with every reduction marked where it happened. Only size decides — never
+key names, since each bespoke system names its bulk list after its contents (`values`,
+`entries`, `hosts`, …). Every identification here is by count, size or type.
 
-Two facts, kept apart. `Completeness` is what the SERVER did, read off the envelope's own scalars
-(`total`/`returned`/`truncated`/`row_count`) — which survive any reduction for free, since the
-metadata/bulk split is universal: scalars are metadata, arrays are bulk. `Elision` is what THIS
-VIEW did. Conflating them is how a lead comes to believe rows are missing from the world when
-they are merely absent from its context, and how a complete payload gets told not to count
-itself. Under the ceiling a payload arrives verbatim and says nothing: `elisions == []` IS the
-proof of completeness.
+`Completeness` is what the server did, read off the envelope's scalars (`total`, `returned`,
+`truncated`, `row_count`), which survive any reduction since scalars are metadata and arrays are
+bulk. `Elision` is what this view did. Keeping them apart stops a lead from believing rows are
+missing from the world when they are only missing from its context. Under the ceiling nothing
+is said: `elisions == []` means the view is complete.
 """
 
 from __future__ import annotations
@@ -28,14 +24,10 @@ from defender._env import env_int
 from defender._model import model
 from defender._text import as_int
 
-#: The in-context ceiling for ONE captured payload. 8 KB because in the recorded corpus only SIEM
-#: payloads exceed it — identity profiles, host records, tickets, package and key listings pass
-#: whole BY RULE rather than by luck — while a larger ceiling lets a 33 KB result into gather's
-#: context to be re-read every turn.
-#:
-#: NOT the cap on reading an authored file — `runtime/tools.py` holds that one separately, and
-#: applies THIS ceiling to reads under `gather_raw/` so an on-disk read cannot defeat the bound
-#: the capture chose.
+#: The in-context ceiling for one captured payload. At 8 KB only SIEM payloads exceed it in the
+#: recorded corpus; larger would let 33 KB results into gather's context, re-read every turn.
+#: `runtime/tools.py` applies this ceiling to reads under `gather_raw/` too, so reading the file
+#: cannot bypass it.
 PASSTHROUGH_MAX_BYTES_DEFAULT = 8192
 
 
@@ -43,26 +35,22 @@ def passthrough_max_bytes() -> int:
     return env_int("DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES", PASSTHROUGH_MAX_BYTES_DEFAULT)
 
 
-#: A string value longer than this is bulk in its own right and clips, marked, AT THE LEAF.
-#: Deliberately NOT a cap on the serialized record: clipping `json.dumps(record)` drops whole
-#: trailing FIELDS, so a "field-shape sample" loses part of the field shape. A record keeps all
-#: its keys; only a bulky value is cut.
+#: A longer string value is bulk and is clipped, marked, at the leaf — not by clipping the
+#: serialized record, which would drop trailing fields.
 LEAF_MAX_CHARS = 600
 
-#: The shortest value prefix worth keeping beside a marker. Below this a clip states nothing
-#: about the value it replaced, and `_clip_string` refuses rather than emit a mangled marker.
+#: The shortest value prefix worth keeping beside a marker; below it `_clip_string` refuses.
 _MIN_CLIP_PREFIX = 8
 
-#: Every reduction carries this, in the scope where it happened. A silently shortened array is
-#: valid JSON that parses clean and counts wrong, so the marker is deliberately not JSON-shaped
-#: and cannot be read as data.
+#: Every reduction carries this, where it happened. Not JSON-shaped, so a shortened array cannot
+#: be mistaken for complete data.
 ELISION_PREFIX = "<<ELIDED"
 
 
 @model(frozen=True)
 class Elision:
-    """One region this VIEW dropped. Never a statement about the payload on disk, which is
-    always whole: `kept`/`total` are counts of elements (a list) or characters (a string)."""
+    """One region this view dropped (the payload on disk is always whole). `kept`/`total`
+    count elements for a list, characters for a string."""
 
     path: str
     kind: str  # "list" | "string" | "fields" | "cells" | "text"
@@ -72,30 +60,23 @@ class Elision:
 
 @model(frozen=True)
 class Completeness:
-    """What the SERVER returned, read off the envelope's own scalars — never inferred from how
-    much of it this view happens to show. `unknown` when the payload declares nothing; most
-    single-record payloads have no completeness to declare."""
+    """What the server returned, read off the envelope's scalars — never inferred from this
+    view. `unknown` when the payload declares nothing, as most single records do."""
 
     state: str  # "complete" | "capped" | "unknown"
     total: int | None = None
     returned: int | None = None
 
 
-#: `json.dumps`' DEFAULT separators are `", "` and `": "` — TWO bytes each, not one. Every cost in
-#: the walk must charge that; charging 1 overshoots the ceiling, falls to `render`'s floor, and
-#: cuts the document mid-token into text `json.loads` rejects. The ruler stays `json.dumps`'
-#: default because that is what the CAPTURE writes with (`query_tool._record`).
+#: `json.dumps`' default separators are two bytes each; undercharging overshoots the ceiling
+#: and falls to `render`'s floor. Default separators because the capture writes with them.
 _SEP = 2
 
 
 def _dumps(value: Any) -> str:
-    """`ensure_ascii` STAYS ON, and it is load-bearing.
-
-    Everything here is compared in BYTES but measured with `len()`, which counts codepoints.
-    Those agree only because `json.dumps` escapes non-ASCII to `\\uXXXX`, making every string
-    this module measures — and every `text` reaching `render`, both callers building it the same
-    way — pure ASCII. Turn `ensure_ascii` off and the ruler under-reads by up to 3x on CJK: an
-    8,000-character payload measuring 8,000 and weighing 24,000 passes the 8 KB ceiling whole."""
+    """`ensure_ascii` must stay on: sizes are measured with `len()` (codepoints) but compared
+    as bytes, which agree only because escaping makes every string ASCII. Without it CJK text
+    would under-measure up to 3x and pass the ceiling whole."""
     return json.dumps(value, default=str)
 
 
@@ -108,9 +89,7 @@ def _lists(obj: dict) -> list[list]:
 
 
 def _rows_for(obj: dict, declared: int) -> list | None:
-    """The list a declared row/doc count is ABOUT, by COUNT and then by size — never by name.
-    Keyed on a name (say the ES|QL `values`), a payload declaring `row_count` beside a
-    differently-named list loses its completeness reading and falls through to `unknown`."""
+    """The list a declared row/doc count is about: the one of that length, else the longest."""
     if not (lists := _lists(obj)):
         return None
     matching = [v for v in lists if len(v) == declared]
@@ -120,24 +99,18 @@ def _rows_for(obj: dict, declared: int) -> list | None:
 
 
 def completeness(obj: Any) -> Completeness:
-    """Read, in declaration order of strength: the `total`/`returned` pair the search envelope
-    states outright; a `row_count` that EXCEEDS the rows actually present; a lone `total`
-    against the payload's ONE list; and finally a bare `truncated` flag.
-
-    Structural throughout — a list is identified by being the only list, never by its name."""
+    """Read in order of strength: the `total`/`returned` pair; a `row_count` exceeding the rows
+    present; a lone `total` against the payload's only list; a bare `truncated` flag."""
     if not isinstance(obj, dict):
         return Completeness("unknown")
     total, returned = _int(obj, "total"), _int(obj, "returned")
     if total is not None and returned is not None:
         return Completeness("capped" if total > returned else "complete", total, returned)
     row_count = _int(obj, "row_count")
-    # ONE DIRECTION ONLY. `row_count` ABOVE the rows present is a real declaration of a cap.
-    # EQUAL declares nothing: `elastic_adapter.esql_payload` computes `"row_count": len(values)`
-    # from the very array `_rows_for` measures, so reading equality as `complete` asserts
-    # "nothing was capped upstream" over a row count that may BE ES's 1000-row cap or the
-    # query's `LIMIT`. Equal falls through to `unknown` — no prose rather than false prose. A
-    # genuine ES|QL server total needs response headers, which `docker_exec_curl` does not
-    # capture today.
+    # One direction only: `row_count` above the rows present declares a cap, but equality
+    # declares nothing (`esql_payload` sets `row_count = len(values)`, which may itself be ES's
+    # 1000-row cap or a `LIMIT`), so it stays `unknown`. A real ES|QL total needs response
+    # headers, which `docker_exec_curl` does not capture.
     if (
         row_count is not None
         and (rows := _rows_for(obj, row_count)) is not None
@@ -152,8 +125,8 @@ def completeness(obj: Any) -> Completeness:
     return Completeness("unknown")
 
 
-# The span of a capped payload's returned docs — a cap is ONE slice and the envelope never says
-# which. Computed over the FULL returned list, not over whatever survived the byte budget.
+# The span of a capped payload's returned docs (the envelope never says which slice), computed
+# over the full returned list.
 
 _TIME_KEYS = ("@timestamp", "timestamp")
 
@@ -169,18 +142,11 @@ def _record_time(rec: Any) -> str | None:
 
 
 def _time_sort_key(ts: str) -> tuple[int, Any]:
-    """A chronological sort key for one `@timestamp` string, falling open to string order.
+    """A chronological sort key for a timestamp string, unparseable ones last by raw string.
 
-    Plain string order inverts the reported start/end when two stamps in the same second carry
-    different fractional-second precision: `"...11:59:00Z"` sorts AFTER `"...11:59:00.500Z"`
-    because `.` (0x2E) is below `Z` (0x5A). Unparseable stamps sort last, by raw string, rather
-    than raising on a field this function was never handed a schema for.
-
-    `_clock.parse_iso_utc` rather than a bare `fromisoformat`, and the difference is a crash:
-    `fromisoformat` returns NAIVE for a stamp with no offset and AWARE for a `Z` stamp, and
-    `sort` comparing the two raises `TypeError` out of `render` and the lead loses the whole
-    payload. The fallback `timestamp` key is exactly where a bespoke adapter omits the offset;
-    the shared helper reads naive AS UTC.
+    String order is wrong across fractional-second precisions (`.` sorts below `Z`).
+    `_clock.parse_iso_utc` reads naive stamps as UTC; a bare `fromisoformat` would mix naive and
+    aware values and raise `TypeError` out of `render`.
     """
     parsed = parse_iso_utc(ts)
     return (1, ts) if parsed is None else (0, parsed)
@@ -189,10 +155,9 @@ def _time_sort_key(ts: str) -> tuple[int, Any]:
 def returned_span(records: list) -> tuple[str, str] | None:
     """The time range the returned docs actually cover.
 
-    A capped payload is a *slice*, and which slice depends on the adapter's sort — the SIEM's
-    `query` verb sorts `@timestamp` newest-first unless asked for `sort: "asc"`, so a window
-    bracketing an alert hands back the window's newest N and the alert's own events can sit
-    entirely outside them. The envelope never says *which* docs it returned; the span does.
+    A capped payload is one slice whose position depends on the adapter's sort (the SIEM
+    defaults to newest-first), so an alert's own events can lie outside it. The envelope never
+    says which slice; the span does.
     """
     stamps = [t for rec in records if (t := _record_time(rec)) is not None]
     if not stamps:
@@ -202,8 +167,8 @@ def returned_span(records: list) -> tuple[str, str] | None:
 
 
 def _returned_records(obj: Any, comp: Completeness) -> list:
-    """The docs the server returned, identified by COUNT: the list whose length is `returned`.
-    Falls back to the longest list. Structural on purpose — see the module docstring."""
+    """The docs the server returned: the list whose length is `returned`, else the longest.
+    Identified by count, never by key name."""
     if not isinstance(obj, dict):
         return obj if isinstance(obj, list) else []
     rows = _rows_for(obj, comp.returned if comp.returned is not None else -1)
@@ -230,9 +195,8 @@ class _Node:
 
 
 def _bulk_nodes(obj: Any, prefix: tuple[str, ...] = ()) -> list[_Node]:
-    """Bulk reachable through dicts. Deliberately does NOT descend into a list: a list is bulk as
-    a whole, and what nests inside its elements is handled by `_clip_leaves` when those elements
-    are kept, or is gone with the elements that were not."""
+    """Bulk reachable through dicts. Does not descend into lists: a list is bulk as a whole,
+    and `_clip_leaves` handles what is inside the elements that are kept."""
     if isinstance(obj, list):
         return [_Node(prefix, "list", obj)]
     if not isinstance(obj, dict):
@@ -257,9 +221,8 @@ def _replace(obj: Any, path: tuple[str, ...], value: Any) -> Any:
 
 
 def _list_marker(kept: int, total: int, noun: str = "elements") -> str:
-    """The marker for a region cut by COUNT. `noun` names what was counted — elements of a
-    list, fields of a record, cells of a positional row — because a lead reading "elements"
-    over a row whose count is intact reads it as "rows were dropped"."""
+    """The marker for a region cut by count. `noun` names what was counted, so a lead does not
+    read dropped fields or cells as dropped rows."""
     return (
         f"{ELISION_PREFIX} {total - kept} of {total} {noun} — dropped from THIS VIEW only; "
         f"the payload on disk has all {total}>>"
@@ -271,29 +234,25 @@ def _string_marker(kept: int, total: int) -> str:
 
 
 def _clip_string(text: str, room: int) -> tuple[str, bool]:
-    """Clip to at most `room` CHARACTERS, marked. A clipper that returns more than its room is a
-    budget that does not hold."""
+    """Clip to at most `room` characters, marked."""
     if len(text) <= room:
         return text, False
     marker = _string_marker(0, len(text))
     keep = room - len(marker)
     if keep < _MIN_CLIP_PREFIX or room >= len(text):
-        # A clip has to leave BOTH a legible prefix and a whole marker, or it is not a clip. The
-        # marker runs ~25 chars, so at the small caps `_fit_one` squeezes to, clamping would cut
-        # the MARKER itself. Refuse, and let the caller drop whole FIELDS instead.
+        # A clip must leave a legible prefix and a whole marker (~25 chars); otherwise refuse
+        # and let the caller drop whole fields.
         return text, False
     return text[:keep] + _string_marker(keep, len(text)), True
 
 
 def _clip_serialized(text: str, room: int) -> tuple[str, bool]:
-    """Clip so the string's JSON SERIALIZATION fits `room` bytes — a different ruler from
-    `_clip_string`, because of escaping. `LEAF_MAX_CHARS` is a CHARACTER budget by intent; a
-    share of the walk's byte budget is not. `json.dumps` spends 2 bytes on a newline and 6 on a
-    non-ASCII codepoint, so a newline-dense value clipped to 1,949 characters serializes to
-    3,931 bytes. Binary search on the prefix, measured with the same `_dumps` as everything."""
+    """Clip so the string's JSON serialization fits `room` bytes. Unlike `_clip_string`'s
+    character budget, escaping matters here (a newline costs 2 bytes, non-ASCII 6), so this
+    binary-searches the prefix length with `_dumps`."""
     if len(_dumps(text)) <= room:
         return text, False
-    probe = _string_marker(0, len(text))  # the widest the marker can get: `total - 0` digits
+    probe = _string_marker(0, len(text))  # the widest the marker can get
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
@@ -305,11 +264,8 @@ def _clip_serialized(text: str, room: int) -> tuple[str, bool]:
 
 
 def _clip_leaves(value: Any, path: str, out: list[Elision], leaf_cap: int = LEAF_MAX_CHARS) -> Any:
-    """Long string leaves inside a KEPT element. The element keeps every key it had; only the
-    bulky value is cut, and it says so where it was cut.
-
-    `leaf_cap` is normally `LEAF_MAX_CHARS`. `_fit_one` lowers it when a single element is
-    itself wider than the whole share."""
+    """Clip long string leaves inside a kept element, marking each cut; every key is kept.
+    `_fit_one` lowers `leaf_cap` when one element is wider than its share."""
     if isinstance(value, str):
         clipped, did = _clip_string(value, leaf_cap)
         if did:
@@ -322,25 +278,19 @@ def _clip_leaves(value: Any, path: str, out: list[Elision], leaf_cap: int = LEAF
     return value
 
 
-#: Leaf caps `_fit_one` walks down when ONE element does not fit the share, before it gives up
-#: on values and starts dropping fields. The last is deliberately tiny: a 12-character value
-#: still shows the lead that the field is an ISO stamp rather than an integer, which is the
-#: whole reason elements are shown instead of a key list.
+#: Leaf caps `_fit_one` tries before dropping fields. Even 12 characters shows whether a value
+#: is an ISO stamp or an integer.
 _SQUEEZE_CAPS = (300, 120, 40, 12)
 
 
 def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | None:
-    """ONE element squeezed into `room`, for the case where not even the first fits whole. A
-    single alert document can serialize larger than the whole ceiling; without this the lead
-    receives `hits: ["<<ELIDED 20 of 20 elements>>"]` — no field name at all, on exactly the
-    payload it most needs one from to write a narrowing filter.
+    """One element squeezed into `room` when not even the first fits whole. Without it a large
+    alert document would render as a bare marker with no field names, exactly when the lead
+    needs them to write a narrowing filter.
 
-    Field shape is preserved ahead of value shape: clip the string leaves harder and harder
-    first, and only when even that will not fit start dropping the element's own members —
-    `_fit_fields` for a record, `_fit_cells` for a positional row. Both halves are needed
-    because an element is whatever the payload made it: a dict for search hits, a bare array for
-    an ES|QL row. `None` when the element cannot be represented at all, leaving the marker to
-    speak alone."""
+    Field shape is kept ahead of value shape: clip leaves progressively harder, then drop
+    members (`_fit_fields` for a record, `_fit_cells` for an ES|QL row). `None` when the
+    element cannot be represented at all."""
     squeezed = element
     for cap in _SQUEEZE_CAPS:
         leaves: list[Elision] = []
@@ -348,7 +298,7 @@ def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | No
         if len(_dumps(squeezed)) <= room:
             out.extend(leaves)
             return squeezed
-    # `squeezed` is the tightest cap's candidate, already built by the last pass above.
+    # `squeezed` is the tightest cap's candidate from the last pass.
     if room > 0:
         if isinstance(element, dict):
             return _fit_fields(squeezed, room, out, path=path)
@@ -362,9 +312,7 @@ def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
     kept: list[Any] = []
     used = 2
     for idx, element in enumerate(node.value):
-        # Per ELEMENT, not per list: leaf elisions are committed (`out.extend`) only once the
-        # element they belong to is kept, or the record of the element that BROKE the loop — a
-        # region absent from the view entirely — leaks in.
+        # Leaf elisions are committed only once their element is kept.
         leaves: list[Elision] = []
         clipped = _clip_leaves(element, f"{node.label}[{idx}]", leaves)
         cost = len(_dumps(clipped)) + _SEP
@@ -374,15 +322,13 @@ def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
         out.extend(leaves)
         used += cost
     if not kept and node.value:
-        # Not one element fit — see `_fit_one`. Squeeze the first rather than show none: a list
-        # rendered as a bare marker carries no field name at all.
+        # Nothing fit: squeeze the first so the view still shows field names.
         squeezed = _fit_one(node.value[0], max(share - reserve - 2, 0), f"{node.label}[0]", out)
         if squeezed is not None:
             kept = [squeezed]
     if len(kept) == len(node.value):
-        # Checked AFTER the salvage, which can complete the list: a one-row payload whose single
-        # element was squeezed has lost no ELEMENT, and marking a drop of zero breaks the rule
-        # that a marker means a real cut. The squeeze's own cost is marked INSIDE the element.
+        # After the salvage: a squeezed single-element list lost no element, so no list
+        # marker (the squeeze is marked inside the element).
         return kept
     out.append(Elision(node.label, "list", len(kept), len(node.value)))
     return [*kept, _list_marker(len(kept), len(node.value))]
@@ -396,16 +342,15 @@ def _fit_string(node: _Node, share: int, out: list[Elision]) -> Any:
 
 
 def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -> Any:
-    """A wide flat object of short scalars — bulky purely by having many fields, with nothing
-    structural to cut. Keep whole key/value pairs until the budget is spent, then say how many
-    were dropped."""
+    """A wide flat object of short scalars: keep whole key/value pairs until the budget is
+    spent, then mark how many were dropped."""
     marker_key = f"{ELISION_PREFIX}>>"
     marker = _list_marker(0, len(obj), "fields")
     reserve = len(_dumps({marker_key: marker})) + _SEP  # measured, not guessed
     kept: dict[str, Any] = {}
     used = 2
     for key, value in obj.items():
-        # `_dumps({k: v})` is `{` + the pair + `}`, so the pair PLUS its `", "` is that length.
+        # `{` + pair + `}` costs the same as the pair plus its separator.
         cost = len(_dumps({str(key): value}))
         if used + cost + reserve > budget:
             break
@@ -419,12 +364,8 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -
 
 
 def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") -> Any:
-    """A wide positional ROW — the list-shaped mirror of `_fit_fields`, needed because an ES|QL
-    row arrives as a bare array and would otherwise fall to `_fit_one`'s `return None`.
-
-    Cells are kept from the FRONT, which is what makes a cut row still readable: cell `i` binds
-    to `columns[i]`, so `columns[:len(kept)]` names precisely the survivors. That falls out of
-    not reordering; nothing here has to know it.
+    """A wide positional row (an ES|QL row is a bare array) — the list counterpart of
+    `_fit_fields`. Cells are kept from the front, so `columns[:len(kept)]` names the survivors.
     """
     marker = _list_marker(0, len(row), "cells")
     reserve = len(_dumps(marker)) + _SEP
@@ -445,12 +386,10 @@ def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") ->
 def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
     """The payload reduced to fit `budget` bytes, and the record of what that cost.
 
-    Water-filling, ascending: every scalar is kept (the metadata every envelope carries), then
-    the remaining budget is spent across bulk regions SMALLEST FIRST, each taking an equal share
-    of what is left and rolling its unspent remainder forward. A 5-entry `columns` survives whole
-    beside an elided `values`; the inverse — one wide row against many columns — falls out of the
-    same arithmetic. A per-key rule ("never cut `columns`") is right for one and wrong for the
-    other; a budget is right for both without being told which it sees.
+    Water-filling: every scalar is kept, then the remaining budget is spread over bulk regions
+    smallest first, each taking an equal share of what is left and passing on its remainder. So
+    a small `columns` survives beside an elided `values`, and the reverse case works too,
+    without any per-key rule.
     """
     if len(_dumps(obj)) <= budget:
         return obj, []
@@ -465,11 +404,8 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
         result = _replace(result, node.path, [] if node.kind == "list" else "")
     remaining = budget - len(_dumps(result))
     if remaining <= 0:
-        # The SCALARS alone overflow, so `_fit_fields` must run here too and not only for
-        # payloads with no bulk node — a wide flat object carrying ONE long string HAS a bulk
-        # node, and skipping this keeps all its fields and blows the budget. Mark each emptied
-        # region in place first (an emptied `[]` is a silently shortened array), then spend
-        # what is left on the fields.
+        # The scalars alone overflow, so fall back to `_fit_fields` even though bulk nodes
+        # exist. Mark each emptied region first — a bare `[]` would look like real data.
         for node in nodes:
             total = len(node.value)
             marker = (
@@ -496,9 +432,8 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
 # The view.
 
 def _prose(comp: Completeness, elisions: list[Elision], size: int, span) -> list[str]:
-    """Four cases, four statements. What the SERVER did and what THIS VIEW did are separate
-    sentences and never borrow each other's wording: a lead that cannot tell them apart will
-    either hunt for rows that are on disk all along, or report a total it never saw."""
+    """The prose lines. What the server did and what this view did are separate sentences, so
+    a lead neither hunts for rows that are on disk nor reports a total it never saw."""
     lines: list[str] = []
     if comp.state == "capped" and comp.total is not None and comp.returned is not None:
         lines.append(
@@ -516,9 +451,8 @@ def _prose(comp: Completeness, elisions: list[Elision], size: int, span) -> list
                 f"server-side with an aggregating query."
             )
     elif comp.state == "capped":
-        # A `truncated: true` envelope declaring no `total`/`returned` IS a server cap, which the
-        # branch above has no numbers to state. Without this arm the elision line below would
-        # tell the lead the rows it cannot see "are present in full on disk" — false: never sent.
+        # `truncated: true` with no counts is still a server cap; without this arm the elision
+        # line would wrongly claim the missing rows are on disk.
         lines.append(
             f"[record_query] {size} bytes. The SERVER capped this result (`truncated`) and did "
             f"NOT say how many matched — this is a slice of unknown size, on disk as well as "
@@ -547,8 +481,7 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
         return []
     abs_payload = run_dir / payload_rel
     if comp.state == "capped":
-        # The file holds the SERVER'S SLICE, not the world, so no `SELECT count(*)` example
-        # here: it hands back the cap — the number the prose above says never to count.
+        # The file holds the server's slice, so no `count(*)` example: it would return the cap.
         return [
             f"[record_query] returned slice on disk: {abs_payload}",
             "→ read FIELD SHAPE and values off this file; its row count is the server's cap, "
@@ -558,11 +491,8 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
             f"  cat {abs_payload} | head -40",
         ]
     if comp.state == "unknown":
-        # `unknown` means the envelope declared no completeness fact this module can read —
-        # EVERY ES|QL payload, since `row_count` is `len(values)` (see `completeness`). Falling
-        # through to the `complete` arm below would name the file "full payload" and advertise
-        # `SELECT count(*) FROM data`, restating the false "nothing was capped upstream" the
-        # prose deliberately does not state. Let a count be a count OF THIS FILE, not an answer.
+        # No declared completeness (every ES|QL payload): don't call it the full payload or
+        # suggest `count(*)` as if nothing was capped.
         return [
             f"[record_query] payload on disk: {abs_payload}",
             "→ nothing in this payload declares a total, so whether the system capped it is "
@@ -583,17 +513,14 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
 def render(
     text: str, payload_rel: str | None, run_dir: Path, *, ceiling: int | None = None
 ) -> str:
-    """The model-visible view of one captured payload.
-
-    Under the ceiling the payload is returned VERBATIM — no prose, no samples, no reformatting.
-    That is ~94% of the recorded corpus.
-    """
+    """The model-visible view of one captured payload. Under the ceiling (~94% of the recorded
+    corpus) it is returned verbatim."""
     cap = passthrough_max_bytes() if ceiling is None else ceiling
     if len(text) <= cap:
         return text
     try:
         obj = json.loads(text)
-    except ValueError:  # JSONDecodeError is a ValueError — one clause, not two spellings of it
+    except ValueError:  # includes JSONDecodeError
         # `len(text) > cap` is already established, so this always clips.
         body, _ = _clip_string(text, cap)
         elisions = [Elision("", "text", len(body), len(text))]
@@ -604,9 +531,8 @@ def render(
         comp = completeness(obj)
         span = returned_span(_returned_records(obj, comp)) if comp.state == "capped" else None
         if len(body) > cap:
-            # The floor under shapes the structural walk cannot fit. Emits the clipped document
-            # as a JSON STRING rather than a raw byte cut of the serialization, which would land
-            # mid-token and no longer parse.
+            # Floor for shapes the walk cannot fit: emit the clipped document as a JSON string,
+            # since a raw byte cut would not parse.
             clipped, _ = _clip_serialized(body, cap)
             body = _dumps(clipped)
             elisions = [*elisions, Elision("", "text", len(clipped), len(_dumps(obj)))]

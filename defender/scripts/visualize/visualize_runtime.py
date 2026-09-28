@@ -30,11 +30,8 @@ from defender.scripts.visualize.visualize_primitives import (
 )
 
 
-#: The wire log AS AN OPERATOR READS IT — run-dir-relative, so the two strings below name a
-#: path someone can actually go and look at. Derived from `_run_paths`, never hand-spelled:
-#: a literal here would send a reader to a file no current run writes.
 def _wire_log_rel() -> str:
-    """The wire log's run-dir-relative spelling, from the owner (#1077 D7)."""
+    """The wire log's run-dir-relative path, as an operator would look for it."""
     return str(RUN_LAYOUT.wire_log)
 
 
@@ -64,11 +61,8 @@ def render_runtime_investigation(
         body = f'<div class="empty">no {RUN_LAYOUT.investigation.name} or empty</div>'
         return (section("sec-investigation", "defender", "Investigation", subtitle, body), [])
     blocks: list[str] = []
-    # The stats line belongs to the BUCKET, and `phases` is a render list that may name one
-    # twice (`## GATHER` twice with no `## PLAN` between normalizes to one `GATHER (loop N)`).
-    # Drawing it under every appearance bills the same money and the same seconds once per
-    # header, so the section's own per-phase figures stop summing to the headline — #956's
-    # symptom, in the section an operator reads phase by phase. First appearance carries it.
+    # Stats belong to the phase bucket, which may appear twice in `phases`; only the first
+    # appearance carries them, so per-phase figures still sum to the headline.
     billed: set[str] = set()
     for ph in phases:
         stats = (attribution or {}).get(ph["name"])
@@ -113,10 +107,8 @@ def render_runtime_transcript(
     tools: list[dict],
     phases: list[dict],
 ) -> tuple[str, int, set[str]]:
-    # FIRST appearance wins. A repeated phase name (`## GATHER` twice inside one loop) is one
-    # transcript group, so exactly one `tx-<anchor>` id is emitted for it — and a plain
-    # comprehension would key it to the LAST block's anchor while the nav still links the
-    # first, leaving `#tx-phase-gather` pointing at nothing (#956).
+    # First appearance wins: a repeated phase name is one transcript group with one `tx-`
+    # anchor, and it must match the anchor the nav links.
     phase_anchor: dict[str, str] = {}
     for ph in phases:
         phase_anchor.setdefault(ph["name"], ph["anchor"])
@@ -200,27 +192,18 @@ def _render_tx_groups(
     return "".join(blocks)
 
 
-#: The three byte sequences that mean something to the HTML tokenizer INSIDE a `<script>`
-#: element, and whose absence is what makes a data island inert. `</script` ends it;
-#: `<script` and `<!--` drive it into the escaped/double-escaped states, where the island's
-#: OWN closing tag stops ending it and the rest of the page is swallowed as script data.
-#:
-#: IGNORECASE is load-bearing: HTML tag names are case-insensitive, so `</SCRIPT>` and
-#: `</Script >` ARE the terminator. The content here is a FOREIGN TOOL's own payload, so
-#: every spelling is reachable by whatever wrote it.
+#: Sequences the HTML tokenizer honours inside `<script>`: `</script` ends the element, and
+#: `<script` / `<!--` enter escaped states where the island's own closing tag stops working.
+#: Case-insensitive because tag names are, and the content is a foreign tool's payload.
 _SCRIPT_BREAKOUT_RE = re.compile(r"<(?=/?script|!--)", re.IGNORECASE)
 
 
 def _render_original_json(original_json: str | None) -> str:
     """The original JSON a TOON-gate-substituted result replaced, rendered beside the view.
 
-    A `<script type="application/json">` data island, not another `esc()`'d `<pre>`:
-    HTML-entity-escaping would encode every `"` in the JSON, so a reader (or a test)
-    searching the page for the tool's own JSON bytes would never find them.
-
-    `\\u003c` and not `<\\/script>` for the neutralized `<`: it is a JSON escape for the
-    character itself, so `JSON.parse`/`json.loads` recovers the payload byte for byte on all
-    three sequences, whereas `<\\!--` is not JSON at all."""
+    A `<script type="application/json">` data island rather than an escaped `<pre>`, so the
+    tool's JSON bytes stay searchable in the page. `<` is neutralized as `\\u003c`, a JSON
+    escape, so parsing recovers the payload exactly."""
     if not original_json:
         return ""
     safe = _SCRIPT_BREAKOUT_RE.sub(lambda _: "\\u003c", original_json)
@@ -253,8 +236,7 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
                 body.append(f'<div class="tx-text">{esc_untrusted(t)}</div>')
         for th in e.get("thinks") or []:
             if th and th.strip():
-                # Thinking content and tool-call args are model-authored, exactly like
-                # `texts` above — same attacker-influenced lane, same escape.
+                # Model-authored, like `texts`: same untrusted escape.
                 body.append(block("tx-think", "thinking", pre_text_untrusted(th)))
         for c in e.get("calls") or []:
             body.append(
@@ -305,12 +287,8 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
 
 
 class _CloseVocabulary(NamedTuple):
-    """The close tool's OWN published members, read once rather than restated as literals.
-
-    Two viewer modules key on these — the per-attempt verdict badge here and `visualize_run`'s
-    headline badge — and a member renamed at its home would otherwise fall through to the
-    neutral grey on both with no test failing. Same reason this panel reads `REVIEW_ROLES` and
-    `RunPaths.review_trace` instead of spelling the roles and the filename."""
+    """The close tool's published outcome members, read rather than restated as literals, so
+    a rename at the source cannot silently turn both viewers' badges grey."""
 
     stands: str
     challenged: str
@@ -322,9 +300,8 @@ class _CloseVocabulary(NamedTuple):
 def close_vocabulary() -> _CloseVocabulary:
     """`close_tool`'s outcome members and its not-reviewed cause.
 
-    Imported lazily and cached: `close_tool` pulls the whole in-process runtime (pydantic-ai
-    included) and `learning/frontend/build.py` imports this package at module scope, so the
-    edge must not be paid by anything that only wants the page CSS."""
+    Imported lazily: `close_tool` pulls in the whole runtime (pydantic-ai included), and
+    `learning/frontend/build.py` imports this package just for the page CSS."""
     from defender.runtime.close_tool import CAUSE_NOT_REVIEWED, CHALLENGED, FORCED_INCONCLUSIVE, STANDS
 
     return _CloseVocabulary(STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED)
@@ -335,9 +312,8 @@ _BYPASS_NOTE = (
     "<code>unresolved</code>, which commits immediately</div>"
 )
 
-#: The same strip for a record from before the close wrote `reviewed` — the note must not
-#: describe today's bypass set beside a row that predates it (an `inconclusive` from when
-#: that disposition was not reviewed, badged "not reviewed" next to a note saying it is).
+#: The note for a record predating the `reviewed` field, which must not describe today's
+#: bypass set.
 _PRE_RECORD_NOTE = (
     '<div class="empty">this record predates the close saying whether a review ran; by the '
     "bypass set of its day, none did</div>"
@@ -345,68 +321,45 @@ _PRE_RECORD_NOTE = (
 
 
 def _bypass_note(record: dict) -> str:
-    """The note beside an attempt that bypassed the gate — ONE chooser for the run-level strip
-    (every attempt bypassed) and the per-attempt row (this one did), so a mixed pre-#992 run —
-    one attempt challenged, the next an `inconclusive` that bypassed by the set of its day —
-    cannot show today's bypass set beside the row that predates it."""
+    """The note beside an attempt that bypassed the gate — one chooser for the run-level strip
+    and the per-attempt row, so an old record is never shown with today's bypass set."""
     return _BYPASS_NOTE if isinstance(record.get("reviewed"), bool) else _PRE_RECORD_NOTE
 
 
-#: What the gate skipped BEFORE the record said so. A record with no `reviewed` field was
-#: written when the ceiling disposition and the host's own were the bypass set, so for that
-#: record the disposition alone still tells the two populations apart. Frozen history, not
-#: the live bypass set — the live set is `close_tool.NO_REVIEW_DISPOSITIONS`, and a record
-#: written under it carries the field. Spelled from the vocabulary's own names rather than as
-#: literals, so a member renamed at its home cannot leave this reader answering for a string
-#: nothing writes any more.
+#: The bypass set for records predating the `reviewed` field (the live set is
+#: `close_tool.NO_REVIEW_DISPOSITIONS`, and records under it carry the field).
 _UNREVIEWED_BEFORE_THE_RECORD_SAID = frozenset({CEILING_DISPOSITION, HOST_ONLY_DISPOSITION})
 
 
 def _was_reviewed(record: dict) -> bool:
     """Did a review actually run for this attempt?
 
-    Asked in ONE place because two questions on this page turn on it — "is any attempt worth
-    counting?" and "does THIS attempt's verdict mean a review agreed?" — and an unreviewed
-    attempt rendered as `stands` reads as "a review ran and the disposition held".
-
-    Read off the record's own `reviewed` field, written by the close tool at the one site that
-    knows. This reader used to INFER the answer — first from the disposition's membership in
-    the bypass set, then (#992, briefly) from whether a trace file carried a row for the round —
-    and each inference broke when what it keyed on moved: a reviewed and a bypassed
-    `inconclusive` share one string, and a run dir from before the traces moved under
-    `wire_logs/` has no row to find, so a close that was reviewed rendered as one that was not.
-    The frozen fallback covers records from before the field existed, and nothing else."""
+    One place, because an unreviewed attempt rendered as `stands` would read as "a review ran
+    and the disposition held". Read off the record's own `reviewed` field, written by the close
+    tool; inferring it is unreliable (a reviewed and a bypassed `inconclusive` look the same).
+    The frozen fallback is only for records predating the field."""
     reviewed = record.get("reviewed")
     if isinstance(reviewed, bool):
         return reviewed
-    # Membership through the vocabulary's own normalizer, not a bare `in` on the raw value: a
-    # value outside the vocabulary is no evidence a review ran, and rendering it as one is the
-    # failure this function exists to prevent — so it answers False, the same as a bypass.
+    # Through the vocabulary's normalizer: an unknown value is no evidence of a review.
     disposition = normalized_disposition(record.get("reviewed_disposition"))
     return disposition is not None and disposition not in _UNREVIEWED_BEFORE_THE_RECORD_SAID
 
 
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
-    """Every close ATTEMPT's numbered review record, in attempt order.
-
-    Sorted NUMERICALLY: a challenged close writes its record and commits nothing, so attempts
-    at one close accumulate as `review_record.{n}.json`, and a lexical sort would put attempt
-    10 before attempt 2 the first time a bound moves."""
+    """Every close attempt's review record (`review_record.{n}.json`), sorted numerically so
+    attempt 10 follows attempt 9."""
     from defender._io import read_text_soft
 
     out: list[tuple[int, dict]] = []
-    # ONE SPECIMEN for the glob and the parse, composed by the owner (#1077 D7): the
-    # pattern that finds a review record and the regex that recovers its turn number are
-    # the same fact, and they were two spellings of it.
+    # One specimen name drives both the glob and the turn-number regex.
     specimen = RUN_LAYOUT.review_record(0).name
     prefix, _, ext = specimen.partition("0")
     for p in run_dir.glob(f"{prefix}*{ext}"):
         m = re.fullmatch(rf"{re.escape(prefix)}(\d+){re.escape(ext)}", p.name)
         if m is None:
             continue
-        # `read_text_soft` rather than a locally restated `(OSError, UnicodeDecodeError)`:
-        # `_io` publishes that tuple as `TEXT_READ_ERRORS` so a grep for the name audits who
-        # guards a read correctly, and the degrading reader is what a view wants.
+        # The degrading reader, which is what a view wants.
         text, _ = read_text_soft(p)
         if text is None:
             continue
@@ -422,14 +375,10 @@ def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
 def _review_trace(path: Path) -> list[dict]:
     """One review role's trace: each metadata row, with the framed reply that follows it.
 
-    Walked line by line rather than through `read_jsonl_rows`, with the split decided by
-    `parse_jsonl_row` — the WRITER's own predicate. `_write_trace_row` puts a stage's framed
-    reply on its own physical line exactly when no reader could mistake it for a row, so the
-    ordinary row reader skips it by design and would silently drop the model's words this
-    panel exists to show; re-deriving the rule locally would drift from the writer.
-
-    A BLANK line inside a framed reply is part of the reply, not a separator: skipping it
-    reflows every multi-paragraph reading into one run-on block."""
+    Walked line by line using `parse_jsonl_row`, the writer's own predicate: the writer puts a
+    framed reply on its own line exactly when it cannot be mistaken for a row, so
+    `read_jsonl_rows` would skip the replies this panel shows. Blank lines belong to the
+    reply."""
     from defender._io import parse_jsonl_row, read_text_soft
 
     entries: list[dict] = []
@@ -446,9 +395,8 @@ def _review_trace(path: Path) -> list[dict]:
 
 
 def _review_reply_text(entry: dict) -> str:
-    """The role's raw framed reply, from whichever of the two places the writer put it: its
-    own physical line, or inside the row's `raw_reply` when the reply was itself row-shaped
-    (a composer reply is a JSON object, and on its own line it would corrupt the trace)."""
+    """The role's raw framed reply: on its own line, or in the row's `raw_reply` when the
+    reply is itself row-shaped (a composer's JSON object)."""
     inline = entry["row"].get("raw_reply")
     if isinstance(inline, str) and inline.strip():
         return inline
@@ -456,8 +404,7 @@ def _review_reply_text(entry: dict) -> str:
 
 
 def _verdict_class(value: str) -> str:
-    """A verdict's CSS class, keyed on `close_tool`'s published members — see
-    `close_vocabulary`. Anything else is the neutral grey."""
+    """A verdict's CSS class, keyed on `close_tool`'s members; anything else is neutral grey."""
     v = close_vocabulary()
     return {v.stands: "rv-stands", v.challenged: "rv-challenged", v.forced: "rv-forced"}.get(
         value, "rv-skip"
@@ -467,9 +414,8 @@ def _verdict_class(value: str) -> str:
 def _review_row_status(row: dict) -> tuple[str, str]:
     """One trace row's status label and class.
 
-    `skipped` and `ok: false` are kept apart, and a `skipped` row is never read as an answer:
-    the gate writes NO `ok` key for a lens it did not dispatch, precisely because every trace
-    reader takes `ok: true` as "this stage answered"."""
+    `skipped` and `ok: false` are distinct; a skipped lens has no `ok` key at all, since
+    readers take `ok: true` as "this stage answered"."""
     if row.get("incomplete"):
         return "incomplete", "rr-bad"
     if "skipped" in row:
@@ -482,8 +428,7 @@ def _review_row_status(row: dict) -> tuple[str, str]:
 
 
 def _read_role_traces(run_dir: Path) -> list[tuple[str, list[dict]]]:
-    """Every review role's trace, read ONCE per run rather than once per close attempt. The
-    roster comes from `REVIEW_ROLES` rather than being restated here."""
+    """Every review role's trace (roster from `REVIEW_ROLES`), read once per run."""
     from defender._run_paths import RunPaths
     from defender.runtime.challenge_gate import REVIEW_ROLES
 
@@ -494,10 +439,8 @@ def _read_role_traces(run_dir: Path) -> list[tuple[str, list[dict]]]:
 def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str:
     """One close attempt's per-role calls.
 
-    ATTEMPT N IS TRACE ROUND N-1, and the offset is real rather than a typo to tidy away.
-    The gate stamps its trace rows with `state.turns` as it ENTERS the review (0 on the first
-    close), while the record is numbered by the attempt it belongs to. Filtering the traces on
-    the record's own number renders every role panel empty, with nothing to say it did."""
+    Attempt N is trace round N-1: trace rows carry `state.turns` on entering the review (0 on
+    the first close), while records are numbered by attempt."""
     round_no = attempt - 1
 
     cards: list[str] = []
@@ -507,9 +450,8 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
             if row.get("round") != round_no:
                 continue
             status, cls = _review_row_status(row)
-            # All of this is gate-authored, stage-derived or model-authored, so it goes out
-            # through the untrusted escape. `reason` rides FRAMED (real newlines) and needs
-            # the pre-formatted lane too — in a bare div the frame collapses onto one line.
+            # Untrusted escape throughout. `reason` is framed with real newlines, so it needs
+            # the pre-formatted lane.
             note = row.get("reason") or row.get("skipped") or ""
             reply = _review_reply_text(e)
             inner = ""
@@ -533,8 +475,8 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
 def _review_cost_html(costs: dict[str, float] | None) -> str:
     """The gate's spend, totalled and split by lens.
 
-    Empty when nothing priced — the honest render for a replay, whose injected stages call no
-    provider. A `$0.0000` there would read as "the gate was free", a different claim."""
+    Empty when nothing priced (a replay's injected stages call no provider); `$0.0000` would
+    claim the gate was free."""
     total = sum((costs or {}).values())
     if not total:
         return ""
@@ -551,17 +493,12 @@ def render_review_gate(
     run_dir: Path, report: ReportRead, costs: dict[str, float] | None = None,
 ) -> tuple[str, int]:
     """§ Review gate — the write-time review every close but the host's own `unresolved`
-    passes (#992 added `inconclusive` beside every confident member).
+    passes.
 
-    Rendered as a gate and deliberately NOT as a phase: it has no `##` header in
-    `investigation.md`, the investigator never occupies it, and it is kept out of
-    `visualize_data`'s phase machinery (`_LOOP_VERBS`, `phase_color`) so no cost bar, wall
-    bar or transcript group can imply the agent was ever "in" it. Its unit is the close
-    ATTEMPT instead.
-
-    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`), rendered
-    here and nowhere in the phase machinery for the same reason: the money is real, but the
-    gate is not a place the investigator was."""
+    Rendered as a gate, not a phase: it has no `##` header, the investigator is never in it,
+    and it stays out of `visualize_data`'s phase machinery so no cost bar, wall bar or
+    transcript group implies otherwise. Its unit is the close attempt. `costs` (per lens, from
+    `visualize_messages.review_cost_by_lens`) is shown here for the same reason."""
     subtitle = "— the write-time gate on a close (not a phase)"
     records = _review_records(run_dir)
     if not records:
@@ -576,10 +513,8 @@ def render_review_gate(
     cause = str(fm.get("cause", ""))
     failure_kind = fm.get("failure_kind")
 
-    # A close that bypassed the gate has the honest "nothing was reviewed" record, not a review
-    # that found nothing — and the record itself says which (`_was_reviewed`), so a pre-#992
-    # `inconclusive` bypass and a reviewed one — which share the same `reviewed_disposition` —
-    # render apart.
+    # A bypassed close shows "nothing was reviewed", not a review that found nothing;
+    # `_was_reviewed` reads that off the record.
     reviewed = [(n, r) for n, r in records if _was_reviewed(r)]
     if not reviewed:
         body = (
@@ -615,11 +550,9 @@ def render_review_gate(
     for n, rec in records:
         verdict = str(rec.get("verdict", "—"))
         drafted = str(rec.get("reviewed_disposition", "—"))
-        # An attempt that BYPASSED the gate carries `verdict: stands` — the close tool's word
-        # for "committed unchanged", which here would read as "the review ran and the
-        # disposition survived", so it is labelled by what happened to it instead. The guard
-        # above only covers a run whose EVERY attempt bypassed; a run challenged once and then
-        # closed `inconclusive` reaches here with one of each.
+        # A bypassed attempt carries `verdict: stands` ("committed unchanged"), which would
+        # read as a review that held; label it by what happened. A run can mix reviewed and
+        # bypassed attempts.
         bypassed = not _was_reviewed(rec)
         badge_cls, badge_text = (
             ("rv-skip", "not reviewed") if bypassed else (_verdict_class(verdict), verdict)
@@ -659,9 +592,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     rows: list[str] = []
     for jl in leads:
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
-        # `.rows` — this table IS the run-inspection view: a human debugging the run needs the
-        # refusal and shim rows most of all, so the split the agent-facing projections take is
-        # exactly wrong here.
+        # `.rows`, including refusal and shim rows: this is the debugging view.
         qs = jl.rows
         lead_cell = (
             f'<td class="lq-lead" id="lead-{esc(jl.lead_id)}" rowspan="{max(1, len(qs))}">'
@@ -676,8 +607,8 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
             continue
         for i, q in enumerate(qs):
             params = json.dumps(q.params, ensure_ascii=False) if q.params else "—"
-            # One entry per member of `error_class_for_exit`'s vocabulary, so a policy denial
-            # (#860, `denied`) reads differently from a broken adapter without parsing text.
+            # One entry per `error_class_for_exit` member, so a policy denial reads differently
+            # from a broken adapter.
             exit_cls = {
                 None: "lq-ok", "infra": "lq-infra", "agent-fixable": "lq-agent",
                 "denied": "lq-denied",
@@ -741,9 +672,8 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
         anchor = ph["anchor"]
         return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
-    # One transcript entry per BUCKET (first appearance), matching the one `tx-` anchor the
-    # transcript emits for a repeated name; the investigation links below stay one-per-block,
-    # because those blocks really are distinct sections of the document.
+    # One transcript entry per phase bucket (matching the transcript's single `tx-` anchor);
+    # investigation links stay one per block.
     tx_phase_blocks: dict[str, dict] = {}
     for ph in phases:
         tx_phase_blocks.setdefault(ph["name"], ph)
@@ -759,8 +689,7 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
     )
 
     investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
-    # A flat link, never a phase entry in the dropdown above: a `pn-tag` beside ORIENT/PLAN/…
-    # is exactly the "sixth phase" reading the section exists to avoid.
+    # A flat link, not a phase entry: the review gate is not a phase.
     review_label = "review gate" + (f" ({n_reviewed})" if n_reviewed else "")
     review_item = f'<li class="item"><a href="#sec-review">{review_label}</a></li>'
     leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links, open_=False)

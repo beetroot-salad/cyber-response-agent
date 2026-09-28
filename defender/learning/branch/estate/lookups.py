@@ -1,24 +1,16 @@
 """A world's difference applied to a state system's response.
 
 The six systems that are not the event stream have no query engine to hand the work to, so
-their difference is applied to the payload after the call. What matters is the KEY it is
-authored under.
+their difference is applied to the payload after the call.
 
-**Per entity, not per response.** A patch decided once for `canary-1` lands in every payload
-`canary-1` appears in — its own `get-host` record and its row inside a fifty-host `list-hosts`
-alike. Authored per response instead, those are two independent decisions that can disagree,
-and the world then contradicts itself across queries: the host has an owner when asked about
-directly and none when listed. That is #845's constraint — *the overlay is authored once and
-applied by code, or siblings contradict across queries* — and it is the same principle staging
-buys for free on the event side, where one corpus answers every query over it.
+Patches are keyed per entity, not per response. A patch for `canary-1` lands in every payload
+that entity appears in — its own `get-host` record and its row in a `list-hosts` alike —
+so the world cannot contradict itself across queries.
 
-MATCHING IS BY VALUE, and deliberately carries no per-system knowledge. An entity is patched
-wherever an object names it, whatever field it happens to be named in — `host`, `name`,
-`hostname`, `ci_name`, the seven systems do not agree and this seam does not need them to.
-The cost is a false positive: an object that mentions `canary-1` for an unrelated reason is
-patched too. Round one accepts that and records it — every application lands in the ledger, so
-an over-broad patch is visible rather than silent, which is the trade the alternative (a
-per-system rule for where entities live) does not obviously beat.
+Matching is by value, with no per-system knowledge: an entity is patched wherever an object
+names it, in whatever field (`host`, `name`, `hostname`, `ci_name`). The cost is false positives
+(an object mentioning `canary-1` for an unrelated reason is patched too); every application
+lands in the ledger, so an over-broad patch is visible.
 """
 
 from __future__ import annotations
@@ -28,19 +20,11 @@ from typing import Any
 
 
 def _named(obj: dict) -> set:
-    """The entity names this object could identify: its own STRING values, never a recursive
-    read.
+    """The entity names this object could identify: its own string values, not nested ones.
 
-    A nested object naming the entity is that object's business, and the walk reaches it
-    separately. Without that bound a patch for one host would land on every ancestor container
-    that happens to hold it, which is the whole payload.
-
-    Collected ONCE per node rather than rescanned per entity. Asked the other way round — "does
-    this object name entity E?", for each E — the same field scan runs once per patch, so a
-    world with thirty patched entities reads every string in the payload thirty times on every
-    served call. The set is half of what makes the per-node cost independent of the patch
-    table's size; PROBING the table with it rather than scanning the table is the other half,
-    and `apply_patches` owes it the same way round.
+    Nested objects are reached separately by the walk; recursing here would patch every
+    ancestor container. Collected once per node so per-node cost does not scale with the
+    number of patched entities.
     """
     return {v for v in obj.values() if isinstance(v, str)}
 
@@ -48,11 +32,8 @@ def _named(obj: dict) -> set:
 def _hits(node: dict, patches: dict[str, dict]) -> list[dict]:
     """The patches this node's own names select, in the table's order.
 
-    PROBED with the node's names — `len(names)` dict lookups — rather than sweeping the table
-    for each node, which is `len(patches)` membership tests per node and puts the patch table's
-    size back into the per-node cost `_named`'s set was collected to remove. The multi-hit case
-    falls back to the table's own order so a node two entities both name resolves the same way
-    every run; a set's iteration order would not.
+    Probes the table with the node's names rather than sweeping the table per node. With
+    several hits, the table's order (not a set's) keeps resolution deterministic.
     """
     matched = _named(node) & patches.keys()
     if not matched:
@@ -63,12 +44,10 @@ def _hits(node: dict, patches: dict[str, dict]) -> list[dict]:
 
 
 def _rebuilt_list(node: list, walk: Any) -> list:
-    """`node` with every element walked — the SAME object back when none of them moved.
+    """`node` with every element walked — the same object back when none of them moved.
 
-    The deferral the dict arm makes, made here too. Building the replacement list first and
-    comparing afterwards paid one list of N pointers (plus N zip tuples) per list node on the
-    commonest case by far: a payload naming none of the patched entities, which the caller then
-    discards whole.
+    The copy is deferred until the first changed element, so the common no-match case
+    allocates nothing.
     """
     items: list | None = None
     for i, item in enumerate(node):
@@ -83,33 +62,20 @@ def _rebuilt_list(node: list, walk: Any) -> list:
 def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
     """`payload` with every matching entity patched; returns `(payload, applications)`.
 
-    The count is what lets the caller distinguish "this world changed nothing here" from "this
-    world does not touch this system" — two different facts that would otherwise both read as
-    an untouched response.
+    The count lets the caller tell "this world changed nothing here" from "this world does not
+    touch this system".
 
-    H1 (#1007, §7 human decision): `applied` counts CONTENT CHANGED, never an entity-NAME hit.
-    A node whose matched entity's patch writes only values the node already held — including an
-    empty patch table entry — is not an application: the merged node is compared to the node it
-    replaces, and the count only advances when they differ. Three production consumers read this
-    count (the serve path's ledger `source`, `_patched_visible` -> `_rejection`'s world-rejection
-    gate, and `judge/family.py`'s `doctored_answer_served`), and all three inherit the correction
-    from this one seam.
+    `applications` counts content changes, not entity-name hits: a patch that writes only values
+    the node already held (or an empty patch) does not count. The ledger `source`, the
+    world-rejection gate and `judge/family.py`'s `doctored_answer_served` all rely on this.
 
-    Rebuilt rather than mutated in place, because the base payload is the FAMILY's recording:
-    mutating it would edit one sibling's world into the shared row every other sibling replays.
+    Rebuilt, never mutated: the base payload is the family's shared recording, so mutating it
+    would leak one sibling's world into every other sibling's replay. Untouched subtrees are
+    returned as the same objects, with no allocation, so copying is proportional to what
+    changed.
 
-    STRUCTURE-SHARED where nothing matched: an untouched subtree is handed back as the SAME
-    object, and no dict OR LIST is allocated for it either — the copy is made on the first
-    child that moved or the first hit, so the copying really is proportional to what the
-    world changed rather than merely the object that comes back. Rebuilding unconditionally made the
-    commonest case — a payload naming none of the patched entities, which the caller then
-    discards whole — the most expensive one, at one dict and one set per node of the tree.
-
-    THE PATCH IS COPIED IN, never referenced in. The overlay is authored once and lives for the
-    whole run, so writing its own objects into a served payload hands the caller a mutable
-    handle on the world itself: one `payload["hosts"][0]["tags"].append(...)` downstream and
-    every later call — and every sibling sharing the applier — serves the edited overlay. That
-    is the same "author once, apply mechanically" rule read from the other side.
+    Patches are deep-copied in, never referenced: the overlay lives for the whole run, and a
+    caller mutating a served payload would otherwise edit the world for every later call.
     """
     if not patches:
         return payload, 0
@@ -120,20 +86,15 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
 def _apply_hits(node: dict, out: dict | None, hits: list[dict], counter: list[int]) -> dict:
     """`node` (or its already-child-rebuilt `out`) with every hit merged in.
 
-    Split out of `_walk_patched` on its own — the per-patch content-comparison loop (H1) is one
-    more branch than the walk's own dispatch, and the two together tripped the complexity gate.
-    A MODULE-LEVEL function rather than a closure, and `counter` a one-element list rather than
-    a `nonlocal`: mccabe counts a closure's branches against its enclosing function too, so a
-    nested `apply_hits` moved the complexity rather than removing it.
+    Module-level with a list counter rather than a closure with `nonlocal`, because mccabe
+    counts a closure's branches against its enclosing function and this keeps `_walk_patched`
+    under the complexity gate.
     """
     working = dict(node) if out is None else dict(out)
     for patch in hits:
         merged = dict(working)
         merged.update(copy.deepcopy(patch))
-        # PER PATCH, not per node: two entities naming one object each contribute their own
-        # count when each genuinely moves the content, and a patch that lands on top of an
-        # already-identical value contributes none — H1's "content changed" reading applied at
-        # the same grain the table itself is keyed at.
+        # Counted per patch: each entity counts only if it actually changes content.
         if merged != working:
             counter[0] += 1
         working = merged

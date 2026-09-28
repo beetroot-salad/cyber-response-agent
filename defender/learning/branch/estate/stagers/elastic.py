@@ -1,49 +1,29 @@
 """Point an elastic query at a world's view of the corpus.
 
-The event stream is the one system where a world is STAGED rather than patched: its documents
+The event stream is the one system where a world is staged rather than patched: its documents
 are prepared before the query runs, and Elasticsearch does its own filtering, aggregation and
-sorting over them. That is why nothing here composes a result — a `STATS COUNT(*) BY source.ip`
-over a mutated world is correct by construction, where a composed answer would be a guess, and
-two queries touching the same fact cannot disagree because they read the same documents.
+sorting over them. Nothing here composes a result, so aggregations over a mutated world are
+correct by construction and two queries touching one fact read the same documents.
 
-A world's view is `base − exclude + inject`. **Removal is not optional**: the 2026-08-16
-turn-N experiment's world B was an absence — whether the `nc` activity has a recurring cadence
-outside the alert window — and an additive-only pipeline cannot express that at all.
+A world's view is `base − exclude + inject`. Removal is required: a world's difference can be an
+absence (e.g. whether some activity recurs outside the alert window), which an additive-only
+pipeline cannot express.
 
-REDIRECTION IS TWO PATHS, because elastic's index targeting is not uniform. Of the 15 committed
-templates under `skills/gather/queries/elastic/`, 12 are `esql`, where the index lives in a
-`FROM` clause inside the query BODY; only `query` and `alerts` take an `index` parameter.
+Redirection has two paths: `esql` carries the index in a `FROM` clause inside the query body;
+only `query` and `alerts` take an `index` parameter.
 
-One asymmetry the caller has to know about, and it is pre-existing rather than introduced here:
-`query`/`alerts` run their index through `confine_index` and `esql` (elastic_adapter.py's
-`esql`) confines nothing, so its `FROM` reaches wherever it is pointed. A world view is named
-OUTSIDE the pattern it stages — see `confinement.VIEW_NAMESPACE` for why a view the pattern
-still reaches lets the base run collect every sibling's staged documents — so the confined
-half cannot be admitted by reach and is admitted by DECLARATION instead: the estate registry
-hands the adapter a ctx naming the world, and `confine_index` resolves that world's views and
-no sibling's.
+`query`/`alerts` run their index through `confine_index`; `esql` confines nothing. A world view
+is named outside the pattern it stages (see `confinement.VIEW_NAMESPACE`), so the confined path
+admits it by declaration: the estate registry hands the adapter a ctx naming the world, and
+`confine_index` resolves that world's views and no sibling's.
 
-THE SAME SPLIT RUNS THROUGH THE TIME WINDOW, and there it leaves a gap this module does not
-close. A branched run is pinned to its branch point's moment, so a payload cannot differ merely
-because one sibling executed later than another — the state adapters take that moment from the
-ctx, and `query`/`alerts` carry their window as `start`/`end` parameters, so an OMITTED upper
-bound is closed at the branch point before the search runs (`elastic_adapter._bounded_end`).
-A present bound is never rewritten: it is a scenario-timeline value the model chose, routinely
-months from the wall clock, so clamping it would truncate the alert's own window.
-
-`esql` has no such parameter. Its window is `| WHERE @timestamp >= "..."` INSIDE the body, so
-the bound is added as its own pipe stage after the source command rather than by editing the
-predicate the model wrote (`elastic_adapter.bounded_esql`). Appending narrows and can never
-widen, which is why it is not the query-language surgery this module refuses elsewhere: nothing
-reads or rewrites the existing `WHERE`, so there is no half-application to be silent about.
-`evals/oracle_golden/controls.add_esql_window` makes the same move on the same splitter.
-
-The bound rides the WIRE and not the evidence: `esql_payload` echoes the query into the payload,
-so the asked form is what is echoed and recorded, and a branched payload stays byte-comparable
-with the capture it came from.
-
-An earlier revision left `esql` unbounded and relied on the resumed run being TOLD the date. That
-did not hold — the coordinate reaches MAIN's opening prompt, while the model that writes these
+Time window: a branched run is pinned to its branch point's moment. `query`/`alerts` close an
+omitted upper bound at that moment (`elastic_adapter._bounded_end`); a present bound is a
+scenario-timeline value the model chose and is never rewritten. `esql` has its window inside the
+body, so the bound is appended as its own pipe stage (`elastic_adapter.bounded_esql`), which can
+only narrow and never edits the model's `WHERE`. The bound rides the wire, not the evidence: the
+asked form is what `esql_payload` echoes and what is recorded, keeping payloads byte-comparable
+with the capture. Telling the run the date is not enough, because the model writing these
 queries is the GATHER subagent, whose deps carry no clock and whose prompt renders none.
 """
 
@@ -63,50 +43,36 @@ from defender.scripts.adapters.confinement import (
 from defender.scripts.adapters.esql_text import split_first_command
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 
-#: The leading `FROM` command. ES|QL requires it FIRST, which is what makes this a
-#: leading-clause substitution rather than general query-language surgery: everything after the
-#: first pipe is another command and is never touched.
+#: The leading `FROM` command. ES|QL requires it first, so this is a leading-clause
+#: substitution: everything after the first pipe is never touched.
 _FROM = re.compile(r"\A(?P<lead>\s*FROM\s+)(?P<rest>.*)\Z", re.IGNORECASE | re.DOTALL)
 #: `FROM <sources> METADATA <fields>` — the one suffix that may follow the source list inside
 #: the same command, and it must survive the rewrite.
 #:
-#: WHITESPACE-DELIMITED, not `\b`-delimited. `-` and `.` are non-word characters, so `\bMETADATA\b`
-#: matches INSIDE an ordinary index name: `FROM logs-metadata-*` split as `logs-` plus a
-#: `METADATA metadata-*` suffix, staging half the query against the base corpus and emitting a
-#: two-source `FROM` — the silent half-retarget `_one_source` refuses a comma list to prevent —
-#: while `FROM metadata-events-*` was refused outright as naming no source.
+#: Whitespace-delimited, not `\b`: `-` and `.` are non-word characters, so `\bMETADATA\b` would
+#: match inside an index name like `logs-metadata-*`.
 _METADATA = re.compile(r"(?:(?<=\s)|\A)METADATA(?=\s|\Z)", re.IGNORECASE)
 
-#: Verbs whose index is a PARAMETER rather than part of the query body.
+#: Verbs whose index is a parameter rather than part of the query body.
 PARAM_INDEXED = ("query", "alerts")
 
 #: Which config key each param-indexed verb defaults its index to, mirroring
-#: `elastic_adapter.query`/`alerts`. A call that omits `index` is not indexless — it is
-#: addressing THIS, and a stager that cannot see it would have to refuse a shipped template.
+#: `elastic_adapter.query`/`alerts`. A call omitting `index` addresses this.
 _DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}
 
 
-#: The two keys naming this deployment's corpus, in the order the pair is always read in.
+#: The two keys naming this deployment's corpus, in a stable order.
 _PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
 def configured_patterns(settings_dir: Path) -> tuple[str, ...]:
     """The two corpus patterns a tenant configures, in a stable order.
 
-    `settings_dir` is that tenant's `settings/` folder (#1106), handed in by the caller — the
-    launcher resolved it from the source's runs-base record, and a serving call carries it on its verb
-    context. Nothing here finds a folder for itself.
-
-    ONE reading of the pair the whole design keys on: the overlay-key gate, the staging
-    namespace guard and the manifest loader all ask which patterns exist, and three independent
-    readings would let a config edit widen one and narrow another.
-
-    THROUGH THE READ ADAPTER'S OWN PARSE. This frame had a private copy of that loop, because
-    `load_config` needs a `VerbContext` this seam's callers do not hold — the launcher asks
-    which patterns are configured BEFORE any run dir or verb context exists. But the context was
-    the only thing that differed; the parse and the precedence were not, and the copies had
-    already drifted on both. So the parse lives in one place that takes a path and an
-    environment, and this frame supplies the two things it knows.
+    `settings_dir` is the tenant's `settings/` folder, supplied by the caller. This is the single
+    reading of the pair used by the overlay-key gate, the staging namespace guard and the
+    manifest loader, so a config edit cannot widen one and narrow another. It goes through the
+    read adapter's own parse (`config_from`) because the launcher asks before any verb context
+    exists.
     """
     import os
 
@@ -117,14 +83,10 @@ def configured_patterns(settings_dir: Path) -> tuple[str, ...]:
 
 
 def check_world_id(world_id: str) -> None:
-    """Refuse a world whose id no view of this corpus could be named with — BEFORE it serves.
+    """Refuse a world whose id no view of this corpus could be named with, before it serves.
 
-    The id reaches `world_view` unfiltered on every staged call, so an id carrying a space, a
-    `*` or upper case does not refuse one query, it refuses the whole event stream: every
-    `esql`/`query`/`alerts` call lands as a `refused` row while the base world keeps all of it.
-    That reads as a sibling that asked nothing rather than as a world that cannot be named, and
-    it is the same silent-measurement shape the `touches` check is placed early to catch. Asked
-    once, where the world arrives, because the answer cannot vary per call.
+    The id reaches `world_view` unfiltered on every staged call, so a bad id (a space, `*`,
+    upper case) would refuse the whole event stream and read as a sibling that asked nothing.
     """
     try:
         refuse_unnameable_world(world_id)
@@ -133,27 +95,16 @@ def check_world_id(world_id: str) -> None:
 
 
 def stages(verb: str) -> bool:
-    """Does retargeting this verb do anything?
-
-    `health-check` reaches no corpus, so a world stages nothing for it — and reporting it as
-    STAGED would put a decision in the ledger that names the system honestly and the CALL
-    wrongly.
-    """
+    """Does retargeting this verb do anything? (`health-check` reaches no corpus.)"""
     return verb in PARAM_INDEXED or verb == "esql"
 
 
 class StagingError(AdapterFault):
     """A query that cannot be pointed at a world's view.
 
-    An `AdapterFault` carrying the USAGE code, not a bare exception. It is raised from inside
-    the served verb body, so `QueryCapture` is what meets it — and its catch-all maps an
-    unrecognised exception to `DEFAULT_FAULT_EXIT`, which is 2, which is in
-    `circuit_breaker.INFRA_EXIT_CODES`. A capability refusal would therefore have been counted
-    as an environment outage: two of them trip the breaker for the whole system and five abort
-    the run, so the pair would measure "the estate was up for the base and down for the
-    sibling" — the contamination the base/sibling design exists to exclude. Every refusal here
-    also names something the caller can act on (pass an explicit index; address one corpus;
-    open with FROM), which is what the usage class means.
+    An `AdapterFault` with the usage exit code: an unrecognised exception would be filed as an
+    infra code, which the circuit breaker counts as an outage in the sibling but not its base.
+    Every refusal here names something the caller can act on.
     """
 
     exit_code = USAGE_EXIT_CODE
@@ -163,13 +114,8 @@ class StagingError(AdapterFault):
 class _FromClause:
     """One ES|QL query's leading `FROM`, split into the parts a retarget needs.
 
-    ONE parse, because there was nearly two: `source_pattern` read the source list out of this
-    clause and `rewrite_from` read the `METADATA` suffix out of the same one, each re-running
-    `split_first_command` → `_FROM.match` → `_METADATA.search` and each raising its own wording
-    for the same "does not open with FROM". `redirect` calls both on every staged query, so a
-    fix to the METADATA-boundary rule — the one `_METADATA`'s own comment says a `\\b` spelling
-    gets silently wrong — could land in one copy and leave the other reading the same query
-    differently, which is the half-retarget this module refuses everywhere else.
+    One parse shared by `source_pattern` and `rewrite_from`, so they cannot read the same query
+    differently.
     """
 
     lead: str      #: `FROM` and the whitespace after it, exactly as written
@@ -180,8 +126,7 @@ class _FromClause:
 
 
 def _parse_from(query: str, origin: str) -> _FromClause:
-    # QUOTE-AWARE, not `partition('|')`: a `|` inside a quoted source name
-    # (`FROM "logs|weird"`) is DATA, and splitting there cuts the source in half.
+    # Quote-aware split: a `|` inside a quoted source name is data.
     head, tail = split_first_command(query)
     m = _FROM.match(head)
     if m is None:
@@ -194,53 +139,33 @@ def _parse_from(query: str, origin: str) -> _FromClause:
         raise StagingError(f"{origin} names no source after FROM: {query[:80]!r}")
     return _FromClause(
         lead=m.group("lead"), sources=sources,
-        # The author's whitespace BEFORE `METADATA` is carried, not normalised to one space,
-        # for the same reason `gap` below carries the whitespace before the pipe: `FROM logs-*\n
-        # METADATA _id` is a two-line command, and rebuilding it as `FROM wv-a-logs METADATA
-        # _id` reflows text no world touched. `_METADATA` only matches after whitespace or at
-        # the start of `rest`, and an `\A` match leaves `sources` empty and is refused above, so
-        # there is always at least one character here.
+        # Keep the author's whitespace before `METADATA` (possibly a newline) so the rewrite
+        # reflows nothing. There is always at least one character: an `\A` match leaves
+        # `sources` empty and is refused above.
         suffix=f"{head[len(head.rstrip()):]}{rest[meta.start():].rstrip()}" if meta else "",
-        # The whitespace between the command and the pipe is the author's formatting — usually
-        # the newline that puts each pipe stage on its own line. Taken from `rest` in BOTH
-        # branches: measuring it only on the no-METADATA path silently joined `METADATA _id` to
-        # the following `| WHERE`, turning a two-line query into one.
+        # The author's whitespace before the pipe, measured on both branches so `METADATA _id`
+        # is not joined onto the next stage's line.
         gap=rest[len(rest.rstrip()):], tail=tail)
 
 
-#: The ES|QL metadata fields that carry a corpus identity INTO THE ROWS. `_index` is the
-#: concrete index each row came from, so a query selecting it answers with names that differ
-#: base-vs-sibling — in `payload["values"]`, which is evidence and which `restore` must never
-#: rewrite.
+#: ES|QL metadata fields that put a corpus identity into the rows. `_index` names the concrete
+#: index each row came from, so it would differ base-vs-sibling inside `values` (evidence, which
+#: `restore` must never rewrite).
 #:
-#: `_id` is deliberately NOT here, and the distinction is the staging mechanism's. An id is
-#: SCOPED BY an index rather than naming one, and a view that carries the same documents
-#: carries the same ids — so `METADATA _id` answers identically base-vs-sibling and refusing it
-#: would cost the sibling a whole class of query the base still serves, which is the difference
-#: this module exists not to create. If a world's view is ever built by RE-MINTING ids instead
-#: of by aliasing or by preserving them on copy, this tuple is the line that has to change.
+#: `_id` is not here: an id is scoped by an index rather than naming one, and a view carrying the
+#: same documents carries the same ids. If views are ever built by re-minting ids, add it.
 _IDENTIFYING_METADATA = ("_index",)
 
 
 def refuse_identifying_metadata(clause: str, query: str) -> None:
-    """Refuse an ES|QL query whose ROWS would carry the corpus identity.
+    """Refuse an ES|QL query whose rows would carry the corpus identity.
 
-    `restore` puts back the identity the retarget replaced, but only in the fields a verb is
-    known to ECHO — never in `values`, because those are the documents and rewriting them is
-    editing evidence. `FROM … METADATA _index` puts the index name in a column, so the sibling's
-    rows differ from the base's by the harness's own naming and nothing in the seam can undo it.
-
-    REFUSED rather than served, and this is the one place that trade goes this way. Everywhere
-    else the module bends to keep a sibling's evidence — a refusal costs the pair a query the
-    base still answers, which is the difference this seam exists not to create. Here serving it
-    costs the same thing invisibly: ΔO reads a difference in every row and no reader can tell
-    it from the world's. A refusal at least lands in the ledger saying so.
-
-    No committed template selects `_index` (all 12 `esql` templates go through `FROM <pattern>`
-    with no METADATA clause at all), so today this costs nothing and speaks up if one arrives.
+    `restore` only rewrites fields a verb echoes, never `values` (the documents). `METADATA
+    _index` puts the index name in a column, so every sibling row would differ from the base by
+    the harness's own naming, indistinguishable from a real world difference. Refusing at least
+    lands in the ledger. No committed template selects `_index`.
     """
-    # COMMA-DELIMITED as well as space-delimited: `METADATA _index, _id` tokenizes to
-    # `_index,` on a bare `split()`, so the field named FIRST in a list would not match itself.
+    # Split on commas too: `METADATA _index, _id` would otherwise tokenize to `_index,`.
     fields = clause.replace(",", " ").split()
     named = [f for f in _IDENTIFYING_METADATA if f in fields]
     if named:
@@ -255,9 +180,7 @@ def refuse_identifying_metadata(clause: str, query: str) -> None:
 def rewrite_from(query: str, view: str) -> str:
     """Retarget an ES|QL query's leading `FROM` at `view`, preserving everything else.
 
-    Only the source list moves. A `METADATA` suffix belongs to the same command and is kept, as
-    is every downstream pipe stage — the query the defender wrote is the query that runs, over
-    a different corpus.
+    Only the source list moves; a `METADATA` suffix and every downstream pipe stage are kept.
     """
     c = _parse_from(query, "this ES|QL query")
     return f"{c.lead}{view}{c.suffix}{c.gap}{c.tail}"
@@ -268,27 +191,16 @@ def _one_source(
 ) -> str:
     """The single corpus `expression` addresses, or a refusal.
 
-    A COMMA LIST IS REFUSED WHOLE, never partially retargeted. ES|QL admits `FROM a-*, b-*`,
-    and staging only the sources a world happens to have a view for leaves the query reading
-    the unstaged base for the rest — the world's difference silently absent from half the
-    evidence, in a run that looks like it worked. Refusing whole is also the doctrine
-    `confine_index` already applies to a multi-index expression (§7 R5): refuse rather than
-    silently narrow.
+    A comma list is refused whole: staging only some sources would leave the query reading the
+    unstaged base for the rest, the world's difference silently missing from part of the
+    evidence. (`confine_index` likewise refuses rather than narrows.)
 
-    Quotes are stripped rather than carried, but ONLY on the ES|QL path (`unquote`), because
-    only there are they syntax. A view is a name this module constructs, so appending to a
-    quoted source would build `"logs-*"-w-A` — a name no index answers to.
+    `unquote` strips quotes on the ES|QL path only, where they are syntax; a view built from a
+    quoted source would be a name no index answers to.
 
-    The `index` PARAMETER is not ES|QL text and carries no quoting rule: `_search_verb` hands
-    its value to `confine_index` verbatim, so `index='"logs-*"'` is a `ConfinementFault` on the
-    base run. Stripping there too staged and SERVED a call the base refuses — a base-vs-sibling
-    difference owned by the harness rather than the world, in the permissive direction.
-
-    `verbatim` is that rule applied to WHITESPACE as well as to quotes, and it is the same
-    argument: `confine_index(" logs-* ")` faults on the base run because `_reach_ok` compares
-    the string it is given, so trimming here built a well-formed view and served a sibling the
-    answer its base was refused. The ES|QL path and the run's configured default keep the trim —
-    there the surrounding text is the language's or the config reader's, not the caller's value.
+    `verbatim` (the `index` parameter) strips neither quotes nor whitespace: the base run hands
+    that value to `confine_index` as-is and faults on `'"logs-*"'` or `" logs-* "`, so trimming
+    here would serve a sibling what its base was refused.
     """
     source = expression if verbatim else expression.strip()
     if "," in source:
@@ -304,22 +216,13 @@ def _one_source(
 def source_pattern(verb: str, params: dict, ctx: Any = None) -> str | None:
     """Where this call addresses its corpus, by whichever route the verb carries it.
 
-    An omitted `index` is resolved through the RUN'S OWN CONFIG, the same file and key the
-    adapter would have fallen back to. `elastic_adapter.query`/`alerts` declare
-    `index: str | None = None` on purpose and a shipped template relies on it —
-    `correlate-alerts-by-entity.md` is `params: [end, start]` and its prose says "the verb
-    defaults its `index` to …, so there is no FROM to write". Refusing that call would drop a
-    whole evidence class from the sibling while the base kept it: a base-vs-sibling difference
-    that is the STAGER'S, not the world's, which is the one kind this seam must never create.
+    An omitted `index` resolves through the run's own config, the same key the adapter falls
+    back to. Shipped templates rely on that default, so refusing would drop a whole evidence
+    class from the sibling while the base kept it — a difference owned by the stager, not the
+    world.
 
-    FALSY IS OMITTED, and that reading is the ADAPTER'S rather than this module's opinion:
-    `_search_verb` resolves `index or config[index_key]`, so `index=""` and an explicit
-    `index=None` address the configured default exactly as an absent one does — both are
-    declarable, since the param is `str | None = None` and `validate_params` passes both.
-    Refusing them here would answer a call the base run serves in full with a `refused` row on
-    every sibling, which is the harness-owned difference the paragraph above forbids. A present
-    value that is TRUTHY and not a string is a broken CALL and stays refused: `_search_verb`
-    hands it to `confine_index`, which faults on the base run too, so the two arms agree.
+    Falsy counts as omitted, matching the adapter's `index or config[index_key]`. A truthy
+    non-string index is a broken call and is refused (the base run faults on it too).
     """
     if verb in PARAM_INDEXED:
         index = params.get("index")
@@ -349,18 +252,10 @@ def source_pattern(verb: str, params: dict, ctx: Any = None) -> str | None:
 def view_name(base_pattern: str, world_id: str) -> str:
     """The alias a world's queries read, as a refusal this seam can record.
 
-    The RULE is `confinement.world_view` and lives there, next to `confine_index`, because the
-    two halves of a world view are one decision: the name is built OUTSIDE every configured
-    pattern — so the base run and the siblings that do not stage the event stream cannot reach
-    it through the pattern it came from — and it is therefore admitted by declaration rather
-    than by reach. Split across two modules, a naming change here would silently stop matching
-    the names confinement admits there, and every staged read would fault as out of bounds.
-
-    What is this module's is the ERROR CLASS. `world_view` raises a plain `ValueError`: naming
-    is not confinement, and it has no view on how a refusal reaches a model. Here it becomes a
-    `StagingError` — an `AdapterFault` carrying the USAGE code — so `redirect`'s caller records
-    it as a REFUSED row and the circuit breaker does not read a capability refusal as the
-    estate being down for this sibling and up for its base.
+    The naming rule is `confinement.world_view`, kept beside `confine_index` so the names built
+    and the names admitted cannot drift apart. This wrapper converts its `ValueError` into a
+    `StagingError` (usage exit code), so the call is recorded `refused` rather than tripping the
+    circuit breaker.
     """
     try:
         return world_view(base_pattern, world_id)
@@ -368,44 +263,24 @@ def view_name(base_pattern: str, world_id: str) -> str:
         raise StagingError(str(bad_name)) from bad_name
 
 
-#: Which payload field each staged verb ECHOES its corpus identity back in — the inverse of
-#: the two redirection paths, and the whole of what `restore` needs to know.
-#:
-#: The echo is not incidental. `search_envelope`'s docstring calls `index` "the contract a lead
-#: reads and a payload on disk keeps", and `esql_payload` returns the query text because
-#: `sql.py`'s ES|QL idiom reads it back. Both are model-facing, so on a staged call both hand a
-#: sibling a corpus name its model never wrote.
+#: Which payload field each staged verb echoes its corpus identity back in — what `restore`
+#: needs to know. Both echoes are model-facing (`search_envelope`'s `index`, `esql_payload`'s
+#: query text), so an unrestored staged call shows the model a corpus name it never wrote.
 _ECHOED_FIELD = {"query": "index", "alerts": "index", "esql": "query"}
 
 
 def restore(verb: str, payload: Any, asked: dict, prepared: dict, ctx: Any = None) -> Any:
     """`payload` with the corpus identity `redirect` replaced put back.
 
-    THE INVERSE OF `redirect`, and it lives beside it so the two are authored together. A
-    retarget that is not undone here leaves every staged payload differing base-vs-sibling in a
-    field NO WORLD TOUCHED: identical corpora, identical rows, and a `query` reading `FROM
-    wv-a-logs-falco.alerts` against the base's `FROM logs-falco.alerts-*`. ΔO over the event
-    stream — where most of a run's evidence lives — is then non-zero on every row, and "the
-    sibling saw something different" stops meaning anything.
+    The inverse of `redirect`. Without it every staged payload differs base-vs-sibling in a
+    field no world touched, so ΔO over the event stream is non-zero on every row. It also stops
+    the echoed view name from re-entering as a query: a lead narrowing the template it was
+    served would re-bind it, `redirect` would stage it twice, and `confine_index` would refuse.
 
-    It also stops the payload from re-entering as a query. A lead that narrows the template it
-    was just served — which `falco-alerts.md`'s own "Narrowing examples" section tells it to do
-    — re-binds the echoed text, `redirect` stages the already-staged name to
-    `wv-a-wv-a-logs-falco.alerts`, and `confine_index` refuses it. The base run narrows and
-    gets an answer; the sibling faults. That is a base-vs-sibling difference belonging to the
-    HARNESS rather than the world, which is the one kind this seam must never create.
-
-    FIELD-TARGETED, never textual. A detection alert carries its own rule's parameters, and
-    this environment's `v2-sshd-failed-auth-burst.json` declares `index: ["logs-system.auth-*"]`
-    — so replacing the pattern wherever it appears in a payload would rewrite a field inside
-    the EVIDENCE. Only the field the verb is known to echo is touched.
-
-    ONLY WHEN THE FIELD STILL HOLDS WHAT WE SENT. If the echo does not carry the staged
-    identity, this module did not put it there and has no business rewriting it — a payload
-    shape it does not understand is left alone rather than edited on a guess. The cost of that
-    rule is the one thing it cannot catch: an echo field nobody listed stays un-restored, and
-    ΔO reads it as a world difference forever. `test_the_restored_payload_matches_the_base`
-    derives the shape from the ADAPTER rather than restating it, so a new echo is a red test.
+    Field-targeted, never textual: detection alerts carry their rule's own index patterns, which
+    are evidence. And only when the field still holds exactly what was sent; an unfamiliar shape
+    is left alone. An echo field missing from `_ECHOED_FIELD` therefore stays unrestored, which
+    `test_the_restored_payload_matches_the_base` catches by deriving the shape from the adapter.
     """
     field = _ECHOED_FIELD.get(verb)
     if field is None or not isinstance(payload, dict) or field not in payload:
@@ -414,12 +289,8 @@ def restore(verb: str, payload: Any, asked: dict, prepared: dict, ctx: Any = Non
         return payload
     asked_identity = _asked_identity(verb, asked, ctx)
     if asked_identity is None:
-        # FAILS CLOSED, the way `redirect` does on the SAME missing input. Without a `ctx` an
-        # omitted `index` has no resolvable base pattern, and writing the `None` back would put
-        # `index: null` into the payload the model reads and the row a cross-world comparison
-        # pairs on — a corpus identity no run ever had. `redirect` refuses that input outright
-        # ("pass an explicit index to stage this world"); the mirror leaves the payload alone,
-        # which is this function's own rule for a shape it cannot account for.
+        # Without a `ctx` an omitted `index` has no resolvable pattern; writing `None` back
+        # would invent `index: null`. Leave the payload alone (`redirect` refuses this input).
         return payload
     return {**payload, field: asked_identity}
 
@@ -427,13 +298,9 @@ def restore(verb: str, payload: Any, asked: dict, prepared: dict, ctx: Any = Non
 def _asked_identity(verb: str, asked: dict, ctx: Any = None) -> Any:
     """What the echoed field would have held had this call never been staged.
 
-    For `esql` that is the query text the model sent, verbatim — the base run passes its body
-    through untouched, so the asked form IS the base's.
-
-    For the param-indexed verbs it is the SOURCE the call addressed, which is not always the
-    `index` parameter: `_search_verb` resolves `index or config[index_key]`, so an omitted
-    index means the run's configured default and that is what the base run's payload echoes.
-    `source_pattern` already answers exactly that question, through the same file and key.
+    For `esql`, the query text as sent (the base passes it through untouched). For the
+    param-indexed verbs, the source the call addressed, which for an omitted index is the
+    configured default — exactly what `source_pattern` answers.
     """
     if verb == "esql":
         return asked.get("query")
@@ -443,18 +310,11 @@ def _asked_identity(verb: str, asked: dict, ctx: Any = None) -> Any:
 def declares(overlay: Any, base_pattern: str) -> bool:
     """Does this world's overlay stage `base_pattern`?
 
-    KEY EQUALITY, never reach. The overlay is keyed by the base pattern it stages and staging
-    creates one alias per key, so the only names that exist on the cluster are the ones those
-    keys derive — a call naming a NARROWER source under a declared wildcard (`logs-*` declared,
-    `logs-zeek.connection-*` asked) has no view of its own, and retargeting it to the wide key's
-    alias would silently answer a query for the narrow corpus with the wide one's documents.
-    Reading the base instead is a `passthrough`, which is a recorded decision rather than an
-    absence, so the overlap — documents this world excluded that are still reachable through an
-    undeclared pattern — is visible in the ledger rather than lost.
+    Key equality, never reach: staging creates one alias per overlay key, so a narrower source
+    under a declared wildcard has no view of its own, and retargeting it to the wide alias would
+    answer with the wide corpus. It reads the base instead, recorded as `passthrough`.
 
-    An absent overlay is NOT "declares nothing": it is a caller that has not been given the
-    world's difference to consult, and `redirect` keeps its pre-existing behaviour there rather
-    than silently passing every staged call through. See `redirect`.
+    An absent overlay is not "declares nothing"; `redirect` handles that case.
     """
     table = getattr(overlay, "elastic", None) or {}
     return base_pattern in table
@@ -464,39 +324,24 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
              overlay: Any = None) -> dict:
     """`params` pointed at `world_id`'s view of whatever corpus they already address.
 
-    `world_id is None` is the base world — it stages nothing, so its params come back untouched
-    and its payloads ARE the estate's. That is what makes a base-versus-sibling difference read
-    as exactly the sibling's staging, with no third thing to subtract.
+    `world_id is None` is the base world: params come back untouched, so a base-versus-sibling
+    difference is exactly the sibling's staging.
 
-    The base pattern is read off the CALL where the call carries one, so the view is derived
-    from what this query actually asked for. A `query`/`alerts` call that leaves `index` unset
-    is addressing the RUN'S CONFIGURED DEFAULT, and `source_pattern` reads that same key from
-    that same file rather than guessing — see its docstring for why refusing instead would drop
-    a whole evidence class from the sibling while the base kept it. The refusal below is what
-    remains: a frame with no `ctx` to read the config through cannot resolve the default, and a
-    view built on a guess stages a world into an index nobody reads.
+    The base pattern is read off the call, or for an index-less `query`/`alerts` from the run's
+    configured default via `source_pattern`. With no `ctx` that default cannot be resolved, and
+    the call is refused rather than staged on a guess.
 
-    `overlay` IS THE WORLD'S DIFFERENCE, and it narrows what is retargeted to the patterns the
-    world actually declares — see `declares`. A pattern the overlay does not name has no alias
-    on the cluster, and a retarget to a name nothing created returns zero hits in SILENCE
-    (`_search` appends `ignore_unavailable=true`), so the sibling would lose a whole evidence
-    class with every row still reading honestly. It reads the base instead, recorded
-    `passthrough`.
+    `overlay` narrows retargeting to the patterns the world declares (`declares`). An undeclared
+    pattern has no alias, and retargeting to it would silently return zero hits (`_search` sets
+    `ignore_unavailable=true`); it reads the base instead, recorded `passthrough`. With no
+    overlay supplied, a touching world stages every corpus its calls address — "not told" is
+    not "declares nothing".
 
-    NOT SUPPLIED IS NOT "DECLARES NOTHING". A caller that does not hand over the overlay has
-    not told this seam what the world stages, and answering "nothing" would turn every staged
-    call in that frame into a base read — the silent-measurement failure again, arriving through
-    the argument list. Without an overlay the pre-existing rule stands: a touching world stages
-    every corpus its calls address.
-
-    The index-less refusal is NOT softened by the passthrough rule, and that ordering is
-    deliberate: such a call addresses the run's configured default, a frame with no `ctx`
-    cannot resolve which pattern that is, and "we could not tell whether this is declared" is
-    not the same answer as "it is not declared". Fail closed.
+    The index-less refusal takes precedence over passthrough: "could not tell whether this is
+    declared" is not "not declared". Fail closed.
     """
-    # `stages(verb)` rather than a second spelling of the same set: `applier.apply` already
-    # asks it to decide whether a call was staged, so two independently-written complements
-    # here would let a verb report STAGED on a call this function passed through untouched.
+    # `stages(verb)`, the same predicate `applier.apply` uses, so a verb cannot report STAGED
+    # on a call passed through here untouched.
     if world_id is None or not stages(verb):
         return params
     if verb in PARAM_INDEXED:
@@ -508,12 +353,8 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
         if overlay is not None and not declares(overlay, base):
             return params
         return {**params, "index": view_name(base, world_id)}
-    # ONE CLAUSE for the source list AND the METADATA suffix. Read through `source_pattern`
-    # and then a second time for the suffix, this arm ran `split_first_command` →
-    # `_FROM.match` → `_METADATA.search` twice over the same text before `rewrite_from` ran it
-    # a third — which is also the drift `_FromClause`'s docstring says the single parse exists
-    # to prevent, reintroduced by the caller. `rewrite_from` keeps its own parse: it is the
-    # splice's one public spelling and the tests read it directly.
+    # One parse for both the source list and the METADATA suffix. `rewrite_from` keeps its own
+    # parse as the public splice.
     body = params.get("query")
     if not isinstance(body, str):
         raise StagingError(f"esql params carry no query body: {params!r}")
@@ -522,8 +363,6 @@ def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None, *,
     if overlay is not None and not declares(overlay, base):
         return params
     view = view_name(base, world_id)
-    # BEFORE the rewrite, so the refusal names the query the model wrote rather than one it
-    # has never seen. A `METADATA` clause selecting the corpus identity survives into the rows,
-    # which `restore` cannot follow it into — see `refuse_identifying_metadata`.
+    # Before the rewrite, so the refusal quotes the query the model wrote.
     refuse_identifying_metadata(clause.suffix, body)
     return {**params, "query": rewrite_from(body, view)}

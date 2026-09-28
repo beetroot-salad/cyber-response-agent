@@ -1,26 +1,14 @@
-"""Harness-executed lead-0.
+"""Harness-executed lead-0: the work the harness does before MAIN's first ORIENT turn.
 
-Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
-and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
-run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
-the review gate cite them like any model-dispatched lead.
+It resolves the alert's ancestor documents (item 1) and dispatches one tightly-bounded
+correlation gather lead (item 3), both under the reserved ids ``l-000``/``l-00c`` so the
+learning loop and the review gate cite them like any model-dispatched lead. ``orient.py``
+stays a pure text-assembler that formats the returned block as an ORIENT section.
 
-This module owns every backend call, run-dir write and dispatch those two items add;
-``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
-returned block as one more ORIENT section.
-
-Turn-zero leads: the work the harness does before the model's first request.
-
-Split into four modules:
-
-  * `_spec`    — the ids, statuses and field names turn-zero work is written against.
-  * `_capture` — issuing a call and recording what came back, including the budget
-                    gate, the per-run call ledger, and the declaring `:L findings` row.
-  * `_render`  — turning documents into the section the model actually reads.
-  * `_items`   — the two items themselves: ancestor resolution, and correlation.
-
-What stays here is the surface the driver calls: seed the lead, render the section,
-resolve turn zero.
+  * `_spec`    — ids, statuses and field names.
+  * `_capture` — issuing a call and recording it (budget gate, call ledger, `:L` row).
+  * `_render`  — turning documents into the section the model reads.
+  * `_items`   — ancestor resolution and correlation.
 """
 from __future__ import annotations
 
@@ -120,26 +108,14 @@ def prepare_correlation_lead(
     run_dir: Path, alert: dict, ancestor_block: str, status: str,
     *, dispatch: CorrelationDispatch,
 ) -> tuple[str, list[str]] | None:
-    """The SYNCHRONOUS half of item 3: gate on the resolution status (dispatches on RESOLVED
-    and TRUNCATED, never on FAILED/EMPTY), build the harness-authored contract, and claim
-    `l-00c`'s leads row BEFORE MAIN's first turn. Returns `(goal, what_to_summarize)` when item
-    3 should actually dispatch, else `None`.
+    """The synchronous half of item 3: gate on item 1's status (RESOLVED or TRUNCATED), build
+    the contract, and claim `l-00c`'s leads row before MAIN's first turn. Returns
+    `(goal, what_to_summarize)` when item 3 should dispatch, else `None`.
 
-    The gate is "item 1 resolved at least one ancestor DOCUMENT" — nothing downstream turns a
-    dispatch away for yielding no host/user/source-ip, which would exclude every alert source
-    carrying its entities outside those three fields.
-
-    `dispatch` is the identity the run-start check resolved (`resolve_correlation_dispatch`,
-    run by the driver over the run's own tree before this frame, #1003). `dispatch.system is
-    None` means the verb-disposition table projects the lead NO query verb (#999); that gate
-    sits FIRST, before the contract and before `claim_lead`: a lead that will never run must
-    not own a row in the leads table. Otherwise the system is the one the configured template
-    is filed under and the table grants, by the check — so the `:L findings` row this claims
-    is labelled with the system the lead actually binds its template on, and the contract
-    names the id the check resolved (`dispatch.template_id`), not a module constant.
-
-    `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
-    sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
+    `dispatch.system is None` (the table grants the lead no query verb) is checked first, so a
+    lead that will never run never owns a leads row. The system and template id come from
+    `dispatch`, the run-start check's result. `ancestor_block` is `LeadZeroResult.text`, so the
+    lead reads the same bytes MAIN reads."""
     if dispatch.system is None:
         return None
     if status not in (STATUS_RESOLVED, STATUS_TRUNCATED):
@@ -153,9 +129,7 @@ def prepare_correlation_lead(
         "what_to_summarize": what, "provenance": HARNESS_PROVENANCE,
     })
     if claimed != CLAIMED:
-        # Someone else already owns this id (a planted collision), or the row could not be
-        # written at all — either way this frame owns nothing, so it dispatches nothing and
-        # touches the id no further.
+        # A collision or a failed write: this frame owns nothing, so it does nothing.
         return None
     _declare_l_finding(run_dir, L3, "correlation lead", dispatch.system)
     return goal, what
@@ -164,10 +138,8 @@ def prepare_correlation_lead(
 # the wrap + section assembly
 
 def _render_section(body: str) -> str:
-    """`LeadZeroResult.text`: item 1's rendered block IN ITS ENTIRETY inside ONE
-    `wrap_fresh(text, "untrusted")` frame — nothing outside it. The ORIENT heading is a
-    separate, TRUSTED line `render_orient_section` prepends; it is not part of the entry
-    point's own return value."""
+    """Item 1's whole block inside one untrusted frame. The trusted heading is prepended
+    separately by `render_orient_section`."""
     return wrap_fresh(body, "untrusted")
 
 
@@ -175,43 +147,18 @@ def render_orient_section(
     result: LeadZeroResult, run_dir: Path | None = None,
     *, correlation_system: str | None, grant_home: str,
 ) -> str:
-    """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
-    reuse) followed by item 1's whole untrusted frame, unmodified.
+    """The ORIENT section: a trusted heading naming the reserved ids, then item 1's untrusted
+    frame unmodified.
 
-    `run_dir` is what lets the heading tell the truth about `L0`. The harness seeds that lead's
-    declaring `:L findings` row before this renders, and that seed can decline to write — it
-    validates the document first and refuses rather than laundering unvalidated bytes past the
-    gate (#964). "Already claimed; do not reuse them" is then a TRAP, and a tight one: MAIN is
-    told the id is claimed, cites it, and is refused with `undeclared lead` — for which the
-    only repair is to write the very `:L findings` row it reads "do not reuse" as forbidding.
-    So when the row is not on the page, say so and say what to do.
+    With `run_dir`, the heading checks the document for `L0`'s declaring row: the seed may have
+    refused to write it, and "do not reuse" would then trap MAIN into an `undeclared lead`
+    refusal whose only fix is writing that row. Checked on disk rather than via a flag so it
+    cannot go stale. `None` (tests only) omits the check; production passes a dir even on the
+    degraded arm, where the seed most likely never ran.
 
-    DERIVED FROM THE DOCUMENT, not from a flag the seed sets. Same rule the repair window
-    obeys: the answer is a property of the bytes on disk, so it cannot go stale, cannot
-    disagree with the file, and is right about a row that went missing some other way. Passed
-    `None`, the extra line is simply omitted — the heading is exactly what it was. Both
-    production call sites pass a real dir, INCLUDING the degraded arm: a `BudgetKill` or
-    `RunAborted` mid-resolution is the case in which the seed most likely never ran at all, so
-    an arm that silently dropped the run dir would omit the escape line on precisely the runs
-    that need it. `None` is for a caller that genuinely has no run dir — the tests that drive
-    this function directly.
-
-    `L3` gets no such line: it is dispatched AFTER this renders and conditionally, so an absent
-    row there is the ordinary case and not a fault. Its citation is covered by the validator's
-    own refusal, which names the harness-reserved case in its repair text.
-
-    `correlation_system` is the ONE case where `L3`'s absence is not the ordinary one and is
-    said: `None` means the verb-disposition table projects the lead no query verb (#999), so
-    the lead was never claimed and never will be, and the heading names the table rather than
-    leaving "if any" to explain it. The line does not claim WHICH of the two states produced
-    it — a written withholding (`roles:` without the holder) and a table that never named the
-    holder at all are the distinction #995 exists to keep, and `correlation_system` alone
-    cannot tell them apart, so it says what is observable and points at the file. The
-    parameter mirrors `prepare_correlation_lead`'s, for the same reason, and has no default:
-    it is the RUN's value (`RunGrants.correlation_system`, #1106), and a process-level default
-    would be some other tenant's answer. `grant_home` is the run's table as the model is told of
-    it (`RunTenant.table_pointer` — the tenant and the file, never a host path), named in that
-    line."""
+    `correlation_system is None` means the table grants the correlation lead no query verb, so
+    `L3` will never run and the heading says so, pointing at `grant_home` (the tenant and file,
+    never a host path). It has no default because it is per-run (per-tenant)."""
     heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -235,22 +182,12 @@ def render_orient_section(
 def _is_declared(run_dir: Path, lead_id: str) -> bool:
     """Is `lead_id`'s declaring `:L findings` row on the page right now?
 
-    Answered through the real parser rather than a substring search: the id appears in prose
-    and in a `:R` row's first cell too, and a heading that promised a declaration on the
-    strength of either would be wrong in exactly the case it exists to catch.
+    Uses the real parser and the validator's definition (`_check_lead_refs`): a findings entry
+    with a name. A bare `:R` reference also creates an entry, just without a name, and must not
+    count, or the prompt would contradict the refusal.
 
-    DECLARED MEANS WHAT THE VALIDATOR MEANS BY IT — a `:L findings` row carrying a NAME. The
-    projector opens a lead bucket for any id it meets, so a bare `:R` reference already puts
-    `{"id": lead_id}` in `findings`; keying on the id alone would answer True for exactly the
-    citation `_check_lead_refs` is about to refuse as `undeclared lead`, and the heading would
-    then withhold the escape line on the one document that needs it. `_check_lead_refs`
-    separates the two the same way (`if isinstance(f.get("id"), str) and f.get("name")`), and
-    the two readings have to agree or the prompt contradicts the refusal.
-
-    FAILS OPEN — an unreadable or unparseable document returns True, so the extra line is
-    omitted. This is prompt text, not a gate: a document nothing can parse is a fault the
-    write gate and the close both refuse on their own terms, and guessing "not declared" here
-    would bolt a confusing instruction onto a run whose real problem is elsewhere."""
+    Fails open (returns True) on an unparseable document: this is prompt text, not a gate, and
+    other gates already refuse such a document."""
     from defender.skills.invlang.parser import parse_dense_companion
 
     path = RunPaths(run_dir).investigation
@@ -267,7 +204,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     )
 
 
-# the entry point (F1)
+# the entry point
 
 def resolve_lead_zero(
     *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
@@ -314,9 +251,7 @@ def resolve_lead_zero(
             )
         except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
                 KeyboardInterrupt, GeneratorExit):
-            # Cancellation/control-flow signals must propagate rather than degrade into a plain
-            # "item 1 failed" result: swallowing `CancelledError` here breaks task cancellation
-            # semantics for whatever is running this coroutine.
+            # Control-flow signals propagate; swallowing CancelledError breaks cancellation.
             raise
         except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
             return _unavailable(f"{e!r}"), STATUS_FAILED
@@ -325,8 +260,8 @@ def resolve_lead_zero(
     return LeadZeroResult(text=_render_section(body), status=status)
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports: each name's home is the module it is imported from.
+
 __all__ = [
     "ALERT_ID_FIELD",
     "ALREADY_CLAIMED",

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Append a held-out result to the ledger.
 
-A held-out score is recorded **once per (case, tag)**. This appends the entry;
-it will not replace one. That refusal is the mechanism: re-running a held-out
-case under the same tag until the number improves is the way a held-out set
-stops being held out, and there is no flag here to do it. Record a new oracle
-version under a NEW tag instead.
+A held-out score is recorded once per (case, tag): this appends and never replaces, so a
+held-out case cannot be re-run under the same tag until the number improves. Record a new
+oracle version under a new tag instead.
 
 Usage: record_held_out.py <case_dir> <tag>
 """
@@ -49,10 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"!! no {score_path}", file=sys.stderr)
         return 1
 
-    # The judge runs at score time, so the tag names it. `judge_model()` reads an env var
-    # with a fallback, so two machines can mint identically-named tags from different
-    # judges. Refuse the one thing that would make the ledger lie: a result filed under a
-    # tag that does not name the judge recorded inside it.
+    # Refuse a score whose recorded judge does not match its tag's judge suffix.
     score = json.loads(score_path.read_bytes())
     recorded = score.get("judge") or {}
     if not ns.tag.endswith(judge.tag_suffix(recorded.get("model", ""),
@@ -79,9 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest(),
         "recorded": ns.recorded,
     })
-    # Keep the file's explanatory header (everything before `entries:`) and
-    # re-serialize the list — the header is the only place that says why this
-    # ledger exists, and a rewrite that dropped it would leave a bare hash list.
+    # Keep the file's explanatory header (everything before `entries:`).
     head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
     ledger_path.write_text(
         head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,

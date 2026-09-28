@@ -13,22 +13,13 @@ from defender._io import TEXT_READ_ERRORS, locked_for_rewrite
 def update_json_locked(
     path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
 ) -> dict:
-    """Locked read-modify-write. The refuse-then-`O_NOFOLLOW`-then-lock prefix is
-    `_io.locked_for_rewrite`'s, not a second copy of it: `path.touch(exist_ok=True)` +
-    `open(path, "r+")` both follow a planted symlink — `touch` creates/updates the OUTSIDE
-    target and the `r+` open then locks and rewrites it. The refusal happens before the lock is
-    ever taken.
+    """Locked read-modify-write through `_io.locked_for_rewrite`, which refuses a planted
+    symlink before taking the lock.
 
-    A document that parses to a NON-DICT falls back to `default()` too. `[]`, `3`, `"x"` and
-    `null` are all valid JSON and none is a state written through here; each `mutate` opens with
-    `state[...]` or `state.setdefault(...)`, so a non-dict would raise
-    `TypeError`/`AttributeError` out of the writer. Coercing at this seam keeps the signature's
-    promise once instead of in each `mutate`."""
+    An undecodable, unparseable, or non-dict document falls back to `default()`, so `mutate`
+    always receives a dict."""
     path = Path(path)
     with locked_for_rewrite(path) as f:
-        # UNDECODABLE is the same case as unparseable, reached one step EARLIER: the handle is
-        # text-mode utf-8, so a `budget.json` holding non-UTF-8 bytes raises `UnicodeDecodeError`
-        # out of the read, above every guard below it. `""` here, so `default()` applies.
         try:
             raw = f.read()
         except UnicodeDecodeError:
@@ -47,28 +38,15 @@ def update_json_locked(
 
 
 def read_json_locked(path: Path) -> dict:
-    """The document at `path` as a dict — `{}` for absent, unreadable, unparseable, and for a
-    document that parses to something that is not a dict.
-
-    `json.loads` is typed `Any`, which satisfies every annotation, so without the last clause
-    `3`, `"x"`, `null` and `[]` type-check clean and come back as the state. Callers then
-    dereference them (`{**state, …}`, `state.get("alias_refusals", [])`) and raise
-    `TypeError`/`AttributeError` from a fault path with no handler for it.
-
-    Narrowed HERE rather than at each reader, which is the argument
-    `scripts/lint/lint_unnarrowed_parse.py` makes for gating this seam: fixing the seam fixes
-    every reader, present and future."""
+    """The document at `path` as a dict — `{}` for absent, symlinked, unreadable, unparseable,
+    or non-dict. Narrowed here so no reader has to handle a non-dict `json.loads` result."""
     path = Path(path)
     if not path.is_file():
         return {}
-    # A SYMLINK at the state's name is not this run's state — the same judgement
-    # `locked_for_rewrite` makes on the write side. `is_file()` above DEREFERENCES, so without
-    # this the reader follows a planted alias and reads whatever it points at as `budget.json`.
+    # `is_file()` follows links; a symlink at the state's name is a planted alias, not state.
     if path.is_symlink():
         return {}
-    # `TEXT_READ_ERRORS`, not a bare `OSError`: `f.read()` on a text handle also raises
-    # `UnicodeDecodeError` (a `ValueError`), and non-UTF-8 bytes in the rw-bound run root would
-    # otherwise come back out of `read_budget` un-caught.
+    # `TEXT_READ_ERRORS` also covers `UnicodeDecodeError` from non-UTF-8 bytes.
     try:
         with open(path, encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_SH)

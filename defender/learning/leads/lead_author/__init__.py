@@ -1,13 +1,9 @@
 """The lead-author: offline curation of the gather query catalog and the system skills.
 
-Split into two modules when this file reached 1017 lines:
-
   * `_handoff` — the queue lock, what a handoff contains, and dispatching the agent.
-  * `_rules`   — the verification rules a produced edit has to survive before it is
-                    allowed to land.
+  * `_rules`   — the verification rules a produced edit has to survive before it lands.
 
-What stays here is the drain itself: acquire the lock, build the handoffs, run, verify,
-commit.
+This module is the drain itself: acquire the lock, build the handoffs, run, verify, commit.
 """
 #!/usr/bin/env python3
 from __future__ import annotations
@@ -137,10 +133,8 @@ def _write_state(path: Path, content: str) -> None:
 def done_sentinel_text(sha: str | None) -> str:
     """The body of the per-run `done` sentinel — the one producer of it.
 
-    @owns done_sentinel — `commit: <sha|none>`, the time it was WRITTEN, and whether a commit
-    was made. Rendered by `write_done_sentinel` alone, so `at:` is when the run was recorded
-    done however it was served — by hand at once, or by the drain once its batch had passed
-    the scrub (#952)."""
+    @owns done_sentinel — `commit: <sha|none>`, when it was written, and whether a commit was
+    made. `at:` is when the run was recorded done, which under the drain is after the scrub."""
     return (
         f"commit: {sha or 'none'}\nat: {_loop_config.now_iso()}\n"
         f"commit_made: {sha is not None}\n"
@@ -148,10 +142,9 @@ def done_sentinel_text(sha: str | None) -> str:
 
 
 def write_done_sentinel(run_dir: Path, sha: str | None) -> None:
-    """The one writer of `<run_dir>/lead_author/done` — the file `_run_locked` short-circuits
-    on. `run` writes it itself by default; under `on_done` the drain writes it here once the
-    batch's tree passed the scrub (#952), so a run whose batch was tainted is served again
-    next tick instead of being recorded as done."""
+    """The one writer of `<run_dir>/lead_author/done`, which `_run_locked` short-circuits on.
+    Under `on_done` the drain writes it only after the scrub, so a tainted batch's run is
+    served again rather than recorded done."""
     _write_state(_done_sentinel(run_dir), done_sentinel_text(sha))
 
 
@@ -165,9 +158,8 @@ DoneSink = Callable[[str | None], None]
 @model(frozen=True)
 class LeadAuthorDeps:
     paths: _loop_config.LoopPaths
-    #: The UNION (adapter glob ∪ committed marker) resolved ONCE at the boundary — before the
-    #: agent is ever spawned — and threaded non-Optional into every path-composition consumer
-    #: on this lane. Never re-derived by a consumer.
+    #: The declared systems (adapter glob ∪ committed marker), resolved once before the agent
+    #: is spawned and never re-derived by a consumer.
     systems: frozenset[str]
     invoke_agent: Callable[..., int]
     extract: Callable[[Path], tuple[list, list[ExecutedLead]]]
@@ -209,22 +201,20 @@ def run(
     box: Any = None,
     on_done: DoneSink | None = None,
 ) -> int:
-    """Serve one run under the per-author queue lock. `on_done` is the consumption switch
-    (#952 M4): left `None`, a clean exit writes the `done` sentinel under the run dir at once
-    — the CLI's contract; given, the commit sha is handed to the callable instead and nothing
-    is written under the run dir, so the drain can record the run as done only once its
-    batch has passed the scrub. The `pitfalls_collected` marker and the pitfalls rows are
-    written either way — they are facts about the run, not about a commit."""
+    """Serve one run under the per-author queue lock.
+
+    `on_done` is the consumption switch: left `None`, a clean exit writes the `done` sentinel
+    at once (the CLI's contract); given, the commit sha is handed to it instead, so the drain
+    can record the run done only after the scrub. The `pitfalls_collected` marker and pitfalls
+    rows are written either way — they are facts about the run, not a commit."""
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
-    # Resolved ONCE, here at the boundary; every write site below takes the sink as given.
     sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
 
-    # The lock is checked BEFORE `deps` is built when the caller supplied none: resolving
-    # membership is real subprocess work, and a tick about to skip on a contended lock should
-    # not pay for it, nor fail hard on a tree the resolver cannot yet read — a skip must never
-    # present as anything but the skip rc.
+    # Take the lock before building `deps`: resolving membership is subprocess work, and a
+    # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
+    # resolver can't read yet.
     if deps is not None:
         queue_lock = deps.acquire_queue_lock()
         if queue_lock is None:
@@ -247,10 +237,8 @@ def run(
 def run_under_held_queue_lock(
     run_dir: Path, *, paths: _loop_config.LoopPaths, box: Any = None, on_done: DoneSink,
 ) -> int:
-    """`run` for a caller that ALREADY holds the per-author queue lock — the drain, which
-    takes it once around its whole tick (#952 M5) because the sentinel it defers is what
-    `_run_locked` short-circuits on, and a by-hand run in the gap would otherwise re-serve
-    the run. Never skips: the lock is the caller's, so there is nothing to contend on."""
+    """`run` for a caller that already holds the per-author queue lock (the drain holds it for
+    its whole tick, since it defers the done sentinel). Never skips."""
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
@@ -265,9 +253,8 @@ def _run_locked(
         return 0
 
     if not deps.systems:
-        # An empty declared set is not spendable as an ordinary membership "no": that would
-        # refuse every path one at a time and the tick would report a clean no-op. Refused
-        # loudly instead, before the agent is ever spawned.
+        # An empty declared set would refuse every path one by one and report a clean no-op;
+        # refuse loudly before spawning instead.
         raise LeadAuthorError(
             f"lead-author refused: {deps.paths.repo_root} declares no systems (empty "
             "adapter glob and no committed execution.md); refusing to run the lane"
@@ -289,9 +276,8 @@ def _run_locked(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
-    # Captured between the mint and the agent: these drafts are UNTRACKED, so if the agent
-    # removes one the commit gate has neither a `git status` record nor a HEAD pre-image to
-    # recover the identities it recorded (`_departed_drafts`).
+    # Captured before the agent runs: these drafts are untracked, so if the agent removes one
+    # git can't recover the identities it recorded.
     minted = _minted_identities(synth)
 
     collected_marker = _state_dir(run_dir) / "pitfalls_collected"
@@ -301,10 +287,8 @@ def _run_locked(
         )
         if failures:
             _loop_persist.append_pitfalls(failures, paths=deps.paths)
-            # Both numbers: the failures are what the run did, the distinct count is how many
-            # mistakes THIS RUN made once its repeats collapse — not what the curation
-            # threshold will see, which merges this run's rows against every row already
-            # queued. A lead that loops makes the gap large, and that gap is the signal.
+            # Both numbers: a large gap between failures and this run's distinct mistakes
+            # signals a looping lead. (The curation threshold merges across the whole queue.)
             distinct = len(_loop_persist.merge_pitfalls(failures))
             _logger.info(
                 f"collected {len(failures)} general failure(s) into the queue "
@@ -349,8 +333,7 @@ def _prepare_handoffs(
     executed: list | None = None, joined_leads: list | None = None,
     *, catalog: list | None = None, on_done: DoneSink | None = None,
 ) -> tuple[list, list, int | None]:
-    # Optional HERE ALONE, for the tests that drive this frame directly; `run` resolves the
-    # sink once at its boundary and `_run_locked` always passes it.
+    # Optional only for tests that drive this frame directly; `_run_locked` always passes it.
     record_done = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
@@ -411,15 +394,11 @@ def _prepare_handoffs(
 
 
 
-#: Substituted at the parser with the owner's record names (#1077 D1) — a template, not a
-#: module-level f-string, so the prompt-frame lint does not read it as a prompt boundary.
+#: Substituted at the parser with the owner's record names — a template rather than a
+#: module-level f-string, so the prompt-frame lint doesn't read it as a prompt boundary.
 #:
-#: `string.Template`, NOT `str.format`. This is operator prose that names paths, and the two
-#: spellings a path takes in this repo — `defender/skills/{system}/SKILL.md`, `{run_id}` — are
-#: both braces. Under `.format` the first such edit raises `KeyError` at `--help`, i.e. only
-#: once it is in an operator's hands and never in a test. `safe_substitute` cannot raise at
-#: all: an unrecognized `$x` is left as written, so the failure mode is a visibly unsubstituted
-#: word in help text rather than a dead command.
+#: `string.Template`, not `str.format`: path placeholders like `{system}` in this prose would
+#: raise `KeyError` at `--help`, while `safe_substitute` leaves an unknown `$x` as written.
 _HELP_EPILOG = string.Template("""\
 The agent runs no git; the loop commits. Invoked directly this commits onto the
 current branch/worktree's HEAD — in production the lead-author drain
@@ -461,11 +440,8 @@ Environment
 
 
 def _record_names() -> dict[str, str]:
-    """The three record names this help text shows an operator, ASKED OF THE OWNER at call
-    time rather than imported (#1077 D7). `.name` off an accessor built on a placeholder root
-    is the only spelling this module ever sees, so a rename through the owner reaches the help
-    text with nothing here to update — and there is no module-level copy for a rename to
-    strand."""
+    """The record names this help text shows, asked of `RunPaths` at call time so a rename
+    there reaches the help text with nothing to update here."""
     names = RunPaths(Path("<run_dir>"))
     return {
         "EXECUTED_QUERIES": names.executed_queries.name,
@@ -492,8 +468,8 @@ def main(argv: list[str]) -> int:
 
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports: callers import these names from here; their real homes are the source
+#: modules.
 __all__ = [
     "Any",
     "CATALOG_DIR",

@@ -1,18 +1,4 @@
-"""Harness-executed lead-0.
-
-Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
-and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
-run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
-the review gate cite them like any model-dispatched lead.
-
-This module owns every backend call, run-dir write and dispatch those two items add;
-``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
-returned block as one more ORIENT section.
-
-The vocabulary turn-zero work is written against: lead ids, statuses, field names.
-
-Imports none of its siblings.
-"""
+"""Lead-0 vocabulary: lead ids, statuses, field names. Imports none of its siblings."""
 from __future__ import annotations
 
 import re
@@ -35,17 +21,9 @@ CORRELATION_REQUEST_LIMIT = 8
 def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
     """Item 3's grant: the verb-disposition table's projection for the correlation lead.
 
-    Until #999 this was a `VerbGrant` literal here — the one grant the table could neither
-    widen nor withdraw, so a withholding written in the table was honoured by item 1 and every
-    model-dispatched lead and ignored by item 3. Now it is `grant_for`'s filter over the rows,
-    which invents nothing (#995's standing property), and the holder's pairs are AUTHORED in
-    the table under `CORRELATION_GRANT_HOLDER` and nowhere else. The table's authority over
-    the lead is grant-or-withhold: WHICH query pair it grants is not free — it must be the
-    pair the template configured in `lead-zero.yaml` binds, and the run-start check in
-    `_agreement` refuses a table that grants any other (#1003).
-
-    A function over rows, never a module constant (#1106): each run projects its OWN tenant's
-    table (`verb_dispositions.run_grants`), so there is no process-level grant to hold here.
+    The table can grant or withhold; the granted pair must match the configured template,
+    which `_agreement` checks at run start. A function over rows, not a constant, because each
+    run projects its own tenant's table.
     """
     return grant_for(CORRELATION_GRANT_HOLDER, rows)
 
@@ -53,17 +31,12 @@ def correlation_grant(rows: tuple[Disposition, ...]) -> VerbGrant:
 def correlation_system(grant: VerbGrant) -> str | None:
     """The one system item 3 is dispatched against, or `None` when there is nothing to dispatch.
 
-    `None`, not a raise, when the grant holds no verb other than `health-check`: that is the
-    table WITHHOLDING the lead's query verb — a decision an author wrote down with a reason —
-    and it degrades the run (item 3 is neither claimed nor dispatched, and ORIENT says so)
-    rather than stopping it. The predecessor raised on an empty grant, which made "skip, do
-    not die" impossible. Health-check alone is not a target either: a lead whose template
-    index is empty spends its whole budget discovering that.
+    `None` when the grant holds nothing but `health-check`: the table withheld the lead, which
+    degrades the run (item 3 is skipped and ORIENT says so) rather than stopping it.
+    Health-check alone is not a target either: the lead would spend its budget on a ping.
 
-    Two systems is unreachable past `load_dispositions`, which refuses a table naming them for
-    this holder; the raise stays as this function's own contract for a grant that did not
-    come through the loader. The choice is deliberate authoring (it selects the template
-    index's on-target tier and the prompt-cache lane), never `sorted(...)[0]` at run time.
+    Raises on two systems (the loader already refuses that; this guards other grants): the
+    system selects the template tier and cache lane, so it must be authored, not picked.
     """
     systems = sorted({s for s, v, _ in grant.entries if v != HEALTH_CHECK})
     if not systems:
@@ -77,12 +50,8 @@ def correlation_system(grant: VerbGrant) -> str | None:
     return systems[0]
 
 
-#: Item 1's OWN system, and deliberately not the run's `correlation_system`. Every backend call item 1
-#: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +
-#: `query_id` + `raw_command`, `_breaker_failures`' per-system state read, `_CallLedger.call`'s
-#: registry lookup — so its `:L findings` row must be labelled from the SAME anchor. Labelling
-#: it from the correlation grant's derived system looks like a dedup while the two are the same
-#: string, and mislabels item 1's row the moment the correlation grant names a different vendor.
+#: Item 1's own system, not the run's `correlation_system`. Every item-1 backend call names it,
+#: so its `:L findings` row must too; the correlation system can name a different vendor.
 ITEM1_SYSTEM = "elastic"
 
 PROVENANCE_KEY = "provenance"
@@ -93,8 +62,7 @@ LEAD_ZERO_HEADING = "## Alert ancestors"
 STATUS_FAILED = "failed"
 STATUS_EMPTY = "succeeded-empty"
 STATUS_TRUNCATED = "succeeded-truncated"
-#: Every requested ancestor document resolved. Derived from `saw_success` / `docs` /
-#: `requested`; `prepare_correlation_lead`'s gate reads it as "item 1 resolved documents".
+#: Every requested ancestor document resolved.
 STATUS_RESOLVED = "succeeded-resolved"
 
 UNAVAILABLE = "_(unavailable:"
@@ -119,9 +87,7 @@ ITEM1_WHAT_TO_SUMMARIZE = [
 ]
 
 _ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
-#: A markdown code-fence run. Neutralized because item 1's rendered block is interpolated into
-#: item 3's goal, which `tools_gather._gather_prompt` emits INSIDE a fenced block: a fence run
-#: in an attacker-authored `message` (a captured command line, a shell transcript) closes that
-#: fence early, so the harness's own `what_to_summarize` block renders as free prose the lead
-#: reads as document content.
+#: A markdown code-fence run. Item 3's goal is emitted inside a fenced block, so a fence run in
+#: attacker-authored content would close it early and let the text pose as harness prose.
+
 _FENCE_RUN = re.compile(r"`{3,}")

@@ -56,12 +56,11 @@ def _run_verify_pydantic(
     salt: str | None = None,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    """The forward-check's request limit is stage-fixed (one turn); its timeout is not — the
-    caller passes its own env-backed knob, so no default is evaluated at import.
+    """The request limit is stage-fixed (one turn); the timeout is the caller's env-backed
+    knob, so no default is evaluated at import.
 
-    `ctx.salt` is NOT bound: it scopes this stage's PROMPT frames — the set
-    `stage_user_message` announces as one message — while a tool return is framed by
-    `wrap_fresh`, which mints its own salt after the content is in hand."""
+    `salt` scopes this stage's prompt frames and isn't bound; tool returns are framed by
+    `wrap_fresh` with their own salt."""
     ctx = StageContext(
         learning_run_dir=source_run_dir, user=user,
         request_limit=VERIFY_REQUEST_LIMIT,

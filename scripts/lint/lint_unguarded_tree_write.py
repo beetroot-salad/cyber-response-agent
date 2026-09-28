@@ -1,35 +1,27 @@
 #!/usr/bin/env python3
-"""Unguarded shared-tree write — flag a write into a box-writable tree (a run dir, the drain
-worktree's corpus) that bypasses the alias-refusing primitives (#771 M3:
-``defender._io.write_guarded`` / ``guarded_mkdir`` / ``open_guarded``).
+"""Unguarded shared-tree write: flag a write into a box-writable tree (a run dir, the drain
+worktree's corpus) that bypasses the alias-refusing primitives (``defender._io.write_guarded``
+/ ``guarded_mkdir`` / ``open_guarded``).
 
-A grep over write IDIOMS is not a census instrument (#771 C3-fix): it cannot see a WRAPPER, and
-that is exactly the shape that let ``budget_enforcer``'s atomic-write wrapper go missing from
-the original census while it kept writing straight through ``_io.write_atomic``. This gate
-resolves the CALLEE, not the spelling: ``from defender._io import write_atomic as wa; wa(...)``
-is the same finding as the unaliased form.
+A grep over write idioms cannot see a wrapper, so this gate resolves the callee, not the
+spelling: ``from defender._io import write_atomic as wa; wa(...)`` is the same finding as the
+unaliased form.
 
 What it flags, inside `SCOPE` (``defender/``): a call to ``defender._io.write_atomic`` or
-``defender._io.append_jsonl`` (the two primitives #771 superseded for shared-tree writers —
-`write_atomic` now delegates to `write_guarded` itself and stays legitimate for callers OUTSIDE
-every box mount; a call inside a hard-gated module is still a finding because those modules'
-own artifacts ARE inside the tree), and the duck-typed ``<x>.write_text(...)`` /
-``<x>.write_bytes(...)`` / ``<x>.mkdir(...)`` method shapes (unresolvable by import origin,
-matched the same way ``opener_slot`` matches ``<p>.open(...)``).
+``defender._io.append_jsonl`` (``write_atomic`` delegates to ``write_guarded`` and is fine for
+callers outside every box mount, but inside a hard-gated module it is still a finding because
+those modules' artifacts are inside the tree), and the duck-typed ``<x>.write_text(...)`` /
+``<x>.write_bytes(...)`` / ``<x>.mkdir(...)`` shapes (matched like ``opener_slot`` matches
+``<p>.open(...)``).
 
-What it does NOT flag: a call to ``write_guarded`` / ``guarded_mkdir`` / ``open_guarded``
-themselves (the sanctioned primitives). The modules where the primitives are IMPLEMENTED get no
-blanket exemption — ``_io.py`` is itself a hard-gated census module, and a module-wide bypass
-would have silently cancelled that gate — so the handful of raw idioms they call by necessity
-carry per-line ``# lint-unguarded-tree-write: ok`` markers instead, each naming why that one
-call may stay raw. A NEW unguarded write in the primitive's own module is then still a finding.
+What it does not flag: ``write_guarded`` / ``guarded_mkdir`` / ``open_guarded`` themselves.
+The modules implementing them get no blanket exemption (``_io.py`` is itself hard-gated):
+the raw idioms they need carry per-line ``# lint-unguarded-tree-write: ok`` markers naming
+why, so a new unguarded write there is still a finding.
 
-Ratcheted like every other lint here (``lint_unguarded_tree_write_baseline.json``), EXCEPT for
-the modules #771's writer census names (``LINT_HARD_GATED_MODULES``, a copy of
-``defender/tests/e2e/_spec771.py``'s ``CENSUS`` module set that the spec suite compares
-set-for-set — see that constant's own comment on why the copy exists and what holds it in
-step): those are HARD-gated, never ratcheted, so a converted writer that regresses fails CI
-rather than joining the baseline silently.
+Ratcheted via ``lint_unguarded_tree_write_baseline.json``, except for the writer-census modules
+(``LINT_HARD_GATED_MODULES``, kept set-equal to ``defender/tests/e2e/_spec771.py``'s census):
+those are hard-gated, never ratcheted, so a converted writer that regresses fails CI.
 
 Run from repo root:  python scripts/lint/lint_unguarded_tree_write.py
 Regenerate the baseline:  python scripts/lint/lint_unguarded_tree_write.py --update-baseline
@@ -50,30 +42,23 @@ BASELINE_PATH = Path(__file__).with_name("lint_unguarded_tree_write_baseline.jso
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
-#: The pre-#771 whole-file idioms. `write_atomic` now DELEGATES to `write_guarded` (safe to
-#: call), but stays flagged: `write_guarded` is the one canonical seam #771's M3 gives every
-#: shared-tree writer, and a new writer reaching the tree through `write_atomic` instead is the
-#: exact wrapper shape that hid `budget_enforcer`'s writer from C1's own grep — a lint that
-#: stopped seeing it because the wrapped call became safe would reproduce that blind spot with
-#: extra steps. A caller that has deliberately kept `write_atomic` (because it also serves
-#: callers outside every box mount) marks the line `# lint-unguarded-tree-write: ok`.
-#: `append_jsonl` is the JSONL sibling — still literally unguarded (`"a"`, no `O_NOFOLLOW`).
-#: Both resolved by CALLEE so an alias or a `from ... import ... as ...` cannot dodge the gate.
+#: Whole-file idioms that bypass the canonical seam. `write_atomic` delegates to
+#: `write_guarded` and is safe, but stays flagged: `write_guarded` is the one seam every
+#: shared-tree writer uses, and going quiet on a wrapper because the wrapped call became safe
+#: recreates the blind spot wrappers cause. A caller that keeps `write_atomic` because it also
+#: serves callers outside every box mount marks the line `# lint-unguarded-tree-write: ok`.
+#: `append_jsonl` is still literally unguarded (`"a"`, no `O_NOFOLLOW`). Both resolved by callee.
 _UNSAFE_CALLEES = frozenset({"defender._io.write_atomic", "defender._io.append_jsonl"})
 
-#: Duck-typed method shapes that write/create without going through the guarded primitive —
-#: unresolvable by import origin (the receiver is a Path VALUE, not a module), matched the same
-#: way `_astlib.opener_slot` matches `<p>.open(...)`.
+#: Duck-typed method shapes that write/create without the guarded primitive (the receiver is
+#: a Path value, so there is no import origin to resolve).
 _UNSAFE_METHODS = frozenset({"write_text", "write_bytes", "mkdir"})
 
-#: #771's writer census (fork R25). This is a COPY of
-#: `defender/tests/e2e/_spec771.py`'s `CENSUS_MODULES | DRAIN_MODULES`, not a derivation: a
-#: repo-root lint may not import the test package (it drags in pydantic_ai and the whole
-#: `defender` runtime), so the two lists are kept in step by
-#: `test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones`, which compares
-#: them set-for-set. Nothing else does — a census row added there and not here is a module the
-#: gate stops covering, which is exactly how the driver's fault-exit trace write went missing
-#: from this gate once already.
+#: The writer census: a copy of `defender/tests/e2e/_spec771.py`'s
+#: `CENSUS_MODULES | DRAIN_MODULES`, not a derivation, because a repo-root lint may not import
+#: the test package (it drags in pydantic_ai and the whole runtime). Kept in step only by
+#: `test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones` (set-for-set);
+#: a census row added there and not here is a module the gate stops covering.
 LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",
     "runtime/driver/",
@@ -94,12 +79,9 @@ LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
 def _hard_gated(rel: str) -> bool:
     """Is this file one the census hard-gates?
 
-    An entry ending in `/` names a PACKAGE and covers every file under it. Three of the
-    census modules became packages (`runtime/driver.py` -> `runtime/driver/`), spreading
-    their writers across several files: an exact-match test would have kept covering only
-    the file that no longer exists, and the gate would have gone quiet on every writer in
-    the package — the same way the driver's fault-exit trace write went missing once
-    already. Covering the directory is strictly wider than the single file it replaced.
+    An entry ending in `/` names a package and covers every file under it, so a census
+    module that became a package (`runtime/driver.py` -> `runtime/driver/`) stays covered
+    across all its files.
     """
     return rel in LINT_HARD_GATED_MODULES or any(
         entry.endswith("/") and rel.startswith(entry) for entry in LINT_HARD_GATED_MODULES
@@ -139,9 +121,8 @@ def _unsafe_reason(call: ast.Call, env: ModuleEnv) -> str | None:
         return origin
     func = call.func
     if isinstance(func, ast.Attribute) and func.attr in _UNSAFE_METHODS:
-        # Duck-typed: could in principle be an unrelated object with a same-named method
-        # (a dict-like `.mkdir`? none exists in this codebase's idiom set) — the same
-        # tradeoff `opener_slot` already makes for `.open(...)`.
+        # Duck-typed: a same-named method on an unrelated object would match too — the
+        # tradeoff `opener_slot` makes for `.open(...)`.
         return f"<value>.{func.attr}"
     return None
 
@@ -227,8 +208,7 @@ def main(
         if _hard_gated(f.fingerprint.split(":")[0])
     ]
     if hard_gated:
-        # A census module's finding ends the run: the ratchet below never sees one, so there is
-        # nothing left to filter out of `findings` on the way to it.
+        # A census-module finding ends the run before the ratchet.
         for f in hard_gated:
             print(f"HARD-GATED (never ratcheted): {f.display}", file=sys.stderr)
         return 1

@@ -1,21 +1,13 @@
 """The content schema for the run's two model-authored artifacts.
 
-`report.md` and `investigation.md` are the only files a model authors that leave the
-system: the report and investigation ride verbatim into the judge LLM prompt, and the
-report body into the ticket bridge's HTTP egress. This module owns what a well-formed one
-IS — the report's frontmatter grammar, its `disposition` enum, the UTF-8 byte bounds on
-both, and the investigation's invlang structure.
+`report.md` and `investigation.md` are the only model-authored files that leave the system
+(into the judge prompt and the ticket bridge's HTTP egress). This module owns what a
+well-formed one is: the report's frontmatter grammar and `disposition` enum, UTF-8 byte
+bounds, and the investigation's invlang structure.
 
-It owns NO authorization. Who may write where is `runtime/permission/files.py`'s job (the
-`write_allow` allowlist, the `write ⊆ read roots` containment check, and the resolve-then-key
-decision that picks which artifact a path IS); this module is called only after those gates
-have already said yes, and it never sees a policy, a run dir, or a path.
-
-Every entry point returns `str | None` — the deny reason, or `None` for "well-formed" —
-deliberately NOT a `permission.Decision`. `Decision` is authorization vocabulary, and keeping
-it out is what lets this module sit as a neutral leaf: the permission gate and the learning
-loop's read-side validators both import it without importing each other. The gate wraps a
-returned reason back into `Decision(False, reason)`.
+It owns no authorization (`runtime/permission/files.py` does) and never sees a policy, run
+dir, or path. Entry points return a deny reason or `None`, not a `permission.Decision`, so
+this stays a neutral leaf both the gate and read-side validators can import.
 """
 
 from __future__ import annotations
@@ -25,85 +17,54 @@ import logging
 from defender import _run_paths
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
-# Imported to be USED, not re-exported: other readers of the vocabulary import `_vocab`
-# directly. The normalizer is deliberately NOT imported — this module holds the WRITE gate,
-# and on write the value is tested exactly (see `validate_report`).
+# Not the normalizer: the write gate tests the value exactly (see `validate_report`).
 from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import Diagnostic, diagnose, warn_diagnostics
 
 _logger = logging.getLogger(__name__)
 
-# Output-structure bounds for the run's two model-authored artifacts, all in UTF-8 BYTES.
-# A VOLUME + STRUCTURE control on bytes that leave the system, not a content oracle: an
-# in-bound, well-formed payload still passes.
+# Volume bounds on bytes that leave the system, in UTF-8 bytes — not a content check.
 REPORT_FRONTMATTER_MAX = 512
 REPORT_FILE_MAX = 8192
 INVESTIGATION_FILE_MAX = 65536
 
-# Still refused even though the judge now places report bytes inside an invocation-salted
-# frame (`_untrusted.wrap`): accepting the sequence would loosen the report contract
-# independently of that prompt-layer hardening.
+# Refused even though the judge frames report bytes in a salted frame: the report contract
+# should not depend on that prompt-layer hardening.
 REPORT_CLOSE_DELIMITER = "</report>"
 
-#: This module owns what a well-formed artifact IS, never what it is called (#1077 D1). It
-#: used to re-export the two names under its own spellings, which made it a second home for
-#: them — D7's rule is that nothing outside the owner HOLDS a record name, and a module-level
-#: `REPORT_NAME = _run_paths.REPORT` is exactly that.
-#:
-#: The artifacts this module has a schema for. The gate iterates this to decide whether a
-#: resolved write target is a gated artifact at all, so adding a third one is a change HERE
-#: rather than a new branch in `decide_write` — a FUNCTION, so the names are the owner's at
-#: the moment they are asked for.
+# The gate iterates this to decide whether a write target is a gated artifact, so a third
+# artifact is added here. A function so names always come from the run-dir owner; this module
+# must not hold record names of its own.
 def artifact_names() -> tuple[str, ...]:
     """The artifacts this module has a schema for, by name, from the run-dir owner."""
     return (_run_paths.RUN_LAYOUT.report.name, _run_paths.RUN_LAYOUT.investigation.name)
 
-# Which artifacts need the CURRENT on-disk text as a baseline. Only invlang does (it is
-# append-only, so validation is against the document's history, not the text alone). The
-# gate reads the baseline and passes it in — this module does no filesystem access — and
-# it must read for THESE names only: an unconditional read would put a `read_text` that can
-# raise on the report.md path, where none ran before.
+# Only the append-only investigation validates against its history. The gate reads the
+# baseline only for these names, keeping a raising `read_text` off the report path.
 def needs_baseline(name: str) -> bool:
     """Does validating this artifact need the CURRENT on-disk text?"""
     return name == _run_paths.RUN_LAYOUT.investigation.name
 
 
 def _utf8_len(text: str) -> int:
-    """Byte length under UTF-8 — the basis for every bound here. A multibyte codepoint costs
-    its real transport bytes, so a `len(str)` codepoint count would under-count and let a body
-    over the byte bound through."""
+    """Byte length under UTF-8 — `len(str)` would under-count multibyte codepoints."""
     return len(text.encode("utf-8"))
 
 
 def _has_duplicate_top_level_key(raw: str) -> bool:
-    """True iff the frontmatter YAML declares the same top-level key twice. PyYAML's `safe_load`
-    silently resolves duplicates last-wins, so a `disposition:` declared twice (a valid member
-    shadowing an invalid one) would pass a plain membership check on the parsed mapping — this
-    catches it at the node level instead. Returns False on any parse trouble: `raw` already
-    parsed once via `split_frontmatter`, so trouble here means no reliable duplicate signal and
-    the other checks stand.
-
-    DELEGATED to `_yaml.duplicate_top_level_key` rather than scanned here. The node walk, the
-    `<<:` flatten and the constructed-key identity this needs are the same three decisions
-    `_yaml.duplicate_key_paths` makes for the verb-disposition table, and two spellings of
-    "what would `safe_load` collapse here" is exactly the drift both exist to report. See that
-    module for why the identity is the CONSTRUCTED key (`1:` and `"1":` are two keys sharing
-    one node text; `yes:` and `true:` are one key spelled two ways) and why a merge is
-    expanded first (`safe_load` folds one in before building the mapping, so a merged key an
-    explicit key shadows is a real last-wins entry).
+    """True iff the frontmatter declares a top-level key twice — `safe_load` keeps the last,
+    so a valid `disposition:` could shadow an invalid one. Delegates to `_yaml` so the gate and
+    the permission table agree on what `safe_load` collapses; False on parse trouble.
     """
     return duplicate_top_level_key(raw)
 
 
 def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:
-    """Deny text that is not UTF-8-encodable, BEFORE either artifact's own schema runs.
+    """Deny text that is not UTF-8-encodable, before either artifact's schema runs.
 
-    Both artifact schemas measure UTF-8 BYTES (`_utf8_len`) and their text splices into live
-    egresses. Content that is not UTF-8-encodable — a lone surrogate, reachable from a model
-    tool-call JSON arg (`json.loads('"\\ud800"')` yields one) — can be neither byte-measured
-    nor written (`write_text(encoding="utf-8")` raises the SAME error), so it is denied
-    FAIL-CLOSED here rather than letting `_utf8_len`'s `.encode()` raise out of the gate: the
-    gate's contract is to return a Decision, never propagate (its RESOLVE_ERRORS rule)."""
+    A lone surrogate (reachable from a model's JSON tool arg, `json.loads('"\\ud800"')`) can be
+    neither byte-measured nor written; denying here keeps `.encode()` from raising out of a
+    gate that must always return a decision."""
     try:
         proposed_text.encode("utf-8")
     except UnicodeEncodeError:
@@ -115,23 +76,13 @@ def encodable_or_reason(proposed_text: str, artifact: str) -> str | None:
 
 
 def validate_report(proposed_text: str) -> str | None:
-    """The report.md output-structure schema. Fail-closed on any of: unparseable frontmatter
-    (leading+closing fence, valid YAML, a mapping); a missing / duplicated / non-string /
-    out-of-enum top-level `disposition`; a frontmatter or whole file over its byte bound; or a
-    literal `</report>` that would break out of the judge's report block. Only `disposition` is
-    required — `case_id`/`confidence` are deliberately unvalidated (the ticket path derives
-    case_id from the run dir; confidence is untyped everywhere). Each reason is actionable text
-    the tool lane raises as ModelRetry.
+    """The report.md schema. Fail-closed on: unparseable frontmatter; a missing, duplicated,
+    non-string or out-of-enum top-level `disposition`; frontmatter or file over its byte bound;
+    or a literal `</report>`. Only `disposition` is required (`case_id` comes from the run dir,
+    `confidence` is untyped).
 
-    Model-facing, batched since #1067 PR5: every check below reads the SAME already-parsed
-    `fm`/`raw`/`proposed_text` and none depends on another's outcome, so a report wrong two
-    ways (say, a missing disposition AND an over-bound frontmatter) names both in the one
-    ModelRetry instead of costing a second retry to learn the second reason. The frontmatter
-    PARSE stays its own gate ahead of all of them — `fm`/`raw` do not exist to check anything
-    against until it succeeds, matching `validate_investigation`'s stricter sequencing below
-    for the same root reason, byte-bound before invlang, kept because that document's schema
-    depends on running the byte check WITHOUT invlang ever seeing oversize text; nothing here
-    shares that hazard, so nothing here keeps the first-fail shape."""
+    Reasons are model-facing (raised as ModelRetry). After the frontmatter parses, all
+    independent problems are reported together so the model fixes them in one retry."""
     try:
         fm, raw, _body = split_frontmatter(proposed_text)
     except FrontmatterError as e:
@@ -143,13 +94,9 @@ def validate_report(proposed_text: str) -> str | None:
             "duplicate and rewrite."
         )
     disposition = fm.get("disposition")
-    # `isinstance(str)` FIRST: a non-string value (a list / mapping) is unhashable, so a bare
-    # `value in DISPOSITION_ENUM` (a set) would raise TypeError out of the gate instead of denying.
-    #
-    # lint-vocabulary: ok — the WRITE gate is exact where every reader normalizes, and the
-    # asymmetry is the point: here there is still an author to ask, so an exact test denies a
-    # zero-width-laced disposition with actionable retry text. `normalized_disposition` would
-    # silently ACCEPT it and write a document no reader can tell from a clean one.
+    # `isinstance(str)` first: an unhashable value would raise TypeError in the set test.
+    # lint-vocabulary: ok — the write gate is exact where readers normalize: there is still an
+    # author to ask, so a zero-width-laced disposition is denied with retry text.
     if not (isinstance(disposition, str) and disposition in DISPOSITION_ENUM):
         problems.append(
             "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
@@ -175,14 +122,9 @@ def validate_report(proposed_text: str) -> str | None:
     return " ".join(problems)
 
 
-#: Every refusal on this artifact carries it. The model is told its own context IS the file
-#: (`SKILL.md`, "Re-sync, don't re-read"), so the refusal text is its primary signal about what
-#: is on disk: a model that believes a refused block landed anchors its next edit to text that
-#: was never written.
-#: The leading fragment is minted separately because some refusal paths have no proposed text
-#: of their own — a refused CLOSE offered no bytes, so "does not contain your text" would be a
-#: claim about nothing. Every refusal LEADS with this and an ACCEPT leads with its byte count,
-#: so the model tells the two apart by the first sentence and does not re-emit on a warning.
+#: Every refusal on this artifact leads with it. The model treats its context as the file, so
+#: it must be told plainly that a refused block did not land; an accept leads with its byte
+#: count instead. The lead is separate because a refused close has no text of its own.
 UNCHANGED_LEAD = "No changes were made"
 
 UNCHANGED_NOTICE = (
@@ -191,18 +133,11 @@ UNCHANGED_NOTICE = (
 
 
 def render_diagnostic(d: Diagnostic) -> str:
-    """One diagnostic as the model sees it: the message leads, with locus and corrections as
-    additive lines beneath it.
+    """One diagnostic as the model sees it: the message, then locus and corrections.
 
-    The row is suppressed when the message already contains it — a parse warning's `format()`
-    embeds `row=...`, and repeating it is noise. That embedding is a `repr()`, so the raw
-    substring test alone misses any row carrying a backslash or a quote; both spellings are
-    checked. A row past `format()`'s 200-char truncation matches NEITHER and is printed whole,
-    which is the point of the line.
-
-    MODULE-PUBLIC because the ACCEPT path needs it too: a warn-only document makes this module
-    return no text at all, so the tool bodies render through this one renderer rather than
-    growing a second, drifting spelling of the same three lines."""
+    The row is omitted when the message already embeds it (raw or `repr()` form); a row past
+    `format()`'s 200-char truncation matches neither and is printed whole. Public because the
+    tool bodies also render warnings on the accept path."""
     lines = [f"  - {d.message}"]
     if d.locus is not None and not (
         d.locus.row_text in d.message or repr(d.locus.row_text) in d.message
@@ -215,13 +150,8 @@ def render_diagnostic(d: Diagnostic) -> str:
 
 
 def _warns_quietly(current: str) -> bool:
-    """Is a row flagged on the ON-DISK document? Answered for one purpose only: picking which
-    REMEDY the size refusal names.
-
-    It swallows a validator error rather than propagating it: the branch that asks has already
-    decided its verdict (the write is denied either way), and letting `diagnose` raise out of
-    `validate_investigation` here would escape the module's fail-closed contract and take the
-    tool call down instead of denying it."""
+    """Is a row flagged on the on-disk document? Only picks which remedy the size refusal
+    names, so a validator error is swallowed — the write is denied either way."""
     try:
         return bool(warn_diagnostics(current))
     except Exception:  # noqa: BLE001 — a prose choice must not decide the gate's control flow
@@ -229,27 +159,18 @@ def _warns_quietly(current: str) -> bool:
 
 
 def validate_investigation(proposed_text: str, current: str | None) -> str | None:
-    """The investigation.md schema: the byte bound FIRST (so an over-bound document yields a
-    deterministic SIZE-failure reason without the invlang validator ever running on the
-    oversize text), then structural invlang validation of the full proposed text (`current`,
-    the caller-supplied on-disk text, supplies the append-only baseline). Empty /
-    whitespace-only text is under bound and invlang-empty, so it accepts.
+    """The investigation.md schema: the byte bound first (so invlang never runs on oversize
+    text), then invlang validation of the full proposed text against `current` as the
+    append-only baseline. Empty text accepts.
 
-    Every refusing branch states that nothing was written. This module owns the rendering and
-    `skills.invlang.validate` owns the finding — hence `diagnose` here rather than the
-    `validate_companion` string surface.
-
-    WARN-severity findings do not refuse and are not returned through this surface at all; the
-    tool bodies derive that window themselves."""
+    Every refusal states that nothing was written. Warnings do not refuse and are not returned
+    here; the tool bodies handle that repair window."""
     if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
-        # The size is the WHOLE document and the only writer APPENDS to it, so "trim it and
-        # re-send" is advice the model cannot always take: once what is committed fills the
-        # bound, no block is small enough. Name the on-disk share so the model can tell "send
-        # less" from "you are out of room".
+        # The bound covers the whole append-only document, so name the committed share: the
+        # model must tell "send less" from "out of room".
         on_disk = _utf8_len(current) if current is not None else 0
-        # With a row flagged, "close the investigation" is a verb the M5 gate refuses — that
-        # remedy would name the one move the model cannot make. `fix_row(old, "")` is the
-        # escape that actually shrinks the document.
+        # With a row flagged the close is refused, so name `fix_row(old, "")`, which shrinks
+        # the document.
         if on_disk and current is not None and _warns_quietly(current):
             remedy = (
                 f"{on_disk} of those bytes are already committed and cannot be removed, and a "
@@ -267,13 +188,8 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
-    # Fail closed on an internal validator error — same as invlang_validate's
-    # hook, which exits 2 (block) rather than letting the write through. An adapters
-    # directory this process cannot read is NOT a case this guard can meet: the
-    # `nothing-to-try` price is answered from the checkout's roster the run HOLDS
-    # (`hold_capabilities`, handed the value at `run_investigation`'s own frame before any
-    # model call, #1035), so by the time a write reaches here the roster is that value or the
-    # run never started — the gate has no read of its own to fail here.
+    # Fail closed on an internal validator error. (The adapter roster was read at run start,
+    # so an unreadable adapters dir cannot surface here.)
     try:
         found = diagnose(proposed_text, current)
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
@@ -292,15 +208,8 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
 
 
 def _rendered_errors(found: list[Diagnostic]) -> str | None:
-    """The ERROR-severity findings as the model sees them, or `None` when there are none.
-
-    One filter and one renderer for both readings of this schema — the WRITE gate above and
-    the CLOSE gate below. They frame the result differently (a refused write can say the
-    file is unchanged; a refused close offered no bytes to be unchanged FROM) and that is the
-    only thing they differ in, so the frame is the caller's and everything under it is here.
-
-    WARN severity is excluded on both paths for the same reason: it is the repair window
-    `runtime.tools` owns, not a reason to refuse."""
+    """The error-severity findings rendered for the model, or `None`. Shared by the write and
+    close gates, which differ only in framing. Warnings are `runtime.tools`' repair window."""
     errors = [d for d in found if d.severity != "warning"]
     if not errors:
         return None
@@ -308,50 +217,24 @@ def _rendered_errors(found: list[Diagnostic]) -> str | None:
 
 
 def committed_investigation_reason(text: str) -> str | None:
-    """Is `investigation.md` AS IT STANDS well-formed enough to publish? The deny reason, or
-    `None`.
+    """Is `investigation.md` as it stands well-formed enough to publish? The deny reason, or
+    `None`. The close publishes without going through `permission.decide_write`, so it needs
+    its own check.
 
-    This is the CLOSE's reading of the same schema `validate_investigation` gates writes with,
-    and it is deliberately narrower in two ways:
+    Narrower than `validate_investigation`:
 
-      * NO BYTE BOUND. The bound is a volume control on what a write ADDS, and a close adds
-        nothing to this document. Enforcing it here would also make the write gate's own
-        refusal text false — over-bound, that text offers "close the investigation on the
-        evidence you already have" as the way out, which is exactly the move a size-checking
-        close would refuse.
-      * THE DOCUMENT IS ITS OWN BASELINE. Every check that keys on `current` asks what THIS
-        WRITE INTRODUCES, and a close introduces nothing — so the honest baseline for a
-        committed document is the document. `None` is the WRONG spelling of that, and not
-        harmlessly: `_check_surface` subtracts the baseline's orphaned headers from the
-        proposal's, so with no baseline every unfenced header already on disk reads as newly
-        added. `investigation.md` is append-only and `fix_row` reaches `:R attr_updates` rows
-        only, so those bytes can never be fenced after the fact — the close would refuse, for
-        the life of the run, a document every write gate had accepted, with no repair the
-        model can make. Passed the text itself, `_check_surface` subtracts to nothing and
-        `_check_append_only` compares the document to itself (equal fence counts, every
-        record mapping to itself), which is exactly the no-op "nothing is proposed" means.
+      * No byte bound: a close adds nothing, and the write gate's over-bound refusal offers
+        closing as the way out.
+      * The document is its own baseline: checks keyed on `current` ask what a write
+        introduces, and a close introduces nothing. With `None`, every unfenced header already
+        on disk would read as new, and since the document is append-only the close would be
+        refused for the rest of the run with no possible repair.
 
-    Fails OPEN on an internal validator error, and this is where it parts company with the
-    write gate above. There, failing closed is free — nothing is written and the model
-    re-sends. Here the same choice makes a validator BUG an unclosable run: no repair exists
-    for it, so the model retries until the framework force-closes `unresolved` and the
-    disposition the run reached is discarded. A document that cannot be READ never reaches
-    this gate at all (#992): the close decides that case once, ahead of every gate — the
-    model's close is overruled to `unresolved` as a review that cannot run, or refused to
-    retry on an I/O fault, and the host's forced close proceeds off the empty document (see
-    `runtime.tools.CompanionRead`) — so the one question left here is the validator's own
-    fault, and it is answered open for the wedge reason above. The condition is logged,
-    because a validator that raises is a defect to chase and silence is how it would go
-    unchased.
-
-    WHY THE CLOSE NEEDS ITS OWN READING AT ALL. Every other write verb reaches this module
-    through `permission.decide_write`, so "a committed investigation parses" held by
-    construction — except at the close, which is the one verb that PUBLISHES: it commits the
-    report whose frontmatter the learning loop trains on and hands the parsed companion to the
-    review gate. The one verb that publishes was the one verb that did not check (#961)."""
+    Fails open (logged) on an internal validator error: failing closed would make a validator
+    bug an unclosable run. Unreadable documents are handled by the close before this gate."""
     try:
         found = diagnose(text, text)
-    except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
+    except Exception as e:  # noqa: BLE001 — fail open; an unclosable run is worse
         _logger.warning(
             f"investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"treating it as publishable: {e!r}",
@@ -371,12 +254,9 @@ def committed_investigation_reason(text: str) -> str | None:
 
 
 def validate_artifact(name: str, proposed_text: str, current: str | None) -> str | None:
-    """Validate `proposed_text` as the artifact `name` (one of `artifact_names()`), returning the
-    deny reason or `None`. The UTF-8-encodability check runs for BOTH artifacts before either
-    schema, because both measure bytes. `current` is the on-disk baseline, required for the
-    artifacts `needs_baseline` names and ignored for the rest. An unknown `name` raises rather
-    than silently accepting, so a third artifact added to the tuple without a schema cannot
-    ship as a permanently-allowed write."""
+    """Validate `proposed_text` as the artifact `name`, returning the deny reason or `None`.
+    `current` is the on-disk baseline for artifacts `needs_baseline` names. An unknown `name`
+    raises, so an artifact without a schema can never be a permanently-allowed write."""
     reason = encodable_or_reason(proposed_text, name)
     if reason is not None:
         return reason

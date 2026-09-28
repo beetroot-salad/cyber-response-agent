@@ -1,75 +1,47 @@
 #!/usr/bin/env python3
-"""Ungated artifact write — flag a function under ``defender/`` that WRITES one of the two
+"""Ungated artifact write: flag a function under ``defender/`` that writes one of the two
 model-authored artifacts (``investigation.md``, ``report.md``) without that artifact's content
 schema being applied anywhere in the same function.
 
-WHAT WENT WRONG.  ``defender/_artifact_schema.py`` owns what a well-formed artifact IS, and
-the permission gate applies it to every write a MODEL makes. That made a sentence true and
-tempting: *a committed investigation parses*. It was true of the verbs the agent writes
-through, and the design of everything downstream rested on it — including #954's, whose whole
-argument was that a malformed document cannot form because the write gate refuses it.
+``defender/_artifact_schema.py`` owns what a well-formed artifact is, and the permission gate
+applies it to every write a model makes. That makes "a committed investigation parses" true
+only of the paths through the gate. A harness writer that calls ``write_guarded`` directly, or
+a verb that validates the report it writes but not the companion it publishes, reaches the same
+sink another way, and every downstream claim about the artifact is silently narrowed. The
+pattern: an invariant enforced at a gate, and believed of the artifact.
 
-Two writers were outside that set. ``lead_zero._declare_l_finding`` seeds a ``:L findings``
-row into ``investigation.md`` before MAIN's first turn by concatenating text and calling
-``write_guarded`` directly — no tool call, so no ``decide_write``, so no schema (#964). And
-``close_investigation`` — the one verb that PUBLISHES, committing the report and handing the
-parsed companion to the review gate — validated the report it wrote and never the companion it
-published, so a document carrying an error-severity finding closed successfully (#961).
-Neither was a bypass anyone chose; both were writers nobody had censused, under an invariant
-everyone had inherited.
+What it flags — under ``defender/``, production code only. A function containing both:
 
-THE PATTERN, stated so it is recognisable next time: *an invariant enforced at a gate, and
-believed of the artifact.* A gate can only promise something about the paths that run through
-it. The moment a second writer reaches the same sink another way, every downstream claim about
-the artifact is quietly narrowed to "…except by that route" — and nothing in the type system,
-the tests, or the reading of any one file says so.
-
-WHAT IT FLAGS — under ``defender/``, production code only. A function is a finding when it
-contains BOTH:
-
-- a **write** — a call resolved by ORIGIN to ``defender._io``'s ``write_guarded`` /
+- a write — a call resolved by origin to ``defender._io``'s ``write_guarded`` /
   ``write_atomic`` / ``open_guarded`` / ``append_jsonl``, or the duck-typed
-  ``<x>.write_text(...)`` / ``<x>.write_bytes(...)`` shapes (a receiver is a Path VALUE, so
-  there is no import to resolve);
-- a **gated artifact name** — the literals ``"investigation.md"`` / ``"report.md"``, the
-  ``_artifact_schema`` constants that spell them, or the ``RunPaths`` accessors
-  ``.investigation`` / ``.report``;
+  ``<x>.write_text(...)`` / ``<x>.write_bytes(...)`` (the receiver is a Path value);
+- a gated artifact name — the literals ``"investigation.md"`` / ``"report.md"``, the constant
+  spellings of them, or the ``RunPaths`` accessors for them;
 
-and NO **validation** — a call whose resolved callee ends in ``validate_artifact``,
+and no validation — a call whose resolved callee ends in ``validate_artifact``,
 ``validate_investigation``, ``validate_report``, ``committed_investigation_reason``,
-``decide_write``, or ``validator`` (the close's injected schema seam, which is a parameter and
-so has no import to resolve).
+``decide_write``, or ``validator`` (the close's injected schema seam, a parameter with no
+import to resolve).
 
-Co-occurrence inside one function, deliberately, rather than dataflow from the validated text
-to the written text. Dataflow would be the stronger question and this gate does not ask it:
-see the blind spots below. What it does buy is that a writer of these artifacts cannot be
-added without the schema being visibly nearby — and if it is added anyway, the diff that adds
-it also has to add a baseline row, which is the review moment #964 never got.
+Co-occurrence within one function, not dataflow. It ensures a writer of these artifacts
+cannot be added without the schema visibly nearby, or else a baseline row in the same diff.
 
-WHAT IT DOES *NOT* SEE — read this before treating a green run as proof:
+What it does not see — read this before treating a green run as proof:
 
-- **Whether the validated text is the written text.** ``validate_artifact(name, a, ...)``
-  beside ``write_guarded(p, b)`` passes. The gate asks whether the schema was consulted, not
-  whether it was obeyed.
-- **A write split across functions.** A helper that takes an already-composed string and
-  writes it, called by a function that validated nothing, is invisible from either side.
-  ``lead_zero._declare_l_finding`` composed and wrote in one frame, which is why this shape
-  catches it; a two-frame version would not be caught.
-- **A CONSUMER that publishes without validating.** #961 is only half a write bug: the close
-  did write report.md, but what went unchecked was the companion it published alongside.
-  Nothing structural can ask "did this function validate everything it is about to expose",
-  because "expose" is not a syntactic act. That half is held by
-  ``tests/test_ungated_artifact_write_961_964.py`` and by review, not by this gate.
-- **Artifacts reached through a computed name.** The gate reads names, not values.
+- Whether the validated text is the written text: ``validate_artifact(name, a, ...)``
+  beside ``write_guarded(p, b)`` passes.
+- A write split across functions: a helper that writes an already-composed string, called by
+  a function that validated nothing, is invisible from either side.
+- A consumer that publishes without validating: "expose" is not a syntactic act. That half is
+  held by ``tests/test_ungated_artifact_write_961_964.py`` and by review.
+- Artifacts reached through a computed name.
 
 So a clean run means "no writer of these two artifacts is missing their schema in its own
-frame", not "every path that publishes them is gated". The second is what the census in
-``artifact_names()`` and the suite are for.
+frame", not "every path that publishes them is gated".
 
-THE BASELINE SHIPS EMPTY. Both known sites were fixed in the change that added this gate, so
-an entry appearing here is a regression someone chose. Mark a deliberate site with
+The baseline ships empty, so an entry is a chosen regression. Mark a deliberate site with
 ``# lint-artifact-gate: ok — <reason>`` on the flagged line or anywhere in the flagged node's
-span, and say in the reason WHICH gate covers that write instead.
+span, and say in the reason which gate covers that write instead.
 
 Run from repo root:  python scripts/lint/lint_ungated_artifact_write.py
 Regenerate the baseline:  python scripts/lint/lint_ungated_artifact_write.py --update-baseline
@@ -92,34 +64,23 @@ BASELINE_PATH = Path(__file__).with_name("lint_ungated_artifact_write_baseline.j
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-artifact-gate: ok",)
 
-#: The module that OWNS the schema. Exempted by full relative path rather than basename, the
-#: same way the sibling gates exempt their canonical module: a basename match would wave
-#: through any new `_artifact_schema.py` anywhere under the scope.
+#: The module that owns the schema. Exempted by full relative path, not basename, so a new
+#: `_artifact_schema.py` elsewhere under the scope is not waved through.
 CANONICAL_MODULE = "_artifact_schema.py"
 
-#: The two artifacts, as they are spelled in code. The bare filenames are what most call sites
-#: write; the constant spellings are the ones a writer would use rather than repeat a literal.
-#: Both count — a writer that holds the constant is no less a writer than one that types the
-#: string.
-#:
-#: `_artifact_schema` no longer EXPORTS those two constants (#1077 D7: nothing outside the
-#: owner holds a record name, and a module-level `REPORT_NAME = _run_paths.REPORT` was exactly
-#: that). The names stay in this set anyway — this gate watches for a writer that reaches for
-#: one, and a name nobody may export is still a name someone may re-introduce.
+#: The two artifacts as spelled in code: bare filenames, and the constant spellings a writer
+#: might use instead. `_artifact_schema` does not export those constants (nothing outside the
+#: owner may hold a record name), but they stay here because a writer may re-introduce one.
 ARTIFACT_LITERALS = frozenset({"investigation.md", "report.md"})
 ARTIFACT_CONSTS = frozenset({  # lint-stale-ref: ok — spellings this gate WATCHES FOR, not ones it resolves
     "INVESTIGATION_NAME", "REPORT_NAME"})
 
 def _artifact_accessors() -> frozenset[str]:
-    """`RunPaths`' accessors for the two schema'd artifacts — DERIVED from the owner: every
-    public accessor whose resolved name is one of `ARTIFACT_LITERALS`, so a third artifact
-    that joins `_artifact_schema.artifact_names()` (and this set) is gated the day the owner
-    names it, and an accessor for any OTHER record (`budget`, `tool_trace`, a trace) never
-    is — this gate asks for a CONTENT SCHEMA, and only the two model-authored documents have
-    one (#1077 decision 19, corrected: the list held in step with the owner is this gate's
-    two, not the owner's whole method set). Matched as bare attribute names because the
-    receiver is a VALUE — `RunPaths(run_dir).investigation` and `rp.investigation` are the
-    same write and only one of them has a resolvable origin."""
+    """`RunPaths`' accessors for the two schema'd artifacts, derived from the owner: every
+    public accessor resolving to one of `ARTIFACT_LITERALS`. Only the two model-authored
+    documents have a content schema, so accessors for other records are never included.
+    Matched as bare attribute names because the receiver is a value — `rp.investigation` has
+    no resolvable origin."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._run_paths import RunPaths  # noqa: PLC0415
@@ -137,11 +98,9 @@ def _artifact_accessors() -> frozenset[str]:
 
 ARTIFACT_ACCESSORS = _artifact_accessors()
 
-#: Resolved by ORIGIN through `_astlib.callee`, so `from defender._io import write_guarded as w`
-#: is the same finding as the dotted spelling. This is the same primitive set
+#: Resolved by origin through `_astlib.callee`, so aliased imports count. The same primitives
 #: `lint_unguarded_tree_write` watches, for a different question: that gate asks whether the
-#: write is alias-safe, this one asks whether its CONTENT met a schema. A write can pass one
-#: and fail the other, which is why they are two gates and not one.
+#: write is alias-safe, this one whether its content met a schema.
 WRITE_CALLEES = frozenset({
     "defender._io.write_guarded",
     "defender._io.write_atomic",
@@ -149,16 +108,13 @@ WRITE_CALLEES = frozenset({
     "defender._io.append_jsonl",
 })
 
-#: Duck-typed write shapes — no import to resolve, matched the way `lint_unguarded_tree_write`
-#: matches them.
+#: Duck-typed write shapes, with no import to resolve.
 WRITE_METHODS = frozenset({"write_text", "write_bytes"})
 
-#: Matched on the callee's LAST SEGMENT, not its origin, and that leniency is deliberate. The
-#: close injects its schema as a PARAMETER (`validator: ArtifactValidator = validate_artifact`)
-#: so the seam can be driven in tests; a parameter has no import and origin resolution cannot
-#: see through it. Erring lenient here costs a false NEGATIVE — a function that calls something
-#: incidentally named `validator` passes — which the baseline's review moment still catches,
-#: where a false POSITIVE on the DI seam would train people to suppress the gate.
+#: Matched on the callee's last segment, not its origin: the close injects its schema as a
+#: parameter (`validator: ArtifactValidator = validate_artifact`), which origin resolution
+#: cannot see through. The leniency risks a false negative on an incidentally named
+#: `validator`; a false positive on the DI seam would train people to suppress the gate.
 VALIDATOR_NAMES = frozenset({
     "validate_artifact",
     "validate_investigation",
@@ -207,9 +163,8 @@ def _is_validation(node: ast.AST, env: ModuleEnv) -> bool:
     target = callee(node, env)
     if target is not None and target.split(".")[-1] in VALIDATOR_NAMES:
         return True
-    # `callee` returns None for a call on a bare local name it cannot resolve to an import —
-    # which is exactly the shape of the close's injected `validator(...)`. Read the name off
-    # the node instead of treating the unresolved call as "not a validation".
+    # `callee` returns None for an unresolvable bare local name — the shape of the close's
+    # injected `validator(...)` — so read the name off the node.
     if isinstance(node.func, ast.Name) and node.func.id in VALIDATOR_NAMES:
         return True
     return isinstance(node.func, ast.Attribute) and node.func.attr in VALIDATOR_NAMES
@@ -226,12 +181,10 @@ def _names_artifact(node: ast.AST) -> bool:
 
 
 def _walk_body(func: ast.AST) -> list[ast.AST]:
-    """Every node under `func` EXCEPT the bodies of nested functions.
+    """Every node under `func` except the bodies of nested functions.
 
-    A nested def is its own frame and gets its own verdict from the outer walk in `_scan_file`,
-    so folding its nodes into the enclosing function's would let an inner validation excuse an
-    outer write (and the reverse). The nested def's own name still shows up in the fingerprint,
-    which is what makes a finding inside one addressable."""
+    A nested def is its own frame with its own verdict; folding it in would let an inner
+    validation excuse an outer write (and the reverse)."""
     out: list[ast.AST] = []
     for child in ast.iter_child_nodes(func):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -258,8 +211,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
             continue
         if _suppressed(node, lines):
             continue
-        # Fingerprint carries no line number, so moving the write within its function does not
-        # read as a new finding — same convention as the sibling gates.
+        # No line number, so moving the write within its function is not a new finding.
         fingerprint = f"{rel}:{node.name}"
         findings.append(Finding(
             fingerprint=fingerprint,
@@ -274,8 +226,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    """Findings under ``root``, fingerprints relative to it — so the gate is drivable on an
-    injected tmp tree, not just the repo checkout."""
+    """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
     for path in sorted(root.rglob("*.py")):
         if not _in_scope(path):
@@ -311,9 +262,8 @@ def main(
     if not root.is_dir():
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean".
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

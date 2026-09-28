@@ -32,8 +32,7 @@ def _spawn_author_agent(
 ) -> int:
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     from defender.learning.leads import lead_author_engine
-    # Every knob below is read HERE, at spawn — each is env-backed and a module-level or
-    # signature default would freeze it at import.
+    # Every knob is read at spawn: each is env-backed, and a default would freeze it at import.
     return lead_author_engine.run_author_stage(
         wiring=_loop_config.StageWiring.for_batch(
             system_prompt_file,
@@ -65,13 +64,9 @@ def _verify_corpus_scope(
 ) -> list[str]:
     """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
 
-    Two hooks because two kinds of invariant live here. Almost everything the gate asks is
-    answerable from one path ("may the agent touch this", "is what it wrote well-formed"), and
-    `rule` keeps those cheap and independent. What `batch_rule` is for is the questions that are
-    only decidable across the batch — a deleted draft is legitimate or not depending on whether
-    some OTHER file in the same commit took over the identity it carried, and no per-path pass
-    can see that. It runs last, on the records the per-path rule already admitted, so a batch
-    rule never reasons about a path the gate has refused."""
+    `batch_rule` is for invariants only decidable across the batch (e.g. whether a deleted
+    draft's identity was taken over by another file in the same commit). It runs last, on
+    records `rule` already admitted."""
     records = _porcelain_records(repo_root)
 
     def _in_corpus(p: str) -> bool:

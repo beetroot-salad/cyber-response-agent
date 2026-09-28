@@ -1,29 +1,20 @@
-"""Two payloads and an axis: the only comparison this design makes, blind BY SIGNATURE.
+"""Two payloads and an axis: the only comparison this design makes, blind by signature.
 
-One implementation, two seats. The review asks it "do these two answers to one question
-contradict each other?" with no axis; the derived reader (`episode.delta_o`) asks it "does this
-world's answer differ along the axis it declared?" with the world's axis text. Both questions
-are about two strings, and neither is about which world produced them — so the function admits
-two payloads and an axis and NOTHING else.
+One implementation, two seats. The review asks "do these two answers to one question
+contradict each other?" with no axis; `episode.delta_o` asks "does this world's answer differ
+along the axis it declared?" with the world's axis text. Neither question is about which world
+produced the payloads, so the function admits two payloads and an axis and nothing else.
 
-That is the whole of the blindness guarantee, and it is structural rather than conventional
-(#947 O8, C21). A comparator that could see which side was the base and which the sibling, or
-what disposition a world declared, is a comparator whose verdict can be predicted from the
-label instead of read off the bytes — and the measurement it feeds is exactly a measurement of
-whether the label was earned. `build_prompt` carries the same rule one level down: it has no
-parameter that could carry an identity, so no prompt it renders can leak one.
+That signature is the blindness guarantee: a comparator that could see which side was the base
+or what a world declared could have its verdict predicted from the label rather than read off
+the bytes. `build_prompt` has the same property: no parameter could carry an identity.
 
-MECHANICAL FIRST, and not as an optimisation. A canonical re-dump answers `same` for two
-payloads whose key order differs, and a key-spelling fold answers `formatting` for two that
-differ in `host-name` versus `host_name` — both without a model call, because a model asked a
-question arithmetic already settled is a source of nondeterminism with no upside. Most replayed
-pairs are one of those two, so the model call is the exception rather than the pass.
+Mechanical checks come first: a canonical re-dump settles `same` for differing key order, and a
+key-spelling fold settles `formatting` for `host-name` versus `host_name`, with no model call
+and no nondeterminism. Most replayed pairs are settled this way.
 
-ONE VERDICT TYPE, and each seat asserts only its own members (§7 F2). The type is deliberately
-wider than either use: nothing structurally prevents a model from returning a delta-seat verdict
-to the review seat, so the CALLER is what refuses one, here, naming the wrong-seat verdict it
-was handed. The cost of the wider type is that refusal; the alternative — two enums — is two
-vocabularies to keep in step, and the one that drifts is the one that stops refusing.
+One `Verdict` type spans both seats, and each caller refuses members outside its own seat. Two
+enums would be two vocabularies to keep in step.
 """
 
 from __future__ import annotations
@@ -39,32 +30,25 @@ from defender.learning.branch.ledger import payload_text
 from defender.learning.branch.redaction import redact_model_visible
 from defender.runtime.agent_role import AgentRole
 
-#: The frame tag every payload reaches the prompt inside. `wrap_fresh` mints the salt per frame,
-#: so the delimiter of THIS frame cannot occur in THIS frame's body — the property #875 F-1 was
-#: filed for, and the reason a payload is never wrapped on a salt someone else already holds.
+#: The frame tag every payload reaches the prompt inside. `wrap_fresh` mints a salt per frame, so
+#: a frame's delimiter cannot already occur in its own body.
 UNTRUSTED_TAG = "untrusted"
 
-#: The `agent_id` namespace this call writes its wire rows under. Its own namespace, though it
-#: shares the QUESTIONER role key with the three authoring calls: `observe` keys a trace file
-#: and a cost row on `agent_id`, never on the role, so a fourth call under an existing role is
-#: only separable if it names itself.
+#: The `agent_id` namespace for this call's wire rows. It shares the questioner role key, but
+#: `observe` keys traces and cost rows on `agent_id`, so it needs its own name to be separable.
 AGENT_ID_PREFIX = "comparator:"
 
-#: Per-process, so two comparisons in one review are two identities in the wire log rather than
-#: one row written twice. It numbers calls, not worlds — a counter that could be read back to a
-#: world would be an identity this function is not allowed to hold.
+#: Per-process call counter, so two comparisons get two wire-log identities. It numbers calls,
+#: not worlds: anything traceable to a world would be an identity this module may not hold.
 _CALL_SEQUENCE = itertools.count(1)
 
 
 class Verdict(StrEnum):
     """What one payload is, relative to another.
 
-    Five members, three seats' worth of meaning, and no `undecided`: FORK-9's (C) was considered
-    and not taken, because a verdict that means "the model would not say" is a verdict every
-    downstream reader has to invent a policy for, and the policies would differ.
-
-    A `StrEnum` so a record written to YAML and a comparison against a bare `"same"` both read
-    naturally; the members are still what the callers switch on.
+    No `undecided` member: a "the model would not say" verdict would force every downstream
+    reader to invent its own policy. A `StrEnum` so YAML records and bare-string comparisons
+    read naturally.
     """
 
     SAME = "same"
@@ -74,13 +58,11 @@ class Verdict(StrEnum):
     UNDECLARED = "undeclared"
 
 
-#: The review seat: no axis, and the question is whether the replay contradicts the capture.
-#: `mutation`/`undeclared` are answers to a question this seat did not ask — a world's declared
-#: difference — so a model returning one here has answered something else.
+#: The review seat: no axis; does the replay contradict the capture? `mutation`/`undeclared`
+#: answer a question this seat did not ask.
 REVIEW_SEAT = frozenset({Verdict.SAME, Verdict.FORMATTING, Verdict.CONTRADICTION})
-#: The delta seat: an axis in hand, and the question is whether the difference is the declared
-#: one. `contradiction` is the review's word and means "these cannot both be true of one
-#: corpus", which is not a judgment this seat is measuring.
+#: The delta seat: an axis in hand; is the difference the declared one? `contradiction` is not
+#: a judgment this seat measures.
 DELTA_SEAT = frozenset(
     {Verdict.SAME, Verdict.FORMATTING, Verdict.MUTATION, Verdict.UNDECLARED})
 
@@ -88,23 +70,16 @@ DELTA_SEAT = frozenset(
 class ComparatorRefusal(ValueError):
     """A comparison that cannot be honestly reported.
 
-    A `ValueError` rather than a class of its own, because every caller that must not swallow it
-    already handles the house refusal set — and a verdict the seat does not admit is exactly a
-    value that is wrong, arriving where a value was expected.
+    A `ValueError` so callers already handling the house refusal set catch it.
     """
 
 
 def canonical(text: str) -> str:
-    """`text` re-dumped through the ONE canonical spelling, or `text` when it is not JSON.
+    """`text` re-dumped through `ledger.payload_text`, or `text` unchanged when it is not JSON.
 
-    `ledger.payload_text` is that spelling — `sort_keys=True`, `default=str` — and it is
-    imported rather than restated because the recording side already writes through it: a second
-    spelling here would make two dumps of one answer compare unequal, and every replayed key
-    would read as a difference nobody made.
-
-    A payload that does not parse is compared as bytes. That is not tolerance for a torn row —
-    the ledger's reader already refuses to memoize one — it is the honest answer for a system
-    whose payload is not JSON at all, where the text IS the answer.
+    Imported rather than restated because the recording side writes through it; a second
+    spelling would make every replayed key read as a difference. Non-JSON payloads are compared
+    as bytes, since for such a system the text is the answer.
     """
     try:
         return payload_text(json.loads(text))
@@ -113,12 +88,10 @@ def canonical(text: str) -> str:
 
 
 def _folded(text: str) -> str:
-    """`text` with key SPELLING and whitespace normalised away.
+    """`text` with key spelling and whitespace normalised away.
 
-    The `formatting` class is what stops a rename of the shape `host-name` → `host_name` from
-    reading as a corpus contradiction and rejecting a world for its estate's punctuation. Keys
-    only: a VALUE that changed from `host-name` to `host_name` is a change in what the corpus
-    says, and folding it would hide exactly the difference this comparison exists to see.
+    So a `host-name` → `host_name` rename reads as `formatting`, not a contradiction. Keys only:
+    a changed value is a real change in what the corpus says.
     """
     try:
         return payload_text(_fold_keys(json.loads(text)))
@@ -129,13 +102,8 @@ def _folded(text: str) -> str:
 def _fold_keys(node: Any) -> Any:
     """Every mapping key in `node` with `-` folded onto `_`, recursively.
 
-    A MAPPING THAT HOLDS BOTH SPELLINGS IS LEFT ALONE, and that is the whole of the extra
-    branch. `host-name` and `host_name` in ONE object fold onto one key, so the comprehension
-    dropped whichever value came first — and a payload that genuinely contradicts its capture in
-    that field then compared equal after folding and was recorded `formatting`, a verdict
-    `_rejection` never rejects on. Both spellings at once is exactly the mid-migration schema
-    state this fold was written for, so it is the input the fold must not silently halve. Left
-    unfolded, the two objects are compared as they are — which can only ever be stricter.
+    A mapping holding both spellings (mid-migration) is left unfolded: folding would drop one
+    value and could hide a genuine contradiction as `formatting`. Leaving it is only stricter.
     """
     if isinstance(node, dict):
         folded = [(k.replace("-", "_") if isinstance(k, str) else k) for k in node]
@@ -150,16 +118,11 @@ def _fold_keys(node: Any) -> Any:
 def mechanical(a: str, b: str) -> Verdict | None:
     """The verdict arithmetic can settle, or `None` when only a reader can.
 
-    PUBLISHED rather than inlined into `compare`, because the review needs the same question
-    answered before it decides whether a key is worth a model call at all — and a second copy of
-    the canonical-then-fold ladder in that module is how the two would come to disagree about
-    what `same` means, with the review's copy the one nobody tests directly.
+    Public so the review uses the same ladder to decide whether a key needs a model call; a
+    second copy could disagree about what `same` means.
 
-    BYTE EQUALITY FIRST, before either parse. This is the hottest frame the review has — once
-    per captured row per world, and again per duplicate key — and the review hands the CAPTURED
-    payload straight through for every world that applies nothing to it, so identical text is
-    the common case rather than the rare one. Two `json.loads` and two `json.dumps` of a payload
-    the ledger sizes in tens of kilobytes, to rediscover what `==` already knew.
+    Byte equality is checked before parsing: this is the review's hottest path and identical
+    text is the common case, so it avoids re-parsing large payloads.
     """
     if a == b:
         return Verdict.SAME
@@ -173,23 +136,14 @@ def mechanical(a: str, b: str) -> Verdict | None:
 def build_prompt(a: str, b: str, axis: str | None) -> str:
     """The one prompt this comparison sends, from the two payloads and the axis alone.
 
-    NO OTHER PARAMETER, and that is the instrument C21 was deferred to: a prompt builder with
-    nothing else in its signature cannot render an identity it was never handed, whatever a
-    later author is tempted to add at the call site.
+    No other parameter, so no prompt can render an identity it was never handed.
 
-    BOTH PAYLOADS ARRIVE WRAPPED, each in its own fresh frame. They are captured or replayed
-    adapter output — attacker-influenced by definition, since the corpus is what an intrusion
-    wrote to — so no byte of either is offered to the model as instruction. Two separate
-    `wrap_fresh` calls rather than one frame holding both: a single frame would let the first
-    payload's text close the frame the second is still inside.
+    Each payload is attacker-influenced adapter output and gets its own fresh untrusted frame;
+    one shared frame would let the first payload close the frame around the second.
 
-    AND BOTH GO THROUGH THE REDACTION FILTER, for the reason the axis does one frame down. A
-    frame stops the bytes being read as an INSTRUCTION; it does not stop them being read. A
-    ledger row's `payload_text` is not always an adapter payload — `WorldRegistry._served`
-    records a refusal verbatim under that column, and `episode._answers` keeps those rows and
-    pairs them like any other — so the second answer can be a refusal sentence naming the
-    namespace prefix, the `wv-{world}-{stem}` template and the world token, which is all three
-    of the things the whole per-world-view scheme exists to keep from the model.
+    Both are also redacted: a frame stops text being obeyed, not being read. A ledger row's
+    `payload_text` can be a recorded refusal naming the view namespace, the view template and
+    the world token, all of which must stay hidden from the model.
     """
     seat = _seat_guide(axis)
     return (
@@ -209,18 +163,9 @@ def build_prompt(a: str, b: str, axis: str | None) -> str:
 def _seat_guide(axis: str | None) -> str:
     """The vocabulary this call may answer in, and what each member means.
 
-    The AXIS TEXT is the only thing that distinguishes the two seats in the prompt, and it is
-    reproduced as authored: it is a phrase an author wrote about a difference, and paraphrasing
-    it into a category would be this function judging the comparison it is only supposed to ask.
-
-    THROUGH THE REDACTION FILTER FIRST, though, because the axis is the one MODEL-AUTHORED
-    string on this prompt that is not inside an untrusted frame. NEW-DECISION-1 is that no
-    model-visible text may name a staged index, and it was raised about fault text because that
-    was the channel the probe found — but the rule is about the CHANNEL CLASS, and an axis
-    reading "world b's view wv-<token>-logs- drops the beacon" is the same leak through a door
-    nobody had looked at. Applied here rather than at the authoring end for the reason the fault
-    filter is applied at the boundary: the text is authored somewhere this module does not
-    control, and a filter that has to be remembered by every author is one that will not be.
+    The axis text is reproduced as authored (paraphrasing would prejudge the comparison), but
+    redacted first: it is model-authored, sits outside any frame, and could name a staged index.
+    Redacting here means authors need not remember to.
     """
     axis = None if axis is None else redact_model_visible(axis)
     if axis is None:
@@ -241,15 +186,9 @@ def _seat_guide(axis: str | None) -> str:
 def compare(a: str, b: str, axis: str | None, *, invoke: Any) -> Verdict:
     """How `b` stands to `a`, on the seat the presence of an axis selects.
 
-    THREE ARGUMENTS AND A SEAM. `invoke` is the model call, injected rather than reached for,
-    because the same function is called from a host-side review, from a derived reader and from
-    a test, and only the first two of those have a provider.
-
-    The seat is chosen by `axis is None` rather than by a flag, because the axis is what the
-    two seats actually differ by: without one there is no declared difference to measure against,
-    and `mutation` is unanswerable. A verdict outside the chosen seat is REFUSED and named — the
-    model returned an answer to a question this call did not ask, and silently mapping it onto a
-    member this seat does admit would put a guess where a measurement is recorded.
+    `invoke` is the injected model call (callers include tests with no provider). Without an
+    axis there is nothing to measure `mutation` against, so `axis is None` selects the review
+    seat. A verdict outside the selected seat is refused, never mapped onto an admitted member.
     """
     settled = mechanical(a, b)
     if settled is not None:
@@ -271,11 +210,10 @@ def compare(a: str, b: str, axis: str | None, *, invoke: Any) -> Verdict:
 
 
 def _verdict_of(reply: Any) -> Verdict:
-    """The one verdict `reply` names, or the refusal that says it named none.
+    """The one verdict `reply` names, or a refusal.
 
-    Tolerant of the wrapper a model puts around one word — trailing punctuation, a code fence,
-    a leading "Verdict:" — and intolerant of ambiguity: a reply naming two members has not
-    answered, and picking the first would be this frame deciding the comparison.
+    Tolerates wrapping around one word (punctuation, a code fence, "Verdict:"); a reply naming
+    two members has not answered.
     """
     text = str(reply).casefold()
     named = [v for v in Verdict if re.search(rf"\b{v.value}\b", text)]

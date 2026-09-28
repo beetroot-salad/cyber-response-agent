@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Shared baseline ratchet for the defender lint suite.
 
-A gated lint emits findings; each finding carries a STABLE fingerprint — a path
-plus the salient token, never a line number — so unrelated edits don't churn the
-baseline. The accepted fingerprints live in a checked-in JSON config beside the
-lint (`<lint>_baseline.json`). The lint fails (exit 1) only on a fingerprint NOT
-in that config: a newly-introduced smell.
+A gated lint emits findings; each carries a stable fingerprint — a path plus the salient
+token, never a line number — so unrelated edits don't churn the baseline. Accepted
+fingerprints live in a checked-in JSON file beside the lint (`<lint>_baseline.json`), and the
+lint fails (exit 1) only on a fingerprint not in it.
 
-Why config (JSON), not code: exclusions are reviewable data, diffed in PRs like
-any other config. JSON is stdlib-parseable, so the lints stay runnable as bare
-`python scripts/lint/<lint>.py` with no third-party dependency on the path.
+JSON rather than code: exclusions are reviewable data, and stdlib-parseable, so the lints run
+as bare `python scripts/lint/<lint>.py` with no third-party dependency.
 
 Baseline file shape — an object so each accepted fingerprint can carry a human
 annotation that separates an *intentional* exclusion from un-triaged debt:
@@ -22,10 +20,9 @@ annotation that separates an *intentional* exclusion from un-triaged debt:
       }
     }
 
-The annotation is advisory: the gate only checks membership. Regenerate after a
-deliberate change with `<lint>.py --update-baseline`; the rewrite MERGES, so it
-preserves your annotations, adds new fingerprints with "", and drops resolved
-ones.
+The annotation is advisory unless the lint passes `require_reasons`. Regenerate after a
+deliberate change with `<lint>.py --update-baseline`; the rewrite merges, preserving
+annotations, adding new fingerprints with "", and dropping resolved ones.
 
 Never hand-edit `entries` to silence a *new* finding — fix it, or (where the lint
 supports one) use its inline `# lint-<name>: ok — <reason>` marker.
@@ -82,14 +79,10 @@ def gate(
     Otherwise: print the NEW findings prominently plus a baselined/new summary,
     and return 1 iff any finding's fingerprint is absent from the baseline.
 
-    `require_reasons` closes the ratchet's own escape hatch. Without it, ANY change can
-    bury a finding by running `--update-baseline` and leaving the reason "" — the module
-    docstring calls "" un-triaged debt, but nothing ever refused it, so "annotate the new
-    entry" was advice rather than a gate. With it, an un-triaged entry fails the lint with
-    the same force as a new finding: burying a smell costs a sentence saying why.
-
-    Opt-in per lint rather than global because lint_unguarded_tree_write's baseline is 70
-    entries un-triaged wholesale, and triaging that is its own change.
+    `require_reasons` closes the ratchet's own escape hatch: otherwise any change can bury
+    a finding via `--update-baseline` with an empty reason. With it, an un-triaged entry
+    fails like a new finding. Opt-in per lint, since some baselines carry large un-triaged
+    populations.
     """
     current = {f.fingerprint for f in findings}
     baseline = _load_entries(baseline_path)

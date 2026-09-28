@@ -1,27 +1,19 @@
-"""D5 — the file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
+"""The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
 per-kind `RecordHandle` every record accessor answers.
 
-`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the PRIMARY constructor application
-code uses. `Run.at(directory)` is the eval/fixture/tooling escape hatch — total over any
-existing directory, no runs base in hand. `Run.under(runs_base, run_id)` is the internal helper
-`for_tenant` is built on; nothing outside this module should reach it.
+`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor application code
+uses. `Run.at(directory)` is the eval/fixture/tooling escape hatch with no runs base.
+`Run.under` is `for_tenant`'s internal helper.
 
-Every record accessor answers a `RecordHandle` (`.path`, `.read`, and the group's own write
-verb) rather than a bare `pathlib.Path` (decision 1c) — never parsed contents, never validation
-beyond what today's seam for that record already does. Asking for `.path` creates nothing on
-disk (decision 9); only a write/append/update call creates the holding directory, through the
-SAME `io=` seam every accessor routes through, so a fake injected at construction sees every
-operation — the reads `run.record` makes included.
+Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
+never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
+through the same injected `io=` seam as every read.
 
-THE VERBS ARE TODAY'S SEAMS, NOT A SECOND SET. Every write lands through `_io.write_guarded`
-(`create` for the write-once facts, `replace` for a document, `append` for a table or a trace)
-or `_io.locked_for_rewrite` (the two locked states), anchored by `guarded_mkdir` on the trust
-root the record actually sits under — the run dir for everything inside it, the runs base for
-the three sidecars. The session db is opened, not written, through `session_store.open_store`,
-which anchors its own directory on `SessionPaths.trust_root` (claim C15). The two model-authored
-documents are held to `_artifact_schema` at the write, because that schema is what "a
-committed investigation parses" rests on and a writer outside the gate is the #961/#964
-class. Nothing here reaches the pre-#771 `append_jsonl`.
+Writes go through the existing guarded seams (`_io.write_guarded` in `create`/`replace`/
+`append` mode, or `_io.locked_for_rewrite`), anchored by `guarded_mkdir` on the record's trust
+root: the run dir, or the runs base for the three sidecars. The session db is opened through
+`session_store.open_store`. The two model-authored documents are validated against
+`_artifact_schema` at every write, so no writer bypasses the schema.
 """
 from __future__ import annotations
 
@@ -38,11 +30,10 @@ from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
 from defender._run_paths import RUN_LAYOUT, RunPaths
 
-#: Decision 1a — the five group cells, group-then-kind addressed.
+#: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: D5's group table — mirrors `defender/tests/_spec1077.py::GROUP_MEMBERS` exactly; that file
-#: is the spec, this is the shipped shape it describes.
+#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
     "facts": ("alert", "provenance", "run_end", "scrub_verdict", "accounting"),
@@ -69,12 +60,9 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
     "session_db": "session_db",
 }
-#: THE VERB BELONGS TO THE RECORD, NOT THE GROUP: the group says how a record is READ and by
-#: whom (decision 1a); what a writer may do to it is a fact of the record's own shape. One
-#: table, one verb per member — `append` for a JSONL table or trace, `write` for a whole
-#: document or a write-once fact, `update` for the two `flock`ed JSON states, `open` for the
-#: session store, none for what nothing in the host writes through the handle. A group-wide
-#: verb handed the session db an `append` that would have written JSONL into SQLite.
+#: The one write verb per member — per record, not per group, since the group only says how a
+#: record is read. `append` (JSONL), `write` (whole document or write-once fact), `update` (the
+#: `flock`ed JSON states), `open` (session store), or none.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
@@ -90,27 +78,19 @@ MEMBER_VERB: dict[str, str | None] = {
 }
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
-#: The three sidecars sit DIRECTLY in the runs base, so their holding directory is anchored
-#: there, not on the run dir. The session db has no root here: its one verb is `open`, which is
-#: `session_store.open_store`, and that anchors its own mkdir on `SessionPaths.trust_root`
-#: (claim C15).
+#: The three sidecars sit directly in the runs base, so they are anchored there. (The session
+#: db's `open_store` anchors its own directory.)
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
-#: Written ONCE, through the exclusive lane: the alert, the stamp and the run-end record —
-#: the facts today's host writes once and never again — and the lead claim, an
-#: exclusive-create sidecar whose whole point is that a second claim on the same lead id
-#: collides (`hooks/record_lead.py`). NOT the other two facts: the scrub verdict is written at
-#: box start ("did not run") and REWRITTEN at exit (`scrub._write_verdict`), and the
-#: accounting counter is rewritten on every failure and reset (`budget_enforcer`) — today's
-#: seams replace them, so the handle does. Every other `write` is a whole-document replace.
+#: Written once through the exclusive lane (a second lead claim must collide). The scrub
+#: verdict and accounting counter are facts too but are rewritten, so they use `replace` like
+#: every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
                          "report": RUN_LAYOUT.report.name}
 
-#: Sub-collection members whose owner accessor takes a caller-supplied component — `run.
-#: <group>.<name>` answers a CALLABLE for these, taking the same positional args the owner
-#: accessor does, and returning the `RecordHandle`; every other member answers the
-#: `RecordHandle` directly.
+#: Members whose owner accessor takes a caller-supplied component: `run.<group>.<name>` answers
+#: a callable taking the same positional args and returning the `RecordHandle`.
 _COMPOSING_MEMBERS = frozenset({
     "leads", "payloads", "ticket_reads", "gather_summaries", "review_trace",
     "review_record", "forward_check_trace", "session_db",
@@ -118,9 +98,8 @@ _COMPOSING_MEMBERS = frozenset({
 
 
 class RecordHandle:
-    """A thin per-kind wrapper: `.path` (the owner's own resolved `pathlib.Path`) plus
-    read/write/append/update delegating to today's seams — never a bare `Path`, never parsed
-    contents beyond what the seam it wraps already returns."""
+    """A thin per-kind wrapper: `.path` plus read and the record's own verb, delegating to the
+    existing seams."""
 
     def __init__(
         self, resolve: Callable[[], Path], *, io: Any, root: Callable[[], Path], group: str,
@@ -129,9 +108,7 @@ class RecordHandle:
     ) -> None:
         self._resolve = resolve
         self._io = io
-        # The trust root the holding directory is created under — a thunk, like `resolve`, so
-        # asking for a handle over a bare directory (`Run.at`) does not raise until a write
-        # actually needs the runs base (decision 10: a missing precondition, at use).
+        # A thunk, so a `Run.at` handle only raises for a missing runs base when a write needs it.
         self._root = root
         self._group = group
         self._member = member
@@ -146,10 +123,7 @@ class RecordHandle:
 
             self.open_store = session_store.open_store
             self._lineage_id, self._sessions_runs_base = session_args or (None, None)
-        # ONLY the record's own verb is exposed as a PUBLIC attribute — `hasattr(rec,
-        # "append")`/`"write"`/`"update"` is how the suite asserts a member does NOT carry a
-        # verb it should not (a fact or a document exposes no `append`; a trace exposes no
-        # `write`; the two locked states expose `update` alone).
+        # Only the record's own verb is a public attribute; tests check the others are absent.
         if self._verb == "write":
             self.write = self._do_write
         elif self._verb == "append":
@@ -181,11 +155,7 @@ class RecordHandle:
                 raise ValueError(f"run.{self._group}.{self._member}: {reason}")
         self._mkdir(p)
         if self._member in _WRITE_ONCE_MEMBERS:
-            # Write-once: the exclusive lane refuses an occupied name instead of replacing it,
-            # so a fact is never rewritten by any writer and a lead is never claimed twice.
-            # The collision stays the `OSError` it is (`FileExistsError`), so a caller's
-            # "never take the run down" arm (`run_common._stamp`) sees it as the write
-            # refusal it is, not as a `ValueError` it never expected.
+            # Stays a `FileExistsError` (an `OSError`) so callers' OSError arms still catch it.
             try:
                 self._io.write_guarded(p, text, mode="create")
             except FileExistsError as taken:
@@ -200,9 +170,7 @@ class RecordHandle:
             return
         p = self.path
         self._mkdir(p)
-        # One guarded append for the batch (the same seam `record_query.append_query_row` and
-        # `challenge_gate._write_trace_row` reach), never the pre-#771 `append_jsonl`, whose
-        # `open("a")` follows a link the model planted at the table's name.
+        # One guarded append for the batch; a plain `open("a")` would follow a planted link.
         text = "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — the rows are handed whole to the guarded append seam, not to a line loop over an open handle  # noqa: E501
         try:
             self._io.write_guarded(p, text, mode="append")
@@ -229,8 +197,7 @@ class RecordHandle:
             f.write(json.dumps(current))
 
     def _do_open(self):
-        # Resolve first: the owner's refusals (a lineage id that is not case-stable, a handle
-        # with no runs base) hold for `.open()` exactly as they hold for `.path`.
+        # Resolve first so the owner's refusals apply to `.open()` as to `.path`.
         _ = self.path
         return self.open_store(case_id=self._lineage_id, runs_base=self._sessions_runs_base)
 
@@ -254,7 +221,7 @@ class _RecordHandleGroup:
 
 @dataclasses.dataclass(frozen=True)
 class RunRecord:
-    """D4's twelve descriptive fields, read-only, through the readers that already exist."""
+    """The run's descriptive fields, read-only, through the existing readers."""
 
     tenant_id: str | None
     world_id: str | None
@@ -274,7 +241,7 @@ class RunRecord:
 class Run:
     """The file-backed run handle, addressed by `(tenant_id, run_id)`."""
 
-    #: The five sub-collections (decision 1a), bound per instance in `__init__`.
+    #: The five sub-collections, bound per instance in `__init__`.
     tables: _RecordHandleGroup
     facts: _RecordHandleGroup
     documents: _RecordHandleGroup
@@ -289,12 +256,8 @@ class Run:
     ) -> None:
         self.run_dir = Path(run_dir)
         self.runs_base = Path(runs_base) if runs_base is not None else None
-        # THE ADDRESS, not a descriptive field. A `Run` is addressed by `(tenant_id, run_id)`
-        # (N4): a handle built by `for_tenant` carries the tenant it was asked for, exactly as
-        # it carries `run_dir`; what the STAMP says the tenant is lives on `run.record` (the
-        # twelve descriptive fields, decision 1b/fork D-F2). `for_tenant` refuses when the two
-        # disagree, so on such a handle they agree; a handle built from a bare directory
-        # (`Run.at`) has no address and no attribute — `hasattr(run, "tenant_id")` is False.
+        # The address's tenant, not the stamp's (that is `run.record.tenant_id`; `for_tenant`
+        # ensures they agree). A `Run.at` handle has no address and no such attribute.
         if tenant_id is not None:
             self.tenant_id = tenant_id
         self._io = io
@@ -349,10 +312,8 @@ class Run:
     def for_tenant(
         cls, tenant_id: str, run_id: str, *, runs_base: Path, io: Any = _real_io,
     ) -> Run:
-        """The constructor real APPLICATION code uses — the host process that creates and
-        operates on one specific run. Refuses when `tenant_id` disagrees with the tenant
-        record actually stored at `runs_base` (decision 22): neither argument is trusted over
-        the other, because trusting either makes a mismatch silent."""
+        """The constructor application code uses. Refuses when `tenant_id` disagrees with the
+        tenant record stored at `runs_base`, rather than silently trusting either."""
         runs_base = Path(runs_base)
         if io.entry_present(_tenant.record_path(runs_base)):
             record = _tenant.read_tenant(runs_base, io=io)
@@ -375,12 +336,9 @@ class Run:
 
     @classmethod
     def at(cls, directory: Path) -> Run:
-        """The eval/fixture/tooling escape hatch — bulk directory-walkers mining
-        training/held-out data, checked-in test fixtures, and the archive/branch machinery
-        reading an already-materialized world copy. Total over any EXISTING directory (never
-        inspects contents; an empty directory is accepted with all identity fields `None`),
-        refuses only when the path is not an existing directory. NOT the live investigation
-        path — real application code constructs through `for_tenant`."""
+        """The eval/fixture/tooling escape hatch — directory walkers, test fixtures, and the
+        archive/branch machinery. Accepts any existing directory without inspecting it; not the
+        live investigation path (use `for_tenant`)."""
         directory = Path(directory)
         if not directory.is_dir():
             raise ValueError(f"{directory} is not an existing directory")
@@ -392,9 +350,8 @@ class Run:
     def record(self) -> RunRecord:
         owner = RunPaths(self.run_dir)
         faults: list[str] = []
-        # Every read below goes through the injected `io` and refuses an alias the box planted
-        # at the record's name — a symlinked `alert.json` would otherwise make `alert_ref` (the
-        # curation key) the hash of bytes outside the run.
+        # Reads go through `io`, which refuses planted aliases (e.g. a symlinked `alert.json`
+        # would make `alert_ref` hash bytes outside the run).
         prov = self._provenance(owner, faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
         disposition, review_outcome = self._report_fields(owner)
@@ -407,9 +364,7 @@ class Run:
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
             alert_ref=case_ref(alert_bytes) if alert_bytes is not None else None,
-            # The fork's lineage is STAMPED (D3/D4) — read off the run's own record, never off
-            # a `family.yaml` guessed at from the runs base's parent (which, under the default
-            # base, is `/tmp`).
+            # Lineage comes from the stamp, never a `family.yaml` guessed from the runs base.
             parent_run_id=prov.parent_run_id if prov is not None else None,
             fork_turn=prov.fork_turn if prov is not None else None,
             exit_class=exit_class,
@@ -469,19 +424,16 @@ class Run:
         return read.disposition, (outcome if isinstance(outcome, str) else None)
 
 def case_ref(alert_bytes: bytes) -> str:
-    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]` — ONE
-    derivation, read by `run.record.alert_ref` and by the curation lane alike."""
+    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]`."""
     return f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
 
 
 # ---------------------------------------------------------------------------------------
-# ArchivedWorld — the archive projection's read-only handle (D5/N5); not a `Run`.
+# ArchivedWorld — the archive projection's read-only handle; not a `Run`.
 # ---------------------------------------------------------------------------------------
 
-#: The copied set, each name READ FROM ITS OWNER: the run-dir names from `_run_paths`, the
-#: two flat sidecar spellings and the pointer from `_episode_paths` (they are the archive's
-#: own — a sidecar lives beside the run dir keyed by run id, and the archive re-homes it
-#: under the world as a bare `<kind>.json`).
+#: The copied set, each name from its owner: run-dir names from `_run_paths`, the archive's
+#: re-homed sidecar names and run-dir pointer from `_episode_paths`.
 _ARCHIVED_WORLD_NAMES: dict[str, str] = {
     "report": _run_paths.REPORT, "investigation": _run_paths.INVESTIGATION,
     "provenance": _run_paths.PROVENANCE,
@@ -510,8 +462,7 @@ class _ArchivedRecordHandle:
 
 class ArchivedWorld:
     """A read-only projection of an archived `worlds/<label>/` directory — exactly the copied
-    set (page §5, D5/N5). Not a `Run`: it has no `.record` and is not addressed by
-    `(tenant_id, run_id)`."""
+    set. Not a `Run`: no `.record`, not addressed by `(tenant_id, run_id)`."""
 
     def __init__(self, world_dir: Path, *, io: Any = _real_io) -> None:
         self.world_dir = Path(world_dir)

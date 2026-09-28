@@ -10,8 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-#: The one stylesheet every rendered page inlines, read once at import — `visualize_run` and
-#: `visualize_episode` both take it from here rather than each reading the assets dir.
+#: The stylesheet every rendered page inlines, read once at import.
 ASSETS = Path(__file__).resolve().parent / "assets"
 CSS = (ASSETS / "styles.css").read_text(encoding="utf-8")
 
@@ -25,23 +24,17 @@ def esc(s) -> str:
     return html.escape(s if isinstance(s, str) else json.dumps(s, indent=2))
 
 
-#: An `on<word>=`-shaped event-handler attribute, e.g. `onerror=`. `esc()` already makes this
-#: inert HTML, but the pattern still reads as a live handler to a downstream non-HTML-aware
-#: consumer (a plain text viewer, a naive markdown renderer) — split it with a zero-width
-#: space, invisible in any HTML rendering.
-#:
-#: IGNORECASE is load-bearing: HTML attribute names are case-insensitive, so `ONERROR=` and
-#: `OnError=` ARE the attribute this covers.
+#: An `on<word>=`-shaped event-handler attribute, e.g. `onerror=`. Already inert after `esc()`,
+#: but it still reads as a live handler to non-HTML-aware consumers (plain text viewers, naive
+#: markdown renderers), so it is split with an invisible zero-width space. Case-insensitive,
+#: like HTML attribute names.
 EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
 
 
 def esc_untrusted(s) -> str:
-    """`esc()`, plus the event-handler split above — for text whose source is
-    attacker-influenced by construction (a model-authored session store payload, per
-    `session_store`'s own access table), as opposed to internal/structural strings."""
-    # The replacement is a CALLABLE, not the literal `"on\u200b"`: under IGNORECASE that
-    # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this page
-    # exists to show verbatim. `m.group(0)` splits the match, casing preserved.
+    """`esc()`, plus the event-handler split above — for attacker-influenced text (e.g. a
+    model-authored session store payload), as opposed to internal/structural strings."""
+    # A callable rather than the literal `"on​"`, which would case-fold `ONERROR=`.
     return EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
 
 
@@ -110,8 +103,7 @@ def slugify(s: str) -> str:
 
 
 def fmt_duration(ms: float | int) -> str:
-    # A non-finite span — the sum of finite per-row walls can overflow — is the dash, not
-    # `int(inf)`'s raise.
+    # A non-finite span (a sum of walls can overflow) is the dash, not a raise.
     if not ms or ms <= 0 or not math.isfinite(ms):
         return "—"
     s = int(ms // 1000)
@@ -123,10 +115,9 @@ def fmt_duration(ms: float | int) -> str:
 
 
 def parse_report(run_dir: Path) -> ReportRead:
-    """This run's report, read through the one accessor every consumer shares. Typed rather
-    than a merged `{**frontmatter, "body": ...}` dict: that shape let the model's own
-    frontmatter keys collide with the view's, and left each page free to invent its own
-    reading of a disposition it could not validate."""
+    """This run's report, via the shared accessor. Typed rather than a merged dict, so the
+    model's frontmatter keys cannot collide with the view's and no page invents its own
+    reading of an invalid disposition."""
     return read_report(RunPaths(run_dir).report)
 
 

@@ -38,36 +38,22 @@ class ToolSet:
     lesson_read: bool = False
     template_search: bool = False
     query: bool = False
-    #: The verb-surface read lane: `list_verbs`, the grant-filtered discovery tool that
-    #: answers "what does this system declare, and what params does each verb bind" from the
-    #: live signatures. Verb-bearing like `query` — it reads the role's grant to filter — so
-    #: it counts toward the R7 agreement below.
+    #: `list_verbs`, the grant-filtered verb discovery tool. Verb-bearing like `query`, so it
+    #: counts toward the grant agreement check below.
     list_verbs: bool = False
     close: bool = False
 
     def __iter__(self) -> Iterator[str]:
-        """The names of the lanes this set GRANTS, in declaration order.
+        """The names of the granted lanes, in declaration order, so `tuple(defn.tools) == ()`
+        states deny-all over every lane, including future ones.
 
-        A ToolSet reads as a row of booleans, which makes "what does this role actually hold?"
-        a question every caller answers by hand — and a deny-all role's answer, the one worth
-        asserting, is the empty one, which a hand-written check states by NOT mentioning a bit
-        it forgot. Iterating yields only the True lanes, so `tuple(defn.tools) == ()` is the
-        whole deny-all claim over every lane that exists now or is added later.
-
-        Through `dataclasses.fields`, never `__dataclass_fields__`: the raw mapping also holds
-        ClassVar/InitVar pseudo-fields (#965)."""
+        Uses `dataclasses.fields`, not `__dataclass_fields__`, which also holds
+        ClassVar/InitVar pseudo-fields."""
         return (f.name for f in fields(self) if getattr(self, f.name))
 
 
-# DEFINED BEFORE `AgentDefinition` (#1067), not after where it used to sit: a strict pydantic
-# dataclass resolves a field's annotation at DECORATION time, and `AgentDefinition.bash_shapes`/
-# `write_shapes` name `ResolvedRoots` — a forward reference to a class the stdlib `@dataclass`
-# never had to see resolved (annotations were never introspected), that pydantic could not yet
-# resolve while `ResolvedRoots` was defined later in this same module. It "worked" anyway —
-# pydantic retries the build lazily on first real construction, by which point the whole module
-# has finished importing — but left `AgentDefinition.__pydantic_complete__` False from
-# decoration until that first use. Defined here, the build completes at decoration time like
-# every other class in this file.
+# Defined before `AgentDefinition`, whose field annotations name it: pydantic resolves them at
+# decoration time, and a forward reference would leave the class incomplete until first use.
 @model(frozen=True)
 class ResolvedRoots:
 
@@ -90,13 +76,9 @@ class AgentDefinition:
     corpus_dirs: tuple[str, ...] = ()
     bash_shapes: tuple[Callable[[ResolvedRoots], tuple[Grant, ...]], ...] = ()
     write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...] = ()
-    #: The deps type `bind` builds for this role. Normally an `AgentDeps` subtype; typed
-    #: loosely for the shape that cannot be one — a role holding NO grant and no run-scoped
-    #: state at all, whose deps carry only their `role` ClassVar. Two of those now: #947's
-    #: questioner, and the family judge that took a key of its own in #1008. `AgentDeps` IS the
-    #: run scope (run dir, policy, box, anchors), so a deps type with none of that cannot
-    #: inherit it; `bind` refuses such a def loudly rather than reaching for a `_for_run` that
-    #: is not there.
+    #: The deps type `bind` builds for this role. Normally an `AgentDeps` subtype; typed loosely
+    #: for grant-less roles (the questioner, the family judge) whose deps carry only their
+    #: `role` ClassVar and no run scope. `bind` refuses those.
     deps_cls: type[Any] | None = None
     requires_confine: bool = False
     requires_explicit_tree: bool = False
@@ -155,8 +137,7 @@ def resolve_roots(
 def _require_write_co_constraint(
     tools: ToolSet, write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...],
 ) -> None:
-    # Either grant makes the agent a writer: `append_block` faces the same allowlist and the
-    # same content schema `write_file`/`edit_file` do, so it needs the same scope.
+    # `append_block` faces the same allowlist and schema as `write_file`/`edit_file`.
     writes = tools.write or tools.append
     if writes and not write_shapes:
         raise ValueError(
@@ -175,35 +156,21 @@ def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
 
 
 def effective_tools_for(defn: AgentDefinition) -> ToolSet:
-    """The ToolSet a generic, out-of-band consumer (the operator policy CLI, a permission-gate
-    probe) should compile a role's policy against.
+    """The ToolSet an out-of-band consumer (the operator policy CLI, a gate probe) should
+    compile a role's policy against.
 
-    Today this is `defn.tools` for every role, and the function is kept rather than inlined
-    because what it exists to absorb is a role whose real capability is switched on PAST the
-    registry. The OLD PIPELINE's judge was the one such role — its closed-ticket bit was flipped
-    per LEG by a runtime `replace()` well after `AGENTS` — and #922 retired both the leg and the
-    bit, so there is no longer any role whose static shape understates it. (`AgentRole.JUDGE`
-    exists again since #1008 and is NOT that role: it is the family judge, which registers no
-    tool at all and switches nothing on at runtime.) A consumer still asks this
-    question rather than reading `defn.tools` directly, because the next role that switches a
-    capability at runtime must have exactly one place to declare it (N4 — the operator surface
-    must not carry its own map of typed capabilities to attack)."""
+    Currently `defn.tools` for every role. Kept as the single place to declare a capability
+    switched on at runtime past the registry, so the operator surface never keeps its own
+    map."""
     return defn.tools
 
 
 def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
-    """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in EITHER
-    direction. A grant naming verbs while every verb-bearing bit (`query`, `list_verbs`) is
-    off is a stale grant behind a switched-off capability; a verb-bearing bit on with an empty
-    grant is a capability with nothing behind it. Checked against the EFFECTIVE `tools`, not
-    only what `defn` declares, because a stage can switch its capability on with a runtime
-    `replace()` after `bind` compiled its policy. No shipped role does that since #922 retired
-    the judge's closed-ticket leg — the one role whose static shape understated it — but the
-    check stays written against the effective shape so the next one cannot slip past it.
+    """A role's verb_grant is non-empty iff a verb-bearing tool (`query`, `list_verbs`) is on.
 
-    `list_verbs` joins the disjunction rather than sitting outside it: it does not DISPATCH a
-    verb, but it reads the grant to decide what to name, so a role holding it over an empty
-    grant is a discovery tool that can only ever answer "nothing"."""
+    Otherwise it is either a stale grant or a capability with nothing behind it (`list_verbs`
+    over an empty grant can only answer "nothing"). Checked against the effective `tools`,
+    since a capability could be switched on at runtime after `bind`."""
     has_verb_tool = bool(tools.query or tools.list_verbs)
     has_grant = bool(defn.verb_grant.entries)
     if has_verb_tool != has_grant:
@@ -277,10 +244,8 @@ def _build_roots(
     )
     if defn.requires_corpus:
         assert roots.corpus_dir is not None
-        # Compare RESOLVED to RESOLVED, the same collapse `decide_write`'s containment half
-        # applies at runtime. A lexical `is_relative_to` on the UNresolved corpus_dir would
-        # spuriously reject every bind whenever the tree path carries a symlink component (a
-        # symlinked worktree base, macOS `/tmp`→`/private/tmp`).
+        # Compare resolved paths, as `decide_write` does at runtime; a lexical check fails
+        # when the tree path has a symlink component (e.g. macOS `/tmp`).
         resolved_corpus = roots.corpus_dir.resolve()
         if not any(resolved_corpus.is_relative_to(c.resolve()) for c in roots.read_confine):
             raise ValueError(
@@ -314,10 +279,7 @@ def bind(
             "importing the learning stages to look it up)."
         )
     if not hasattr(defn.deps_cls, "_for_run"):
-        # A deps type outside the AgentDeps hierarchy — a role that carries no run scope
-        # because it holds no grant. There is nothing to bind, and answering with a half-built
-        # deps object would hand a caller something whose `.policy` does not exist; refuse by
-        # name instead, the way the curator's non-bindable def already does.
+        # A grant-less role with no run scope: refuse rather than return deps with no `.policy`.
         raise ValueError(
             f"{defn.role.name}_DEF is not bindable: its deps type "
             f"{defn.deps_cls.__name__} is not an AgentDeps subtype (it carries no run scope), "

@@ -16,8 +16,6 @@ from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-# The SAME byte ruler the artifact bounds are measured with — a write tool that reports
-# "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender.hooks.record_lesson_load import (
     LOAD_KIND_READ as _LOAD_KIND_READ,
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
@@ -27,18 +25,10 @@ from ._bash import _deny_authored_read, _grep_lines, _guarded_parents, _is_cross
 
 
 def _probe_is_file(p: Path, path: str) -> bool:
-    """`p.is_file()` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
+    """`p.is_file()` over a model-authored path, as a refusal rather than a traceback.
 
-    `pathlib` swallows only `_IGNORED_ERRNOS` — ENOENT/ENOTDIR/EBADF/ELOOP — and every other
-    `os.stat` error comes back out. The reachable one is ENAMETOOLONG: the read gate ALLOWS a
-    basename over `NAME_MAX`, because MAIN's and GATHER's run-root read shape is
-    `under(run, SEG)` with `SEG = [\\w.@=+-]+`, which places no length bound, and
-    `Path.resolve()` does not stat. So an allowed path reaches the probe and raises — outside
-    every `try`, past `on_tool_execute_error`, past `_drive_agent`'s handlers and out of
-    `asyncio.run` — ending the run with no disposition and no `report.md`.
-
-    Bounding `SEG` is deliberately NOT the fix: the probe has to survive an allowed path
-    whatever its shape."""
+    `pathlib` re-raises most `os.stat` errors; e.g. ENAMETOOLONG on a basename the read gate
+    allows would otherwise end the run with no disposition."""
     try:
         return p.is_file()
     except OSError as e:
@@ -46,11 +36,7 @@ def _probe_is_file(p: Path, path: str) -> bool:
 
 
 def _probe_read_text(p: Path, path: str) -> str:
-    """`read_text_utf8(p)` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
-
-    The other half of `_probe_is_file`, and ONE copy: `_gated_read` and `_tool_edit_file` both
-    read the same operand under the same two fault classes (undecodable, unreadable) and owe
-    the model the same two refusals."""
+    """`read_text_utf8(p)` over a model-authored path, as a refusal rather than a traceback."""
     try:
         return read_text_utf8(p)
     except UnicodeDecodeError:
@@ -93,13 +79,8 @@ def _bound_and_wrap(
 
 
 def _tail_chars(text: str, n: int) -> str:
-    """The last `n` characters, trimmed FORWARD to the next line start so a `|`-delimited
-    invlang row never arrives cut in half and reads as truncated data. `n` is a ceiling, not a
-    target. `n <= 0` yields nothing; a file shorter than `n` is returned whole; text with no
-    newline in the window is cut at `n`.
-
-    Its own fold rather than a reuse of `_bounded_read`, whose overflow path keeps the HEAD —
-    the wrong end of an append-only log."""
+    """At most the last `n` characters, trimmed forward to a line start so an invlang row is
+    never cut in half. `n <= 0` yields nothing; with no newline in the window, cut at `n`."""
     if n <= 0:
         return ""
     if len(text) <= n:
@@ -121,16 +102,11 @@ def _tool_read_file(
 
 
 def _closed_for_investigation_write(deps: AgentDeps, p: Path) -> bool:
-    """RS15. `investigation.md` becomes review-state-aware AFTER a close commits, so no
-    post-close write can silently move the recorded disposition. Up to the close the document
-    stays model-writable; this is the ONE gate on it.
+    """Whether `p` is `investigation.md` after a close has committed, so no post-close write
+    can move the recorded disposition.
 
-    The `resolve()` here runs one line AHEAD of `decide_write`/`decide_read`, so an operand it
-    cannot resolve (an embedded NUL — `ValueError`; a symlink cycle — `RuntimeError`) would
-    escape the write/edit tool as an unhandled exception, routing around the fail-closed
-    `Decision(False)` the gate's `RESOLVE_ERRORS` rule produces. An unresolvable operand is
-    certainly not `<run_dir>/investigation.md`, so answering False is honest — and it hands the
-    operand to the gate, which denies it with a correctable reason."""
+    An unresolvable operand answers False (it is not the investigation) and is left for the
+    permission gate to deny with a correctable reason, rather than raising here."""
     try:
         if p.resolve() != RunPaths(deps.run_dir).investigation.resolve():
             return False
@@ -173,8 +149,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    # ONE probe, not one here and another in the empty-`old_string` check below: they ask the
-    # same question about the same path, and a second stat could answer it differently.
+    # One probe, so both checks below see the same answer.
     exists = _probe_is_file(p, path)
     current = _probe_read_text(p, path) if exists else ""
     if not old_string and exists:

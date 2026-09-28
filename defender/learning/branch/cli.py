@@ -1,43 +1,31 @@
 #!/usr/bin/env python3
 """Fork one finished run into a questioner-authored triplet of worlds, and run them.
 
-The composition root for #947's episode. The operator names two things — a source run and the
-message to branch at — and this module decides the ORDER everything else happens in, which is
-the part no seam can enforce about itself. The sequence is `branch/steps.py::Step`'s — that
-module OWNS the episode lifecycle, and every frame, banner and message here that names a step
-names one of its members; this module only runs them in that order (#1025 O7 — the timing
-record refuses any other spelling):
+The operator names a source run and the message to branch at; this module runs the episode's
+steps (`branch/steps.py::Step`) in order:
 
-1. **Preflight** — not a `Step`; `steps.py` says why. Everything that can refuse before
-   anything is spent, asked in one place: the branch point is in range, the source alert is a
-   plain file, the configured corpus patterns can carry a view name, the write door reaches the
-   cluster, the sweep of this episode's own namespace completes, and every registered role has
-   a usable model. A refusal here costs no model call, no staged name and no primed capture.
-2. **`Step.QUESTIONER`.** A deny-all role authors the triplet; its raw output is validated
-   into `Family` and held to ONE identity gate before anything is staged.
+1. **Preflight** (not a `Step`). Everything that can refuse before anything is spent: the
+   branch point is in range, the source alert is a plain file, the configured corpus patterns
+   can carry a view name, the write door reaches the cluster, the sweep of this episode's
+   namespace completes, and every registered role has a usable model.
+2. **`Step.QUESTIONER`.** A deny-all role authors the triplet; its output is validated into
+   `Family` and held to one identity gate before anything is staged.
 3. **`Step.STAGING`.** Each world's corpus is written into the `wv-` namespace, every name
-   write-ahead-recorded in `staged.yaml` before it is created.
-4. **`Step.REVIEW`, by replay.** The captured set is replayed through each world; any world
-   that contradicts the capture, or whose declared difference is unreachable, REJECTS — and any
-   rejected world ends the EPISODE (§7 FORK-14), so no sibling starts at all.
-5. **`Step.RUNS`, the family as processes.** Each accepted world runs as its own
-   `run.py --resume` child, started together, under `{episode_dir}/runs/` — never beside the
-   source run and never under the operator's runs base (§7 FORK-13).
-6. **`Step.VERIFY`, then `Step.JUDGE`.** Every sibling's scrub verdict and provenance stamp
-   is checked; agreeing stamps write the family stamp, and anything else marks the episode
-   `incomplete` — a modelled outcome with a reason, not the absence of a file (§7 FORK-1).
-   The judge grades the archive once the cluster is handed back.
+   recorded in `staged.yaml` before it is created.
+4. **`Step.REVIEW`, by replay.** The captured set is replayed through each world; a world that
+   contradicts the capture, or whose declared difference is unreachable, is rejected, and any
+   rejection ends the episode before a sibling starts.
+5. **`Step.RUNS`.** Each accepted world runs as its own `run.py --resume` process, started
+   together, under `{episode_dir}/runs/` — never beside the source or under the runs base.
+6. **`Step.VERIFY`, then `Step.JUDGE`.** Every sibling's scrub verdict and provenance stamp is
+   checked; agreeing stamps write the family stamp, anything else records the episode as
+   `incomplete` with a reason. The judge grades the archive after the cluster is handed back.
 
-THIS MODULE DRIVES NO INVESTIGATION IN ITS OWN PROCESS, and has no path to one: it neither
-imports the driver's entry point nor awaits anything. D1's whole content is that a sibling is a
-`run.py` PROCESS, which is what gets it the box lifecycle, the reap scan, its own role preflight
-and its own provenance stamp — the four pieces the in-process launcher this replaces could not
-have without answering a concurrency question it had not answered. It also means the launcher
-acquires `run.py`'s two automatic lanes and has to refuse them there rather than silently not
-calling them, which is `run.py --resume`'s job and not this file's.
+Siblings are always `run.py` processes (for the box lifecycle, reap scan, role preflight and
+provenance stamp); this module never runs an investigation in-process.
 
-Teardown runs on EVERY exit: rejection, clean completion, `incomplete`, and any exception raised
-after the first staging append. The cluster does not care why the episode ended.
+Teardown runs on every exit: rejection, clean completion, `incomplete`, and any exception
+raised after the first staging append.
 """
 
 from __future__ import annotations
@@ -55,11 +43,8 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
-# This file is a path-based launcher, just like `run.py` and `learning/loop.py`. Python puts
-# only `learning/branch/` on `sys.path` for `python3 defender/learning/branch/cli.py`, so both
-# the first `defender` import and package-relative imports fail unless the workspace root is
-# installed before any package import resolves. Re-exec into the project venv first when it
-# exists, matching the other launchers' dependency boundary.
+# Run by path, so Python puts only `learning/branch/` on `sys.path`: re-exec into the project
+# venv when it exists, then add the workspace root before any `defender` import.
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
@@ -98,51 +83,33 @@ from defender.runtime.branch._family import (
 
 _logger = logging.getLogger(__name__)
 
-#: The environment variable naming where episodes live. THERE IS NO DEFAULT DERIVATION, and the
-#: absence is the whole point (§7 round 2, F5-EPISODE-ROOT). Deriving this from the runs base is
-#: what put `episodes/` back inside the tree every corpus walker descends and inside the checkout
-#: a sibling's own provenance stamp is taken over — the two containment holes FORK-13 closed. A
-#: reader that re-derives it silently restores both, so with the variable unset the launcher
-#: REFUSES naming it rather than inventing a location.
+#: Where episodes live. No default: deriving it from the runs base would put `episodes/` inside
+#: the tree corpus walkers descend and inside the checkout provenance is stamped from.
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
 
-#: The three outcomes an episode can end in. `incomplete` is a MODELLED outcome carrying a
-#: reason rather than the absence of a file (§7 FORK-1): every question about a partially good
-#: family used to fall through the gap between "accepted" and "rejected".
+#: The three outcomes an episode can end in. `incomplete` is an explicit outcome with a reason,
+#: not inferred from a missing file.
 ACCEPTED, REJECTED, INCOMPLETE = "accepted", "rejected", "incomplete"
 
 
 class LauncherRefused(SystemExit):
-    """An episode this launcher will not run, reported as an operator's exit.
-
-    A `SystemExit` because every one of these is an answer to an operator's own command line —
-    the launcher's failure mode is an exit with a written explanation, not a traceback out of a
-    library frame.
-    """
+    """An episode this launcher will not run, reported as an operator's exit with an
+    explanation rather than a traceback."""
 
 
 # ---------------------------------------------------------------------------------------
-# where an episode lives (§7 FORK-13 + F5-EPISODE-ROOT)
+# where an episode lives
 # ---------------------------------------------------------------------------------------
 
 
 def episodes_root(*, tenant: Any) -> Path:
-    """The CONFIGURED root every episode directory is a child of.
+    """The configured root every episode directory is a child of.
 
-    READ FROM CONFIGURATION, never derived. Three properties have to hold at once and only a
-    configured location gets all three: it is outside the data root (#1078 D4 — every tenant's
-    tree lives there, so an episode inside it would be walked by every consumer that indexes a
-    tenant's own runs/episodes), it is outside the checkout, so an untracked episode directory
-    cannot dirty the tree a sibling's own provenance stamp is taken over — which would compose
-    with the dirty refusal into a family that can never complete; and re-pointing the data root
-    moves no episode, so the two roots are independent facts rather than one arithmetic.
-
-    `tenant` is a `_tenant.TenantPaths` instance — the launcher derives it once (`_launch`) and
-    threads it here; `tenant.dir.parent` is the data root every tenant's tree lives under.
-
-    Both refusals below are the same refusal in two spellings, and neither is optional: a
-    default under the data root would restore the first hole, and one under the checkout the
-    second, in both cases silently and with a green run.
+    Must be outside the data root (every tenant's tree lives there, so walkers indexing a
+    tenant's runs or episodes would count it) and outside the checkout (or an untracked episode
+    dir makes every sibling's provenance stamp dirty, so no family can complete). Being
+    configured also keeps it independent of the data root. `tenant` is the launcher's
+    `TenantPaths`; its folder's parent is the data root.
     """
     raw = os.environ.get(EPISODES_BASE_ENV)
     if not raw:
@@ -152,12 +119,8 @@ def episodes_root(*, tenant: Any) -> Path:
             "would be walked by every consumer that indexes a tenant's runs, and derived from "
             "the checkout it would dirty the tree every sibling stamps itself against. Name a "
             "directory outside both")
-    # RESOLVED UNCONDITIONALLY. `Path.resolve()` is non-strict and answers for a path that does
-    # not exist yet, which is EVERY first launch — nothing creates the episodes root ahead of
-    # `guarded_mkdir`. Resolved only when it existed, a relative `DEFENDER_EPISODES_BASE=episodes`
-    # compared as `Path("episodes")`, whose `.parents` is `(Path("."),)`, so neither refusal
-    # fired and the episode landed inside the checkout — untracked, which is exactly what every
-    # sibling's own provenance stamp then reports as a dirty tree.
+    # Resolved even when it does not exist yet (every first launch): an unresolved relative path
+    # has `.parents == (Path("."),)`, so neither refusal below would fire.
     root = Path(raw)
     candidate = root.resolve()
     data_root = Path(tenant.dir).parent.resolve()
@@ -171,30 +134,19 @@ def episodes_root(*, tenant: Any) -> Path:
         if candidate == forbidden or forbidden in candidate.parents:
             raise LauncherRefused(
                 f"[branch] {EPISODES_BASE_ENV}={root} resolves inside {why}")
-    # A base CONTAINING the data root is refused too (#1078 d4, J44: `/tmp` for a data root of
-    # `/tmp/defender-data`) — the data root only; a base containing the checkout is not.
+    # A base containing the data root (its parent, say) is refused too; one containing the
+    # checkout is not.
     if candidate in data_root.parents:
         raise LauncherRefused(
             f"[branch] {EPISODES_BASE_ENV}={root} contains the data root {data_root} — keep "
             "episodes and tenants' trees apart")
-    # THE RESOLVED PATH, which is what "RESOLVED UNCONDITIONALLY" above is about. Returned
-    # unresolved, a relative `DEFENDER_EPISODES_BASE` made every path built from it relative:
-    # `sibling_runs_base` reached a child process as `DEFENDER_RUNS_BASE`, and the manifest
-    # reached it as `--resume`, both re-resolved against whatever cwd that child happened to
-    # have. The refusals judged `candidate`; every consumer has to get the same value.
+    # Return the resolved path the refusals judged: paths built from it reach child processes,
+    # which would re-resolve a relative one against their own cwd.
     return candidate
 
 
-def refuse_bad_episode_id(episode_id: str) -> None:  # lint-dup: ok — one RULE, two error CLASSES: `_family` owns the predicate and raises `FamilyError`; this frame owns nothing but the operator-facing `SystemExit` every other check on this command line raises
-    """The episode id's own rule, as the launcher's OPERATOR-FACING refusal.
-
-    The rule itself lives with the schema (`_family.refuse_bad_episode_id`), because the id is a
-    property of the manifest's identity rather than of this command line. What is this module's
-    is the CLASS: an operator's own argument is answered with an exit and a written explanation,
-    not with a library exception, and every other check on this path already does that. Two
-    spellings of "you cannot branch this" from one command is the thing `main`'s handler exists
-    to collapse.
-    """
+def refuse_bad_episode_id(episode_id: str) -> None:  # lint-dup: ok — one rule, two error classes: `_family` owns the predicate and raises `FamilyError`; this wrapper raises the operator-facing `SystemExit`
+    """`_family.refuse_bad_episode_id`, raised as the launcher's operator-facing refusal."""
     try:
         _family.refuse_bad_episode_id(episode_id)
     except FamilyError as bad:
@@ -204,11 +156,9 @@ def refuse_bad_episode_id(episode_id: str) -> None:  # lint-dup: ok — one RULE
 def episode_dir_for(episode_id: str, *, tenant: Any) -> Path:
     """Where one episode's shared records live.
 
-    Under the configured episodes root, as a single path component. `episode_id` is checked
-    HERE, at the path-construction boundary as well as in `_launch`, because `prepare_episode`
-    WRITES through this path before any run id derived from it is ever judged — so an id
-    carrying a separator plants the family's capture outside the episodes root, or onto another
-    episode's, with the run still green.
+    A single path component under the configured episodes root. The id is checked here because
+    `prepare_episode` writes through this path before anything else judges it; an id carrying a
+    separator would plant the capture outside the root or onto another episode's.
     """
     refuse_bad_episode_id(episode_id)
     return episodes_root(tenant=tenant) / episode_id
@@ -217,21 +167,13 @@ def episode_dir_for(episode_id: str, *, tenant: Any) -> Path:
 def episode_id_for(source_run_id: str, branch_message_id: int) -> str:
     """The episode id this source and branch point derive.
 
-    DERIVED, not an operator argument. An episode is one (source run, branch point) pair, so an
-    id chosen by hand is a second name for something that already has one — and two launches of
-    the same pair under two ids are two immutable captures of one moment, with nothing saying
-    they are the same episode. Case-folded because the id names a directory, and two spellings
-    of it are one directory wherever the filesystem folds case.
+    Derived rather than chosen, so one (source run, branch point) pair always maps to one
+    episode. Case-folded because it names a directory, and case-folding filesystems would merge
+    two spellings.
     """
     return f"{source_run_id}-n{branch_message_id}".casefold()
 
 
-#: #1078 D4/J52: the pre-#1078 distant-source pre-check is DELETED (its name is a production
-#: regression test, so it is not spelled here). Its role on the launch path is now
-#: `tenant_of_run_dir`'s location check (`_launch` derives the source's tenant once, before
-#: `episode_dir_for`, and refuses a source that does not sit at `<data root>/<tenant>/runs/`) —
-#: a stronger check than "directly under a single configured runs base", since there is no
-#: longer one runs base to configure.
 
 
 # ---------------------------------------------------------------------------------------
@@ -243,34 +185,22 @@ def prepare_episode(
     episode_id: str, source_run_dir: Path, *, tenant: Any,
     prime: Callable[[Path, Path], PrimeReport] = prime_base,
 ) -> Path:
-    """Prime the family's base ONCE, exclusively, and hand back the episode directory.
+    """Prime the family's base once, exclusively, and hand back the episode directory.
 
-    THE CLAIM IS ATOMIC, not a check-then-act (§7 FORK-2). Two launchers racing on one source
-    and branch point derive ONE episode id, so without an exclusive claim both pass an
-    `exists()` test, both prime, and the two captures stack into a single recording that
-    `_absorb` reads first-row-wins — one source's estate answering every sibling of the other,
-    with nothing in the table to tell them apart. `O_CREAT|O_EXCL` on the claim file is what
-    makes exactly one of them win.
+    The claim is an atomic `O_CREAT|O_EXCL`, not check-then-act: two launchers on one source and
+    branch point derive one episode id, and both priming would stack two captures that
+    `_absorb` reads first-row-wins.
 
-    AND A MANIFESTLESS EPISODE DIRECTORY IS ADOPTED, which is the other half of the same fork.
-    A launcher killed mid-prime would otherwise make that source and branch point permanently
-    unbranchable with no documented remedy, because the directory it left behind fails every
-    existence test. What is permanent is a MANIFEST: once the questioner has authored a family
-    into this episode, the episode is that family, and priming a second capture underneath it is
-    the merge the claim exists to prevent.
+    An episode dir with no manifest is adopted, so a launcher killed mid-prime does not make the
+    branch point permanently unbranchable. Once a manifest exists, the episode is that family.
 
-    `prime` is the primer as an INJECTION SEAM rather than a module lookup, so a caller that
-    needs to observe whether priming ran at all — the refusals above exist precisely to keep it
-    from running — can hand in its own without reaching into this module's globals.
+    `prime` is injectable so a test can observe whether priming ran.
     """
     episode = episode_dir_for(episode_id, tenant=tenant)
     refuse_claimed_episode(episode, episode_id)
-    # A PARTLY-RUN EPISODE IS NOT ADOPTABLE, and this is the half of FORK-2's adopt answer that
-    # keeps it from being a hole. `Ledger._absorb` reads the base tier AND this world's own file,
-    # first-row-wins — so a world ledger left behind by an earlier attempt at the same id would
-    # override live reads for keys the NEW source never captured, silently, under a capture that
-    # otherwise reads clean. What is adoptable is a directory that got no further than being
-    # made: a mid-prime death, which is the state the fork's answer exists to keep recoverable.
+    # Only a directory that got no further than a mid-prime death is adoptable: a world ledger
+    # left by an earlier attempt would be absorbed first-row-wins and silently answer this
+    # episode's live reads with the earlier estate.
     stale = sorted(p.name for p in base_file(episode).parent.glob("*.jsonl")
                    if p.name != base_file(episode).name) if artifact_dir(episode) else []
     if stale:
@@ -280,10 +210,8 @@ def prepare_episode(
             "episode's live reads with the earlier one's estate. Remove the episode directory "
             "to re-prime it")
     served = base_file(episode).parent
-    # THE EPISODE DIRECTORY IS THE TRUST ROOT for every mkdir under it. Everything at or
-    # above it is host-controlled — the episodes root is configured, outside both the runs
-    # base and the checkout — while everything BELOW it is reachable from a sibling box's
-    # rw bind, which is exactly the split `guarded_mkdir`'s anchor is for.
+    # The episode dir is the trust root: everything at or above it is host-controlled, while
+    # everything below is reachable from a sibling box's rw bind.
     guarded_mkdir(served, base=episode)
     claim = EpisodePaths(episode).priming_lock
     try:
@@ -296,29 +224,11 @@ def prepare_episode(
     try:
         report = prime(Path(source_run_dir), base_file(episode))
     except LedgerError as nothing_to_prime:
-        # A SOURCE THAT CAPTURED NOTHING IS STILL BRANCHABLE, and this is the one place that
-        # reading is taken. `prime_base` refuses a zero-row capture, and for its own caller that
-        # is right: #920's in-process launcher had no other signal, and an episode whose every
-        # question goes live is one whose siblings differ by the estate's drift rather than by
-        # their worlds.
-        #
-        # #947 has that signal. The review replays EXACTLY the set the primer read, and records
-        # what it replayed and what it could not; a family over an empty capture is a family
-        # whose review says so, per world, in the archive. So the refusal is DOWNGRADED here to
-        # an empty base plus a loud line, and nowhere else: `prime_base` keeps it for every
-        # other caller, and an episode that took this path is the one an operator was told
-        # about at launch.
-        #
-        # ONE SOURCE SHAPE REACHES IT, and naming it is the point: a run with NO SESSION STORE.
-        # `_check_branch_point` asks `branch.validate` — which refuses a capture that reached no
-        # system — but only where there is a store to ask it of, and it returns early where
-        # there is none. An imported run dir, a replayed fixture and a pruned store are exactly
-        # the sources that arrive with evidence, no session and no queries table. A source that
-        # DOES carry a session was already refused at the preflight, before the claim above and
-        # before a model call, which is where an unbranchable source should be refused.
-        #
-        # Declared as a MECHANISM DEVIATION rather than a repair. If a later reader decides an
-        # empty capture must abort, the change is one `raise` here and a fixture that captures.
+        # A source that captured nothing is still branchable here: `prime_base` refuses a
+        # zero-row capture for its other callers, but the review records what it could replay
+        # per world, so this downgrades to an empty base plus a warning. Only a source with no
+        # session store reaches this (an imported run, replayed fixture or pruned store); one
+        # with a session was already refused by `branch.validate` at preflight.
         if not _is_empty_capture(nothing_to_prime):
             raise
         write_guarded(base_file(episode), "")
@@ -329,13 +239,9 @@ def prepare_episode(
             "replayed; read it before comparing.")
         return episode
     finally:
-        # The claim is released on EVERY exit, including the primer's own refusal, so a refused
-        # prime does not make the episode permanently unbranchable — which is the state the
-        # adopt half of this fork exists to keep reachable.
+        # Released on every exit, so a refused prime does not make the episode unbranchable.
         claim.unlink(missing_ok=True)
-    # BOTH HALVES, NAMED. Every skipped row is a key that will reach the LIVE estate during the
-    # episode rather than replaying, so the skips are the size of the non-deterministic surface
-    # — and a reader shown only "primed 10" would assume it was zero.
+    # Log the skips too: each is a key read live rather than replayed.
     _logger.info(
         f"primed {report.primed} captured row(s) into {base_file(episode)}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
@@ -344,66 +250,45 @@ def prepare_episode(
 
 
 def _is_empty_capture(refusal: LedgerError) -> bool:
-    """Is this the primer's ZERO-ROW refusal, rather than one of its others?
+    """Is this the primer's zero-row refusal, rather than one of its others?
 
-    Matched on the primer's own sentence rather than on a class, because `LedgerError` is also
-    what a base that already exists raises — and downgrading THAT would be exactly the two-runs-
-    merged-under-first-row-wins failure the claim above exists to prevent. Narrow on purpose: a
-    refusal this predicate does not recognise propagates.
+    Matched on the message because `LedgerError` also signals an already-existing base, which
+    must never be downgraded.
     """
     return "primed no base rows" in str(refusal)
 
 
-def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8): every refusal that is knowable before a model call is asked here, so an operator with two problems is not told about them one paid episode at a time. Splitting it to satisfy an argument count would restore exactly the shape it exists to replace.
+def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a model call is asked in this one block
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
     continuation_prompt: str, allow_dirty: bool,
     live_tree: Callable[[], _provenance.RunProvenance], settings_dir: Path,
 ) -> tuple[str, tuple[str, ...], dict]:
-    """Everything that can refuse BEFORE the questioner is paid for, in one block.
+    """Everything that can refuse before the questioner is paid for, in one block, so an
+    operator with several problems hears about them all before spending anything.
 
-    ONE BLOCK, not six checks scattered along the happy path (§7 FORK-8). Each of these refuses
-    for its own reason, and every one of them is knowable before a single model call, a single
-    staged name or a single primed row exists. Split across the flow they fired in the order the
-    code happened to reach them, which meant an operator with two problems fixed them one paid
-    episode at a time.
+    Returns the episode token, the configured corpus patterns and the source's stamp, so later
+    steps use exactly the values judged here. In particular the stamp is the anchor
+    `verify_family` compares siblings against; re-reading it from the prior box's rw bind could
+    see a changed file.
 
-    Returns the episode token, the configured corpus patterns and the SOURCE'S STAMP, because
-    all three are computed here to be checked and every later step needs them — recomputing any
-    downstream is a second reading of a value the preflight already judged. The stamp is the
-    anchor `verify_family` holds the siblings to (#976 M5): threaded from here so the one read
-    that was judged is the one that is compared, never a second read of a file in a prior box's
-    rw bind that could have changed in between.
-
-    `live_tree` is the live tree's own stamp, taken AT MOST ONCE (#976 M2). It is a seam
-    rather than a call to `_provenance.capture_tree` because every end-to-end launch of this
-    frame would otherwise compare the fixture source against whatever HEAD the suite happens
-    to run under. It is NOT the authority on what the siblings ran — each sibling process
-    stamps itself, and `verify_family` compares those — it is the cheap early exit: a launcher
-    standing on a tree that is not the source's commit is about to spend N investigations on
-    a family whose verify tier will refuse them. Named for what it captures, not for the act:
-    `capture` in this module is the source's served-response capture (`branch/capture.py`),
-    and a seam by that name reads as a way to seed it.
+    `live_tree` returns the checkout's stamp, called at most once; injectable so tests don't
+    compare against whatever HEAD the suite runs under. It is only an early exit (siblings stamp
+    themselves and `verify_family` compares those) — a launcher on the wrong commit would
+    otherwise spend N investigations on a family verify will refuse.
     """
     token = _episode_token(episode_id)
-    # The EPISODE tenant's corpus patterns (#1106): `settings_dir` is the source run's tenant's
-    # folder, which `_episode_tenant` resolved from the source's runs-base record.
+    # The episode tenant's corpus patterns; `settings_dir` was resolved by `_episode_tenant`.
     patterns = staging_mod.check_configured_patterns(configured_patterns(settings_dir))
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
-    # THE ANCHOR IS READ AND JUDGED BEFORE THE PAID ROLE PREFLIGHT, beside the other reads of
-    # the source dir (#976 M1, M2). The live tree is a sibling that has not run yet — it is the
-    # checkout every sibling will run — so the preflight is `verify_family`'s own judgement over
-    # a one-member family: the same faults, the same order, the same rule about which of them
-    # `--allow-dirty` reaches. Nothing has been sourced or spent when it refuses.
+    # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
+    # paid role preflight.
     source_stamp = _stamp_of(source_run_dir)
     if source_stamp is None:
         raise _no_stamp(source_run_dir)
-    # THE LIVE TREE IS ASKED ONLY WHEN THE SOURCE CAN ANCHOR IT. The capture is two git
-    # subprocesses over the checkout, each on a 60 s timeout; against a source that names no
-    # commit the comparison has no anchor and the refusal is the source's own, so its answer
-    # could not matter — and an operator on a stalled index would wait two minutes to be told
-    # about a file that was readable in a millisecond.
+    # Capturing the live tree runs git (up to 60 s per call); skip it when the source names no
+    # commit, since the refusal is then the source's own.
     members: dict[str, dict | None] = (
         {"the live tree": _as_stamp(live_tree())} if _stamp_speaks(source_stamp) else {})
     refusal = _family_refusal(
@@ -411,10 +296,8 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
         source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty)
     if refusal is not None:
         raise LauncherRefused(f"[branch] {refusal}")
-    # THE SOURCE ALERT IS SCREENED BEFORE THE QUESTIONER READS IT, and this is the third reader
-    # of that surface — beside `run.py --resume`'s own seed read and the questioner's frontier
-    # read. The source run dir is a prior box's rw bind, so `alert.json` there is model-writable
-    # and a link planted at that name would copy its TARGET's bytes into a model-facing prompt.
+    # The source run dir is a prior box's rw bind, so a link planted at `alert.json` would copy
+    # its target's bytes into the questioner's prompt.
     alert = RunPaths(Path(source_run_dir)).alert
     if not artifact_file(alert):
         raise LauncherRefused(
@@ -428,20 +311,12 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
             "model config is checked at family level so a missing key surfaces before the base "
             "is primed, not once per sibling after N forks have committed")
     _probe_cluster(door, patterns)
-    # ASKED BEFORE THE SWEEP, not left to `prepare_episode` twenty lines later. The sweep
-    # DELETES every `wv-<token>.*` name this episode's own `staged.yaml` records — and a second
-    # launcher on the same (source, branch point) pair derives the SAME episode id and the SAME
-    # token, so it reads the FIRST launcher's record, finds every live alias "recorded", and
-    # removes the running family's whole staged corpus before `prepare_episode` refuses it. The
-    # first launcher's siblings then read views that no longer exist, which `_search` answers
-    # 200-with-zero-hits (`ignore_unavailable=true`) while every ledger row still says `staged`.
-    # A manifest is what says the episode has been authored, and staged names exist only after
-    # one — so refusing here closes the window entirely.
+    # Before the sweep: a second launcher on the same pair derives the same token, and its
+    # sweep would delete a running family's staged corpus (which then reads as zero hits, not
+    # an error). Staged names exist only after a manifest, so this closes the window.
     refuse_claimed_episode(episode_dir, episode_id)
-    # THE SWEEP IS THE FIRST THING THAT TOUCHES THE NAMESPACE. An episode must never author
-    # worlds into a namespace still holding an earlier attempt's aliases: those names are live
-    # on the cluster under exactly the token this episode is about to reuse, so a query for this
-    # world's view would read the dead attempt's documents.
+    # The sweep is the first thing to touch the namespace, so no world is authored over an
+    # earlier attempt's live aliases under the same token.
     staging_mod.sweep(episode_dir, episode_token=token, door=door)
     return token, patterns, source_stamp
 
@@ -454,18 +329,14 @@ def _no_stamp(source_run_dir: Path) -> LauncherRefused:
 
 
 def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
-    """The episode's tenant: the SOURCE run's, resolved under the tenants root this launcher
-    was handed — or the refusal, before anything is spent.
+    """The episode's tenant: the source run's, resolved under `tenants_root` — or the refusal,
+    before anything is spent.
 
-    Every sibling runs on this tenant (`start_family` seeds it into their runs base), the review
-    replays through its settings and write door, and the manifest is judged against its corpus
-    patterns — so it is read from where the box cannot write: the source's runs-base record
-    (`_tenant.tenant_of_run_dir`). The source's stamp sits in the box's writable run dir, and a
-    model that rewrote its `tenant_id` would otherwise pick whose estate the whole family stages
-    into. The stamp must AGREE with the record — a disagreement is a forged or moved stamp,
-    refused rather than settled — and a stamp with no tenant (a pre-#1077 run) gets NO fallback:
-    there is no default tenant (#1078), and a family run on a tenant nobody chose would measure
-    somebody's estate, but not necessarily the source's."""
+    Siblings, the review and the manifest check all use this tenant, so it is read from the
+    source's runs-base record (`_tenant.tenant_of_run_dir`), which the box cannot write; the
+    stamp in the box's run dir could have been rewritten by a model. The stamp must agree with
+    the record, and a stamp with no tenant gets no fallback: a family on a tenant nobody chose
+    may not measure the source's estate."""
     from defender import _tenant
 
     try:
@@ -486,11 +357,8 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
             f"{stamp.get('tenant_id')!r} but its runs base's record "
             f"({_tenant.record_path(Path(source_run_dir).parent)}) names {tenant_id!r} — the "
             "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
-    # THROUGH THE ONE ACCEPTANCE FRAME a sibling's run start uses (`run_tenant.resolve_tenant`),
-    # asked here — before the questioner is paid for, the review replays and any world is
-    # staged — so a tenant a sibling would refuse is refused once, not by every sibling after the
-    # spend. The value is RETURNED and used (the review's grants come from it), not re-read. A
-    # sibling dispatches no turn-0 lead, so the lead-zero agreement is not asked, as there.
+    # The same acceptance check a sibling's run start uses, asked once up front so a tenant a
+    # sibling would refuse is refused before any spend. Siblings dispatch no turn-0 lead.
     from defender.runtime import run_tenant as run_tenant_mod
 
     try:
@@ -503,11 +371,8 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
 def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
     """Refuse an episode id whose family has already been authored.
 
-    ONE RULE, TWO DOORS. `prepare_episode` asks it because priming a second capture under an
-    existing family is the merge its exclusive claim exists to prevent; `preflight_episode`
-    asks it because the sweep it runs one line later would delete that family's live staged
-    names first. Spelled once so the two cannot come to disagree about what "already claimed"
-    is — the second door was added after the first, and the failure it closes is destructive.
+    Asked by `prepare_episode` (priming under an existing family would merge two captures) and
+    by `preflight_episode` (its sweep would delete that family's live staged names).
     """
     manifest = EpisodePaths(episode_dir).family
     if manifest.exists() or manifest.is_symlink():
@@ -521,12 +386,9 @@ def refuse_claimed_episode(episode_dir: Path, episode_id: str) -> None:
 def _episode_token(episode_id: str) -> str:
     """The episode's token, or the operator-facing refusal.
 
-    No override reaches this: an id `episode_token_for` cannot render is already refused by
-    `refuse_bad_episode_id`, which every caller of `episode_dir_for` runs first (F-R5 removed
-    the operator-named-token flag — it replaced the derived token outright, which let two
-    episode ids share one namespace and defeated `staging.sweep` by hand). This wrapper exists
-    only so a direct caller of `preflight_episode` — never the real launcher — meets the same
-    operator-facing refusal class as every other check here, rather than a bare `FamilyError`.
+    The token is always derived, never operator-named, so two episode ids cannot share a
+    namespace. The real launcher has already refused bad ids via `episode_dir_for`; this wrapper
+    gives direct callers of `preflight_episode` the same refusal class.
     """
     try:
         return episode_token_for(episode_id)
@@ -537,10 +399,8 @@ def _episode_token(episode_id: str) -> str:
 def _probe_cluster(door: Any, patterns: Sequence[str]) -> None:
     """Refuse an episode whose write door cannot reach the cluster.
 
-    Asked with the door's own connecting call rather than by trusting its construction: the door
-    is built from configuration and its failure mode is at USE — a container that is not
-    running, a docker context that does not resolve. Discovered at `Step.STAGING` instead, the
-    refusal arrives after the questioner has been paid for and the base primed.
+    Probed with a real call, since the door only fails at use (container down, docker context
+    unresolved); found at `Step.STAGING`, the questioner would already be paid for.
     """
     if not patterns:
         return
@@ -554,12 +414,9 @@ def _probe_cluster(door: Any, patterns: Sequence[str]) -> None:
             "itself") from unreachable
 
 
-#: The largest message id any one investigation's session could hold, used ONLY when the source
-#: run carries no readable session store. The driver caps an investigation at
-#: `DEFAULT_REQUEST_LIMIT` model requests and a request appends a bounded handful of messages, so
-#: an id two orders of magnitude beyond that product names no message any run could have
-#: produced. It is a CEILING and not the check: where a store exists, `branch_point_time` asks
-#: the session itself, which is the only authority on which of ITS messages may be branched from.
+#: A generous ceiling on any session's message id, far beyond `DEFAULT_REQUEST_LIMIT` times the
+#: messages per request. Only a sanity bound: where a store exists, the session itself decides
+#: which messages may be branched from.
 MAX_BRANCH_MESSAGE_ID = 100 * 60
 
 
@@ -567,28 +424,14 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
                         continuation_prompt: str) -> None:
     """Refuse a branch point the source run could not have produced.
 
-    THE STORE IS THE AUTHORITY when there is one, and `branch.validate` is what it is asked
-    THROUGH. That call is the seam's own set of preconditions and it is asked HERE, before the
-    questioner is paid, rather than only inside each sibling: a branch point at a dangling tool
-    call, over a capture that reached no system, at the tip of a finished investigation, or over
-    a frontier whose fence mapping was snapped is refused by every one of the three children —
-    identically, with the same message, after three model calls, a primed base, a staged corpus
-    and a full review have already been spent on it. Two of those preconditions govern what the
-    questioner is SHOWN (`read_frontier(source, fences_at=...)` slices the same document
-    `validate` judges), so a triplet authored past them was authored against material the seam
-    exists to refuse.
+    Where a session store exists, `branch.validate` is asked here — before the questioner is
+    paid — rather than only inside each sibling, where every child would refuse identically
+    after the whole episode was spent. Some of its preconditions also govern what the
+    questioner is shown. `as_of` comes from `branch_point_time`, which `validate`
+    cross-checks.
 
-    `branch_point_time` first, and its answer is what the spec carries: `validate` cross-checks
-    `as_of` against its own derivation, so a launcher that invented one would be refused on a
-    value it had just computed. One store handle does both, and the sibling that later opens the
-    same store re-asks the same rule — one home, two askings, no second spelling.
-
-    A SOURCE RUN WITH NO SESSION STORE is still branchable, and that is a deliberate looseness
-    rather than an oversight — an imported run dir, a replayed fixture and a run whose store was
-    pruned all carry their evidence and none carries a session. What can still be said about
-    such a request is exactly the ceiling above: negative is no message, and an id beyond what
-    any session could hold is a typo or a paste. Anything between those the launcher cannot
-    judge, and it says so rather than refusing a source it has no evidence against.
+    A source with no session store (imported, replayed, pruned) is still branchable; only the
+    range check above applies to it.
     """
     if branch_message_id < 0:
         raise LauncherRefused(
@@ -619,23 +462,10 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
 def _source_store(source_run_dir: Path) -> Any:
     """The source run's own session store, or `None` when it does not carry one.
 
-    `open_source_store` refuses a run whose case pointer is missing or does not reconcile, and
-    that refusal is right for a caller about to FORK into the store — a handle over the wrong
-    database inherits nothing. Here the question is weaker: does this source have a session this
-    launcher can ask about its own messages? A run with none is answered `None`, and the two
-    callers above each say what they do with that.
-
-    ONLY THE ABSENT POINTER IS "NO SESSION", and the distinction is the whole of this frame.
-    `open_source_store` raises ONE class for two facts — a run dir that carries no pointer at
-    all (an imported run, a replayed fixture, a pruned store) and a pointer that does not
-    reconcile with the store it names. Catching the class swallowed the second as if it were
-    the first: a source parked off its own runs base then reported "no session store", every
-    caller took its fallback, T0 became the moment the launcher ran and the questioner was shown
-    the FINISHED document's frontier instead of the branch point's — a whole episode paid for
-    against a source both the deleted distant-source pre-check and this handle existed to
-    refuse. The
-    presence of the pointer is asked HERE, so anything `open_source_store` says about a pointer
-    that IS there propagates as the refusal it is.
+    Only an absent session pointer means "no session". `open_source_store` raises one class
+    for both a missing pointer and one that does not reconcile, so the presence check is made
+    here and a mismatch still propagates as a refusal rather than silently taking the
+    storeless fallback (wrong T0, the finished document's frontier).
     """
     run_dir = Path(source_run_dir)
     if not artifact_file(RunPaths(run_dir).session_pointer):
@@ -644,19 +474,12 @@ def _source_store(source_run_dir: Path) -> Any:
 
 
 def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
-    """T0 — the moment every sibling resumes INTO — derived once for the whole family.
+    """T0 — the moment every sibling resumes into — derived once for the whole family so the
+    siblings share one clock.
 
-    DERIVED ONCE, never per world: a moment each sibling worked out for itself is not a shared
-    clock, and nothing downstream could tell that it was not.
-
-    THE SESSION IS THE AUTHORITY, and where there is one this is exactly `branch_point_time`.
-    Where there is not, T0 falls back to the newest moment the source run's own evidence
-    carries — the last time anything in that run dir was written. That is a MECHANISM DEVIATION
-    from the design, which names the store and only the store, and it is recorded as one: the
-    fallback is the moment the source's evidence STOPPED, which is the closest thing a storeless
-    run has to a branch point, and it is strictly better than the alternative of stamping every
-    sibling's payloads with the afternoon the family happened to be launched. A source that DOES
-    carry a session never reaches it.
+    With a session store this is `branch_point_time`. Without one it falls back to the newest
+    mtime in the source run dir — the moment its evidence stopped, which is closer to a branch
+    point than the launch time.
     """
     import datetime as _dt
 
@@ -678,15 +501,10 @@ def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
 
 
 def sibling_runs_base(episode_dir: Path) -> Path:
-    """The runs base each sibling PROCESS is handed.
+    """The runs base each sibling process is handed: inside the episode.
 
-    INSIDE THE EPISODE (§7 FORK-13). A sibling materialised beside its source is indistinguishable
-    from an ordinary run to every consumer that walks the runs base — the held-out index claims
-    the fixture slug by prefix and hands the score to the newest by mtime, the lesson tracer
-    counts one investigation as four, and the orientation corpus's recursive walk moves the
-    denominator every ordinary run is ranked against. None of those readers can tell a synthetic
-    sibling from a real run, and the answer this seam took is to keep them out of the tree rather
-    than to teach three readers a fourth rule.
+    Runs-base walkers (held-out index, lesson tracer, orientation corpus) cannot tell a sibling
+    from a real run, so siblings are kept out of the runs base entirely.
     """
     return EpisodePaths(episode_dir).runs
 
@@ -698,17 +516,11 @@ def sibling_argv(
     """One sibling's command line: the manifest, which arm of it this process is, its tenant
     and the model.
 
-    Everything else a sibling needs is DERIVED from the manifest, which is what makes the
-    manifest the contract. `sys.executable` rather than a bare `python3`, because the launcher
-    already re-execs into the project venv and a child that did not would resolve a different
-    interpreter with a different dependency set.
+    Everything else a sibling needs is derived from the manifest. `sys.executable` so the child
+    uses the same venv interpreter.
 
-    THE MODEL IS NOT DERIVABLE FROM THE MANIFEST, so it rides here. The launcher preflights
-    `--model` at family level (`preflight_episode`), and dropped from the child's argv that
-    check certified a model no sibling then ran: every arm resolved `$DEFENDER_MODEL` or the
-    built-in default instead. The failure is invisible without this line, because all N arms
-    resolve the SAME wrong model — so `_family_faults`'s `model` agreement finds perfect
-    agreement and the family is archived as comparable on a model nobody asked for.
+    The model is not in the manifest, so it is passed here; without it every arm would silently
+    agree on the default model rather than the one the preflight checked.
     """
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
             "--resume", str(EpisodePaths(episode_dir).family), "--world", world_label,
@@ -717,18 +529,15 @@ def sibling_argv(
             "--tenant", tenant_id]
     if model is not None:
         argv += ["--model", model]
-    # THE TENANTS ROOT RIDES TOO (#1106 M2): the child is an entry point, and one that worked
-    # the root out for itself would read its own checkout's copy rather than the one this
-    # launcher resolved the episode's tenant under.
+    # So the child uses the tenants root the launcher resolved, not its own default.
     if tenants_root is not None:
         argv += ["--tenants-root", str(tenants_root)]
     return argv
 
 
-#: The exit code recorded for an arm whose PROCESS never started — the spawn seam raised, or the
-#: rendezvous broke. Not any code a sibling can itself exit with (`run.py` returns 0, 1 or 2), so
-#: "we could not start it" stays distinguishable in the launcher's own report from "it ran and
-#: failed"; both are non-zero, which is what the launch status is about.
+#: The exit code recorded for an arm whose process never started (spawn raised, or the
+#: rendezvous broke). Distinct from `run.py`'s own 0/1/2 so "never started" is distinguishable
+#: from "ran and failed".
 SPAWN_FAILED_EXIT = 70
 
 
@@ -737,35 +546,27 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: _tenant.TenantId | None, tenants_root: Path,
 ) -> dict[str, int]:
-    """Start every accepted sibling TOGETHER, and wait for all of them.
+    """Start every accepted sibling together, and wait for all of them.
 
-    TOGETHER IS A PROPERTY OF THE START, not of a config flag: the children are handed to the
-    process seam from N threads that rendezvous first, so no sibling's start waits on another
-    sibling's completion. Serially, an episode's arms would be separated in time by however long
-    each investigation took — and a family compared across a moving estate is exactly what the
-    primed capture and the shared T0 exist to prevent, undone by the launcher's own scheduling.
+    The children are spawned from N threads that rendezvous first, so the arms overlap in time;
+    run serially they would be compared across a moving estate, which the primed capture and
+    shared T0 exist to prevent.
 
-    THE CHILD'S RUNS BASE IS INSIDE THE EPISODE. That is the whole of the containment decision:
-    #1078 D2 has the child DERIVE `EpisodePaths(world.episode_dir).runs` itself, inside
-    `materialize_run`'s sibling arm, from the manifest it already resolves — so this
-    launcher composes no `DEFENDER_RUNS_BASE` for it any more (J46: the retired knob is never
-    exported, whatever an operator's own shell still carries).
+    Each child's runs base is inside the episode: the child derives it from the manifest, so
+    the launcher exports no `DEFENDER_RUNS_BASE`, and siblings stay out of runs-base walkers'
+    reach.
 
-    `spawn` is the process seam. Defaulted at the boundary rather than re-coalesced in the body,
-    per the project's own anchoring rule.
+    `spawn` is the process seam.
 
-    THE CHILD'S TENANT IS SEEDED BEFORE IT STARTS (#1106 M2), and named on its command line
-    (#1078): the runs base's `_tenant.json` is created with the episode's `tenant_id` through
-    `_tenant`'s own create lane, and `--tenant` and `tenants_root` ride on each child's command
-    line. No tenant refuses before any record is written or any child is started — there is no
-    default to fall back to.
+    The child's runs-base record is seeded with the episode's `tenant_id` before it starts, and
+    `--tenant` and `tenants_root` ride on each command line. No tenant refuses before anything
+    is written.
     """
     from defender import _tenant
 
     if tenant_id is None or not _tenant.is_valid_tenant_id(tenant_id):
-        # A ValueError, not a `LauncherRefused`: the launcher resolved the episode's tenant
-        # before anything was spent (`_episode_tenant`), so reaching here without one is a
-        # caller's bug, and it rides the episode's one abort rule like any other fault.
+        # A ValueError, not `LauncherRefused`: `_episode_tenant` already resolved the tenant, so
+        # this is a caller bug and takes the episode's normal abort path.
         raise ValueError(
             f"episode {episode_dir} has no usable tenant ({tenant_id!r}) to run its siblings "
             "on — refused before any sibling started")
@@ -784,9 +585,7 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
 
     def launch_one(label: str) -> None:
         env = dict(os.environ)
-        # RENDEZVOUS FIRST. Without it "started together" would be whatever the pool's own
-        # scheduling happened to produce, and a family whose arms did not overlap would still
-        # look like one that did.
+        # Rendezvous first, so "started together" does not depend on the pool's scheduling.
         ready.wait(timeout=30)
         exits[label] = start(
             sibling_argv(episode_dir, label, tenant_id=tenant_id, model=model,
@@ -794,16 +593,10 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
         futures = {label: pool.submit(launch_one, label) for label in labels}
-    # A THREAD THAT DIED IS A RESULT, not a reason to abandon its siblings — the contract the
-    # `return_exceptions=True` fan-in this replaced spelled out loud. Re-raised here it left
-    # `_run_episode` through `_launch`'s abort arm, so `verify_family` never ran:
-    # the siblings that DID complete a whole investigation were never archived, no episode
-    # outcome was recorded, and the operator was told "no sibling started" — which is false of
-    # every arm the pool had already run to completion. It also fires for all N at once, since
-    # one late arrival breaks the shared barrier for every party.
-    #
-    # Recorded as a NON-ZERO exit rather than as a missing key: `_run_episode` reads a label's
-    # absence from this map as nothing to report, so a swallowed failure would have exited 0.
+    # A thread that died is recorded as a result, not re-raised: raising would skip
+    # `verify_family`, leaving completed siblings unarchived and misreporting "no sibling
+    # started". (A broken barrier fails all N at once.) Recorded as a non-zero exit, since a
+    # missing key would read as success.
     for label, future in futures.items():
         try:
             future.result()
@@ -833,10 +626,8 @@ def _world_label_of(run_dir: Path) -> str:
 def _scrub_ran(run_dir: Path) -> bool:
     """Did the reap scan walk this sibling's tree and say so?
 
-    Read at the SIDECAR path beside the run dir, never inside it: the verdict is written outside
-    the tree it judges on purpose (§7 D8) — in-tree it would be both plantable and forgeable by
-    the box that is root on that mount — so a run-dir-scoped read finds nothing and would mark
-    every family incomplete.
+    Read at the sidecar path beside the run dir: the verdict lives outside the tree it judges,
+    where the box that is root on that mount cannot forge it.
     """
     from defender.runtime import scrub as scrub_mod
 
@@ -853,48 +644,27 @@ def _scrub_ran(run_dir: Path) -> bool:
 def _stamp_of(run_dir: Path) -> dict | None:
     """A run dir's own provenance record, or `None` when it has none this reader can use.
 
-    ONE READER FOR ANY RUN DIR (#976 M0): the SOURCE run the family is anchored to at preflight
-    and each SIBLING it is compared over at verify are read through this same frame, so the
-    two ends of the comparison hold one shape and one notion of "unusable".
+    Used for both the source and every sibling, so both ends of the comparison share one shape.
+    Absent and unreadable both answer `None`: neither is an agreeing stamp.
 
-    ABSENT AND UNREADABLE ANSWER THE SAME WAY, and that is the point: neither is an agreeing
-    stamp, and treating an unknown as agreement is the one error a provenance comparison must
-    not make.
-
-    THROUGH `_provenance.read`, NOT a hand-rolled `artifact_file`-then-`read_text` pair. The
-    class owns what a provenance record IS, and this file lives in a BOX's rw bind — the
-    sibling's own, or the prior box that produced the source — so the bytes at that name are
-    whatever that box last wrote there. Read raw, a forged
-    `"commit": ["x"]` was truthy to `_clean_stamp`, `_stamp_speaks` admitted the arm, and
-    `_family_faults`'s set build then raised `TypeError: unhashable type: 'list'` out of
-    `verify_family` — before a single world was archived, destroying the expensive half of the
-    episode over one arm's file. `from_obj` refuses a non-`str` commit and a non-`bool` dirty,
-    and `read_guarded` is the alias-refusing read this frame was spelling by hand.
-
-    Re-serialised back to the record's own wire shape so every reader below keeps asking a
-    mapping — `_write_family_stamp` publishes it verbatim, and a field the class gains reaches
-    the family stamp without a second census here.
+    Read through `_provenance.read`, which refuses aliases and type-checks fields: the file is
+    in a box's rw bind, and a forged `"commit": ["x"]` would otherwise crash `verify_family`
+    before anything was archived. Returned as the record's wire-shape mapping, which
+    `_write_family_stamp` publishes verbatim.
     """
     record = _provenance.read(RunPaths(Path(run_dir)).provenance)
     return None if record is None else _as_stamp(record)
 
 
 def _as_stamp(record: _provenance.RunProvenance) -> dict:
-    """A typed provenance record as the mapping every comparison below asks.
-
-    ONE ROUND-TRIP for the two records that enter this frame typed — a run dir's stamp read
-    back through `_provenance.read`, and the live tree's capture at preflight — so the source,
-    the siblings and the launcher's own checkout are judged in one shape.
-    """
-    # lint-parse: ok — `as_json` is the class's OWN wire shape, narrowed field by field by
-    # `RunProvenance.as_json`; this is a round-trip of a typed record, not a read of untyped input.
+    """A typed provenance record as the mapping every comparison below asks."""
+    # lint-parse: ok — a round-trip of a typed record through its own `as_json`, not untyped
+    # input.
     return json.loads(record.as_json())
 
 
-#: One reason a family cannot be archived as a comparison against its source. `waivable`
-#: is the WHOLE of what `--allow-dirty` knows: the override drops every waivable fault and
-#: reaches no other, so which shapes it waives is a property of the fault, never of the site
-#: that reports it.
+#: One reason a family cannot be archived as a comparison against its source. `--allow-dirty`
+#: drops exactly the `waivable` faults, so waivability is a property of the fault, not the site.
 class _Fault(NamedTuple):
     waivable: bool
     text: str
@@ -905,27 +675,18 @@ def _family_faults(
 ) -> list[_Fault]:
     """Every reason `members` are not provably one family continuing `source`.
 
-    ONE JUDGEMENT FOR BOTH TIERS (#976). At preflight the family is the launcher's live tree
-    alone — the checkout every sibling will run; at verify it is the N siblings' own stamps.
-    Spelled once, the two tiers cannot disagree about what "anchored" means, and a shape one
-    of them forgot to ask cannot exist — the authority judges the SOURCE's own fitness exactly
-    as the preflight does, rather than trusting that the preflight ran.
+    One judgement for both tiers: at preflight the members are the live tree alone, at verify
+    the siblings' stamps. Verify re-judges the source rather than trusting that preflight ran.
 
-    THE SOURCE FIRST, and a silent source ends the anchoring there: a stamp that names no
-    commit can equal nobody's, and reported through the member comparison the fault would
-    blame the member and send the operator at the wrong knob. Then each member is held to the
-    anchor — commit equal; scope equal unless the source stamped before the field existed —
-    and every non-clean tree on either side is a fault: dirty, git could not be asked at all,
-    or git named the sha and could not answer for the tree. An unknown is not a clean bill of
-    health. Then the members are held to EACH OTHER on the model too, which is not anchored —
-    `--model` on the launcher is the operator's deliberate choice — but is held constant among
-    siblings, because a family across two engines is a comparison of nothing the archive
-    claims.
+    The source is checked first; a source with no commit ends anchoring there, so the fault
+    names the source rather than the members. Each member must match the anchor's commit (and
+    scope, when the source has one), and any non-clean tree on either side is a fault — an
+    unknown is not clean. Members must also agree with each other on the model, which is not
+    anchored to the source but must be constant across siblings.
 
-    ONLY DIRT IS WAIVABLE. A commit that is absent or is not the source's, or a `dirty` measured
-    over a different pathspec, is a code confound and not dirt; and a silent member is a
-    silence, which waived would drop out of the agreement and let another arm's commit be
-    published as the family's (M3b).
+    Only dirt is waivable. A wrong or missing commit or a different scope is a code confound,
+    and a silent member waived would drop out of the agreement and let another arm's commit
+    stand as the family's.
     """
     faults: list[_Fault] = []
     anchored = _stamp_speaks(source)
@@ -937,19 +698,12 @@ def _family_faults(
         faults.append(_Fault(True, _not_certified_clean(source_who, source)))
     for who, stamp in members.items():
         faults.extend(_member_faults(who, stamp, anchor=source if anchored else None))
-    # THE AGREEMENT IS TAKEN OVER THE STAMPS THAT SAY SOMETHING, and a DIRTY tree says
-    # something: a dirty arm is compared on the fields it does carry, and the tree's dirtiness
-    # itself is the one thing the override waives. Dropping every non-clean arm instead made
-    # `--allow-dirty` waive the whole agreement — the siblings run from ONE checkout, so a
-    # dirty tree made all three unclean at once and a family across two commits or two MODELS
-    # was archived as comparable.
+    # Agreement is over every stamp that names a commit, dirty ones included: excluding dirty
+    # arms would let `--allow-dirty` waive the whole agreement, since siblings share one
+    # checkout and are all dirty together.
     comparable = {who: stamp for who, stamp in members.items()
                   if stamp is not None and _stamp_speaks(stamp)}
-    # NOT OVER THE FIELDS THE ANCHOR ALREADY PINNED. A member held to the source's commit
-    # (and scope, when the source has one) that disagrees with a sibling on it has ALREADY
-    # been named against the source above — two siblings at two commits are two anchor faults,
-    # and a third sentence saying they also differ from each other is the same fact told a
-    # third time in the archived reason. The agreement covers what the anchor does not.
+    # Skip fields the anchor already pinned; disagreements there were reported above.
     pinned: set[str] = set()
     if anchored:
         pinned.add("commit")
@@ -967,9 +721,8 @@ def _family_faults(
 
 
 def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list[_Fault]:
-    """One tree's faults against the anchor — `None` when the source itself could not anchor,
-    in which case the tree is judged on its own stamp alone and the source's fault, already
-    reported, is the one the operator is sent to."""
+    """One tree's faults against the anchor. `anchor` is `None` when the source could not
+    anchor (already reported); the tree is then judged on its own stamp alone."""
     if stamp is None:
         return [_Fault(False, (
             f"{who} carries no readable provenance stamp — an absent or unreadable stamp is "
@@ -1006,13 +759,8 @@ def _family_refusal(
 ) -> str | None:
     """The faults `--allow-dirty` did not waive, as one refusal — or `None`.
 
-    NEVER-WAIVABLE FAULTS FIRST, and the flag is named EXACTLY WHEN PASSING IT WOULD LET THE
-    FAMILY THROUGH. Both are properties of the list, not of any message: an operator with a
-    dirty source and a launcher at the wrong commit reads the commit first, and is not told to
-    pass a flag that would not help (§7 FORK-8); a refusal the override cannot reach does not
-    mention it, not even to say so, because an operator reading `--allow-dirty` in a refusal
-    is being told what to do next. Every message in `_family_faults` is therefore written
-    without the flag, and only this frame appends it.
+    Non-waivable faults are listed first, and `--allow-dirty` is suggested only when passing it
+    would let the family through; fault messages themselves never mention the flag.
     """
     faults = [fault for fault in _family_faults(source, members, source_who=source_who)
               if not (fault.waivable and allow_dirty)]
@@ -1027,11 +775,8 @@ def _family_refusal(
 def _clean_stamp(stamp: dict | None) -> bool:
     """Did git answer for this sibling's tree, and say it was clean?
 
-    THREE SHAPES ARE NOT CLEAN and only one is: a dirty tree, a git that could not be asked at
-    all (no sha, a reason), and a git that named the sha and could not answer for the tree. An
-    unknown is not a clean bill of health — that is the one error a provenance comparison must
-    never make, and the three arms are refused by one rule rather than by a taxonomy that would
-    have to decide which unknowns are comfortable.
+    Only `dirty is False` with a commit counts; a dirty tree, an unreachable git, or a sha with
+    no answer for the tree are all unknowns, and an unknown is not clean.
     """
     if stamp is None:
         return False
@@ -1039,12 +784,10 @@ def _clean_stamp(stamp: dict | None) -> bool:
 
 
 def _stamp_speaks(stamp: dict | None) -> bool:
-    """Did git answer AT ALL for this sibling — whatever it said about the tree?
+    """Did git answer at all for this tree — whatever it said about dirt?
 
-    The weaker half of `_clean_stamp`, and the one the AGREEMENT is taken over. A stamp with a
-    commit names a commit, a scope and a model that can agree or disagree with a sibling's; a
-    stamp without one is a silence, held to nothing and never waived (#976 M3b) — the override
-    waives dirt, and a dirty stamp still speaks.
+    The agreement is taken over stamps that speak. A stamp with no commit is a silence, held to
+    nothing and never waived; a dirty stamp still speaks.
     """
     return stamp is not None and bool(stamp.get("commit"))
 
@@ -1055,25 +798,12 @@ def verify_family(
 ) -> dict:
     """Check every sibling, archive what is clean, and record the episode's outcome.
 
-    `source` is the source run's stamp — the dict `_stamp_of` returns, threaded from
-    `preflight_episode` where it was read and judged (#976 M5). KEYWORD-REQUIRED WITH NO
-    DEFAULT: a default of `None` would let every existing call site keep the unanchored
-    behaviour it had, which is exactly the hole this argument closes (C5 — three siblings
-    agreeing at a commit the source never ran were archived as comparable).
+    `source` is the source run's stamp as judged by `preflight_episode`. Required with no
+    default, so siblings are always held to the source's commit rather than only to each other.
 
-    THE OUTCOME IS A FIELD WITH A REASON (§7 FORK-1). Before it was one, `incomplete` was
-    carried by the ABSENCE of a family stamp, and every question about a partially good family
-    fell through the gap between "accepted" and "rejected": which arms are usable, whether the
-    directory can be compared, why not.
-
-    An incomplete family ARCHIVES PER WORLD and withholds only the family stamp and the
-    comparability claim it stands for. Each individually clean sibling is a real investigation
-    that really ran, and deleting it because a fourth arm failed its scrub would throw away the
-    expensive half of the episode to record the cheap half more tidily.
-
-    And `incomplete` is a FOURTH TEARDOWN TRIGGER. The cluster does not care why the episode
-    ended; a staged name left live under this episode's token is a name the next launch's sweep
-    will refuse to touch and nothing else will ever remove.
+    The outcome is recorded with a reason. An incomplete family still archives each clean
+    sibling and withholds only the family stamp: each is a real, expensive investigation.
+    Teardown runs on this path too.
     """
     episode_dir = Path(episode_dir)
     dirs = {_world_label_of(d): Path(d) for d in run_dirs}
@@ -1082,12 +812,8 @@ def verify_family(
     stamps = {label: _stamp_of(path) for label, path in dirs.items()}
 
     reasons: list[str] = []
-    # NO SIBLING IS NOT A FAMILY. Over an empty `run_dirs` every check below passes vacuously
-    # — nothing unwalked, nothing off the anchor, nothing disagreeing — and the family stamp
-    # would then publish an agreed record of nobody (or, taken from an empty mapping, raise
-    # out of this frame after the archive was written and before the outcome was recorded or
-    # the door torn down). The launcher never reaches here with none (a manifest always has a
-    # base world), so this is the public entry's own answer.
+    # With no siblings every check below passes vacuously, and `_write_family_stamp` would
+    # raise after the archive was written. The launcher never gets here with none.
     if not dirs:
         reasons.append("the family has no sibling — a comparison over no arm is not one, so "
                        "there is nothing to hold to the source's commit or to archive")
@@ -1106,28 +832,19 @@ def verify_family(
 
     outcome = INCOMPLETE if reasons else ACCEPTED
     reason = "; ".join(reasons)
-    # THE ARCHIVE DIRECTORY EXISTS WHATEVER THE OUTCOME. `worlds/` is the archive's own shape,
-    # and its ABSENCE would be a third spelling of "incomplete" beside the outcome field and the
-    # withheld family stamp — which is the exact gap FORK-1 closed. An episode that archived no
-    # world has an empty `worlds/`, and the recorded outcome is what says why.
+    # `worlds/` exists whatever the outcome; the recorded outcome, not its absence, says why it
+    # may be empty.
     guarded_mkdir(EpisodePaths(episode_dir).worlds, base=episode_dir)
-    # PER WORLD, and only the individually clean ones: a sibling whose own scrub never ran has a
-    # tree nothing certified, so copying out of it is the read the certification exists to gate.
+    # Only scrub-verified siblings are archived: an unscrubbed tree is uncertified.
     from defender.learning.branch import archive as archive_mod
 
     try:
         archive_mod.archive_episode(
             episode_dir, {label: dirs[label] for label in scrub_verified})
     except Exception as archive_refused:  # noqa: BLE001 — recorded, then re-raised unchanged
-        # A HALF-ARCHIVE IS RECORDED BEFORE THE EXCEPTION LEAVES, which is the whole of FORK-1
-        # applied to this frame. `archive_episode` screens per world and raises on the first
-        # world whose run dir has an artifact's name occupied by something that is not the
-        # artifact — so an episode with three clean scrubs could leave `worlds/a/` behind, no
-        # `episode.outcome` written at all, and a `review.yaml` still saying "3 worlds
-        # reviewed, none rejected". `episode._refuse_incomplete` gates on a RECORDED
-        # `incomplete`, so both derived readers then answered a one-arm question for a
-        # three-arm family with nothing on disk marking it partial — the absence-means-
-        # incomplete gap the outcome field exists to close.
+        # Record `incomplete` before re-raising: `archive_episode` can fail partway, and
+        # readers (`episode._refuse_incomplete`) gate on a recorded outcome, so a partial
+        # archive with none would read as complete.
         _record_episode_outcome(
             episode_dir, outcome=INCOMPLETE,
             reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
@@ -1143,22 +860,16 @@ def verify_family(
 
 
 def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -> str | None:
-    """§7 decision 15(2)/(3): every sibling whose stamp carries a DIFFERENT non-null
-    `tenant_id` is a cross-tenant fault; a sibling whose stamp carries NO `tenant_id` field at
-    all is its OWN distinctly-worded fault, never conflated with a disagreement — treating
-    "absent" as "compatible" is exactly how a real cross-tenant family would slip past this
-    check during the migration window. Runs over whichever siblings have ALREADY stamped: a
-    sibling with no readable stamp at all is SKIPPED here (its own fault is
-    `_member_faults`'s "carries no readable provenance stamp"), and the comparison records how
-    many it skipped rather than blocking on them."""
+    """Siblings disagreeing on `tenant_id`, or a mix of stamps with and without the field.
+
+    A missing field is its own fault, never treated as agreeing. Siblings with no readable
+    stamp are skipped (`_member_faults` reports them) and the skip count is recorded."""
     readable: dict[str, dict] = {
         label: stamp for label in labels
         if isinstance(stamp := stamps.get(label), dict)}
     skipped = len(labels) - len(readable)
     no_field = sorted(label for label, s in readable.items() if s.get("tenant_id") is None)
-    # A family where EVERY readable sibling is silent on tenant (a pre-#1077 stamp, or one an
-    # older process wrote) is not this check's business — only a MIX of stamped and unstamped
-    # siblings is the migration-window signal decision 15(2) names.
+    # All siblings silent on tenant (older stamps) is fine; only a mix is a fault.
     if no_field and len(no_field) == len(readable):
         no_field = []
     parts: list[str] = []
@@ -1171,11 +882,9 @@ def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -
         if len(set(values.values())) > 1:
             parts.append(f"siblings disagree on tenant: {values}")
     if skipped:
-        # RECORDED in the family's reason (the spec's demand: an unstamped sibling cannot
-        # silently shrink the comparison), and only ever beside a fault that is already
-        # there — a sibling with no readable stamp is `_member_faults`'s own fault, so this
-        # note never turns an otherwise-accepted family INCOMPLETE on its own. Should that
-        # fault ever be relaxed, this line is the one to move onto it.
+        # Recorded so an unstamped sibling cannot silently shrink the comparison. Always
+        # accompanies `_member_faults`'s own fault for that sibling, so this note alone never
+        # makes a family incomplete.
         parts.append(
             f"the cross-tenant comparison ran over the {len(readable)} sibling(s) already "
             f"stamped and skipped {skipped} unstamped one(s)")
@@ -1189,36 +898,22 @@ def _write_family_stamp(
     """The family's one stamp: what every sibling agreed on, what it was anchored to, and
     whether it was waved through.
 
-    @owns source — the family stamp's `source` key, the source run's WHOLE provenance record as
-    `_stamp_of` read it at preflight (#976 M4, O5). Copied verbatim rather than reduced to the
-    commit: an operator who waived a dirty source with `--allow-dirty` gets a family stamp
-    whose `source.dirty` is True beside `allow_dirty` True, so the archive never reads as
-    anchored to a clean sha it was not.
+    @owns source — the family stamp's `source` key, the source run's whole provenance record as
+    `_stamp_of` read it at preflight. Copied verbatim so a waived dirty source shows
+    `source.dirty` beside `allow_dirty`, and the archive never reads as anchored to a clean sha.
 
-    THREE ROLES, DISJOINT. The agreed provenance is a CONCLUSION about the siblings' own
-    records; the source is the RECORD the family was held to; the override is a fact about the
-    operator's command line. Sourced from one another they would be indistinguishable to an
-    archive reader — a family that was clean and one that was waved through would read
-    identically — which is the whole reason the override is named.
+    The agreed record (about the siblings), the source (what they were held to) and the
+    override (the operator's flag) are kept separate so a clean family and a waived one read
+    differently.
     """
-    # ANY sibling's stamp is the agreed record ON THE FIELDS THE FAMILY IS HELD CONSTANT ON —
-    # commit, scope and model: this frame is reached only when `_family_refusal` found none
-    # absent, none silent and every speaker agreeing on those, so on them the first is every
-    # other. The dirt fields (`dirty`, `dirty_paths`, `dirty_path_count`, `unavailable`) are
-    # NOT held constant — under `--allow-dirty` one sibling can be clean and the next dirty —
-    # and here they are the first sibling's; each sibling's own reading is in its archived
-    # `worlds/<label>/provenance.json`, which is where a reader asking which arm needed the
-    # override finds it.
-    #
-    # AND THE FAMILY IS NOT EMPTY: `verify_family` refuses a family of no siblings before this
-    # frame, so the `next` below has a stamp to take — over an empty mapping it would raise
-    # `StopIteration` after the archive was written and before the outcome was recorded.
+    # Any sibling's stamp is the agreed record on commit, scope and model, since
+    # `_family_refusal` passed. Dirt fields may differ under `--allow-dirty` and here are the
+    # first sibling's; each sibling's own is archived in `worlds/<label>/provenance.json`.
+    # `verify_family` guarantees at least one sibling, so `next` cannot raise.
     agreed = {k: v for k, v in next(
         stamp for stamp in stamps.values() if stamp is not None).items() if k != "world_id"}
-    # #1077 decision 15(4): the family record carries the family's OWN base world, read off
-    # the tenant record at the siblings' shared runs base — so a family whose every member is
-    # a forked sibling still has one carrier lessons attribution can key on (no member ever
-    # stamps the tenant's base world itself; decision 15(1)/(4)).
+    # The family's base world, from the tenant record at the siblings' runs base: no member
+    # stamps it, and lessons attribution keys on it.
     base_world_id = _family_base_world_id(dirs)
     doc: dict[str, object] = {
         "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)}
@@ -1230,9 +925,7 @@ def _write_family_stamp(
 
 
 def _family_base_world_id(dirs: dict[str, Path] | None) -> str | None:
-    """The family's base world, read from the tenant record at the siblings' shared runs
-    base — derived from any one sibling's own run dir (they all share one runs base, per
-    `learning/branch/cli.sibling_runs_base`)."""
+    """The family's base world, from the tenant record at the siblings' shared runs base."""
     from defender import _tenant
 
     if not dirs:
@@ -1249,10 +942,8 @@ def _record_episode_outcome(
 ) -> None:
     """Merge the episode's own verdict into its review record, never over the worlds it holds.
 
-    THROUGH `staging.merge_review`, which is the ONE merger of this file. Spelled here as well,
-    the two writers had drifted on key ordering, unicode escaping and whether the parent
-    directory was made — and both run against the same document in one episode, so which of them
-    wrote last decided its whole shape.
+    Through `staging.merge_review`, the single merger for this file, so both writers serialise
+    it identically.
     """
     block: dict[str, Any] = {"outcome": outcome, "reason": reason}
     if decision is not None:
@@ -1268,14 +959,10 @@ def _record_episode_outcome(
 def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     """The operator's whole command line: a source run, a branch point, and what to say.
 
-    THE EPISODE ID IS NOT HERE. An episode IS a (source run, branch point) pair, so the id is
-    derived from those two rather than chosen: two launches of one pair under two operator-chosen
-    ids are two immutable captures of one moment with nothing saying they are the same episode.
+    No episode id argument: it is derived from the source run and branch point.
 
-    THE CONTINUATION PROMPT IS REQUIRED. It is part of the measured instrument — the 2026-08-16
-    experiment's own caveat was that its continuation wording biased the run toward closing over
-    gathering — and the design names no other author for it, so a launch without one refuses at
-    the parser rather than inventing a string.
+    The continuation prompt is required because it is part of the measured instrument (its
+    wording can bias siblings toward closing over gathering), and nothing else should author it.
     """
     p = argparse.ArgumentParser(prog="branch", description=__doc__)
     p.add_argument("source_run_dir", type=Path, help="the finished run to fork")
@@ -1312,30 +999,18 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     lessons_dir: Path | None = None,
     live_tree: Callable[[], _provenance.RunProvenance] | None = None,
 ) -> int:
-    """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
+    """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
 
-    Every check this module owns exits with a written explanation, and the checks it delegates
-    to — the source store, the branch point, the primer, the family loader, the staging guard,
-    the review — raise their own classes with messages authored for exactly this reader.
-    Uncaught, those reached the operator wrapped in a stack trace while the ones beside them
-    printed cleanly: two spellings of "you cannot branch this" from one command.
+    The delegated checks (source store, branch point, primer, family loader, staging guard,
+    review) raise their own classes with operator-ready messages; they are converted here.
+    `sqlite3.Error` is included because a corrupt source store raises it, not `BranchError`.
 
-    THE STORE FAULTS RIDE HERE TOO, and for the reason the driver's own setup handler names
-    them: every preflight check reads the source's sqlite database, so a file that is not one
-    raises `sqlite3.DatabaseError` — never a `BranchError` — and left out, the corrupt-store
-    case printed a traceback while the pointer-mismatch case one line away printed a clean
-    refusal.
-
-    ANYTHING ELSE RAISED FROM `Step.QUESTIONER` THROUGH `Step.REVIEW` IS ALSO A REFUSAL (§7
-    FORK-9: one abort rule, not a six-way taxonomy). A questioner call that fails, a staging
-    door that fails mid-way and a review whose replay cannot reach the cluster are three
-    different exception classes and one outcome: teardown has already fired in `_launch`'s own
-    `finally`, no sibling has started, and the operator is told which step ended the episode.
+    One abort rule: anything else raised from `Step.QUESTIONER` through `Step.REVIEW` is also
+    reported as a refusal (in `_launch`) — teardown has already run, no sibling has started,
+    and the operator is told which step ended the episode.
     """
-    # DEFERRED, and the reason is the launcher's own entry point: `python3
-    # defender/learning/branch/cli.py --help` has to reach argparse in an interpreter that may
-    # not carry the model runtime, and the review's own imports pull it in. The names below are
-    # needed only once a launch is actually under way.
+    # Deferred so `cli.py --help` works in an interpreter without the model runtime, which the
+    # review's imports pull in.
     from defender.learning.branch.review import ReviewError
 
     try:
@@ -1357,14 +1032,11 @@ def _launch(  # noqa: PLR0913 — see `main`
     from defender.run import preflight_role_models
 
     ns = parse_branch_args(argv)
-    # RESOLVED ONCE, HERE, and threaded inward non-`None`. Both are DI seams whose production
-    # value is expensive to name (`default_door` reads the deployment's config; the preflight
-    # sources provider keys), so the signature cannot carry them as literal defaults — the
-    # project's anchoring rule is then to resolve at the boundary rather than to re-coalesce in
-    # each body, which is what would let two frames disagree about which door an episode used.
+    # Injected seams are resolved once here and threaded inward non-`None`, so no two frames can
+    # disagree about which door, preflight or model an episode used.
     role_preflight = preflight_role_models if preflight is None else preflight
-    # THE EPISODE'S TENANT FIRST (#1106): the door, the corpus patterns, the review's read side
-    # and every sibling all resolve through it, so it is settled before any of them is built.
+    # The episode's tenant first: the door, corpus patterns, review read side and siblings all
+    # resolve through it.
     source = Path(ns.source_run_dir).resolve()
     tenants_root = (ns.tenants_root if ns.tenants_root is not None
                     else default_tenants_root(REPO_ROOT))
@@ -1375,14 +1047,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     runs_base = tenant_paths.runs
     write_door = (staging_mod.write_door_from_env(staging_mod.host_context(tenant.settings))
                   if door is None else door)
-    # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
-    # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
-    # `tmp_path` corpus and this frame is the only one that ever sees the production path.
     questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
-    # SAME RULE, #976 M2: the live tree's capture is `_provenance.capture_tree` over the
-    # checkout this launcher runs in, resolved here so the preflight is handed a callable and
-    # never asks git itself — every end-to-end launch of `main` would otherwise be compared
-    # against the HEAD of whatever tree the suite ran under.
+    # Injectable so end-to-end tests aren't compared against the suite's own HEAD.
     live_capture = ((lambda: _provenance.capture_tree(REPO_ROOT)) if live_tree is None
                     else live_tree)
     episode_id = episode_id_for(source.name, ns.branch_message_id)
@@ -1393,23 +1059,10 @@ def _launch(  # noqa: PLR0913 — see `main`
         model=ns.model, continuation_prompt=ns.continuation_prompt,
         allow_dirty=ns.allow_dirty, live_tree=live_capture, settings_dir=tenant.settings)
 
-    # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
-    # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they
-    # reached `author_family`'s `invoke(...)` and `review(adapters=None)` as a bare `TypeError`,
-    # AFTER `prepare_episode` had primed an immutable episode directory that cannot be reused —
-    # so the shipped `__main__` path burned an episode id per attempt and reported it as a crash.
-    #
-    # RESOLVED BEFORE THE CLAIM, so a deployment that cannot build them is refused while
-    # nothing has been spent and no episode directory exists. The adapter seam is the one that
-    # can answer that here: building its registry reads and parses every system the gather
-    # grant names, so a tree missing an adapter the grant declares refuses now rather than
-    # inside the review. The questioner's own model config was already asked for by the role
-    # preflight above, which sweeps every registered role including this one.
-    #
-    # `seams.model_seam` answers BOTH model calls, because the authoring fan-out and the
-    # comparator make the same call on the same role and differ only by the `agent_id` their
-    # traces partition on — see that module for why a second builder here would be a second
-    # place for them to acquire different models.
+    # The model and adapter seams are built before the claim, so a deployment that cannot build
+    # them (e.g. a gather-granted adapter missing from the tree) is refused before an episode
+    # dir exists. `seams.model_seam` serves both the authoring fan-out and the comparator so
+    # they cannot end up on different models.
     try:
         author = seams.model_seam(episode_dir) if questioner is None else questioner
         compare_with = seams.model_seam(episode_dir) if invoke is None else invoke
@@ -1422,21 +1075,14 @@ def _launch(  # noqa: PLR0913 — see `main`
             "questioner and the estate's read side, and an episode that cannot reach either "
             "has nothing to measure") from unbuildable
 
-    # `Step.QUESTIONER` ONWARD IS THE PART THAT SPENDS. Everything from here to the archive
-    # runs inside the teardown guard, because from the first staging append onward there are
-    # names live on the cluster that only this process knows about (§7 FORK-9: ONE abort rule
-    # from `Step.QUESTIONER` through `Step.REVIEW`).
+    # From here on the episode spends, and after the first staging append there are live
+    # cluster names only this process knows about, so everything runs inside the teardown guard.
     episode_dir = prepare_episode(episode_id, source, tenant=tenant_paths)
-    # SET ON THE WAY OUT OF EVERY ABORT ARM, and read by the `finally`. The one thing the
-    # teardown frame has to know is whether an exception is already on its way to the operator,
-    # and the only frame that can say so is this one — see `_teardown_without_masking`.
+    # Tells the `finally` whether an exception is already heading to the operator; only this
+    # frame knows (see `_teardown_without_masking`).
     aborting = False
-    # ONE SHOT, so the episode can hand the cluster back EARLY and the `finally` still covers
-    # every path that did not. The grade at the tail of `_run_episode` makes worlds x draws
-    # model calls, each bounded only by the subagent timeout, and it reads the ARCHIVE and the
-    # runs base — never the cluster. Holding every staged alias live across that is minutes to
-    # hours of namespace nobody is using, and any hang there delays teardown of names the next
-    # launch's sweep will refuse to touch.
+    # One-shot so the episode can release the cluster before the long judge pass (which never
+    # reads the cluster), while the `finally` still covers every other path.
     teardown = _OneShotTeardown(episode_dir, write_door)
     try:
         return _run_episode(
@@ -1448,40 +1094,27 @@ def _launch(  # noqa: PLR0913 — see `main`
     except SystemExit:
         aborting = True
         raise
-    except BaseException as failed:  # noqa: BLE001 — ONE abort rule, see `main`'s docstring
+    except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
         aborting = True
         if teardown.done:
-            # UNCHANGED, not wrapped — and the condition is WHAT HAPPENED, not one exception
-            # class. Once the episode has handed the cluster back, every sibling has started,
-            # archived and been reviewed, so both halves of the abort sentence below ("no
-            # sibling started and every staged name is torn down") are false of anything raised
-            # from here on: the teardown's own refusal, whichever class `staging.teardown`
-            # leaked on the way to raising it (`read_staged`'s `UnicodeDecodeError`,
-            # `merge_review`'s `OSError`), or an interrupt during the grade. Named on the class
-            # instead, exactly one of those was reported honestly and every other one was
-            # reported as an episode that never ran. BEFORE the teardown, a `StagingRefused` out
-            # of `stage_world` IS the one-abort case and keeps the wrap.
+            # Re-raised unchanged: once the cluster has been handed back the siblings have run,
+            # so the abort message below ("no sibling started…") would be false for anything
+            # raised now, whatever its class.
             raise
         raise LauncherRefused(
             f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
             "staged name is torn down") from failed
     finally:
-        # ON EVERY EXIT that has not already torn down: the rejection, the clean completion, the
-        # `incomplete` family and any exception raised after the first staging append. The
-        # cluster does not care why the episode ended, and a staged name left live under this
-        # episode's token is one the next launch's sweep will refuse to touch and nothing else
-        # will ever remove.
+        # On every exit not already torn down: a staged name left live is one the next
+        # launch's sweep refuses to touch and nothing else removes.
         teardown(aborting=aborting)
 
 
 class _OneShotTeardown:
     """`_teardown_without_masking`, called at most once however many callers ask.
 
-    Two frames want it now — the episode itself, which releases the cluster before it spends
-    minutes grading, and `_launch`'s `finally`, which covers every path the episode did not
-    reach. `staging.teardown` is not safe to run twice (it re-deletes a name already gone and
-    files the adapter's complaint as a verification failure), so the second call is the one that
-    must do nothing rather than the first being conditional on a flag someone has to thread."""
+    Both the episode (releasing the cluster before grading) and `_launch`'s `finally` call it,
+    and `staging.teardown` is not safe to run twice."""
 
     def __init__(self, episode_dir: Path, door: Any) -> None:
         self._episode_dir = episode_dir
@@ -1490,8 +1123,7 @@ class _OneShotTeardown:
 
     @property
     def done(self) -> bool:
-        """Has the cluster already been handed back? Read by `_launch`'s abort arm, which must
-        not tell an operator "no sibling started" about an episode that ran to completion."""
+        """Has the cluster already been handed back?"""
         return self._done
 
     def __call__(self, *, aborting: bool) -> None:
@@ -1502,27 +1134,17 @@ class _OneShotTeardown:
 
 
 def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -> None:
-    """Tear the episode's staged names down, and NEVER let that displace the abort in flight.
+    """Tear the episode's staged names down without letting a failure displace an abort in flight.
 
-    A `finally` is the one frame where a second exception silently replaces the first, and the
-    two are not interchangeable here: the abort says why the episode ended and is what the
-    operator has to act on, while a teardown failure says the cleanup also went wrong. Reported
-    the other way round, "the door died on its third connection" is what an operator sees for an
-    episode that was actually rejected in review.
-
-    NOT SWALLOWED, though — `teardown` has already written the unverified names into the review
-    record before it raises, which is the obligation, and this frame adds the log line. With
-    nothing else propagating, the failure is the answer and it is re-raised.
+    In a `finally` a second exception would replace the first, and the abort is what the
+    operator must act on. So while aborting, a teardown failure is logged (its unverified
+    names are already in the review record); otherwise it is re-raised.
     """
-    # PASSED IN, never inferred. `sys.exc_info()` is THREAD-global, not frame-local: read here
-    # it answers for whatever exception is being handled anywhere up this thread's stack, so a
-    # `cli.main` called from inside someone else's `except` block reported an in-flight abort
-    # for a perfectly clean episode — and a teardown that could not verify its names gone was
-    # then swallowed into an exit 0 with live aliases on the cluster. Only `_launch` knows, and
-    # it says so.
+    # `aborting` is passed in, not read from `sys.exc_info()`, which is thread-global and would
+    # report an in-flight exception from any caller up the stack.
     try:
         staging_mod.teardown(episode_dir, door=door, review_path=EpisodePaths(episode_dir).review)
-    except Exception as cleanup_failed:  # noqa: BLE001 — see the docstring: never mask
+    except Exception as cleanup_failed:  # noqa: BLE001 — never mask an in-flight abort; re-raised otherwise
         if not aborting:
             raise
         _logger.error(f"teardown also failed ({cleanup_failed!r}); the names it could not "
@@ -1541,28 +1163,19 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     `teardown` is `_launch`'s one-shot guard, called here once the archive is written so the
     cluster is released before the grade spends its model calls; `_launch`'s `finally` covers
     every path that does not reach that call. `source_stamp` is the anchor the preflight read
-    and judged, handed to `verify_family` unchanged (#976 M5)."""
-    # ONE CLOCK FOR THE EPISODE, and every frame below is drawn with it: the six steps are
-    # visible here, in launch order, in one function — `steps.Step` declares them, this runs
-    # them, and nothing else draws a frame.
+    and judged, handed to `verify_family` unchanged."""
+    # One clock for the episode; every step frame is drawn here, in launch order.
     clock = timing_mod.StageClock(episode_dir)
     with clock.step(Step.QUESTIONER):
         family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
                          questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
     with clock.step(Step.STAGING):
-        # THE STAGING RECORD EXISTS FROM THE MOMENT STAGING BEGINS, empty if nothing is staged.
-        # It is the SOLE account of a cluster write — the write door bypasses `guard_outbound`,
-        # which is also the capture recorder — so its ABSENCE has to mean "staging never
-        # started" and never "staging wrote something this file does not name". An empty record
-        # is the honest statement that a family declared no corpus difference.
+        # The staging record exists from the moment staging begins, so its absence can only
+        # mean "staging never started".
         staged = staging_mod.staged_path(episode_dir)
         if not staged.exists():
-            # A COMMENT LINE, not `[]`. The record is APPENDED to, one YAML list item per
-            # created name, so a literal empty-list document would make every later append
-            # unparseable — and an unparseable staging record is the one thing teardown refuses
-            # to act on, which would leave every name this episode creates live on the cluster
-            # forever. A comment parses to nothing, so an episode that staged no corpus reads
-            # back as no rows, while the FILE still exists from the moment staging began.
+            # A comment, not `[]`: rows are appended as YAML list items, and appending after a
+            # literal `[]` makes the record unparseable, which teardown refuses to act on.
             write_guarded(
                 staged,
                 f"# staged names for episode {episode_id} — one row per name, appended BEFORE "
@@ -1577,10 +1190,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                                    door=door, invoke=invoke, settings_dir=tenant.settings,
                                    runs_base=runs_base)
     if record.get("episode", {}).get("decision") == REJECTED:
-        # ANY REJECTED WORLD ENDS THE EPISODE (§7 FORK-14). Not the rejected one alone: a world
-        # is a difference against its siblings, so a family missing an arm measures nothing the
-        # design claims to measure, and running the remainder would produce a directory that
-        # reads like a completed comparison.
+        # Any rejected world ends the whole episode: a family missing an arm measures nothing,
+        # and running the rest would look like a completed comparison.
         _record_episode_outcome(episode_dir, outcome=REJECTED, reason=str(
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
@@ -1602,66 +1213,41 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _logger.warning(f"world {label} exited {exits[label]}")
     _logger.info(f"episode {episode_id}: outcome={report['outcome']} "
                  f"({len(report['scrub_verified'])}/{len(labels)} verified)")
-    # J10: the judge runs at the TAIL of the step runner, after the archive step and before the
-    # return — never in `_launch`'s post-teardown path, which is production-dead on this route.
-    # THE HAND-BACK IS THE OUTER FRAME AND THE CLOCK THE INNER ONE, in that order: the cluster
-    # is released before the judge's clock starts (teardown is not a step — `steps.py`), and
-    # the judge's entry is on the record before a held hand-back failure is raised. Drawn the
-    # other way round, the judge was booked for every delete-and-verify the teardown made, and
-    # a held cleanup fault re-raised after a COMPLETED grade erased the judge's entry.
+    # Hand-back is the outer frame and the judge clock the inner one: the cluster is released
+    # before the judge's clock starts, so teardown time isn't booked to the judge, and the
+    # judge's entry is recorded before a held hand-back failure is raised.
     with _cluster_released(teardown, episode_id=episode_id):
         with clock.step(Step.JUDGE):
             _grade(episode_dir, episode_id=episode_id, judge=judge, runs_base=runs_base)
-        # #1025 J1: rendered AFTER the JUDGE frame closes (the judge row is on `timing.json`
-        # first) and still inside `_cluster_released`'s body, under its own non-fatal
-        # boundary — a render fault costs the episode nothing, and a held teardown fault is
-        # still raised (unchanged) once this returns.
+        # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
+        # non-fatal.
         _render_page(episode_dir, episode_id=episode_id)
-    # THE EXIT STATUS IS ABOUT THE LAUNCH, and the RECORD is about the family. A sibling that
-    # exited non-zero is a launch that did not do what it was asked; an `incomplete` family is a
-    # launch that did exactly what it was asked and found the results not comparable, which is a
-    # measurement rather than a failure — and it is written down, in the episode's own outcome
-    # field, where a reader who cares can see it. Collapsing the two into the status would make
-    # a real finding indistinguishable from a crashed child.
+    # The exit status is about the launch (did every sibling exit cleanly); an `incomplete`
+    # family is a measurement, recorded in the episode outcome, not a launch failure.
     return 1 if failed else 0
 
 
 
 @contextlib.contextmanager
 def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
-    """Hand the cluster back, then run the body; a hand-back failure is HELD until the body
-    has completed, and never masks a failure of the body's own.
+    """Hand the cluster back, then run the body; a hand-back failure is held until the body
+    completes, and never masks a failure of the body's own.
 
-    THE CLUSTER IS HANDED BACK BEFORE THE GRADE. Everything the judge reads is on disk — the
-    archived episode and the operator's runs base — so there is nothing left for the staged
-    names to serve, and the grade is the longest-running thing in the episode.
+    The cluster is released first because everything the judge reads is on disk and the grade
+    is the longest step. A teardown failure must not preempt the grade (the episode would end
+    with no `judge.yaml`), so it is held and raised after the body completes.
 
-    HELD, NOT RAISED THROUGH. `_teardown_without_masking` re-raises when `aborting` is False,
-    and calling it ahead of the grade therefore made a CLEANUP failure preempt the grade
-    entirely: a fully archived, fully reviewed episode ended with no draws, no queue rows and
-    no `judge.yaml` — the file whose presence certifies the pass — and the operator saw only
-    the staging refusal, indistinguishable from an episode that was never graded for any other
-    reason. The refusal is still this episode's answer; it is raised AFTER the grade it has
-    nothing to do with (nothing the judge reads is on the cluster).
-
-    IN A `finally`, so the held fault survives a class the body does not catch. Raised only
-    after the block, it was DROPPED whenever the grade exited on a `BaseException` — an
-    operator's interrupt during minutes of model calls, a `SystemExit` out of an import — and
-    because `_OneShotTeardown` latches `_done` BEFORE it calls, `_launch`'s `finally` was
-    already a no-op: nothing retried, nothing reported, and the names stayed live under a
-    token the next launch's sweep will refuse to touch. NEVER MASKING, which is
-    `_teardown_without_masking`'s own rule at the frame that first had to make this choice —
-    answered from a FRAME-LOCAL flag, never `sys.exc_info()`, which is thread-global and
-    answers for whatever is being handled anywhere up this thread's stack: `completed` is set
-    only when the body leaves normally, so it is False exactly when something is still on its
-    way to the operator, and then the cleanup fault is logged (its unverified names are
-    already in the review record, which is the obligation) rather than raised.
+    The re-raise is in a `finally` so the held fault is not dropped when the body exits on a
+    `BaseException` (`_OneShotTeardown` has already latched, so nothing else would report it).
+    If the body did not complete, something is already heading to the operator, so the fault is
+    logged instead (its unverified names are in the review record). `completed` is a
+    frame-local flag rather than `sys.exc_info()`, which is thread-global.
     """
     held: BaseException | None = None
     if teardown is not None:
         try:
             teardown(aborting=False)
-        except Exception as cleanup_failed:  # noqa: BLE001 — held: raised unchanged after a body that completed, logged under one that did not (see the docstring)
+        except Exception as cleanup_failed:  # noqa: BLE001 — held: raised after a completed body, logged otherwise
             held = cleanup_failed
     completed = False
     try:
@@ -1677,64 +1263,42 @@ def _cluster_released(teardown: Any, *, episode_id: str) -> Iterator[None]:
 
 
 def _render_page(episode_dir: Path, *, episode_id: str) -> None:
-    """The episode page (#1025), holding every failure it can have — the render's own frame,
-    called AFTER the judge's clock frame closes so the stage table it reads already carries
-    the judge row. Never fatal to the launch: a page that could not be written is logged, not
-    raised, exactly as `_grade`'s own boundary is."""
+    """Render the episode page. Never fatal to the launch: a failure is logged, not raised."""
     try:
         from defender.scripts.visualize import visualize_episode
 
         page = visualize_episode.render_episode(episode_dir)
         _logger.info(f"episode {episode_id}: page {page}")
-    except Exception as render_failed:  # noqa: BLE001 — see the docstring: a render fault is non-fatal to the launch
+    except Exception as render_failed:  # noqa: BLE001 — a render fault is non-fatal to the launch
         _logger.warning(f"episode {episode_id}: the page could not be rendered "
                         f"({render_failed!r})")
 
 
 def _grade(episode_dir: Path, *, episode_id: str, judge: Any, runs_base: Path) -> None:
-    """The grade itself, holding every failure it can have (F-5): the body of the `JUDGE`
-    frame, so the clock is drawn around exactly this and nothing else. `runs_base` is the
-    TENANT'S base the launcher derived once and threads down (#1078 D4) — `runs_base_for(T)`,
-    never a re-derivation."""
+    """The grade, the body of the `JUDGE` frame; any failure is logged, never raised.
+    `runs_base` is the tenant's, threaded from the launcher."""
     try:
         from defender.learning import judge as judge_mod
 
         judge_mod.grade_episode(episode_dir, judge=judge, runs_base=runs_base)
-    # INSIDE THE `try`, imports included: an import fault in the judge package is a judge
-    # failure like any other, and raised from outside this boundary it reached `_launch`'s
-    # `except BaseException` and was reported as "no sibling started and every staged name is
-    # torn down" — both halves false of an episode that has already run, archived and torn down.
-    except Exception as judge_failed:  # noqa: BLE001 — F-5 IS the broad catch, see below
-        # EVERY class, not `JudgeRefused` alone. "A judge failure is non-fatal to the episode"
-        # is a property of this boundary, and a boundary that lists the failures it will
-        # tolerate does not have it: the grade reads model-authored archives, a shared queue and
-        # an injected model seam, and each of those produced a live escape (a decode error, a
-        # corrupt draw file, a lock timeout, whatever the seam raises) that reached here as a
-        # traceback and cost an otherwise-clean episode its own exit status. The failure is
-        # logged in full rather than swallowed — the point is that the LAUNCH's status stays
-        # about the launch, not that the failure goes unreported.
+    # Imports are inside the `try` too, so an import or config fault is a judge failure
+    # rather than reaching `_launch`'s abort arm with a false "no sibling started" message.
+    except Exception as judge_failed:  # noqa: BLE001 — a judge failure is non-fatal, see below
+        # Every class: the grade reads model-authored archives, a shared queue and an injected
+        # model seam, any of which can raise anything. Logged in full so the launch's status
+        # stays about the launch without hiding the failure.
         _logger.warning(f"episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
                         "episode itself is otherwise unaffected", exc_info=True)
 
 
 def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
-    """`Step.QUESTIONER` (#1007 M4/O5): `samples.yaml`, the questioner's own reference document
-    per staged pattern, moved into the EPISODE archive — not left in the source run, which a
-    later prune removes, and not kept only in memory. This is the ONE thing that makes a
-    `shape-invention` claim decidable at grading time: the judge is shown the same bytes the
-    questioner was.
+    """Write `samples.yaml`, the questioner's reference document per staged pattern, into the
+    episode archive, so the judge is shown the same bytes the questioner was (which makes a
+    `shape-invention` claim decidable) even after the source run is pruned.
 
-    `samples` is normalised to ONE Python `dict` BEFORE it is dumped — never a sequence of
-    `(pattern, document)` pairs written as repeated YAML keys and left to the loader's own
-    last-key-wins, which would be a decision made by a serializer rather than by this design
-    (`test_the_writer_pins_one_document_per_pattern_rather_than_relying_on_last_key_wins`).
-    `dict(samples)` already resolves a repeated key deterministically (last write wins) before
-    a single byte is serialized, so the file that lands always parses to one key, one value.
-
-    OVERWRITES WHOLESALE on a re-entered episode (H3/RS-1) — no merge, no second file, no
-    refusal. O5's byte-identity obligation is scoped to ONE ATTEMPT; the accepted cost of
-    keeping the episode resumable is that a re-entered `Step.QUESTIONER` may hand the judge
-    attempt N's samples for a world authored in attempt N-1 (accepted gap G-2).
+    Normalised to one `dict` before dumping, so the file never relies on a YAML loader's
+    handling of repeated keys. Overwritten wholesale on a re-entered episode; a retried
+    `Step.QUESTIONER` may therefore pair these samples with a world from an earlier attempt.
     """
     import yaml
 
@@ -1749,25 +1313,14 @@ def _author(
     ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
     questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
-    """@owns configured_patterns — the one writer of the manifest's recorded tenant patterns
-    (#1106); every later reader takes them from `family.yaml` via `_family.parse_family`.
+    """@owns configured_patterns — the one writer of the manifest's recorded tenant patterns;
+    every later reader takes them from `family.yaml` via `_family.parse_family`.
 
-    `Step.QUESTIONER`: the questioner authors the triplet, and it is validated before
-    anything reads it.
-
-    THE DERIVED HALF IS THE LAUNCHER'S, and it is written over whatever the model returned. The
-    episode id, the source run, the branch point, T0 and the operator's continuation prompt are
-    facts about the measurement; a family that could choose its own would be a family that could
-    name a different source run than the one it was authored from.
-
-    ONE IDENTITY GATE, over the whole manifest, BEFORE anything is staged (§7 FORK-4): every
-    rule it applies would otherwise have refused at a different depth, and refused there it
-    costs a primed episode and however many siblings had already run against a live model.
-
-    `lessons_dir` (#1007 M8/O7) is resolved by `_launch`, the same boundary `door`/`preflight`
-    are resolved at, and threaded inward non-`None` — never re-coalesced here — so a test can
-    give it a `tmp_path` corpus without the production default (`PATHS.lessons_questioner_dir`)
-    ever entering the picture."""
+    `Step.QUESTIONER`: the questioner authors the triplet, and it is validated before anything
+    reads it. The launcher's derived fields (episode id, source run, branch point, T0,
+    continuation prompt) overwrite whatever the model returned, so a family cannot name a
+    different source than it was authored from. One identity gate runs over the whole manifest
+    before anything is staged."""
     from defender._corpus import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.branch.estate.stagers.elastic import source_pattern  # noqa: E501 # lint-shippable: ok — the per-vendor stager owns which key of a call names its corpus; the join surface holds no vendor knowledge and takes this as its `pattern_of`
@@ -1776,27 +1329,16 @@ def _author(
     as_of = branch_point_clock(source, ns.branch_message_id)
     fences = _fence_count(source, ns.branch_message_id,
                           continuation_prompt=ns.continuation_prompt, as_of=as_of)
-    # ONE READ, TWO PROJECTIONS. The source's two tables are joined once here and the list is
-    # handed to both the sampler and the questioner's leads render — the same leads, by
-    # construction, rather than by two reads of a run dir a prior box was root on.
+    # Joined once and projected twice (sampler and leads render), so both see the same leads.
     leads = _joined_leads(source, joined)
-    # ONE WALK, TWO ANSWERS. `corpus_samples` keys every base pattern the capture addressed,
-    # so its keys ARE the capture's own FROM sources — which is exactly what `parse_family`
-    # judges an overlay's keys against, and what the prompt must name as stageable. Derived
-    # apart, the sampler and the pattern set would answer for two different captures.
+    # The sample keys are the capture's own FROM patterns, which `parse_family` judges overlay
+    # keys against and the prompt names as stageable — one walk, so they cannot diverge.
     samples = _corpus_samples(leads, corpus_samples, source_pattern)
-    # #1007 O5/M4: the SAME documents the questioner is about to be shown, moved into the
-    # episode archive now — before the model call — so the judge can be shown byte-identical
-    # bytes at grading time regardless of what later happens to the source run.
+    # Archived before the model call, so the judge sees exactly what the questioner saw.
     write_questioner_samples(episode_dir, samples)
     captured = tuple(samples)
     stageable = tuple(dict.fromkeys([*patterns, *captured]))
-    # #1007 M8/O7: the launcher's own glob of the questioner corpus, the SAME helper
-    # (`_corpus.iter_lesson_paths`) the defender's own lessons corpus is globbed through — none
-    # of these are read yet; `author_family` is where they are opened, screened against
-    # `stageable`, and reach only call 1. Without this call, O7 is unwired end to end: every
-    # test in `test_1007_questioner.py` drives `author_family` directly and stayed green while
-    # this launcher never passed `lessons=` at all.
+    # Paths only; `author_family` opens them and screens them against `stageable`.
     lessons = iter_lesson_paths(lessons_dir)
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode_dir,
@@ -1804,8 +1346,7 @@ def _author(
         leads=questioner_leads(leads),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
-        # The SAME set `parse_family` below judges the authored overlays against, so the prompt
-        # and the refusal cannot name two different domains.
+        # The same set `parse_family` below judges the overlays against.
         stageable_patterns=stageable,
         corpus_samples=samples,
         lessons=lessons,
@@ -1818,21 +1359,12 @@ def _author(
         "fences_at": fences,
         "as_of": as_of.isoformat().replace("+00:00", "Z"),
         "continuation_prompt": ns.continuation_prompt,
-        # WRITTEN INTO THE MANIFEST, not only passed to the check below. `_check_overlay_keys`
-        # admits a configured pattern OR one the capture's own FROM sources name, and no caller
-        # had ever supplied the second half — so the rule had one branch and every world was
-        # forced onto the deployment's widest configured key. A view matches its pattern by
-        # EQUALITY (the stager owns that rule in its own `declares`), so a world staged under a
-        # wide key is invisible to every narrower query the investigation actually issues.
-        #
-        # Supplying it HERE alone was not enough, and the way it failed is the reason the field
-        # exists: the sibling and the derived readers re-parse this manifest through
-        # `load_family`, which has no capture to consult, so the refusal simply moved from
-        # authoring to RESUME — after three worlds had been staged and reviewed. Recorded, every
-        # reader judges the overlays against the set that authored them.
+        # Recorded in the manifest, not only passed to the check below: overlay keys may name a
+        # captured FROM pattern (views match patterns by equality, so a world staged under a
+        # wide configured key is invisible to narrower queries), and siblings re-parsing the
+        # manifest via `load_family` have no capture to consult.
         "captured_patterns": list(captured),
-        # #1106: the tenant's configured patterns the overlays were judged against, recorded so
-        # a sibling or judge re-reading the manifest needs no settings folder to re-judge them.
+        # Recorded so a sibling or judge re-reading the manifest needs no settings folder.
         "configured_patterns": list(patterns),
     })
     family = parse_family(document, captured_patterns=captured,
@@ -1845,13 +1377,10 @@ def _author(
 def _corpus_samples(leads: Any, sampler: Any, pattern_of: Any) -> dict[str, Any]:
     """One document per corpus the capture queried.
 
-    The sampler absorbs an unreadable payload itself, per candidate — one bad payload is one
-    skipped candidate, not a blank sample set — so like `_joined_leads` beside it, the arm here
-    is for a fault at the READ the host raises, and for the same reason: the samples are an
-    ORIENTATION aid, so a run whose payloads cannot be reached should author a family with a
-    thinner prompt rather than refuse an episode over an aside. The count is logged because a
-    silently empty sample set looks identical to a capture that queried nothing, and the two
-    call for different operator responses.
+    The sampler skips unreadable payloads itself; this catches host-level read faults. Samples
+    are an orientation aid, so a fault yields a thinner prompt rather than no episode. The
+    count is logged because an empty sample set otherwise looks like a capture that queried
+    nothing.
     """
     try:
         samples = sampler(leads, pattern_of=lambda q: pattern_of(q.verb, q.params or {}))
@@ -1868,17 +1397,10 @@ def _fence_count(source: Path, branch_message_id: int, *,
                  continuation_prompt: str, as_of: Any) -> int:
     """How many invlang fences the source run's document closed at the branch point.
 
-    THROUGH `branch.fence_count_at`, which is the frame that owns this arithmetic and the only
-    one that can answer it AT a branch point — the document alone says how many fences the run
-    ever wrote, and the session says which of them had landed by the message being branched
-    from. Spelled here as `len(scan_fences(...).fences)` it answered 0 for every document:
-    `FenceScan` carries `bodies`/`spans`/`orphaned_headers`/`open_tail` and no `fences`, and the
-    `getattr` default swallowed the mistake — so `fences_at: 0` went into every manifest and the
-    questioner was shown an EMPTY frontier for every episode it authored.
-
-    A source with NO session store falls back to the document's own total, the same shape and
-    for the same reason `branch_point_clock` falls back to the moment its evidence stopped: an
-    imported or replayed run has no session to say when, and its whole document is the prefix.
+    Through `branch.fence_count_at`: the document says how many fences the run ever wrote,
+    and only the session says which had landed by the branch message. A source with no session
+    store falls back to the document's total, as `branch_point_clock` falls back to its last
+    mtime.
     """
     from defender.runtime.branch import BranchSpec, fence_count_at, source_session
     from defender.skills.invlang.parser import scan_fences
@@ -1887,10 +1409,7 @@ def _fence_count(source: Path, branch_message_id: int, *,
     if not artifact_file(path):
         return 0
     document = path.read_text(encoding="utf-8")
-    # `bodies` is the fence content; the complement (`orphaned_headers`) is not dropped
-    # silently — it is what `fence_count_at` is asked for instead whenever a session exists,
-    # and this arm is only reached for a run that carries none.
-    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a COUNT of fences, not a read of their content; the orphan complement is not addressable by an index into `bodies` and `fence_count_at` below is what answers when a session can say  # noqa: E501
+    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a count of fences, not a read of their content; `fence_count_at` below answers whenever a session exists  # noqa: E501
     store = _source_store(source)
     if store is None:
         return total
@@ -1903,16 +1422,10 @@ def _fence_count(source: Path, branch_message_id: int, *,
 
 
 def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any]:
-    """The joined leads at the branch point: `lead_repository.joined` over the source, and the
-    ONE place the launcher reads the two tables — what it returns is projected, never re-read
-    (`questioner_leads` for the prompt's section, `corpus_samples` for the corpora). A
-    passthrough: the list is the surface's own, untouched.
+    """`lead_repository.joined` over the source: the launcher's one read of the two tables.
 
-    The surface absorbs everything a run dir's CONTENT can do — a missing table, a line that
-    is not a row, a row nested past `_io.JSON_NESTING_LIMIT`, a numeric column past an `int`
-    — as `[]`, a skipped row or a defaulted column, silently. What can still raise is the
-    host: a directory it refuses to walk. That is an episode with a thinner prompt, not no
-    episode, so the arm is broad and says so in the log."""
+    The surface already absorbs bad content; what can still raise is the host (a directory it
+    refuses to walk), which yields a thinner prompt rather than no episode."""
     try:
         return joined(source)
     except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode

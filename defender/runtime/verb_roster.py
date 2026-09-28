@@ -1,14 +1,12 @@
 """The grant-derived model-facing verb roster, and the build-time audit over every artifact
 the model reads.
 
-`generate_roster` builds the roster from a `VerbGrant` as DATA — no adapter code executed —
-and writes it to the role's committed path, failing closed (no roster at all) rather than
-falling back to any authored text. `load_roster` reads it back and refuses a hand-edited
-(drifted) file rather than silently trusting it. `audit_read_surfaces` scans every committed
-build-time artifact the model reads for a verb name the relevant role's grant withholds, under
-three attribution rules for how a verb name appears in prose, plus a fourth scoring each
-generated roster against its OWN role's grant — never a single role's grant for every surface,
-which collapses two roles' correct rosters into a false offense.
+The roster is generated from a `VerbGrant` as data (no adapter code executed) and carries a
+digest so a hand-edited copy fails to load. The audit scans model-read surfaces for verb names
+the relevant role's grant withholds, in three forms: `query(system=..., verb=...)`, a dotted
+`system.verb`, and a bare verb name (attributed to the file's owning system when it declares
+the name, else to every system that does). Each generated roster is scored against its own
+role's grant, since scoring every surface against one role would flag other roles' rosters.
 """
 from __future__ import annotations
 
@@ -27,36 +25,20 @@ _ROSTER_FILENAME = "verb-roster.md"
 
 _HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-f]{64}) -->\n")
 
-#: Both scanners spell their name groups from `verbs.SYSTEM_PATTERN` — the SAME alphabet the
-#: predicate is built on — except for one deliberate, documented narrowing below.
-#:
-#: `_QUALIFIED_CALL_RE` takes the alphabet whole. It is anchored on the literal `query(system="`,
-#: so it can afford every name the tree can carry, digit-leading ones included; verb names share
-#: the alphabet, so the same fragment spells that group too.
-#:
-#: `_CALL_ID_RE` cannot. It is UNANCHORED — it hunts a bare `system.verb` anywhere in prose —
-#: so a digit-leading first character would make it read `1.2`, `0.7` and every other version
-#: string as a `system.verb` pair. It therefore keeps an `[a-z]` head over the shared tail:
-#: narrower than the real alphabet, costing it a digit-leading system, buying back every false
-#: pair a version number would mint.
-#:
-#: Either alphabet interacts with `audit_read_surfaces`' span exclusion: a match here
-#: suppresses `_bare_offenders` over the text it covers, so a match whose (system, verb) is NOT
-#: a real declared pair must be dropped from the exclusion set — otherwise
-#: `query(system="7", verb="esql")` both fails to attribute (`7` declares nothing) and hides
-#: the bare `esql` the fallback rule would have caught.
+#: Name groups are spelled from `verbs.SYSTEM_PATTERN`. `_QUALIFIED_CALL_RE` is anchored on
+#: `query(system="`, so it takes the full alphabet, digit-leading names included.
 _QUALIFIED_CALL_RE = re.compile(
     rf"""query\(\s*system\s*=\s*['"]({SYSTEM_PATTERN})['"]\s*,\s*verb\s*=\s*['"]({SYSTEM_PATTERN})['"]"""
 )
-#: The narrowing named above: an `[a-z]` head, then the shared tail, spelled by slicing the
-#: leading character class off `SYSTEM_PATTERN` so the TAIL still has exactly one source.
+#: `_CALL_ID_RE` is unanchored (a bare `system.verb` anywhere in prose), so it requires an
+#: `[a-z]` head; a digit head would read version strings like `1.2` as pairs. The tail is sliced
+#: off `SYSTEM_PATTERN` so it keeps a single source.
 _CALL_ID_TAIL = SYSTEM_PATTERN[len("[a-z0-9]"):]
 _CALL_ID_RE = re.compile(rf"\b([a-z]{_CALL_ID_TAIL})\.([a-z]{_CALL_ID_TAIL})\b")
 
 
 class RosterError(Exception):
-    """A verb-roster generation or load defect — a failed generation leaves no roster behind,
-    and a load refuses a hand-edited (drifted) artifact rather than trusting it."""
+    """A verb-roster generation or load defect."""
 
 
 def roster_path(defender_dir: Path, role: str) -> Path:
@@ -64,11 +46,10 @@ def roster_path(defender_dir: Path, role: str) -> Path:
 
 
 def generate_roster(grant: VerbGrant, *, defender_dir: Path) -> str:
-    """The role's roster, generated from `grant` as data alone (no adapter imported), written
-    to its committed path and returned. A system for which the grant names no verb is omitted
-    entirely — not present-but-empty. Fails closed: an unwritable or nonexistent
-    `defender_dir` raises `RosterError` and leaves no roster behind, never a fallback to
-    whatever text happened to be there before."""
+    """Generate the role's roster from `grant`, write it to its committed path, and return it.
+
+    Systems with no granted verb are omitted. A missing or unwritable `defender_dir` raises
+    `RosterError`; there is no fallback to previously written text."""
     root = Path(defender_dir)
     if not root.is_dir():
         raise RosterError(f"{root} does not exist — refusing to generate a roster into it")
@@ -98,8 +79,7 @@ def generate_roster(grant: VerbGrant, *, defender_dir: Path) -> str:
 
 
 def load_roster(defender_dir: Path, role: str) -> str:
-    """The committed roster, refusing a load whose body no longer matches the digest its own
-    header carries — a hand-edit is a load failure, not a silent divergence."""
+    """The committed roster; raises `RosterError` if the body no longer matches its header digest."""
     path = roster_path(defender_dir, role)
     try:
         text = path.read_text(encoding="utf-8")
@@ -116,10 +96,8 @@ def load_roster(defender_dir: Path, role: str) -> str:
 
 
 def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
-    """The set the correspondence demand is scoped to: every system's `SKILL.md`/`execution.md`,
-    every committed query template (including a `_draft` search reaches), and every generated
-    roster on disk — read off the tree fresh on every call, so the scope cannot go stale the way
-    a hand-recalled list would."""
+    """Every model-read surface: each skill's `SKILL.md`/`execution.md`, every query template
+    (including `_draft`), and every generated roster. Read off the tree on each call."""
     root = Path(defender_dir)
     skills = root / "skills"
     out: list[Path] = []
@@ -166,9 +144,8 @@ def _bare_offenders(
     all_names = {n for names in declared_by_system.values() for n in names}
     pairs: set[tuple[str, str]] = set()
     for name in all_names:
-        # The word-boundary guard already stops a short name matching inside a longer one, so
-        # the order names are tried in carries nothing; and every match of ONE name attributes
-        # to the same pair(s), so the first one outside an excluded span settles it.
+        # Every match of one name attributes to the same pair(s), so the first match outside an
+        # excluded span settles it.
         pattern = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])")
         for m in pattern.finditer(text):
             span = m.span()
@@ -195,19 +172,12 @@ def _grant_for_surface(
 
 
 def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> tuple[str, ...]:
-    """Every model-read-surface hit that names a `(system, verb)` pair the relevant role's
-    grant withholds — `()` when the tree is clean. Each hit names its offending file by PATH
-    (several committed surfaces share the bare name `SKILL.md`)."""
+    """Every model-read-surface hit naming a `(system, verb)` pair the relevant role's grant
+    withholds; `()` when clean. Hits name files by path, since many share the name `SKILL.md`."""
     root = Path(defender_dir)
     skills_dir = root / "skills"
-    # `read_roster`, the dispatch seam's own read, once, at the audit's own top — and its
-    # `verbs` map consumed as the value, rather than a second spelling of either: the audit's
-    # notion of "a system this tree declares" and "what it declares" must be the seam's, or a
-    # name only one of them recognises is a pair the other cannot score (#1035). A tree this
-    # process cannot read — absent, unlistable, listable but not searchable, an adapter file
-    # it cannot open — is `RosterError`, never "clean": `()` from a directory that was never
-    # listed reports nothing to check as nothing wrong, and the absent arm matches
-    # `generate_roster`'s own "does not exist — refusing" posture.
+    # Use the dispatch seam's own `read_roster` so the audit and dispatch agree on which
+    # systems and verbs exist. An unreadable tree raises rather than auditing as clean.
     try:
         declared_by_system = read_roster(adapters_under(root)).verbs
     except RegistryError as e:
@@ -221,17 +191,13 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
             continue
         grant = _grant_for_surface(path, grants)
         qualified = _qualified_mentions(text)
-        # Keep only REAL (system, verb) mentions, filtering out incidental "word.word" prose
-        # (`e.g.`, `execution.md`) the dotted call-id pattern also matches — it never named an
-        # actual verb, so it cannot be an offense against a role's grant.
+        # Keep only declared pairs; the dotted pattern also matches prose like `e.g.`.
         pairs = {
             pair for pair, _ in qualified
             if pair[1] in declared_by_system.get(pair[0], ())
         }
-        # SPANS FROM THE KEPT PAIRS ONLY. The exclusion exists to stop `_bare_offenders`
-        # re-attributing a verb the qualified rules already attributed — so a match that was
-        # just discarded as "not a real (system, verb)" must not suppress anything, or the
-        # discard silently becomes a way to hide a verb name from the fallback rule.
+        # Exclude spans of kept pairs only: a discarded match must not hide a bare verb name
+        # (e.g. `query(system="7", verb="esql")`) from `_bare_offenders`.
         spans = [
             span for pair, span in qualified
             if pair[1] in declared_by_system.get(pair[0], ())

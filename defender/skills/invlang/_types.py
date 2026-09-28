@@ -16,10 +16,6 @@ class Block:
     name: str
     columns: list[str] | None
     rows: list[str] = field(default_factory=list)
-    #: How many leading cells this block's header REQUIRES — one past the last column not
-    #: marked `?`. `columns` keeps the clean names (the `?` is stripped there, and every
-    #: consumer reads it that way), so the optionality the header states would otherwise be
-    #: discarded at tokenization and `_row_cells` would pad any short row in silence.
-    #: 0 for a block that declares no header: there is nothing to require against, and the
-    #: built-in `default_cols` the projectors fall back to carry no optionality either.
+    #: How many leading cells the header requires: one past the last column not marked `?`.
+    #: Kept separately because `columns` has the `?` stripped. 0 when no header is declared.
     required_cells: int = 0

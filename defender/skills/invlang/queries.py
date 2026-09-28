@@ -13,10 +13,10 @@ from .schema import Conclude, FindingRecord, HypothesisRecord
 
 
 def _disposition(c: Companion) -> str | None:
-    """This case's conclude disposition as it RENDERS, or `None`.
+    """This case's conclude disposition as it renders, or `None`.
 
-    Every corpus surface below reads the headline through here. It is model-authored text:
-    read raw, a zero-width character clinging to the keyword silently drops the case out of a
+    Normalized because it is model-authored text: a zero-width character on the keyword would
+    otherwise silently drop the case out of a
     `--disposition benign` precedent lookup."""
     return normalized_disposition(c.conclude.get("disposition"))
 
@@ -26,12 +26,10 @@ def _hypothesis_name(h: HypothesisRecord) -> str:
 
 
 def case_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
-    """Every hypothesis in the case — the prologue's AND each lead's `new_hypotheses`.
+    """Every hypothesis in the case: the prologue's and each lead's `new_hypotheses`.
 
-    Public because `cli._hypothesis_vocabulary` needs it too: an investigation declares
-    hypotheses at two sites, and anything that reads only `Companion.hypotheses` sees the
-    opening set and none of what the run went on to raise. This is the Companion-level
-    spelling of `_walkers.all_hypotheses`, which is the one owner of the walk itself.
+    The `Companion`-level form of `_walkers.all_hypotheses`; reading only
+    `Companion.hypotheses` would miss hypotheses raised mid-run.
     """
     return _walkers.all_hypotheses(c.body).values()
 

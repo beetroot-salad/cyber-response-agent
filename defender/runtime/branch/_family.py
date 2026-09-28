@@ -1,25 +1,17 @@
 """The family manifest: the one document a sibling is told, and the schema that gates it.
 
-#947's M2. `episodes/<id>/family.yaml` carries three authors in one document — the launcher's
-derived half (episode id, source run, branch point, T0), the operator's instrument field
-(`continuation_prompt`), and the questioner's authored half (the base story, the discriminator
-and the worlds) — and `run.py --resume <manifest> --world X` derives everything else from it.
+`episodes/<id>/family.yaml` carries three authors: the launcher's derived half (episode id,
+source run, branch point, T0), the operator's `continuation_prompt`, and the questioner's
+authored half (base story, discriminator, worlds). `run.py --resume <manifest> --world X`
+derives everything else from it.
 
-THE SCHEMA LIVES IN THE RUNTIME, not in `learning/`, because the RUNTIME reads it: a resumed
-run must not import the learning tree to know which world it is. Learning writes through the
-same loader, so the questioner's raw output is validated into `Family` before any other step
-reads it, and a refusal names the offending field rather than merely saying the document is bad.
+The schema lives in the runtime because a resumed run must not import the learning tree to know
+which world it is. Learning validates the questioner's output through the same loader.
 
-STRICT, in both directions (§7 FORK-5). An unknown top-level field is refused rather than
-ignored — a manifest a human edited after review must not load as if the edit were part of the
-contract — and every closed vocabulary the document names is the SHIPPED one (`_vocab`'s
-disposition enum, the serving grant's systems) rather than a second, looser list beside it.
-
-The model authors free text into this document, so every model-authored scalar is written back
-through a structured dumper and never through string interpolation (S41): a `base_story`
-carrying `episode_id: hijacked` on its second line is one opaque scalar on the way out and the
-same string on the way back in, and the entity keys of the patch table — which ARE rendered as
-keys — carry a bounded, validated domain of their own (§7 NEW-1).
+Strict both ways: an unknown top-level field is refused (a manifest edited after review must not
+load as if the edit were part of the contract), and every closed vocabulary is the shipped one.
+Model-authored scalars are written through a structured dumper, never string interpolation, so a
+`base_story` carrying `episode_id: hijacked` round-trips as one opaque scalar.
 """
 
 from __future__ import annotations
@@ -52,35 +44,26 @@ from defender._vocab import (
 )
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
 
-#: The manifest's filename inside an episode directory. Named once: the launcher writes it, the
-#: sibling reads it, and the archive keeps it.
-# `MANIFEST_NAME` was a re-binding of the owner's `FAMILY_NAME` (#1077 D7). The manifest IS
-# the family record; two names for it is what D7 removes.
-
-#: The base world's role. `A` is the control every other world is compared against, and the
-#: loader enforces that exactly one world claims it.
+#: The base world's role: the control every other world is compared against. Exactly one world
+#: claims it.
 BASE_ROLE = "A"
 
-#: The system whose difference is STAGED rather than patched. A patch table naming it is an
-#: authoring slip the estate's applier already refuses; the loader refuses it one step earlier,
-#: where the field can still be named.
-STAGED_SYSTEM = "elastic"  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+#: The system whose difference is staged rather than patched. The loader refuses a patch table
+#: naming it, where the field can still be named.
+STAGED_SYSTEM = "elastic"  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
 
 #: The six state systems an entity patch may name — the serving roster minus the staged one.
-#: Spelled here rather than imported from `runtime.driver` because this module is on the
-#: RESUME path's import graph and must not pull the driver in to read a manifest.
+#: Spelled here rather than imported from `runtime.driver`: the resume path must not pull the
+#: driver in to read a manifest.
 PATCHABLE_SYSTEMS: frozenset[str] = frozenset({
     "cmdb", "identity", "threat-intel", "change-mgmt", "ticket", "host-state",
 })
 
-#: The two bases a world's declared disposition may rest on. `policy-rule` is the default: a
-#: world that omits the field is asserting the shipped rule, not a judgment.
+#: The two bases a world's declared disposition may rest on; `policy-rule` is the default.
 LABEL_BASES: frozenset[str] = frozenset({"policy-rule", "judgment"})
 
-#: What a patch-table ENTITY key may be. The entity is rendered AS A KEY in a document a model
-#: authored the value of, so its domain is bounded the way the system key's is (§7 NEW-1): a
-#: leading alphanumeric, then alphanumerics and the three separators a hostname carries. No
-#: whitespace, no `:`, no `/`, no `.` run that could climb a path.
+#: What a patch-table entity key may be. The entity is rendered as a key in a model-authored
+#: document, so it is bounded to hostname-like spelling: no whitespace, `:`, or `/`.
 _ENTITY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: Every top-level field the manifest declares. Unknown ones refuse.
@@ -99,18 +82,13 @@ _WORLD_FIELDS = (
 class FamilyError(Exception):
     """A manifest this design cannot honestly run.
 
-    A FAULT, never a corpus contradiction and never an unreachable difference: `is_contradiction`
-    answers False for every instance, because the review's three outcome classes are about what
-    the ESTATE said and this class is about what the document says (S33/S36).
+    A fault about the document, never a corpus contradiction or an unreachable difference (those
+    are about what the estate said).
     """
 
 
 def is_contradiction(_error: BaseException) -> bool:
-    """Is this refusal a corpus contradiction? Never, for a manifest fault.
-
-    Published beside the class so a caller classifying a replay difference asks one question
-    rather than matching on a type it would have to keep in step.
-    """
+    """Is this refusal a corpus contradiction? Never, for a manifest fault."""
     return False
 
 
@@ -124,13 +102,8 @@ class ElasticEntry:
     """One base pattern's staged difference: what is added, and what is taken away."""
 
     inject: list[dict] = field(default_factory=list)
-    #: The exclusion predicate, UNNARROWED on purpose. The loader admits any document shape a
-    #: model can author — a mapping, a bare list, a bare string — because the thing that decides
-    #: whether a predicate is admissible is `staging.check_exclusion_predicate`'s ALLOW-LIST over
-    #: clause types, and it can only refuse a shape by name if that shape reaches it. Narrowed to
-    #: `dict` here, an unparseable predicate would be refused by the loader with a message about
-    #: types rather than by the gate with a message about the grammar, and the gate's own
-    #: refusals would become unreachable.
+    #: The exclusion predicate, left unnarrowed: `staging.check_exclusion_predicate`'s allow-list
+    #: decides admissibility and can only refuse a shape by name if that shape reaches it.
     exclude: Any = None
 
 
@@ -138,15 +111,12 @@ class ElasticEntry:
 class Overlay:
     """A world's difference, as data.
 
-    Two halves, keyed the way the two mechanisms consume them: `patches` by system then entity
-    then field, and its staged half by the base pattern that half stages. Both normalise to
-    ABSENT when empty —
-    an overlay whose halves are present and empty is world A, not an authored difference — so
-    `touches_of` can be derived from the keys rather than stored beside them.
+    `patches` is keyed system → entity → field; the staged half by base pattern. Both normalise
+    to absent when empty (an empty overlay is world A), so `touches_of` derives from the keys.
     """
 
     patches: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
-    elastic: dict[str, ElasticEntry] = field(default_factory=dict)  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+    elastic: dict[str, ElasticEntry] = field(default_factory=dict)  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
 
 
 def parse_overlay(raw: Any, *, where: str = "overlay") -> Overlay:
@@ -155,11 +125,11 @@ def parse_overlay(raw: Any, *, where: str = "overlay") -> Overlay:
         return Overlay()
     if not isinstance(raw, dict):
         raise FamilyError(f"{where} must be a mapping, got {type(raw).__name__}")
-    unknown = sorted(set(raw) - {"patches", "elastic"})  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+    unknown = sorted(set(raw) - {"patches", "elastic"})  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
     if unknown:
         raise FamilyError(f"{where} names unknown field(s) {unknown}")
     return Overlay(patches=_parse_patches(raw.get("patches"), where),
-                   elastic=_parse_elastic(raw.get("elastic"), where))  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+                   elastic=_parse_elastic(raw.get("elastic"), where))  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
 
 
 def _parse_patches(raw: Any, where: str) -> dict[str, dict[str, dict[str, Any]]]:
@@ -191,12 +161,10 @@ def _parse_patches(raw: Any, where: str) -> dict[str, dict[str, dict[str, Any]]]
 
 
 def _check_entity(entity: Any, where: str, system: str) -> None:
-    """The patch table's entity KEY has a bounded domain the way its system key does.
+    """Refuse an entity key outside `_ENTITY_RE`.
 
-    Refused rather than escaped: the entity is written back as a mapping key, and a key
-    carrying document-structural or path syntax is a key a later reader resolves differently
-    from the one the model meant. `_ENTITY_RE` admits what a hostname or an account name is
-    spelled with and nothing that could open a second key or climb a path.
+    Refused rather than escaped: the entity is written back as a mapping key, and one carrying
+    structural or path syntax would be resolved differently by a later reader.
     """
     if not isinstance(entity, str) or not _ENTITY_RE.match(entity):
         raise FamilyError(
@@ -208,11 +176,8 @@ def _check_entity(entity: Any, where: str, system: str) -> None:
 def _checked_fields(fields_: Any, at: str) -> dict[str, Any]:
     """One entity's field table, refused as `FamilyError` unless it is a mapping keyed by str.
 
-    The FIELD keys too, not only the entity's: `Overlay.patches` is strictly typed
-    `dict[str, ...]` all the way down (#1067), so a non-string key — YAML 1.1 reads a bare
-    `on:`/`yes:`/`1:` as a bool or an int — would otherwise refuse as pydantic's
-    `ValidationError` out of `Overlay(...)`, a class none of this loader's callers handle,
-    instead of the `FamilyError` naming the field.
+    YAML 1.1 reads a bare `on:`/`yes:`/`1:` key as a bool or int; unchecked, that would surface
+    as pydantic's `ValidationError` from `Overlay(...)`, which no caller handles.
     """
     if not isinstance(fields_, dict):
         raise FamilyError(f"{at} must be a mapping of field to value")
@@ -229,23 +194,21 @@ def _parse_elastic(raw: Any, where: str) -> dict[str, ElasticEntry]:
     if not raw:
         return {}
     if not isinstance(raw, dict):
-        raise FamilyError(f"{where}.elastic must be a mapping, got {type(raw).__name__}")  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+        raise FamilyError(f"{where}.elastic must be a mapping, got {type(raw).__name__}")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
     out: dict[str, ElasticEntry] = {}
     for pattern, entry in raw.items():
         if not isinstance(pattern, str) or not pattern:
-            raise FamilyError(f"{where}.elastic names a non-string base pattern {pattern!r}")  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
-        parsed = _parse_elastic_entry(entry, f"{where}.elastic[{pattern!r}]")  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+            raise FamilyError(f"{where}.elastic names a non-string base pattern {pattern!r}")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
+        parsed = _parse_elastic_entry(entry, f"{where}.elastic[{pattern!r}]")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
         if parsed is not None:
             out[pattern] = parsed
     return out
 
 
 def _parse_elastic_entry(entry: Any, at: str) -> ElasticEntry | None:
-    """One base pattern's staged difference, or `None` when it declares none.
+    """One base pattern's staged difference, or `None` when it stages nothing.
 
-    An entry that stages nothing is not a declared difference, so it normalises to ABSENT
-    rather than to an empty entry — which is what keeps `touches_of` derivable from the
-    overlay's keys alone, instead of from a walk of what each key happens to hold.
+    Normalising empty to absent keeps `touches_of` derivable from the overlay's keys alone.
     """
     if entry is None:
         return None
@@ -254,10 +217,8 @@ def _parse_elastic_entry(entry: Any, at: str) -> ElasticEntry | None:
     unknown = sorted(set(entry) - {"inject", "exclude"})
     if unknown:
         raise FamilyError(f"{at} names unknown field(s) {unknown}")
-    # `is None`, never `or`: `inject: {}` / `0` / `""` are falsy NON-lists, and coalescing
-    # them to `[]` walked them straight through the isinstance check below — a malformed
-    # overlay loading clean as an empty injection in a loader whose whole docstring is
-    # "STRICT, in both directions". `exclude` two lines down already reads this way.
+    # `is None`, not `or`: `inject: {}` / `0` / `""` are falsy non-lists that must reach the
+    # isinstance check and be refused, not coalesce to an empty injection.
     inject = entry.get("inject")
     inject = [] if inject is None else inject
     if not isinstance(inject, list) or any(not isinstance(d, dict) for d in inject):
@@ -271,14 +232,12 @@ def _parse_elastic_entry(entry: Any, at: str) -> ElasticEntry | None:
 
 
 def touches_of(overlay: Overlay) -> tuple[str, ...]:
-    """The systems this overlay's difference touches, DERIVED on every read.
+    """The systems this overlay touches, derived on every read (a stored copy could drift).
 
-    `World.touches` retires as an authored field (D2): a stored set is a second place for the
-    answer to live, and the one that drifts is the one that stops staging. The patch systems
-    plus the staged system when that half is non-empty, in a stable order.
+    The patch systems plus the staged system when that half is non-empty, sorted.
     """
     systems = set(overlay.patches)
-    if overlay.elastic:  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+    if overlay.elastic:  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
         systems.add(STAGED_SYSTEM)
     return tuple(sorted(systems))
 
@@ -334,11 +293,10 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
 
 
 def _check_axis(axis: Any, at: str, role: str | None) -> str | None:
-    """The difference this world claims to name, or the null sentinel that says it names none.
+    """The difference this world names, or null for none.
 
-    THE HOUSE SENTINEL IS NULL. An empty string is a real value, so a non-base world declaring
-    one is declaring a difference it cannot name — a world nothing downstream can compare,
-    recorded as though it were comparable.
+    The sentinel is null; an empty string on a non-base world would be a difference it cannot
+    name, recorded as though it were comparable.
     """
     if axis is not None and not isinstance(axis, str):
         raise FamilyError(f"{at}.axis must be a string or null")
@@ -350,25 +308,14 @@ def _check_axis(axis: Any, at: str, role: str | None) -> str | None:
 
 
 def _check_disposition(raw: Any, at: str) -> str:
-    """The world's declared disposition, through the VOCABULARY'S OWN NORMALIZER.
+    """The world's declared disposition, through `_vocab`'s own normalizer.
 
-    Never a membership test written here. A world's declared disposition is the same value the
-    report's headline is, authored by a model reading attacker-influenced data, and `_vocab`
-    owns what one MEANS — including the zero-width strip a borrowed `in DISPOSITION_ENUM`
-    silently loses (#785: one parser, six interpreters, three of which disagreed).
+    Not a local membership test: the value is model-authored from attacker-influenced data, and
+    `_vocab` owns what it means (including a zero-width strip a plain `in` would miss).
 
-    AN AUTHORING SURFACE, which is why the host-only member is refused with its own clause.
-    `disposition_declared` is raw model-authored manifest text — the questioner writes it
-    (`SEAT_AUTHORED_FIELDS`), and #921's judge grades a world by comparing it against what that
-    world's run actually concluded. So this is a door a disposition is AUTHORED through, and
-    `unresolved` is a member of the shipped tuple: the normalizer admits it for free, exactly as
-    the invlang document's vocabulary check did before #923 gave it a clause of its own. A world
-    may not declare the verdict only the host records — a family graded against it would score
-    the questioner's guess about a gate overrule.
-
-    Model-facing, because the author is one: the questioner's own `world.md` roster already
-    stops at the four, so a manifest carrying this member came from a model that went outside
-    its roster and the message says which member to use instead.
+    This is an authoring surface — the questioner writes it and the judge grades the world's run
+    against it — so the host-only member (`unresolved`), which the normalizer admits, is refused
+    here. The message is model-facing and names what to declare instead.
     """
     disposition = normalized_disposition(raw)
     if disposition is None:
@@ -386,16 +333,9 @@ def _check_disposition(raw: Any, at: str) -> str:
 
 
 def _check_label_basis(raw: Any, at: str) -> str:
-    """What the declared disposition RESTS on, defaulting to the shipped rule.
-
-    A world that omits the field is asserting the policy rule, not a judgment: the default is
-    the WEAKER claim, so an omission can never be read as a stronger one.
-    """
-    # THE TYPE FIRST, like every other scalar this loader narrows. `LABEL_BASES` is a frozenset,
-    # so `basis not in LABEL_BASES` HASHES the value — and `label_basis` is copied verbatim out
-    # of a model reply, so a seat answering `{...}` or `[...]` raised `TypeError: unhashable
-    # type` rather than the named `FamilyError` this module promises. `run.py --resume` catches
-    # only `FamilyError`, so the sibling died on a traceback instead of a refusal.
+    """What the declared disposition rests on; omitted means the weaker `policy-rule` claim."""
+    # Type first: the membership test hashes the value, and a model-authored `{...}` or `[...]`
+    # would raise `TypeError` instead of the `FamilyError` `run.py --resume` catches.
     basis = "policy-rule" if raw is None else raw
     if not isinstance(basis, str) or basis not in LABEL_BASES:
         raise FamilyError(f"{at}.label_basis is {basis!r}, outside {sorted(LABEL_BASES)}")
@@ -418,23 +358,15 @@ class Family:
     fences_at: int
     as_of: dt.datetime
     continuation_prompt: str
-    #: The base patterns the CAPTURE's own queries addressed, recorded by the launcher.
-    #:
-    #: PART OF THE DERIVED HALF, beside the episode id and T0, because it is a fact about the
-    #: measurement rather than anything a model may choose — and because every later reader
-    #: has to judge the overlays against the SAME set the launcher judged them against. Left
-    #: to be re-derived, a sibling re-reads the source run's tables to answer a question the
-    #: authoring already answered, and a source run that has since changed makes the sibling
-    #: refuse the manifest its own launcher wrote. That is not hypothetical: supplying
-    #: `captured_patterns` at the authoring call and nowhere else moved the refusal from
-    #: author time to RESUME time, where three worlds had already been staged and reviewed.
+    #: The base patterns the capture's own queries addressed, recorded by the launcher. Stored
+    #: rather than re-derived so every later reader judges overlays against the same set; a
+    #: source run that changed since would otherwise make a sibling refuse its own manifest.
     captured_patterns: tuple[str, ...]
     base_story: str
     discriminator: dict
     worlds: list[World]
-    #: The episode TENANT's configured corpus patterns the launcher judged the overlays against
-    #: (#1106), recorded beside `captured_patterns` for the same reason: every later reader
-    #: judges against the set that authored the manifest, and none of them resolves a tenant.
+    #: The episode tenant's configured corpus patterns the launcher judged the overlays against,
+    #: recorded for the same reason as `captured_patterns`; no later reader resolves a tenant.
     configured_patterns: tuple[str, ...] = ()
 
     def world(self, world_id: str) -> World:
@@ -449,20 +381,15 @@ class Family:
 def parse_as_of(raw: Any, *, where: str = "as_of") -> dt.datetime:
     """T0, as an aware UTC moment, or the fault that says why it is not one.
 
-    A naive moment names no instant and an offset one formats a trailing `Z` that lies by its
-    offset — every timestamp a sibling mints would be wrong by the same amount, consistently,
-    which is the kind of wrong nothing downstream can see.
+    A naive or non-UTC moment would skew every timestamp a sibling mints by a consistent amount
+    nothing downstream can see.
     """
     if isinstance(raw, dt.datetime):
         moment = raw
     elif isinstance(raw, str):
         try:
-            # lint-parse: ok — `_clock.parse_iso_utc` is the project's owner of this parse and
-            # is deliberately the WRONG normalizer here: it READS A NAIVE VALUE AS UTC, which is
-            # right for a precedent store sorting a mixed batch and is exactly the collapse this
-            # demand refuses. A naive T0 is the fault (S2) — every timestamp a sibling mints
-            # from it is the afternoon it executed — so this seam has to be able to see the
-            # difference the shared helper exists to erase, and then refuses on it below.
+            # lint-parse: ok — `_clock.parse_iso_utc` reads a naive value as UTC; this seam must
+            # see naivety so it can refuse it below.
             moment = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
         except ValueError as bad:
             raise FamilyError(f"{where} {raw!r} is not an ISO-8601 moment: {bad}") from bad
@@ -492,13 +419,7 @@ def _check_scalars(doc: dict) -> None:
 
 
 def _parse_worlds(raw_worlds: Any) -> list[World]:
-    """The declared worlds, with the family's own cardinality rule applied to the list.
-
-    EXACTLY ONE BASE, refused here rather than discovered later: the base is the control every
-    other world is compared against, so a family with two has no control and one with none has
-    nothing to compare to. And an EMPTY list is refused by name — the questioner's flow produces
-    the base plus two by construction, so an empty one is a document that lost its worlds.
-    """
+    """The declared worlds: non-empty, with exactly one base (the control)."""
     if not isinstance(raw_worlds, list):
         raise FamilyError(
             f"the manifest's worlds must be a list, got {type(raw_worlds).__name__}")
@@ -519,33 +440,26 @@ def _check_overlay_keys(
     worlds: list[World], captured_patterns: tuple[str, ...],
     configured_patterns: tuple[str, ...],
 ) -> None:
-    """Every staged overlay key names a corpus this episode can actually address.
+    """Every staged overlay key names a configured pattern or one the capture's FROM names.
 
-    A configured corpus pattern, or one the capture's own FROM sources name, and nothing else.
-    An invented pattern is a world staging a corpus no query in this episode addresses — a
-    difference that is staged, recorded, and unobservable.
+    An invented pattern would stage a difference no query in this episode can observe.
     """
     allowed = set(captured_patterns) | set(configured_patterns)
     for world in worlds:
-        for pattern in world.overlay.elastic:  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+        for pattern in world.overlay.elastic:  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
             if pattern not in allowed:
                 raise FamilyError(
-                    f"worlds[{world.world_id!r}].overlay.elastic names {pattern!r}, which is "  # lint-shippable: ok — the manifest's own field name; the overlay's staged half is spelled this in `family.yaml` and the loader must name the key it reads
+                    f"worlds[{world.world_id!r}].overlay.elastic names {pattern!r}, which is "  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
                     "neither a configured corpus pattern nor one the capture's own FROM "
                     f"sources name ({sorted(allowed)})")
 
 
 
 def _parse_captured_patterns(raw: Any, *, field: str = "captured_patterns") -> tuple[str, ...]:
-    """A pattern list the manifest records — the capture's own FROM sources, or (`field=
-    "configured_patterns"`) the tenant's configured corpus patterns the launcher judged with.
+    """A recorded pattern list (`captured_patterns` or `configured_patterns`), deduplicated.
 
-    ABSENT IS EMPTY, not a refusal: a manifest written before this field existed is still a
-    manifest this loader must read, and an episode whose capture addressed nothing is a real
-    (if unbranchable) shape. What is refused is a PRESENT value that is not a list of non-empty
-    strings — the field widens what an overlay may key, so a malformed one that silently read
-    as empty would narrow the rule instead, and a manifest edited after review would load as if
-    the edit were part of the contract.
+    Absent is empty (older manifests lack the field). A present value that is not a list of
+    non-empty strings is refused rather than read as empty.
     """
     if raw is None:
         return ()
@@ -566,20 +480,11 @@ def parse_family(
 ) -> Family:
     """Validate a raw manifest document into `Family`, naming the field that refused.
 
-    `captured_patterns` are the FROM sources the capture itself names; `configured_patterns`
-    are the corpus patterns the episode's TENANT configures (#1106 — handed in by the launcher,
-    which resolved the tenant; this loader reads no settings). An overlay's staged half may key
-    one of either and nothing else: an invented pattern is a world staging a corpus no query in
-    this episode addresses, which stages a difference nothing can observe.
-
-    Both sets are RECORDED in the document by the authoring call and preferred over the
-    arguments on load, so a sibling or a judge re-reading the manifest judges its overlays
-    against the sets that authored it without resolving anything. A manifest written before
-    #1106 records no configured set — its overlays were judged against the checkout's corpus
-    config, which now lives in the tenant's settings — so a reader that must accept one hands
-    in `configured_patterns`, which is ASKED only for such a manifest (answering it means
-    resolving the tenant; `run.py --resume` does, for its own). A reader that hands none admits
-    only the captured set.
+    `captured_patterns` are the capture's FROM sources; `configured_patterns` supplies the
+    tenant's corpus patterns (this loader reads no settings). An overlay's staged half may key
+    only one of those. Sets recorded in the document win over the arguments, so a re-reader
+    judges against what authored it. `configured_patterns` is called only for a manifest that
+    records no configured set; a reader passing none admits only the captured set.
     """
     if not isinstance(doc, dict):
         raise FamilyError(f"the manifest must be a mapping, got {type(doc).__name__}")
@@ -594,10 +499,8 @@ def parse_family(
         raise FamilyError("the manifest's discriminator must be a non-empty mapping")
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"))
-    # THE DOCUMENT'S OWN RECORD FIRST, the argument second. A manifest being LOADED carries the
-    # set its launcher judged it against; only the authoring call, which is composing the
-    # document and has no record to read yet, passes the argument. Preferring the argument
-    # would let a re-derivation at load time disagree with what was actually authored.
+    # The document's own record first: only the authoring call, which has no record yet, relies
+    # on the argument.
     recorded = _parse_captured_patterns(doc.get("captured_patterns"))
     recorded_configured = _parse_captured_patterns(
         doc.get("configured_patterns"), field="configured_patterns")
@@ -616,11 +519,8 @@ def parse_family(
 
 
 def runnable_worlds(family: Family) -> list[World]:
-    """The worlds the launcher starts by default.
-
-    The null replicate arm (`role: null`) LOADS and is not run: it is admitted by the data
-    model so an operator can ask for it, not selected unless they do.
-    """
+    """The worlds the launcher starts by default; the null replicate arm (`role: null`) loads but
+    runs only when an operator asks for it."""
     return [w for w in family.worlds if w.role is not None]
 
 
@@ -628,26 +528,16 @@ def load_family(
     path: Path, *, captured_patterns: tuple[str, ...] = (),
     configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
 ) -> Family:
-    """Read and validate the manifest at `path` (`parse_family` says when `configured_patterns`
-    is asked)."""
+    """Read and validate the manifest at `path`."""
     return parse_family(_read_document(Path(path)), captured_patterns=captured_patterns,
                         configured_patterns=configured_patterns)
 
 
 def _read_document(path: Path) -> object:
-    """The manifest's bytes, deserialized and NOT yet narrowed.
-
-    Split from `load_family` so the parse and the narrowing are two statements with two types:
-    this frame promises `object`, which is what a deserializer actually hands back, and
-    `parse_family` is the one seam that turns it into a `Family`. Folded together, the
-    deserializer's `Any` flowed straight into a `-> Family` return and type-checked clean over
-    a promise the runtime never made.
-    """
-    # SCREENED, the mirror of `write_family`'s `write_guarded` below and for its own reason:
-    # the episode dir is reachable from a sibling box's rw bind, so an entry at the manifest's
-    # name may be a link the model planted — and a plain `read_text` follows the link the write
-    # side refuses, handing every sibling a contract from outside the episode. `read_guarded`
-    # asks plainness of the OPEN DESCRIPTOR, so there is no check-then-act window either.
+    """The manifest deserialized but not yet narrowed; typed `object` so only `parse_family`
+    produces a `Family`."""
+    # Guarded: the episode dir is reachable from a sibling box's rw bind, so the manifest may be
+    # a planted link. `read_guarded` checks the open descriptor, leaving no check-then-act window.
     text, refusal = read_guarded(path)
     if text is None:
         raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
@@ -658,23 +548,18 @@ def _read_document(path: Path) -> object:
 
 
 def write_family(episode_dir: Path, doc: dict) -> Path:
-    """Render the manifest into `episode_dir` through a STRUCTURED dumper, never by hand.
+    """Render the manifest into `episode_dir` through a structured dumper, never by hand.
 
-    S41's guarantee, and the reason this is a function rather than a `write_text` at the call
-    site: every scalar in this document is model-authored, and one carrying `episode_id:
-    hijacked` on its second line is a whole sibling key if the writer is an f-string. The
-    dumper quotes and escapes; re-reading yields the same string and no key the text tried to
-    introduce.
+    Scalars are model-authored; an f-string writer would let one carrying `episode_id: hijacked`
+    on a second line inject a key.
     """
     episode_dir = Path(episode_dir)
-    # The episode directory is its own trust root: it is created under the CONFIGURED
-    # episodes root, which is host-controlled, and everything below it is reachable
-    # from a sibling box's rw bind.
+    # The episode dir is its own trust root: its parent is the host-controlled episodes root,
+    # and everything below it is reachable from a sibling box's rw bind.
     guarded_mkdir(episode_dir, base=episode_dir.parent)
     manifest = EpisodePaths(episode_dir).family
-    # GUARDED, because the episode dir is reachable from a box's rw bind: a link planted at the
-    # manifest's name would send the family's own contract out of the episode, and every sibling
-    # reads that document to learn which world it is.
+    # Guarded: a link planted at the manifest's name would send the family's contract out of the
+    # episode.
     write_guarded(
         manifest,
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
@@ -684,9 +569,7 @@ def write_family(episode_dir: Path, doc: dict) -> Path:
 def manifest_digest(path: Path) -> str:
     """The manifest's content digest, recorded in the review and re-checked on resume.
 
-    OVER THE SAME SCREENED READ `_read_document` MAKES. Hashed through `read_bytes` this frame
-    followed a link the loader is about to refuse — or, worse, agreed with a planted target and
-    certified it as the document the review accepted.
+    Uses the same guarded read as `_read_document`, so a planted link is never certified.
     """
     text, refusal = read_guarded(Path(path))
     if text is None:
@@ -705,54 +588,33 @@ def check_manifest_digest(path: Path, recorded: str) -> None:
 
 
 # ---------------------------------------------------------------------------------------
-# identity: one gate, before anything is staged (§7 FORK-4)
+# identity: one gate, before anything is staged
 # ---------------------------------------------------------------------------------------
 
-#: The world label the family's own shared capture is written under. No world may claim it: a
-#: world that did would append its live rows into the recording its siblings replay.
-#:
-#: `family` (#1007 M5) is reserved for the SAME reason, one layer up: the family-level judge
-#: call's own agent id is `judge:family:<n>`, and a world labelled `family` would give a per-
-#: world draw the identical agent id — one wire-log file (`_run_paths.stage_trace_path`'s
-#: `serialized-append` sink) interleaving both streams, unreadable as either.
+#: Labels no world may claim. `base` names the family's shared capture (a world using it would
+#: append live rows into the recording its siblings replay); `family` would give a per-world judge
+#: draw the family-level call's agent id `judge:family:<n>`, interleaving two streams in one
+#: wire log.
 RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
 
-#: `family_<digits>` too, as DEFENSE IN DEPTH — the colon-fold `agent_id.replace(':', '_')`
-#: that names a wire-log file is not obviously injective across the two agent-id shapes this
-#: design mints (`judge:<world>:<n>` per-world, `judge:family:<n>` family-level), and refusing
-#: the whole `family_\d+` shape at the same gate `RESERVED_WORLD_LABELS` uses closes the family
-#: of near-miss names rather than reasoning about each one's actual fold.
+#: `family_<digits>` too, defensively: the colon fold that names a wire-log file is not obviously
+#: injective across `judge:<world>:<n>` and `judge:family:<n>`, so the whole near-miss shape is
+#: refused.
 _RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
 
 
 def is_reserved_world_label(label: str) -> bool:
-    """THE membership test for the reserved namespace — case-folded, the vocabulary's own
-    normalizer, so a second reader (`learning/judge/family.py::_check_world_labels`, which
-    `grade_episode` reaches directly without the launcher's own `check_identities`) asks THIS
-    module rather than re-deriving the fold locally and risking the two gates disagreeing on
-    what counts as a match.
-
-    BOTH RULES, not just the set. The `family_<digits>` shape below is half the reservation;
-    left out of this predicate it was applied by `check_identities` alone — so the judge's own
-    gate, which exists precisely because `grade_episode` is directly callable over a manifest
-    the launcher never saw, admitted the near-miss names the launcher refuses."""
+    """The membership test for the reserved namespace (the set, case-folded, and the
+    `family_<digits>` shape). Other gates, such as the judge's, ask this rather than re-deriving
+    the fold."""
     return (label.casefold() in RESERVED_WORLD_LABELS
             or _RESERVED_FAMILY_DRAW_LABEL.match(label) is not None)
 
 
 def refuse_reserved_world_label(label: str, *, at: str) -> None:
-    """THE refusal for a reserved label, in one place, raised WHEREVER a world is minted.
+    """Refuse a reserved label; called wherever a world is parsed, not only by the launcher.
 
-    It used to live in `check_identities` alone, which has exactly one caller — the launcher.
-    Every other way into a `Family` (`parse_family` on a hand-repaired document, `load_family`
-    on resume and re-entry) admitted a world labelled `family`, whose per-world judge draws
-    then land in `worlds/family/judge/` under agent id `judge:family:<n>` — the same archive
-    directory and the same serialized-append wire log the family-level call writes. The
-    reservation is a property of the LABEL, not of the family around it, so it is asked where
-    the label is parsed and the launcher's gate keeps it only as defense in depth.
-
-    TWO ARMS, TWO SENTENCES, the shape one first — so `family_1` is refused for the fold that
-    actually matched it rather than for a set it is not a member of.
+    The shape arm runs first so `family_1` is refused for the rule that actually matched it.
     """
     where = f"{at} " if at else ""
     if _RESERVED_FAMILY_DRAW_LABEL.match(label):
@@ -768,21 +630,15 @@ def refuse_reserved_world_label(label: str, *, at: str) -> None:
             "call's own agent id")
 
 
-def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, deliberately not split (see its own docstring)
-    """ONE gate over the whole manifest, before anything is staged.
+def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, kept together
+    """One gate over every identity rule, before anything is staged.
 
-    Every rule the downstream names would each have refused at a different depth, and refused
-    there they cost a primed episode and however many siblings had already run: the label must
-    be nameable in a view, the labels must be distinct case-folded, none may be the reserved
-    base-capture name, the label must be able to NAME A RUN, the roles must be distinct, and
-    each composed world token must round-trip the naming rule the four comparing sites read it
-    back through.
+    Each rule would otherwise refuse downstream after a primed episode and running siblings: the
+    label must name a view and a run, labels must be distinct case-folded and not reserved,
+    roles must be distinct, and each composed world token must be nameable.
     """
-    # THE ROLES FIRST, because that rule is the FAMILY's and the rest are each world's own. A
-    # role is the world's name in every report and in the comparison the archive publishes, so
-    # two arms sharing one is a family that cannot be read at all — a stronger and earlier fact
-    # than any one label being unnameable. Asked in the other order, a manifest with both faults
-    # was refused for the label and the operator fixed one problem at a time.
+    # Roles first: that rule is the family's, and two arms sharing a role make every report
+    # unreadable — the more fundamental fault to report.
     roles: dict[str, str] = {}
     for world in family.worlds:
         if world.role is None:
@@ -797,26 +653,17 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
     token_head = episode_token_for(family.episode_id)
     for world in family.worlds:
         label = world.world_id
-        # DEFENSE IN DEPTH ONLY. `parse_world` already refused this at the mint, so a `Family`
-        # carrying a reserved label cannot reach here through any parser — the arm stays
-        # because this gate is the one a reader looks in for the whole identity rule set, and
-        # because a `Family` can be constructed directly in a test or a future caller.
+        # Defense in depth: `parse_world` already refuses this, but a `Family` can be built
+        # directly.
         refuse_reserved_world_label(label, at="")
         try:
             refuse_unnameable_world(label)
         except ViewNameError as bad:
             raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
-        # AND IT HAS TO NAME A RUN, which the view rule does not cover and which the label's
-        # move from the retired `cli.World.__post_init__` to this gate lost on the way. The two
-        # grammars overlap and neither contains the other: `refuse_unnameable_world` is
-        # `confinement._nameable`, which refuses `\ / * ? " < > | ,`, whitespace, upper case and
-        # `-`, and admits `wörld`, `a+b`, `a:b`, `a#b`, `a[b]` — every one of which fails the
-        # run-id grammar. That matters MORE now than when the rule was written, because the
-        # label is MODEL-authored: each sibling's run dir is `{episode_id}-{label}`, so a label
-        # off this grammar passes the one gate that claims to hold every id rule, gets the base
-        # primed, the corpus staged, the review replayed and three processes spawned — and each
-        # child then `sys.exit`s in `run_common.materialize_run` on the id. Refused at the
-        # mint, where the old code refused it and where nothing has been spent.
+        # The label must also name a run: each sibling's run dir is `{episode_id}-{label}`. The
+        # view and run-id grammars overlap but neither contains the other (the view rule admits
+        # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar
+        # would otherwise fail in every child after the family is staged.
         if not is_valid_run_id(f"{family.episode_id}-{label}"):
             raise FamilyError(
                 f"world label {label!r} cannot name this episode's sibling run "
@@ -830,10 +677,7 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
                 "filesystem folds case, and each names a run dir, a ledger file and a staged "
                 "corpus")
         seen[folded] = label
-        # THE COMPOSED TOKEN, not the label again. Asked of the label a second time this check
-        # was a restatement of the one four lines up and could never fire — while the thing the
-        # docstring promises, that the token the four comparing sites read back is nameable, went
-        # unasked. `world_token_for` is the join, so the value checked is the value they build.
+        # Check the composed token itself, built the same way the comparing sites build it.
         token = world_token_for(token_head, label)
         try:
             refuse_unnameable_world(token)
@@ -842,34 +686,19 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
 
 
 def episode_token_for(episode_id: str) -> str:
-    """The episode's own token: the id with its separators normalised to one spelling.
+    """The episode's own token: the id with `-` folded to `.`, injectively.
 
-    INJECTIVE, and not by a plain character replacement: the run-id grammar admits `-`, `_` AND
-    `.` (`_run_id.RUN_ID_ALLOWED`), so folding one onto another would map two distinct episode
-    ids onto one token — and the token is what the sweep's glob and every world token are built
-    from, so a collision there is one episode tearing down another's live names. All THREE are
-    therefore accounted for before the separator is chosen: `_` escapes to `__` and `.` to `_p`,
-    so nothing but the folded `-` can produce a literal `.`. Escaping only `_` left the hole
-    the escape exists to close — `20260728t161845z-alert-2026.01-n5` and
-    `20260728t161845z-alert-2026-01-n5` are two ids that both folded to one token, and a run id
-    carrying a dot is ordinary (`--run-id`, and the auto id's alert label is a fixture STEM).
+    The run-id grammar admits `-`, `_` and `.`, so `_` escapes to `__` and `.` to `_p` before
+    `-` folds onto `.`; otherwise two ids (e.g. `...-2026.01-n5` and `...-2026-01-n5`) would
+    share a token, and the sweep would tear down one episode's live names for another's.
 
-    NAMEABLE, because the token is the head of every world token and therefore of every staged
-    alias. TAKES NO OVERRIDE (F-R5): every id this can raise on is already refused earlier, by
-    `refuse_bad_episode_id`, which every caller of `episode_dir_for` runs first — an operator
-    escape here would let two episode ids share one namespace and defeat `staging.sweep`, the
-    only recovery for a killed attempt's live cluster aliases, by hand. An episode's namespace
-    is derived from its episode id and from nothing else.
+    Takes no override: an episode's namespace derives from its id alone, and ids this could
+    refuse are already refused by `refuse_bad_episode_id`.
     """
-    # CASEFOLDED, because an alias name cannot carry upper case and a view named above the case
-    # rule is not refused by the cluster — it is answered with an empty result, so the world
-    # reads as one that changed nothing. This is not a loss of injectivity in practice:
-    # `refuse_bad_episode_id` holds every episode id the launcher accepts to `is_case_stable_id`,
-    # so for those ids the fold is the identity, and an id reaching here unfolded came from a
-    # caller that has not been through that gate.
-    # ORDER IS THE ESCAPE. `_` doubles first, so nothing that follows can produce a `__` a
-    # literal `_` did not; then `.` takes `_p`, which a literal `_p` in the id can no longer
-    # spell; only then is `-` folded onto the `.` that is now unreachable any other way.
+    # Casefolded because an alias cannot carry upper case, and the cluster answers such a view
+    # with an empty result rather than an error. Injectivity holds for launcher-accepted ids,
+    # which `refuse_bad_episode_id` requires to be case-stable.
+    # Order matters: `_` doubles first, then `.` becomes `_p`, then `-` takes the freed `.`.
     escaped = episode_id.replace("_", "__").replace(".", "_p").replace("-", ".").casefold()
     return _nameable_token(escaped, f"episode id {episode_id!r}")
 
@@ -877,9 +706,7 @@ def episode_token_for(episode_id: str) -> str:
 def _nameable_token(token: str, origin: str) -> str:
     """`token`, or the fault every alias built from it would have raised.
 
-    Held to the WORLD-ID rule rather than to a looser one: the composed world token is
-    `f"{episode_token}.{world_id}"` and it is that whole string `world_view` renders into an
-    alias, so a token this rule admits and the alias rule does not is a name nothing can stage.
+    Held to the world-id rule because the whole composed world token is rendered into an alias.
     """
     try:
         refuse_unnameable_world(token)
@@ -896,16 +723,11 @@ def _nameable_token(token: str, origin: str) -> str:
 
 
 def world_token_for(episode_token: str, world_label: str) -> str:
-    """The ONE spelling of a world's identity: `f"{episode_token}.{label}"`.
+    """The one spelling of a world's identity: `f"{episode_token}.{label}"`.
 
-    Four sites compare a world — the staged alias name's head, the world ledger's filename, the
-    ledger rows a sibling writes, and the applier's staging decision — and every one of them
-    reads this. Two spellings would be the join-breaker the registry of names exists to prevent.
-
-    The label may not carry the composition's own `.` (#1077 decision 12, refused at MINT
-    time): the episode token holds dots by construction (every `-` of the episode id folds
-    onto one), so the label is the text after the token's last dot only while the label
-    itself has none — a dotted label would make two distinct (episode, label) pairs one token.
+    Used by every site that compares worlds (alias head, ledger filename and rows, applier). The
+    label may not contain `.`: the episode token already does, so a dotted label would let two
+    (episode, label) pairs compose to one token.
     """
     if "." in world_label:
         raise FamilyError(
@@ -916,13 +738,11 @@ def world_token_for(episode_token: str, world_label: str) -> str:
 
 @model(frozen=True)
 class ResumeWorld:
-    """What a sibling process IS, from the manifest alone.
+    """What a sibling process is, from the manifest alone.
 
-    `world_id` is the composed TOKEN rather than the short label, deliberately: the estate seam
-    (`WorldRegistry`, `WorldApplier`, `Ledger.for_world`) reads `world_id` and turns it into an
-    alias name, a ledger filename and a row key, and every one of those must carry the episode
-    so two episodes' world `b` are two worlds. The short label survives beside it as `label`,
-    which is what the manifest, the run id and the archive directory are keyed on.
+    `world_id` is the composed token, not the short label: the estate seam turns it into alias
+    names, ledger filenames and row keys, which must carry the episode. `label` is what the
+    manifest, run id and archive directory are keyed on.
     """
 
     world_id: str
@@ -934,12 +754,12 @@ class ResumeWorld:
 
     @property
     def token(self) -> str:
-        """The composed world token — the same string `world_id` carries, named for readers."""
+        """The composed world token (same as `world_id`)."""
         return self.world_id
 
     @property
     def touches(self) -> tuple[str, ...]:
-        """Derived from the overlay on every read; never a stored field (D2)."""
+        """Derived from the overlay on every read."""
         return touches_of(self.overlay)
 
     @property
@@ -954,11 +774,9 @@ class ResumeWorld:
 
 
 def resume_world_from(family: Family, world_label: str, episode_dir: Path) -> ResumeWorld:
-    """The world `world_label` names in `family`, or the fault that says it declares no such one.
+    """The world `world_label` names in `family`, or the fault that says it declares none.
 
-    Refused HERE, before the run dir is materialised and before any box starts: a label the
-    manifest does not declare is an operator typo, and discovering it after materialisation
-    leaves a run dir nothing will ever fill.
+    Called before the run dir is materialised, so an operator typo leaves no empty run dir.
     """
     world = family.world(world_label)
     return ResumeWorld(
@@ -971,9 +789,8 @@ def resume_world_from(family: Family, world_label: str, episode_dir: Path) -> Re
 def refuse_bad_episode_id(episode_id: str) -> None:
     """Refuse an episode id that cannot name a directory of its own.
 
-    The id is joined straight into the episode dir's path and into every sibling's run id, so a
-    token carrying a separator plants the family's capture outside the episodes root, and two
-    spellings of one id are one directory wherever the filesystem folds case.
+    The id is joined into the episode dir's path and every sibling's run id, so it must be a
+    valid run id and case-stable.
     """
     if not is_valid_run_id(episode_id):
         raise FamilyError(

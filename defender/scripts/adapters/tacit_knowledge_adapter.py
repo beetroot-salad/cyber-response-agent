@@ -1,26 +1,21 @@
 """The tacit-knowledge registry: the estate's authored record of sanctioned patterns.
 
-The one system in this tree with no service behind it — the FILE is the system of record
-(`defender/skills/tacit-knowledge/registry.yaml`), and its entire safety argument is
-provenance: every entry traces to a human commit, because nothing an agent run can reach
-writes it. The commit/PR IS the sign-off, which is the role the missing human-review step in
-this pipeline would otherwise have played (#983 mechanism B).
+The one system with no service behind it: the file
+(`defender/skills/tacit-knowledge/registry.yaml`) is the system of record. Its safety rests on
+provenance — every entry traces to a human commit, since nothing a run can reach writes it, so
+the commit is the sign-off.
 
-READ-ONLY END TO END, and deliberately so. This module exports no write-capable function, and
-`permission.decide_write` refuses the path for every role a run can reach. A registry populated
-from the agent's own automated closes would be the system vouching for itself.
+Read-only end to end: this module exports no write-capable function and
+`permission.decide_write` refuses the path for every run role. A registry populated from the
+agent's own closes would be the system vouching for itself.
 
-Two halves, split so the rules are testable without a `VerbContext`:
+  * `load_entries` — the file, validated entry by entry. A malformed row is dropped and the
+    rest loads (as in `defender._corpus.iter_query_templates`), rather than one bad row sinking
+    every sanction.
+  * `find_entry` — the pure lookup, with `now` passed as a value so expiry is testable.
 
-  * `load_entries` — the file, validated ENTRY BY ENTRY. One malformed row is DROPPED and the
-    rest of the file loads, mirroring `defender._corpus.iter_query_templates`: a registry is a
-    curated list, and one bad row sinking every sanctioned pattern in the estate is the worse
-    failure.
-  * `find_entry` — the pure lookup, with `now` entering as a VALUE so expiry is checkable
-    without a clock to patch.
-
-`lookup` is the gather verb over the pair, resolving both the tree it reads and the moment it
-judges expiry against off the `VerbContext` it is handed.
+`lookup` is the gather verb over the pair, taking the tree and the as-of moment from its
+`VerbContext`.
 """
 from __future__ import annotations
 
@@ -45,85 +40,58 @@ from defender.runtime.verbs import VerbContext
 
 SYSTEM = "tacit-knowledge"
 
-#: The eight fields ONE entry carries — the seven the design names plus the `id` a `:R authz`
-#: row cites as its `anchor_id`. Closed: an entry missing any of them, or carrying a key this
-#: loader does not read, is dropped. Without `id` a citation would name a `pattern` STRING, and
-#: every edit to that string would be a silent re-identification of the sanction.
+#: The fields one entry carries, including the `id` a `:R authz` row cites as its `anchor_id`
+#: (without it a citation would name a `pattern` string, and editing that string would silently
+#: re-identify the sanction). Closed: missing or extra keys drop the entry.
 #:
-#: Nothing here can cite a past case (`cites_past_case`, `similar_to`, `precedent`), and that
-#: omission is the mechanical half of a rejected non-obligation: "this resembles a case we
-#: resolved" cannot be recorded as a sanction at all, so precedent-by-similarity has no home
-#: even with a human's signature on it.
+#: There is no field for citing a past case: precedent-by-similarity cannot be
+#: recorded as a sanction at all.
 ENTRY_FIELDS: tuple[str, ...] = (
     "id", "pattern", "actor_scope", "host_scope",
     "added_by", "added_at", "review_by", "justification",
 )
 
-#: The two fields that carry a DATE, so a `dt.date` PyYAML resolved from an unquoted scalar is
-#: normalized back to the ISO string the rest of this module compares.
+#: Date fields: a `dt.date` PyYAML resolved from an unquoted scalar is normalized back to ISO.
 _DATE_FIELDS: tuple[str, ...] = ("added_at", "review_by")
 
-#: How far past its own `added_at` an entry may set its `review_by`. THE freshness bound, and
-#: it is enforced at load rather than trusted: a file entry does not re-verify itself on every
-#: read the way a live IAM or change-management query does, so the bound is what stands in for
-#: that re-verification. A sanction that could name its own expiry is a rubber stamp.
-#:
-#: One module-level constant so the policy knob is tunable in one place.
+#: The maximum span from `added_at` to `review_by`, enforced at load. A file entry is not
+#: re-verified on read the way a live IAM or change-management query is, so this bound stands
+#: in for that; a sanction that could name its own expiry is a rubber stamp.
 TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS = 180
 
-#: The fewest LITERAL characters — anything that is not a glob metacharacter — an `actor_scope`
-#: or `host_scope` may carry.
+#: The fewest literal (non-glob) characters an `actor_scope` or `host_scope` may carry.
 #:
-#: The three spellings a denylist catches (empty, `*`, `all`/`any`) are not enough, because a
-#: denylist cannot tell a blanket wildcard from a legitimate scoped glob: `actor_scope: "*-0"`
-#: matches `uid-0`, `svc-0`, `root-0` and every other actor whose name ends that way, and it is
-#: none of those three spellings. Counting literal characters is the property that actually
-#: separates them — `build-runner-*.prod` is eighteen literal characters around one star, and
-#: `*-0` is nearly all star.
+#: A denylist of blanket spellings misses scopes like `*-0`, which matches every actor ending
+#: in `-0`; counting literal characters separates that from `build-runner-*.prod`.
 #:
-#: THE LIMIT, recorded rather than papered over: this is a shape rule, not a breadth proof.
-#: `host_scope: "prod-*"` is mostly literal and still covers a fleet, and no character count
-#: can tell a fleet-wide sanction a human MEANT from one they wrote carelessly. What the rule
-#: buys is that the spellings covering EVERYTHING cannot be written at all; who may author a
-#: broad-but-legal entry is a process risk on the registry itself.
+#: This is a shape rule, not a breadth proof: `prod-*` is mostly literal and still covers a
+#: fleet. It only guarantees that scopes covering everything cannot be written.
 TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS = 4
 
-#: The glob metacharacters `fnmatchcase` reads, which is what makes a character NOT literal.
+#: The glob metacharacters `fnmatchcase` reads, which is what makes a character not literal.
 _WILDCARD_CHARS = "*?[]"
 
-#: One `fnmatch` BRACKET EXPRESSION — `[seq]` or the negated `[!seq]`, with a `]` in first
-#: position taken literally, exactly as `fnmatch.translate` reads it.
-#:
-#: Its contents are a CHARACTER SET, never literal text, and counting them as literal was the
-#: hole in the rule below: `[!QQQQ]` is five characters that match every character except `Q`,
-#: so `actor_scope: "[!QQQQ]*"` cleared the four-literal minimum and matched every actor in the
-#: estate — a blanket scope in a spelling the rule claims cannot be written at all. The whole
-#: expression counts as wildcard, which is what it is.
+#: One `fnmatch` bracket expression — `[seq]` or `[!seq]`, with a leading `]` literal, as
+#: `fnmatch.translate` reads it. Its contents are a character set, not literal text:
+#: `[!QQQQ]*` would otherwise clear the literal minimum while matching every actor.
 _BRACKET_EXPR_RE = re.compile(r"\[!?\]?[^\]]*\]")
 
-#: Scope spellings that cover everything by NAME rather than by wildcard. Held beside the
-#: literal-character minimum, not instead of it: each catches what the other cannot.
+#: Scope spellings that cover everything by name; complements the literal-character minimum.
 _BLANKET_SCOPES = frozenset({"*", "all", "any"})
 
 
 def registry_path(defender_dir: Path) -> Path:
     """Where the registry lives inside a defender tree.
 
-    The per-system directory convention, so the file is a SYSTEM's data queried through a
-    gather verb rather than a vocabulary of the invlang module — and so
-    `runtime.verb_roster.model_read_surfaces`, which already enumerates `skills/*/`, sees the
-    skill beside it. Deliberately NOT a tenant's `settings/systems/{system}/`: that lane
-    holds endpoints and credentials for a live service, and this system has no service.
+    Under `skills/` as a system's data (so `runtime.verb_roster.model_read_surfaces` sees it),
+    not a tenant's `settings/systems/{system}/`, which holds endpoints and credentials for live
+    services.
     """
     return Path(defender_dir) / "skills" / SYSTEM / "registry.yaml"
 
 
 def _literal_chars(value: str) -> int:
-    """How many characters of `value` a host or actor name has to MATCH exactly.
-
-    Bracket expressions are struck out whole before the count — see `_BRACKET_EXPR_RE` for the
-    blanket scope that reached `find_entry` while they were being counted as literal text.
-    """
+    """How many characters of `value` a name must match exactly (bracket expressions excluded)."""
     return sum(1 for ch in _BRACKET_EXPR_RE.sub("", value) if ch not in _WILDCARD_CHARS)
 
 
@@ -151,21 +119,13 @@ def _parse_date(value: str) -> dt.date | None:
 
 
 def _normalized(raw: Any) -> dict[str, str] | None:
-    """One raw YAML mapping as an entry of eight string fields, or `None` when it is not one.
+    """One raw YAML mapping as an entry of string fields, or `None` when it is not one.
 
-    A `dt.date` PyYAML resolved out of an unquoted `added_at: 2026-03-01` is folded back to its
-    ISO spelling: the file is HUMAN-EDITED, and refusing an entry for the quoting of a date
-    would drop a legitimate sanction over a formatting detail. Everything else must already be
-    a non-empty string — a list or a mapping in a field this module compares as text would
-    otherwise reach `fnmatchcase` and raise inside a verb body.
-
-    The fold goes through `.date()` FIRST, which is the whole of what makes it work. PyYAML also
-    resolves an unquoted `2026-03-01 00:00:00` — a legal timestamp a human plausibly commits —
-    to a `dt.datetime`, whose `isoformat()` is `'2026-03-01T00:00:00'`, and
-    `dt.date.fromisoformat` does not read that. So the branch that exists to SAVE these entries
-    dropped exactly the ones it was reached for, and the sanction silently stopped answering.
-    One `isinstance(value, dt.date)` covers both: `dt.datetime` is a `dt.date` subclass, which
-    is also why naming it beside `dt.date` in a tuple never selected anything on its own.
+    Dates PyYAML resolved from unquoted scalars are folded back to ISO: the file is
+    hand-edited, and quoting should not drop a sanction. `dt.datetime` (from an unquoted
+    timestamp) goes through `.date()` first, since `fromisoformat` would not read its
+    `isoformat()`; it is a `dt.date` subclass, so one `isinstance` covers both. Anything else
+    must be a non-empty string, or it would raise inside `fnmatchcase` in a verb body.
     """
     if not isinstance(raw, dict) or set(raw) != set(ENTRY_FIELDS):
         return None
@@ -183,9 +143,8 @@ def _normalized(raw: Any) -> dict[str, str] | None:
 def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
     """One raw YAML row as a loadable entry, or `(None, why not)`.
 
-    Both halves from ONE call so the loader cannot answer "does this load" and "what is it"
-    with two normalizations that could disagree. The refusal text is what a human editing the
-    file reads on stderr, so it names the field and the rule.
+    One call answers both, so the two cannot disagree. The refusal text is for the human
+    editing the file, so it names the field and the rule.
     """
     entry = _normalized(raw)
     if entry is None:
@@ -219,25 +178,16 @@ def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
 
 
 class RegistryRead(NamedTuple):
-    """One reading of the registry file: the entries that ANSWER, in file order, and every
-    reason something in the file does not.
+    """One reading of the registry file: the entries that answer, in file order, and every
+    reason something does not.
 
-    THE one walk, for the reason `validate/_gating._CeilingWalk` is one: the verb that serves
-    lookups and the CLI a human validates the file with read the SAME result, so a drop a human
-    is told about is exactly a drop the run will make. A second reading of "well formed" is a
-    tool that certifies a file the runtime then reads differently — which for this system means
-    telling someone their sanction is live while every lookup misses it.
+    The verb and the validating CLI share this reading, so a drop the human is told about is
+    exactly the drop a run makes. `fatal` is a whole-file refusal (unreadable, or no `entries:`
+    list), meaning nothing answers.
 
-    `fatal` is the WHOLE-FILE refusal (unreadable, or no `entries:` list under it), which is not
-    a per-entry drop and must not be reported as one: it means nothing in the file answers.
-
-    A `NamedTuple` AND NOT A `@dataclass`, which is a constraint on this whole directory rather
-    than a preference here. An adapter module is loaded BY PATH and is not registered in
-    `sys.modules` (the estate seam, `runtime.verbs`), and `@dataclass` resolves a string
-    annotation — every annotation is one under `from __future__ import annotations` — by looking
-    its class's module up there. That lookup returns `None`, and the decorator raises at IMPORT,
-    so the adapter does not merely fail a test: it fails to load at all on that path, taking
-    every verb with it. `NamedTuple` reads `__annotations__` directly and is unaffected.
+    A `NamedTuple`, not a `@dataclass`: adapter modules are loaded by path and are not in
+    `sys.modules`, and `@dataclass` resolves string annotations through it, so it would raise
+    at import and take every verb down.
     """
 
     entries: tuple[dict[str, str], ...]
@@ -248,14 +198,9 @@ class RegistryRead(NamedTuple):
 def read_registry(path: Path) -> RegistryRead:
     """The registry at `path`, entry by entry, with the reason for each drop.
 
-    PUBLIC and returning the refusals rather than printing them, because the refusal text is
-    written FOR A HUMAN — `_read_entry`'s docstring says so — and until this existed no human
-    ever saw one. It printed to stderr during an investigation run, where nobody is watching,
-    and the dropped entry then looked exactly like an entry nobody had written: the lookup
-    misses, the contract falls through to `indeterminate`, and the run escalates a case somebody
-    had already sanctioned. The diagnosis existed and had no reader.
-
-    `defender.scripts.tacit_cli` is that reader, and CI runs it.
+    Returns the refusals rather than printing them so a human can see them:
+    `defender.scripts.tacit_cli` reports them and CI runs it. Printed during a run, a dropped
+    entry is indistinguishable from an absent one and the run escalates a sanctioned case.
     """
     try:
         loaded = _yaml.safe_load(read_text_utf8(Path(path)))
@@ -289,29 +234,14 @@ def read_registry(path: Path) -> RegistryRead:
 
 
 def load_entries(path: Path) -> list[dict[str, str]]:
-    """Every well-formed entry in the registry at `path`, in file order.
+    """Every well-formed entry in the registry at `path`, in file order — the verb-side
+    surface over `read_registry`.
 
-    ONE entry is dropped, never the file — the argument `_corpus.iter_query_templates` makes
-    for the query catalog. Each drop is announced on stderr, because the only person who can
-    repair the row is the human who committed it. (Announced there is not the same as READ
-    there: `read_registry` above is what hands those reasons to someone who can act on them.)
-
-    A REPEATED `id` is one of those drops. The file's own header says an id may never be
-    re-used, and until this check nothing enforced it: two entries could share one, `find_entry`
-    would answer with whichever came first in file order, and a `:R authz` row citing that id
-    named neither of them in particular. A citation has to identify ONE sanction — that is the
-    entire reason the id exists rather than a `pattern` string — so the later row is refused
-    while the first, which every existing citation already means, keeps answering.
-
-    THE FILE'S OWN SHAPE is announced too, and it is the drop that was silent. A top-level that
-    is not a mapping, or a mapping with no `entries:` list under it — a `entires:` typo, a list
-    at the root, a file emptied to `null` — reached the same `return []` a genuinely empty
-    registry does, with nothing on stderr and `health_check` reporting `connected: true,
-    entries: 0`. Every sanction in the estate stops answering and every lookup is an ordinary
-    MISS, which is the one failure mode this system cannot distinguish from working.
-
-    The VERB-side surface over `read_registry`: this is what a `lookup` in flight calls, and it
-    keeps the stderr channel because that is the only one a run has.
+    One bad entry is dropped, never the file. A repeated `id` is dropped too (the first keeps
+    answering), since a citation must identify one sanction. A malformed file shape (no
+    `entries:` list) is announced as well; otherwise it would look exactly like an empty
+    registry, with every lookup an ordinary miss. Drops go to stderr, the only channel a run
+    has.
     """
     read = read_registry(path)
     if read.fatal is not None:
@@ -325,27 +255,15 @@ def find_entry(
     entries: list[dict[str, str]], *,
     actor: str, host: str, pattern: str, now: dt.date,
 ) -> dict[str, str] | None:
-    """The first unexpired entry whose scope COVERS this actor, host and action — or `None`.
+    """The first unexpired entry whose scope covers this actor, host and action — or `None`.
 
-    CONTAINMENT, never similarity. `pattern` is compared for exact equality (a glob there would
-    let one entry sanction every action, which is the hole the no-wildcard rule closes on the
-    two scopes); `actor_scope` and `host_scope` are ordinary globs, already held to a literal
-    minimum at load. A near miss is a miss — `uid-00` is not `uid-0` and
-    `build-runner-07.prod.example` is not a `build-runner-*.prod` host — so resemblance to a
-    past case cannot become a hit at read time either.
+    Containment, never similarity. `pattern` is compared exactly (a glob would let one entry
+    sanction every action); the scopes are globs held to a literal minimum at load. A near miss
+    (`uid-00` vs `uid-0`) is a miss.
 
-    Validity is a property of the READ, not of the load, and it has BOTH ends. An entry that is
-    well formed and inside the review span still stops answering once its own review date
-    passes, which is what makes the freshness bound stand in for a live system's
-    re-verification — and it does not START answering before the day it says it was added.
-
-    The second half is what makes the first mean anything. `_read_entry` bounds the SPAN between
-    the two dates, so an entry cannot name its own expiry; checking only `review_by` on the way
-    out left that bound satisfiable by moving both dates forward together, which buys effectively
-    unlimited validity from today with a legal 151-day span. A sanction dated into the future has
-    not been authored yet as far as this read is concerned.
-
-    Either way it is simply NO HIT — never a refusal, and never a stale authorization.
+    Valid only while `added_at <= now <= review_by`. The lower bound matters because the span
+    limit alone could be dodged by dating both ends into the future. Outside the window it is
+    simply no hit — never a refusal or a stale authorization.
     """
     for entry in entries:
         if entry["pattern"] != pattern:
@@ -364,23 +282,18 @@ def find_entry(
 
 
 def _as_of_date(ctx: VerbContext) -> dt.date:
-    """The day this call is being served AS OF.
+    """The day this call is served as of: `ctx.as_of` on a branched run, else today.
 
-    `ctx.as_of` is the branch point's moment on a branched run and `None` on an ordinary one,
-    where the call really is executing now. THE ONE ANCHOR for that optionality, resolved here
-    and handed to `find_entry` as a concrete value — `getattr` for the reason
-    `host_state_adapter._captured_at` uses it: this adapter is reachable with duck-typed
-    contexts, and an `AttributeError` inside a verb body is filed as an INFRA fault rather than
-    as the shape mismatch it is.
+    `getattr` because duck-typed contexts reach this adapter, and an `AttributeError` in a verb
+    body is filed as an infra fault.
     """
     at = getattr(ctx, "as_of", None)
     return (dt.datetime.now(dt.UTC) if at is None else at).date()
 
 
 def health_check(ctx: VerbContext) -> dict:
-    """Liveness for a system with no service: does the registry file exist, and how many
-    entries does it hold. Returns data rather than printing, like every other health check —
-    prose on stdout would leave the queries table recording an empty payload."""
+    """Liveness for a system with no service: does the registry exist, and how many entries
+    does it hold. Returns data rather than printing, so the queries table records a payload."""
     path = registry_path(ctx.defender_dir)
     present = path.is_file()
     return {
@@ -391,17 +304,14 @@ def health_check(ctx: VerbContext) -> dict:
     }
 
 
-def lookup(  # lint-dup: ok — a VERB name, not a helper: `threat_intel_adapter.lookup` is a different system's verb with a different contract, and the roster/query seam addresses both as `<system>.lookup`, so the module attribute must be spelled exactly this. Same NAME-ONLY collision the baselined `health_check() x4` across these adapters already is.
+def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `threat_intel_adapter.lookup` is a different system's verb
     ctx: VerbContext, *, actor: str, host: str, pattern: str,
 ) -> dict:
     """Does an authored, unexpired registry entry sanction `actor` doing `pattern` on `host`?
 
-    ONE key on the return. A `hit` boolean beside the entry would be two spellings of one fact;
-    `matched is None` already says "miss" to a reader and to a gather model looking at the
-    payload, and the whole entry is what a `:R consultations` row cites and a human reviews.
-
-    A MISS names nothing — not the entry it nearly matched, not the one that expired. An
-    almost-hit that reported its own id would be a citation waiting to be written.
+    One key: `matched` is the entry (what a `:R consultations` row cites) or `None`. A miss
+    names nothing — not a near match, not an expired entry — since an almost-hit's id would be a
+    citation waiting to be written.
     """
     entries = load_entries(registry_path(ctx.defender_dir))
     return {

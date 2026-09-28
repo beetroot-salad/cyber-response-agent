@@ -1,31 +1,16 @@
-"""#1078 pass (A) — tenant 1 on the request.
+"""Tenants: the tenant id, a tenant's row under the data root, and the runs-base record.
 
-D2's runs-base record, `<runs_base>/_tenant.json`, keeps its name and fields
-(`{tenant_id, base_world_id, created_at}`); what changes is who decides its tenant:
-`ensure_runs_base_record(runs_base, tenant_id)` mints it with the REQUEST's id, or reads it
-back and refuses on disagreement — never overwrites, never falls back to a default.
+Every run names its tenant on the request; there is no default. `TenantId` is the one check
+of an id. A tenant exists once its row `<data root>/<T>/tenant.json` does (`create_tenant`,
+`require_tenant`); `TenantPaths` spells its layout, and `resolve_data_root` reads the required
+`DEFENDER_DATA_ROOT`. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
+(`ensure_runs_base_record`): created once, never overwritten, and a run for another tenant is
+refused rather than stamped.
 
-D1 adds the tenant itself: a `<data root>/<tenant>/` folder whose ROW (`tenant.json`) is the
-only thing that makes it exist. `TenantPaths` is the one place the tenant's layout is spelled;
-`create_tenant`/`require_tenant` are the row's writer and reader; `resolve_data_root` is the
-one path from `DEFENDER_DATA_ROOT` (no default) to an absolute, symlink-resolved root, and
-carries the widened learning-state-overlap refusal (O13/J24); `runs_base_for` composes the two.
-
-Demand #0 (F0/J29, human): every owner function here refuses a caller-supplied value (a bad
-tenant id, a foreign data root, an unset `DEFENDER_DATA_ROOT`, a disagreeing record) through
-ONE refusal class (`TenantRefused`), whose message names the refused value; every entry point
-catches it and passes that message through verbatim. `TenantRecordCorrupt` (the runs-base
-record's own content fails to parse or is missing/mistyped fields — decision 4's sole
-exception to read-as-`None`) and `TenantRecordMismatch` are subclasses, so a caller that needs
-to tell them apart can, and one that does not catches the one class.
-
-§7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES): a concurrent reader of a create-lane artifact
-(the runs-base record, the tenant row) sees the name absent or the file complete, never empty
-or partial; one name throughout; mode 0644; a crash leaves no stray entry. The mechanism is
-`_io.write_guarded(mode="create")`, the one create lane every write-once record uses: the file
-is written complete to an unnamed inode before it is given a name. On a filesystem that cannot
-make one (NFS, virtiofs/FUSE), that lane falls back to its older one-open create, whose residue
-is a reader seeing an empty file mid-write and a crash leaving a partial one.
+Both files are created through `write_guarded(mode="create")`, so a reader sees them absent or
+complete. Every refusal is a `TenantRefused` naming the refused value, which entry points catch
+and print verbatim; a corrupt record refuses the run rather than reading as `None`.
+`refuse_colliding_run_id` keeps run ids off the record's filename.
 """
 from __future__ import annotations
 
@@ -46,10 +31,10 @@ from defender._model import model
 
 _R = TypeVar("_R")
 
-#: D2's file-backend location, unchanged from #1077: under the runs base, beside the sidecars.
+#: Lives under the runs base beside the run sidecars, at their trust level.
 TENANT_RECORD_NAME = "_tenant.json"
 
-#: D1's row, inside the tenant's own folder.
+#: The tenant's row, inside its own folder under the data root.
 ROW_NAME = "tenant.json"
 
 TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
@@ -112,9 +97,8 @@ class TenantRecord:
 
 
 class TenantRecordCorrupt(TenantRefused):
-    """The runs-base record fails to parse, or parses but is missing a required field, carries
-    the wrong type, or names an off-grammar tenant id. Decision 4's sole exception to
-    read-as-`None`: this record refuses the whole run rather than degrading."""
+    """The runs-base record fails to parse, lacks a required field, has one of the wrong type,
+    or names an off-grammar tenant. Refuses the whole run rather than degrading."""
 
 
 @model(frozen=True)
@@ -122,10 +106,6 @@ class TenantRow:
     tenant_id: TenantId
     created_at: str
 
-
-# ==========================================================================================
-# The grammar (O3)
-# ==========================================================================================
 
 def is_valid_tenant_id(tenant_id: object) -> bool:
     try:
@@ -135,12 +115,8 @@ def is_valid_tenant_id(tenant_id: object) -> bool:
     return True
 
 
-# ==========================================================================================
-# The runs-base record (D2), kept from #1077, with the request deciding its tenant.
-# ==========================================================================================
-
 class TenantRecordMismatch(TenantRefused):
-    """A runs base's record names another tenant than the one a run is for. A run refuses
+    """A runs base's record names another tenant than the one a run is for. The run refuses
     rather than stamp a record its settings did not come from."""
 
 
@@ -152,9 +128,8 @@ def _parse_json_record(
     text: str, record: type[_R], fields: tuple[str, ...], *, source: Path,
     refusal: type[TenantRefused],
 ) -> _R:
-    """`text` as a `record` — the runs-base record or the tenant row — or `refusal` naming
-    `source`: not JSON, not an object, a field missing or of the wrong type, or an off-grammar
-    tenant id (`TenantId`, run by the record's own field). Keys beyond `fields` are ignored."""
+    """`text` as a `record` (the runs-base record or the tenant row), or `refusal` naming
+    `source`. Keys beyond `fields` are ignored; `TenantId` checks the id as the field is set."""
     try:
         obj = json.loads(text)
     except ValueError as bad:
@@ -184,8 +159,7 @@ def _record_doc(record: TenantRecord) -> dict[str, Any]:
 
 
 def read_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord:
-    """The tenant record at `runs_base`, or the refusal — never `None`: an absent or corrupt
-    tenant record refuses the caller rather than degrading (decision 4's sole exception)."""
+    """The tenant record at `runs_base`; absent or corrupt raises `TenantRecordCorrupt`."""
     path = record_path(runs_base)
     text, reason = io.read_guarded(path)
     if text is None:
@@ -194,12 +168,10 @@ def read_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord:
 
 
 def refuse_colliding_run_id(run_id: str) -> Exception | None:
-    """An explicit collision guard for run creation (#1077 decision 13) — replacing the three
-    coincidences that keep a run dir and the tenant record apart today (the leading
-    underscore outside the run-id character space, the stale-sidecar clear's exact keying,
-    both runs-base walkers' `is_dir()` filter), none of which is a constraint anything
-    enforces. Returns the refusal rather than raising it — the caller (`materialize_run`)
-    decides how to surface it."""
+    """Explicit guard against a run id equal to the tenant record's filename. Without it only
+    coincidences keep them apart (the leading underscore, the sidecar clear's keying, the
+    runs-base walkers' `is_dir()` filter). Returns the refusal rather than raising; the caller
+    (`materialize_run`) decides how to surface it."""
     if run_id == TENANT_RECORD_NAME:
         return ValueError(
             f"run id {run_id!r} collides with the tenant record's own filename "

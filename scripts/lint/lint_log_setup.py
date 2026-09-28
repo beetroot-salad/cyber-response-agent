@@ -3,8 +3,8 @@
 
 Status and diagnostics go through `logging` (`defender/_log.py`). A process that never calls
 `configure_from_env()` has no handler, so Python's last-resort handler shows WARNING and up
-and silently drops every INFO line; and whatever the process logs is neither JSON nor stamped
-with a run. That is how a leaked-worktree line and a whole curator trace went missing (#1115).
+and silently drops every INFO line, and whatever it logs is neither JSON nor stamped with a
+run.
 
 So a module with an `if __name__ == "__main__":` block must call `configure_from_env` as a
 statement of that block, before anything but imports — resolved to `defender._log`, not matched
@@ -30,8 +30,8 @@ BASELINE_PATH = Path(__file__).with_name("lint_log_setup_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "tests")
 SUPPRESS = "lint-log-setup: ok"
-#: Where the setup call must LAND — resolved through `_astlib`, so an alias counts and an
-#: unrelated function that happens to share the name does not.
+#: Where the setup call must land, resolved through `_astlib`: an alias counts, an unrelated
+#: same-named function does not.
 SETUP = "defender._log.configure_from_env"
 
 
@@ -57,9 +57,8 @@ def _is_main_guard(node: ast.stmt) -> bool:
 
 
 def _calls_setup(block: ast.If, env: ModuleEnv) -> bool:
-    """The setup is a STATEMENT OF THE GUARD ITSELF — not buried in a nested function, a
-    branch, or after the call that runs the program: it must come before the guard's first
-    statement that does anything but import."""
+    """The setup must be a statement of the guard itself (not in a nested function or
+    branch), before the guard's first statement that does anything but import."""
     for stmt in block.body:
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             if callee(stmt.value, env) == SETUP:

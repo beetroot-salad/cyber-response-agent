@@ -1,29 +1,20 @@
 """Resume a finished investigation from one of its own messages, in a sibling world.
 
-The turn-N branch (`docs/learning-architecture-redesign.md` §The turn-N branch) forks a real
-run at the moment its evidence is in hand and continues it under a world that differs from the
-one it actually ran in. This module owns the two things that makes possible: WHICH message may
-be branched from, and WHERE the forked session lives.
+The turn-N branch forks a real run once its evidence is in hand and continues it under a world
+that differs from the one it ran in. This package owns which message may be branched from and
+where the forked session lives.
 
-`session_store.fork()` is not touched. It is correct — it seeds the child's `last_render_len`
-to the SEND-role length of the inherited prefix, and `test_session_head_fork_754.py` pins that.
-What was missing is the CALLER contract: a fresh `agent.iter` starts the framework's message
-list empty, so the prefix has to be handed back as `message_history` or `selection.ingest`
-underflows against a store that was already right. `driver.run_investigation` does that by
-hydrating the fork it just opened; the symmetry is exact rather than approximate, because
-`fork` and `hydrate(role="send")` truncate through the same `_complete_prefix_len`.
+`session_store.fork()` seeds the child's `last_render_len` to the send-role length of the
+inherited prefix. The caller must hand that prefix back as `message_history` (a fresh
+`agent.iter` starts empty, and `selection.ingest` would underflow); `open_main_session` returns
+it via `hydrate(role="send")`, which truncates through the same `_complete_prefix_len` as `fork`.
 
-The turn-N branch: forking a run from a message in an earlier one.
-
-Split into three modules:
-
-  * `_spec`     — what a branch request IS, and opening the store it reads from.
+  * `_spec`     — what a branch request is, and opening the store it reads from.
   * `_frontier` — reading the source run: where the fences end, which leads existed,
                      what the clock said at the branch point.
   * `_seed`     — writing the sibling: the inherited prefix, evidence and lead dirs.
 
-`validate` below is what refuses a branch that would not be a faithful fork, and it is
-the reason the two halves above stay separable.
+`validate` refuses a branch that would not be a faithful fork.
 """
 
 from __future__ import annotations
@@ -91,57 +82,25 @@ from ._seed import (
 def validate(store: Any, spec: BranchSpec) -> None:
     """Refuse a branch point that cannot carry a sibling world.
 
-    TWO preconditions about the evidence, and both are about the same thing — a world is only
-    meaningfully "consistent with the evidence" when there IS evidence and there IS something
-    unresolved — plus one about the branch point's own SHAPE (a complete pair; see below).
+    Beyond the branch point being a complete message on MAIN's path with a matching clock, a
+    world is only meaningfully "consistent with the evidence" when:
 
-    **A non-empty capture.** At message 0 the adapters have returned nothing, so every proposed
-    world is trivially consistent with the prefix and the captured base guards nothing. That is
-    the generated-world design the redesign rejected, reached by branching too early rather
-    than by choosing it.
-
-    **SOMETHING OPEN in the frontier.** `frontier_at` answers the empty frontier for a
-    fence-less document, and nothing open is nothing to discriminate — the pair would have no
-    question to divide.
-
-    Open means `slots` or `contracts`, NOT `Frontier.is_empty()`. That predicate also counts
-    `held`, which is what the document has already SETTLED: a finished investigation carries
-    ~15 held facts against zero open slots, so `is_empty()` reads it as a perfectly good branch
-    point when it is the exact case this precondition exists to refuse — branched too late,
-    with every question already answered. `is_empty()` is false only for a document with no
-    populated cells at all, which is the same set the fence-less arm already covers.
-
-    **A frontier that was not SNAPPED.** `frontier_at` clamps an out-of-range fence index and
-    says so rather than raising, and its own docstring names why that must not pass silently:
-    "a curator who asks for block 12 of a 4-block document and is handed the terminal frontier
-    has been handed the one state that keys nothing". `snapped` here means the appends the session
-    records landed MORE fences than the document on disk holds, so the two halves disagree about
-    what was written, the message-to-fence mapping is not trustworthy for this run, and the
-    answer would be the FINISHED document's frontier — the one a branch must never read.
-
-    (A refused `append_block` is NOT how that happens, though an earlier spelling of this
-    paragraph said so: `_tool_append_block` refuses through `ModelRetry`, which the framework
-    records as a `RetryPromptPart`, and `fence_count_at` drops those without counting. A
-    document truncated or rewritten outside the append path is what remains.)
+    - the capture is non-empty (branching at message 0 makes every world trivially consistent);
+    - something is open in the frontier — `slots` or `contracts`, not `not is_empty()`, which
+      also counts settled `held` facts and would admit a finished investigation;
+    - the frontier was not snapped: the session's appends account for more fences than the
+      document holds (truncated or rewritten off the append path), so the answer would be the
+      finished document's frontier.
     """
     run_dir = Path(spec.source_run_dir)
-    # NOT the type: `BranchSpec` refuses a mistyped field at construction (#1067 — its own
-    # before-validator, as `BranchError`), so a spec built from untyped input — a CLI flag, a
-    # JSON world file carrying `"59"` — never reaches here. Every comparison below may assume
-    # a real `int`.
+    # `BranchSpec` already refused a non-int at construction.
     if spec.branch_message_id <= 0:
         raise BranchError(
             f"branch_message_id must be a real message, got {spec.branch_message_id} — "
             "message 0 precedes every payload, so no world can contradict the prefix")
 
-    # ON MAIN'S PATH, and not merely a number. `fence_count_at` scores rows with
-    # `row_id <= branch_message_id`, so an id past the tip reads as "every fence" and one
-    # belonging to another session in the same case DB — a `gather:l-NNN` leg's row — reads as
-    # "all of MAIN's fences so far". Neither is caught downstream: `fork` walks parents from
-    # the id it is given regardless of session, so the foreign id yields a child whose prefix
-    # is a SUB-AGENT's transcript while this function vouched for MAIN's document, and the
-    # phantom id survives to `hydrate`, which fails far away with `UnresolvablePathElement`
-    # after the run dir's pointer has already been written.
+    # On MAIN's path, not merely a number: an id past the tip or from a gather session would
+    # miscount fences, and `fork` would inherit a sub-agent's transcript.
     session = source_session(store, spec)
     path = session_store.path_row_ids(store, session)
     if spec.branch_message_id not in path:
@@ -150,14 +109,9 @@ def validate(store: Any, spec: BranchSpec) -> None:
             f"({len(path)} row(s), {path[0] if path else '-'}..{path[-1] if path else '-'}) — "
             "a branch point has to be a message this run's own main session actually holds")
 
-    # A COMPLETE PAIR, and not merely a message on the path. `fork` seeds the child's
-    # `last_render_len` from `_complete_prefix_len`, so a branch point that is a `ModelResponse`
-    # with an unanswered tool call is hidden from the FIRST `message_history` — and then the
-    # fork's HEAD is still that row, so `ingest` parents the continuation onto it and the very
-    # next `hydrate(role="send")` ends on a `ModelRequest` and hands the dangling `tool_use`
-    # straight back. Every provider rejects a tool call with no matching result, so the resumed
-    # run dies on request 1 with a 400 that names nothing about branching. Refused here, through
-    # the SAME `_complete_prefix_len` `fork` and `hydrate` truncate with, so there is one rule.
+    # A complete pair: a response with an unanswered tool call would become the fork's head,
+    # and providers reject a `tool_use` with no result (a 400 on the first request). Same
+    # `_complete_prefix_len` rule `fork` and `hydrate` use.
     prefix = session_store.hydrate(store, session, role="analysis")
     upto = prefix[: path.index(spec.branch_message_id) + 1]
     if session_store._complete_prefix_len(upto) != len(upto):
@@ -167,27 +121,12 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "first request of the resumed run would carry a `tool_use` with no result. Branch "
             "at the tool RETURN that answers it instead")
 
-    # THE CLOCK, checked here rather than at construction because the only thing that can say
-    # whether a moment is THIS branch point's is the store (that it IS a moment, the spec
-    # already refused at construction). Cheap: the derivation reuses the slice already
-    # hydrated above rather than re-reading.
+    # The clock, checked here because only the store knows this branch point's moment.
     _refuse_bad_as_of(spec, _as_of_of(upto, run_dir, spec.branch_message_id))
 
-    # A SESSION THAT HAS FOLDED CANNOT SAY WHAT IT DISPATCHED, and the failure is silent in the
-    # unsafe direction. `selection._fold_impl` parents the frontier onto the lineage ROOT, so
-    # `path_row_ids` collapses to `[root, frontier]` and every `gather` call/return pair the
-    # fold displaced is reachable from nothing. `leads_at` then finds no dispatch at all,
-    # `dispatched` is empty, and `_known_leads(run_dir) - dispatched` degenerates to the WHOLE
-    # census — so the sibling inherits every lead the source ever gathered, including the ones
-    # it gathered after the fork, while `leads_at` returns a perfectly clean-looking answer.
-    # That is verbatim the leak evidence truncation exists to close, restored by a config flag
-    # (`DEFENDER_COMPACTION`) with nothing red.
-    #
-    # REFUSED HERE, before `store.fork`, for the reason every refusal in this module is: a
-    # `fork` commits its own transaction and nothing can undo one, so a truncation that
-    # discovered this later would leave an orphan child session per attempt. Under-counting is
-    # this seam's safe direction and over-counting is not, so a census it cannot compute is a
-    # refusal rather than a guess.
+    # A folded session cannot say what it dispatched: the fold hides the gather pairs, so
+    # `leads_at` would silently let the sibling inherit every lead. Refused before `store.fork`,
+    # which commits and cannot be undone.
     if session_store.displaced_tip(store, session) is not None:
         raise BranchError(
             f"{run_dir}'s main session has been folded (compaction displaced tip "
@@ -196,14 +135,7 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "nothing and no branch point on it can say which leads the run held. Branch an "
             "uncompacted run, or fork before the fold")
 
-    # SENTINELS ARE NOT CAPTURES. A `∅.`-prefixed `query_id` is a writer-only record of a call
-    # that never reached a system of record — a refused repeat, a param-schema rejection, a
-    # failed reducer shim — and `lead_repository.joined` splits exactly those onto
-    # `JoinedLead.sentinels` so `.queries` means only what the defender ran. This precondition
-    # asks the `.queries` question ("is there evidence a world could contradict?"), so it has to
-    # read the `.queries` set: a run whose whole table is refusals has rows and no evidence, and
-    # counting them admits the branch this raise exists to refuse. The predicate is
-    # `record_query`'s own, never a second spelling of the prefix.
+    # Sentinel rows (`∅.`-prefixed ids) never reached a system, so they are not evidence.
     rows = [
         row for row in read_jsonl_rows(RunPaths(run_dir).executed_queries)
         if not is_reserved_query_id(str(row.get("query_id", "")))
@@ -215,11 +147,8 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "design, not a branch")
 
     frontier = frontier_at_branch(store, spec)
-    # SNAPPED FIRST. A clamped index answers the TERMINAL frontier, which is the document state
-    # with everything settled and nothing open — so asking "is anything open?" of it reports
-    # "branched too late" for a run whose real fault is that the message-to-fence mapping is not
-    # trustworthy at all. Diagnosing the clamp before reading its answer is what keeps the two
-    # refusals naming their own cause.
+    # Snapped first: a clamped answer is the terminal frontier, which would otherwise be misreported
+    # as "nothing open".
     if frontier.snapped:
         raise BranchError(
             f"message {spec.branch_message_id} maps to fence {frontier.requested}, but "
@@ -236,24 +165,12 @@ def validate(store: Any, spec: BranchSpec) -> None:
 
 
 def framework_view(prefix: list) -> list:
-    """The prefix as the FRAMEWORK will hold it, which is not always as the store holds it.
+    """The prefix as the framework will hold it, which is not always as the store holds it.
 
-    `pydantic_ai` normalises a handed-in `message_history` before the first request, and part
-    of that is MERGING ADJACENT SAME-ROLE messages — requests with requests, and responses
-    with responses; both shapes are measured in `test_920_framework_contract.py`. The store deliberately produces exactly that
-    shape: #808's correlation lead is a synthesized `ModelRequest` written straight into MAIN's
-    session, landing next to the tool-return `ModelRequest` before it. Measured: a four-message
-    prefix of that shape comes back as three.
-
-    Both `fork` and `hydrate` count STORE ROWS, and the framework does not — so the fork↔hydrate
-    symmetry is exact and still insufficient. One merge and `len(live)` equals `last_render_len`
-    at the first ingest, the tail slice is empty, the opening prompt is never stored, and the
-    render hands back a list ending on a `ModelResponse` that the framework then refuses. Two
-    merges and it underflows instead.
-
-    So the count and the thing counted come from the SAME call. The framework's own function is
-    used rather than a local "merge adjacent requests" of our own: the rule is theirs, and a
-    reimplementation is a second spelling that drifts the day they normalise anything else.
+    `pydantic_ai` merges adjacent same-role messages in a handed-in history (the store produces
+    that shape: the correlation lead's synthesized request sits next to a tool-return request).
+    `fork` and `hydrate` count store rows, so `last_render_len` must be re-seeded to this count
+    or ingest breaks. Uses the framework's own private function so the rule cannot drift.
     """
     from pydantic_ai._agent_graph import _clean_message_history
 
@@ -263,13 +180,9 @@ def framework_view(prefix: list) -> list:
 def stamp_dead_fork(store: Any, session_id: str | None) -> None:
     """Mark a forked session that no run will ever drive.
 
-    `store.fork` COMMITS, and this store exposes no way to delete a session — so a resume that
-    fails after the fork leaves a child in the source's database that nothing distinguishes
-    from a sibling still running. Stamped with the same `truncated_by` every other interrupted
-    session carries, it is at least legible as finished.
-
-    Best-effort and silent about its own failure on purpose: every caller is already unwinding
-    a fault it must not replace (`_record_beside` in the estate seam is the same rule).
+    `store.fork` commits and sessions cannot be deleted, so stamping `truncated_by` makes the
+    orphan legible as finished. Best-effort and silent: callers are already unwinding a fault it
+    must not replace.
     """
     if session_id is None:
         return
@@ -282,27 +195,14 @@ def attach_case_pointer(
 ) -> str:
     """Write the run's case pointer, and stamp the fork if that write is what fails.
 
-    Returns the case id it RECORDED, which is the run's real one — the caller's minted uuid is
-    a fresh run's and names no session in a resumed run's database. Handed back rather than
-    re-derived at the call site so the pointer and the run summary cannot disagree about which
-    case a run joined: the summary reporting the uuid is the same mismatch this function's
-    third paragraph says "was not cosmetic", left in the other artifact.
+    The case id comes from the store, not the caller's minted uuid: a resume joins the source's
+    case, and a wrong id would fail `open_source_store`'s derive-and-compare check, so a branch
+    could not be taken from a branch. Returns the recorded id so the run summary agrees.
 
-    THE CASE ID COMES OFF THE STORE, not from the caller's minted one. On a fresh run they are
-    the same string; on a resume the minted uuid names no session in the database the pointer
-    points at, because `fork` inherits its parent row's `case_id`. Recorded wrong, the pointer
-    fails `open_source_store`'s derive-and-compare check — so a branch could never be taken
-    FROM a branch — and it fails it while naming the opposite cause.
-
-    THE SESSION ID is the run's own, which is what a reader needs when the store holds more
-    than one run. A sibling forks into the source's database, so resolving run_dir -> store ->
-    root-of-lineage renders the SOURCE's transcript for it.
-
-    Here rather than in the composition root because this is the LAST step that can fail after
-    a committed fork, and the compensation for that belongs beside the fork it compensates for.
+    The session id is the run's own; a sibling shares the source's database, so the lineage
+    root would name the source's transcript.
     """
-    # TRUTHINESS, not `is not None`: `open_store_for_read` builds a handle whose `case_id` is
-    # the EMPTY string, and recording that would write a pointer naming no case at all.
+    # Truthiness: `open_store_for_read` handles carry an empty `case_id`.
     recorded = getattr(store, "case_id", None) or case_id
     try:
         session_store.write_case_pointer(
@@ -320,41 +220,20 @@ def open_main_session(
     """MAIN's session for this run, the history it starts from, and the document that history
     refers to.
 
-    THE one place the fresh/resumed choice is made, so the driver's composition root stays a
-    straight line and the two cases cannot drift apart. A fresh run gets a new session and
-    `None` — `agent.iter`'s own empty list is exactly right when nothing is inherited.
+    The one place the fresh/resumed choice is made. A fresh run gets a new session and `None`.
+    A resume forks, returns the prefix via `hydrate(role="send")` (the same truncation `fork`
+    seeded `last_render_len` with), and seeds `investigation.md` into the new run dir so the
+    inherited messages never point at a missing file.
 
-    THE DOCUMENT IS PART OF THE OPEN, not a step after it. A resume inherits the source's
-    messages into a FRESH run dir, and `investigation.md` lives in the run dir — so a caller
-    that opened the session and forgot the document would hand the model coordinates into a
-    file that does not exist, which is the one failure `seed_investigation` exists to remove.
-    Seeded here, the two cannot be done apart.
-
-    A resume forks and hands back the prefix through `hydrate(role="send")`, because that is
-    the SAME truncation `fork` seeded the child's `last_render_len` with: both route through
-    `_complete_prefix_len`. Recomputing it any other way makes the two numbers independent, and
-    an ingest whose live list is shorter than the last render raises `IngestTailUnderflow`.
-
-    EVERY OTHER FAULT HERE IS STILL A SETUP FAULT, so it leaves as one. A resume is the only
-    caller that validates, hydrates and forks INSIDE `run_investigation`'s store-setup `try`,
-    and that handler names classes — `sqlite3.Error`, `StoreError`, `BranchError`, `OSError`.
-    The work below raises outside them: `_message_from_payload` validates a stored payload
-    through pydantic, which answers `ValidationError` on a row written by another framework
-    version (`open_store_for_read`'s own docstring names schema skew as a live residue), and
-    `framework_view` imports a private framework symbol that a minor upgrade can remove. Either
-    would unwind `run_investigation` entirely, leaving the sqlite connection open AND
-    `llm_requests.jsonl` registered in `observe._ACTIVE_PATHS` — so the next sibling in an
-    in-process sweep can never reopen it. Converted here rather than by widening the driver's
-    tuple, because this is the frame that knows the work was a resume's.
+    Other faults (e.g. a pydantic `ValidationError` on a payload from another framework
+    version, or the private `framework_view` import disappearing) are converted to
+    `BranchError` so the driver's store-setup handler catches them.
     """
     if spec is None:
         return store.new_session(agent_id="main"), None
     try:
-        # EVERY REFUSAL THIS MODULE OWNS, BEFORE THE FORK. `store.fork` commits its own
-        # transaction and nothing here can undo one, so a refusal raised after it leaves a
-        # child session in the SOURCE database with no run behind it — and the refusals below
-        # are the repeatable kind (a retried resume, a dir a partial attempt already seeded),
-        # so every retry would add another.
+        # Every refusal before the fork: `store.fork` commits, and each retried refusal after
+        # it would leave another orphan session in the source database.
         validate(store, spec)
         refuse_seeded_run_dir(run_dir)
         session = source_session(store, spec)
@@ -363,29 +242,16 @@ def open_main_session(
             prefix = session_store.hydrate(store, session_id, role="send")
             visible = framework_view(prefix)
             if len(visible) != len(prefix):
-                # Re-seed to what the framework will report, because that is what `ingest`
-                # compares against. `fork` set this to the store's row count, which is right
-                # for every other reader and wrong for this one.
-                #
-                # INSIDE the guard, not after it: this is a store write on an already-committed
-                # fork, so a fault here leaves the orphan the stamp below exists to mark — and
-                # a class the driver's store-setup handler does not name escapes
-                # `run_investigation` entirely, leaving the connection open and
-                # `llm_requests.jsonl` registered in `observe._ACTIVE_PATHS`.
+                # Re-seed to the framework's count, which `ingest` compares against. Inside the
+                # guard so a failure here still stamps the orphan.
                 store.set_last_render_len(session_id, len(visible))
             seed_investigation(store, spec, run_dir)
         except BaseException:
-            # WHAT REMAINS AFTER THE FORK cannot be rolled back into the store either, so the
-            # orphan is STAMPED through the column every other interrupted session already
-            # uses. It then reads as a session that ended rather than one still live —
-            # `ends_on_complete_pair` answers False for it, and a reader counting a run's
-            # children can tell a dead fork from a sibling that is mid-flight. Best-effort:
-            # this is a failure path, and a stamp that fails must not replace the fault.
+            # The fork cannot be rolled back; stamp it so it reads as ended, not mid-flight.
             stamp_dead_fork(store, session_id)
             raise
     except (BranchError, session_store.StoreError, sqlite3.Error, OSError):
-        # Already a class the driver's store-setup handler names; re-raised untouched so the
-        # run's `exit_reason` still carries the type that actually failed.
+        # Already handled by the driver; re-raise so `exit_reason` names the real type.
         raise
     except Exception as e:
         raise BranchError(
@@ -394,8 +260,7 @@ def open_main_session(
     return session_id, visible
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Re-exports; each name's home is the module it is imported from.
 __all__ = [
     "Any",
     "BranchError",

@@ -4,37 +4,20 @@ author thinks it says?
     defender/.venv/bin/python -m defender.scripts.tacit_cli check [--defender-dir <tree>]
     defender/.venv/bin/python -m defender.scripts.tacit_cli show  [--defender-dir <tree>] [--as-of YYYY-MM-DD]
 
-WHY IT EXISTS. The registry is the one system in this tree with no service behind it: a human
-edits a YAML file and commits it, and the commit IS the sign-off. Everything about that is
-deliberate — but until this, the edit had no feedback of any kind. A malformed entry is DROPPED
-rather than refused (one bad row must not sink every sanction in the estate), the reason is
-printed on stderr DURING AN INVESTIGATION RUN, and nobody is watching that stream. So a typo
-produced exactly the outcome an unwritten entry produces: the lookup misses, the authorization
-contract falls through to `indeterminate`, and the run escalates a case somebody had already
-sanctioned. The failure is silent, and it is silent in the direction that looks like ordinary
-operation.
+The registry is a hand-edited, committed YAML file. A malformed entry is dropped rather than
+refused, and the reason goes to stderr during an investigation run where nobody reads it, so a
+typo looks exactly like an unwritten entry: the lookup misses and the run escalates a case
+someone had sanctioned. This gives the loader's refusal text a reader.
 
-The refusal text was already written for a human — `_read_entry`'s docstring says "the refusal
-text is what a human editing the file reads on stderr, so it names the field and the rule". It
-had no reader. This is the reader.
+It is a second consumer of the loader, never a second implementation: `check` prints what
+`tacit_knowledge_adapter.read_registry` returns, the same walk a live `lookup` uses. A separate
+validator could certify a file the runtime reads differently. For the same reason `check` fails
+only on the loader's drops; everything under `notes` (expiring soon, legal but broad) is advice
+the loader does not judge.
 
-THE ONE RULE THIS MODULE LIVES BY, borrowed verbatim from `policy_cli`: **it is a second
-CONSUMER of the loader, never a second implementation.** `check` calls
-`tacit_knowledge_adapter.read_registry` — the same walk `load_entries` serves a live `lookup`
-from — and prints what it returns. A validator that modelled the rules separately would be
-worse than none, because it would certify a file the runtime reads differently: it would tell
-someone their sanction is live while every lookup in production misses it.
-
-That rule is also why the ADVICE below is labelled as advice. `check`'s FAILURES are exactly
-the loader's drops and nothing else. Everything under `notes` — an entry expiring soon, a scope
-that is legal and broad — is something the loader deliberately does NOT judge (see
-`TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS`: "this is a shape rule, not a breadth proof"), and
-printing it as a failure would quietly mint a second policy.
-
-A MAINTAINER tool, not an agent one, and there is no `bin/` shim on purpose. No agent reads the
-registry this way — the runtime reaches it through the typed `query` tool — so a `defender-*`
-token here would be one more command for the gate to classify and one more thing a lane could
-be talked into. Humans and CI invoke it as a module, the way the lint gates are invoked.
+A maintainer tool with no `bin/` shim: agents reach the registry through the typed `query`
+tool, and a `defender-*` command would be one more thing for the gate to classify. Humans and
+CI run it as a module.
 """
 
 from __future__ import annotations
@@ -52,27 +35,19 @@ from defender.scripts.adapters.tacit_knowledge_adapter import (
     registry_path,
 )
 
-#: How close to its `review_by` an entry has to be before `check` mentions it. Advice, never a
-#: failure: an entry inside its window is doing exactly what it is supposed to, and refusing one
-#: for being near its end would make the review date mean something it does not.
-#:
-#: Sized as a working month, so the note lands with time to re-attest before the sanction stops
-#: answering — the point is that the drop-off is currently invisible until a run escalates.
+#: How close to `review_by` an entry must be before `check` mentions it — advice, never a
+#: failure. A working month, leaving time to re-attest before the sanction silently stops.
 _EXPIRING_SOON_DAYS = 30
 
-#: How many literal characters a scope carries before `check` stops calling it broad. Well above
-#: the loader's own minimum, and it is NOT a second threshold: nothing here refuses a scope the
-#: loader admits. It exists because the loader's rule is stated as a shape rule with a named
-#: limit — "no character count can tell a fleet-wide sanction a human MEANT from one they wrote
-#: carelessly" — and the thing that CAN tell them apart is the human reading this output.
+#: Literal characters below which a wildcarded scope is called broad. Advice only, never a
+#: second threshold: the loader's minimum is a shape rule, and only the human reading this can
+#: tell whether the breadth was meant.
 _BROAD_SCOPE_CHARS = 8
 
 
 def _notes(entry: dict[str, str], today: dt.date) -> list[str]:
-    """Advisory observations about one loaded entry — never a reason to fail.
-
-    Each is something the loader deliberately does not judge, surfaced at the one moment a
-    person is in a position to act on it: while they are editing the file.
+    """Advisory observations about one loaded entry — never a reason to fail — surfaced while
+    the author is editing the file.
     """
     out: list[str] = []
     review_by = _parse_date(entry["review_by"])
@@ -97,10 +72,8 @@ def _notes(entry: dict[str, str], today: dt.date) -> list[str]:
         )
     for field in ("actor_scope", "host_scope"):
         scope = entry[field]
-        # A scope with no metacharacter names ONE thing, however short: `uid-0` is the design's
-        # own motivating actor and is exactly as precise as a forty-character hostname. Breadth
-        # comes from the wildcard, so only a scope that HAS one can be called broad — otherwise
-        # the note fires on the canonical entry and teaches the reader to skip these.
+        # Without a wildcard a scope names one thing however short (`uid-0`), so only a
+        # wildcarded scope can be broad.
         if not any(ch in scope for ch in "*?[") or _literal_chars(scope) >= _BROAD_SCOPE_CHARS:
             continue
         out.append(
@@ -156,11 +129,8 @@ def _expired(entry: dict[str, str], today: dt.date) -> bool:
 
 
 def _report_in_force(path: Path, today: dt.date) -> int:
-    """What is IN FORCE as of `today` — the question a reviewer actually asks of this file.
-
-    Separate from `check` because they answer different questions and a run answers only this
-    one: a file can be perfectly well formed and cover nothing, every entry having quietly aged
-    past its own review date.
+    """What is in force as of `today`. Separate from `check`: a well-formed file can cover
+    nothing once every entry has aged past its review date.
     """
     read = read_registry(path)
     if read.fatal is not None:
@@ -199,8 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             "show: the sanctions in force right now."
         ),
     )
-    # lint-default: ok — a CLI boundary owning its default: `--defender-dir` is resolved ONCE
-    # here, into a concrete path threaded inward, exactly as `policy_cli` resolves its own.
+    # lint-default: ok — a CLI boundary resolving `--defender-dir` once, as `policy_cli` does.
     parser.add_argument(
         "--defender-dir", type=Path, default=None,
         help="the defender tree to read (default: this checkout's)",

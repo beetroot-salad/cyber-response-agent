@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """spec-graph check #4 — compute the gate's rule triggers from the formal slots.
 
-rules.md defines R1–R5 and R7 as predicates over formal slots; this check evaluates those
-predicates mechanically, so the gate leaf annotates computed firings instead of
-re-deriving them by prompt. What stays with the agent is exactly what the rules flag
-as judgment: R0's bidirectional prose reconciliation, R5's tightening extension, and
-R6's chooser/sanitizer walk. The tool still *requires* their `gate.evaluated` entries,
-so a judgment rule nobody ran reads as skipped, never as clean.
+rules.md defines R1–R5 and R7 as predicates over formal slots; this check evaluates them
+mechanically. The judgment halves (R0's prose reconciliation, R5's tightening extension,
+R6's chooser/sanitizer walk) stay with the agent, but their `gate.evaluated` entries are
+still required, so a judgment rule nobody ran reads as skipped, never as clean.
 
 Three outputs, one artifact:
 
@@ -53,10 +51,9 @@ _FACET = re.compile(r"^([\w.-]+)\.(payload|identity|domain|access)$")
 class Trigger:
     """One computed rule hit: the rule, the obligated address, and why it fired.
 
-    `exact` says the obligation is per-address and a demand at a coarser grain does not
-    discharge it. Address syntax carries this for a cell (`b.access[via]`), but not for an
-    edge: `interacts(a->b)` parses to root `b`, so without this flag any demand anywhere on
-    `b` reads as an answer — which is precisely the altitude collapse R7 exists to catch.
+    `exact` marks a per-address obligation that a coarser demand does not discharge. A cell
+    address says this itself; an edge (`interacts(a->b)`, root `b`) needs the flag, or any
+    demand on `b` would read as an answer.
     """
 
     def __init__(self, rule: str, element: str, reason: str, *, exact: bool = False) -> None:
@@ -68,9 +65,7 @@ class Graph:
     def __init__(self, path: Path) -> None:
         self.path = path
         raw = _cli.load_graph(path)
-        # The contract this graph was authored against. Absent or unparseable reads as 1 —
-        # the oldest, which owes the fewest entries; a graph that fails to declare its
-        # version is check_lint's finding to make, not a reason for this check to pile on.
+        # Absent or invalid reads as 1 (owes the fewest entries); check_lint reports it.
         version = raw.get("schema_version")
         self.schema_version: int = version if isinstance(version, int) else 1
         self.demands: list[dict] = raw.get("demands", []) or []
@@ -86,8 +81,7 @@ class Graph:
         self.evaluated: dict[str, object] = {
             e.get("rule"): e.get("fired") for e in gate.get("evaluated", []) or []
         }
-        # Every recorded answer, keyed by rule: an obligation, a hole, or a pre-discharge
-        # all count as "the gate saw this element" — routing is the agent's, not ours.
+        # Every recorded answer by rule: obligations, holes and pre-discharges all count.
         self.recorded: dict[str, list[str]] = {}
         for section in ("obligations", "holes", "pre_discharged"):
             for entry in gate.get(section, []) or []:
@@ -106,14 +100,10 @@ class Graph:
 
     def answered(self, rule: str, element: str, *, exact_only: bool = False) -> bool:
         """Whether the graph records an answer for a computed trigger: an executable demand
-        binds the obligated address, or a gate entry for the rule names it. Per-cell
-        addresses (`b.access[via]`, `b.domain.…[v]`) must match exactly — per-cell discharge
-        is the discipline R3/R4 exist for. A facet-bearing address (`b.identity`,
-        `interacts(a->b).payload`) accepts the same facet on the same root, or the bare
-        boundary/edge — never a SIBLING facet: matching on the root alone let a demand on
-        `sink.payload` silence an R2 trigger on `sink.identity`. Only a bare-root element
-        keeps plain root matching. `exact_only` forces string equality for a caller whose
-        obligation is per-address but whose address syntax cannot say so (an edge)."""
+        binds the obligated address, or a gate entry for the rule names it. Cell addresses
+        (`b.access[via]`, `b.domain.…[v]`) match exactly. A facet-bearing address accepts the
+        same facet on the same root, or the bare boundary/edge, never a sibling facet. A
+        bare-root element matches on root. `exact_only` forces string equality (edges)."""
         root, facet, exact = _parse(element)
         exact = exact or exact_only
 
@@ -137,8 +127,7 @@ class Graph:
 
 
 def _binds(d: dict) -> list:
-    """`binds:` written as a bare string is one address, not a character sequence —
-    iterating the scalar per-character minted one bogus dangling finding per letter."""
+    """`binds:` as a list; a bare string is one address, not a character sequence."""
     b = d.get("binds") or []
     return [b] if isinstance(b, str) else b
 
@@ -261,9 +250,7 @@ def _r0_identity_keys(g: Graph) -> list[str]:
                     f"R0 {g.path.name}: {bid}.identity derivation `{(d or {}).get('value')}` "
                     f"derives from `{(d or {}).get('fn_of')}`, not a registered axis."
                 )
-        # Keyed on `key_axes`, not on the facet's mere presence: a `sharing: serialized-append`
-        # sink legitimately claims NO key, and demanding evidence for it asked the author to
-        # justify a key they never asserted.
+        # Keyed on `key_axes`: a `serialized-append` sink legitimately claims no key.
         if identity.get("key_axes") and not identity.get("evidence"):
             findings.append(
                 f"R0 {g.path.name}: {bid}.identity claims key_axes with no `evidence` — "
@@ -290,8 +277,7 @@ def _r0_interpolates(g: Graph) -> list[str]:
 
 
 def _r0_unheard_unknowns(g: Graph) -> list[str]:
-    """`unknown` invariants are holes to route, not lint errors — but an unknown with no
-    recorded hole is a finding: the confession was made and then nobody heard it."""
+    """An `unknown` invariant with no recorded hole."""
     findings: list[str] = []
     for bid in g.boundaries:
         findings += _unheard_access(g, bid)
@@ -373,8 +359,7 @@ def _r1(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
         if not e.get("sends"):
             continue
         dst = str(e.get("to"))
-        # A `sends:` whose target lacks a payload facet is still an outbound channel — the
-        # facet's absence is a modeling gap, not a reason to stay quiet about the edge.
+        # Fires even if the target lacks a payload facet: still an outbound channel.
         if in_delta(e, g.boundaries.get(dst), g.actors.get(str(e.get("from")))):
             el = f"interacts({e.get('from')}->{dst}).payload"
             triggers.append(Trigger(
@@ -388,8 +373,8 @@ def _r1(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
 def _r2(g: Graph, in_delta: Callable[..., bool]) -> tuple[list[Trigger], list[str]]:
     """R2 — shared sink: an identity-facet boundary with ≥2 writers, or a driven writer.
 
-    The only rule with two outputs. A missed key axis is a direct FINDING, not a trigger:
-    the slots already contain the answer, so there is no question to route.
+    Also returns findings: a missed key axis is a direct finding, since the slots already
+    contain the answer.
     """
     triggers: list[Trigger] = []
     coverage: list[str] = []
@@ -403,9 +388,8 @@ def _r2(g: Graph, in_delta: Callable[..., bool]) -> tuple[list[Trigger], list[st
             if any(d.get("to") == e.get("from") for d in g.drives)
         ]
         fires = len({e.get("from") for e in writers}) >= 2 or bool(driven)
-        # The DRIVES edges belong in the delta test: "gaining a new `drives` edge over its
-        # writers" is rules.md's own trigger, and `driven` only re-lists writer edges — so a
-        # design-provenance drives edge over code-provenance writers could never fire.
+        # Drives edges join the delta test: a new `drives` edge over the writers is itself a
+        # trigger (rules.md), and `driven` lists only writer edges.
         drive_edges = [d for d in g.drives if any(d.get("to") == e.get("from") for e in writers)]
         involved = [g.boundaries.get(bid), *writers, *drive_edges]
         if not fires or not in_delta(*involved):
@@ -428,8 +412,7 @@ def _r2_key_coverage(g: Graph, bid: str, identity: dict, writers: list[dict]) ->
         for ax in identity.get("key_axes") or []:
             if _covered(ax, e.get("interpolates") or [], identity):
                 continue
-            # A recorded R2 answer on this boundary means the coverage question reached
-            # the gate — the demand it minted owns the cross-key assertion from here.
+            # A recorded R2 answer means its demand owns the cross-key assertion.
             if g.answered("R2", f"{bid}.identity"):
                 continue
             coverage.append(
@@ -463,10 +446,9 @@ def _r3(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
 
 
 def _r4(g: Graph, in_delta: Callable[..., bool]) -> list[Trigger]:
-    """R4 — domain coverage: consumers of a domain-facet boundary. Read edges are the
-    canonical consumers, but rules.md's trigger is also "a domain facet gaining members" —
-    a design-provenance domain reached only via invoke/write (or not yet wired at all)
-    still fires; keying on `mode: read` alone let the edge label silence the rule."""
+    """R4 — domain coverage: consumers of a domain-facet boundary. Read edges are preferred
+    consumers, but a domain reached only via invoke/write (or unwired) still fires, since
+    "a domain facet gaining members" is itself a trigger."""
     triggers: list[Trigger] = []
     for bid in g.boundaries:
         domain = g.facet(bid, "domain")
@@ -542,22 +524,13 @@ def _r7(g: Graph) -> list[Trigger]:
     """R7 — shared source: a boundary read by ≥2 actors where the delta moves some readers
     and leaves others behind.
 
-    R2's dual. R2 asks whether two writers into one sink stay distinguishable; R7 asks
-    whether two readers of one source stay in agreement. The escape it computes is the
-    stale mirror: a ceiling raised for the caller that needed it while a second reader kept
-    its own copy of the old value, a preflight validating the default an override replaced,
-    a guard covering the call but not the parse after it. Nothing is added or removed, so
-    the whole add/remove grid is quiet and every reader looks correct read alone.
+    R2's dual: do two readers of one source stay in agreement? It catches the stale
+    mirror, where one reader moves to a new value and another keeps the old one.
 
-    The predicate is DIFFERENTIAL, and that is what keeps it from firing on every
-    multi-reader boundary: it needs both a moved side (the boundary itself in the delta, or
-    at least one reader) and an unmoved one. One trigger per unmoved reader, addressed at
-    that reader's edge — a boundary-wide demand is exactly the altitude at which "two of the
-    three moved" reads as discharged.
-
-    Uses `g.in_delta` directly rather than `_delta_scope`'s wrapper: a graph that cannot
-    scope its delta has no unmoved side to name, so this rule stays silent instead of
-    firing on every reader of every shared value.
+    Differential: it needs a moved side (the boundary or a reader in the delta) and an
+    unmoved reader. One exact trigger per unmoved reader's edge, since a boundary-wide
+    demand would read "two of three moved" as discharged. Uses `g.in_delta` directly: a
+    graph that cannot scope its delta has no unmoved side, so the rule stays silent.
     """
     triggers: list[Trigger] = []
     for bid in g.boundaries:
@@ -582,12 +555,9 @@ def _r7(g: Graph) -> list[Trigger]:
 
 
 def _triggers(g: Graph) -> tuple[list[Trigger], list[str]]:
-    """R1–R5 and R7 over the formal slots. Returns (triggers, key-coverage findings) — a key
-    gap is a direct finding (the slots already contain the answer), not a question to route.
+    """R1–R5 and R7 over the formal slots. Returns (triggers, key-coverage findings).
 
-    Written out rather than looped: the rules do not share a signature (only R2 produces
-    findings, R5 and R7 ignore the delta wrapper), and their order is the order `check`
-    reports in.
+    Written out because the rules' signatures differ; the order is `check`'s report order.
     """
     in_delta = _delta_scope(g)
     triggers = _r1(g, in_delta)
@@ -606,9 +576,8 @@ def check(path: Path) -> tuple[list[str], list[Trigger]]:
     triggers, coverage = _triggers(g)
     findings.extend(coverage)
     for rule in RULES:
-        # A rule that postdates this graph's schema version is not owed an entry: the run
-        # that would have recorded it predates the rule (`_schema.SINCE`). Triggers below
-        # are NOT version-gated — those are findings about structure that is really there.
+        # A rule newer than the graph's schema version is not owed an entry (`_schema.SINCE`).
+        # Triggers below are not version-gated.
         if SINCE.get(rule, 1) > g.schema_version:
             continue
         if rule not in g.evaluated:
@@ -661,17 +630,10 @@ def main(argv: list[str]) -> int:
     for p in paths:
         try:
             findings, triggers = check(p)
-        # AttributeError is the same could-not-read class as a bad top level: nested wrong
-        # shapes (a string where a mapping belongs, in actors/demands/boundaries/gate lists)
-        # surface as AttributeError inside the walk — uncaught it was a traceback behind
-        # exit 1 ("found findings"), not 2 ("could not look").
-        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
-        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
-        # ("looked, found something") for a gate that read nothing.
+        # Nested wrong shapes surface as AttributeError; `ValueError` covers
+        # UnicodeDecodeError. Both mean could-not-read (exit 2), not findings.
         except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
-            # Never a silent pass: a graph the gate cannot read must not certify clean.
-            # Collected, not returned on: bailing here threw away every finding the
-            # already-checked graphs produced.
+            # Collected, not returned on, so other graphs' findings still print.
             print(f"check_gate: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             unreadable.append(p)
             continue

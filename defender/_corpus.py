@@ -12,13 +12,8 @@ from defender._model import model
 _logger = logging.getLogger(__name__)
 
 
-#: A lesson's BOOKKEEPING keys — provenance, not content.
-#:
-#: One definition rather than two, because two consumers render a lesson's frontmatter for a
-#: model and both have to drop the same thing: `learning/author/shared.build_corpus_manifest`
-#: (the curator's corpus inventory) and `scripts/lessons/lessons_frontier.render` (the block
-#: `append_block` hands the defender). A fifth key added to one copy and not the other leaks
-#: bookkeeping into whichever surface was missed, with nothing to notice it (#919).
+#: A lesson's bookkeeping keys — provenance, not content. Shared by every surface that renders
+#: lesson frontmatter for a model, so none leaks bookkeeping the others drop.
 PROVENANCE_KEYS = frozenset(
     {"source_finding_ids", "source_observation_ids", "created_at", "recorded_at"}
 )
@@ -28,9 +23,8 @@ PROVENANCE_KEYS = frozenset(
 class Lesson:
 
     path: Path
-    #: Keys `Any`, not `str`, for the reason `_report.ReportRead.frontmatter` gives: the
-    #: mapping as YAML built it, and `iter_lessons`' warn-and-skip catches `FrontmatterError`,
-    #: not the `ValidationError` a `str` claim would raise here (#1067).
+    #: Keys `Any`: YAML builds non-`str` keys, and a `str` claim would raise a `ValidationError`
+    #: that `iter_lessons`' warn-and-skip does not catch.
     fm: dict[Any, Any]
     raw: str
     body: str
@@ -80,48 +74,26 @@ class QueryTemplate:
     query: str
     body: str
     verb: str = ""
-    #: The two DECLARATION keys `SCHEMA.md` defines alongside `verb:` — the params the verb
-    #: declares, and the `${name}`s that are query-language body text rather than params. They
-    #: ride on the one corpus walk so `_scaffold_rules` (their only reader) does not need a
-    #: second frontmatter parse per caller.
+    #: The declaration keys `SCHEMA.md` defines alongside `verb:`: the verb's params, and the
+    #: `${name}`s that are query-language body text rather than params.
     params: tuple[str, ...] = ()
     body_substitutions: tuple[str, ...] = ()
-    #: Every coined `query_id` this template accounts for — the `covers:` key.
-    #:
-    #: `query_id` is the IDENTITY a gather call asserts (`{system}.{descriptive-kebab}`, coined
-    #: by the subagent when no template fit), so a template answers one or more such
-    #: identities. Recording them on the file lets `synthesize_drafts` know an identity is
-    #: already answered: `by_id` is ids UNION covers, so a promoted template suppresses the
-    #: draft it came from and a widened one suppresses the draft it absorbed. Without it the
-    #: same draft is re-minted every time a later run coins the same id.
-    #:
-    #: It also lets the commit gate match a deleted draft to the established template that took
-    #: it over (no shared basename survives once the author names the file), and the coined name
-    #: is the subagent's own one-line description of a measurement it judged novel — the best
-    #: single input to the naming decision the author makes at promote.
+    #: Every coined `query_id` this template accounts for — the `covers:` key. Lets
+    #: `synthesize_drafts` treat those ids as answered (so a draft is not re-minted each time a
+    #: run coins the same id), and lets the commit gate match a deleted draft to the template
+    #: that absorbed it.
     covers: tuple[str, ...] = ()
-    #: A DRAFT's `## Executed query` — the verbatim recording of the call that minted it.
-    #:
-    #: Deliberately NOT `query`. A template's `## Query` is an INTERFACE: its `${name}`s are
-    #: holes a dispatch fills, which is why `_scaffold_rules.check_template` holds them to the
-    #: verb's params. A draft is a TRANSCRIPT of one execution, so it has no holes — every
-    #: `${…}` in it was sent literally. Parsing it into `query` would put the recording under
-    #: the placeholder rule and refuse a draft for the shape of the data it recorded; parsing
-    #: it here leaves that rule vacuous for drafts by construction, and the author writes the
-    #: real parameterized `## Query` at promote.
+    #: A draft's `## Executed query` — the verbatim recording of the call that minted it. Kept
+    #: out of `query`: a `## Query`'s `${name}`s are placeholders checked against the verb's
+    #: params, while every `${…}` in a recording was sent literally.
     recording: str = ""
 
 
 def is_established(t: QueryTemplate) -> bool:
-    """Is `t` in the catalog's ESTABLISHED tier — `status: established` AND not under `_draft/`?
+    """Is `t` in the catalog's established tier — `status: established` and not under `_draft/`?
 
-    Both halves, always: the location and the status are two channels for the same fact, and
-    a file on which they disagree (an established-status copy parked under `_draft/`, a
-    demoted file still at the system root) is in neither tier. THE one predicate for "a
-    template a gather lead's index lists": `tools_gather._template_index` filters on it, and
-    the run-start check that promises the correlation lead its configured template is IN that
-    index (`lead_zero._agreement`) resolves through the same predicate, so the two cannot
-    drift into an id the check accepts and the index omits.
+    A file where location and status disagree is in neither tier. Shared by the gather
+    template index and lead zero's run-start check so they cannot disagree.
     """
     return t.status == "established" and "_draft" not in t.path.parts
 
@@ -147,23 +119,15 @@ def section_bodies(body: str) -> dict[str, str]:
 def _declared_names(value: Any) -> tuple[str, ...]:
     """A frontmatter declaration list, normalized to names.
 
-    Every shape YAML can give a "list of names" is read, not just the flat sequence
-    `SCHEMA.md` shows: a mapping (`params:` with a per-param note under it), a sequence of
-    single-key mappings, and a BARE SCALAR (`body_substitutions: window`) are all natural
-    spellings a template author reaches for. Dropping them does not fail safe either way: an
-    unread `params:` declaration is an UNENFORCED one (`check_template` reports the entries a
-    verb does not declare), and an unread `body_substitutions:` entry makes `check_template`
-    refuse a `${name}` the author DID declare — which on the lead lane's promote discards the
-    whole batch.
-
-    A shape that is not one of those declares nothing rather than raising: the walk's readers
-    depend on a malformed key skipping one template, not on it sinking the corpus.
+    Accepts a sequence, a mapping, a sequence of single-key mappings, or a bare scalar — all
+    natural spellings, and dropping any would leave a declaration unenforced or refuse a name
+    the author did declare. Any other shape declares nothing rather than raising, so one
+    malformed key cannot sink the corpus walk.
     """
     if isinstance(value, Mapping):
         return tuple(str(k) for k in value)
     if isinstance(value, str):
-        # THE one-entry spelling, and a scalar before the sequence branch because a `str` is
-        # iterable: read as a sequence it would declare one name per CHARACTER.
+        # Before the sequence branch: a `str` is iterable and would yield one name per character.
         return (value,)
     if isinstance(value, (list, tuple)):
         out: list[str] = []
@@ -173,17 +137,13 @@ def _declared_names(value: Any) -> tuple[str, ...]:
             elif isinstance(v, str):
                 out.append(v)
             elif isinstance(v, (int, float)):
-                # `bool` is an `int`, and is read like one ON PURPOSE: an unquoted `on`/`yes`/
-                # `no` is a BOOLEAN to YAML, and excluding it would drop the entry (and
-                # disagree with the `Mapping` branch, where the same value is a key and gets
-                # stringified). `str(True)` is not a name either, which is the point:
-                # `check_template` reports it as an undeclared param, so the author is told
-                # their `on` was coerced instead of the declaration going unenforced.
+                # Includes `bool`: YAML reads unquoted `on`/`yes`/`no` as booleans. Keeping
+                # `"True"` makes `check_template` report it, telling the author their name was
+                # coerced instead of silently dropping the declaration.
                 out.append(str(v))
         return tuple(out)
     if isinstance(value, (int, float)):
-        # The scalar twin of the `bool`/number entry above, for the same reason and with the
-        # same coercion: `params: on` is a one-entry declaration YAML hands over as `True`.
+        # Scalar form of the above: `params: on` arrives as `True`.
         return (str(value),)
     return ()
 
@@ -192,10 +152,7 @@ def read_query_template(path: Path) -> tuple[QueryTemplate | None, str]:
     """One template file, as `(template, reason)` — `reason` empty on success, else why the file
     is not a template.
 
-    Split out of the walk so a caller holding ONE path (the loop's commit gate, handed changed
-    paths by git rather than a directory) reads it through the same parser the corpus does.
-    Returning the reason rather than printing it lets that caller refuse a commit *with* the
-    reason; `iter_query_templates` keeps the warn-and-skip behavior its readers depend on."""
+    For callers holding one path (the commit gate), which need the reason to refuse with."""
     try:
         text = read_text_utf8(path)
     except TEXT_READ_ERRORS as e:
@@ -204,14 +161,8 @@ def read_query_template(path: Path) -> tuple[QueryTemplate | None, str]:
 
 
 def parse_query_template(text: str, path: Path) -> tuple[QueryTemplate | None, str]:
-    """`read_query_template` for content already in hand, with `path` supplying only the
-    LOCATION facts (the file's system, and the template's own `path` field).
-
-    Split from the read because the commit gate asks the same questions of a version of the
-    file that is not on disk: matching a DELETED draft to the template that took it over means
-    parsing the draft's pre-image out of `git show HEAD:…`. Routing that through the corpus's
-    own parser keeps "what the gate thinks this file declares" and "what every reader thinks it
-    declares" the same answer."""
+    """`read_query_template` for content already in hand (e.g. a deleted draft's pre-image from
+    `git show HEAD:…`); `path` supplies only location facts (system, `path` field)."""
     from defender._frontmatter import FrontmatterError, parse_frontmatter
 
     try:
@@ -238,16 +189,13 @@ def parse_query_template(text: str, path: Path) -> tuple[QueryTemplate | None, s
         verb=verb if isinstance(verb, str) else "",
         params=_declared_names(fm.get("params")),
         body_substitutions=_declared_names(fm.get("body_substitutions")),
-        # Through `_declared_names` for its shape tolerance, not its name semantics: a
-        # one-entry `covers: cmdb.network-map` is what a hand-editing author writes, and read
-        # as a sequence a `str` would yield one entry per character. What rides here are
-        # `query_id`s, not param names.
+        # `_declared_names` for its shape tolerance (e.g. a bare `covers: cmdb.network-map`).
         covers=_declared_names(fm.get("covers")),
     ), ""
 
 
 def query_catalog_dir(defender_dir: Path) -> Path:
-    """The query catalog of the tree at `defender_dir` — the one spelling of where it lives."""
+    """The query catalog of the tree at `defender_dir`."""
     return Path(defender_dir) / "skills" / "gather" / "queries"
 
 

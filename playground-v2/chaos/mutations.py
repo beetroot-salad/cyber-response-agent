@@ -1,14 +1,11 @@
-"""M2 — resolve a chaos profile + seed into concrete mutations.
+"""Resolve a chaos profile + seed into concrete mutations.
 
-Pure: takes the parsed inventory as an argument, does no I/O, and is
-deterministic in the seed (O3). `chaos.ctl` is the only caller that pushes
-the returned mutations through the exec seam.
+Pure: no I/O, deterministic in the seed.
 
-Mutations speak the stack's vocabulary, not the operator's: a data-drop
-names a *dataset* (`system.syslog`), which fixes exactly one ingest pipeline
-(`logs-system.syslog@custom`) and one stream (`logs-system.syslog-*`); an
+Mutations speak the stack's vocabulary: a data-drop names a *dataset*
+(`system.syslog`), which fixes exactly one ingest pipeline and one stream; an
 ingest-processor mutation carries the full set of `fields` it touches. The
-guard (M3) reasons about those, with no glob translation in between.
+guard reasons about those directly, with no glob translation.
 
 Each mutation is a dict with a `kind` (`field-flip` | `phantom-host` |
 `missing-host` | `schema-drift` | `data-drop`) plus the fields `ctl.py`
@@ -24,12 +21,10 @@ import random
 import re
 from typing import Any
 
-# The overlay sentinel M4 teaches the CMDB stub to read as "this host is
-# gone" — the common real-world silent gap, expressed with no harness marker.
+# The overlay the CMDB stub reads as "this host is gone", with no harness marker.
 TOMBSTONE: dict[str, Any] = {"__absent__": True}
 
-# schema-drift always targets the auth dataset; the guard (M3) restricts
-# *which* field on it, never the pipeline itself.
+# schema-drift always targets the auth dataset; the guard restricts which field.
 AUTH_DATASET = "system.auth"
 
 # A Fleet dataset name: dotted lowercase segments, no wildcards. Anything
@@ -38,10 +33,8 @@ _DATASET_RE = re.compile(r"^[a-z0-9_]+(?:\.[a-z0-9_]+)*$")
 
 
 class UnresolvableProfile(ValueError):
-    """The profile cannot produce a real, well-formed fault — e.g. a
-    field-flip on a field every host shares, or a dataset that is not a
-    dataset. A no-op or a nonsense target must never be pushed and recorded
-    as an injected fault."""
+    """The profile cannot produce a real, well-formed fault (e.g. a field-flip
+    on a field every host shares). A no-op must never be recorded as a fault."""
 
 
 def pipeline_for_dataset(dataset: str) -> str:
@@ -112,12 +105,9 @@ def _resolve_cmdb_stale(profile: Any, seed: int, inventory: dict[str, Any]) -> l
         return mutations
 
     if variant == "phantom-host":
-        # A phantom is a clone of a real host with the next free index —
-        # web-3 looks exactly like web-1 and web-2 — so it reads as ordinary
-        # fleet growth. Drawing role/owner/criticality independently of the
-        # name produced `db-2` with `role: web`: a record that contradicts
-        # the fleet's own naming convention is a harness tell (O6), and so
-        # is any coined "chaos"-shaped prefix.
+        # A phantom clones a real host with the next free index (web-3 like
+        # web-1), so it reads as ordinary fleet growth. A record contradicting
+        # the naming convention would be a harness tell.
         existing = {h["name"] for h in hosts}
         generated: set[str] = set()
         mutations = []
@@ -162,11 +152,9 @@ def _resolve_cmdb_stale(profile: Any, seed: int, inventory: dict[str, Any]) -> l
 
 def _resolve_schema_drift(profile: Any) -> list[dict[str, Any]]:
     params = profile.params
-    # ignore_missing + ignore_failure are mandatory, always: proven on the
-    # live pipeline that a bare rename/remove stamps event.kind:pipeline_error
-    # + error.message onto the field-less majority of auth lines, and those
-    # error fields land in the agent-visible index (O6). No tag/description
-    # either — a harness-named string sitting in cluster state is a tell.
+    # ignore_missing + ignore_failure are mandatory: otherwise most auth lines
+    # (which lack the field) get pipeline_error fields in the agent-visible
+    # index. No tag/description: a harness-named string in cluster state is a tell.
     if "rename" in params:
         rename = params["rename"]
         processor = {
@@ -206,9 +194,9 @@ def _resolve_data_drop(profile: Any, seed: int) -> list[dict[str, Any]]:
     params = profile.params
     dataset = _require_dataset(params.get("dataset"))
     rate = int(params["rate"])
-    # Null-guarded (a field-less line survives untouched rather than
-    # throwing into pipeline_error) and salted by the seed, so a different
-    # seed drops a different subset and the same seed replays it (O3).
+    # Null-guarded (no pipeline_error on message-less lines) and salted by the
+    # seed, so the same seed replays the same subset.
+
     condition = (
         f"ctx.message != null && ((ctx.message + '{seed}').hashCode() "
         f"& 0x7fffffff) % 100 < {rate}"

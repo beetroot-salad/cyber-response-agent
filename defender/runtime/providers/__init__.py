@@ -15,10 +15,8 @@ FIREWORKS = OpenAICompatProvider(
     id="fireworks",
     base_url="https://api.fireworks.ai/inference/v1",
     api_key_var="FIREWORKS_API_KEY",
-    # `glm-5.2` and `kimi-k2.6` are gone: Fireworks decommissioned both serverless on
-    # 2026-09-25 (5.2 → 5.3; K2.6 → GLM 5.3 Flash for gather, per experiments/gather-flash-port).
-    # A run that still names one fails at `provider_for` with the alias list, not at its
-    # first dispatch with the provider's 404.
+    # Only models Fireworks still serves; an unlisted name fails at `provider_for` with the
+    # alias list rather than at first dispatch with a 404.
     aliases={
         "glm-5.3": "accounts/fireworks/models/glm-5p3",
         "glm-5p3": "accounts/fireworks/models/glm-5p3",
@@ -32,9 +30,8 @@ FIREWORKS = OpenAICompatProvider(
     },
     main_effort="low",
     gather_effort="none",
-    # GLM 5.3 and its Flash variant reason unconditionally; `none` is an API refusal, not a
-    # cheaper request. Kimi K3 and DeepSeek V4.1 Flash take it. Gather's shipped `none` is
-    # therefore a preference the Flash default cannot honour: it runs at `low`, the floor.
+    # GLM 5.3 and its Flash variant always reason; the API refuses `none`, so gather's `none`
+    # runs at `low` on them.
     thinking_only=frozenset({
         "accounts/fireworks/models/glm-5p3",
         "accounts/fireworks/models/glm-5p3-flash",
@@ -46,8 +43,7 @@ PROVIDERS: tuple[Provider, ...] = (ANTHROPIC, FIREWORKS)
 def selectable_aliases() -> tuple[str, ...]:
     """One spelling per distinct model behind the Fireworks alias map, in declaration order.
 
-    DERIVED, not written out: a hand-kept literal silently omits models added later, and an
-    operator who typos one is then told it looks unsupported.
+    Derived so newly added models are never omitted.
     """
     seen: set[str] = set()
     names: list[str] = []
@@ -82,9 +78,7 @@ def effort_for_role(name: str, role: AgentRole) -> str | None:
 
 def build_for_effort(name: str, effort: str | None) -> BuiltModel:
     p = provider_for(name)
-    # `BuiltModel.settings` is `dict[str, Any] | None` (#1067's own comment on that field says
-    # why: a `ModelSettings | None` here is real at runtime, just not the narrower TYPE the
-    # carrier field declares, to keep a provider's own extension keys from being stripped).
+    # `BuiltModel.settings` is typed as a plain dict so provider extension keys survive.
     return BuiltModel(p.build_model(name), cast("dict | None", p.settings_for_effort(effort)))
 
 
@@ -93,9 +87,8 @@ def cache_affinity(
 ) -> ModelSettings | None:
     """`settings` plus `name`'s provider's prompt-cache affinity hint for `key`.
 
-    An UNROUTABLE name returns `settings` untouched instead of raising: the hint is an
-    optimization, and every name a real run reaches has already been through `provider_for`
-    in `run.py`'s all-roles preflight, which is where an unknown model fails.
+    An unroutable name returns `settings` untouched: the hint is an optimization, and unknown
+    models already fail in `run.py`'s preflight.
     """
     try:
         provider = provider_for(name)

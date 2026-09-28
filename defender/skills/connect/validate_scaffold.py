@@ -35,13 +35,9 @@ _POSITIONAL_KINDS = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITI
 
 
 def _is_ctx(param: inspect.Parameter) -> bool:
-    """The leading param is the harness carriage, not a model-supplied value. Checking the
-    KIND alone is not enough: `def get_host(host: str)` also has a leading positional param,
-    so a verb that dropped its ctx entirely reads as well-formed and the tool then binds a
-    `VerbContext` OBJECT into `host` — a silently wrong request instead of a caught error.
-    Adapters carry `from __future__ import annotations`, so the annotation arrives as the
-    STRING `"VerbContext"`; one without it hands over the class. Accept both, and any
-    qualified spelling (`verbs.VerbContext`)."""
+    """Is the leading param annotated `VerbContext`? The kind alone is not enough: in
+    `def get_host(host: str)` the tool would bind the ctx object into `host`. Accepts the
+    class, the string annotation, and qualified spellings."""
     ann = param.annotation
     if ann is VerbContext:
         return True
@@ -71,11 +67,9 @@ class Report:
 
 
 def check_registry(report: Report, defender: Path, system: str):
-    """Resolve `system`'s verbs through `VerbResolver` — THE resolution rule, not a second copy
-    of it. Spelling the verdicts inline invites two defects the resolver already handles: a
-    `KeyError` raised by the ADAPTER'S OWN import is indistinguishable from the registry's "no
-    such adapter" one, and a blanket `except BaseException` swallows an interrupt into "broken
-    adapter", making a scaffold sweep un-interruptible.
+    """Resolve `system`'s verbs through `VerbResolver`, the shared resolution rule (which
+    already tells an adapter's own import errors from a missing adapter and lets interrupts
+    through).
     """
     adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
     try:
@@ -93,19 +87,12 @@ def check_registry(report: Report, defender: Path, system: str):
 
 
 def check_signatures(report: Report, verbs) -> None:
-    """Every verb must be dispatchable as ``fn(ctx, **params)`` — the ONE call shape
-    `query_tool` makes (`fn(vctx, **params)`), with the model's params bound by keyword.
+    """Every verb must be dispatchable as ``fn(ctx, **params)``, the call shape `query_tool`
+    makes. `declared_params` sees only keyword-only params, so a positional param can never
+    be bound by the model.
 
-    A verb that takes its params positionally is not merely non-idiomatic, it is unusable:
-    `declared_params` collects KEYWORD_ONLY parameters only, so a positional-or-keyword param
-    is invisible to `validate_params` and the model can never bind it. Every call is then
-    refused at the boundary as an unknown param, and the one shape that survives (`params={}`)
-    raises TypeError on the missing positional inside the tool.
-
-    The four sub-checks are the four ways that call shape breaks, and they are the SAME four
-    `test_verbs_registry_declares_surface` pins over the shipped adapters — a gate a scaffold
-    author clears before going further must not be weaker than the CI test that greets them
-    afterwards."""
+    Mirrors the checks `test_verbs_registry_declares_surface` applies to shipped adapters, so
+    this gate is no weaker than CI."""
     broken: list[str] = []
     for name in sorted(verbs):
         fn = verbs[name]
@@ -157,7 +144,7 @@ def check_signatures(report: Report, verbs) -> None:
 
 
 def check_config(report: Report, settings_dir: Path, system: str) -> None:
-    """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106)."""
+    """`system`'s `config.env` in the connected tenant's `settings/` folder."""
     path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
         report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")
@@ -202,9 +189,8 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     if execution.exists():
         report.add(PASS, f"skills/{system}/execution.md exists")
     elif has_inline:
-        # Not a PASS: the inline shape puts the system's `docker exec … curl` transport in the
-        # file the orchestrator reads to route, and leaves gather to discover the missing
-        # sibling with a Read that 404s.
+        # Inline puts the transport in the file the orchestrator reads to route, and gather
+        # then hits a missing execution.md.
         report.add(WARN, "SKILL.md embeds ## Execution inline — split it into execution.md "
                          "(docs/system-skill-shape.md)")
     else:
@@ -212,12 +198,9 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
 
 
 def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
-    """Every template of `system`, DRAFTS INCLUDED.
-
-    Drafts are NOT excluded: `_draft/` is exactly the directory the lead-authoring lane mints
-    into, so excluding it leaves the one lane that writes this tree continuously unchecked. The
-    rule lives in `_scaffold_rules`, which the loop's commit gate calls too — the checker and
-    the writer meet because they read the same function.
+    """Every template of `system`, drafts included, since `_draft/` is where the
+    lead-authoring lane writes. The rules are `_scaffold_rules`, shared with the loop's
+    commit gate.
     """
     qdir = defender / "skills" / "gather" / "queries" / system
     templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]
@@ -261,8 +244,8 @@ def main() -> None:
     print(f"validate_scaffold: {system}\n")
     report = Report()
     verbs = check_registry(report, defender, system)
-    # An unresolvable tenant WARNs rather than exits: the config check is advisory (an absent
-    # config.env only warns), and the scaffold's other checks still run.
+    # An unresolvable tenant only warns: the config check is advisory.
+
     try:
         settings_dir = entry_tenant(defender, args.tenants_root, args.tenant).settings
     except TenantDirError as refusal:

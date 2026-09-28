@@ -1,7 +1,4 @@
-"""The queue lock, what a handoff contains, and dispatching the agent that acts on it.
-
-Split out of `lead_author.py` at 1017 lines.
-"""
+"""The queue lock, what a handoff contains, and dispatching the agent that acts on it."""
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -68,15 +65,12 @@ _logger = logging.getLogger(__name__)
 
 
 #: The per-author queue lock under DEFAULT_PATHS — what the CLI locks. `queue_lock_file(paths)`
-#: is the same spelling for any `LoopPaths`; the drain and a by-hand run over the same state
-#: contend on the same file (#952 M5).
+#: gives it for any `LoopPaths`, so the drain and a by-hand run contend on one file.
 QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 
-#: What `run` returns when it did NOT serve because another lead-author tick holds the queue
-#: lock. Distinct from 0 because the drain's next move is to delete the request it just
-#: served — a skip reported as a serve deletes every marker the pass claimed, with no work
-#: done, no dead letter and no retry. Distinct from 2 because it is not a fault: the request
-#: is intact and the next tick serves it.
+#: What `run` returns when it did not serve because another tick holds the queue lock. Not 0,
+#: or the drain would delete the claimed request as served; not 2, since it isn't a fault and
+#: the next tick serves it.
 QUEUE_LOCK_SKIP_RC = 3
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
 
@@ -112,16 +106,11 @@ def release_queue_lock(fh: Any) -> None:
 
 
 def _templates_by_identity(catalog: list) -> dict:
-    """`{identity -> template}` over both the ids templates HAVE and the ids they COVER.
+    """`{identity -> template}` over both the ids templates have and the ids they cover.
 
-    A queries-table row carries the coined `query_id` gather dispatched under, which is not
-    any template's `id:` — the mint derives a draft's name from it instead. Indexed on `id`
-    alone, the draft this tick just minted does not resolve, `build_handoff` drops the row as
-    an unresolved contract violation, and the author is handed nothing about the one file the
-    tick was spawned to curate.
-
-    `setdefault` so a real `id:` always beats an alias, and so the first template in catalog
-    order wins if two ever claim the same identity.
+    A queries-table row carries the coined `query_id`, which a just-minted draft records in
+    `covers:` rather than `id:`; indexing on `id` alone would drop that row as unresolved.
+    `setdefault`, so a real `id:` beats an alias and the first template wins a tie.
     """
     by_id = {t.id: t for t in catalog}
     for template in catalog:
@@ -144,10 +133,8 @@ def build_handoff(
     seen_order: list[Path] = []
     for lead in executed:
         if lead.is_sentinel:
-            # Not a contract violation and not this collector's row: a `∅.`-prefixed sentinel
-            # records something the defender did NOT run, and is routed to the pitfalls
-            # residue by construction. Letting it fall to the WARN below would put one line
-            # of noise per refusal into the log an operator reads for real catalog drift.
+            # A sentinel records something the defender didn't run and belongs to the pitfalls
+            # residue; skip it quietly rather than warn as catalog drift.
             continue
         tpl = by_id.get(lead.query_id)
         if tpl is None:
@@ -218,16 +205,12 @@ _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
 
 
 def _draft_contradicts_skill(draft: Path) -> bool:
-    """True only when `draft`'s frontmatter declares `contradicts_skill: true` — it asserts
-    something that disagrees with a claim already shipped in the system's SKILL.md, rather
-    than merely adding detail SKILL.md lacks (#984). Such a draft bypasses `_lift_threshold`
-    in `_prepare_handoffs`: the cost of leaving a CONTRADICTING draft queued is a knowledge
-    surface that is actively wrong, and that cost does not shrink while it waits behind
-    unrelated, merely-incomplete drafts accumulating toward the lift threshold.
+    """True only when `draft`'s frontmatter declares `contradicts_skill: true` — it disagrees
+    with a claim already in the system's SKILL.md rather than adding detail. Such a draft
+    bypasses `_lift_threshold`, since a SKILL.md that is actively wrong shouldn't wait for
+    unrelated drafts to accumulate.
 
-    Read defensively and opt-in only: a draft with no frontmatter, unparseable frontmatter,
-    or no `contradicts_skill` key at all does NOT bypass — only an explicit `true` does. That
-    keeps every draft written before this field existed on the original threshold-gated path.
+    Opt-in only: missing or unparseable frontmatter, or no key, doesn't bypass.
     """
     try:
         text = draft.read_text(encoding="utf-8")
@@ -242,12 +225,8 @@ def _draft_contradicts_skill(draft: Path) -> bool:
 def discover_system_drafts(
     *, skills_dir: Path = SKILLS_DIR, systems: frozenset[str],
 ) -> list[Path]:
-    """Walks every child of `skills_dir`, skipping any directory `systems` does not declare,
-    so an undeclared `_draft/` never becomes work the agent is instructed to do and the
-    commit gate then refuses.
-
-    Every skip is reported: a skipped directory reads from the outside exactly like a tree
-    that had none, so a silent skip is a refusal with no trace."""
+    """Every draft under a declared system's `_draft/` in `skills_dir`. Undeclared directories
+    are skipped (the commit gate would refuse their edits) and each skip is logged."""
     out: list[Path] = []
     if not skills_dir.is_dir():
         return out

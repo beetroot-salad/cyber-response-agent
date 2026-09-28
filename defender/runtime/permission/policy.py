@@ -28,15 +28,10 @@ class AgentPolicy:
 
     @property
     def write_roots(self) -> tuple[re.Pattern[str], ...]:
-        """The write scope this policy compiled, under the name that reads as a question.
-
-        The same value as `write_allow` and deliberately so: `read_roots` and `write_roots` are
-        how a policy AUDIT asks "may this role read anywhere / write anywhere at all", and the
-        two halves of that question should not be spelled with two different vocabularies. The
-        write side is compiled to PATTERNS rather than roots — a write scope is a set of named
-        artifacts under a root, not the root — so this is the honest thing to hand back, and the
-        answer that matters at a deny-all role is the emptiness rather than the members.
+        """`write_allow` under the name a policy audit pairs with `read_roots`. These are
+        patterns, not roots; what an audit usually needs is whether it is empty.
         """
+
         return self.write_allow
 
     def __post_init__(self) -> None:

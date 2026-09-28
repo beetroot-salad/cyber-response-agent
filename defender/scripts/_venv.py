@@ -4,22 +4,19 @@ import os
 import sys
 from pathlib import Path
 
-#: `defender/` — derived from THIS file's location, not the caller's, so the helper stays
-#: correct however deep the calling script sits.
+#: `defender/`, derived from this file's location so it is right however deep the caller sits.
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 
 
 def reexec_into_venv(script: str) -> None:
     """Re-exec `script` under `defender/.venv` if it is not already running there.
 
-    NOT usable from `defender/run.py` or `defender/learning/loop.py`, which hand-roll the same
-    three lines — irreducibly: both must re-exec BEFORE any `defender.*` import resolves, and
-    importing this helper is itself such an import.
+    Not usable from `defender/run.py` or `defender/learning/loop.py`, which must re-exec before
+    any `defender.*` import (importing this helper is one), so they inline the same lines.
 
-    M6/O5 (#1092): inside a box the image's own `python3` already carries what this script
-    needs, so re-execing into the mounted `.venv` would undercut the boundary for a
-    gate-admitted call. `DEFENDER_BOX` (set only inside a box) skips the re-exec — see
-    `bin/README.md`'s Conventions section for what that guarantee does and does not cover.
+    Inside a box (`DEFENDER_BOX` set) the image's `python3` already has what is needed, and
+    re-execing into the mounted `.venv` would undercut the boundary, so it is skipped. See
+    `bin/README.md`'s Conventions section for what that does and does not guarantee.
     """
     if os.environ.get("DEFENDER_BOX"):
         return

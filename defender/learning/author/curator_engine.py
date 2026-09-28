@@ -88,11 +88,9 @@ _CORPUS_REPAIR_DENY_REASON = (
 )
 
 
-# The shipped lesson corpora — the curator's read confine AND, by construction, its
-# corpus-name membership set: a name that does not resolve INTO this confine can never bind
-# (the confine-containment check in `bind` refuses it), so no separate membership list is
-# needed. Derived from the canonical set (`hooks/record_lesson_load.LESSON_CORPORA`, the
-# author-side superset of RUNTIME_LESSON_CORPORA); sorted for determinism.
+# The shipped lesson corpora: the curator's read confine and, since `bind` refuses a corpus
+# name outside the confine, also its corpus-name membership set. Sorted from the author-side
+# `LESSON_CORPORA`.
 SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
 
 
@@ -142,12 +140,9 @@ class CuratorDeps(AgentDeps):
 
     @classmethod
     def for_run(cls, run_dir: Path, repo_root: Path, corpus_dir: Path, *, box: Any) -> CuratorDeps:
-        """A thin wrapper over `bind`: resolves the corpus NAME off `corpus_dir`'s basename,
-        binds through the one seam. `box` is REQUIRED — a loud TypeError at construction beats
-        a silent inert default that deadens the curator's bash lane.
-
-        M1: no forward-check config is attached here any more — the check moved out of the
-        curator's hands entirely, and `tool_config` stays at `bind`'s own unset default."""
+        """A thin wrapper over `bind`, taking the corpus name from `corpus_dir`'s basename.
+        `box` is required, so a missing one fails loudly rather than silently disabling the
+        curator's bash lane."""
         defender_dir = repo_root / "defender"
         scope = RunScope(
             corpus_name=corpus_dir.name,
@@ -165,10 +160,9 @@ class CuratorDeps(AgentDeps):
 
 @model(frozen=True)
 class CorpusRepairDeps(AgentDeps):
-    """M4's repair spawn — a SEPARATE deps type from `CuratorDeps`, because `run_stage`
-    resolves the effective `AgentDefinition` off `AGENTS[deps_type.role]`
-    (`_pydantic_stage.build_stage_agent`), not off whatever definition `bind` was called
-    with — so the restricted toolset only actually applies if the role differs too."""
+    """The repair spawn's deps — a separate type from `CuratorDeps` because `run_stage`
+    resolves the `AgentDefinition` by `deps_type.role`, not from the definition `bind` got, so
+    the restricted toolset only applies under a distinct role."""
 
     role: ClassVar[AgentRole] = AgentRole.CORPUS_REPAIR
 
@@ -207,9 +201,9 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     requires_explicit_tree=True,
     anchors_on_tree=True,
     requires_corpus=True,
-    # The read VIEW spans the multi-corpus confine while the shell (cat) VIEW stays at one
-    # corpus — a deliberate divergence, so read_allow is forced empty rather than derived from
-    # the cat grant's own-corpus scope (the read↔bash parity every OTHER role keeps).
+    # The read view spans the multi-corpus confine while `cat` stays on one corpus, so
+    # read_allow is forced empty rather than derived from the cat grant (breaking the
+    # read↔bash parity other roles keep).
     read_allow_override=PathShapes(),
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )
@@ -223,10 +217,8 @@ def _run_curator_pydantic(
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """Both limits vary per spawn here, so the caller owns the whole context."""
-    # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
-    # run dir alone) but required here: the corpus confine is resolved off the repo tree.
-    # A raise, not an assert — `python -O` strips asserts, and the fallout would be a
-    # `NoneType / str` TypeError several frames down inside `bind`.
+    # Required here, though optional on the shared context. A raise, not an assert, since
+    # `python -O` strips asserts.
     repo_root = ctx.repo_root
     if repo_root is None:
         raise ValueError(
@@ -252,17 +244,11 @@ def run_curator_stage(
     """`wiring` is the spawn's prompt/model/effort/trace/label/batch, `ctx` its roots, user
     prompt and two env-backed limits.
 
-    Every model/effort/limit/timeout knob is caller-supplied with no default here: each is
-    env-backed and differs per corpus, so a default evaluated at import would freeze it.
-
-    M1: the verifier-key preflight this used to run for the check it no longer carries has
-    moved to the drain, before the first curator spawn (O10) — this function sources only
-    the AUTHOR's own key, as it always did."""
-    # ONE batch identity, read off the wiring that already derived `trace_name` and `label`
-    # from it. Taking it a second time as a parameter would let the log line, the AuthorError
-    # and the trace filename name different batches with nothing asserting they agree. A
-    # raise, not an assert: `python -O` strips asserts, and `for_batch` is the only builder
-    # that sets the field.
+    Every model/effort/limit/timeout knob is caller-supplied: each is env-backed and differs
+    per corpus, so a default evaluated at import would freeze it. Sources only the author's
+    key; the drain handles the verifier key."""
+    # The batch id comes off the wiring, so the log line, AuthorErrors and trace filename
+    # can't disagree. A raise, not an assert, since `python -O` strips asserts.
     batch_id = wiring.batch_id
     if batch_id is None:
         raise ValueError(
@@ -346,9 +332,8 @@ def run_repair_stage(
     log: logging.Logger,
     run_repair: Callable[..., str] = _run_repair_pydantic,
 ) -> dict:
-    """M4's one bounded repair spawn: same shape as `run_curator_stage`, minus the
-    AUTHOR_RESULT parsing — the drain re-checks whatever the spawn wrote by re-reading the
-    tree (M3 pass 2), never by trusting what this function returns."""
+    """The one bounded repair spawn: like `run_curator_stage` minus AUTHOR_RESULT parsing —
+    the drain re-reads the tree rather than trusting the return value."""
     batch_id = wiring.batch_id
     if batch_id is None:
         raise ValueError(

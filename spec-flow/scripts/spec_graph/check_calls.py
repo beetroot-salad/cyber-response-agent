@@ -39,10 +39,8 @@ def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
-        # Matching the dotted module key (not just pre-collected symbols) matters: an
-        # explicit `--target app.mod` names a module that EXISTS (the modify-existing
-        # case), so the heuristic collected no symbols for it and a suite doing
-        # `from app.mod import f` + `f()` was 100% falsely NO-CALL.
+        # Match the module key too: an explicit `--target` names an existing module, for
+        # which the heuristic collected no symbols.
         from_target = isinstance(node, ast.ImportFrom) and node.module in targets
         for a in node.names:
             if from_target and a.name != "*":
@@ -51,10 +49,8 @@ def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names:
                 # Aliases: `from mod import target as t` / `import app.mod as m` make
                 # `t` / `m` target names in this file.
                 local.add(a.asname)
-    # Module-level aliases: `drive = functools.partial(summarize, tmp)` or
-    # `summ = summarize` bind a target-reaching name OUTSIDE any function, which the
-    # function-only harvest below never sees — a test calling only `drive` was falsely
-    # NO-CALL. Walked in body order, so alias-of-alias chains resolve in one pass.
+    # Module-level aliases (`drive = functools.partial(summarize, tmp)`, `summ = summarize`)
+    # bind target-reaching names outside any function. Body order resolves alias chains.
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
             if _suite.names_in(node.value) & local:
@@ -66,11 +62,8 @@ def _local_targets(tree: ast.Module, targets: dict[str, set[str]], target_names:
 
 
 def _module_refs(tree: ast.Module) -> dict[str, set[str]]:
-    # Refs are MERGED per name, never last-one-wins: `ast.walk` flattens methods and
-    # nested defs into one namespace, so two same-named helpers in different classes
-    # used to overwrite each other and the fixed point judged both bodies by whichever
-    # the walk reached last. Union keeps the resolution name-based (which is all the
-    # call sites in `refs` can be matched by) without depending on walk order.
+    # Merged per name: `ast.walk` flattens methods and nested defs into one namespace, so
+    # same-named helpers must union rather than overwrite each other.
     refs: dict[str, set[str]] = {}
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -79,8 +72,7 @@ def _module_refs(tree: ast.Module) -> dict[str, set[str]]:
 
 
 def _reaching(refs: dict[str, set[str]], local_targets: set[str]) -> set[str]:
-    # Fixed point: a function touches the target directly, or calls a same-file
-    # function that does. Iterate until stable (helper chains, any depth).
+    # Fixed point: a function touches the target directly or via a same-file helper chain.
     touches = {name for name, r in refs.items() if r & local_targets}
     changed = True
     while changed:
@@ -100,20 +92,16 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
         target_names.add(dotted.split(".")[-1])
         target_names.update(symbols)
 
-    # Same-dir conftest.py only: pytest injects its fixtures into every test here by
-    # name, so a conftest function that reaches the target makes its NAME
-    # target-reaching for the whole dir (a test body referencing the fixture param then
-    # satisfies the fixed point) — the phase-F charge's "driving an object a call to
-    # the target returned" legitimately spans that seam. Parent-dir conftests stay out
-    # of scope: this check reads one suite dir, and widening it would mean re-deriving
-    # pytest's rootdir discovery.
+    # Same-dir conftest.py only: a fixture that reaches the target makes its name
+    # target-reaching for every test here. Parent-dir conftests would need pytest's rootdir
+    # discovery.
     conftest_reaching: set[str] = set()
     conftest = suite_dir / "conftest.py"
     if conftest.is_file():
         try:
             ctree = ast.parse(conftest.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, ValueError):
-            pass  # unscannable conftest: same-file reachability still stands
+            pass
         else:
             conftest_reaching = _reaching(
                 _module_refs(ctree), _local_targets(ctree, targets, target_names)
@@ -124,7 +112,7 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, ValueError):
-            continue  # unscannable files are the null-stub gate's collection error to report
+            continue  # the null-stub gate reports unscannable files
         local_targets = _local_targets(tree, targets, target_names) | conftest_reaching
         refs = _module_refs(tree)
         touches = _reaching(refs, local_targets)
@@ -145,19 +133,12 @@ def main(argv: list[str]) -> int:
     explicit: list[str] = opts["target"]
     cfg = _config.load(opts["config"])
     if args:
-        # An explicitly-given suite dir may live in a different repo than the process
-        # cwd; a cwd-anchored root would misclassify every import (nothing is
-        # project-rooted) and exit 2 with a false "every import resolves". Anchor the
-        # root at the argument, resolved so `is_dir`/rooting checks are cwd-independent.
+        # Anchor the root at the argument: it may live in another repo than the cwd.
         p = Path(args[0]).resolve()
         suite_dirs = [_suite.suite_dir_from_arg(p)]
         root: Path | None = _config.repo_root(suite_dirs[0])
     else:
-        # No single root: `suite_dir_from_arg` anchors each graph's `tests:` on ITS OWN checkout,
-        # so a process-anchored root would classify one suite's imports against another repo —
-        # every import reads as third-party and the dir comes back "blind" with a false "every
-        # suite import resolves". Anchored per dir inside the loop instead, which is also what
-        # the explicit-argument branch above does.
+        # No single root: each suite dir is anchored on its own checkout inside the loop.
         root = None
         suite_dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
     if not suite_dirs:
@@ -165,15 +146,9 @@ def main(argv: list[str]) -> int:
         return 2
     all_findings: list[str] = []
     blind: list[Path] = []
-    # A resolved directory with no Python in it is a could-not-look, and it has to be said HERE
-    # rather than left to the no-targets arm below: an explicit `--target` seeds `targets`, so an
-    # empty directory sails past that arm and prints "0 test(s) that never reach the target" over
-    # a suite that was never opened. That was the #949 symptom.
-    #
-    # COLLECTED, not returned on — for the same reason `blind` is, and it matters more now that
-    # `suite_dirs` is one entry per GRAPH: a single graph whose `tests:` names a retired, renamed
-    # or not-yet-written suite would otherwise throw away every finding the other suites produced
-    # and print nothing at all.
+    # A directory with no tests is could-not-look. Checked here because an explicit `--target`
+    # would get past the no-targets arm. Collected, not returned on, so other suites' findings
+    # still print.
     no_tests: list[Path] = []
     for d in suite_dirs:
         if not _suite.has_tests(d):
@@ -185,18 +160,13 @@ def main(argv: list[str]) -> int:
         for note in floor:
             print(f"  WARN [check_calls] {note}", file=sys.stderr)
         if not targets:
-            # Collected, not returned on: bailing here threw away every finding the
-            # already-scanned dirs produced, so a real NO-CALL went unreported because a
-            # LATER dir happened to be unlookable.
+            # Collected, not returned on, so other suites' findings still print.
             blind.append(d)
             continue
         all_findings.extend(check(d, targets))
     for f in all_findings:
         print(f"  {f}")
-    # The summary line is printed only when a suite was actually SCANNED. Over zero of them it
-    # reads "0 test(s) that never reach the target over 0 suite dir(s)" — honest in its second
-    # clause and a clean bill of health in its first, and the first is the half a human reads.
-    # The exit code is already 2 here; #949 is about the sentence disagreeing with it.
+    # Summary only when something was scanned: over zero suites it would read as clean.
     scanned = len(suite_dirs) - len(blind) - len(no_tests)
     if scanned:
         print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "

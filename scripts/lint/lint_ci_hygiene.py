@@ -12,15 +12,15 @@ Three sub-checks, all soft (intended for the code-smells report job):
                          (documented defaults, not hardcoded leaks).
 
   - python-interpreter   bare `python3 X.py` in JSON hook `command:` fields
-                         (NOT in `Bash(python3 ...)` allow patterns, which
+                         (not in `Bash(python3 ...)` allow patterns, which
                          are permission scopes rather than invocations).
-                         Bug class from b7901f1 — hooks need ${PYTHON} or
-                         an absolute venv path to avoid system-python.
+                         Hooks need ${PYTHON} or an absolute venv path to
+                         avoid system python.
 
   - hook-matcher         hook matcher containing exactly one of `Task` /
                          `Agent` rather than both. Production dispatches
                          as both; missing one means the hook silently
-                         never fires (bug class from b7901f1).
+                         never fires.
 
 Pre-existing findings are ratcheted via lint_ci_hygiene_baseline.json (see
 scripts/lint/_baseline.py); the gate fails only on a NEW finding.
@@ -48,8 +48,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_ci_hygiene_baseline.json")
 PATH_ALLOWLIST = {
     "defender/CLAUDE.md",
     "defender/learning/actor-settings.json",
-    # The lint scripts live at repo-root scripts/lint/, outside the scanned
-    # defender/ tree, so they need no allowlist entry here.
 }
 
 # Directories under defender/ that are either out-of-scope or are
@@ -61,7 +59,7 @@ EXCLUDED_PREFIXES = (
     "defender/tests/",
     "defender/lessons/",
     "defender/lessons-actor/",
-    "defender/lessons-questioner/",                    # #1007: the questioner's own corpus
+    "defender/lessons-questioner/",
     "defender/docs/",                                  # POC design notes
     "defender/skills/wazuh/",
     "defender/skills/host-query/",
@@ -99,11 +97,9 @@ def _is_excluded(rel: str) -> bool:
 def _iter_defender_files() -> list[Path]:
     """Every shipped text file under `defender/`, minus what git ignores.
 
-    `EXCLUDED_PREFIXES` scopes what is DELIBERATELY out of scope (per-vendor skill content,
-    fixtures, docs); `git_ignored` scopes what is not part of the repo at all. Only the second
-    can cover a directory a RUN writes — `learning/runs/`, `author-queue/`, `learn-queue/`
-    accumulate in any working tree that has executed the loop, and reported 290 findings here
-    against CI's zero, since a fresh checkout has none of them."""
+    `EXCLUDED_PREFIXES` scopes what is deliberately out of scope; `git_ignored` excludes what
+    is not part of the repo at all, such as run output (`learning/runs/`, `author-queue/`)
+    that accumulates in a working tree but never exists in a fresh CI checkout."""
     out: list[Path] = []
     if not DEFENDER.is_dir():
         return out
@@ -153,9 +149,8 @@ def _iter_command_fields(node, path_prefix: str = ""):
 
 
 def _settings_files() -> list[Path]:
-    """Known JSON config locations under defender/. Hardcoded list avoids
-    the cost of an unscoped rglob over the whole worktree (which can
-    include `.venv/`)."""
+    """Known JSON config locations under defender/, listed to avoid an unscoped rglob that
+    could descend into `.venv/`."""
     out: list[Path] = []
     for path in DEFENDER.glob("*.json"):
         out.append(path)
@@ -174,8 +169,7 @@ def check_python_interpreter() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
-        # A settings file that will not parse is exactly where a bad interpreter line hides: the
-        # swallow made "malformed" and "clean" the same answer (#618/#621/#652).
+        # An unparseable settings file must not read as clean.
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -218,8 +212,7 @@ def check_hook_matchers() -> list[Finding]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
-        # A settings file that will not parse is exactly where a bad hook matchers hides: the
-        # swallow made "malformed" and "clean" the same answer (#618/#621/#652).
+        # An unparseable settings file must not read as clean.
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -253,9 +246,8 @@ HEADER = (
 
 
 def main(argv: list[str]) -> int:
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = (
             check_hardcoded_paths()
