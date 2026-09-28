@@ -44,11 +44,12 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import subprocess
 from collections.abc import Callable, Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -694,10 +695,12 @@ class IoFault:
     """A declarative fault-spec for `RecordingIo`. The fake classifies nothing and decides no
     policy: it raises what it is told to raise, where it is told to raise it.
 
-    `fail_on` names the `_io` operations that raise; `error` is the exception raised, defaulting
-    to the one claim C19 observed on the REAL `_io.write_guarded` when its staged
-    `O_CREAT|O_EXCL|O_NOFOLLOW` create meets an existing entry. `raise_after` lets the Nth call
-    through before failing. `before_write` runs just before the real call, which is how the
+    `fail_on` names the `_io` operations that raise (a path seam such as `write_guarded`, or a
+    rooted one such as `rooted_write`); `error` is the exception raised, defaulting to the
+    `FileExistsError` claim C19 observed when a guarded exclusive create meets an existing
+    entry. `raise_after` lets the Nth call through before failing. `before_write` runs just
+    before every write call (`write_guarded`, `rooted_write`, `rooted_locked_for_rewrite`),
+    handed the RECORD's path (a rooted call's trust root joined with its name), which is how the
     tenant-record create race (decision 13) is opened deterministically.
     """
     fail_on: tuple[str, ...] = ()
@@ -706,35 +709,68 @@ class IoFault:
     before_write: Callable[[Path], None] | None = None
 
 
+def bound_arguments(op: str, args: tuple, kwargs: dict) -> dict[str, Any]:
+    """One recorded `_io` call's arguments BY NAME, bound against the real function's own
+    signature with its defaults applied — so a positional and a keyword spelling of the same
+    call read the same, and a seam test asserts on `root` / `name` / `mode` / `text` rather than
+    on argument positions (#1111 O8)."""
+    bound = inspect.signature(getattr(io(), op)).bind(*args, **kwargs)
+    bound.apply_defaults()
+    return dict(bound.arguments)
+
+
+#: The `_io` calls `IoFault.before_write` fires before.
+_WRITE_OPS = frozenset({"write_guarded", "write_atomic", "rooted_write",
+                        "rooted_locked_for_rewrite"})
+
+
+def _recorded_path(op: str, args: tuple, kwargs: dict) -> Path:
+    """The path one `_io` call is about: a rooted call's trust root joined with the name (or
+    folder) under it, else the call's first argument."""
+    if op.startswith("rooted_"):
+        b = bound_arguments(op, args, kwargs)
+        return Path(b["root"]) / PurePosixPath(b.get("name", b.get("folder_name")))
+    return Path(args[0] if args else next(iter(kwargs.values())))
+
+
 class RecordingIo:
     """A pass-through recorder over the real `defender._io`, entering through the owner's
     `io=` injection seam (never `monkeypatch.setattr` — `scripts/lint/lint_monkeypatch.py`).
 
     It records every operation the owner asks of it, with the path, so a `kind: seam` demand
-    can assert on the CAPTURED INBOUND CALL rather than on a canned return value.
+    can assert on the CAPTURED INBOUND CALL rather than on a canned return value. `calls` keeps
+    each call's path (a rooted call's trust root joined with its name); `invocations` keeps
+    every argument, which is where a seam test reads a rooted call's name, mode and payload.
     """
 
     def __init__(self, fault: IoFault | None = None) -> None:
         self.fault = fault or IoFault()
         self.calls: list[tuple[str, Path]] = []
+        self.invocations: list[tuple[str, tuple, dict]] = []
         self._real = io()
 
     @property
     def ops(self) -> list[str]:
         return [name for name, _ in self.calls]
 
+    def arguments(self, op: str) -> list[dict[str, Any]]:
+        """Every recorded call of `op`, in order, its arguments bound by name."""
+        return [bound_arguments(name, a, kw) for name, a, kw in self.invocations if name == op]
+
     def _dispatch(self, name: str):
         real = getattr(self._real, name)
 
-        def call(path, *a, **kw):
-            self.calls.append((name, Path(path)))
+        def call(*a, **kw):
+            path = _recorded_path(name, a, kw)
+            self.calls.append((name, path))
+            self.invocations.append((name, a, dict(kw)))
             prior = sum(1 for n, _ in self.calls[:-1] if n == name)
             if name in self.fault.fail_on and self.fault.raise_after <= prior:
                     raise self.fault.error or FileExistsError(
-                        f"{path}: staged create collided (write_guarded O_EXCL, claim C19)")
-            if name.startswith("write") and self.fault.before_write is not None:
-                self.fault.before_write(Path(path))
-            return real(path, *a, **kw)
+                        f"{path}: the guarded exclusive create collided (claim C19)")
+            if name in _WRITE_OPS and self.fault.before_write is not None:
+                self.fault.before_write(path)
+            return real(*a, **kw)
 
         return call
 
