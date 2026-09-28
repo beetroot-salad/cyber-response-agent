@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import dataclasses
 import errno
-import inspect
 import json
 import logging
 import os
@@ -74,6 +73,7 @@ import pytest
 from defender import _env, _io, _provenance, _tenant, run_common
 from defender._run_handle import Run
 from defender._run_paths import RunPaths
+from defender.tests._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import (
@@ -126,11 +126,8 @@ class IoCall:
     kwargs: dict
 
     def bound(self) -> dict[str, Any]:
-        """The call's arguments by name, bound against the real `_io` function's signature, so
-        a positional and a keyword spelling of the same call read the same."""
-        bound = inspect.signature(getattr(_io, self.op)).bind(*self.args, **self.kwargs)
-        bound.apply_defaults()
-        return dict(bound.arguments)
+        """The call's arguments by name (`_spec1077.bound_arguments`)."""
+        return bound_arguments(self.op, self.args, self.kwargs)
 
     @property
     def target(self) -> Path:
@@ -150,9 +147,9 @@ class IoCall:
 class ArgRecordingIo:
     """A pass-through recorder over the real `defender._io`, entering through the `Run`
     handle's `io=` injection seam (never `monkeypatch.setattr`). Every operation still really
-    happens; each is recorded WITH its arguments — `_spec1077.RecordingIo`'s `calls` keep only
-    the path, and the page text and the write mode are the payload O1 is about. Total over
-    `_io`, since `Run.for_tenant` and the handle's own mkdir also reach through it."""
+    happens; each is recorded as an `IoCall`, whose `target` / `text` / `mode` are what O1's
+    assertions read (the page text and the write mode are its payload). Total over `_io`, since
+    `Run.for_tenant` and the handle's own mkdir also reach through it."""
 
     def __init__(self) -> None:
         self.calls: list[IoCall] = []

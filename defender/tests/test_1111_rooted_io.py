@@ -1769,15 +1769,16 @@ class _SwapsAfterCheck(PassThroughOs):
 
 
 @pytest.mark.parametrize("op", ["append", "lock"])
-@pytest.mark.parametrize("swap", ["hardlink", "fifo", "symlink"])
+@pytest.mark.parametrize("swap", ["hardlink", "fifo", "symlink", "directory"])
 def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descriptor(
         scratch, swap, op):
     """M1: "a plant that slipped into the race window is refused on the descriptor, and ENXIO
     from a reader-less FIFO folds into the non-plain row". The leaf passes its pre-open check
     as a plain file and is then replaced, before the open, by a hard link to a host file (the
     marked EMLINK: the host file's bytes and mtime unchanged), a FIFO (the unmarked ELOOP,
-    promptly: the open does not block), or a symlink to a host file (the marked ELOOP). The
-    plant is left in place. Control: the same pass-through with no swap lands."""
+    promptly: the open does not block), a symlink to a host file (the marked ELOOP), or a
+    directory (the unmarked ELOOP, not the open's bare EISDIR). The plant is left in place.
+    Control: the same pass-through with no swap lands."""
     target = scratch.real_folders()
     target.write_bytes(b"plain\n")
     host_file = scratch.host / "host-file"
@@ -1789,6 +1790,8 @@ def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descrip
             os.link(host_file, target)
         elif swap == "fifo":
             os.mkfifo(target)
+        elif swap == "directory":
+            target.mkdir()
         else:
             target.symlink_to(host_file)
 
@@ -1802,13 +1805,59 @@ def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descrip
     assert (host_file.read_bytes(), os.stat(host_file).st_mtime_ns) == host_before, (
         f"the {op} went through the swapped-in {swap} into the host file")
     kind = stat.S_IFMT(os.lstat(target).st_mode)
-    assert kind == {"hardlink": stat.S_IFREG, "fifo": stat.S_IFIFO, "symlink": stat.S_IFLNK}[swap]
+    assert kind == {"hardlink": stat.S_IFREG, "fifo": stat.S_IFIFO, "symlink": stat.S_IFLNK,
+                    "directory": stat.S_IFDIR}[swap]
 
-    target.unlink()
+    if swap == "directory":
+        target.rmdir()
+    else:
+        target.unlink()
     target.write_bytes(b"plain\n")
     control = _SwapsAfterCheck(target.name, None)
     assert_seam_lands(scratch, op, os_=control)
     assert control.swapped, "control: the pre-open check did not run"
+
+
+# -- one plainness rule, read and write alike ---------------------------------------------
+
+@pytest.mark.parametrize("op", ["read", "read_bytes", "bound_read", "append", "lock"])
+def test_a_file_a_replace_unnamed_after_it_was_opened_still_counts_as_plain(scratch, op):
+    """A replace landing between an op's open and its descriptor check leaves the opened file
+    with no name (`st_nlink == 0`). That file is still the plain record the op opened: the
+    read answers its text, as `read_guarded` always has, and the write lands. Reads and writes
+    share one plainness rule (a regular file with at most one name). A read that refused it
+    would look absent, and the schema pre-read would then lose its append-only baseline."""
+    target = scratch.real_folders()
+    target.write_bytes(b"plain\n")
+    unnamed = _PosesAs(target, fmt=stat.S_IFREG, nlink=0, on=("fstat",))
+    if op == "read":
+        assert _io.rooted_read(scratch.root, DEEP, os_=unnamed) == ("plain\n", None)
+    elif op == "read_bytes":
+        assert _io.rooted_read(scratch.root, DEEP, binary=True, os_=unnamed) == (b"plain\n", None)
+    elif op == "bound_read":
+        with _io.bind(scratch.root, os_=unnamed) as bound:
+            assert bound.read(DEEP.as_posix()).text == "plain\n"
+    else:
+        assert_seam_lands(scratch, op, os_=unnamed)
+
+
+def test_a_write_once_collision_writes_no_body(scratch):
+    """A `create` onto a plain record already at the name is refused as the ordinary
+    write-once collision (`FileExistsError`, unmarked) before any body is written: no unnamed
+    file is opened for it. The first record stands."""
+    target = scratch.real_folders()
+    target.write_text("first\n", encoding="utf-8")
+    opened: list[int] = []
+
+    def open_unnamed(dir_fd: int) -> int:
+        opened.append(dir_fd)
+        return _io.open_unnamed_at(dir_fd)
+
+    with pytest.raises(FileExistsError) as again:
+        _io.rooted_write(scratch.root, DEEP, "second\n", mode="create", open_unnamed=open_unnamed)
+    assert not getattr(again.value, "write_guarded_alias", False)
+    assert opened == [], "a body was staged for a create the standing record already refused"
+    assert target.read_text(encoding="utf-8") == "first\n"
 
 
 # -- hole 3: create's DEFAULT lane --------------------------------------------------------
@@ -1922,22 +1971,29 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
     for kill in range(ALERT_KILLS):
         root = tmp_path / f"kill-{kill}"
         root.mkdir()
-        child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-            [sys.executable, "-c", _ALERT_CRASH_CHILD, str(root), str(ALERT_BODY_BYTES)],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # A file, not a pipe: reading a live child's stderr pipe for a failure message would
+        # block until it exits, and this child never does on its own.
+        errors = tmp_path / f"kill-{kill}.stderr"
+        with errors.open("w", encoding="utf-8") as err:
+            child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
+                [sys.executable, "-c", _ALERT_CRASH_CHILD, str(root), str(ALERT_BODY_BYTES)],
+                env=env, stdout=subprocess.PIPE, stderr=err, text=True)
         try:
             assert child.stdout is not None
-            assert child.stderr is not None
-            assert child.stdout.readline().strip() == "ready", child.stderr.read()
+            assert child.stdout.readline().strip() == "ready", errors.read_text(encoding="utf-8")
             time.sleep(random.uniform(0.02, 0.15))
             if child.poll() is not None:
-                pytest.fail(f"the alert-writing child died on its own: {child.stderr.read()}")
+                pytest.fail("the alert-writing child died on its own: "
+                            + errors.read_text(encoding="utf-8"))
             child.send_signal(signal.SIGKILL)
         finally:
+            # On every exit (a failed assert, an interrupt): the child loops forever, writing
+            # 1 MiB alerts, so it is killed here, never left running.
+            if child.poll() is None:
+                child.kill()
             child.wait(timeout=30)
-            for stream in (child.stdout, child.stderr):
-                if stream is not None:
-                    stream.close()
+            if child.stdout is not None:
+                child.stdout.close()
         bad, landed = _alert_leftovers(root, body)
         torn += [f"kill {kill}: {b}" for b in bad]
         whole += landed
