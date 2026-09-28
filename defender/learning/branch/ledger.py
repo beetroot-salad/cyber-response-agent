@@ -199,6 +199,11 @@ class ServedCall:
         return row
 
 
+def _jsonl_line(row: dict) -> str:
+    """One served-call row as its JSONL line, handed whole to the ledger's rooted append."""
+    return json.dumps(row) + "\n"  # lint-jsonl-io: ok — one row, handed whole to the rooted append
+
+
 @model
 class Ledger:
     """The append-only record of one world's served calls, and the family's shared base.
@@ -363,7 +368,7 @@ class Ledger:
         row = call.row()
         key = call.key
         with self._lock:
-            self._append(json.dumps(row) + "\n")  # lint-jsonl-io: ok — one row handed whole to the rooted append
+            self._append(_jsonl_line(row))
             if call.world_id is None:
                 # First row wins, as in `_absorb`, so a repeated question answers the same way
                 # for the rest of the run.
