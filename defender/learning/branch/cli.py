@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
-import errno
 import json
 import logging
 import os
@@ -57,7 +56,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 from defender import _provenance
 from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
-from defender._io import load_json_artifact
+from defender._io import is_not_plain_refusal, load_json_artifact
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender._tenants import default_tenants_root
@@ -84,10 +83,6 @@ from defender.runtime.branch._family import (
 )
 
 _logger = logging.getLogger(__name__)
-
-#: The core's refusals of a non-plain entry at a name (a link, a hard link, a FIFO, a
-#: directory): at the priming claim they mean what an occupied claim means.
-_CLAIM_REFUSALS = (errno.ELOOP, errno.EMLINK)
 
 #: Where episodes live. No default: deriving it from the runs base would put `episodes/` inside
 #: the tree corpus walkers descend and inside the checkout provenance is stamped from.
@@ -189,9 +184,10 @@ def episode_id_for(source_run_id: str, branch_message_id: int) -> str:
 
 def prepare_episode(
     episode_id: str, source_run_dir: Path, *, tenant: Any,
-    prime: Callable[[Path, Path], PrimeReport] = prime_base,
-) -> Path:
-    """Prime the family's base once, exclusively, and hand back the episode directory.
+    prime: Callable[[Path, Episode], PrimeReport] = prime_base,
+) -> Episode:
+    """Prime the family's base once, exclusively, and hand back the episode, held open: the
+    launcher's door, whose caller closes it (`with prepare_episode(...) as episode:`).
 
     The claim is the core's exclusive create, not check-then-act: two launchers on one source and
     branch point derive one episode id, and both priming would stack two captures that
@@ -200,31 +196,47 @@ def prepare_episode(
     An episode dir with no manifest is adopted, so a launcher killed mid-prime does not make the
     branch point permanently unbranchable. Once a manifest exists, the episode is that family.
 
-    `prime` is injectable so a test can observe whether priming ran.
+    `prime` is injectable so a test can observe whether priming ran; it is handed the episode
+    this returns.
     """
-    episode = episode_dir_for(episode_id, tenant=tenant)
-    refuse_claimed_episode(episode, episode_id)
+    episode_dir = episode_dir_for(episode_id, tenant=tenant)
+    refuse_claimed_episode(episode_dir, episode_id)
     # Only a directory that got no further than a mid-prime death is adoptable: a world ledger
     # left by an earlier attempt would be absorbed first-row-wins and silently answer this
     # episode's live reads with the earlier estate.
-    stale = sorted(p.name for p in base_file(episode).parent.glob("*.jsonl")
-                   if p.name != base_file(episode).name) if artifact_dir(episode) else []
+    base = base_file(episode_dir)
+    stale = sorted(p.name for p in base.parent.glob("*.jsonl")
+                   if p.name != base.name) if artifact_dir(episode_dir) else []
     if stale:
         raise LedgerError(
-            f"episode {episode_id!r} at {episode} already holds per-world rows {stale} from an "
-            "earlier attempt — those rows are absorbed first-row-wins and would answer this "
+            f"episode {episode_id!r} at {episode_dir} already holds per-world rows {stale} from "
+            "an earlier attempt — those rows are absorbed first-row-wins and would answer this "
             "episode's live reads with the earlier one's estate. Remove the episode directory "
             "to re-prime it")
-    # The episode dir is the trust root: nothing below it is followed.
-    handle = Episode(episode)
-    handle.served.ensure()
-    claim = handle.priming_lock
+    # Made (or adopted) from its parent, never through a link at its name, and held: nothing
+    # below reopens it by name.
+    episode = Episode.create(episode_dir)
+    try:
+        _prime_once(episode, episode_id, Path(source_run_dir), prime)
+    except BaseException:
+        episode.close()
+        raise
+    return episode
+
+
+def _prime_once(
+    episode: Episode, episode_id: str, source_run_dir: Path,
+    prime: Callable[[Path, Episode], PrimeReport],
+) -> None:
+    """`prepare_episode`'s priming, under the exclusive claim it takes and always releases."""
+    episode.served.ensure()
+    claim = episode.priming_lock
     try:
         claim.create("")
     except OSError as taken:
         # Occupied (`FileExistsError`), or anything at the name that is not a plain file (the
         # core's refusal, left in place): either way this launcher does not hold the claim.
-        if not isinstance(taken, FileExistsError) and taken.errno not in _CLAIM_REFUSALS:
+        if not isinstance(taken, FileExistsError) and not is_not_plain_refusal(taken):
             raise
         raise LedgerError(
             f"another launcher is priming episode {episode_id!r} ({claim.path} exists) — a "
@@ -232,7 +244,7 @@ def prepare_episode(
             "running, that file is the wreck of one that was killed mid-prime; remove it to "
             "retry") from taken
     try:
-        report = prime(Path(source_run_dir), base_file(episode))
+        report = prime(source_run_dir, episode)
     except LedgerError as nothing_to_prime:
         # A source that captured nothing is still branchable here: `prime_base` refuses a
         # zero-row capture for its other callers, but the review records what it could replay
@@ -241,13 +253,13 @@ def prepare_episode(
         # with a session was already refused by `branch.validate` at preflight.
         if not _is_empty_capture(nothing_to_prime):
             raise
-        handle.served_base.create("")
+        episode.served_base.create("")
         _logger.warning(
             f"{source_run_dir} captured no replayable query — the family's base is "
             "EMPTY, so every key each sibling asks reaches the live estate and any difference "
             "between siblings includes the estate's own drift. The review records what it "
             "replayed; read it before comparing.")
-        return episode
+        return
     finally:
         # Released on every exit, so a refused prime does not make the episode unbranchable. A
         # refusal here (something not plain at the claim's name, left for the reap scan) is
@@ -258,10 +270,9 @@ def prepare_episode(
             _logger.warning(f"could not release the priming claim {claim.path}: {stuck}")
     # Log the skips too: each is a key read live rather than replayed.
     _logger.info(
-        f"primed {report.primed} captured row(s) into {base_file(episode)}; "
+        f"primed {report.primed} captured row(s) into {episode.served_base.path}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
         "than replayed")
-    return episode
 
 
 def _is_empty_capture(refusal: LedgerError) -> bool:
@@ -557,7 +568,7 @@ SPAWN_FAILED_EXIT = 70
 
 
 def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every arm runs on
-    episode_dir: Path, world_labels: Sequence[str], *,
+    episode: Episode, world_labels: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: _tenant.TenantId | None, tenants_root: Path,
 ) -> dict[str, int]:
@@ -583,12 +594,11 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
         # A ValueError, not `LauncherRefused`: `_episode_tenant` already resolved the tenant, so
         # this is a caller bug and takes the episode's normal abort path.
         raise ValueError(
-            f"episode {episode_dir} has no usable tenant ({tenant_id!r}) to run its siblings "
+            f"episode {episode.dir} has no usable tenant ({tenant_id!r}) to run its siblings "
             "on — refused before any sibling started")
     start = _default_spawn if spawn is None else spawn
-    episode_dir = Path(episode_dir)
-    runs = sibling_runs_base(episode_dir)
-    Episode(episode_dir).runs.ensure()
+    runs = sibling_runs_base(episode.dir)
+    episode.runs.ensure()
     # Minted with the episode's tenant, or read back and refused when it names another
     # (`TenantRefused`, a ValueError) — before any sibling started.
     _tenant.ensure_runs_base_record(runs, tenant_id)
@@ -603,7 +613,7 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
         # Rendezvous first, so "started together" does not depend on the pool's scheduling.
         ready.wait(timeout=30)
         exits[label] = start(
-            sibling_argv(episode_dir, label, tenant_id=tenant_id, model=model,
+            sibling_argv(episode.dir, label, tenant_id=tenant_id, model=model,
                          tenants_root=tenants_root), env=env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
@@ -808,7 +818,7 @@ def _stamp_speaks(stamp: dict | None) -> bool:
 
 
 def verify_family(
-    episode_dir: Path, run_dirs: Sequence[Path], *, source: dict, allow_dirty: bool = False,
+    episode: Episode, run_dirs: Sequence[Path], *, source: dict, allow_dirty: bool = False,
     door: Any = None,
 ) -> dict:
     """Check every sibling, archive what is clean, and record the episode's outcome.
@@ -820,7 +830,6 @@ def verify_family(
     sibling and withholds only the family stamp: each is a real, expensive investigation.
     Teardown runs on this path too.
     """
-    episode_dir = Path(episode_dir)
     dirs = {_world_label_of(d): Path(d) for d in run_dirs}
     scrub_verified = [label for label in dirs if _scrub_ran(dirs[label])]
     unverified = sorted(set(dirs) - set(scrub_verified))
@@ -849,27 +858,27 @@ def verify_family(
     reason = "; ".join(reasons)
     # `worlds/` exists whatever the outcome; the recorded outcome, not its absence, says why it
     # may be empty.
-    Episode(Path(episode_dir)).worlds.ensure()
+    episode.worlds.ensure()
     # Only scrub-verified siblings are archived: an unscrubbed tree is uncertified.
     from defender.learning.branch import archive as archive_mod
 
     try:
         archive_mod.archive_episode(
-            episode_dir, {label: dirs[label] for label in scrub_verified})
+            episode, {label: dirs[label] for label in scrub_verified})
     except Exception as archive_refused:  # noqa: BLE001 — recorded, then re-raised unchanged
         # Record `incomplete` before re-raising: `archive_episode` can fail partway, and
         # readers (`episode._refuse_incomplete`) gate on a recorded outcome, so a partial
         # archive with none would read as complete.
         _record_episode_outcome(
-            episode_dir, outcome=INCOMPLETE,
+            episode, outcome=INCOMPLETE,
             reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
         raise
     if outcome == ACCEPTED:
         _write_family_stamp(
-            episode_dir, stamps, source=source, allow_dirty=allow_dirty, dirs=dirs)
-    _record_episode_outcome(episode_dir, outcome=outcome, reason=reason)
+            episode, stamps, source=source, allow_dirty=allow_dirty, dirs=dirs)
+    _record_episode_outcome(episode, outcome=outcome, reason=reason)
     if door is not None:
-        staging_mod.teardown(episode_dir, door=door, review_path=EpisodePaths(episode_dir).review)
+        staging_mod.teardown(episode, door=door)
     return {"outcome": outcome, "reason": reason, "scrub_verified": scrub_verified,
             "worlds": sorted(dirs)}
 
@@ -907,7 +916,7 @@ def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -
 
 
 def _write_family_stamp(
-    episode_dir: Path, stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
+    episode: Episode, stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
     dirs: dict[str, Path] | None = None,
 ) -> None:
     """The family's one stamp: what every sibling agreed on, what it was anchored to, and
@@ -934,7 +943,7 @@ def _write_family_stamp(
         "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)}
     if base_world_id is not None:
         doc["base_world_id"] = base_world_id
-    Episode(Path(episode_dir)).family_stamp.write(
+    episode.family_stamp.write(
         json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
@@ -952,7 +961,7 @@ def _family_base_world_id(dirs: dict[str, Path] | None) -> str | None:
 
 
 def _record_episode_outcome(
-    episode_dir: Path, *, outcome: str, reason: str, decision: str | None = None,
+    episode: Episode, *, outcome: str, reason: str, decision: str | None = None,
 ) -> None:
     """Merge the episode's own verdict into its review record, never over the worlds it holds.
 
@@ -962,7 +971,7 @@ def _record_episode_outcome(
     block: dict[str, Any] = {"outcome": outcome, "reason": reason}
     if decision is not None:
         block["decision"] = decision
-    staging_mod.merge_review(EpisodePaths(episode_dir).review, "episode", block)
+    staging_mod.merge_review(episode, "episode", block)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1091,37 +1100,40 @@ def _launch(  # noqa: PLR0913 — see `main`
 
     # From here on the episode spends, and after the first staging append there are live
     # cluster names only this process knows about, so everything runs inside the teardown guard.
-    episode_dir = prepare_episode(episode_id, source, tenant=tenant_paths)
-    # Tells the `finally` whether an exception is already heading to the operator; only this
-    # frame knows (see `_teardown_without_masking`).
-    aborting = False
-    # One-shot so the episode can release the cluster before the long judge pass (which never
-    # reads the cluster), while the `finally` still covers every other path.
-    teardown = _OneShotTeardown(episode_dir, write_door)
-    try:
-        return _run_episode(
-            ns, source=source, source_stamp=source_stamp, episode_id=episode_id,
-            episode_dir=episode_dir, token=token, patterns=patterns, door=write_door,
-            questioner=author, adapters=read_side, invoke=compare_with, spawn=spawn,
-            judge=judge, lessons_dir=questioner_lessons_dir, teardown=teardown,
-            tenant=tenant, tenants_root=tenants_root, runs_base=runs_base)
-    except SystemExit:
-        aborting = True
-        raise
-    except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
-        aborting = True
-        if teardown.done:
-            # Re-raised unchanged: once the cluster has been handed back the siblings have run,
-            # so the abort message below ("no sibling started…") would be false for anything
-            # raised now, whatever its class.
+    episode = prepare_episode(episode_id, source, tenant=tenant_paths)
+    # The episode is held for the whole launch, teardown included: every write below goes
+    # through this one handle.
+    with episode:
+        # Tells the `finally` whether an exception is already heading to the operator; only this
+        # frame knows (see `_teardown_without_masking`).
+        aborting = False
+        # One-shot so the episode can release the cluster before the long judge pass (which never
+        # reads the cluster), while the `finally` still covers every other path.
+        teardown = _OneShotTeardown(episode, write_door)
+        try:
+            return _run_episode(
+                ns, source=source, source_stamp=source_stamp, episode_id=episode_id,
+                episode=episode, token=token, patterns=patterns, door=write_door,
+                questioner=author, adapters=read_side, invoke=compare_with, spawn=spawn,
+                judge=judge, lessons_dir=questioner_lessons_dir, teardown=teardown,
+                tenant=tenant, tenants_root=tenants_root, runs_base=runs_base)
+        except SystemExit:
+            aborting = True
             raise
-        raise LauncherRefused(
-            f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
-            "staged name is torn down") from failed
-    finally:
-        # On every exit not already torn down: a staged name left live is one the next
-        # launch's sweep refuses to touch and nothing else removes.
-        teardown(aborting=aborting)
+        except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
+            aborting = True
+            if teardown.done:
+                # Re-raised unchanged: once the cluster has been handed back the siblings have run,
+                # so the abort message below ("no sibling started…") would be false for anything
+                # raised now, whatever its class.
+                raise
+            raise LauncherRefused(
+                f"[branch] episode {episode_id} aborted: {failed!r} — no sibling started and every "
+                "staged name is torn down") from failed
+        finally:
+            # On every exit not already torn down: a staged name left live is one the next
+            # launch's sweep refuses to touch and nothing else removes.
+            teardown(aborting=aborting)
 
 
 class _OneShotTeardown:
@@ -1130,8 +1142,8 @@ class _OneShotTeardown:
     Both the episode (releasing the cluster before grading) and `_launch`'s `finally` call it,
     and `staging.teardown` is not safe to run twice."""
 
-    def __init__(self, episode_dir: Path, door: Any) -> None:
-        self._episode_dir = episode_dir
+    def __init__(self, episode: Episode, door: Any) -> None:
+        self._episode = episode
         self._door = door
         self._done = False
 
@@ -1144,10 +1156,10 @@ class _OneShotTeardown:
         if self._done:
             return
         self._done = True
-        _teardown_without_masking(self._episode_dir, self._door, aborting=aborting)
+        _teardown_without_masking(self._episode, self._door, aborting=aborting)
 
 
-def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -> None:
+def _teardown_without_masking(episode: Episode, door: Any, *, aborting: bool) -> None:
     """Tear the episode's staged names down without letting a failure displace an abort in flight.
 
     In a `finally` a second exception would replace the first, and the abort is what the
@@ -1157,7 +1169,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
     # `aborting` is passed in, not read from `sys.exc_info()`, which is thread-global and would
     # report an in-flight exception from any caller up the stack.
     try:
-        staging_mod.teardown(episode_dir, door=door, review_path=EpisodePaths(episode_dir).review)
+        staging_mod.teardown(episode, door=door)
     except Exception as cleanup_failed:  # noqa: BLE001 — never mask an in-flight abort; re-raised otherwise
         if not aborting:
             raise
@@ -1168,7 +1180,7 @@ def _teardown_without_masking(episode_dir: Path, door: Any, *, aborting: bool) -
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
     ns: argparse.Namespace, *, source: Path, source_stamp: dict, episode_id: str,
-    episode_dir: Path, token: str, patterns: Sequence[str], door: Any, questioner: Any,
+    episode: Episode, token: str, patterns: Sequence[str], door: Any, questioner: Any,
     adapters: Any, invoke: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     teardown: Any = None, tenant: RunTenant, tenants_root: Path, runs_base: Path,
 ) -> int:
@@ -1179,9 +1191,9 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     every path that does not reach that call. `source_stamp` is the anchor the preflight read
     and judged, handed to `verify_family` unchanged."""
     # One clock for the episode; every step frame is drawn here, in launch order.
-    clock = timing_mod.StageClock(episode_dir)
+    clock = timing_mod.StageClock(episode)
     with clock.step(Step.QUESTIONER):
-        family = _author(ns, source=source, episode_id=episode_id, episode_dir=episode_dir,
+        family = _author(ns, source=source, episode_id=episode_id, episode=episode,
                          questioner=questioner, patterns=patterns, lessons_dir=lessons_dir)
     with clock.step(Step.STAGING):
         # The staging record exists from the moment staging begins, so its absence can only
@@ -1191,36 +1203,36 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         with contextlib.suppress(FileExistsError):
             # A comment, not `[]`: rows are appended as YAML list items, and appending after a
             # literal `[]` makes the record unparseable, which teardown refuses to act on.
-            Episode(Path(episode_dir)).staged.create(
+            episode.staged.create(
                 f"# staged names for episode {episode_id} — one row per name, appended BEFORE "
                 "the name is created\n")
         for world in runnable_worlds(family):
-            staging_mod.stage_world(world, episode_dir=episode_dir, episode_token=token,
+            staging_mod.stage_world(world, episode=episode, episode_token=token,
                                     configured_patterns=patterns, door=door)
     from defender.learning.branch import review as review_mod
 
     with clock.step(Step.REVIEW):
-        record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
+        record = review_mod.review(family, episode=episode, adapters=adapters,
                                    door=door, invoke=invoke, settings_dir=tenant.settings,
                                    runs_base=runs_base)
     if record.get("episode", {}).get("decision") == REJECTED:
         # Any rejected world ends the whole episode: a family missing an arm measures nothing,
         # and running the rest would look like a completed comparison.
-        _record_episode_outcome(episode_dir, outcome=REJECTED, reason=str(
+        _record_episode_outcome(episode, outcome=REJECTED, reason=str(
             record.get("episode", {}).get("reason") or "a world contradicted the capture"),
             decision=REJECTED)
-        Episode(Path(episode_dir)).worlds.ensure()
+        episode.worlds.ensure()
         _logger.info(f"episode {episode_id}: rejected before any sibling started")
         return 1
 
     labels = [w.world_id for w in runnable_worlds(family)]
     with clock.step(Step.RUNS):
-        exits = start_family(episode_dir, labels, spawn=spawn, model=ns.model,
+        exits = start_family(episode, labels, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, tenants_root=tenants_root)
-    runs = sibling_runs_base(episode_dir)
+    runs = sibling_runs_base(episode.dir)
     with clock.step(Step.VERIFY):
         report = verify_family(
-            episode_dir, [runs / f"{episode_id}-{label}" for label in labels],
+            episode, [runs / f"{episode_id}-{label}" for label in labels],
             source=source_stamp, allow_dirty=ns.allow_dirty)
     failed = sorted(label for label, code in exits.items() if code)
     for label in failed:
@@ -1232,10 +1244,10 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     # judge's entry is recorded before a held hand-back failure is raised.
     with _cluster_released(teardown, episode_id=episode_id):
         with clock.step(Step.JUDGE):
-            _grade(episode_dir, episode_id=episode_id, judge=judge, runs_base=runs_base)
+            _grade(episode.dir, episode_id=episode_id, judge=judge, runs_base=runs_base)
         # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
         # non-fatal.
-        _render_page(episode_dir, episode_id=episode_id)
+        _render_page(episode.dir, episode_id=episode_id)
     # The exit status is about the launch (did every sibling exit cleanly); an `incomplete`
     # family is a measurement, recorded in the episode outcome, not a launch failure.
     return 1 if failed else 0
@@ -1305,7 +1317,7 @@ def _grade(episode_dir: Path, *, episode_id: str, judge: Any, runs_base: Path) -
                         "episode itself is otherwise unaffected", exc_info=True)
 
 
-def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
+def write_questioner_samples(episode: Episode, samples: Any) -> Path:
     """Write `samples.yaml`, the questioner's reference document per staged pattern, into the
     episode archive, so the judge is shown the same bytes the questioner was (which makes a
     `shape-invention` claim decidable) even after the source run is pruned.
@@ -1317,14 +1329,14 @@ def write_questioner_samples(episode_dir: Path, samples: Any) -> Path:
     import yaml
 
     doc = dict(samples)
-    record = Episode(Path(episode_dir)).samples
+    record = episode.samples
     record.write(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
                                 default_flow_style=False))
     return record.path
 
 
 def _author(
-    ns: argparse.Namespace, *, source: Path, episode_id: str, episode_dir: Path,
+    ns: argparse.Namespace, *, source: Path, episode_id: str, episode: Episode,
     questioner: Any, lessons_dir: Path, patterns: Sequence[str] = (),
 ) -> Family:
     """@owns configured_patterns — the one writer of the manifest's recorded tenant patterns;
@@ -1349,13 +1361,13 @@ def _author(
     # keys against and the prompt names as stageable — one walk, so they cannot diverge.
     samples = _corpus_samples(leads, corpus_samples, source_pattern)
     # Archived before the model call, so the judge sees exactly what the questioner saw.
-    write_questioner_samples(episode_dir, samples)
+    write_questioner_samples(episode, samples)
     captured = tuple(samples)
     stageable = tuple(dict.fromkeys([*patterns, *captured]))
     # Paths only; `author_family` opens them and screens them against `stageable`.
     lessons = iter_lesson_paths(lessons_dir)
     document = questioner_mod.author_family(
-        source_run_dir=source, episode_dir=episode_dir,
+        source_run_dir=source, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
         alert=_alert_document(source),
@@ -1384,7 +1396,7 @@ def _author(
     family = parse_family(document, captured_patterns=captured,
                           configured_patterns=lambda: tuple(patterns))
     check_identities(family)
-    _family.write_family(episode_dir, document)
+    _family.write_family(episode, document)
     return family
 
 

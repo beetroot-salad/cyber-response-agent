@@ -1,5 +1,7 @@
 """#1133 D1' — the rooted core in `defender/_io.py`: the held root (`hold`, `hold_new`, `Held`),
-and the two rev-1 additions `rooted_*` keep for `Run` (durable append, `rooted_unlink`).
+and the rev-1 durable append `rooted_write` keeps for `Run`. (Rev 1's `rooted_unlink` had no
+caller once the handle's `delete` went through `Held.unlink`; it was removed, and the `Held`
+matrix below pins the same unlink semantics.)
 
 The held root, pinned here on the core itself (the `Episode` handle's matrices are in
 `test_1133_episode_handle.py`):
@@ -150,88 +152,6 @@ def test_d2_a_durable_append_refuses_a_plant_at_the_leaf_in_the_cores_shape(scra
     planted.remove()
     _io.rooted_write(root, DEEP, ROW, mode="append", durable=True)
     assert leaf.read_text(encoding="utf-8") == ROW
-
-
-def test_d2_rooted_unlink_removes_a_plain_file_and_answers_true(scratch):
-    root, leaf, _host = scratch
-    leaf.write_text(PRIOR, encoding="utf-8")
-    assert _io.rooted_unlink(root, DEEP) is True
-    assert not os.path.lexists(leaf), "a plain file was reported unlinked but is still there"
-    assert (root / DEEP.parent).is_dir(), "the unlink took the holding folder with it"
-
-
-def test_d2_rooted_unlink_of_an_absent_leaf_or_holding_folder_or_root_is_false(scratch, tmp_path):
-    root, _leaf, _host = scratch
-    before = S.census(tmp_path)
-    assert _io.rooted_unlink(root, DEEP) is False
-    assert _io.rooted_unlink(root, PurePosixPath("missing/folder/rec.jsonl")) is False
-    assert _io.rooted_unlink(tmp_path / "no-such-root", DEEP) is False
-    assert S.census(tmp_path) == before, "an unlink of nothing changed the tree"
-
-
-_UNLINK_PLANTS = [pytest.param(k, None, id=k) for k in S.LEAF_PLANTS] + [
-    pytest.param(k, PurePosixPath(f), id=f"{k}@{f}")
-    for f in ("a", "a/b") for k in S.FOLDER_PLANTS]
-
-
-@pytest.mark.parametrize(("kind", "site"), _UNLINK_PLANTS)
-def test_d2_rooted_unlink_refuses_a_non_plain_entry_and_leaves_it_in_place(scratch, kind, site):
-    root, leaf, host = scratch
-    if site is not None:
-        (root / DEEP.parent).rmdir()
-        (root / "a").rmdir()
-    planted = S.plant(root, DEEP, site, kind, host=host)
-    before = S.census(root.parent)
-
-    raised = S.raised_by(lambda: _io.rooted_unlink(root, DEEP), fifo=planted.fifo)
-
-    S.assert_refusal(raised, kind, where=f"rooted_unlink of a {kind}")
-    assert S.census(root.parent) == before, "a refused unlink changed the tree"
-    assert os.path.lexists(planted.at), "the refused plant was removed"
-    if kind == "hardlink":
-        assert os.lstat(leaf).st_nlink == 2, "the hard link's other name lost a link"
-
-    planted.remove()
-    (root / DEEP.parent).mkdir(parents=True, exist_ok=True)
-    leaf.write_text(PRIOR, encoding="utf-8")
-    assert _io.rooted_unlink(root, DEEP) is True
-    assert not os.path.lexists(leaf)
-
-
-def test_d2_rooted_unlink_follows_the_roots_own_spelling(scratch, tmp_path):
-    root, leaf, _host = scratch
-    leaf.write_text(PRIOR, encoding="utf-8")
-    alias = tmp_path / "root-alias"
-    alias.symlink_to(root, target_is_directory=True)
-    assert _io.rooted_unlink(alias, DEEP) is True
-    assert not os.path.lexists(leaf)
-    assert alias.is_symlink(), "the root's own link was touched"
-
-
-@pytest.mark.parametrize("name", ["", ".", "..", "../rec.jsonl", "/abs/rec.jsonl",
-                                  "a/../rec.jsonl", "a//rec.jsonl"])
-def test_d2_rooted_unlink_refuses_a_name_outside_the_grammar_before_any_io(scratch, name):
-    root, leaf, _host = scratch
-    leaf.write_text(PRIOR, encoding="utf-8")
-    (root / "rec.jsonl").write_text(PRIOR, encoding="utf-8")
-    before = S.census(root.parent)
-    with pytest.raises(ValueError, match=S.NAME_REFUSAL):
-        _io.rooted_unlink(root / "a", name)
-    assert S.census(root.parent) == before
-
-
-def test_d2_rooted_unlink_is_judged_on_the_entry_not_by_following_it(scratch):
-    root, leaf, host = scratch
-    target = host / "plain-target"
-    target.write_text(PRIOR, encoding="utf-8")
-    leaf.symlink_to(target)
-    with pytest.raises(OSError, match="aliased") as refused:
-        _io.rooted_unlink(root, DEEP)
-    assert refused.value.errno == errno.ELOOP
-    assert getattr(refused.value, "write_guarded_alias", False) is True
-    assert stat.S_ISLNK(os.lstat(leaf).st_mode)
-    assert target.read_text(encoding="utf-8") == PRIOR
-    assert os.lstat(target).st_nlink == 1
 
 
 # =======================================================================================
@@ -936,7 +856,7 @@ class InterruptAfterFirstClose(S.PassThroughOs):
             raise KeyboardInterrupt("mid-walk")
 
 
-@pytest.mark.parametrize("op", ["write", "unlink", "mkdir"])
+@pytest.mark.parametrize("op", ["write", "mkdir"])
 def test_an_interrupt_mid_walk_never_closes_a_descriptor_twice(scratch, op):
     """Found while moving the episode page's write onto the core (#1133): each descriptor the
     walk opens is closed at most once, whatever the interrupt; the interrupt still propagates.
@@ -945,7 +865,6 @@ def test_an_interrupt_mid_walk_never_closes_a_descriptor_twice(scratch, op):
     leaf.write_text(PRIOR, encoding="utf-8")
     ops = {
         "write": lambda os_: _io.rooted_write(root, DEEP, ROW, mode="replace", os_=os_),
-        "unlink": lambda os_: _io.rooted_unlink(root, DEEP, os_=os_),
         "mkdir": lambda os_: _io.rooted_mkdir(root, DEEP.parent, os_=os_),
     }
     spy = InterruptAfterFirstClose()

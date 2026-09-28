@@ -16,16 +16,14 @@ such read records a `base` row in the world's own file, so counting them sizes t
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from defender._model import model
 from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT
-from defender._io import load_json_artifact, read_text_soft
+from defender._io import is_not_plain_refusal, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
 
-from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
+from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
 
 
 @model(frozen=True)
@@ -51,29 +49,16 @@ class PrimeReport:
         return self.duplicates + self.failed + self.sentinels + self.unreadable
 
 
-def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
-    """Write `base_path` from `source_run_dir`'s capture. Once, before any sibling exists.
+def prime_base(source_run_dir: Path, episode: Episode) -> PrimeReport:
+    """Write `episode`'s primed base from `source_run_dir`'s capture. Once, before any sibling
+    exists.
 
     The whole capture, not a slice at the branch point. The run dir's evidence is truncated
     because it is what the model may read; the base ledger is what the estate answers from, and
     a post-branch row is only reached if a sibling independently re-asks that question. Slicing
     would cost determinism on exactly those keys.
     """
-    # The base is its episode's `served_base` record; a path that is not one is refused.
-    base_path = Path(base_path)
-    episode = Episode(base_path.parent.parent)
-    if base_path != episode.served_base.path:
-        raise ValueError(f"{base_path} is not an episode's primed base ({LAYOUT.served_base})")
-    # Refuse a second prime: `_absorb` is first-row-wins, so the earlier source's answers would
-    # silently stay the estate while `PrimeReport` reported a clean prime. Retrying a
-    # partly-failed episode makes this a common path. (The exclusive create below refuses one
-    # too; this names the case.)
-    if base_path.exists() or base_path.is_symlink():
-        raise LedgerError(
-            f"{base_path} already holds a primed base — a family's capture is written once, "
-            "before any sibling forks, and priming over it merges two runs' estates under "
-            "first-row-wins with nothing in the table to tell them apart. Name a fresh "
-            "episode id, or remove the episode directory to re-prime it")
+    base = episode.served_base
     # Through `lead_repository`, the single read surface for the queries table, so this reader
     # cannot disagree with others (e.g. about a string `"0"` exit code).
     rows, table_unreadable = load_queries_report(Path(source_run_dir))
@@ -105,15 +90,21 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
             "nothing in the record to say so. The counts name which rule skipped them: "
             "`failed` is a non-zero exit, `sentinels` never reached a system, `unreadable` is "
             "a payload this episode could not read back")
-    # Written whole by one exclusive create: a reader sees no base or all of it, and a racing
-    # second primer is the "already primed" refusal.
-    text = "".join(json.dumps(row) + "\n" for row in out)  # lint-jsonl-io: ok — the rows are handed whole to the rooted create  # noqa: E501
+    # Written whole by one exclusive create, which is also the "already primed" check: a
+    # reader sees no base or all of it, and a second prime (a retried episode, a racing
+    # primer) is refused. `_absorb` is first-row-wins, so priming over a base would silently
+    # keep the earlier source's answers as the estate while `PrimeReport` reported a clean
+    # prime. A link or any non-plain entry at the name is the core's refusal, the same case.
     try:
-        episode.served_base.create(text)
-    except FileExistsError as taken:
+        base.create("".join(served_line(row) for row in out))
+    except OSError as taken:
+        if not isinstance(taken, FileExistsError) and not is_not_plain_refusal(taken):
+            raise
         raise LedgerError(
-            f"{base_path} already holds a primed base — a family's capture is written once, "
-            "before any sibling forks") from taken
+            f"{base.path} already holds a primed base — a family's capture is written once, "
+            "before any sibling forks, and priming over it merges two runs' estates under "
+            "first-row-wins with nothing in the table to tell them apart. Name a fresh "
+            "episode id, or remove the episode directory to re-prime it") from taken
     # Named fields, not `**counts`: a field mismatch would raise after the base file is
     # written, leaving the episode id permanently unusable.
     return PrimeReport(

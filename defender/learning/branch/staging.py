@@ -41,7 +41,6 @@ from defender import _yaml
 from defender._clock import now_iso
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
-from defender import _io
 from defender._io import Bound, bind
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
@@ -331,22 +330,17 @@ def read_staged(bound: Bound) -> list[dict] | None:
     return list(rows)
 
 
-def record_staged(episode_dir: Path, row: Mapping[str, Any], *, io: Any = _io) -> dict:
-    """Append one row to `staged.yaml`, flushed and fsynced before returning.
+def record_staged(episode: Episode, row: Mapping[str, Any]) -> dict:
+    """Append one row to `staged.yaml`, on disk before returning.
 
     This file is the only record that a cluster write was about to happen, so a row still in a
     userspace buffer when the launcher is killed is a live name nothing on disk names: teardown
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
-    whole list would open a window where the record is shorter than the cluster. `io` is the
-    episode handle's I/O seam.
+    whole list would open a window where the record is shorter than the cluster.
     """
-    episode = Episode(Path(episode_dir), io=io)
-    # Made from its parent, so a symlinked `episodes/<id>/` is refused rather than followed: it
-    # would put the record where teardown won't look.
-    episode.create_dir()
     entry = yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
-    # The durable append: on disk before this returns, and nothing below the episode dir is
-    # followed.
+    # The durable append: the record and its entry in the episode dir are synced before this
+    # returns (the episode dir's own entry was synced when `Episode.create` made it).
     episode.staged.append_durable(entry)
     return dict(row)
 
@@ -408,7 +402,7 @@ def _plan_world(world: World, *, token: str,
     return plans
 
 
-def stage_world(world: World, *, episode_dir: Path, episode_token: str,
+def stage_world(world: World, *, episode: Episode, episode_token: str,
                 configured_patterns: Sequence[str], door: Any) -> list[dict]:
     """Create this world's corpus on the cluster, recording every name before it exists.
 
@@ -429,10 +423,10 @@ def stage_world(world: World, *, episode_dir: Path, episode_token: str,
                        configured_patterns=configured_patterns, door=door)
     rows: list[dict] = []
     for plan in plans:
-        rows.append(record_staged(episode_dir, _row(
+        rows.append(record_staged(episode, _row(
             world=token, name=plan.inject, kind=KIND_INDEX, derived_from=plan.pattern)))
         door.create_index(plan.inject, docs=plan.docs)
-        rows.append(record_staged(episode_dir, _row(
+        rows.append(record_staged(episode, _row(
             world=token, name=plan.view, kind=KIND_ALIAS, derived_from=plan.pattern)))
         over = [*door.resolve(plan.pattern), plan.inject]
         # The exclusion applies to the base only; the injection index is exempt.
@@ -446,7 +440,7 @@ def stage_world(world: World, *, episode_dir: Path, episode_token: str,
 # ---------------------------------------------------------------------------------------
 
 
-def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -> list[str]:
+def teardown(episode: Episode, *, door: Any) -> list[str]:
     """Remove exactly the names `staged.yaml` records, newest first, verifying each is gone.
 
     Newest first because the record is in dependency order (index before the alias spanning
@@ -455,8 +449,7 @@ def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -
     failure that matters (the next episode reusing the token finds a live alias), so every
     failure is written into the review record and then raised.
     """
-    with bind(Path(episode_dir)) as bound:
-        rows = read_staged(bound) or []
+    rows = read_staged(episode.view()) or []
     failures: list[dict] = []
     for row in reversed(rows):
         name = str(row.get("name") or "")
@@ -470,27 +463,25 @@ def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -
         except Exception as bad:  # noqa: BLE001 — every fault is collected and raised below
             failures.append({"name": name, "detail": f"{type(bad).__name__}: {bad}"})
     if failures:
-        _record_teardown_failure(failures, review_path)
+        _record_teardown_failure(failures, episode)
         raise StagingRefused(
             "teardown did not verify every staged name gone: "
             + "; ".join(f"{f['name']} ({f['detail']})" for f in failures))
     return [str(r.get("name")) for r in rows]
 
 
-def _record_teardown_failure(failures: list[dict], review_path: Path | None) -> None:
+def _record_teardown_failure(failures: list[dict], episode: Episode) -> None:
     """Put the failure in the review record before raising it.
 
     The names are still live on the cluster and the review's reader is who has to remove them.
     Merged rather than rewritten, because the review step has already written its verdicts.
     """
-    if review_path is None:
-        return
-    merge_review(Path(review_path), "teardown",
+    merge_review(episode, "teardown",
                  {"ok": False, "failures": failures,
                   "names": [f["name"] for f in failures], "at": now_iso()})
 
 
-def merge_review(path: Path, key: str, block: dict) -> None:
+def merge_review(episode: Episode, key: str, block: dict) -> None:
     """Merge one block into the review record, leaving everything else it holds.
 
     The single merger for `review.yaml` outside the review itself, shared by teardown and
@@ -498,12 +489,8 @@ def merge_review(path: Path, key: str, block: dict) -> None:
 
     Read and replaced through the episode handle: a link, hard link or other non-plain entry at
     the name is neither read nor written through (the read answers nothing, and the replace
-    refuses it). A `path` that is not an episode's review record is refused.
+    refuses it).
     """
-    path = Path(path)
-    episode = Episode(path.parent)
-    if path != episode.review.path:
-        raise ValueError(f"{path} is not an episode's review record ({LAYOUT.review})")
     doc: dict[str, Any] = {}
     text, _reason = episode.review.read()
     if text is not None:
@@ -518,8 +505,6 @@ def merge_review(path: Path, key: str, block: dict) -> None:
         held.update(block)
     else:
         doc[key] = dict(block)
-    # Made from its parent, as the other creation doors do.
-    episode.create_dir()
     episode.review.write(
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
 

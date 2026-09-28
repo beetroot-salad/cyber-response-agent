@@ -524,71 +524,61 @@ def runnable_worlds(family: Family) -> list[World]:
 
 
 def load_family(
-    path: Path, *, captured_patterns: tuple[str, ...] = (),
+    episode: Episode, *, captured_patterns: tuple[str, ...] = (),
     configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
 ) -> Family:
-    """Read and validate the manifest at `path`."""
-    return parse_family(_read_document(Path(path)), captured_patterns=captured_patterns,
+    """Read and validate `episode`'s manifest."""
+    return parse_family(_read_document(episode), captured_patterns=captured_patterns,
                         configured_patterns=configured_patterns)
 
 
-def _read_manifest(path: Path) -> tuple[str | None, str | None]:
-    """The manifest's text, read as its episode's `family` record: the episode dir is the trust
-    root and nothing below it is followed, so a planted link is never read or certified. A path
-    that is not an episode's manifest is refused."""
-    path = Path(path)
-    manifest = Episode(path.parent).family
-    if path != manifest.path:
-        raise FamilyError(
-            f"{path} is not an episode manifest — the manifest is its episode dir's "
-            f"{manifest.path.name}")
-    return manifest.read()
+def _read_manifest(episode: Episode) -> str:
+    """The manifest's text, read through the episode's `family` record: nothing below the
+    episode dir is followed, so a planted link is never read or certified."""
+    text, refusal = episode.family.read()
+    if text is None:
+        raise FamilyError(f"the manifest at {episode.family.path} could not be read: {refusal}")
+    return text
 
 
-def _read_document(path: Path) -> object:
+def _read_document(episode: Episode) -> object:
     """The manifest deserialized but not yet narrowed; typed `object` so only `parse_family`
     produces a `Family`."""
-    text, refusal = _read_manifest(path)
-    if text is None:
-        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
+    text = _read_manifest(episode)
     try:
         return _yaml.safe_load(text)
     except yaml.YAMLError as bad:
-        raise FamilyError(f"the manifest at {path} could not be read: {bad}") from bad
+        raise FamilyError(
+            f"the manifest at {episode.family.path} could not be read: {bad}") from bad
 
 
-def write_family(episode_dir: Path, doc: dict) -> Path:
-    """Render the manifest into `episode_dir` through a structured dumper, never by hand.
+def write_family(episode: Episode, doc: dict) -> Path:
+    """Render the manifest into `episode` through a structured dumper, never by hand.
 
     Scalars are model-authored; an f-string writer would let one carrying `episode_id: hijacked`
     on a second line inject a key.
     """
-    episode = Episode(Path(episode_dir))
-    # Made from its parent, so a link at the episode dir's own name is refused; the manifest is
-    # then written without following anything below the episode dir.
-    episode.create_dir()
-    episode.family.write(
+    manifest = episode.family
+    manifest.write(
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
-    return episode.family.path
+    return manifest.path
 
 
-def manifest_digest(path: Path) -> str:
+def manifest_digest(episode: Episode) -> str:
     """The manifest's content digest, recorded in the review and re-checked on resume.
 
     Uses the same read as `_read_document`, so a planted link is never certified.
     """
-    text, refusal = _read_manifest(path)
-    if text is None:
-        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_read_manifest(episode).encode("utf-8")).hexdigest()
 
 
-def check_manifest_digest(path: Path, recorded: str) -> None:
+def check_manifest_digest(episode: Episode, recorded: str) -> None:
     """Refuse a manifest whose bytes changed since the review recorded them."""
-    actual = manifest_digest(path)
+    actual = manifest_digest(episode)
     if actual != recorded:
         raise FamilyError(
-            f"the manifest at {path} has a digest of {actual[:12]} but the review recorded "
+            f"the manifest at {episode.family.path} has a digest of {actual[:12]} but the "
+            f"review recorded "
             f"{str(recorded)[:12]} — a manifest edited between review and run is not the "
             "document the review accepted")
 

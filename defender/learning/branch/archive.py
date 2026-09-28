@@ -39,7 +39,7 @@ from typing import Any
 
 from defender._episode_handle import Episode
 from defender._io import Bound, entry_present
-from defender._episode_paths import LAYOUT, EpisodePaths, WorldPaths
+from defender._episode_paths import LAYOUT, WorldPaths
 from defender._run_paths import (
     RunPaths,
     artifact_dir,
@@ -190,8 +190,9 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
             "would write this world's archived artifact wherever it points")
 
 
-def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
-    """Archive each world's run dir into `episode_dir/worlds/<label>/`; return what was written.
+def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Path]:
+    """Archive each world's run dir into the episode's `worlds/<label>/`; return what was
+    written.
 
     `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
     archives only its clean siblings, so the set is not derived from the manifest.
@@ -199,16 +200,16 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
     Each world is screened, then copied. Worlds go in sorted order so a partial failure always
     leaves the same prefix.
     """
-    episode_dir = Path(episode_dir)
-    episode = EpisodePaths(episode_dir)
-    handle = Episode(episode_dir)
     archived: dict[str, Path] = {}
     for world in sorted(run_dirs):
         run_dir = Path(run_dirs[world])
-        dest = episode.world(world)
+        # The label passes the handle's minting check; the copy lane's own paths are the
+        # world's, under the episode dir the handle holds.
+        handle = episode.world(world)
+        dest = WorldPaths(episode.dir, LAYOUT.world(world))
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
-        handle.world(world).dir.ensure()
+        handle.dir.ensure()
         _screen_destinations(world, dest, run_dir, {to for _s, to in sources})
         for source, target in sources:
             shutil.copy2(  # lint-tree-read-follows-link: ok — every source screened in `_screened_sources`
@@ -233,7 +234,7 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
         # The pointer last, as text, through the episode handle.
-        handle.world(world).run_dir_pointer.write(f"{run_dir}\n")
+        handle.run_dir_pointer.write(f"{run_dir}\n")
         archived[world] = world_dir
     return archived
 

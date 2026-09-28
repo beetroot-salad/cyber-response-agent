@@ -26,20 +26,15 @@ import contextlib
 import json
 import logging
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
 from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT, EpisodePaths
+from defender._episode_paths import LAYOUT
 from defender._io import Bound
 from defender.learning.branch.steps import STEPS, Step
 
 _logger = logging.getLogger(__name__)
-
-
-def timing_path(episode_dir: Path) -> Path:
-    return EpisodePaths(episode_dir).timing
 
 
 class StageClock:
@@ -49,8 +44,8 @@ class StageClock:
     so nothing on disk can make it write a row it did not see finish.
     """
 
-    def __init__(self, episode_dir: Path) -> None:
-        self._record = Episode(Path(episode_dir)).timing
+    def __init__(self, episode: Episode) -> None:
+        self._record = episode.timing
         self.path = self._record.path
         self._rows: list[dict[str, Any]] = []
 

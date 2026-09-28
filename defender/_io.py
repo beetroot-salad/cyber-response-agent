@@ -12,6 +12,7 @@ import re
 import secrets
 import stat
 import sys
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
 from typing import Any, Literal, overload
@@ -249,9 +250,6 @@ class EntriesRead(_Read):
     def has_file(self, entry: str) -> bool:
         return (self.entries or {}).get(entry) == ENTRY_FILE
 
-    def has_dir(self, entry: str) -> bool:
-        return (self.entries or {}).get(entry) == ENTRY_DIR
-
 
 # -- the core: reaching a file below a trust root (#1111) -----------------------------------
 #
@@ -273,6 +271,16 @@ class EntriesRead(_Read):
 # Reads fold every refusal into a reason with no path in it (`_read_reason`).
 
 _NOT_PLAIN = "refusing to write through a non-plain or aliased entry"
+
+#: The errnos of the core's refusal of a link, hard link or other non-plain entry at a name
+#: (`_refuse_unless_plain_stat`, `_open_refusal`).
+_NOT_PLAIN_ERRNOS: tuple[int, ...] = (errno.ELOOP, errno.EMLINK)
+
+
+def is_not_plain_refusal(exc: BaseException) -> bool:
+    """Is `exc` the core's refusal of a link, hard link or other non-plain entry at a name (left
+    in place for the reap scan)? For a caller that contains that refusal and nothing else."""
+    return isinstance(exc, OSError) and exc.errno in _NOT_PLAIN_ERRNOS
 _LINKED_FOLDER = "refusing to create through a symlinked path component"
 _NOT_A_FOLDER = "path component is not a directory"
 
@@ -397,7 +405,7 @@ def _read_reason(e: BaseException) -> str:
     """A refused read's reason, naming no path: the alias sentence for a link, hard link or
     other non-plain entry, else the error's own words."""
     if isinstance(e, OSError) and e.errno:
-        if e.errno in (errno.ELOOP, errno.EMLINK):
+        if e.errno in _NOT_PLAIN_ERRNOS:
             return ALIAS_READ_REFUSAL
         return os.strerror(e.errno)
     return str(e)
@@ -1124,27 +1132,48 @@ def rooted_write(
     """:func:`write_guarded`'s `create` / `replace` / `append`, for `name` under `root`. The
     folders are walked, never made (:func:`rooted_mkdir` makes them): a missing one, or a
     missing root, is `FileNotFoundError`. `durable` (append only) flushes and `fsync`s the leaf
-    before closing it, for a record whose rows must be on disk when the call returns.
+    before closing it, then the folder holding it, for a record whose rows must be on disk when
+    the call returns.
     `stage_name` and `open_unnamed` are the leaf-name and unnamed-open seams."""
     _spelling, parts = _parse_name(name)
+    _check_write(text, mode, durable)
+    with _rooted(os_, root, parts[:-1]) as dir_fd:
+        _write_at(os_, dir_fd, parts[-1], Path(root, *parts), text, mode=mode, durable=durable,
+                  stage_name=stage_name, open_unnamed=open_unnamed)
+
+
+def _check_write(text: object, mode: str, durable: bool) -> None:
+    """A write's arguments, judged before any I/O: `text` is `str` or `bytes` (an iterable
+    would be spent by the create lane's first attempt), `mode` one of `_ROOTED_MODES`, and
+    `durable` only with `append`."""
+    if not isinstance(text, (str, bytes)):
+        raise TypeError(f"text must be str or bytes, not {type(text).__name__}")
     if mode not in _ROOTED_MODES:
         raise ValueError(f"unknown rooted_write mode: {mode!r}")
     if durable and mode != "append":
         raise ValueError(f"durable applies to the append mode only, not {mode!r}")
-    leaf = parts[-1]
-    where = Path(root, *parts)
-    with _rooted(os_, root, parts[:-1]) as dir_fd:
-        if mode == "create":
-            _create_at(os_, dir_fd, leaf, where, text, open_unnamed)
-        elif mode == "replace":
-            _replace_at(os_, dir_fd, leaf, where, text, stage_name)
+
+
+def _write_at(  # noqa: PLR0913 — `rooted_write`'s whole call, carried to the folder it resolved
+    os_: Any, dir_fd: int, leaf: str, where: Path, text: str | bytes, *, mode: str,
+    durable: bool = False, stage_name: Callable[[str], str] = staged_leaf,
+    open_unnamed: Callable[[int], int] = open_unnamed_at,
+) -> None:
+    """One `create` / `replace` / `append` of `leaf` in the folder `dir_fd` holds. `durable`
+    (append only) fsyncs the leaf, then that folder, so the record and its entry are both on
+    disk when the call returns."""
+    if mode == "create":
+        _create_at(os_, dir_fd, leaf, where, text, open_unnamed)
+    elif mode == "replace":
+        _replace_at(os_, dir_fd, leaf, where, text, stage_name)
+    else:
+        _leaf_present(os_, dir_fd, leaf, where)
+        fd = _open_leaf(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
+        if durable:
+            _write_synced(fd, text, os_=os_)
+            _fsync_folder(os_, dir_fd)
         else:
-            _leaf_present(os_, dir_fd, leaf, where)
-            fd = _open_leaf(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
-            if durable:
-                _write_synced(fd, text, os_=os_)
-            else:
-                _write_all(fd, text, os_=os_)
+            _write_all(fd, text, os_=os_)
 
 
 def _write_synced(fd: int, text: str | bytes, *, os_: Any = os) -> None:
@@ -1157,19 +1186,26 @@ def _write_synced(fd: int, text: str | bytes, *, os_: Any = os) -> None:
         os_.fsync(fd)
 
 
-def rooted_unlink(root: Path, name: str | PurePath, *, os_: Any = os) -> bool:
-    """Remove the plain file at `name` under `root`: `True` when one was removed, `False` when
-    nothing is there (the root or a holding folder included). The folders are walked no-follow,
-    and the entry is judged by a no-follow stat before the unlink: a link, a hard link or any
-    other non-plain entry is the core's refusal and is left in place for the reap scan. The
-    stat and the unlink are two steps, so an entry swapped between them is removed as found."""
-    _spelling, parts = _parse_name(name)
-    where = Path(root, *parts)
+def _fsync_folder(os_: Any, dir_fd: int) -> None:
+    """`fsync` the folder `dir_fd` holds, through `.` reopened `O_RDONLY|O_DIRECTORY` off it:
+    an `O_PATH` handle cannot be synced (`EBADF`)."""
+    fd = os_.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=dir_fd)  # lint-text-io: ok — os.open of a DIRECTORY handle, no text mode
     try:
-        with _rooted(os_, root, parts[:-1]) as dir_fd:
-            if not _leaf_present(os_, dir_fd, parts[-1], where):
-                return False
-            os_.unlink(parts[-1], dir_fd=dir_fd)
+        os_.fsync(fd)
+    finally:
+        os_.close(fd)
+
+
+def _unlink_at(os_: Any, dir_fd: int, leaf: str, where: Path) -> bool:
+    """Remove the plain file `leaf` in the folder `dir_fd` holds: `True` when one was removed,
+    `False` when nothing is there. The entry is judged by a no-follow stat before the unlink: a
+    link, a hard link or any other non-plain entry is the core's refusal and is left in place
+    for the reap scan. The stat and the unlink are two steps, so an entry swapped between them
+    is removed as found."""
+    if not _leaf_present(os_, dir_fd, leaf, where):
+        return False
+    try:
+        os_.unlink(leaf, dir_fd=dir_fd)
     except FileNotFoundError:
         return False
     return True
@@ -1248,6 +1284,142 @@ def rooted_locked_for_rewrite(
     with opener as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         yield f
+
+
+# The held root (#1133): an `Episode`'s one open handle on its episode dir. Every verb works
+# `*at` off it, so the dir is resolved once, at the door, and never again by name.
+
+
+class Held:
+    """A folder held open by descriptor (:func:`hold`, :func:`hold_new`), and the rooted verbs
+    relative to it. Nothing below the held folder is followed; the folder itself is never
+    re-resolved, so a rename carries the handle with it and a removal fails every write.
+
+    Each verb works off a private `dup` of the root, taken under the lock `close` takes: a verb
+    after `close` is `OSError(EBADF)` and touches nothing, and a verb already running keeps its
+    own descriptor, never a number the process has since reused (the sibling's `Ledger.record`
+    runs on worker threads that can outlive a cancelled task)."""
+
+    def __init__(self, os_: Any, fd: int, where: Path) -> None:
+        self._os = os_
+        self._root = _Handle(os_, fd)
+        self._where = Path(where)
+        self._lock = threading.Lock()
+
+    # -- lifetime -------------------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release the root. Idempotent; the views then answer `Bad file descriptor`."""
+        with self._lock:
+            self._root.close()
+
+    def __enter__(self) -> Held:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    @contextlib.contextmanager
+    def _dup(self) -> Iterator[int]:
+        with self._lock:
+            if self._root.fd is None:
+                raise OSError(errno.EBADF, os.strerror(errno.EBADF), str(self._where))
+            fd = self._os.dup(self._root.fd)
+        try:
+            yield fd
+        finally:
+            self._os.close(fd)
+
+    def view(self) -> Bound:
+        """A reader over this same handle. It owns nothing: closing it is a no-op, and once this
+        root is closed it answers `Bad file descriptor`."""
+        return Bound(self._os, self._root)
+
+    # -- the verbs ------------------------------------------------------------------------------
+
+    @overload
+    def read(self, name: str | PurePath, *, binary: Literal[False] = False,
+             ) -> tuple[str | None, str | None]: ...
+    @overload
+    def read(self, name: str | PurePath, *, binary: Literal[True],
+             ) -> tuple[bytes | None, str | None]: ...
+    def read(self, name: str | PurePath, *, binary: bool = False,
+             ) -> tuple[str | bytes | None, str | None]:
+        """:func:`rooted_read`, relative to the held root."""
+        spelling, parts = _parse_name(name)
+        with self._dup() as root_fd:
+            try:
+                with _descend(self._os, root_fd, parts[:-1], self._where) as dir_fd:
+                    return _read_leaf(self._os, dir_fd, parts[-1], Path(self._where, *parts),
+                                      binary=binary), None
+            except FileNotFoundError:
+                return None, f"{spelling}: {os.strerror(errno.ENOENT)}"
+            except TEXT_READ_ERRORS as e:
+                return None, f"{spelling}: {_read_reason(e)}"
+
+    def write(self, name: str | PurePath, text: str | bytes, *, mode: str,
+              durable: bool = False) -> None:
+        """:func:`rooted_write`'s modes, in one walk off the held root that makes each missing
+        holding folder (no link followed) and writes the leaf in the last one."""
+        _check_write(text, mode, durable)
+        _spelling, parts = _parse_name(name)
+        with self._dup() as root_fd, _descend(
+                self._os, root_fd, parts[:-1], self._where, create=True) as dir_fd:
+            _write_at(self._os, dir_fd, parts[-1], Path(self._where, *parts), text,
+                      mode=mode, durable=durable)
+
+    def mkdir(self, folder: str | PurePath) -> None:
+        """Make each missing folder of `folder` below the held root, never through a link."""
+        folders = () if str(folder) in ("", ".") else _parse_name(folder)[1]
+        with self._dup() as root_fd, _descend(
+                self._os, root_fd, folders, self._where, create=True):
+            pass
+
+    def unlink(self, name: str | PurePath) -> bool:
+        """Remove the plain file at `name` below the held root (`_unlink_at`); `False` when it
+        or a holding folder is absent."""
+        _spelling, parts = _parse_name(name)
+        with self._dup() as root_fd:
+            try:
+                with _descend(self._os, root_fd, parts[:-1], self._where) as dir_fd:
+                    return _unlink_at(self._os, dir_fd, parts[-1], Path(self._where, *parts))
+            except FileNotFoundError:
+                return False
+
+
+def hold(root: Path, *, os_: Any = os) -> Held:
+    """Hold `root` open, following its spelling (the operator's, as :func:`bind`'s). A missing
+    root is `FileNotFoundError`, a non-directory `NotADirectoryError`."""
+    if _O_PATH is None:  # pragma: no cover — no CI box lacks it
+        raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
+    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root))
+
+
+def hold_new(parent: Path, name: str, *, os_: Any = os) -> Held:
+    """Make (or adopt) the folder `name` in `parent` and hold it. `parent` is made if missing,
+    following its spelling; `name` is judged off `parent`'s handle and never followed (a link,
+    file or FIFO there is the core's folder refusal). The held descriptor is the one that
+    judged it. `parent` is then fsynced, so the new folder's entry is durable."""
+    if _O_PATH is None:  # pragma: no cover — no CI box lacks it
+        raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
+    if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
+        raise ValueError(f"{name!r}: {_NOT_A_NAME}")
+    parent = Path(parent)
+    try:
+        parent_fd = os_.open(parent, _ROOT_FLAGS)
+    except FileNotFoundError:
+        os_.makedirs(parent, exist_ok=True)
+        parent_fd = os_.open(parent, _ROOT_FLAGS)
+    try:
+        fd = _step(os_, parent_fd, name, parent / name, create=True)
+        try:
+            _fsync_folder(os_, parent_fd)
+        except BaseException:
+            os_.close(fd)
+            raise
+    finally:
+        os_.close(parent_fd)
+    return Held(os_, fd, parent / name)
 
 
 #: The staged-name marker, matched loosely (not the exact `<name>.staged-<16 hex>` shape) so

@@ -32,10 +32,10 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, bind, read_jsonl_rows
 from defender._run_paths import artifact_file
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
+from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
-    Ledger,
     base_file,
     correlation_key_of,
 )
@@ -294,7 +294,9 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
         labels = _archived_labels(bound)
     if not labels:
         return {}
-    family = load_family(EpisodePaths(episode_dir).family)
+    # The manifest through the episode's `family` record, which follows no link.
+    with Episode.open(episode_dir) as episode:
+        family = load_family(episode)
     token = episode_token_for(family.episode_id)
     control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
 
@@ -306,8 +308,10 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
                 f"the archive holds a world {label!r} the manifest does not declare "
                 f"({[w.world_id for w in family.worlds]}) — its axis is what a difference is "
                 "classified against, so there is nothing to classify it with")
-        served[label] = _answers(
-            Ledger.for_world(episode_dir, world_token_for(token, label)).path)
+        # A read of an existing world's file: the owner's shape check, not the writer's
+        # minting check.
+        served[label] = _answers(EpisodePaths(episode_dir).at(
+            LAYOUT.served_world(world_token_for(token, label))))
 
     drift = set()
     if control is not None:

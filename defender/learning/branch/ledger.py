@@ -20,10 +20,10 @@ import threading
 from collections.abc import Mapping
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from defender._io import read_jsonl_rows, rooted_mkdir, rooted_write
-from defender._episode_handle import Episode
+from defender._io import read_jsonl_rows
+from defender._episode_handle import AppendRecord, Episode
 from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
@@ -199,9 +199,12 @@ class ServedCall:
         return row
 
 
-def _jsonl_line(row: dict) -> str:
-    """One served-call row as its JSONL line, handed whole to the ledger's rooted append."""
-    return json.dumps(row) + "\n"  # lint-jsonl-io: ok — one row, handed whole to the rooted append
+def served_line(row: dict) -> str:
+    """One served-call row (`ServedCall.row()`) as its JSONL line: the one spelling of a
+    served-file line, for the primer's base and each world's own file.
+
+    @owns served-call line"""
+    return json.dumps(row) + "\n"  # lint-jsonl-io: ok — one row, handed whole to the episode's create or append
 
 
 @model
@@ -224,28 +227,24 @@ class Ledger:
     base_path: Path
 
     @classmethod
-    def for_world(cls, episode_dir: Path, world_id: str) -> Ledger:
-        """This world's ledger under `episode_dir`, over the family's primed base.
+    def for_world(cls, episode: Episode, world_id: str) -> Self:
+        """This world's ledger in `episode`, over the family's primed base.
 
-        Deriving the path from the world id makes "two worlds never share a file" structural.
+        Deriving the file from the world id makes "two worlds never share a file" structural.
 
-        The id is validated as a single filename component (nothing upstream refuses `../base`).
-        That check does not stop the bare id `base` from naming the capture; `__post_init__`
-        refuses that collision on the resulting paths.
+        The id passes the episode's minting check (a single, case-stable filename component:
+        nothing upstream refuses `../base`), as a `LedgerError`. That check does not stop the
+        bare id `base` from naming the capture; `__post_init__` refuses that collision.
         """
-        if not isinstance(world_id, str) or not world_id:
+        try:
+            served = episode.served_world(world_id)
+        except ValueError as e:
             raise LedgerError(
-                f"a world needs a non-empty string id to name its ledger, got {world_id!r}")
-        if world_id != Path(world_id).name or world_id in (".", ".."):
-            raise LedgerError(
-                f"world id {world_id!r} is not a single filename component — a world's rows are "
+                f"world id {world_id!r} cannot name a world's ledger ({e}) — a world's rows are "
                 "a file beside the family's base, and an id carrying a separator would write "
-                "outside the episode or onto the capture its siblings replay")
-        base = base_file(episode_dir)
-        ledger = cls(path=base.parent / f"{world_id}.jsonl", base_path=base)
-        # Writes go through the episode's `served_world` record, built at write time: a reader
-        # of `.path` makes no minting check.
-        ledger._episode = Episode(Path(episode_dir))
+                "outside the episode or onto the capture its siblings replay") from None
+        ledger = cls(path=served.path, base_path=episode.served_base.path)
+        ledger._served = served
         return ledger
 
     def declare(self) -> Ledger:
@@ -264,19 +263,17 @@ class Ledger:
         return self
 
     def _append(self, text: str) -> None:
-        """Append to this world's file without following anything: through the episode's
-        `served_world` record when the ledger was built for an episode, else (a directly
-        constructed ledger) through the rooted core with the file's folder as its root."""
-        if self._episode is not None:
-            self._episode.served_world(self.path.stem).append(text)  # lint-run-records: ok — `_episode` is the `Episode` handle `for_world` set; the gate cannot trace an attribute  # noqa: E501
-            return
-        rooted_mkdir(self.path.parent, ".")
-        rooted_write(self.path.parent, self.path.name, text, mode="append")
+        """Append to this world's file through the episode's `served_world` record, the one
+        write lane. A ledger not built by `for_world` has none and writes nothing."""
+        if self._served is None:
+            raise LedgerError(
+                f"{self.path}: a ledger writes only through its episode — build it with "
+                "`Ledger.for_world(episode, world_id)`")
+        self._served.append(text)
 
     def __post_init__(self) -> None:
-        #: The episode this ledger's writes go through; set by `for_world` (and the review's
-        #: scratch ledger), absent on a directly constructed one.
-        self._episode: Episode | None = None
+        #: This world's `served_world` record, the ledger's one write lane; set by `for_world`.
+        self._served: AppendRecord | None = None
         #: Family tier only, keyed by request key: `base_payload` never reads a world's own
         #: rows, so memoizing them would only hold every served payload in memory.
         self._memo: dict[str, str] = {}
@@ -368,7 +365,7 @@ class Ledger:
         row = call.row()
         key = call.key
         with self._lock:
-            self._append(_jsonl_line(row))
+            self._append(served_line(row))
             if call.world_id is None:
                 # First row wins, as in `_absorb`, so a repeated question answers the same way
                 # for the rest of the run.
