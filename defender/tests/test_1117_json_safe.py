@@ -70,6 +70,13 @@ def test_only_the_log_cuts_a_deep_value_and_it_cuts_below_six_levels():
     truncate what the model or a reader is shown."""
     assert _logged(_nested(6, "x")) == _nested(6, "x")
     assert _logged(_nested(7, "x")) == _nested(6, "['x']")
+    deep_map: object = {"k": "x"}
+    for _ in range(6):
+        deep_map = {"k": deep_map}
+    cut = _logged(deep_map)
+    for _ in range(6):
+        cut = cut["k"]
+    assert cut == "{'k': 'x'}", "a nested map must count toward the cap like a nested list"
     assert _json_safe_params(_nested(9, "x")) == _nested(9, "x")
     assert serialize._json_safe(_nested(9, "x")) == _nested(9, "x")
 
@@ -87,3 +94,55 @@ def test_a_float_subclass_with_its_own_repr_is_still_spelled_and_never_raises():
             return f"Tagged({float(self)!r})"
 
     assert _logged([Tagged("nan"), Tagged("inf"), Tagged("-inf")]) == ["NaN", "Infinity", "-Infinity"]
+
+
+# --- The review of #1123: the helper touches only what the encoder cannot carry. ---
+
+from defender._io import json_safe  # noqa: E402
+from defender.tests._by_path import DEFENDER  # noqa: E402
+from defender.tests._defender_sql import EXIT_OK, run_sql_py  # noqa: E402
+
+
+def test_the_sql_tool_leaves_keys_json_already_writes_to_the_encoder():
+    """A map with true/false keys reads `"true"`/`"false"`, as `json.dump` writes them — the
+    helper must not re-spell a key the encoder already carries."""
+    proc = run_sql_py("SELECT map([true, false], [1, 2]) AS m FROM data", stdin='{"x": 1}')
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert json.loads(proc.stdout) == [{"m": {"true": 1, "false": 2}}]
+
+
+def test_every_output_writes_a_timestamp_in_the_one_standard_form():
+    """ISO 8601 with `T`: the SQL tool's detected timestamp column, a lesson's `created_at`,
+    and a log field all read the same way."""
+    proc = run_sql_py("SELECT ts FROM data", stdin='{"ts": "2026-01-01T10:00:00Z"}\n')
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert json.loads(proc.stdout) == [{"ts": "2026-01-01T10:00:00"}]
+    created = dt.datetime(2026, 6, 4, tzinfo=dt.UTC)
+    assert serialize._json_safe({"created_at": created}) == {"created_at": "2026-06-04T00:00:00+00:00"}
+    assert _logged(created) == "2026-06-04T00:00:00+00:00"
+
+
+def test_a_non_finite_key_takes_the_standard_spelling_under_either_policy():
+    """A key cannot be null, so both policies spell it."""
+    for policy in ("text", "null"):
+        assert json_safe({NAN: 1, INF: 2}, non_finite=policy) == {"NaN": 1, "Infinity": 2}
+
+
+def test_a_set_whose_members_print_alike_comes_out_in_one_order_under_every_hash_seed():
+    import os
+    import subprocess
+    import sys
+    probe = ("import json; from defender._io import json_safe; "
+             "print(json.dumps(json_safe({1, '1', 'a'}, non_finite='text')))")
+    outs = {
+        subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True,
+                       env={**os.environ, "PYTHONHASHSEED": str(seed),
+                            "PYTHONPATH": str(DEFENDER.parent)}).stdout
+        for seed in range(16)
+    }
+    assert len(outs) == 1, outs
+
+
+def test_an_unknown_policy_is_refused():
+    with pytest.raises(ValueError, match="non_finite"):
+        json_safe(NAN, non_finite="none")  # type: ignore[arg-type]

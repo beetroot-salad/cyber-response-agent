@@ -1610,8 +1610,8 @@ def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
     call to its stored form (`_json_safe_params`, then `request_key`) before keying, so
     `repeat_trip` is literally one function over one input shape and the predicate O1's
     obligations are measured with is the predicate that runs. Probed disagreement this
-    closes: a live `{"threshold": nan}` keys as `NaN` while the row the same call wrote holds
-    `"nan"`, so without the normalisation a repeated non-finite param never recognises its own
+    closes: a live `{"threshold": nan}` keys as the bare token `NaN` while the row the same call
+    wrote holds the string `"NaN"`, so without the normalisation a repeated non-finite param never recognises its own
     prior rows and never trips. The stored form here is produced by the PRODUCTION transform,
     not restated, so the test re-probes the real round trip on every run."""
     live = {"native_query": "FROM logs", "threshold": float("nan")}

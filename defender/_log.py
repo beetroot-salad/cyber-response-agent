@@ -133,9 +133,9 @@ def record_fields(record: logging.LogRecord) -> dict[str, Any]:
     fields: dict[str, Any] = {**dict.fromkeys(ALWAYS_FIELDS), **current_context()}
     fields.update((k, v) for k, v in vars(record).items()
                   if k not in _RECORD_ATTRS and k not in BIND_ONLY_FIELDS)
-    # Made JSON-safe BEFORE encoding, so encoding cannot fail and a line is never lost to what
-    # one caller put in `extra=`. Non-finite stays text — a log is read to diagnose, and
-    # "infinite" must not read as "missing"; the depth cap because `extra=` takes any object.
+    # Made JSON-safe before encoding, so a line is never lost to what a caller put in `extra=`.
+    # Non-finite stays text: a log is read to diagnose, and "infinite" must not read as
+    # "missing". Capped in depth because `extra=` takes any object.
     out.update((k, json_safe(v, non_finite="text", max_depth=_MAX_DEPTH))
                for k, v in fields.items() if k not in CORE_FIELDS)
     if record.exc_info:

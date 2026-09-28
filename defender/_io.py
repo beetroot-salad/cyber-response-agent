@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import datetime as _dt
 import errno
 import fcntl
 import json
@@ -580,35 +581,54 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
 
 def json_safe(value: Any, *, non_finite: Literal["text", "null"],
               max_depth: int | None = None) -> Any:
-    """`value` as something `json.dumps(allow_nan=False)` always accepts: text keys, lists for
-    every sequence (a set sorted, so its order is stable), text for anything JSON has no type
-    for, and finite numbers.
+    """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
+    booleans and null, as values or keys, are left to the encoder's own rules.
 
-    THE ONE traversal (#1117); a caller states only what JSON forbids outright — a non-finite
-    float — and must say which way it goes: `"text"` keeps it, spelled as the Protocol Buffers
-    JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a reader diagnosing;
-    `"null"` makes it missing, for a reader computing over the field.
-    `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
-    def walk(v: Any, depth: int) -> Any:
-        if v is None or isinstance(v, (bool, int, str)):
+    A set becomes a list in a fixed order. A key or value JSON has no type for becomes text,
+    a date or time in ISO 8601. A non-finite float goes the way the caller says: `"text"`
+    keeps it, spelled as the Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`,
+    `"Infinity"`), for a reader diagnosing; `"null"` makes it missing, for a reader computing
+    over the field. A key cannot be null, so a non-finite key is always spelled. `max_depth`
+    cuts a deeper value to its repr, for a caller handed arbitrary objects."""
+    if non_finite not in ("text", "null"):
+        raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
+    return _json_safe_walk(value, non_finite, max_depth, 0)
+
+
+def _json_safe_walk(v: Any, non_finite: str, max_depth: int | None, depth: int) -> Any:
+    if v is None or isinstance(v, (bool, int, str)):
+        return v
+    if isinstance(v, float):
+        if math.isfinite(v):
             return v
-        if isinstance(v, float):
-            if math.isfinite(v):
-                return v
-            if non_finite == "null":
-                return None
-            return "NaN" if math.isnan(v) else "Infinity" if v > 0 else "-Infinity"
-        if max_depth is not None and depth >= max_depth:
-            return repr(v)
-        if isinstance(v, Mapping):
-            return {k if isinstance(k, str) else str(k): walk(x, depth + 1)
-                    for k, x in v.items()}
-        if isinstance(v, (set, frozenset)):
-            return [walk(x, depth + 1) for x in sorted(v, key=str)]
-        if isinstance(v, (list, tuple)):
-            return [walk(x, depth + 1) for x in v]
-        return str(v)
-    return walk(value, 0)
+        return None if non_finite == "null" else _non_finite_text(v)
+    if max_depth is not None and depth >= max_depth:
+        return repr(v)
+    if isinstance(v, Mapping):
+        return {_json_key(k): _json_safe_walk(x, non_finite, max_depth, depth + 1)
+                for k, x in v.items()}
+    if isinstance(v, (list, tuple, set, frozenset)):
+        items = [_json_safe_walk(x, non_finite, max_depth, depth + 1) for x in v]
+        # By repr, which no two set members share (`1` and `"1"` print alike), so the order
+        # never depends on the hash seed.
+        return sorted(items, key=repr) if isinstance(v, (set, frozenset)) else items
+    return _json_text(v)
+
+
+def _json_key(k: Any) -> Any:
+    if isinstance(k, float) and not math.isfinite(k):
+        return _non_finite_text(k)
+    if k is None or isinstance(k, (bool, int, float, str)):
+        return k
+    return _json_text(k)
+
+
+def _json_text(v: Any) -> str:
+    return v.isoformat() if isinstance(v, (_dt.date, _dt.time)) else str(v)
+
+
+def _non_finite_text(v: float) -> str:
+    return "NaN" if math.isnan(v) else "Infinity" if v > 0 else "-Infinity"
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:

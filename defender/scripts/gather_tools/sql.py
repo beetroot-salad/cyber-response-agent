@@ -209,7 +209,7 @@ def _run(sql: str) -> int:
         # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
         rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null")
                 for record in cursor.fetchall()]
-        json.dump(rows, sys.stdout, default=str, allow_nan=False)
+        json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")
         if renamed:
             print(_collision_note(renamed), file=sys.stderr)

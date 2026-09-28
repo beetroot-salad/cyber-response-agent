@@ -101,7 +101,8 @@ def request_key(system: str, verb: str, params: Any) -> str:
 
     Delegates to `record_query._request_key` so this table and `executed_queries.jsonl` key the
     same `(system, verb, params)` identically and can be joined. `_json_safe_params` is applied
-    for the same reason: otherwise a non-finite float keys as `Infinity` here and `"inf"` there.
+    for the same reason: otherwise a non-finite float keys as the bare token `Infinity` here and
+    the string `"Infinity"` there.
     """
     return _request_key(
         system, verb, _json_safe_params(params) if isinstance(params, dict) else {})
