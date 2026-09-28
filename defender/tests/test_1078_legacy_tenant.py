@@ -136,47 +136,30 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(tenant_root, tm
 
 
 def test_the_tenant_record_is_written_through_write_guarded_and_read_through_read_guarded(
-        tenant_root, monkeypatch):
-    """DELIBERATE OVERRIDE (#1078 J16/J63): the tenant record's create lane is `_create_once`
-    (`O_TMPFILE` + `linkat`), never `_io.write_guarded` — a concurrent reader must never observe
-    an empty or partial record, a guarantee `write_guarded`'s staged O_EXCL create does not
-    make. This pins the NEW mechanism: `write_guarded` is never called by
-    `ensure_runs_base_record`'s create path, `read_guarded` still does the read, and a symlink
-    planted at the record's own name is still refused rather than written through."""
-    import defender._io as io_mod
-    import defender._tenant as tenant_mod
-
+        tenant_root):
+    """The tenant record is created through `_io.write_guarded` and read through `read_guarded`,
+    never through a raw `os.open`. (#1078 J16/J63's complete-or-absent guarantee lives in
+    `write_guarded`'s own `create` lane, so the record keeps #1077's one write seam.)"""
     base = tenant_root / T_ID / "runs"
     base.mkdir(parents=True, exist_ok=True)
+    writer = S.RecordingIo()
+    S.tenant().ensure_runs_base_record(base, T_ID, io=writer)
+    assert any(op.startswith("write_guarded") for op in writer.ops), (
+        f"the create reached {writer.ops}; D2 says `write_guarded`, not a raw `os.open`")
+    assert "write_atomic" not in writer.ops
+    assert "open_guarded" not in writer.ops
 
-    def explode(*_a, **_kw):
-        raise AssertionError(
-            "write_guarded was called — the create lane is _create_once, not write_guarded, "
-            "per #1078 J16/J63")
+    reader = S.RecordingIo()
+    S.tenant().read_tenant(base, io=reader)
+    assert "read_guarded" in reader.ops, f"the read reached {reader.ops}"
 
-    monkeypatch.setattr(io_mod, "write_guarded", explode)
-    record = tenant_mod.ensure_runs_base_record(base, T_ID)
-    assert record.tenant_id == T_ID, "the create lane did not need write_guarded to succeed"
-    monkeypatch.undo()
-
-    read_calls: list[Path] = []
-    real_read_guarded = io_mod.read_guarded
-
-    def counting_read(path):
-        read_calls.append(Path(path))
-        return real_read_guarded(path)
-
-    monkeypatch.setattr(io_mod, "read_guarded", counting_read)
-    tenant_mod.read_tenant(base)
-    assert read_calls, "the read did not reach `_io.read_guarded`"
-
-    # The alias refusal, driven for real: a symlink at the record's own path.
+    # The alias refusal the seam inherits, driven for real: a symlink at the record's path.
     other = base.parent / "elsewhere.json"
     other.write_text("{}\n", encoding="utf-8")
     (base / H.RECORD_NAME).unlink()
     (base / H.RECORD_NAME).symlink_to(other)
-    with pytest.raises((OSError, ValueError)):
-        tenant_mod.ensure_runs_base_record(base, T_ID)
+    with pytest.raises((OSError, ValueError)):  # noqa: PT011 — refused, whichever frame names it
+        S.tenant().ensure_runs_base_record(base, T_ID)
     assert other.read_text(encoding="utf-8") == "{}\n", "the create followed the alias"
 
 
@@ -477,44 +460,35 @@ def test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_
 
 
 def test_a_failed_tenant_or_stamp_write_fails_the_run_loudly_and_is_never_retried(
-        tenant_root, monkeypatch):
+        tenant_root):
     """A failed write of the tenant record fails the run loudly and is never silently retried.
 
     The fault is a REAL obstruction through the REAL primitive — a directory squatting the
-    record's own path, which `_create_once` meets on disk — not an injected exception.
-    `_create_once` is wrapped, not faked, purely to COUNT the attempts: the half of "never
-    retried" a single raised exception cannot show on its own.
+    record's own path, which `_io.write_guarded`'s alias-refusing create meets on disk — not an
+    injected exception. The recorder is a pass-through with NO fault-spec: it is there only to
+    COUNT the attempts, which is the half of "never retried" a raised exception cannot show on
+    its own. The refusal surfaces from the fallback read (`TenantRecordCorrupt`, since
+    `read_guarded` refuses to read through a directory): "fails loudly, once" either way.
     """
-    import defender._tenant as tenant_mod
-
     base = tenant_root / T_ID / "runs"
     base.mkdir(parents=True, exist_ok=True)
     (base / H.RECORD_NAME).mkdir()
-    calls: list[Path] = []
-    real_create_once = tenant_mod._create_once
-
-    def counting(path, body):
-        calls.append(Path(path))
-        return real_create_once(path, body)
-
-    monkeypatch.setattr(tenant_mod, "_create_once", counting)
-    # `_create_once` itself declines quietly (the name is occupied by a non-regular entry);
-    # `ensure_runs_base_record`'s fallback read is what surfaces the failure LOUDLY, as
-    # `TenantRecordCorrupt` (a `ValueError`) — `read_guarded` refuses to read through a
-    # directory. Either shape is "fails loudly, once", which is what this demand pins.
+    recorder = S.RecordingIo()
     with pytest.raises((OSError, ValueError)):  # noqa: PT011 — the real primitive picks the error, not us
-        tenant_mod.ensure_runs_base_record(base, T_ID)
-    attempts = [c for c in calls if c == base / H.RECORD_NAME]
+        S.tenant().ensure_runs_base_record(base, T_ID, io=recorder)
+    attempts = [op for op in recorder.ops if op.startswith("write")]
     assert len(attempts) == 1, (
         f"the identity-bearing write was attempted {len(attempts)} times; it fails LOUDLY and "
         "is never silently retried — a best-effort record makes O4 unobservable")
     assert (base / H.RECORD_NAME).is_dir(), "the failed write replaced the obstruction"
 
+    # Positive control: with the obstruction gone, the same call through the same seam succeeds.
     (base / H.RECORD_NAME).rmdir()
-    clean = tenant_mod.ensure_runs_base_record(base, T_ID)
+    clean = S.tenant().ensure_runs_base_record(base, T_ID, io=S.RecordingIo())
     assert (base / H.RECORD_NAME).is_file()
     # A LATER materialisation gets its own fresh attempt (decision 3's resumable setup).
-    assert tenant_mod.ensure_runs_base_record(base, T_ID).base_world_id == clean.base_world_id
+    assert S.tenant().ensure_runs_base_record(
+        base, T_ID, io=S.RecordingIo()).base_world_id == clean.base_world_id
 
 
 # ---------------------------------------------------------------------------------------
@@ -548,33 +522,23 @@ def test_a_second_runs_base_is_live_in_the_same_process(tenant_root, tmp_path):
     assert (sibling / H.RECORD_NAME).is_file()
 
 
-def test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads(
-        tenant_root, monkeypatch):
+def test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads(tenant_root):
     """The loser of a tenant-record create race discards the value it was about to write and
     reads the winner's record instead, with no retry and no error surfaced.
 
-    #1078 adapts this from #1077's `io=` fault-injection seam (retired along with
-    `ensure_tenant`): the deterministic race window is opened at `_link_tmpfile`, the step
-    immediately before the create lane gives the written body its name — planting the winner's
-    record there reproduces the same "another writer lands first" window the original test drove
-    through `write_guarded`'s `before_write` hook. `test_1078_records.py::
-    test_o6_record_create_exclusive` (a separate suite) is the fuller real N-way threaded race
-    over the same lane; this restored test isolates the LOSER's own behaviour specifically.
-    """
-    import defender._tenant as tenant_mod
-
+    The race window, opened deterministically through #1077's `io=` seam: the winner's record
+    appears between the loser's absence check and its own create. `test_1078_records.py::
+    test_o6_record_create_exclusive` is the fuller real N-way threaded race over the same lane."""
     base = tenant_root / T_ID / "runs"
     base.mkdir(parents=True, exist_ok=True)
     winner_world = "f" * 32
-    real_link = tenant_mod._link_tmpfile
 
-    def winner_lands_first(fd, path):
-        if not Path(path).exists():
+    def winner_lands(_path: Path) -> None:
+        if not (base / H.RECORD_NAME).exists():
             S.plant_tenant_record(base, tenant_id=T_ID, base_world_id=winner_world)
-        return real_link(fd, path)
 
-    monkeypatch.setattr(tenant_mod, "_link_tmpfile", winner_lands_first)
-    loser = tenant_mod.ensure_runs_base_record(base, T_ID)
+    loser = S.tenant().ensure_runs_base_record(
+        base, T_ID, io=S.RecordingIo(S.IoFault(before_write=winner_lands)))
 
     assert loser.base_world_id == winner_world, (
         "the loser kept its own freshly-minted world; loser-re-reads is the only resolution "

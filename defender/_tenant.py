@@ -22,18 +22,15 @@ second spelling of it.
 
 §7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES): a concurrent reader of a create-lane artifact
 (the runs-base record, the tenant row) sees the name absent or the file complete, never empty
-or partial; one name throughout; mode 0644; a crash leaves no stray entry. `_create_once`
-below is the mechanism — `O_TMPFILE` + `linkat` on Linux, where the file is written complete
-before it is ever given a name, so there is no window in which a reader can see it partial.
-This is a local primitive, not a `_io.write_guarded` mode: `write_guarded`'s `create` lane also
-backs every run's `alert.json`/`provenance.json`, and widening ITS guarantee is a larger blast
-radius than these two artifacts asked for (a declared deviation — see the PR body).
+or partial; one name throughout; mode 0644; a crash leaves no stray entry. The mechanism is
+`_io.write_guarded(mode="create")`, the one create lane every write-once record uses: the file
+is written complete to an unnamed inode before it is given a name. On a filesystem that cannot
+make one (NFS, virtiofs/FUSE), that lane falls back to its older one-open create, whose residue
+is a reader seeing an empty file mid-write and a crash leaving a partial one.
 """
 from __future__ import annotations
 
-import ctypes
 import dataclasses
-import errno
 import json
 import os
 import re
@@ -172,26 +169,41 @@ def refuse_colliding_run_id(run_id: str) -> Exception | None:
     return None
 
 
-def ensure_runs_base_record(runs_base: Path, tenant_id: str) -> TenantRecord:
+def ensure_runs_base_record(
+    runs_base: Path, tenant_id: str, *, io: Any = _real_io,
+) -> TenantRecord:
     """Mint the runs-base record naming `tenant_id` when absent; read it back and hand it over
     when present and naming `tenant_id`; refuse when present and naming another tenant —
-    never overwrite (D1, O6; §7 J16/J63's complete-or-absent creator)."""
+    never overwrite (D1, O6; §7 J16/J63's complete-or-absent creator).
+
+    READ FIRST: every run after a base's first, and every sibling, finds the record there.
+    The create is EXCLUSIVE, so a lost race re-reads the winner's record rather than trusting
+    or overwriting ours; a name this process cannot read (an alias planted at it, a directory
+    squatting it) refuses rather than being minted over."""
     refuse_bad_tenant_id(tenant_id)
     runs_base = Path(runs_base)
     path = record_path(runs_base)
-    record = TenantRecord(
-        tenant_id=tenant_id, base_world_id=uuid.uuid4().hex, created_at=_now())
-    body = json.dumps(_record_doc(record), indent=2, sort_keys=True) + "\n"
-    if _create_once(path, body):
-        return record
-    # Lost the race (or the name was already occupied): the value on disk is the identity —
-    # read it back rather than trusting or overwriting ours.
-    winner = read_tenant(runs_base)
-    if winner.tenant_id != tenant_id:
+    existing, _reason = io.read_guarded(path)
+    if existing is not None:
+        record = _parse_record(existing, source=path)
+    else:
+        record = TenantRecord(
+            tenant_id=tenant_id, base_world_id=uuid.uuid4().hex, created_at=_now())
+        body = json.dumps(_record_doc(record), indent=2, sort_keys=True) + "\n"
+        try:
+            io.write_guarded(path, body, mode="create")
+        except FileExistsError:
+            # Lost the race: the winner's record is the identity; ours is discarded unwritten.
+            record = read_tenant(runs_base, io=io)
+        except OSError as blocked:
+            # An alias or a directory at the name, or this call's own failure (ENOSPC, EACCES):
+            # the record cannot be created, and the run is refused naming it — never retried.
+            raise TenantRefused(f"{path} could not be created: {blocked}") from blocked
+    if record.tenant_id != tenant_id:
         raise TenantRefused(
-            f"{path} names {winner.tenant_id!r}, not {tenant_id!r} — ensure_runs_base_record "
+            f"{path} names {record.tenant_id!r}, not {tenant_id!r} — ensure_runs_base_record "
             "never overwrites a disagreeing record")
-    return winner
+    return record
 
 
 # ==========================================================================================
@@ -250,7 +262,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def create_tenant(root: Path, tenant_id: str) -> TenantRow:
+def create_tenant(root: Path, tenant_id: str, *, io: Any = _real_io) -> TenantRow:
     """Mint tenant_id's row exactly once, into a FRESH data root (O10: tenant 1 only). The
     folder is made through `guarded_mkdir` (F12: no raw mkdir here), which re-judges every
     component below `root` at mkdir time, closing an O11a-vs-write-time symlink swap; the row
@@ -260,15 +272,19 @@ def create_tenant(root: Path, tenant_id: str) -> TenantRow:
     root = Path(root)
     refuse_foreign_data_root(root, tenant_id)
     try:
-        _real_io.guarded_mkdir(paths.dir, base=root)
+        io.guarded_mkdir(paths.dir, base=root)
     except OSError as blocked:
         raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
     row = TenantRow(tenant_id=tenant_id, created_at=_now())
     body = json.dumps(
         {"tenant_id": row.tenant_id, "created_at": row.created_at}, indent=2, sort_keys=True,
     ) + "\n"
-    if not _create_once(paths.row, body):
-        raise TenantRefused(f"{paths.row} already exists — a tenant is created once")
+    try:
+        io.write_guarded(paths.row, body, mode="create")
+    except FileExistsError as taken:
+        raise TenantRefused(f"{paths.row} already exists — a tenant is created once") from taken
+    except OSError as blocked:
+        raise TenantRefused(f"{paths.row}: {blocked}") from blocked
     return row
 
 
@@ -389,92 +405,3 @@ def tenant_of_run_dir(run_dir: Path) -> str:
 # ==========================================================================================
 # §7 J16/J63 — the complete-or-absent create lane.
 # ==========================================================================================
-
-def _create_once(path: Path, body: str) -> bool:
-    """True if THIS call created `path`; False if it already existed (any shape — a plain
-    file, a symlink, a hard link, a directory), never touching what is there.
-
-    Linux: `O_TMPFILE` opens an anonymous, unnamed inode in `path`'s own directory; the body is
-    written to it in full BEFORE it is given any name, then `linkat` (via the `/proc/self/fd`
-    trick, `os.link(..., follow_symlinks=True)`) gives it `path`'s name atomically. There is no
-    instant at which the name exists and the body is incomplete, and no instant with two names
-    (the anonymous inode has zero links until the one `linkat` succeeds). A losing `linkat`
-    (`FileExistsError`) leaves the tmpfile inode to be reclaimed on close — no stray entry —
-    and never touches whatever already occupies `path`.
-
-    Elsewhere: falls back to `_io.write_guarded(mode='create')` (today's one-`open` lane) — a
-    documented, weaker guarantee off Linux; CI runs Linux. Only a lost race (`FileExistsError`)
-    or `write_guarded`'s own alias refusal (a symlink/hard link already at the name) reads as
-    "already existed"; any OTHER `OSError` (ENOSPC, EACCES, …) is a real failure of THIS call's
-    own write and must propagate rather than being told to the caller as "someone else won" —
-    which would send it off to read a record that was never written."""
-    path = Path(path)
-    if hasattr(os, "O_TMPFILE"):
-        fd = os.open(path.parent, os.O_TMPFILE | os.O_WRONLY, 0o644)
-        try:
-            os.fchmod(fd, 0o644)
-            _write_every_byte(fd, body.encode("utf-8"))
-            os.fsync(fd)
-            try:
-                return _link_tmpfile(fd, path)
-            except FileExistsError:
-                return False
-        finally:
-            os.close(fd)
-    try:
-        _real_io.write_guarded(path, body, mode="create")
-    except FileExistsError:
-        return False
-    except OSError as failed:
-        if failed.strerror == _real_io.ALIAS_READ_REFUSAL:
-            return False
-        raise
-    return True
-
-
-def _write_every_byte(fd: int, data: bytes) -> None:
-    """`os.write` may write fewer bytes than asked (a short write — POSIX allows it on any fd,
-    not only pipes/sockets); a single unchecked call could link a SHORT body into `path` under
-    a name the complete-or-absent contract promises is never partial. Loop until every byte has
-    landed."""
-    sent = 0
-    while sent < len(data):
-        sent += os.write(fd, data[sent:])
-
-
-_libc: Any = None
-
-
-def _link_tmpfile(fd: int, path: Path) -> bool:
-    """Give the anonymous `O_TMPFILE` descriptor `fd` the name `path`, exactly once.
-
-    The portable, unprivileged route is `linkat` through the `/proc/self/fd` magic symlink
-    (`os.link(..., follow_symlinks=True)`) — no capability needed on ordinary Linux, which is
-    what CI runs. Some sandboxed containers (observed in this project's dev container) refuse
-    that specific route with `EXDEV` even though the target names the same device — a runtime
-    artifact of how they virtualize `/proc`, not a real cross-filesystem link. There, fall back
-    to the raw `linkat(AT_EMPTY_PATH)` syscall, which needs `CAP_DAC_READ_SEARCH` (root has it,
-    which the affected sandbox runs as)."""
-    try:
-        os.link(f"/proc/self/fd/{fd}", path, follow_symlinks=True)
-        return True
-    except OSError as first:
-        if first.errno != errno.EXDEV:
-            raise
-    _linkat_at_empty_path(fd, path)
-    return True
-
-
-def _linkat_at_empty_path(fd: int, path: Path) -> None:
-    global _libc
-    if _libc is None:
-        _libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    at_fdcwd = -100
-    at_empty_path = 0x1000
-    target = os.fsencode(str(path))
-    ret = _libc.linkat(fd, b"", at_fdcwd, target, at_empty_path)
-    if ret != 0:
-        err = ctypes.get_errno()
-        if err == errno.EEXIST:
-            raise FileExistsError(err, os.strerror(err), str(path))
-        raise OSError(err, os.strerror(err), str(path))

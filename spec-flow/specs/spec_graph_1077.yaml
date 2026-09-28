@@ -469,21 +469,12 @@ demands:
       - "_io.access[read_guarded]"
     discharged_by: test_the_tenant_record_is_written_through_write_guarded_and_read_through_read_guarded
     seed_docstring: >-
-      DELIBERATE OVERRIDE (#1078 J16/J63, see the PR's "Edits to spec_graph_1077.yaml" section):
-      the tenant record's create lane is no longer `_io.write_guarded`/`read_guarded`. #1078's
-      own committed spec requires the complete-or-absent `_create_once` primitive (`O_TMPFILE` +
-      `linkat` on Linux) instead, because a concurrent reader must never observe an empty or
-      partial record — a guarantee `write_guarded`'s staged O_EXCL create does not make. This
-      demand's SEAM claim is therefore superseded by #1078's own; the restored test (same name,
-      test_1078_legacy_tenant.py) now pins the NEW mechanism instead of the retired one, and
-      `test_1078_records.py::test_s7_j16_create_lane_complete_or_absent` (a separate suite —
-      `spec_graph_1078-pass-a.yaml`'s own) is the fuller, multi-threaded proof of the same lane.
+      The tenant record is created through `_io.write_guarded` and read through `read_guarded`,
+      never through a raw `os.open`.
     note: >-
       Flagged fact F11 is the counter-example this seam must not become: `served/.priming` is a
       RAW `os.open(O_CREAT|O_EXCL|O_WRONLY, 0o600)` today. The security dive's universal (2) is
       about NEW seams, so F11 is unaffected — and must not be quietly converted by the move.
-      #1078 superseded THIS demand's own seam claim for the tenant record specifically (see
-      seed_docstring); the point about F11 stands.
   - id: unparseable_tenant_refuses_run
     kind: domain-outcome
     form: test

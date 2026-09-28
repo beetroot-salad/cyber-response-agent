@@ -2735,6 +2735,14 @@ demands:
     The shared write_guarded(mode='create') also writes every run's alert and provenance files, so an
     unguarded O_TMPFILE there breaks every macOS run. Provide a per-platform path (the macOS path is NOT
     probed here). Do not retry the refuted named-temp + hard-link route (C-R4..C-R6, C-R21).
+    IMPLEMENTED (merge of main, 2026-09-28): the mechanism lives in _io.write_guarded(mode='create')
+    itself, not a private primitive in _tenant.py, so the record, the row and every run's alert and
+    provenance files share one complete-or-absent lane behind write_guarded's injectable `io=` seam.
+    The unnamed open is attempted, never feature-tested: where it answers EOPNOTSUPP/EISDIR/EINVAL (no
+    O_TMPFILE on the platform, or a filesystem without it — NFS, virtiofs/FUSE), or /proc is absent,
+    the lane falls back to the one-open O_CREAT|O_EXCL|O_NOFOLLOW create, whose residue is a reader
+    seeing an empty file mid-write and a crash leaving a partial file at the name. Linux CI on a
+    local filesystem enforces the observable; the fallback's weaker guarantee is the macOS/NFS path.
   cites:
   - C-R4
   - C-R5
