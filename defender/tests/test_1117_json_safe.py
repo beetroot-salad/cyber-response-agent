@@ -146,3 +146,33 @@ def test_a_set_whose_members_print_alike_comes_out_in_one_order_under_every_hash
 def test_an_unknown_policy_is_refused():
     with pytest.raises(ValueError, match="non_finite"):
         json_safe(NAN, non_finite="none")  # type: ignore[arg-type]
+
+
+# --- The denial fingerprint cleans parameters by the same rule. ---
+
+
+from defender.runtime import observe  # noqa: E402
+from defender.scripts.gather_tools.record_query import _request_key  # noqa: E402
+
+_PARAMS = [
+    {"threshold": NAN}, {"threshold": INF, "floor": -INF}, {"hosts": {"b", "a"}},
+    {"since": dt.date(2026, 1, 1)}, {"pair": (1, [2, NAN])}, {"q": "FROM logs", "n": 3},
+]
+
+
+@pytest.mark.parametrize("params", _PARAMS, ids=lambda p: "-".join(p))
+def test_a_denial_fingerprints_a_call_the_way_the_query_record_stores_it(params):
+    """A blocked call and the same call as the query record writes it carry one fingerprint:
+    the two surfaces identify a call by one rule, not two."""
+    stored = _json_safe_params(params)
+    assert observe._params_digest(params) == observe._params_digest(stored)
+
+
+def test_mixed_key_types_neither_crash_the_fingerprint_nor_the_repeat_key():
+    """Both sort their keys, and a sort over `1` and `"b"` raises — so every key reaches them
+    as text, spelled as the encoder would write it."""
+    params = {1: "a", "b": 2, False: "f", None: "n", 1.5: "x"}
+    assert json_safe(params, non_finite="text") == {
+        "1": "a", "b": 2, "false": "f", "null": "n", "1.5": "x"}
+    observe._params_digest(params)
+    _request_key("elastic", "probe", _json_safe_params(params))

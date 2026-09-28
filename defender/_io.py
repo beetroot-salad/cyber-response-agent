@@ -582,7 +582,7 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
 def json_safe(value: Any, *, non_finite: Literal["text", "null"],
               max_depth: int | None = None) -> Any:
     """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
-    booleans and null, as values or keys, are left to the encoder's own rules.
+    booleans and null are left as the encoder would write them.
 
     A set becomes a list in a fixed order. A key or value JSON has no type for becomes text,
     a date or time in ISO 8601. A non-finite float goes the way the caller says: `"text"`
@@ -615,11 +615,11 @@ def _json_safe_walk(v: Any, non_finite: str, max_depth: int | None, depth: int) 
     return _json_text(v)
 
 
-def _json_key(k: Any) -> Any:
-    if isinstance(k, float) and not math.isfinite(k):
-        return _non_finite_text(k)
-    if k is None or isinstance(k, (bool, int, float, str)):
-        return k
+def _json_key(k: Any) -> str:
+    # Always text, so a caller that sorts keys never compares `1` with `"b"`; a key the encoder
+    # carries is spelled as the encoder would write it (`true`, `null`, `1`, `NaN`).
+    if k is None or isinstance(k, (bool, int, float)):
+        return json.dumps(k)
     return _json_text(k)
 
 
