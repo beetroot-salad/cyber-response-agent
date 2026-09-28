@@ -122,15 +122,16 @@ def test_the_sql_tool_leaves_keys_json_already_writes_to_the_encoder():
 
 def test_every_timestamp_in_one_sql_result_has_one_form():
     """UTC, `Z`, six fraction digits, whatever the row's own precision or offset — so the model
-    reading one result knows what every timestamp in it looks like. The engine converts an
-    offset to UTC on load, so its zone-less timestamps are UTC and say so."""
+    reading one result knows what every timestamp in it looks like. A loaded field stays the
+    source's text (#1125); this is the form of a time the query makes. The session's zone is
+    UTC, so a zone-less timestamp cast from a zoned one is UTC and says so."""
     rows = _sql(
-        'SELECT h."@timestamp" AS ts FROM (SELECT unnest(hits) h FROM data)',
+        'SELECT h."@timestamp"::TIMESTAMPTZ AS ts FROM (SELECT unnest(hits) h FROM data)',
         [{"hits": [{"@timestamp": "2026-01-01T10:00:00.000Z"},
                    {"@timestamp": "2026-01-01T10:00:00.123Z"}]}])
     assert [r["ts"] for r in rows] == ["2026-01-01T10:00:00.000000Z", "2026-01-01T10:00:00.123000Z"]
-    rows = _sql("SELECT ts FROM data", [{"ts": "2026-01-01T12:00:00+02:00"},
-                                        {"ts": "2026-01-01T13:30:00+02:00"}])
+    rows = _sql("SELECT ts::TIMESTAMPTZ::TIMESTAMP AS ts FROM data",
+                [{"ts": "2026-01-01T12:00:00+02:00"}, {"ts": "2026-01-01T13:30:00+02:00"}])
     assert [r["ts"] for r in rows] == ["2026-01-01T10:00:00.000000Z", "2026-01-01T11:30:00.000000Z"]
 
 

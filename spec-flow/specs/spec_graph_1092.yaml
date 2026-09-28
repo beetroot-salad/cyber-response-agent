@@ -540,7 +540,7 @@ demands:
   - id: box_extra_is_duckdb_only_and_locked
     kind: shape
     form: test
-    discharged_by: test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it
+    discharged_by: test_the_box_extra_is_exactly_duckdb_and_pytz_and_the_lock_provides_it
     binds: ["pyproject.domain.distinguished[box]", uv_lock]
     premises: [17]
     rows: "#17 — a lock lacking the `box` extra: `uv sync --locked --extra box` fails and the build step is red (`--locked` refuses drift — `--frozen`, as first written, did NOT: it skips the freshness check, #1095 finalize round 2); G23: the extra must land WITH its relock (F11: three lock hunks, no version moves)."

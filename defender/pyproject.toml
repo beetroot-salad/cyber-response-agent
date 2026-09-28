@@ -49,6 +49,10 @@ runtime = [
     # is needed. Sources with a native aggregating query language
     # (elastic → ES|QL) never reach for it.
     "duckdb>=1.5,<2",
+    # pytz — duckdb imports it to hand a zoned timestamp to Python, but does not declare
+    # it; without it every zoned result (`::TIMESTAMPTZ`, `now()`, `to_timestamp`) fails
+    # at fetch (#1126).
+    "pytz",
     # sqlite — the session store (per-case message log + recorded views, the
     # substrate compaction and session forking both select over) uses the
     # STDLIB `sqlite3`, so there is deliberately NO pip entry for it here. Two
@@ -68,6 +72,8 @@ runtime = [
 # the host venv (O1).
 box = [
     "duckdb>=1.5,<2",
+    # duckdb's undeclared import for zoned timestamps — see `runtime` (#1126).
+    "pytz",
 ]
 dev = [
     "pytest>=8.0",
