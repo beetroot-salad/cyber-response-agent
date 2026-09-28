@@ -139,7 +139,8 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
                 f"{alert} is not a plain file — the alert is the case input both siblings "
                 f"investigate, and one that is {_not_a_plain_file(alert)} is not the source "
                 "run's own")
-        # Bytes, so the copy is exact even if not valid UTF-8.
+        # Bytes, matching `materialize_run`'s `shutil.copy`, so the copy is exact even if not
+        # valid UTF-8.
         write_guarded(RunPaths(run_dir).alert, alert.read_bytes())
 
     queries = RunPaths(source_run_dir).executed_queries

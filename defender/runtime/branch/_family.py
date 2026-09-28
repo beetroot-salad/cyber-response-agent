@@ -660,9 +660,10 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
             refuse_unnameable_world(label)
         except ViewNameError as bad:
             raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
-        # The label must also name a run. The view and run-id grammars overlap but neither
-        # contains the other (the view rule admits `wörld`, `a+b`, `a:b`), and a label off the
-        # run-id grammar would otherwise fail in every child after the family is staged.
+        # The label must also name a run: each sibling's run dir is `{episode_id}-{label}`. The
+        # view and run-id grammars overlap but neither contains the other (the view rule admits
+        # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar
+        # would otherwise fail in every child after the family is staged.
         if not is_valid_run_id(f"{family.episode_id}-{label}"):
             raise FamilyError(
                 f"world label {label!r} cannot name this episode's sibling run "

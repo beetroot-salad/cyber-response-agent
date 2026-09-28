@@ -57,8 +57,8 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     would cost determinism on exactly those keys.
     """
     # Refuse a second prime: `append_jsonl` appends, and `_absorb` is first-row-wins, so the
-    # earlier source's answers would silently stay the estate. Retrying a partly-failed
-    # episode makes this a common path.
+    # earlier source's answers would silently stay the estate while `PrimeReport` reported a
+    # clean prime. Retrying a partly-failed episode makes this a common path.
     if base_path.exists() or base_path.is_symlink():
         raise LedgerError(
             f"{base_path} already holds a primed base — a family's capture is written once, "

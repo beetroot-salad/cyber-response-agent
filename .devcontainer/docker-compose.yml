@@ -22,6 +22,10 @@ services:
       # this container at its memory ceiling and got workers OOM-killed.
       # pytest-xdist >= 3.8 reads this var as the cap for `auto`.
       PYTEST_XDIST_AUTO_NUM_WORKERS: "6"
+      # This box is a dev deployment: each run page is also copied to the main
+      # checkout's `run-visualizations/` (#1110). Unset means `production`, which
+      # the runtime image deliberately leaves it as.
+      DEFENDER_DEPLOYMENT: dev
     volumes:
       - ../:/workspace # Mount full workspace directory
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can

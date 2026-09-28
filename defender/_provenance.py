@@ -54,7 +54,8 @@ BUILD_COMMIT_ENV = "DEFENDER_BUILD_COMMIT"
 GIT_TIMEOUT_S = 60.0
 
 #: Git failing without answering. All of `OSError`, not chosen subclasses: an unexecutable
-#: binary (ENOEXEC) or fork/pipe failures (ENOMEM, EMFILE) raise a bare `OSError`.
+#: binary (ENOEXEC) or fork/pipe failures (ENOMEM, EMFILE) raise a bare `OSError`, and a
+#: hand-picked list would let one escape `materialize_run`.
 _GIT_UNREACHABLE: tuple[type[BaseException], ...] = (subprocess.SubprocessError, OSError)
 
 #: The same set plus git's own non-zero exit — everything `capture_tree` must absorb.
@@ -80,8 +81,9 @@ class RunProvenance:
     #: The model this run resolved (per process), so a family comparison can check it is
     #: constant like the commit. `None` means the record does not say.
     model: str | None = None
-    #: The tenant that owns this run and the world it was stamped into (`<episode>.<label>`
-    #: for a forked sibling). Always written; tolerated as `None` on read of older stamps.
+    #: The tenant that owns this run and the world it was stamped into (a bare world id for an
+    #: unforked run, `<episode>.<label>` for a forked sibling). `materialize_run` always writes
+    #: both; on read, absent or wrong-typed values fold to `None`, as `scope`/`model` do.
     tenant_id: str | None = None
     world_id: str | None = None
     #: A forked sibling's lineage (source run, branch point), from the launcher's manifest;

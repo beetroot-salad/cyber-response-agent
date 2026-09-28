@@ -6,7 +6,6 @@ import contextlib
 import hashlib
 import logging
 import os
-import subprocess
 import sys
 import dataclasses as _dataclasses
 from pathlib import Path
@@ -22,10 +21,9 @@ from defender._io import guarded_mkdir  # noqa: E402
 from defender._run_handle import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
 from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
+from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
-
-VISUALIZE_SCRIPT = DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
 if TYPE_CHECKING:
     from defender.runtime.branch._family import ResumeWorld
@@ -82,12 +80,13 @@ def _setup_state(run: Run) -> str:
     return "setup"
 
 
-def materialize_run_dir(
+def materialize_run(
     alert: Path, run_id: str | None, *, model: str | None = None,
     world: ResumeWorld | None = None, tenant_id: str | None = None,
     expected_record: _tenant.TenantRecord | None = None,
-) -> Path:
-    """Build (or finish building) the run directory for `run_id` through the handle.
+) -> Run:
+    """Build (or finish building) the run directory for `run_id` and return the tenant-bound
+    handle the run's later records are saved through.
 
     `tenant_id` is the tenant the caller resolved, and `expected_record` the tenant record it
     resolved it from (`None` if the base had none); with no `tenant_id` the record decides.
@@ -146,7 +145,7 @@ def materialize_run_dir(
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
-    return run_dir
+    return run
 
 
 def _admit_run_id(alert: Path, run_id: str | None) -> str:
@@ -205,7 +204,8 @@ def _stamp(
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
     a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
-    be proven later, so it is logged loudly and the run continues."""
+    be proven later, so it is logged loudly and the run continues. An interrupted setup is
+    resumable, so a retry re-stamps."""
     path = run.facts.provenance.path
     try:
         record = _provenance.capture_tree(REPO_ROOT)
@@ -243,21 +243,22 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
-class VisualizeFailed(Exception):
-    """The visualizer subprocess exited non-zero; the caller must not treat the run dir
-    as rendered — a page left over from a prior render is not proof this one succeeded."""
+def visualize(run: Run) -> None:
+    """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
+    (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
+    copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
+    been scrubbed, so the model never had a chance to rewrite its own report.
 
-
-def visualize(run_dir: Path) -> None:
-    proc = subprocess.run(
-        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
-        capture_output=True, text=True, encoding="utf-8"
-    )
-    if proc.stdout.strip():
-        _logger.info(proc.stdout.strip())
-    if proc.returncode != 0:
-        raise VisualizeFailed(
-            f"visualize_run failed for {run_dir} (exit {proc.returncode}): {proc.stderr}")
+    Only the load is decided here. The renderer is imported lazily — it reads its stylesheet at
+    import time, and nothing but this step needs it — and inside the `try`, so a renderer that
+    cannot even load is a `VisualizeFailed` like any other failed render, and never reaches the
+    run's exit code.
+    """
+    try:
+        from defender.scripts.visualize import visualize_run as vr
+    except Exception as e:
+        raise VisualizeFailed("the renderer could not be loaded") from e
+    vr.publish_page(run)
 
 
 def cross_check_tables(run_dir: Path) -> None:

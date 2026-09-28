@@ -26,7 +26,7 @@ from pathlib import Path
 from types import MappingProxyType, ModuleType
 from typing import Any
 
-from defender._env import env_str
+from defender._env import env_choice, env_str
 
 #: Emitted on every line, `null` when unbound — one shape per line keeps log queries simple.
 ALWAYS_FIELDS = ("run_id", "tenant_id")
@@ -232,15 +232,12 @@ def configure_from_env() -> None:
     `DEFENDER_LOG_LEVEL` (any level name `logging` knows, any case, or a number; default INFO).
 
     Never fatal: an unusable value falls back to its default and a notice is handed straight
-    to the handler, so no level setting can hide it."""
-    raw_fmt = env_str(FORMAT_ENV, DEFAULT_FORMAT)
+    to the handler, so no level setting can hide it. A typo in a deployment costs formatting,
+    not the investigation."""
+    fmt, format_notice = env_choice(FORMAT_ENV, DEFAULT_FORMAT, FORMATS)
     raw_level = env_str(LEVEL_ENV, DEFAULT_LEVEL)
-    fmt = raw_fmt.strip().lower()
     level = _level(raw_level)
-    notices = []
-    if fmt not in FORMATS:
-        notices.append(f"{FORMAT_ENV}={raw_fmt!r} is not one of {FORMATS}; using {DEFAULT_FORMAT!r}")
-        fmt = DEFAULT_FORMAT
+    notices = [format_notice] if format_notice else []
     if level is None:
         notices.append(f"{LEVEL_ENV}={raw_level!r} is not a usable logging level; using {DEFAULT_LEVEL!r}")
     configure(fmt=fmt, level=DEFAULT_LEVEL if level is None else level)

@@ -1,8 +1,8 @@
 """The run-page mirror's one write, stdlib-only so it can run as the checkout's owner.
 
-`visualize_run.render_and_mirror` calls `write_page` in-process when no privilege drop is
-needed, and otherwise runs this file under `-I` in a child with the checkout owner's uid/gid,
-page bytes on stdin. The child imports nothing from `defender`.
+`visualize_run.mirror_page` (via `_mirror`) calls `write_page` in-process when no privilege
+drop is needed, and otherwise runs this file under `-I` in a child with the checkout owner's
+uid/gid, page bytes on stdin. The child imports nothing from `defender`.
 
 A child rather than write-as-root-then-chown: the mirror folder is user-owned, so anything in
 it may be a planted link, and a root writer following one would write (and chown) a file the

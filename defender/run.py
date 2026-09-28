@@ -44,6 +44,7 @@ from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender._tenant import TenantRecord  # noqa: E402
 from defender._tenants import default_tenants_root  # noqa: E402
@@ -452,7 +453,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     """The source run's alert, or the refusal that says it is not a plain file.
 
     The source run dir was a box's writable bind, so `alert.json` may be a planted link, and
-    `materialize_run_dir` follows links. Checked before the copy so outside bytes never become
+    `materialize_run` follows links. Checked before the copy so outside bytes never become
     this run's alert.
     """
     from defender._run_paths import artifact_file
@@ -488,12 +489,13 @@ def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> A
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run_dir(
+def _materialize_run(
     alert: Path, run_id: str | None, *, model: str | None, world: Any = None,
     tenant_id: str, expected_record: TenantRecord | None,
-) -> Path:
-    """Build this run's directory via `run_common.materialize_run_dir`, stamped with code,
-    model, tenant and (for a sibling) the manifest's world and lineage.
+) -> Run:
+    """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
+    handle, stamped with code, model, tenant and (for a sibling) the manifest's world and
+    lineage.
 
     The single call site of the builder and the seam `main` injects; turns a tenant record that
     changed since `main` read it into a named refusal.
@@ -501,23 +503,23 @@ def _materialize_run_dir(
     from defender._tenant import TenantRecordMismatch
 
     try:
-        run_dir = _run.materialize_run_dir(
+        run = _run.materialize_run(
             alert, run_id, model=model, world=world, tenant_id=tenant_id,
             expected_record=expected_record)
     except TenantRecordMismatch as refusal:
         sys.exit(f"[run.py] {refusal}")
-    return run_dir
+    return run
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
-    visualize: Callable[[Path], None] = _run.visualize,
+    visualize: Callable[[Run], None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
-    materialize: Callable[..., Path] = _materialize_run_dir,
+    materialize: Callable[..., Run] = _materialize_run,
 ) -> int:
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
@@ -558,8 +560,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     if rc:
         return rc
 
-    run_dir = materialize(alert, run_id, model=model, world=world, tenant_id=tenant.tenant_id,
-                          expected_record=tenant_record)
+    # The handle, not just its directory: the post-run step saves the run page through it.
+    run = materialize(alert, run_id, model=model, world=world, tenant_id=tenant.tenant_id,
+                      expected_record=tenant_record)
+    run_dir = run.run_dir
 
     # Every log line from here on, the crash included, names this run and tenant.
     with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
@@ -615,9 +619,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             _logger.info("enqueued for catalog curation")
 
         try:
-            visualize(run_dir)
-        except _run.VisualizeFailed as e:
-            _logger.warning(f"{e}")
+            visualize(run)
+        except _run.VisualizeFailed:
+            _logger.warning("the run page was not saved", exc_info=True)
         return 0
 
 if __name__ == "__main__":

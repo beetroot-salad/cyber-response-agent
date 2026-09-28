@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _env
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize import _mirror_write
+from defender.scripts.visualize._page_failed import VisualizeFailed
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
     gather_cost_by_model,
@@ -63,6 +67,14 @@ MIRROR_DIR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 MIRROR_DIR_NAME = "run-visualizations"
 _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
+_logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from defender._run_handle import Run
+
+#: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
+CopyOutcome = Literal["copied", "skipped", "failed"]
+
 
 class MirrorRootRefused(Exception):
     """Under pytest, the mirror root was about to resolve to a real checkout.
@@ -108,7 +120,7 @@ def _main_checkout(start: Path) -> Path:
         if not (main / "defender").is_dir():
             raise ValueError(f"{main} (from {dot_git}) holds no defender/")
     except (OSError, ValueError) as exc:
-        sys.stderr.write(f"[visualize_run] warning: mirroring under {start}: {exc}\n")
+        _logger.warning("mirroring under %s: %s", start, exc)
         return start
     return main
 
@@ -133,30 +145,72 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
     )
     if proc.returncode != 0:
         raise OSError(
-            f"mirror write as uid {owner.st_uid} failed for {dest} (exit {proc.returncode}): "
+            f"mirror write as uid {owner.st_uid} failed (exit {proc.returncode}): "
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_and_mirror(run_dir: Path) -> list[Path]:
-    """Render the run's page, and refuse a directory that is not a run.
+def render_page(run_dir: Path) -> str:
+    """This run's page, generated and returned — nothing is written, and nothing here knows
+    where the page goes: the post-run step saves it as the run's record (#1110).
 
-    The store resolve is a precondition, not a data dependency: a run dir copied without its
-    store pointer would otherwise render a complete-looking page for a run whose record cannot
-    be found. It fails before anything is written.
+    The store resolve is a precondition, not a data dependency: nothing on the page reads the
+    session store, but a run dir copied without its store pointer would otherwise render a
+    complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    src = RunPaths(run_dir).runtime_html
-    src.write_text(render_runtime_page(run_dir), encoding="utf-8")
-    if not src.is_file():
-        return []
-    root = mirror_root()
-    dest = RunPaths(root / run_dir.name).runtime_html
-    _mirror(src.read_bytes(), dest, root)
-    return [dest]
+    return render_runtime_page(run_dir)
 
 
+def publish_page(run: Run) -> CopyOutcome:
+    """The post-run step: render the run's page, save it as the run's `runtime_html` record
+    through `run` — so whatever backend the handle sits on receives it like every other record —
+    then hand it to the dev-only copy, and answer what the copy did (#1110).
+
+    A failed render and a refused record save are each `VisualizeFailed`, saying which, with
+    the cause chained: the caller's single "no record" signal. The copy never raises.
+    """
+    try:
+        page = render_page(run.run_dir)
+    except Exception as e:
+        raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
+    record = run.observability.runtime_html
+    try:
+        record.write(page)
+    except Exception as e:
+        raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
+    _logger.info("saved the run page as %s", record.path)
+    return mirror_page(page, run.run_dir.name)
+
+
+def mirror_page(page: str, run_id: str) -> CopyOutcome:
+    """The dev-only copy, whole: whether to copy, where, the write, and what to say about it.
+
+    Copies the page to `<mirror root>/<run_id>/runtime.html`, written as the mirror folder's
+    owner (#1084), only on a `dev` deployment (#1110) — the rule lives here, beside the write, so
+    no caller can reach the copy without it. Best-effort, and never raises: everything after the
+    deployment check sits in one `try`. A skipped copy is logged at INFO; a failed one at
+    WARNING, naming the destination when one resolved and the error's reason.
+    """
+    deployment = _env.deployment()
+    if deployment != "dev":
+        _logger.info("page not copied: this deployment counts as %r, and only %s=dev copies",
+                     deployment, _env.DEPLOYMENT_ENV)
+        return "skipped"
+    dest: Path | None = None
+    try:
+        root = mirror_root()
+        dest = RunPaths(root / run_id).runtime_html
+        _mirror(page.encode("utf-8"), dest, root)
+    except Exception as e:
+        # The reason alone: an OSError's `str()` repeats the path the message already names.
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
+        where = f" to {dest}" if dest is not None else ""
+        _logger.warning("page not copied%s: %s: %s", where, type(e).__name__, reason)
+        return "failed"
+    _logger.info("page copied to %s", dest)
+    return "copied"
 
 
 def render_header(case_id: str, byline: str, stats_html: str = "") -> str:
@@ -511,6 +565,13 @@ def render_runtime_page(run_dir: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
+    through the same step `run.py` takes, with every line stamped with the run and the tenant
+    its provenance names. Exits 1 when the record was not saved, or when a `dev` copy failed —
+    refreshing that copy is often why an operator re-renders."""
+    from defender import _log
+    from defender._run_handle import Run
+
     if len(argv) != 2:
         print("usage: visualize_run.py <run_dir>", file=sys.stderr)
         return 64
@@ -518,11 +579,14 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    mirrored = render_and_mirror(run_dir)
-    print(f"wrote {RunPaths(run_dir).runtime_html}")
-    for dest in mirrored:
-        print(f"mirrored {dest}")
-    return 0
+    run = Run.at(run_dir)
+    with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
+        try:
+            copy = publish_page(run)
+        except VisualizeFailed:
+            _logger.error("the re-render failed", exc_info=True)
+            return 1
+    return 1 if copy == "failed" else 0
 
 
 if __name__ == "__main__":

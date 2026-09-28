@@ -145,8 +145,10 @@ def ensure_tenant(
 
 
 def refuse_colliding_run_id(run_id: str) -> Exception | None:
-    """Explicit guard against a run id equal to the tenant record's filename (the leading
-    underscore keeps them apart only by coincidence). Returns the refusal rather than raising."""
+    """Explicit guard against a run id equal to the tenant record's filename. Without it only
+    coincidences keep them apart (the leading underscore, the sidecar clear's keying, the
+    runs-base walkers' `is_dir()` filter). Returns the refusal rather than raising; the caller
+    decides how to surface it."""
     if run_id == TENANT_RECORD_NAME:
         return ValueError(
             f"run id {run_id!r} collides with the tenant record's own filename "

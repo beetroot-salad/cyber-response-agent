@@ -107,7 +107,7 @@ GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 
 
 def _clean_run_dir(tmp_path: Path) -> Path:
-    """A realistic FROZEN run dir: the artifacts `materialize_run_dir` + a real run leave
+    """A realistic FROZEN run dir: the artifacts `materialize_run` + a real run leave
     behind. Regular files and real directories only — the shape the scrub must pass."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
@@ -737,7 +737,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     AFTER the investigation (the tree is frozen, no live writer, so the check is TOCTOU-free)
     and BEFORE the first consumer of the tree, which is the artifact listing over
     `sorted(...iterdir())`. Every later consumer — the table cross-check, the learning enqueue,
-    the third-process visualizer — follows it too.
+    the post-run page render — follows it too.
 
     Two legs, one per half of the claim. (1) The REAP'S OWN order, bound to what EXECUTED
     rather than to statement position (#741): the recorded event log is what actually ran, so
@@ -799,7 +799,7 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     """d_no_consumer_runs_on_a_tainted_tree — a tainted tree stops the run: the taint signal
     propagates out of the entrypoint uncaught, so the artifact listing, the table cross-check,
-    the durable learning-state copy and the third-process visualizer never read the tree.
+    the durable learning-state copy and the post-run page render never read the tree.
 
     Three legs. (1) The signal really is raised by the real scrub on a real planted link, and
     it is not a subclass of any exception the entrypoint catches — a taint that lands in an
@@ -1485,7 +1485,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run_dir(alert, None)
+        run_common.materialize_run(alert, None)
     assert list(runs_base.iterdir()) == [], (
         "the hostile id created run artifacts before it was refused"
     )

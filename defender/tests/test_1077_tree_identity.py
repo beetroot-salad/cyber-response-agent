@@ -324,7 +324,7 @@ def test_the_baseline_is_a_golden_compared_on_every_commit(tmp_path: Path):
 # ---------------------------------------------------------------------------------------
 
 def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_path: Path):
-    """Driven from the composition frame (`materialize_run_dir`/`run_main`), every writer under
+    """Driven from the composition frame (`materialize_run`/`run_main`), every writer under
     one run dir (`Run`, `_alias`, `challenge_gate`, `model_bash`, `record_query`) writes into its
     own reserved key space — lead claims by lead_id+seq (d29), review records by turn, the box's
     own `bash`/`docker-exec` writes by their fixed names — with no two writers' keys able to
