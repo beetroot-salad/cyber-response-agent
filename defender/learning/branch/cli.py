@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -56,7 +57,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 from defender import _provenance
 from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
-from defender._io import is_not_plain_refusal, load_json_artifact
+from defender._io import NotPlainEntry, load_json_artifact
 from defender._paths import PATHS
 from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender._tenants import default_tenants_root
@@ -182,9 +183,13 @@ def episode_id_for(source_run_id: str, branch_message_id: int) -> str:
 # ---------------------------------------------------------------------------------------
 
 
+#: The launcher's primer: an empty capture primes an empty base, and `_prime_once` warns.
+_PRIME_ALLOWING_EMPTY = functools.partial(prime_base, allow_empty=True)
+
+
 def prepare_episode(
     episode_id: str, source_run_dir: Path, *, tenant: Any,
-    prime: Callable[[Path, Episode], PrimeReport] = prime_base,
+    prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
 ) -> Episode:
     """Prime the family's base once, exclusively, and hand back the episode, held open: the
     launcher's door, whose caller closes it (`with prepare_episode(...) as episode:`).
@@ -233,11 +238,10 @@ def _prime_once(
     claim = episode.priming_lock
     try:
         claim.create("")
-    except OSError as taken:
-        # Occupied (`FileExistsError`), or anything at the name that is not a plain file (the
-        # core's refusal, left in place): either way this launcher does not hold the claim.
-        if not isinstance(taken, FileExistsError) and not is_not_plain_refusal(taken):
-            raise
+    except (FileExistsError, NotPlainEntry) as taken:
+        # Occupied, or anything at the name that is not a plain file (the core's refusal, left
+        # in place): either way this launcher does not hold the claim. A linked folder on the
+        # way is the core's folder refusal and propagates as itself.
         raise LedgerError(
             f"another launcher is priming episode {episode_id!r} ({claim.path} exists) — a "
             "family's capture is written once, before any sibling forks. If no launcher is "
@@ -245,21 +249,6 @@ def _prime_once(
             "retry") from taken
     try:
         report = prime(source_run_dir, episode)
-    except LedgerError as nothing_to_prime:
-        # A source that captured nothing is still branchable here: `prime_base` refuses a
-        # zero-row capture for its other callers, but the review records what it could replay
-        # per world, so this downgrades to an empty base plus a warning. Only a source with no
-        # session store reaches this (an imported run, replayed fixture or pruned store); one
-        # with a session was already refused by `branch.validate` at preflight.
-        if not _is_empty_capture(nothing_to_prime):
-            raise
-        episode.served_base.create("")
-        _logger.warning(
-            f"{source_run_dir} captured no replayable query — the family's base is "
-            "EMPTY, so every key each sibling asks reaches the live estate and any difference "
-            "between siblings includes the estate's own drift. The review records what it "
-            "replayed; read it before comparing.")
-        return
     finally:
         # Released on every exit, so a refused prime does not make the episode unbranchable. A
         # refusal here (something not plain at the claim's name, left for the reap scan) is
@@ -268,20 +257,22 @@ def _prime_once(
             claim.delete()
         except OSError as stuck:
             _logger.warning(f"could not release the priming claim {claim.path}: {stuck}")
+    if report.primed == 0:
+        # A source that captured nothing is still branchable here (the launcher's primer allows
+        # an empty base): the review records what it could replay per world. Only a source with
+        # no session store reaches this (an imported run, replayed fixture or pruned store); one
+        # with a session was already refused by `branch.validate` at preflight.
+        _logger.warning(
+            f"{source_run_dir} captured no replayable query — the family's base is "
+            "EMPTY, so every key each sibling asks reaches the live estate and any difference "
+            "between siblings includes the estate's own drift. The review records what it "
+            "replayed; read it before comparing.")
+        return
     # Log the skips too: each is a key read live rather than replayed.
     _logger.info(
         f"primed {report.primed} captured row(s) into {episode.served_base.path}; "
         f"{report.skipped} skipped ({report}) — a skipped key is read live per world rather "
         "than replayed")
-
-
-def _is_empty_capture(refusal: LedgerError) -> bool:
-    """Is this the primer's zero-row refusal, rather than one of its others?
-
-    Matched on the message because `LedgerError` also signals an already-existing base, which
-    must never be downgraded.
-    """
-    return "primed no base rows" in str(refusal)
 
 
 def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a model call is asked in this one block
@@ -868,10 +859,14 @@ def verify_family(
     except Exception as archive_refused:  # noqa: BLE001 — recorded, then re-raised unchanged
         # Record `incomplete` before re-raising: `archive_episode` can fail partway, and
         # readers (`episode._refuse_incomplete`) gate on a recorded outcome, so a partial
-        # archive with none would read as complete.
-        _record_episode_outcome(
-            episode, outcome=INCOMPLETE,
-            reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
+        # archive with none would read as complete. A refused review record cannot take it;
+        # the archive's failure stays the one raised, carrying that as a note.
+        try:
+            _record_episode_outcome(
+                episode, outcome=INCOMPLETE,
+                reason="; ".join([*reasons, f"the archive refused: {archive_refused}"]))
+        except staging_mod.StagingRefused as unrecorded:
+            archive_refused.add_note(f"the incomplete outcome was not recorded: {unrecorded}")
         raise
     if outcome == ACCEPTED:
         _write_family_stamp(
@@ -1163,8 +1158,9 @@ def _teardown_without_masking(episode: Episode, door: Any, *, aborting: bool) ->
     """Tear the episode's staged names down without letting a failure displace an abort in flight.
 
     In a `finally` a second exception would replace the first, and the abort is what the
-    operator must act on. So while aborting, a teardown failure is logged (its unverified
-    names are already in the review record); otherwise it is re-raised.
+    operator must act on. So while aborting, a teardown failure is logged (it names what it
+    could not verify gone, and says so when the review record could not take them); otherwise
+    it is re-raised.
     """
     # `aborting` is passed in, not read from `sys.exc_info()`, which is thread-global and would
     # report an in-flight exception from any caller up the stack.
@@ -1174,8 +1170,9 @@ def _teardown_without_masking(episode: Episode, door: Any, *, aborting: bool) ->
         if not aborting:
             raise
         _logger.error(f"teardown also failed ({cleanup_failed!r}); the names it could not "
-                      "verify gone are in the review record, and the failure that ended the episode "
-                      "is what follows")
+                      "verify gone are named in that failure, and recorded in the review record "
+                      "unless it says that record was refused. The failure that ended the "
+                      "episode is what follows")
 
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams

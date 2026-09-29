@@ -27,12 +27,12 @@ from defender._episode_paths import LAYOUT, _check_label, check_minted_token
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
 #: `write` replaces (stage + rename), `create` is exclusive, `append` / `append_durable` append
-#: (the latter synced, with its folder, before it returns), `delete` removes a plain file,
-#: `read` answers `(text | None, reason | None)`.
+#: (the latter synced, with its folder, before it returns), `delete` removes a plain file.
+#: No record reads: reading is the view's (`episode.view().read(LAYOUT.<record>)`).
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
-    "family": ("read", "write"),
+    "family": ("write",),
     "family_stamp": ("write",),
-    "review": ("read", "write"),
+    "review": ("write",),
     "samples": ("write",),
     "judge": ("write",),
     "timing": ("write",),
@@ -65,11 +65,6 @@ class EpisodeRecord:
         return self._dir / self._rel
 
 
-class _Read(EpisodeRecord):
-    def read(self) -> tuple[str | None, str | None]:
-        return self._held.read(self._rel)
-
-
 class _Write(EpisodeRecord):
     def write(self, text: str | bytes) -> None:
         self._held.write(self._rel, text, mode="replace")
@@ -96,10 +91,6 @@ class _Delete(EpisodeRecord):
 
 
 # One class per verb set in `RECORD_VERBS`.
-class ReadWriteRecord(_Read, _Write):
-    pass
-
-
 class WriteRecord(_Write):
     pass
 
@@ -212,16 +203,16 @@ class Episode:
     # -- episode-root records ----------------------------------------------------------------
 
     @property
-    def family(self) -> ReadWriteRecord:
-        return ReadWriteRecord(*self._at(LAYOUT.family))
+    def family(self) -> WriteRecord:
+        return WriteRecord(*self._at(LAYOUT.family))
 
     @property
     def family_stamp(self) -> WriteRecord:
         return WriteRecord(*self._at(LAYOUT.family_stamp))
 
     @property
-    def review(self) -> ReadWriteRecord:
-        return ReadWriteRecord(*self._at(LAYOUT.review))
+    def review(self) -> WriteRecord:
+        return WriteRecord(*self._at(LAYOUT.review))
 
     @property
     def samples(self) -> WriteRecord:

@@ -33,7 +33,7 @@ from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._episode_handle import Episode  # noqa: E402
-from defender._io import Bound, bind, is_not_plain_refusal  # noqa: E402
+from defender._io import Bound, NotPlainEntry, bind  # noqa: E402
 from defender._run_paths import WIRE_LOG_NAMES  # noqa: E402
 from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
@@ -292,14 +292,12 @@ def _run_world_draws(
                 malformed += 1
                 try:
                     world.draw(n).delete()
-                except OSError as stuck:
+                except NotPlainEntry as stuck:
                     # Only the core's refusal of something not plain at the draw's name is
                     # contained: it is left for the reap scan, and a later disk read counts it
                     # unreadable, so it costs this draw, not the pass. Any other failure (a
-                    # denied or read-only tree) would leave a stale plain draw to be queued as
-                    # this pass's, so it stops the pass.
-                    if not is_not_plain_refusal(stuck):
-                        raise
+                    # denied or read-only tree, a linked folder on the way) would leave a stale
+                    # plain draw to be queued as this pass's, so it stops the pass.
                     _logger.warning(f"world {label!r}: the earlier draw {world.draw(n).path.name} "
                                     f"was not removed ({stuck})")
                 continue

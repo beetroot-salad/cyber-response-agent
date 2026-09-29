@@ -157,9 +157,9 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
     raise `ArchiveRefused`. `present` is the single-file destinations that have a source this
     time."""
     # The episode dir is reachable from a sibling box's rw bind, and `copy2` opens the
-    # destination for writing, following a link planted there. `guarded_mkdir` only judges
-    # directory components, so each leaf is checked here. `plain_file`, not `artifact_file`,
-    # so a hard link is refused too.
+    # destination for writing, following a link planted there. The world folder's `ensure`
+    # only judges directory components, so each leaf is checked here. `plain_file`, not
+    # `artifact_file`, so a hard link is refused too.
     #
     # Every single-file name is judged, not only those with a source. A plain file left at a
     # name whose source is now absent (a re-archive) would be read as this run's own, so it is

@@ -447,7 +447,8 @@ def teardown(episode: Episode, *, door: Any) -> list[str]:
     it), so no alias is ever left over a deleted member. Only recorded names are touched —
     teardown never lists or globs. A delete that returns but leaves the name present is the
     failure that matters (the next episode reusing the token finds a live alias), so every
-    failure is written into the review record and then raised.
+    failure is written into the review record (or, when that record is refused, carried in the
+    raised failure) and then raised.
     """
     rows = read_staged(episode.view()) or []
     failures: list[dict] = []
@@ -463,22 +464,27 @@ def teardown(episode: Episode, *, door: Any) -> list[str]:
         except Exception as bad:  # noqa: BLE001 — every fault is collected and raised below
             failures.append({"name": name, "detail": f"{type(bad).__name__}: {bad}"})
     if failures:
-        _record_teardown_failure(failures, episode)
+        unrecorded = _record_teardown_failure(failures, episode)
         raise StagingRefused(
             "teardown did not verify every staged name gone: "
-            + "; ".join(f"{f['name']} ({f['detail']})" for f in failures))
+            + "; ".join(f"{f['name']} ({f['detail']})" for f in failures) + unrecorded)
     return [str(r.get("name")) for r in rows]
 
 
-def _record_teardown_failure(failures: list[dict], episode: Episode) -> None:
-    """Put the failure in the review record before raising it.
+def _record_teardown_failure(failures: list[dict], episode: Episode) -> str:
+    """Put the failure in the review record before raising it; `""`, or — when the record is
+    refused — the sentence the raised failure carries instead, so the names are never lost.
 
     The names are still live on the cluster and the review's reader is who has to remove them.
     Merged rather than rewritten, because the review step has already written its verdicts.
     """
-    merge_review(episode, "teardown",
-                 {"ok": False, "failures": failures,
-                  "names": [f["name"] for f in failures], "at": now_iso()})
+    try:
+        merge_review(episode, "teardown",
+                     {"ok": False, "failures": failures,
+                      "names": [f["name"] for f in failures], "at": now_iso()})
+    except StagingRefused as unmerged:
+        return f" — and the review record was not updated with them ({unmerged})"
+    return ""
 
 
 def merge_review(episode: Episode, key: str, block: dict) -> None:
@@ -487,15 +493,20 @@ def merge_review(episode: Episode, key: str, block: dict) -> None:
     The single merger for `review.yaml` outside the review itself, shared by teardown and
     `cli._record_episode_outcome` so both write the file with one serialisation.
 
-    Read and replaced through the episode handle: a link, hard link or other non-plain entry at
-    the name is neither read nor written through (the read answers nothing, and the replace
-    refuses it).
+    Read through the episode's view and replaced through its handle. An absent record starts
+    empty, and one that does not parse as a mapping is replaced (as it always was). A REFUSED
+    record — a link, hard link or other non-plain entry at the name, or undecodable bytes — is
+    `StagingRefused` and is left exactly as it is: replacing it would drop whatever it holds.
     """
+    rec = episode.view().read(LAYOUT.review)
+    if rec.text is None and not rec.absent:
+        raise StagingRefused(
+            f"{LAYOUT.review} is refused ({rec.reason}); the {key!r} block was not merged, "
+            "since replacing a record this code cannot read drops whatever it holds")
     doc: dict[str, Any] = {}
-    text, _reason = episode.review.read()
-    if text is not None:
+    if rec.text is not None:
         try:
-            loaded = _yaml.safe_load(text)
+            loaded = _yaml.safe_load(rec.text)
         except yaml.YAMLError:
             loaded = None
         if isinstance(loaded, dict):

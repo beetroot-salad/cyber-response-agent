@@ -410,7 +410,7 @@ def resume_world(episode: Episode, world_label: str, *, settings: Callable[[], P
 
     return _family.resume_world_from(
         _family.load_family(
-            episode, configured_patterns=lambda: configured_patterns(settings())),
+            episode.view(), configured_patterns=lambda: configured_patterns(settings())),
         world_label, episode.dir)
 
 
@@ -440,8 +440,12 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
     `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
     around the curation marker. An undeclared world label is refused before a run dir exists.
     """
-    if ns.resume is None or episode is None:
+    if ns.resume is None:
         return None
+    if episode is None:
+        # A sibling is only ever resumed through its held episode; without one it must not
+        # run on as an ordinary investigation.
+        sys.exit(f"[run.py] --resume {ns.resume}: no episode is held for it")
     from defender.runtime.branch._family import FamilyError
 
     if ns.update_ticket:

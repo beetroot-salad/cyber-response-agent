@@ -55,13 +55,13 @@ def _check_label(label: object, *, what: str = "label") -> str:
 
 
 def check_minted_token(token: object) -> str:
-    """A served-world token being minted (`<episode token>.<label>`): a plain component whose
-    label, the text after the last dot, is case-stable (`_family.world_token_for` forbids dots
-    in labels). Readers of an existing token use the shape check on `LAYOUT.served_world`."""
+    """A served-world token being minted (`<episode token>.<label>`): a plain component that is
+    case-stable as a whole, so two tokens differing only in case are never two files on a host
+    that folds them to one. Every minted token is (the episode token is casefolded, the label
+    case-stable). Readers of an existing token use the shape check on `LAYOUT.served_world`."""
     token = _check_component(token, what="token")
-    _head, sep, label = token.rpartition(".")
-    if sep and not is_case_stable_id(label):
-        raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+    if not is_case_stable_id(token):
+        raise ValueError(f"{token!r} is not case-stable ({CASE_STABLE_REQUIRED})")
     return token
 
 
