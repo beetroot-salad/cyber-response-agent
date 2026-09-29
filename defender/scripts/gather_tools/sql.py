@@ -33,8 +33,13 @@ _MAX_OBJECT_SIZE = 1 << 30
 _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
 
 
-def _top_level_columns(con) -> list[str]:
-    return [row[0] for row in con.execute("DESCRIBE data").fetchall()]
+def _describe(con) -> list[tuple[str, str]]:
+    """`data`'s columns as `(name, type)`, or none when the engine will not say: every caller
+    is advisory, and a broken introspection must not mask the answer or the real error."""
+    try:
+        return [(row[0], row[1]) for row in con.execute("DESCRIBE data").fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _error_note(message: str) -> str:
@@ -126,15 +131,18 @@ def _arrow_refusal(con, sql: str) -> str | None:
     return None
 
 
-def _shape_hint(con, message: str, *, declared: bool = False) -> str:
-    if declared:
-        return _declared_hint(con, message)
-    try:
-        cols = _top_level_columns(con)
-    except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
+def _shape_hint(described: list[tuple[str, str]], message: str,
+                declaration: str | None) -> str:
+    """The query-error hint for an UNDECLARED payload: its columns, and the idiom for its shape.
+    `declaration` is the `--rows … --names …` for a payload of positional rows, else None."""
+    if not described:
         return ""
+    cols = [name for name, _ in described]
     # Each branch punctuates itself, so a copyable query does not get a trailing period.
-    if "hits" in cols:
+    if declaration is not None:
+        idiom = ("positional rows — undeclared, the whole payload is ONE row of `data`. "
+                 f"Declare them: {declaration}")
+    elif "hits" in cols:
         idiom = (
             "search-hits shape — `unnest(hits)` yields a STRUCT. Copy this form:\n"
             f"    SELECT h.\"@timestamp\", h.message {_HITS_FROM} "
@@ -146,15 +154,13 @@ def _shape_hint(con, message: str, *, declared: bool = False) -> str:
     return f"\n  hint: `data` has columns [{', '.join(cols)}]; {idiom}{_error_note(message)}"
 
 
-def _declared_hint(con, message: str) -> str:
+def _declared_hint(described: list[tuple[str, str]], message: str) -> str:
     """The query-error hint over a declared table: its columns and types, plus the clause for
     the two errors a declared column's type causes — a list compared as a scalar, and a JSON
     column compared as text."""
-    try:
-        described = con.execute("DESCRIBE data").fetchall()
-    except Exception:  # noqa: BLE001 — advisory only; a broken introspection must not mask the real error
+    if not described:
         return ""
-    cols = ", ".join(f"{_quote_ident(row[0])} {row[1]}" for row in described)
+    cols = ", ".join(f"{_quote_ident(name)} {typ}" for name, typ in described)
     low = message.lower()
     clause = ""
     if "[]" in message and ("conversion" in low or "cast" in low):
@@ -162,8 +168,8 @@ def _declared_hint(con, message: str) -> str:
                   "`list_contains(<col>, '<value>')`, or `unnest` the column in a subquery to get "
                   "one row per element.")
     elif "malformed json" in low:
-        clause = ("\n  A JSON column holds JSON, not text: compare `(<col>->>'$')`, or "
-                  "`CAST(<col> AS VARCHAR)` for its JSON text.")
+        clause = ("\n  A JSON column holds JSON, not text: compare `(<col>->>'$')`, and cast it "
+                  "to compare a number: `TRY_CAST((<col>->>'$') AS DOUBLE)`.")
     return (f"\n  hint: `data` has the declared columns [{cols}]; double-quote a name that "
             f"holds `.`, `@` or other punctuation.{clause}")
 
@@ -207,13 +213,26 @@ def _collision_note(renamed: list[str]) -> str:
     )
 
 
-def _truncation_note(con) -> str:
+def _is_truncated(value: object) -> bool:
+    """Whether a payload's `truncated` field says its rows are not all that matched — the one
+    reading of that field, for the undeclared payload and the declared one alike."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1"}
+    return False
+
+
+def _truncation_note(con, described: list[tuple[str, str]]) -> str:
+    if "truncated" not in (name for name, _ in described):
+        return ""
     try:
-        if "truncated" not in _top_level_columns(con):
-            return ""
-        if con.execute("SELECT 1 FROM data WHERE truncated LIMIT 1").fetchone() is None:
-            return ""
+        values = [row[0] for row in con.execute("SELECT truncated FROM data").fetchall()]
     except Exception:  # noqa: BLE001
+        return ""
+    if not any(_is_truncated(value) for value in values):
         return ""
     return (
         "defender-sql: note — this payload is TRUNCATED: `hits` holds only the first "
@@ -222,10 +241,10 @@ def _truncation_note(con) -> str:
     )
 
 
-def _declared_truncation_note(payload: object) -> str:
-    """The flagged path's truncation note, read off the parsed envelope: under the flag the
-    envelope's own fields are not in `data`, so `_truncation_note` cannot see them."""
-    if not (isinstance(payload, dict) and payload.get("truncated") is True):
+def _declared_truncation_note(truncated: bool) -> str:
+    """The flagged path's truncation note. Under the flag the envelope's own fields are not in
+    `data`, so the load reads `truncated` off the parsed envelope and hands it here."""
+    if not truncated:
         return ""
     return (
         "defender-sql: note — the payload declares `truncated`: these rows are not all that "
@@ -234,65 +253,89 @@ def _declared_truncation_note(payload: object) -> str:
     )
 
 
-def _list_column_note(con) -> str:
+def _list_column_note(described: list[tuple[str, str]]) -> str:
     """O4: a list column never answers silently as if it held scalars."""
-    try:
-        lists = [row[0] for row in con.execute("DESCRIBE data").fetchall()
-                 if row[1].endswith("[]")]
-    except Exception:  # noqa: BLE001
-        return ""
+    lists = [name for name, typ in described if typ.endswith("[]")]
     if not lists:
         return ""
     named = ", ".join(_quote_ident(name) for name in lists)
     first = _quote_ident(lists[0])
     return (
-        f"defender-sql: note — list column(s) {named}: each cell is a LIST, not a value. Filter with "
-        f"`list_contains({first}, '<value>')`; to count or group its elements, `unnest` it in a "
-        "subquery first. `GROUP BY` or `count(DISTINCT …)` on the column itself groups whole "
-        "lists, not their elements."
+        f"defender-sql: note — list column(s) {named}: each cell is a LIST, not a value. "
+        f"Filter with `list_contains({first}, '<value>')`; to count or group its elements, "
+        "`unnest` it in a subquery first. `GROUP BY` or `count(DISTINCT …)` on the column "
+        "itself groups whole lists, not their elements."
     )
 
 
-#: A payload key echoed into a copyable command only when it is this plain.
-_ECHOABLE_KEY = re.compile(r"[A-Za-z0-9_@-]+")
-#: A list of objects carrying a string `name`, as `DESCRIBE` spells its type.
-_NAMED_STRUCTS = re.compile(r'STRUCT\((?:.*, )?"?name"? VARCHAR(?:, .*)?\)\[\]')
-
-
-def _positional_rows_note(con) -> str:
-    """O6: the note an UNFLAGGED run prints when the payload holds positional rows.
-
-    Detected by type only — a top-level column that is a list of lists, whatever its element
-    type — never by key name. Unflagged, such a payload is one row, so `count(*)` answers 1
-    without an error; this is the only thing that says so.
-    """
-    try:
-        described = con.execute("DESCRIBE data").fetchall()
-        rows_keys = [name for name, typ, *_ in described if typ.endswith("[][]")]
-        if not rows_keys:
-            return ""
-        rows_key = rows_keys[0]
-        names_key = None
-        for name, typ, *_ in described:
-            if name == rows_key or not (typ == "VARCHAR[]" or _NAMED_STRUCTS.fullmatch(typ)):
-                continue
-            lengths = con.execute(
-                f"SELECT len({_quote_ident(name)}), len({_quote_ident(rows_key)}[1]) "
-                "FROM data LIMIT 1").fetchone()
-            if lengths and lengths[0] is not None and lengths[0] == lengths[1]:
-                names_key = name
-                break
-    except Exception:  # noqa: BLE001 — advisory only
+def _json_column_note(described: list[tuple[str, str]]) -> str:
+    """A JSON column (cells of mixed kinds) never compares silently as text: `->>` unpacks it
+    to TEXT, where '9' sorts above '412'."""
+    jsons = [name for name, typ in described if typ == "JSON"]
+    if not jsons:
         return ""
-    rows_arg = rows_key if _ECHOABLE_KEY.fullmatch(rows_key) else "<key>"
-    names_arg = (names_key if names_key is not None and _ECHOABLE_KEY.fullmatch(names_key)
-                 else "<names-key>")
-    where = f"under {rows_key}" if rows_arg == rows_key else "under a top-level key"
+    named = ", ".join(_quote_ident(name) for name in jsons)
+    first = _quote_ident(jsons[0])
+    return (
+        f"defender-sql: note — JSON column(s) {named}: the cells are not all one plain kind, "
+        f"so each is JSON, not a typed value. `({first}->>'$')` gives TEXT, which compares and sorts as text; "
+        f"cast it to compare, sort or sum a number: `TRY_CAST(({first}->>'$') AS DOUBLE)` "
+        "(NULL where the cell is not a number)."
+    )
+
+
+#: A payload key echoed into a copyable command only when it is this plain — and not led by a
+#: `-`, which the command line would read as a flag.
+_ECHOABLE_KEY = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_@-]*")
+
+
+def _single_document(raw: bytes) -> object:
+    """The payload parsed as ONE JSON document, or None when it is not one (NDJSON, not JSON)."""
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+
+
+def _positional_declaration(payload: object) -> str | None:
+    """O6: the `--rows … --names …` that declares an UNDECLARED payload's positional rows, or
+    None when it holds none.
+
+    Read off the parsed payload, never off the engine's inferred types (which call an empty
+    `values` something other than a list of lists) and never off a key's name: ONE top-level
+    object, one of whose keys holds a list of lists. An empty list counts only beside a list
+    of names, the only thing that says it is rows. Unflagged, such a payload is one row, so
+    `count(*)` answers 1 without an error; this is what says so.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for rows_key, rows in payload.items():
+        if not (isinstance(rows, list) and all(isinstance(row, list) for row in rows)):
+            continue
+        width = len(rows[0]) if rows else None
+        names_key = next(
+            (key for key, value in payload.items()
+             if key != rows_key and (names := _name_list(value)) is not None
+             and (width is None or len(names) == width)),
+            None,
+        )
+        if not rows and names_key is None:
+            continue
+        rows_arg = rows_key if _ECHOABLE_KEY.fullmatch(rows_key) else "<key>"
+        names_arg = (names_key if names_key is not None and _ECHOABLE_KEY.fullmatch(names_key)
+                     else "<names-key>")
+        return f"--rows {rows_arg} --names {names_arg}"
+    return None
+
+
+def _positional_rows_note(declaration: str | None) -> str:
+    if declaration is None:
+        return ""
     # The declaration ends the note, so a copy of it carries no trailing punctuation.
     return (
-        f"defender-sql: note — this payload holds positional rows {where}. Undeclared, the "
-        "whole payload is ONE row of `data`, so `count(*)` answers 1. Declare them: "
-        f"--rows {rows_arg} --names {names_arg}"
+        "defender-sql: note — this payload holds positional rows. Undeclared, the whole "
+        "payload is ONE row of `data`, so `count(*)` answers 1. Declare them: "
+        f"{declaration}"
     )
 
 
@@ -328,16 +371,25 @@ def _resolve(payload: object, path: str, flag: str) -> object:
 _ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
+def _name_list(value: object) -> list[str] | None:
+    """What counts as a list of column names: a non-empty list of strings, or of objects each
+    carrying a string `name` — for the declaration and for the note that proposes one."""
+    if not (isinstance(value, list) and value):
+        return None
+    if all(isinstance(item, str) for item in value):
+        return list(value)
+    if all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in value):
+        return [item["name"] for item in value]
+    return None
+
+
 def _column_names(declared: object, path: str) -> list[str]:
     if not isinstance(declared, list):
         raise _Refused(f"--names {path!r} is not a list.")
     if not declared:
         raise _Refused(f"--names {path!r} names no columns.")
-    if all(isinstance(item, str) for item in declared):
-        names = list(declared)
-    elif all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in declared):
-        names = [item["name"] for item in declared]
-    else:
+    names = _name_list(declared)
+    if names is None:
         raise _Refused(f"--names {path!r} must be all strings, or all objects with a string "
                        "`name`.")
     seen: dict[str, str] = {}
@@ -345,6 +397,9 @@ def _column_names(declared: object, path: str) -> list[str]:
         if not name or any(unicodedata.category(ch) == "Cc" for ch in name):
             raise _Refused(f"--names {path!r} holds an empty name or one with a control "
                            f"character: {name!r}.")
+        if any(unicodedata.category(ch) == "Cs" for ch in name):
+            raise _Refused(f"--names {path!r} holds a name that is not valid text (a lone "
+                           f"surrogate): {name!r}.")
         # duckdb folds identifiers by ASCII case only, so that is the clash it would refuse.
         folded = name.translate(_ASCII_FOLD)
         if folded in seen:
@@ -398,9 +453,12 @@ def _column_type(cells: list) -> tuple[str, bool]:
         return _scalar_type(present), False
     elements = [el for cell in present for el in (cell if isinstance(cell, list) else [cell])
                 if el is not None]
-    if any(isinstance(el, (list, dict)) for el in elements):
+    element = _scalar_type([el for el in elements if not isinstance(el, (list, dict))])
+    # A list of anything but one plain kind is JSON whole, never a list of JSON: every list
+    # column is then one `list_contains` can search.
+    if element == "JSON" or any(isinstance(el, (list, dict)) for el in elements):
         return "JSON", False
-    return f"{_scalar_type(elements)}[]", True
+    return f"{element}[]", True
 
 
 def _quote_ident(name: str) -> str:
@@ -409,13 +467,17 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: str) -> object:
+def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: str) -> bool:
     """M1+M2: load the declared rows as `data`, one column per declared name.
 
     Payload text enters statement text only as `_quote_ident` identifiers, and only after the
     sandbox is locked: the unlocked load sees synthetic keys `c0…cN` and types from
-    `_column_type`'s fixed vocabulary. Returns the parsed payload.
+    `_column_type`'s fixed vocabulary. The whole load is one boundary: whatever fails in it
+    is a refusal, never a traceback. Returns whether the envelope declares `truncated`, the one
+    envelope field the run still needs, so the parsed payload is not held through the query.
     """
+    import duckdb
+
     if len(raw) > _MAX_OBJECT_SIZE:
         raise _Refused(f"stdin is over the {_MAX_OBJECT_SIZE}-byte cap.", EXIT_INPUT_ERROR)
     try:
@@ -433,6 +495,19 @@ def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: st
                            f"--names {names_path!r} names {len(names)} columns.")
 
     types = [_column_type([row[k] for row in rows]) for k in range(len(names))]
+    try:
+        _load_rows(con, rows, names, types, scratch)
+    except (duckdb.Error, UnicodeError) as exc:
+        # Python's JSON reader accepts what the engine's refuses (a lone surrogate), so a
+        # payload can parse above and still fail here.
+        # First line only: the rest names the tool's own scratch file and statement.
+        reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        raise _Refused(f"the payload could not be loaded: {reason}", EXIT_INPUT_ERROR) from None
+    return isinstance(payload, dict) and _is_truncated(payload.get("truncated"))
+
+
+def _load_rows(con, rows: list, names: list[str], types: list[tuple[str, bool]],
+               scratch: str) -> None:
     ndjson = os.path.join(scratch, "rows.ndjson")
     with open(ndjson, "w", encoding="utf-8") as handle:
         for row in rows:
@@ -452,7 +527,6 @@ def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: st
     select = ", ".join(f"c{k} AS {_quote_ident(name)}" for k, name in enumerate(names))
     con.execute(f"CREATE TABLE data AS SELECT {select} FROM _rows")
     con.execute("DROP TABLE _rows")
-    return payload
 
 
 def _inferred_load(con, raw: bytes, scratch: str) -> None:
@@ -471,6 +545,18 @@ def _inferred_load(con, raw: bytes, scratch: str) -> None:
     except duckdb.Error as exc:
         raise _Refused(f"stdin is not valid JSON or NDJSON: {exc}", EXIT_INPUT_ERROR) from None
     _lock(con)
+
+
+def _load_payload(con, raw: bytes, rows_path: str | None, names_path: str | None,
+                  scratch: str) -> tuple[bool, str | None]:
+    """Load the payload as `data`, declared or not. Returns what the run still needs from the
+    payload itself: whether a declared envelope says `truncated`, and, undeclared, the
+    declaration its positional rows would need."""
+    if rows_path is not None and names_path is not None:
+        return _declared_load(con, raw, rows_path, names_path, scratch), None
+    declaration = _positional_declaration(_single_document(raw))
+    _inferred_load(con, raw, scratch)
+    return False, declaration
 
 
 def _lock(con) -> None:
@@ -535,23 +621,25 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
     try:
         con = duckdb.connect(":memory:")
         try:
-            payload: object = None
-            if rows_path is not None and names_path is not None:
-                payload = _declared_load(con, raw, rows_path, names_path, scratch)
-            else:
-                _inferred_load(con, raw, scratch)
+            truncated, declaration = _load_payload(con, raw, rows_path, names_path, scratch)
         except _Refused as exc:
             print(f"defender-sql: {exc}", file=sys.stderr)
             return exc.code
 
+        described = _describe(con)
+
+        def hint(message: str) -> str:
+            return (_declared_hint(described, message) if declared
+                    else _shape_hint(described, message, declaration))
+
         # Printed on every run past the load, success or error: each says something the
         # answer alone would hide.
-        shape_notes = [n for n in ((_list_column_note(con),) if declared
-                                   else (_positional_rows_note(con),)) if n]
+        shape_notes = ([_list_column_note(described), _json_column_note(described)] if declared
+                       else [_positional_rows_note(declaration)])
+        shape_notes = [note for note in shape_notes if note]
 
         if refusal := _arrow_refusal(con, sql):
-            print(f"{refusal}{_shape_hint(con, refusal, declared=declared)}", *shape_notes,
-                  sep="\n", file=sys.stderr)
+            print(f"{refusal}{hint(refusal)}", *shape_notes, sep="\n", file=sys.stderr)
             return EXIT_QUERY_ERROR
 
         # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
@@ -561,8 +649,7 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
         except duckdb.Error as exc:
             if missing := _MISSING_MODULE.search(str(exc)):
                 return _no_runtime(missing.group(1))
-            print(f"defender-sql: query error: {exc}"
-                  f"{_shape_hint(con, str(exc), declared=declared)}", *shape_notes,
+            print(f"defender-sql: query error: {exc}{hint(str(exc))}", *shape_notes,
                   sep="\n", file=sys.stderr)
             return EXIT_QUERY_ERROR
 
@@ -578,7 +665,8 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
         json.dump(rows, sys.stdout, allow_nan=False)
         sys.stdout.write("\n")
         notes = [_collision_note(renamed) if renamed else "", *shape_notes,
-                 _declared_truncation_note(payload) if declared else _truncation_note(con)]
+                 _declared_truncation_note(truncated) if declared
+                 else _truncation_note(con, described)]
         for note in filter(None, notes):
             print(note, file=sys.stderr)
         return EXIT_OK

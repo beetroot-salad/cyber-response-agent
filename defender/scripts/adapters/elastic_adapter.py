@@ -416,8 +416,9 @@ def esql_payload(query: str, resp: dict) -> dict:
     """The `esql` verb's payload, shaped from the raw ES|QL response.
 
     `values` stays as the wire sent it: bare row arrays, cell `i` bound to `columns[i]`.
-    Re-zipping into dicts would roughly double what gather records to disk; `sql.py`'s hint and
-    `defender-sql.md` document the positional form.
+    Re-zipping into dicts would roughly double what gather records to disk; `defender-sql`
+    queries the rows by name under `--rows values --names columns`, which `defender-sql.md`
+    teaches.
 
     Pure and separate from the verb so `evals/oracle_golden/controls.py` can share it.
     """

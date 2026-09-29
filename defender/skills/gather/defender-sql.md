@@ -61,7 +61,10 @@ A wrong declaration exits `1` and names the defect.
   Filter with `list_contains("host.ip", '10.0.0.5')`; to count or group its
   elements, `unnest` it in a subquery first — `GROUP BY` on the column itself groups
   whole lists. The tool names every list column on stderr.
-- **A column of mixed kinds or objects** is JSON: unpack it with `(col->>'$')`.
+- **A column of mixed kinds or objects** is JSON, and the tool names it on stderr.
+  `(col->>'$')` unpacks a cell to TEXT, so a number compares and sorts as text
+  (`'9'` above `'412'`): cast before comparing, sorting or summing one,
+  `TRY_CAST((col->>'$') AS DOUBLE)`.
 
 ```sql
 SELECT "source.ip", failed FROM data WHERE "source.ip" = '203.0.113.7' AND failed > 9
