@@ -397,6 +397,36 @@
           ".defender-data"
         ],
         "note": "DECLARED BY #1078's GROUNDING (base ed5386bc) as an EMPTY-WRITER root, which is the fact worth recording: at this base nothing in defender/ or scripts/ writes or reads a data root or a tenant row — `grep -rn 'tenant\\.json' --include=*.py defender scripts` (no tests) finds only `_tenant.py`'s docstrings and `TENANT_RECORD_NAME = '_tenant.json'`, the RUNS-BASE record, which is a different file under a different root (`runs_base`). #1078 makes `<data root>/<tenant>/` (DEFENDER_DATA_ROOT, REQUIRED: there is no code default, and an unset or empty value is refused naming the variable, per #1078 §7 J01) the PARENT of four roots already declared here: `runs/` (was runs_base), `sessions/` (session_store, derived as runs_base.parent/sessions and unchanged), `episodes/` (was episode_dir's DEFENDER_EPISODES_BASE) and `learning/` (was learning_queue / pending_dir / learning_run_dir's state root, plus the three drain/repo locks drain_worktree's writers take). Its own record is the tenant ROW `<root>/<T>/tenant.json`, whose ONE production writer is to be `_tenant.py::create_tenant` (write_guarded mode=create) and whose readers are to be `require_tenant` and `tenant_of_run_dir`. NONE OF THOSE SYMBOLS EXISTS YET — add each here in the commit that creates it, per this block's rule that a row naming a symbol that resolves to nothing is indistinguishable from a row nobody wrote. `_tenant.py` is in lint_unguarded_tree_write's LINT_HARD_GATED_MODULES, so the tenant folder's own mkdir must be `guarded_mkdir`, and every new module-level str constant in `_tenant.py` is an import-refused 'record name' under lint_run_records arm (c) unless it joins `_OWNER_NON_RECORD_EXPORTS`. When #1078 lands, the six rows its C45 names (runs_base, episode_dir, learning_queue, pending_dir, learning_run_dir, session_store) go stale on their knob names and resolver symbols (`resolve_runs_base`, `DEFENDER_RUNS_BASE`, `DEFENDER_EPISODES_BASE`, `DEFAULT_PATHS`) — rewrite them in that commit."
+      },
+      "tenant_settings": {
+        "writers": [],
+        "readers": [
+          "defender/_tenants.py::tenant_dir",
+          "defender/runtime/run_tenant.py::resolve_run_tenant",
+          "defender/runtime/verb_dispositions.py::run_grants",
+          "defender/runtime/verb_dispositions.py::dispositions_path",
+          "defender/runtime/lead_zero_config.py::lead_zero_config_path",
+          "defender/scripts/adapters/_stub_transport.py::load_config",
+          "defender/scripts/adapters/_stub_transport.py::_config_path",
+          "defender/scripts/adapters/elastic_adapter.py::config_from",
+          "defender/scripts/adapters/elastic_adapter.py::config_path",
+          "defender/scripts/adapters/elastic_adapter.py::load_config",
+          "defender/learning/branch/estate/stagers/elastic.py::configured_patterns",
+          "defender/learning/branch/staging.py::write_door_from_env",
+          "defender/scripts/case_history/case_ticket.py::_load_mapping",
+          "defender/scripts/case_history/ticket_writer.py::_load_config",
+          "defender/skills/connect/validate_scaffold.py::check_config",
+          "defender/skills/connect/examples/example_adapter.py::_config"
+        ],
+        "grep": [
+          "config.env",
+          "mapping.yaml",
+          "secrets.env",
+          "settings_dir",
+          "verb-grants.yaml",
+          "lead-zero.yaml"
+        ],
+        "note": "DECLARED BY #1107's GROUNDING (re-grounded on dafb2da3, PR #1116's head — #1078 pass A, stacked per the human's base decision; first declared against 58c16165). The host-only `settings/` half of a tenant folder, `<tenants root>/<tenant>/settings/` (`_tenants.TenantDir.settings`; default tenants root `<repo>/knowledge/tenants` via `default_tenants_root`, overridable by an entry point's `--tenants-root`, plus the CI-checked `knowledge/tenant-template/`). NOT the same root as `tenant_root` above: #1078's data root holds the tenant ROW (`<data root>/<T>/tenant.json`) and the runs/episodes/learning trees, and `_tenant.create_tenant` (its one writer) never writes under a tenants root. Declared as an EMPTY-WRITER root, which is the fact worth recording: no production code writes under it — every file is operator-authored (the test helpers `_tenants1106.plant_tenant` and friends write fixture tenants into tmp roots). Its readers today each open their file PER CALL: `_stub_transport.load_config` and `elastic_adapter.load_config` per adapter call, `case_ticket._load_mapping` per screen/writer call (path-keyed `_MAPPING_CACHE`), `ticket_writer._load_config` per ticket step, and `configured_patterns` / `write_door_from_env` per launcher/registry call — and three of them lay the PROCESS environment over the file (`config_from(..., env)`, `ctx.env.get(prefixed) or raw.get(prefixed)`, `os.environ.get(...) or raw.get(...)`). #1107 moves every reader behind ONE resolve-time parse on `RunTenant` (only `secrets.env`, new, stays read per lookup) and removes the environment overlay. The model cannot read this root (`permission.files.decide_read` is deny-by-default over the run dir and the defender corpus, and `resolve_tenant` refuses a tenants root inside a box-mounted tree), and `_tenants._refuse_links` walks it for links ONCE, at resolve. The #1107 record types (`SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup`) and the secret lookup's reader are deliberately NOT listed: they do not exist until write-code-from-spec builds them — add them, and drop the per-call readers that go, in the commit that does."
       }
     }
   },
