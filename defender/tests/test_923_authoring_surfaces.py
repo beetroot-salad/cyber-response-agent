@@ -111,6 +111,12 @@ _VOCABULARY_READERS = {
     # outside the vocabulary is compared as the raw string it is, never coerced into the
     # member it resembles (`test_923_readers.py`'s `visualize_episode` edge).
     "scripts/visualize/visualize_episode.py",   # the verdict tile's contrast/agree counts
+    # READER: the platform API's `Investigation` wire model (#1131) serves the disposition the
+    # store read off a completed run's committed report. No request body carries a disposition
+    # (the create bodies forbid unknown fields), so nothing authors one here; the model asks the
+    # owner whether the value is a member and refuses to serve one that is not, never coercing
+    # a variant into the member it resembles (`test_923_readers.py`'s `api_models` edge).
+    "api/models.py",                            # the served investigation's disposition
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",

@@ -23,7 +23,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
-from defender.api.demo import DEMO_TOKENS, demo_deps  # noqa: E402
+from defender.api.demo import demo_deps, demo_tokens  # noqa: E402
 from defender.api.fakes import (  # noqa: E402
     InMemoryAudit,
     InMemorySecrets,
@@ -447,11 +447,26 @@ def test_check_reports_a_system_without_credentials(world: _World) -> None:
 # --- the demo server's seed ----------------------------------------------------------------
 
 
-def test_the_demo_seed_serves_each_tenant_its_own_records() -> None:
-    client = TestClient(create_app(demo_deps(lambda: NOW)))
-    for token, principal in DEMO_TOKENS.items():
-        alerts = client.get("/alerts", headers={"Authorization": f"Bearer {token}"}).json()
+def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
+    tenants = ("t-one", "t-two")
+    client = TestClient(create_app(demo_deps(tenants, lambda: NOW)))
+    seen: dict[str, set[str]] = {}
+    for token, principal in demo_tokens(tenants).items():
+        auth = {"Authorization": f"Bearer {token}"}
+        alerts = client.get("/alerts", headers=auth).json()
         assert alerts, token
         for alert in alerts:
-            detail = client.get(f"/alerts/{alert['alert_id']}", headers={"Authorization": f"Bearer {token}"})
-            assert detail.status_code == 200, (principal.tenant_id, alert["alert_id"])
+            assert client.get(f"/alerts/{alert['alert_id']}", headers=auth).status_code == 200
+        seen.setdefault(principal.tenant_id, set()).update(a["alert_id"] for a in alerts)
+    assert set(seen) == set(tenants)
+    assert not seen["t-one"] & seen["t-two"]
+
+
+@pytest.mark.parametrize(("tenants", "reason"), [
+    ((), "at least one tenant"),
+    (("t-one", "t-one"), "tenants repeat"),
+    (("Not_A_Tenant",), "not a tenant id"),
+])
+def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:
+    with pytest.raises(ValueError, match=reason):
+        demo_deps(tenants)
