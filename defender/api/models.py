@@ -7,24 +7,28 @@ comes from the login alone (#1131 "Tenancy").
 Vocabulary follows #1131: "investigation" in the public API ("run" stays the internal name), and
 `status` is the execution lifecycle, distinct from `disposition`, the outcome
 (`docs/platform-design.md` §2.3).
+
+Two shapes are closed at the boundary so nothing past it has to handle them: every moment is
+timezone-aware (`AwareDatetime`; a time without an offset is a 422, never a naive value compared
+against an aware one), and every record id matches `RECORD_ID_PATTERN`.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
-#: The statuses in which an investigation is still executing. At most one per alert
-#: (`docs/platform-design.md` §4.1); cancel applies only to these, delete never does.
-LIVE_STATUSES: frozenset[str] = frozenset({"queued", "running"})
-
 LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped"]
+
+#: What a record id may be: the same grammar in a path segment and in a request body, and ASCII
+#: only, so an id is always safe to put back into a URL or a header.
+RECORD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 
 #: The id a caller mints once per user action, so a retried or double-clicked create
 #: returns the record the first attempt made.
@@ -44,9 +48,9 @@ class AlertSummary(BaseModel):
     title: str
     severity: str | None
     rule: str | None
-    fired_at: _dt.datetime = Field(description="When the vendor says the alert fired.")
-    changed_at: _dt.datetime = Field(description="When the vendor last changed the ticket.")
-    received_at: _dt.datetime = Field(description="When we pulled it; our own clock.")
+    fired_at: AwareDatetime = Field(description="When the vendor says the alert fired.")
+    changed_at: AwareDatetime = Field(description="When the vendor last changed the ticket.")
+    received_at: AwareDatetime = Field(description="When we pulled it; our own clock.")
 
 
 class Alert(AlertSummary):
@@ -63,9 +67,9 @@ class Investigation(BaseModel):
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
     cost_usd: float = Field(description="Model cost so far; final once the status is terminal.")
-    created_at: _dt.datetime
-    started_at: _dt.datetime | None = None
-    finished_at: _dt.datetime | None = None
+    created_at: AwareDatetime
+    started_at: AwareDatetime | None = None
+    finished_at: AwareDatetime | None = None
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",
@@ -80,7 +84,7 @@ class Investigation(BaseModel):
 
 
 class InvestigationCreate(_Request):
-    alert_id: str
+    alert_id: RecordId
     client_request_id: ClientRequestId
 
 
@@ -94,12 +98,12 @@ class LearningJob(BaseModel):
     )
     stage: str | None = None
     status_detail: str | None = Field(default=None, description="A skip reason or error summary.")
-    created_at: _dt.datetime
-    finished_at: _dt.datetime | None = None
+    created_at: AwareDatetime
+    finished_at: AwareDatetime | None = None
 
 
 class LearningJobCreate(_Request):
-    investigation_id: str
+    investigation_id: RecordId
     client_request_id: ClientRequestId
 
 
@@ -113,14 +117,21 @@ class Lesson(BaseModel):
 SettingValue = str | int | bool
 
 
-class System(BaseModel):
-    """A connected system of the tenant's: a data source, or the ticket system alerts come from."""
+class SystemSettings(BaseModel):
+    """A connected system of the tenant's, as the systems repository stores it: a data source,
+    or the ticket system alerts come from."""
 
     system_id: str
     kind: str
     display_name: str
     enabled: bool
     settings: dict[str, SettingValue]
+
+
+class System(SystemSettings):
+    """A system as the API serves it. `has_credentials` is the secret store's answer, asked at
+    read time, so it cannot disagree with where credentials are written."""
+
     has_credentials: bool = Field(description="Credentials are write-only; this is all a read says.")
 
 

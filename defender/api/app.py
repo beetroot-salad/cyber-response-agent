@@ -1,26 +1,30 @@
 """The routes: #1131's public API, each a thin translation onto a port.
 
 Every route resolves the caller through the one login dependency (`_principal`) and passes its
-tenant to the ports; no route reads a tenant from the request. Status codes:
+tenant to the ports; no route reads a tenant from the request. The routes decide no data rule —
+which request replays which record, what may be cancelled, deleted or learned from is the
+store's (`ports.py`). What they own is the mapping onto HTTP:
 
-- `POST` creates answer 201 with a `Location` header, or 200 with the existing record when the
-  request replays an earlier one (same `client_request_id`) or, for an investigation, when the
-  alert already has a live one.
-- A record another tenant owns is a 404, the same as a missing one.
-- A body naming a missing record is a 422; a state that refuses the request is a 409.
+- A create answers 201 with a `Location` header when the port says it created, else 200 with
+  the record the port returned.
+- `None` from a read, or `NotFound`, is a 404; a record another tenant owns reads the same.
+- `UnknownReference` (a body naming a missing record) is a 422; `Conflict` is a 409.
+- Malformed input never reaches a port: ids outside `RECORD_ID_PATTERN` and times without an
+  offset are 422s at the boundary.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import AwareDatetime
 
 from .models import (
+    RECORD_ID_PATTERN,
     Alert,
     AlertSummary,
     CredentialsPut,
@@ -32,6 +36,7 @@ from .models import (
     System,
     SystemCheck,
     SystemPut,
+    SystemSettings,
 )
 from .ports import (
     ApiDeps,
@@ -74,6 +79,7 @@ def _principal(
 Deps = Annotated[ApiDeps, Depends(_deps)]
 Caller = Annotated[Principal, Depends(_principal)]
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
+Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
 
 
 def _audit(deps: ApiDeps, caller: Principal, action: AuditAction, target: str, detail: str = "") -> None:
@@ -88,6 +94,8 @@ def _not_found(what: str, record_id: str) -> HTTPException:
 
 
 def _created_or_replayed(response: Response, created: bool, location: str) -> None:
+    """201 and a `Location`, or the default 200. `location` is always a URL the router built,
+    so every segment in it is encoded."""
     if created:
         response.status_code = status.HTTP_201_CREATED
         response.headers["Location"] = location
@@ -100,8 +108,8 @@ alerts = APIRouter(prefix="/alerts", tags=["alerts"])
 def list_alerts(
     deps: Deps,
     caller: Caller,
-    fired_after: _dt.datetime | None = None,
-    fired_before: _dt.datetime | None = None,
+    fired_after: AwareDatetime | None = None,
+    fired_before: AwareDatetime | None = None,
     severity: str | None = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> list[AlertSummary]:
@@ -112,7 +120,7 @@ def list_alerts(
 
 
 @alerts.get("/{alert_id}")
-def get_alert(deps: Deps, caller: Caller, alert_id: str) -> Alert:
+def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
     alert = deps.alerts.get_alert(caller.tenant_id, alert_id)
     if alert is None:
         raise _not_found("alert", alert_id)
@@ -124,29 +132,32 @@ investigations = APIRouter(prefix="/investigations", tags=["investigations"])
 
 @investigations.post("", responses={201: {"model": Investigation}})
 def start_investigation(
-    deps: Deps, caller: Caller, body: InvestigationCreate, response: Response
+    deps: Deps, caller: Caller, body: InvestigationCreate, request: Request, response: Response
 ) -> Investigation:
     """Start an investigation of an alert. Calling it again for the same alert is a rerun,
-    unless an investigation of that alert is still live, which is then returned."""
+    unless an investigation of that alert is still live, which is then returned; the same
+    `client_request_id` always returns the same investigation."""
     investigation, created = deps.investigations.create_investigation(
         caller.tenant_id, body.alert_id, body.client_request_id
     )
     if created:
         _audit(deps, caller, "investigation.start", investigation.investigation_id,
                detail=f"alert {body.alert_id}")
-    _created_or_replayed(response, created, f"/investigations/{investigation.investigation_id}")
+    _created_or_replayed(response, created, str(request.url_for(
+        "get_investigation", investigation_id=investigation.investigation_id)))
     return investigation
 
 
 @investigations.get("")
 def list_investigations(
-    deps: Deps, caller: Caller, alert_id: str | None = None, limit: Limit = DEFAULT_PAGE
+    deps: Deps, caller: Caller, alert_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    limit: Limit = DEFAULT_PAGE,
 ) -> list[Investigation]:
     return deps.investigations.list_investigations(caller.tenant_id, alert_id=alert_id, limit=limit)
 
 
 @investigations.get("/{investigation_id}")
-def get_investigation(deps: Deps, caller: Caller, investigation_id: str) -> Investigation:
+def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
     investigation = deps.investigations.get_investigation(caller.tenant_id, investigation_id)
     if investigation is None:
         raise _not_found("investigation", investigation_id)
@@ -154,14 +165,14 @@ def get_investigation(deps: Deps, caller: Caller, investigation_id: str) -> Inve
 
 
 @investigations.post("/{investigation_id}/cancel")
-def cancel_investigation(deps: Deps, caller: Caller, investigation_id: str) -> Investigation:
+def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
     investigation = deps.investigations.cancel_investigation(caller.tenant_id, investigation_id)
     _audit(deps, caller, "investigation.cancel", investigation_id)
     return investigation
 
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_investigation(deps: Deps, caller: Caller, investigation_id: str) -> None:
+def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
     """Hide an investigation from every read. Its records are kept: lessons cite runs."""
     deps.investigations.delete_investigation(caller.tenant_id, investigation_id)
     _audit(deps, caller, "investigation.delete", investigation_id)
@@ -172,7 +183,7 @@ def delete_investigation(deps: Deps, caller: Caller, investigation_id: str) -> N
     status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     response_class=RedirectResponse,
 )
-def read_artifact(deps: Deps, caller: Caller, investigation_id: str, key: str) -> RedirectResponse:
+def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) -> RedirectResponse:
     """Redirect to a short-lived signed link on the blob store's own origin. The bytes never
     pass through the API, and a run page never renders on the app's origin.
 
@@ -191,23 +202,26 @@ learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"])
 
 @learning_jobs.post("", responses={201: {"model": LearningJob}})
 def start_learning_job(
-    deps: Deps, caller: Caller, body: LearningJobCreate, response: Response
+    deps: Deps, caller: Caller, body: LearningJobCreate, request: Request, response: Response
 ) -> LearningJob:
-    """Learn again from a completed investigation. Completion already queued one
-    automatically; this adds another."""
+    """Learn again from an investigation. Its completion already queued one automatically;
+    this adds another."""
     job, created = deps.learning_jobs.create_learning_job(
         caller.tenant_id, body.investigation_id, body.client_request_id
     )
     if created:
         _audit(deps, caller, "learning_job.start", job.learning_job_id,
                detail=f"investigation {body.investigation_id}")
-    _created_or_replayed(response, created, f"/learning-jobs/{job.learning_job_id}")
+    _created_or_replayed(response, created, str(request.url_for(
+        "get_learning_job", learning_job_id=job.learning_job_id)))
     return job
 
 
 @learning_jobs.get("")
 def list_learning_jobs(
-    deps: Deps, caller: Caller, investigation_id: str | None = None, limit: Limit = DEFAULT_PAGE
+    deps: Deps, caller: Caller,
+    investigation_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    limit: Limit = DEFAULT_PAGE,
 ) -> list[LearningJob]:
     return deps.learning_jobs.list_learning_jobs(
         caller.tenant_id, investigation_id=investigation_id, limit=limit
@@ -215,7 +229,7 @@ def list_learning_jobs(
 
 
 @learning_jobs.get("/{learning_job_id}")
-def get_learning_job(deps: Deps, caller: Caller, learning_job_id: str) -> LearningJob:
+def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> LearningJob:
     job = deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
     if job is None:
         raise _not_found("learning job", learning_job_id)
@@ -233,29 +247,39 @@ def list_lessons(deps: Deps, caller: Caller) -> list[Lesson]:
 systems = APIRouter(prefix="/systems", tags=["systems"])
 
 
+def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
+    """The system as served: its settings plus the secret store's own answer, so the flag can
+    never disagree with where credentials were written."""
+    has = deps.secrets.has_credentials(caller.tenant_id, settings.system_id)
+    return System(**settings.model_dump(), has_credentials=has)
+
+
 @systems.get("")
 def list_systems(deps: Deps, caller: Caller) -> list[System]:
-    return deps.systems.list_systems(caller.tenant_id)
+    return [_served(deps, caller, s) for s in deps.systems.list_systems(caller.tenant_id)]
 
 
 def _system(deps: ApiDeps, caller: Principal, system_id: str) -> System:
-    system = deps.systems.get_system(caller.tenant_id, system_id)
-    if system is None:
+    settings = deps.systems.get_system(caller.tenant_id, system_id)
+    if settings is None:
         raise _not_found("system", system_id)
-    return system
+    return _served(deps, caller, settings)
 
 
 @systems.put("/{system_id}", responses={201: {"model": System}})
-def put_system(deps: Deps, caller: Caller, system_id: str, body: SystemPut, response: Response) -> System:
+def put_system(
+    deps: Deps, caller: Caller, system_id: Id, body: SystemPut, request: Request, response: Response
+) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
-    system, created = deps.systems.put_system(caller.tenant_id, system_id, body)
+    settings, created = deps.systems.put_system(caller.tenant_id, system_id, body)
     _audit(deps, caller, "system.update", system_id)
-    _created_or_replayed(response, created, f"/systems/{system_id}")
-    return system
+    # A PUT creates the resource at its own URL.
+    _created_or_replayed(response, created, str(request.url))
+    return _served(deps, caller, settings)
 
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT)
-def put_credentials(deps: Deps, caller: Caller, system_id: str, body: CredentialsPut) -> None:
+def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
     _system(deps, caller, system_id)
     deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
@@ -264,7 +288,7 @@ def put_credentials(deps: Deps, caller: Caller, system_id: str, body: Credential
 
 
 @systems.post("/{system_id}/check")
-def check_system(deps: Deps, caller: Caller, system_id: str) -> SystemCheck:
+def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
     """Test the connection and a first query."""
     return deps.checker.check(caller.tenant_id, _system(deps, caller, system_id))
 
@@ -279,12 +303,13 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app = FastAPI(
         title="Defender platform API",
         version=API_VERSION,
-        summary="Stub: the routes and shapes are the contract; the records are in-memory fakes.",
+        summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
     )
     app.state.deps = deps
     for router in (alerts, investigations, learning_jobs, lessons, systems):
         app.include_router(router)
     app.add_exception_handler(NotFound, _refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(Conflict, _refusal(status.HTTP_409_CONFLICT))
-    app.add_exception_handler(UnknownReference, _refusal(status.HTTP_422_UNPROCESSABLE_CONTENT))
+    # The literal, not starlette's constant: it was renamed across starlette releases.
+    app.add_exception_handler(UnknownReference, _refusal(422))
     return app

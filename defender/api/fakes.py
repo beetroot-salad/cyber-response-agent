@@ -1,21 +1,25 @@
-"""In-memory implementations of every port, for the stub server and the API's tests.
+"""Rule-free stand-ins for the ports, for the demo server (`demo.py`).
 
-They implement the data-layer rules the real store will enforce with constraints and
-transactions (`docs/platform-design.md` §2.5, §4.1), so `tests/test_api_stub.py` is the
-conformance suite a real store has to pass too. Nothing here persists, and no investigation
-ever moves on its own: a created investigation stays `queued` until a test (or the demo seed)
-sets its state through the `add_*` methods, which are not part of any port.
+They keep records per tenant and answer the obvious thing, and they enforce NONE of the data
+rules `ports.py` states — no `client_request_id` replay, no one-live-investigation collapse, no
+refusal to cancel, delete or learn from an investigation in the wrong state. Those rules are the
+store's (#1082), which enforces them with constraints and transactions and tests them against
+the ports; re-deriving them here in Python is how a second, subtly different copy of each rule
+gets written. So a demo client that double-submits gets two investigations, and nothing here is
+a reference for how the platform behaves.
+
+Every record is keyed by `(tenant_id, id)`, so one tenant's record can never displace
+another's, and every read iterates a snapshot, so a concurrent write cannot fail it.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import itertools
-from collections.abc import Callable, Iterable
-from typing import Any
+from collections.abc import Callable
+from typing import TypeVar
 
 from .models import (
-    LIVE_STATUSES,
     Alert,
     AlertSummary,
     Investigation,
@@ -24,15 +28,11 @@ from .models import (
     System,
     SystemCheck,
     SystemPut,
+    SystemSettings,
 )
-from .ports import (
-    AuditEvent,
-    Conflict,
-    NotFound,
-    Principal,
-    Unauthenticated,
-    UnknownReference,
-)
+from .ports import AuditEvent, NotFound, Principal, Unauthenticated, UnknownReference
+
+T = TypeVar("T")
 
 
 class TokenAuthenticator:
@@ -48,57 +48,46 @@ class TokenAuthenticator:
         return self._tokens[bearer_token]
 
 
-class _Record:
-    """A stored record plus the bookkeeping the wire model does not show."""
+class _Table(dict[tuple[str, str], T]):
+    """One tenant-keyed table."""
 
-    def __init__(self, tenant_id: str, value: Any, *, client_request_id: str | None = None) -> None:
-        self.tenant_id = tenant_id
-        self.value = value
-        self.client_request_id = client_request_id
-        self.deleted = False
+    def of(self, tenant_id: str) -> list[T]:
+        return [v for (tenant, _), v in list(self.items()) if tenant == tenant_id]
 
 
 class InMemoryStore:
-    """The alerts, investigations, learning jobs, lessons and systems repositories over one set
-    of in-memory tables, since investigations and learning jobs point at alerts."""
+    """The alerts, investigations, learning jobs, lessons and systems repositories, seeded by
+    `demo.py` through the `add_*` methods (which are not part of any port)."""
 
-    def __init__(self, clock: Callable[[], _dt.datetime], secrets: InMemorySecrets) -> None:
+    def __init__(self, clock: Callable[[], _dt.datetime]) -> None:
         self._clock = clock
-        # `System.has_credentials` is read from the secret store, never stored beside the
-        # settings, so the two cannot disagree.
-        self._secrets = secrets
         self._ids = itertools.count(1)
-        self._alerts: dict[str, _Record] = {}
-        self._investigations: dict[str, _Record] = {}
-        self._learning_jobs: dict[str, _Record] = {}
-        self._lessons: list[_Record] = []
-        self._systems: dict[tuple[str, str], System] = {}
+        self._alerts: _Table[Alert] = _Table()
+        self._investigations: _Table[Investigation] = _Table()
+        self._deleted: set[tuple[str, str]] = set()
+        self._learning_jobs: _Table[LearningJob] = _Table()
+        self._lessons: _Table[Lesson] = _Table()
+        self._systems: _Table[SystemSettings] = _Table()
 
     def _mint(self, prefix: str) -> str:
         return f"{prefix}-{next(self._ids):06d}"
 
-    @staticmethod
-    def _visible(record: _Record | None, tenant_id: str) -> Any:
-        if record is None or record.tenant_id != tenant_id or record.deleted:
-            return None
-        return record.value
-
-    # --- seeding (not part of any port) -------------------------------------------------
+    # --- seeding ------------------------------------------------------------------------
 
     def add_alert(self, tenant_id: str, alert: Alert) -> Alert:
-        self._alerts[alert.alert_id] = _Record(tenant_id, alert)
+        self._alerts[(tenant_id, alert.alert_id)] = alert
         return alert
 
     def add_investigation(self, tenant_id: str, investigation: Investigation) -> Investigation:
-        self._investigations[investigation.investigation_id] = _Record(tenant_id, investigation)
+        self._investigations[(tenant_id, investigation.investigation_id)] = investigation
         return investigation
 
     def add_learning_job(self, tenant_id: str, job: LearningJob) -> LearningJob:
-        self._learning_jobs[job.learning_job_id] = _Record(tenant_id, job)
+        self._learning_jobs[(tenant_id, job.learning_job_id)] = job
         return job
 
     def add_lesson(self, tenant_id: str, lesson: Lesson) -> Lesson:
-        self._lessons.append(_Record(tenant_id, lesson))
+        self._lessons[(tenant_id, lesson.lesson_id)] = lesson
         return lesson
 
     # --- AlertsRepository ---------------------------------------------------------------
@@ -112,84 +101,62 @@ class InMemoryStore:
         severity: str | None,
         limit: int,
     ) -> list[AlertSummary]:
-        alerts: list[Alert] = [
-            a for r in self._alerts.values() if (a := self._visible(r, tenant_id)) is not None
-        ]
         selected = [
-            a for a in alerts
+            a for a in self._alerts.of(tenant_id)
             if (fired_after is None or a.fired_at >= fired_after)
             and (fired_before is None or a.fired_at < fired_before)
             and (severity is None or a.severity == severity)
         ]
-        selected.sort(key=lambda a: a.fired_at, reverse=True)
+        selected.sort(key=lambda a: (a.fired_at, a.alert_id), reverse=True)
         return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in selected[:limit]]
 
     def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None:
-        return self._visible(self._alerts.get(alert_id), tenant_id)
+        return self._alerts.get((tenant_id, alert_id))
 
     # --- InvestigationsRepository -------------------------------------------------------
-
-    def _tenant_investigations(self, tenant_id: str) -> Iterable[_Record]:
-        return (r for r in self._investigations.values() if r.tenant_id == tenant_id)
 
     def create_investigation(
         self, tenant_id: str, alert_id: str, client_request_id: str
     ) -> tuple[Investigation, bool]:
         if self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
-        of_alert = [r for r in self._tenant_investigations(tenant_id) if r.value.alert_id == alert_id]
-        for r in of_alert:
-            if r.client_request_id == client_request_id:
-                return r.value, False
-        for r in of_alert:
-            if r.value.status in LIVE_STATUSES:
-                return r.value, False
         investigation = Investigation(
-            investigation_id=self._mint("inv"),
-            alert_id=alert_id,
-            status="queued",
-            cost_usd=0.0,
-            created_at=self._clock(),
+            investigation_id=self._mint("inv"), alert_id=alert_id, status="queued",
+            cost_usd=0.0, created_at=self._clock(),
         )
-        self._investigations[investigation.investigation_id] = _Record(
-            tenant_id, investigation, client_request_id=client_request_id
-        )
-        return investigation, True
+        return self.add_investigation(tenant_id, investigation), True
 
     def list_investigations(
         self, tenant_id: str, *, alert_id: str | None, limit: int
     ) -> list[Investigation]:
         found = [
-            r.value for r in self._tenant_investigations(tenant_id)
-            if not r.deleted and (alert_id is None or r.value.alert_id == alert_id)
+            i for i in self._investigations.of(tenant_id)
+            if (tenant_id, i.investigation_id) not in self._deleted
+            and (alert_id is None or i.alert_id == alert_id)
         ]
-        found.sort(key=lambda i: i.created_at, reverse=True)
+        found.sort(key=lambda i: (i.created_at, i.investigation_id), reverse=True)
         return found[:limit]
 
     def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
-        return self._visible(self._investigations.get(investigation_id), tenant_id)
+        if (tenant_id, investigation_id) in self._deleted:
+            return None
+        return self._investigations.get((tenant_id, investigation_id))
 
-    def _existing_investigation(self, tenant_id: str, investigation_id: str) -> _Record:
-        record = self._investigations.get(investigation_id)
-        if self._visible(record, tenant_id) is None:
+    def _existing(self, tenant_id: str, investigation_id: str) -> Investigation:
+        investigation = self.get_investigation(tenant_id, investigation_id)
+        if investigation is None:
             raise NotFound(f"no investigation {investigation_id!r}")
-        assert record is not None
-        return record
+        return investigation
 
     def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
-        record = self._existing_investigation(tenant_id, investigation_id)
-        if record.value.status not in LIVE_STATUSES:
-            raise Conflict(f"investigation already ended ({record.value.status})")
-        record.value = record.value.model_copy(
+        aborted = self._existing(tenant_id, investigation_id).model_copy(
             update={"status": "aborted", "finished_at": self._clock()}
         )
-        return record.value
+        return self.add_investigation(tenant_id, aborted)
 
     def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
-        record = self._existing_investigation(tenant_id, investigation_id)
-        if record.value.status in LIVE_STATUSES:
-            raise Conflict("cancel a live investigation before deleting it")
-        record.deleted = True
+        self._existing(tenant_id, investigation_id)
+        self._deleted.add((tenant_id, investigation_id))
 
     # --- LearningJobsRepository ---------------------------------------------------------
 
@@ -199,70 +166,46 @@ class InMemoryStore:
         investigation = self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
             raise UnknownReference(f"no investigation {investigation_id!r}")
-        for r in self._learning_jobs.values():
-            if r.tenant_id == tenant_id and r.client_request_id == client_request_id:
-                if r.value.investigation_id != investigation_id:
-                    raise Conflict("client_request_id already used for another investigation")
-                return r.value, False
-        if investigation.status != "completed":
-            raise Conflict(f"only a completed investigation can be learned from ({investigation.status})")
         job = LearningJob(
-            learning_job_id=self._mint("lj"),
-            investigation_id=investigation_id,
-            alert_id=investigation.alert_id,
-            status="queued",
-            trigger="explicit",
+            learning_job_id=self._mint("lj"), investigation_id=investigation_id,
+            alert_id=investigation.alert_id, status="queued", trigger="explicit",
             created_at=self._clock(),
         )
-        self._learning_jobs[job.learning_job_id] = _Record(
-            tenant_id, job, client_request_id=client_request_id
-        )
-        return job, True
+        return self.add_learning_job(tenant_id, job), True
 
     def list_learning_jobs(
         self, tenant_id: str, *, investigation_id: str | None, limit: int
     ) -> list[LearningJob]:
         found = [
-            r.value for r in self._learning_jobs.values()
-            if r.tenant_id == tenant_id
-            and (investigation_id is None or r.value.investigation_id == investigation_id)
+            j for j in self._learning_jobs.of(tenant_id)
+            if investigation_id is None or j.investigation_id == investigation_id
         ]
-        found.sort(key=lambda j: j.created_at, reverse=True)
+        found.sort(key=lambda j: (j.created_at, j.learning_job_id), reverse=True)
         return found[:limit]
 
     def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None:
-        return self._visible(self._learning_jobs.get(learning_job_id), tenant_id)
+        return self._learning_jobs.get((tenant_id, learning_job_id))
 
     # --- LessonsRepository --------------------------------------------------------------
 
     def list_lessons(self, tenant_id: str) -> list[Lesson]:
-        return [r.value for r in self._lessons if r.tenant_id == tenant_id]
+        return self._lessons.of(tenant_id)
 
     # --- SystemsRepository --------------------------------------------------------------
 
-    def _with_credentials_flag(self, tenant_id: str, system: System) -> System:
-        has = self._secrets.has_credentials(tenant_id, system.system_id)
-        return system.model_copy(update={"has_credentials": has})
+    def list_systems(self, tenant_id: str) -> list[SystemSettings]:
+        return sorted(self._systems.of(tenant_id), key=lambda s: s.system_id)
 
-    def list_systems(self, tenant_id: str) -> list[System]:
-        return [
-            self._with_credentials_flag(tenant_id, s)
-            for (tenant, _), s in sorted(self._systems.items())
-            if tenant == tenant_id
-        ]
+    def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None:
+        return self._systems.get((tenant_id, system_id))
 
-    def get_system(self, tenant_id: str, system_id: str) -> System | None:
-        system = self._systems.get((tenant_id, system_id))
-        return None if system is None else self._with_credentials_flag(tenant_id, system)
-
-    def put_system(self, tenant_id: str, system_id: str, body: SystemPut) -> tuple[System, bool]:
+    def put_system(
+        self, tenant_id: str, system_id: str, body: SystemPut
+    ) -> tuple[SystemSettings, bool]:
         created = (tenant_id, system_id) not in self._systems
-        self._systems[(tenant_id, system_id)] = System(
-            system_id=system_id, has_credentials=False, **body.model_dump()
-        )
-        system = self.get_system(tenant_id, system_id)
-        assert system is not None
-        return system, created
+        settings = SystemSettings(system_id=system_id, **body.model_dump())
+        self._systems[(tenant_id, system_id)] = settings
+        return settings, created
 
 
 class InMemorySecrets:

@@ -1,12 +1,12 @@
-"""#1131 — the stub platform API: the route set, the login seam, tenant scoping, and the
-data-layer rules behind each write.
+"""#1131 — the platform API's HTTP layer: the route set, the login seam, and how each port's
+answer maps onto a response.
 
-WHAT IS DRIVEN. The real app (`api.app.create_app`) through starlette's `TestClient`, over the
-in-memory fakes (`api.fakes`) seeded per test here rather than from `api.demo`, so each test
-states the records it relies on. The fakes carry the rules the real store will enforce with
-constraints (one live investigation per alert, `client_request_id` replay, learning only from a
-completed investigation), so these tests are also the conformance suite a real store has to
-pass when it replaces them.
+WHAT IS DRIVEN. The real app (`api.app.create_app`) through starlette's `TestClient`, over a
+SCRIPTED fake: every port method answers what the test says, and a call the test did not script
+fails it. So each test pins what the API does with an answer, never what a store would answer.
+The data rules behind the answers (request-id replay, one live investigation per alert, what may
+be cancelled, deleted or learned from) are the store's (`api/ports.py`, #1082) and are tested
+there, against the real implementation — not here against a re-derivation of them.
 """
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ import datetime as _dt
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,27 +26,50 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
 from defender.api.demo import demo_deps, demo_tokens  # noqa: E402
-from defender.api.fakes import (  # noqa: E402
-    InMemoryAudit,
-    InMemorySecrets,
-    InMemoryStore,
-    StubArtifactLinks,
-    StubSystemChecker,
-    TokenAuthenticator,
+from defender.api.fakes import InMemoryAudit, InMemoryStore, TokenAuthenticator  # noqa: E402
+from defender.api.models import (  # noqa: E402
+    Alert,
+    AlertSummary,
+    Investigation,
+    LearningJob,
+    Lesson,
+    System,
+    SystemCheck,
+    SystemSettings,
 )
-from defender.api.models import Alert, Investigation, SystemPut  # noqa: E402
-from defender.api.ports import ApiDeps, Principal  # noqa: E402
+from defender.api.ports import (  # noqa: E402
+    ApiDeps,
+    Conflict,
+    NotFound,
+    Principal,
+    UnknownReference,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
 
-A, B = "tenant-a", "tenant-b"
-TOKENS = {
-    "tok-a": Principal(tenant_id=A, user_id="ann@a.example"),
-    "tok-b": Principal(tenant_id=B, user_id="bob@b.example"),
-}
-AUTH_A = {"Authorization": "Bearer tok-a"}
-AUTH_B = {"Authorization": "Bearer tok-b"}
+A = "tenant-a"
+USER = "ann@a.example"
+AUTH = {"Authorization": "Bearer tok-a"}
+BASE = "http://testserver"
+
+ALERT = Alert(
+    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", severity="high",
+    rule="r", fired_at=NOW, changed_at=NOW, received_at=NOW, raw={"id": "al-1"},
+)
+SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
+INV = Investigation(
+    investigation_id="inv-1", alert_id="al-1", status="completed", disposition="benign",
+    cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+)
+JOB = LearningJob(
+    learning_job_id="lj-1", investigation_id="inv-1", alert_id="al-1", status="queued",
+    trigger="explicit", created_at=NOW,
+)
+LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
+SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", enabled=True,
+                          settings={"queue": "sec"})
+SIGNED = "https://blobs.invalid/signed?sig=1"
 
 #: #1131's "API" section, verbatim as (method, path). The contract this stub exists to pin.
 PUBLIC_ROUTES = {
@@ -66,57 +91,97 @@ PUBLIC_ROUTES = {
     ("POST", "/systems/{system_id}/check"),
 }
 
+#: One successful call per route: (route, concrete path, body, the port answers it needs).
+HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] = [
+    (("GET", "/alerts"), "/alerts", None, {"list_alerts": [SUMMARY]}),
+    (("GET", "/alerts/{alert_id}"), "/alerts/al-1", None, {"get_alert": ALERT}),
+    (("POST", "/investigations"), "/investigations",
+     {"alert_id": "al-1", "client_request_id": "r1"}, {"create_investigation": (INV, True)}),
+    (("GET", "/investigations"), "/investigations", None, {"list_investigations": [INV]}),
+    (("GET", "/investigations/{investigation_id}"), "/investigations/inv-1", None,
+     {"get_investigation": INV}),
+    (("POST", "/investigations/{investigation_id}/cancel"), "/investigations/inv-1/cancel", None,
+     {"cancel_investigation": INV}),
+    (("DELETE", "/investigations/{investigation_id}"), "/investigations/inv-1", None,
+     {"delete_investigation": None}),
+    (("GET", "/investigations/{investigation_id}/artifacts/{key}"),
+     "/investigations/inv-1/artifacts/report.md", None,
+     {"get_investigation": INV, "signed_url": SIGNED}),
+    (("POST", "/learning-jobs"), "/learning-jobs",
+     {"investigation_id": "inv-1", "client_request_id": "r1"}, {"create_learning_job": (JOB, True)}),
+    (("GET", "/learning-jobs"), "/learning-jobs", None, {"list_learning_jobs": [JOB]}),
+    (("GET", "/learning-jobs/{learning_job_id}"), "/learning-jobs/lj-1", None,
+     {"get_learning_job": JOB}),
+    (("GET", "/lessons"), "/lessons", None, {"list_lessons": [LESSON]}),
+    (("GET", "/systems"), "/systems", None,
+     {"list_systems": [SETTINGS], "has_credentials": False}),
+    (("PUT", "/systems/{system_id}"), "/systems/tix", {"kind": "ticketing", "display_name": "T"},
+     {"put_system": (SETTINGS, True), "has_credentials": False}),
+    (("PUT", "/systems/{system_id}/credentials"), "/systems/tix/credentials",
+     {"credentials": {"api_token": "x"}},
+     {"get_system": SETTINGS, "has_credentials": False, "put_credentials": None}),
+    (("POST", "/systems/{system_id}/check"), "/systems/tix/check", None,
+     {"get_system": SETTINGS, "has_credentials": True,
+      "check": SystemCheck(ok=True, detail="fine")}),
+]
 
-class _World:
-    def __init__(self) -> None:
-        self.secrets = InMemorySecrets()
-        self.store = InMemoryStore(lambda: NOW, self.secrets)
+
+class Scripted:
+    """Every port the routes call. `answers` maps a port method's name to what it returns, an
+    exception it raises, or a function of its arguments. Each call is recorded; an unscripted
+    one fails the test, so a test states exactly what the API may ask of the platform."""
+
+    def __init__(self, answers: dict[str, Any]) -> None:
+        self.answers = answers
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append((name, args, kwargs))
+            if name not in self.answers:
+                raise AssertionError(f"unscripted port call: {name}{args}")
+            answer = self.answers[name]
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer(*args, **kwargs) if callable(answer) else answer
+
+        return call
+
+    def called(self, name: str) -> list[tuple[tuple[Any, ...], dict[str, Any]]]:
+        return [(args, kwargs) for n, args, kwargs in self.calls if n == name]
+
+
+class Api:
+    def __init__(self, **answers: Any) -> None:
+        self.ports = Scripted(answers)
         self.audit = InMemoryAudit()
-        self.deps = ApiDeps(
-            authenticator=TokenAuthenticator(TOKENS),
-            alerts=self.store, investigations=self.store, learning_jobs=self.store,
-            lessons=self.store, systems=self.store, secrets=self.secrets,
-            checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
+        ports: Any = self.ports
+        self.client = TestClient(create_app(ApiDeps(
+            authenticator=TokenAuthenticator({"tok-a": Principal(tenant_id=A, user_id=USER)}),
+            alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
+            systems=ports, secrets=ports, checker=ports, artifact_links=ports,
             audit=self.audit, clock=lambda: NOW,
-        )
-        self.client = TestClient(create_app(self.deps))
-
-    def alert(self, tenant: str, alert_id: str, *, hours_ago: int = 1, severity: str = "high") -> Alert:
-        fired = NOW - _dt.timedelta(hours=hours_ago)
-        return self.store.add_alert(tenant, Alert(
-            alert_id=alert_id, vendor="tickets", vendor_ticket_id=f"T-{alert_id}", title=alert_id,
-            severity=severity, rule="r", fired_at=fired, changed_at=fired, received_at=fired,
-            raw={"id": alert_id},
-        ))
-
-    def investigation(self, tenant: str, investigation_id: str, alert_id: str, status: str,
-                      artifacts: tuple[str, ...] = ()) -> Investigation:
-        return self.store.add_investigation(tenant, Investigation(
-            investigation_id=investigation_id, alert_id=alert_id, status=status,
-            cost_usd=0.0, created_at=NOW, artifacts=list(artifacts),
-        ))
+        )))
 
     def actions(self) -> list[str]:
         return [e.action for e in self.audit.events]
 
 
-@pytest.fixture
-def world() -> _World:
-    return _World()
-
-
-def _concrete(path: str) -> str:
-    return path.replace("{key:path}", "k").replace("{", "").replace("}", "")
-
-
 # --- the contract --------------------------------------------------------------------------
 
 
-def test_the_published_routes_are_exactly_1131s_list(world: _World) -> None:
-    doc = world.client.get("/openapi.json").json()
+def test_the_published_routes_are_exactly_1131s_list() -> None:
+    doc = Api().client.get("/openapi.json").json()
     documented = {(method.upper(), path) for path, ops in doc["paths"].items() for method in ops}
     assert documented == PUBLIC_ROUTES
     assert doc["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
+
+
+def test_the_happy_path_table_covers_every_route() -> None:
+    assert {route for route, *_ in HAPPY} == PUBLIC_ROUTES
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
@@ -132,214 +197,238 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     assert json.loads(out.stdout) == []
 
 
-# --- login ---------------------------------------------------------------------------------
+# --- login and tenant ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("method", "path"), sorted(PUBLIC_ROUTES))
+@pytest.mark.parametrize(("route", "path", "body", "answers"), HAPPY, ids=lambda v: str(v))
+def test_every_route_asks_the_ports_as_the_logged_in_tenant(
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any]
+) -> None:
+    api = Api(**answers)
+    response = api.client.request(route[0], path, headers=AUTH, json=body, follow_redirects=False)
+    assert response.status_code < 400, response.text
+    assert api.ports.calls, "the route asked no port"
+    assert {args[0] for _, args, _ in api.ports.calls} == {A}
+    assert all(e.tenant_id == A and e.user_id == USER for e in api.audit.events)
+
+
+@pytest.mark.parametrize(("route", "path", "body", "answers"), HAPPY, ids=lambda v: str(v))
 @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer nope"}, {"Authorization": "Basic tok-a"}])
 def test_every_route_refuses_a_caller_without_a_known_bearer_token(
-    world: _World, method: str, path: str, headers: dict[str, str]
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
+    headers: dict[str, str],
 ) -> None:
-    response = world.client.request(method, _concrete(path), headers=headers, json={})
+    api = Api(**answers)
+    response = api.client.request(route[0], path, headers=headers, json=body)
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert api.ports.calls == []
+    assert api.audit.events == []
 
 
-def test_a_body_cannot_name_a_tenant(world: _World) -> None:
-    world.alert(B, "al-b")
-    response = world.client.post(
-        "/investigations", headers=AUTH_A,
-        json={"alert_id": "al-b", "client_request_id": "r", "tenant_id": B},
-    )
+@pytest.mark.parametrize(("path", "body"), [
+    ("/investigations", {"alert_id": "al-1", "client_request_id": "r", "tenant_id": A}),
+    ("/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r", "tenant_id": A}),
+])
+def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
+    api = Api()
+    assert api.client.post(path, headers=AUTH, json=body).status_code == 422
+    assert api.ports.calls == []
+
+
+# --- creates: 201 or replay ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("path", "body", "port", "record", "location", "action"), [
+    ("/investigations", {"alert_id": "al-1", "client_request_id": "r1"}, "create_investigation",
+     INV, "/investigations/inv-1", "investigation.start"),
+    ("/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r1"},
+     "create_learning_job", JOB, "/learning-jobs/lj-1", "learning_job.start"),
+])
+def test_a_create_is_a_201_with_location_only_when_the_store_created(
+    path: str, body: dict[str, str], port: str, record: Any, location: str, action: str,
+) -> None:
+    created = Api(**{port: (record, True)})
+    response = created.client.post(path, headers=AUTH, json=body)
+    assert response.status_code == 201
+    assert response.headers["Location"] == BASE + location
+    assert response.json() == record.model_dump(mode="json")
+    assert created.actions() == [action]
+    assert created.ports.called(port) == [((A, *body.values()), {})]
+
+    replayed = Api(**{port: (record, False)})
+    response = replayed.client.post(path, headers=AUTH, json=body)
+    assert response.status_code == 200
+    assert "Location" not in response.headers
+    assert response.json() == record.model_dump(mode="json")
+    assert replayed.actions() == [], "a replay is not a second start"
+
+
+def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
+    body = {"kind": "ticketing", "display_name": "T"}
+    created = Api(put_system=(SETTINGS, True), has_credentials=False)
+    response = created.client.put("/systems/tix", headers=AUTH, json=body)
+    assert (response.status_code, response.headers["Location"]) == (201, BASE + "/systems/tix")
+    replaced = Api(put_system=(SETTINGS, False), has_credentials=False)
+    response = replaced.client.put("/systems/tix", headers=AUTH, json=body)
+    assert response.status_code == 200
+    assert "Location" not in response.headers
+    assert created.actions() == replaced.actions() == ["system.update"]
+
+
+# --- refusals ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("path", "port"), [
+    ("/alerts/al-1", "get_alert"),
+    ("/investigations/inv-1", "get_investigation"),
+    ("/investigations/inv-1/artifacts/report.md", "get_investigation"),
+    ("/learning-jobs/lj-1", "get_learning_job"),
+])
+def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
+    api = Api(**{port: None})
+    assert api.client.get(path, headers=AUTH, follow_redirects=False).status_code == 404
+    assert api.audit.events == []
+
+
+@pytest.mark.parametrize(("method", "path", "body", "port", "error", "code"), [
+    ("POST", "/investigations/inv-1/cancel", None, "cancel_investigation", NotFound("x"), 404),
+    ("POST", "/investigations/inv-1/cancel", None, "cancel_investigation", Conflict("x"), 409),
+    ("DELETE", "/investigations/inv-1", None, "delete_investigation", NotFound("x"), 404),
+    ("DELETE", "/investigations/inv-1", None, "delete_investigation", Conflict("x"), 409),
+    ("POST", "/investigations", {"alert_id": "al-1", "client_request_id": "r"},
+     "create_investigation", UnknownReference("x"), 422),
+    ("POST", "/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
+     "create_learning_job", UnknownReference("x"), 422),
+    ("POST", "/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
+     "create_learning_job", Conflict("x"), 409),
+])
+def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
+    method: str, path: str, body: dict[str, str] | None, port: str, error: Exception, code: int,
+) -> None:
+    api = Api(**{port: error})
+    response = api.client.request(method, path, headers=AUTH, json=body)
+    assert response.status_code == code
+    assert response.json() == {"detail": "x"}
+    assert api.audit.events == []
+
+
+# --- artifacts -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["report.md", "gather_raw/L1/0.json"])
+def test_an_artifact_read_redirects_to_the_signed_link_and_is_audited(key: str) -> None:
+    api = Api(get_investigation=INV, signed_url=SIGNED)
+    response = api.client.get(f"/investigations/inv-1/artifacts/{key}", headers=AUTH,
+                              follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["Location"] == SIGNED
+    assert response.headers["Cache-Control"] == "no-store"
+    assert api.ports.called("signed_url") == [((A, "inv-1", key), {})]
+    assert [(e.action, e.target, e.detail) for e in api.audit.events] == [("artifact.read", "inv-1", key)]
+
+
+@pytest.mark.parametrize("key", ["runtime.html", "../other/report.md", "report.md/x"])
+def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
+    api = Api(get_investigation=INV)
+    response = api.client.get(f"/investigations/inv-1/artifacts/{key}", headers=AUTH,
+                              follow_redirects=False)
+    assert response.status_code == 404
+    assert api.ports.called("signed_url") == []
+    assert api.audit.events == []
+
+
+# --- systems and credentials ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("has", [True, False])
+def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
+    api = Api(list_systems=[SETTINGS], has_credentials=has,
+              get_system=SETTINGS, check=lambda tenant, system: SystemCheck(ok=True, detail="x"))
+    listed = api.client.get("/systems", headers=AUTH).json()
+    assert listed == [System(**SETTINGS.model_dump(), has_credentials=has).model_dump(mode="json")]
+    api.client.post("/systems/tix/check", headers=AUTH)
+    ((_, checked), _), = api.ports.called("check")
+    assert checked.has_credentials is has
+    assert api.ports.called("has_credentials")[0] == ((A, "tix"), {})
+
+
+def test_credentials_are_written_through_and_never_echoed_or_audited() -> None:
+    secret = "s3cr3t-value-never-echoed"
+    api = Api(get_system=SETTINGS, has_credentials=False, put_credentials=None)
+    response = api.client.put("/systems/tix/credentials", headers=AUTH,
+                              json={"credentials": {"api_token": secret}})
+    assert (response.status_code, response.content) == (204, b"")
+    assert api.ports.called("put_credentials") == [((A, "tix", {"api_token": secret}), {})]
+    assert [(e.action, e.detail) for e in api.audit.events] == [("system.credentials", "fields: api_token")]
+    assert secret not in repr(api.audit.events)
+
+
+def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store() -> None:
+    api = Api(get_system=None)
+    response = api.client.put("/systems/nope/credentials", headers=AUTH, json={"credentials": {"k": "v"}})
+    assert response.status_code == 404
+    assert api.ports.called("put_credentials") == []
+    assert Api().client.put("/systems/tix/credentials", headers=AUTH,
+                            json={"credentials": {}}).status_code == 422
+
+
+# --- the boundary: malformed input never reaches a port ------------------------------------
+
+
+@pytest.mark.parametrize("param", ["fired_after", "fired_before"])
+def test_a_time_without_an_offset_is_refused_at_the_boundary(param: str) -> None:
+    api = Api()
+    response = api.client.get("/alerts", headers=AUTH, params={param: "2026-09-28T06:00:00"})
     assert response.status_code == 422
-    assert world.store.list_investigations(B, alert_id=None, limit=MAX_PAGE) == []
+    assert api.ports.calls == []
 
 
-# --- tenant scoping ------------------------------------------------------------------------
+def test_an_aware_time_and_the_filters_reach_the_store_as_given() -> None:
+    api = Api(list_alerts=[SUMMARY])
+    after = _dt.datetime(2026, 9, 28, 8, 0, tzinfo=_dt.timezone(_dt.timedelta(hours=2)))
+    response = api.client.get("/alerts", headers=AUTH, params={
+        "fired_after": after.isoformat(), "severity": "high", "limit": 7,
+    })
+    assert response.json() == [SUMMARY.model_dump(mode="json")]
+    ((tenant,), kwargs), = api.ports.called("list_alerts")
+    assert tenant == A
+    assert kwargs == {"fired_after": after, "fired_before": None, "severity": "high", "limit": 7}
+    assert kwargs["fired_after"].utcoffset() == _dt.timedelta(hours=2)
 
 
-def test_another_tenants_records_read_as_missing(world: _World) -> None:
-    world.alert(B, "al-b")
-    world.investigation(B, "inv-b", "al-b", "completed", artifacts=("report.md",))
-    world.store.put_system(B, "sys-b", SystemPut(kind="siem", display_name="B"))
-    job, _ = world.store.create_learning_job(B, "inv-b", "r")
-
-    for path in ("/alerts/al-b", "/investigations/inv-b",
-                 "/investigations/inv-b/artifacts/report.md", f"/learning-jobs/{job.learning_job_id}"):
-        assert world.client.get(path, headers=AUTH_A, follow_redirects=False).status_code == 404, path
-    assert world.client.post("/investigations/inv-b/cancel", headers=AUTH_A).status_code == 404
-    assert world.client.delete("/investigations/inv-b", headers=AUTH_A).status_code == 404
-    assert world.client.post("/systems/sys-b/check", headers=AUTH_A).status_code == 404
-    assert world.client.put("/systems/sys-b/credentials", headers=AUTH_A,
-                            json={"credentials": {"k": "v"}}).status_code == 404
-    for path in ("/alerts", "/investigations", "/learning-jobs", "/lessons", "/systems"):
-        assert world.client.get(path, headers=AUTH_A).json() == [], path
-    # ...and B still sees its own.
-    assert world.client.get("/investigations/inv-b", headers=AUTH_B).status_code == 200
-
-
-def test_a_body_naming_another_tenants_record_is_an_unknown_reference(world: _World) -> None:
-    world.alert(B, "al-b")
-    world.investigation(B, "inv-b", "al-b", "completed")
-    assert world.client.post("/investigations", headers=AUTH_A,
-                             json={"alert_id": "al-b", "client_request_id": "r"}).status_code == 422
-    assert world.client.post("/learning-jobs", headers=AUTH_A,
-                             json={"investigation_id": "inv-b", "client_request_id": "r"}).status_code == 422
-
-
-def test_a_put_system_in_one_tenant_leaves_the_same_id_in_another_alone(world: _World) -> None:
-    body = {"kind": "siem", "display_name": "A's"}
-    assert world.client.put("/systems/siem", headers=AUTH_A, json=body).status_code == 201
-    assert world.client.put("/systems/siem", headers=AUTH_B, json=body | {"display_name": "B's"}).status_code == 201
-    assert world.client.get("/systems", headers=AUTH_A).json()[0]["display_name"] == "A's"
-
-
-# --- alerts --------------------------------------------------------------------------------
-
-
-def test_alerts_list_newest_first_without_the_raw_alert_and_filters(world: _World) -> None:
-    world.alert(A, "old", hours_ago=10, severity="low")
-    world.alert(A, "mid", hours_ago=5)
-    world.alert(A, "new", hours_ago=1)
-
-    listed = world.client.get("/alerts", headers=AUTH_A).json()
-    assert [a["alert_id"] for a in listed] == ["new", "mid", "old"]
-    assert all("raw" not in a for a in listed)
-
-    after = (NOW - _dt.timedelta(hours=6)).isoformat()
-    before = (NOW - _dt.timedelta(hours=2)).isoformat()
-    windowed = world.client.get("/alerts", headers=AUTH_A,
-                                params={"fired_after": after, "fired_before": before}).json()
-    assert [a["alert_id"] for a in windowed] == ["mid"]
-    low = world.client.get("/alerts", headers=AUTH_A, params={"severity": "low"}).json()
-    assert [a["alert_id"] for a in low] == ["old"]
-    assert len(world.client.get("/alerts", headers=AUTH_A, params={"limit": 2}).json()) == 2
+@pytest.mark.parametrize(("method", "path", "body"), [
+    ("GET", "/alerts/%E2%9C%93", None),
+    ("GET", "/investigations/a%20b", None),
+    ("GET", "/learning-jobs/-leading-dash", None),
+    ("PUT", "/systems/%E2%9C%93", {"kind": "k", "display_name": "d"}),
+    ("POST", "/systems/a%20b/check", None),
+    ("POST", "/investigations", {"alert_id": "✓", "client_request_id": "r"}),
+    ("POST", "/learning-jobs", {"investigation_id": "a b", "client_request_id": "r"}),
+    ("GET", "/investigations?alert_id=%E2%9C%93", None),
+])
+def test_an_id_outside_the_grammar_is_refused_at_the_boundary(
+    method: str, path: str, body: dict[str, str] | None
+) -> None:
+    api = Api()
+    assert api.client.request(method, path, headers=AUTH, json=body).status_code == 422
+    assert api.ports.calls == []
+    assert api.audit.events == []
 
 
 @pytest.mark.parametrize("limit", [0, MAX_PAGE + 1])
-def test_a_page_size_out_of_range_is_refused(world: _World, limit: int) -> None:
-    assert world.client.get("/alerts", headers=AUTH_A, params={"limit": limit}).status_code == 422
+@pytest.mark.parametrize("path", ["/alerts", "/investigations", "/learning-jobs"])
+def test_a_page_size_out_of_range_is_refused(path: str, limit: int) -> None:
+    api = Api()
+    assert api.client.get(path, headers=AUTH, params={"limit": limit}).status_code == 422
+    assert api.ports.calls == []
 
 
-def test_one_alert_carries_the_raw_alert(world: _World) -> None:
-    world.alert(A, "al")
-    assert world.client.get("/alerts/al", headers=AUTH_A).json()["raw"] == {"id": "al"}
-
-
-# --- investigations ------------------------------------------------------------------------
-
-
-def test_start_creates_a_queued_investigation_and_audits_it(world: _World) -> None:
-    world.alert(A, "al")
-    response = world.client.post("/investigations", headers=AUTH_A,
-                                 json={"alert_id": "al", "client_request_id": "r1"})
-    assert response.status_code == 201
-    body = response.json()
-    assert response.headers["Location"] == f"/investigations/{body['investigation_id']}"
-    assert (body["status"], body["alert_id"], body["disposition"]) == ("queued", "al", None)
-    assert world.actions() == ["investigation.start"]
-    assert world.audit.events[0].user_id == "ann@a.example"
-
-
-def test_a_replayed_request_returns_the_same_investigation_without_a_second_start(world: _World) -> None:
-    world.alert(A, "al")
-    first = world.client.post("/investigations", headers=AUTH_A, json={"alert_id": "al", "client_request_id": "r1"})
-    world.client.post(f"/investigations/{first.json()['investigation_id']}/cancel", headers=AUTH_A)
-    again = world.client.post("/investigations", headers=AUTH_A, json={"alert_id": "al", "client_request_id": "r1"})
-    assert again.status_code == 200
-    assert again.json()["investigation_id"] == first.json()["investigation_id"]
-    assert world.actions().count("investigation.start") == 1
-
-
-def test_a_live_investigation_is_returned_instead_of_starting_a_second(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv-live", "al", "running")
-    response = world.client.post("/investigations", headers=AUTH_A,
-                                 json={"alert_id": "al", "client_request_id": "fresh"})
-    assert response.status_code == 200
-    assert response.json()["investigation_id"] == "inv-live"
-    assert world.actions() == []
-
-
-@pytest.mark.parametrize("prior", ["completed", "unparseable", "failed", "aborted"])
-def test_a_terminal_prior_does_not_block_a_rerun(world: _World, prior: str) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv-prior", "al", prior)
-    response = world.client.post("/investigations", headers=AUTH_A,
-                                 json={"alert_id": "al", "client_request_id": "rerun"})
-    assert response.status_code == 201
-    assert response.json()["investigation_id"] != "inv-prior"
-    listed = world.client.get("/investigations", headers=AUTH_A, params={"alert_id": "al"}).json()
-    assert {i["investigation_id"] for i in listed} == {"inv-prior", response.json()["investigation_id"]}
-
-
-def test_start_refuses_an_unknown_alert_and_a_blank_request_id(world: _World) -> None:
-    world.alert(A, "al")
-    assert world.client.post("/investigations", headers=AUTH_A,
-                             json={"alert_id": "nope", "client_request_id": "r"}).status_code == 422
-    assert world.client.post("/investigations", headers=AUTH_A,
-                             json={"alert_id": "al", "client_request_id": ""}).status_code == 422
-    assert world.actions() == []
-
-
-@pytest.mark.parametrize("live", ["queued", "running"])
-def test_cancel_aborts_a_live_investigation(world: _World, live: str) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", live)
-    response = world.client.post("/investigations/inv/cancel", headers=AUTH_A)
-    assert response.status_code == 200
-    assert response.json()["status"] == "aborted"
-    assert response.json()["finished_at"] is not None
-    assert world.actions() == ["investigation.cancel"]
-
-
-def test_cancel_refuses_an_investigation_that_already_ended(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "completed")
-    assert world.client.post("/investigations/inv/cancel", headers=AUTH_A).status_code == 409
-    assert world.actions() == []
-
-
-def test_delete_hides_an_ended_investigation_from_every_read(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "completed", artifacts=("report.md",))
-    assert world.client.delete("/investigations/inv", headers=AUTH_A).status_code == 204
-    assert world.client.get("/investigations/inv", headers=AUTH_A).status_code == 404
-    assert world.client.get("/investigations/inv/artifacts/report.md", headers=AUTH_A,
-                            follow_redirects=False).status_code == 404
-    assert world.client.get("/investigations", headers=AUTH_A).json() == []
-    assert world.client.delete("/investigations/inv", headers=AUTH_A).status_code == 404
-    assert world.actions() == ["investigation.delete"]
-
-
-def test_delete_refuses_a_live_investigation(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "running")
-    assert world.client.delete("/investigations/inv", headers=AUTH_A).status_code == 409
-    assert world.client.get("/investigations/inv", headers=AUTH_A).status_code == 200
-
-
-@pytest.mark.parametrize("key", ["runtime.html", "gather_raw/L1/0.json"])
-def test_an_artifact_read_redirects_to_a_signed_link_and_is_audited(world: _World, key: str) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "completed", artifacts=(key,))
-    response = world.client.get(f"/investigations/inv/artifacts/{key}", headers=AUTH_A,
-                                follow_redirects=False)
-    assert response.status_code == 307
-    assert response.headers["Location"] == StubArtifactLinks().signed_url(A, "inv", key)
-    assert not response.headers["Location"].startswith(str(world.client.base_url))
-    assert response.headers["Cache-Control"] == "no-store"
-    assert [(e.action, e.target, e.detail) for e in world.audit.events] == [("artifact.read", "inv", key)]
-
-
-def test_only_keys_the_investigation_lists_are_answered(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "completed", artifacts=("report.md",))
-    for key in ("runtime.html", "../other/report.md", "report.md/x"):
-        response = world.client.get(f"/investigations/inv/artifacts/{key}", headers=AUTH_A,
-                                    follow_redirects=False)
-        assert response.status_code == 404, key
-    assert world.actions() == []
+def test_a_blank_client_request_id_is_refused() -> None:
+    api = Api()
+    assert api.client.post("/investigations", headers=AUTH,
+                           json={"alert_id": "al-1", "client_request_id": ""}).status_code == 422
+    assert api.ports.calls == []
 
 
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
@@ -348,103 +437,13 @@ def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
                       cost_usd=0.0, created_at=NOW)
 
 
-# --- learning jobs -------------------------------------------------------------------------
+def test_a_naive_time_cannot_be_served() -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
+                      created_at=NOW.replace(tzinfo=None))
 
 
-def test_a_relearn_of_a_completed_investigation_is_queued_once_per_request(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", "completed")
-    first = world.client.post("/learning-jobs", headers=AUTH_A,
-                              json={"investigation_id": "inv", "client_request_id": "r1"})
-    assert first.status_code == 201
-    job = first.json()
-    assert (job["status"], job["trigger"], job["alert_id"]) == ("queued", "explicit", "al")
-    assert first.headers["Location"] == f"/learning-jobs/{job['learning_job_id']}"
-
-    again = world.client.post("/learning-jobs", headers=AUTH_A,
-                              json={"investigation_id": "inv", "client_request_id": "r1"})
-    assert (again.status_code, again.json()) == (200, job)
-    second = world.client.post("/learning-jobs", headers=AUTH_A,
-                               json={"investigation_id": "inv", "client_request_id": "r2"})
-    assert second.status_code == 201
-    assert world.actions() == ["learning_job.start", "learning_job.start"]
-
-    listed = world.client.get("/learning-jobs", headers=AUTH_A, params={"investigation_id": "inv"}).json()
-    assert len(listed) == 2
-    assert world.client.get(f"/learning-jobs/{job['learning_job_id']}", headers=AUTH_A).json() == job
-
-
-@pytest.mark.parametrize("status", ["queued", "running", "unparseable", "failed", "aborted"])
-def test_a_relearn_needs_a_completed_investigation(world: _World, status: str) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv", "al", status)
-    response = world.client.post("/learning-jobs", headers=AUTH_A,
-                                 json={"investigation_id": "inv", "client_request_id": "r"})
-    assert response.status_code == 409
-    assert world.actions() == []
-
-
-def test_a_request_id_reused_for_another_investigation_is_a_conflict(world: _World) -> None:
-    world.alert(A, "al")
-    world.investigation(A, "inv1", "al", "completed")
-    world.investigation(A, "inv2", "al", "completed")
-    world.client.post("/learning-jobs", headers=AUTH_A, json={"investigation_id": "inv1", "client_request_id": "r"})
-    response = world.client.post("/learning-jobs", headers=AUTH_A,
-                                 json={"investigation_id": "inv2", "client_request_id": "r"})
-    assert response.status_code == 409
-
-
-# --- systems -------------------------------------------------------------------------------
-
-
-def test_put_system_creates_then_replaces(world: _World) -> None:
-    created = world.client.put("/systems/tix", headers=AUTH_A,
-                               json={"kind": "ticketing", "display_name": "Tickets", "settings": {"queue": "sec"}})
-    assert created.status_code == 201
-    assert created.headers["Location"] == "/systems/tix"
-    replaced = world.client.put("/systems/tix", headers=AUTH_A,
-                                json={"kind": "ticketing", "display_name": "Queue", "enabled": False})
-    assert replaced.status_code == 200
-    assert replaced.json() == {"system_id": "tix", "kind": "ticketing", "display_name": "Queue",
-                               "enabled": False, "settings": {}, "has_credentials": False}
-    assert world.actions() == ["system.update", "system.update"]
-
-
-def test_credentials_are_write_only(world: _World) -> None:
-    secret = "s3cr3t-value-never-echoed"
-    world.client.put("/systems/tix", headers=AUTH_A, json={"kind": "ticketing", "display_name": "T"})
-    response = world.client.put("/systems/tix/credentials", headers=AUTH_A,
-                                json={"credentials": {"api_token": secret}})
-    assert response.status_code == 204
-    assert response.content == b""
-
-    listed = world.client.get("/systems", headers=AUTH_A)
-    checked = world.client.post("/systems/tix/check", headers=AUTH_A)
-    assert listed.json()[0]["has_credentials"] is True
-    assert checked.json()["ok"] is True
-    for text in (listed.text, checked.text, repr(world.audit.events)):
-        assert secret not in text
-    assert world.audit.events[-1].action == "system.credentials"
-    assert world.audit.events[-1].detail == "fields: api_token"
-
-
-def test_credentials_for_an_unknown_system_are_refused_and_not_stored(world: _World) -> None:
-    response = world.client.put("/systems/nope/credentials", headers=AUTH_A,
-                                json={"credentials": {"api_token": "x"}})
-    assert response.status_code == 404
-    assert world.secrets.has_credentials(A, "nope") is False
-    assert world.client.put("/systems/nope/credentials", headers=AUTH_A,
-                            json={"credentials": {}}).status_code == 422
-
-
-def test_check_reports_a_system_without_credentials(world: _World) -> None:
-    world.client.put("/systems/tix", headers=AUTH_A, json={"kind": "ticketing", "display_name": "T"})
-    assert world.client.post("/systems/tix/check", headers=AUTH_A).json() == {
-        "ok": False, "detail": "no credentials set",
-    }
-
-
-# --- the demo server's seed ----------------------------------------------------------------
+# --- the demo server -----------------------------------------------------------------------
 
 
 def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
@@ -460,6 +459,18 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
         seen.setdefault(principal.tenant_id, set()).update(a["alert_id"] for a in alerts)
     assert set(seen) == set(tenants)
     assert not seen["t-one"] & seen["t-two"]
+    systems = client.get("/systems", headers={"Authorization": "Bearer t-one-analyst"}).json()
+    assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
+
+
+def test_the_demo_store_keys_records_by_tenant() -> None:
+    store = InMemoryStore(lambda: NOW)
+    store.add_alert("t-one", ALERT)
+    store.add_alert("t-two", ALERT.model_copy(update={"title": "two's"}))
+    one, two = store.get_alert("t-one", "al-1"), store.get_alert("t-two", "al-1")
+    assert one is not None
+    assert two is not None
+    assert (one.title, two.title) == ("t", "two's")
 
 
 @pytest.mark.parametrize(("tenants", "reason"), [

@@ -242,7 +242,6 @@ def _visualize_runtime_calls_it_unreviewed(tmp_path: Path) -> None:
 
 
 def _api_models_serves_it_and_coerces_nothing(_tmp_path: Path) -> None:
-    pytest.importorskip("fastapi")
     import datetime as _dt
 
     from pydantic import ValidationError

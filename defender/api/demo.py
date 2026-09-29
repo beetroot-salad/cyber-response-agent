@@ -51,7 +51,7 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         if not is_valid_tenant_id(tenant):
             raise ValueError(f"not a tenant id: {tenant!r}")
     secrets = InMemorySecrets()
-    store = InMemoryStore(clock, secrets)
+    store = InMemoryStore(clock)
     now = clock()
     _seed(store, secrets, tenants[0], now)
     for n, tenant in enumerate(tenants[1:], start=9):
