@@ -201,25 +201,40 @@ def test_o1_a_declared_name_that_spells_a_synthetic_or_internal_name_keeps_its_o
         {"c0": "a", "c1": 1, "select": "k", "data": "d", "_rows": "r"}]
 
 
-# ------------------------------------------------ M7 (O1): the truncation note under the flag
+# ------------------------------------ M7 (O1): the truncation note, one rule on both paths
 
 
-@pytest.mark.parametrize("truncated", [True, False, None], ids=["true", "false", "absent"])
-def test_m7_a_declared_truncated_envelope_gets_a_generic_note_and_only_then(truncated):
-    """M7 (O1): under the flag `truncated` is no column of `data`, so the note reads it off the
-    parsed envelope. Its wording is generic — the rows are not all that matched — never the
-    search-hits prose about `hits`. `false` and absent print nothing: this payload has no list
-    column, so an empty stderr also rules out every other note."""
-    payload = dict(_ESQL)
-    if truncated is not None:
-        payload["truncated"] = truncated
-    proc = _flag(payload, "SELECT count(*) AS n FROM data WHERE failed > 1000")
-    assert _ok(proc) == [{"n": 0}]
-    if truncated:
-        assert "truncated" in proc.stderr.lower(), proc.stderr
-        assert "hits" not in proc.stderr, "the flagged note borrowed the search-hits prose"
+_ABSENT = object()
+#: The top-level `truncated` values that mean "the source stopped early", and those that do not.
+#: One table for BOTH paths: a source that writes `1` or `"true"` is truncated whichever way
+#: the lead reads its payload.
+_TRUNCATED = [(True, True), (1, True), ("true", True),
+              (False, False), (0, False), ("false", False), (_ABSENT, False)]
+
+
+@pytest.mark.parametrize("path", ["unflagged", "flagged"])
+@pytest.mark.parametrize(("value", "fires"), _TRUNCATED,
+                         ids=["true", "1", "str-true", "false", "0", "str-false", "absent"])
+def test_m7_the_truncation_note_fires_on_the_same_values_on_both_paths(path, value, fires):
+    """M7 (O1): the truncation note is one rule. Unflagged it is read off `data` (a search-hits
+    envelope); flagged, `truncated` is no column of `data`, so it is read off the parsed
+    envelope — and both fire on `true`, `1` and `"true"`, and on nothing else. The flagged
+    wording is generic, never the search-hits prose about `hits`. Neither payload has a list,
+    JSON or positional column, so a silent run is an EMPTY stderr."""
+    flagged = path == "flagged"
+    payload: dict = (dict(_ESQL) if flagged
+                     else {"total": 3, "returned": 2, "hits": [{"u": "a"}, {"u": "b"}]})
+    if value is not _ABSENT:
+        payload["truncated"] = value
+    proc = (_flag(payload, _SQL) if flagged
+            else _plain(payload, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)"))
+    assert _ok(proc) == [{"n": 5 if flagged else 2}]
+    if fires:
+        assert "truncated" in proc.stderr.lower(), f"`truncated: {value!r}` printed no note"
+        if flagged:
+            assert "hits" not in proc.stderr, "the flagged note borrowed the search-hits prose"
     else:
-        assert proc.stderr.strip() == "", proc.stderr
+        assert proc.stderr.strip() == "", f"`truncated: {value!r}` printed {proc.stderr!r}"
 
 
 # ================================================ O2: a column's type is its own JSON values
@@ -251,7 +266,9 @@ _TYPES = [
     ("list-of-bool", [[True, False]], "BOOLEAN[]"),
     ("list-of-int-and-float", [[1, 2.5]], "DOUBLE[]"),
     ("list-of-null", [[None], None], "VARCHAR[]"),
-    ("list-of-mixed-kinds", [["a", 1]], "JSON[]"),
+    # A list whose elements mix kinds is a JSON column, not `JSON[]` — there is no JSON[] (R3).
+    ("list-of-mixed-kinds", [["a", 1]], "JSON"),
+    ("list-and-scalar-of-mixed-kinds", [["x", 5], "c"], "JSON"),
     ("list-holding-a-list", [[["a"]]], "JSON"),
     ("list-holding-an-object", [[{"a": 1}]], "JSON"),
 ]
@@ -491,6 +508,11 @@ _DEFECTS: dict[str, _Defect] = {
     "name-with-a-c1-control": _Defect(
         _FLAGS + (_SQL,), _recs(["a\x85b"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
         _FLAGS + (_SQL,), _recs(["a\u2026b"], [[1]]), 1),
+    # A lone UTF-16 surrogate parses in Python but is no text the engine can name a column with:
+    # a declaration defect (R2), refused — never a traceback out of the load.
+    "name-with-a-lone-surrogate": _Defect(
+        _FLAGS + (_SQL,), _recs(["a\ud800b"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
+        _FLAGS + (_SQL,), _recs(["ab"], [[1]]), 1),
     # -- two names equal under ASCII case folding -> 1
     "ascii-case-clash": _Defect(
         _FLAGS + (_SQL,), _recs(["Host", "host"], [["a", "b"]]), EXIT_QUERY_ERROR, ("Host", "host"),
@@ -793,8 +815,8 @@ def test_o6_an_unflagged_error_over_positional_rows_names_the_flags_and_no_posit
     ({"cols": [{"name": "a"}, {"name": "b"}], "data_rows": [["x", 1]]},
      "--rows data_rows --names cols"),
 ], ids=["splunk", "bare-matrix", "renamed-esql"])
-def test_o6_the_note_detects_by_type_and_names_this_payloads_own_keys(payload, note):
-    """O6: detection is by TYPE — a top-level list of lists — never by the key names ES|QL
+def test_o6_the_note_detects_by_shape_and_names_this_payloads_own_keys(payload, note):
+    """O6: detection is by SHAPE — a top-level list of lists — never by the key names ES|QL
     happens to use. Each payload names its own keys in the note, and the names key is the one
     whose length matches the rows (a list of strings, or of `{name: …}` objects). None of them
     is ES|QL's `values`/`columns`."""
@@ -806,11 +828,12 @@ def test_o6_the_note_detects_by_type_and_names_this_payloads_own_keys(payload, n
 
 
 @pytest.mark.parametrize("slot", ["rows", "names"])
-@pytest.mark.parametrize("key", ["my rows", "$(id)", "a;b", "x.y", "r`id`", "my names"])
+@pytest.mark.parametrize("key", ["my rows", "$(id)", "a;b", "x.y", "r`id`", "my names", "-v"])
 def test_o6_a_key_outside_the_safe_set_is_not_echoed_into_the_command(key, slot):
     """O6 (security): the note hands the lead a command to copy, so a payload key reaches it
-    only when it matches `[A-Za-z0-9_@-]+` — the rows key AND the names key. A key with a space,
-    `$(`, `;`, `.` or a backtick is not echoed at all; the note still says to declare the rows,
+    only when it matches `[A-Za-z0-9_@][A-Za-z0-9_@-]*` — the rows key AND the names key. A key
+    with a space, `$(`, `;`, `.`, a backtick, or a LEADING dash (`-v` would read as a flag in the
+    copied command) is not echoed at all; the note still says to declare the rows,
     and the SAFE key beside it is still echoed. The control is both keys safe on the same shape,
     and both echoed."""
     payload = {key: [[1, 2]], "hdr": ["a", "b"]} if slot == "rows" else {"recs": [[1, 2]], key: ["a", "b"]}
@@ -1039,3 +1062,234 @@ def test_o10_a_ten_thousand_by_twenty_flagged_load_is_well_inside_the_bash_timeo
     elapsed = time.monotonic() - started
     assert _ok(proc) == [{"n": 10_000, "last": last_ts, "ips": 2 * 10_000 - 10_000 // 5}]
     assert elapsed < 5.0, f"the flagged 10,000 x 20 load took {elapsed:.2f}s"
+
+
+# ===================== R1: the declare note is decided from the PARSED payload, not duckdb's types
+
+
+_EMPTY_ESQL = {"columns": [{"name": "failed", "type": "long"}], "values": [], "row_count": 0}
+
+
+@pytest.mark.parametrize(("payload", "declared"), [
+    (_EMPTY_ESQL, ("values", "columns")),
+    ({"fields": ["host", "n"], "rows": [], "count": 0}, ("rows", "fields")),
+], ids=["esql", "splunk"])
+def test_r1_an_empty_positional_result_gets_the_note_and_its_declaration_answers_zero(payload, declared):
+    """R1: an ES|QL query that matched nothing still hands back `values: []` beside its
+    `columns`. Unflagged, `count(*)` answers 1 — the one object — which reads as "one match", so
+    the note fires on an EMPTY list of rows too, when a sibling holds the names. The
+    declaration taken out of stderr, run as printed, answers the truth: 0."""
+    proc = _plain(payload, _SQL)
+    assert _ok(proc) == [{"n": 1}]
+    found = _NOTE_DECLARATION.search(proc.stderr)
+    assert found, f"an empty positional result printed no declaration: {proc.stderr!r}"
+    assert found.groups() == declared, proc.stderr
+    printed = ("--rows", found.group(1), "--names", found.group(2))
+    assert _ok(run_sql_py(*printed, _SQL, stdin=json.dumps(payload))) == [{"n": 0}]
+
+
+def test_r1_a_non_empty_list_of_rows_fires_even_with_no_names_beside_it():
+    """R1: rows alone are enough to say "declare them" — the names slot stays generic."""
+    proc = _plain({"matrix": [[1, 2], [3, 4]]}, _SQL)
+    assert _ok(proc) == [{"n": 1}]
+    assert "--rows matrix --names <names-key>" in proc.stderr, proc.stderr
+
+
+_ESQL_A = {"columns": [{"name": "a", "type": "long"}], "values": [[1], [2]]}
+_ESQL_B = {"columns": [{"name": "a", "type": "long"}], "values": [[3]]}
+
+
+@pytest.mark.parametrize(("stdin", "n"), [
+    (json.dumps([_ESQL_A, _ESQL_B]), 2),
+    (json.dumps(_ESQL_A) + "\n" + json.dumps(_ESQL_B) + "\n", 2),
+    (json.dumps({"tags": []}), 1),
+    (json.dumps({"values": [], "columns": []}), 1),
+    (json.dumps({"values": [], "ids": [1, 2]}), 1),
+    (json.dumps({"values": [[1], 2], "hdr": ["a"]}), 1),
+], ids=["top-level-array", "ndjson", "empty-list-alone", "empty-names-beside",
+        "numbers-beside", "not-every-element-a-list"])
+def test_r1_no_note_where_the_payload_is_not_one_object_holding_positional_rows(stdin, n):
+    """R1's controls. The note fires only for ONE JSON document whose top level is an object
+    with a key holding a list of lists. A top-level array or NDJSON of ES|QL-shaped objects is
+    one row PER object — `count(*)` answers 2 here, so "count(*) answers 1" would be a false
+    claim — and an empty list fires only beside a non-empty list of names. A list that is not
+    all lists is not rows. None of these prints anything on stderr."""
+    proc = run_sql_py(_SQL, stdin=stdin)
+    assert _ok(proc) == [{"n": n}]
+    assert "--rows" not in proc.stderr, proc.stderr
+    assert "answers 1" not in proc.stderr, proc.stderr
+    assert proc.stderr.strip() == "", proc.stderr
+
+
+def test_r1_a_key_with_an_inner_dash_is_still_echoed():
+    """R1's echo rule forbids only a LEADING dash: `my-rows` / `my-names` are echoed as-is."""
+    proc = _plain({"my-rows": [[1, 2]], "my-names": ["a", "b"]}, "SELECT 1 AS one")
+    assert _ok(proc) == [{"one": 1}]
+    assert "--rows my-rows --names my-names" in proc.stderr, proc.stderr
+
+
+def test_r1_an_unflagged_error_on_positional_rows_names_the_declaration_not_the_flat_idiom():
+    """R1: on a positional payload the flat/array idiom — "the keys ARE `data`'s columns;
+    `SELECT * FROM data`" — is the wrong advice (its only rows are the envelope); the error
+    names the declaration instead. The flat idiom still answers a genuinely flat payload."""
+    proc = _plain(_ESQL, "SELECT nope FROM data")
+    assert_query_error(proc, "a missing column was not an error")
+    assert "--rows values --names columns" in proc.stderr, proc.stderr
+    assert "flat/array" not in proc.stderr, proc.stderr
+    assert "SELECT * FROM data" not in proc.stderr, proc.stderr
+
+    flat = _plain({"host": "web-1", "owner": "team.platform"}, "SELECT nope FROM data")
+    assert_query_error(flat, "a missing column was not an error")
+    assert "SELECT * FROM data" in flat.stderr, flat.stderr
+    assert "--rows" not in flat.stderr, flat.stderr
+
+
+# ============================== R2: the flagged load is one boundary — nothing escapes as a traceback
+
+
+@pytest.mark.parametrize(("bad", "good"), [
+    ("b\ud800", "b"),
+    (["b\ud800", "c"], ["b", "c"]),
+    ({"k": "b\ud800"}, {"k": "b"}),
+    ("\udfff", 7),
+], ids=["string-cell", "list-element", "object-value", "json-column"])
+def test_r2_a_lone_surrogate_in_a_cell_is_an_input_error_not_a_traceback(bad, good):
+    """R2: a lone UTF-16 surrogate (`"\\ud800"` as a JSON escape) parses in Python but cannot be
+    loaded as text. Under the flag that is the payload's defect, refused as input (exit 2) with
+    the tool's own message — never a traceback out of the load. The same payload with the cell
+    fixed loads."""
+    def payload(cell) -> str:
+        return json.dumps({"hdr": ["user", "x"], "recs": [["alice", 1], ["bob", cell]]})
+    text = payload(bad)
+    assert "\\ud" in text, "premise: the surrogate travels as a JSON escape"
+    assert text.isascii(), "premise: the payload text is plain ASCII"
+    proc = run_sql_py("--rows", "recs", "--names", "hdr", _SQL, stdin=text)
+    _refused(proc, EXIT_INPUT_ERROR, "load")
+    assert _ok(run_sql_py("--rows", "recs", "--names", "hdr", _SQL, stdin=payload(good))) == [{"n": 2}]
+
+
+def test_r2_a_valid_surrogate_pair_is_not_a_defect():
+    """R2's control: an escaped surrogate PAIR is one ordinary character (😀), and it loads and
+    round-trips — the refusal above is about a LONE surrogate, not about escapes."""
+    text = json.dumps({"hdr": ["user"], "recs": [["\U0001F600"], ["bob"]]})
+    assert "\\ud83d\\ude00" in text, "premise: the pair travels escaped"
+    assert _ok(run_sql_py("--rows", "recs", "--names", "hdr", "SELECT user FROM data ORDER BY 1",
+                          stdin=text)) == [{"user": "bob"}, {"user": "\U0001F600"}]
+
+
+# ======================================================== R3: JSON columns say what they hold
+
+
+_JSON_NUMBERS = {"hdr": ["event.code"], "recs": [[412], [10], [9], ["n/a"]]}
+
+
+def _call(text: str, fn: str) -> str:
+    """The first `fn(...)` call spelled in `text`, parentheses balanced."""
+    start = text.find(f"{fn}(")
+    assert start >= 0, f"no `{fn}(` in: {text!r}"
+    depth = 0
+    for i in range(start + len(fn), len(text)):
+        depth += {"(": 1, ")": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[start:i + 1]
+    raise AssertionError(f"unbalanced `{fn}(` in: {text!r}")
+
+
+def _on_column(recipe: str, column: str) -> str:
+    """`recipe` with its JSON operand — whatever stands before its `->>` (`col`, `<col>`, or the
+    column itself) — made `column`, double-quoted."""
+    quoted = '"' + column.replace('"', '""') + '"'
+    bound, count = re.subn(r"(\(\s*)[^()]*?(\s*->>)", lambda m: f"{m.group(1)}{quoted}{m.group(2)}",
+                           recipe, count=1)
+    assert count == 1, f"the recipe has no `->>` to bind a column to: {recipe!r}"
+    return bound
+
+
+@pytest.mark.parametrize("sql", [_SQL, "SELECT nope FROM data"], ids=["success", "error"])
+def test_r3_every_flagged_run_over_a_json_column_says_it_holds_json_and_how_to_cast_it(sql):
+    """R3: a column mixing numbers and text is JSON, and `->>'$'` on it is TEXT — compared or
+    summed as text, `'412' < '9'`. Every flagged run over such a table, success or error, names
+    the JSON column(s) on stderr, says `->>'$'` gives text, and hands over a `TRY_CAST` recipe.
+    That recipe, bound to this column and run, orders the numbers AS numbers: max 412, and two
+    rows above 9 — the text `n/a` a NULL, not an error."""
+    proc = run_sql_py("--rows", "recs", "--names", "hdr", sql, stdin=json.dumps(_JSON_NUMBERS))
+    assert proc.returncode in (EXIT_OK, EXIT_QUERY_ERROR), proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert "event.code" in proc.stderr, proc.stderr
+    assert "->>'$'" in proc.stderr, proc.stderr
+    assert re.search(r"\btext\b", proc.stderr, re.IGNORECASE), proc.stderr
+    recipe = _on_column(_call(proc.stderr, "TRY_CAST"), "event.code")
+    assert _ok(_flag(_JSON_NUMBERS, f"SELECT max({recipe}) AS m FROM data",
+                     rows="recs", names="hdr")) == [{"m": 412}]
+    assert _ok(_flag(_JSON_NUMBERS, f"SELECT count(*) AS n FROM data WHERE {recipe} > 9",
+                     rows="recs", names="hdr")) == [{"n": 2}]
+
+
+def test_r3_the_json_note_names_every_json_column_and_only_those():
+    """R3: two JSON columns (mixed kinds; objects; a list of mixed kinds) are all named; the
+    number column beside them is not. The control is the number column alone: no note at all."""
+    payload = {"hdr": ["event.code", "detail", "tags", "bytes"],
+               "recs": [[412, {"a": 1}, ["x", 5], 1], ["n/a", {"b": 2}, "c", 2]]}
+    assert _schema(payload, rows="recs", names="hdr") == [
+        ("event.code", "JSON"), ("detail", "JSON"), ("tags", "JSON"), ("bytes", "BIGINT")]
+    proc = _flag(payload, _SQL, rows="recs", names="hdr")
+    assert _ok(proc) == [{"n": 2}]
+    for json_column in ("event.code", "detail", "tags"):
+        assert json_column in proc.stderr, f"the JSON column {json_column!r} was not named"
+    assert "bytes" not in proc.stderr, "a BIGINT column was named as JSON"
+    assert "TRY_CAST" in proc.stderr, proc.stderr
+
+    control = _flag({"hdr": ["bytes"], "recs": [[1], [2]]}, _SQL, rows="recs", names="hdr")
+    assert _ok(control) == [{"n": 2}]
+    assert control.stderr.strip() == "", control.stderr
+
+
+#: Every list type the rule produces: (cells, the column type, a value one of the lists holds,
+#: how many rows hold it).
+_LIST_TYPES = [
+    ([["10.0.0.5", "fe80::1"], "10.0.0.6"], "VARCHAR[]", "10.0.0.5", 1),
+    ([[22, 443], 80, [22]], "BIGINT[]", 22, 2),
+    ([[0.5, 1.5], 2.5], "DOUBLE[]", 1.5, 1),
+    ([[True], [False, True], False], "BOOLEAN[]", True, 2),
+    ([[2**64, 1], [2]], "HUGEINT[]", 2**64, 1),
+]
+
+
+def _sql_literal(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return f"'{value}'" if isinstance(value, str) else str(value)
+
+
+@pytest.mark.parametrize(("cells", "typ", "value", "n"), _LIST_TYPES,
+                         ids=[t for _, t, _, _ in _LIST_TYPES])
+def test_r3_the_notes_list_contains_recipe_runs_on_every_list_type(cells, typ, value, n):
+    """R3: the O4 note's `list_contains` recipe is copied by the lead onto whatever list column
+    it has. Taken out of stderr, with a real value put in its placeholder (inside the recipe's
+    own quotes if it has them), it runs on every list type the rule produces and finds the
+    rows that hold the value."""
+    payload = {"hdr": ["multi"], "recs": [[c] for c in cells]}
+    assert _schema(payload, rows="recs", names="hdr") == [("multi", typ)]
+    proc = _flag(payload, _SQL, rows="recs", names="hdr")
+    assert _ok(proc) == [{"n": len(cells)}]
+    recipe = _call(proc.stderr, "list_contains")
+    placeholder = re.search(r"'?<[^>]+>'?", recipe)
+    assert placeholder, f"the recipe has no value placeholder: {recipe!r}"
+    text = placeholder.group(0)
+    literal = (f"'{_sql_literal(value).strip(chr(39))}'" if text.startswith("'") and text.endswith("'")
+               else _sql_literal(value))
+    bound = recipe.replace(text, literal, 1)
+    assert _ok(_flag(payload, f"SELECT count(*) AS n FROM data WHERE {bound}",
+                     rows="recs", names="hdr")) == [{"n": n}], bound
+
+
+def test_r3_the_doc_says_a_json_columns_unpacked_value_is_text_and_to_cast_it():
+    """R3: `defender-sql.md`'s guidance for JSON columns says `->>'$'` returns TEXT and to cast
+    before comparing, sorting or summing a number. Read per paragraph and per bullet, so the
+    words must sit together in the JSON-column guidance rather than anywhere in the doc."""
+    doc = read_text_utf8(_DOC)
+    blocks = [b for b in re.split(r"\n\s*\n|\n(?=\s*[-*] )", doc) if "JSON" in b and "->>" in b]
+    assert blocks, "the doc has no JSON-column guidance with `->>`"
+    assert any(re.search(r"\bTRY_CAST\s*\(|\bCAST\s*\(", b) and re.search(r"\btext\b", b, re.I)
+               for b in blocks), f"no JSON-column guidance says `->>` is text and to cast: {blocks}"
+

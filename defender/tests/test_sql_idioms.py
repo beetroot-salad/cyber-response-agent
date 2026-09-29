@@ -270,9 +270,12 @@ def test_query_error_on_esql_shape_names_the_declaration_that_binds_it(esql):
     )
     assert proc.returncode == EXIT_QUERY_ERROR
     assert _declaration(proc) == _ESQL_DECLARED
-    hint = _hint(proc)
+    # The query holds no arrow, so any `->>` on stderr is the tool's own text. Read off the
+    # whole of stderr rather than a `hint:` section: on a positional payload the tool names the
+    # declaration, and need not print the shape hint at all (#1138 review, R1).
     assert "Positions:" not in proc.stderr
-    assert "->>" not in hint, f"the hint still teaches the positional recipe: {hint!r}"
+    assert "->>" not in proc.stderr, f"stderr still teaches the positional recipe: {proc.stderr!r}"
+    assert "flat/array" not in proc.stderr, "a positional payload was handed the flat idiom"
 
     value = payload_doc["values"][0][1]
     assert _declared(esql, f'SELECT count(*) AS n FROM data WHERE "source.ip" = \'{value}\'',
