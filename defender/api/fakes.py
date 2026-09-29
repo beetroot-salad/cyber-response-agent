@@ -30,9 +30,21 @@ from .models import (
     SystemPut,
     SystemSettings,
 )
-from .ports import AuditEvent, NotFound, Principal, Unauthenticated, UnknownReference
+from .ports import AuditEvent, NotFound, Principal, TimePosition, Unauthenticated, UnknownReference
 
 T = TypeVar("T")
+
+
+def _newest_after(rows: list[T], key: Callable[[T], TimePosition], after: TimePosition | None,
+                  limit: int) -> list[T]:
+    """`rows` newest first by `key`, strictly after `after`, at most `limit` — the order the
+    newest-first ports state."""
+    ordered = sorted(rows, key=key, reverse=True)
+    return [r for r in ordered if after is None or key(r) < after][:limit]
+
+
+def _ids_after(rows: list[T], key: Callable[[T], str], after: str | None, limit: int) -> list[T]:
+    return [r for r in sorted(rows, key=key) if after is None or key(r) > after][:limit]
 
 
 class TokenAuthenticator:
@@ -99,6 +111,7 @@ class InMemoryStore:
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
         severity: str | None,
+        after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
         selected = [
@@ -107,8 +120,8 @@ class InMemoryStore:
             and (fired_before is None or a.fired_at < fired_before)
             and (severity is None or a.severity == severity)
         ]
-        selected.sort(key=lambda a: (a.fired_at, a.alert_id), reverse=True)
-        return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in selected[:limit]]
+        page = _newest_after(selected, lambda a: (a.fired_at, a.alert_id), after, limit)
+        return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in page]
 
     def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None:
         return self._alerts.get((tenant_id, alert_id))
@@ -127,15 +140,14 @@ class InMemoryStore:
         return self.add_investigation(tenant_id, investigation), True
 
     def list_investigations(
-        self, tenant_id: str, *, alert_id: str | None, limit: int
+        self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         found = [
             i for i in self._investigations.of(tenant_id)
             if (tenant_id, i.investigation_id) not in self._deleted
             and (alert_id is None or i.alert_id == alert_id)
         ]
-        found.sort(key=lambda i: (i.created_at, i.investigation_id), reverse=True)
-        return found[:limit]
+        return _newest_after(found, lambda i: (i.created_at, i.investigation_id), after, limit)
 
     def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
         if (tenant_id, investigation_id) in self._deleted:
@@ -174,27 +186,29 @@ class InMemoryStore:
         return self.add_learning_job(tenant_id, job), True
 
     def list_learning_jobs(
-        self, tenant_id: str, *, investigation_id: str | None, limit: int
+        self, tenant_id: str, *, investigation_id: str | None, after: TimePosition | None,
+        limit: int,
     ) -> list[LearningJob]:
         found = [
             j for j in self._learning_jobs.of(tenant_id)
             if investigation_id is None or j.investigation_id == investigation_id
         ]
-        found.sort(key=lambda j: (j.created_at, j.learning_job_id), reverse=True)
-        return found[:limit]
+        return _newest_after(found, lambda j: (j.created_at, j.learning_job_id), after, limit)
 
     def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None:
         return self._learning_jobs.get((tenant_id, learning_job_id))
 
     # --- LessonsRepository --------------------------------------------------------------
 
-    def list_lessons(self, tenant_id: str) -> list[Lesson]:
-        return self._lessons.of(tenant_id)
+    def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
+        return _ids_after(self._lessons.of(tenant_id), lambda le: le.lesson_id, after, limit)
 
     # --- SystemsRepository --------------------------------------------------------------
 
-    def list_systems(self, tenant_id: str) -> list[SystemSettings]:
-        return sorted(self._systems.of(tenant_id), key=lambda s: s.system_id)
+    def list_systems(
+        self, tenant_id: str, *, after: str | None, limit: int
+    ) -> list[SystemSettings]:
+        return _ids_after(self._systems.of(tenant_id), lambda s: s.system_id, after, limit)
 
     def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None:
         return self._systems.get((tenant_id, system_id))

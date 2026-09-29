@@ -15,6 +15,7 @@ store's (`ports.py`). What they own is the mapping onto HTTP:
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
@@ -38,6 +39,7 @@ from .models import (
     SystemPut,
     SystemSettings,
 )
+from .pages import Order, Page, newest_first, ordered_by_id, paginate
 from .ports import (
     ApiDeps,
     AuditAction,
@@ -45,6 +47,7 @@ from .ports import (
     Conflict,
     NotFound,
     Principal,
+    TimePosition,
     Unauthenticated,
     UnknownReference,
 )
@@ -79,7 +82,20 @@ def _principal(
 Deps = Annotated[ApiDeps, Depends(_deps)]
 Caller = Annotated[Principal, Depends(_principal)]
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
+Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor` from the previous page.")]
 Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
+
+
+#: Each list's total order, as its port states it (`ports.py`).
+_ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id)
+_INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id)
+_LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id)
+_LESSON_ORDER: Order[Lesson, str] = ordered_by_id(lambda le: le.lesson_id)
+_SYSTEM_ORDER: Order[System, str] = ordered_by_id(lambda s: s.system_id)
+
+
+def _filter_moment(moment: _dt.datetime | None) -> str | None:
+    return None if moment is None else moment.isoformat()
 
 
 def _audit(deps: ApiDeps, caller: Principal, action: AuditAction, target: str, detail: str = "") -> None:
@@ -111,11 +127,17 @@ def list_alerts(
     fired_after: AwareDatetime | None = None,
     fired_before: AwareDatetime | None = None,
     severity: str | None = None,
+    cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
-) -> list[AlertSummary]:
-    return deps.alerts.list_alerts(
-        caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
-        severity=severity, limit=limit,
+) -> Page[AlertSummary]:
+    return paginate(
+        lambda after, n: deps.alerts.list_alerts(
+            caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
+            severity=severity, after=after, limit=n,
+        ),
+        _ALERT_ORDER, list_name="alerts", tenant_id=caller.tenant_id, cursor=cursor, limit=limit,
+        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before),
+                 "severity": severity},
     )
 
 
@@ -151,9 +173,15 @@ def start_investigation(
 @investigations.get("")
 def list_investigations(
     deps: Deps, caller: Caller, alert_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
-) -> list[Investigation]:
-    return deps.investigations.list_investigations(caller.tenant_id, alert_id=alert_id, limit=limit)
+) -> Page[Investigation]:
+    return paginate(
+        lambda after, n: deps.investigations.list_investigations(
+            caller.tenant_id, alert_id=alert_id, after=after, limit=n),
+        _INVESTIGATION_ORDER, list_name="investigations", tenant_id=caller.tenant_id,
+        cursor=cursor, limit=limit, filters={"alert_id": alert_id},
+    )
 
 
 @investigations.get("/{investigation_id}")
@@ -221,10 +249,14 @@ def start_learning_job(
 def list_learning_jobs(
     deps: Deps, caller: Caller,
     investigation_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
-) -> list[LearningJob]:
-    return deps.learning_jobs.list_learning_jobs(
-        caller.tenant_id, investigation_id=investigation_id, limit=limit
+) -> Page[LearningJob]:
+    return paginate(
+        lambda after, n: deps.learning_jobs.list_learning_jobs(
+            caller.tenant_id, investigation_id=investigation_id, after=after, limit=n),
+        _LEARNING_JOB_ORDER, list_name="learning-jobs", tenant_id=caller.tenant_id,
+        cursor=cursor, limit=limit, filters={"investigation_id": investigation_id},
     )
 
 
@@ -240,8 +272,14 @@ lessons = APIRouter(prefix="/lessons", tags=["learning"])
 
 
 @lessons.get("")
-def list_lessons(deps: Deps, caller: Caller) -> list[Lesson]:
-    return deps.lessons.list_lessons(caller.tenant_id)
+def list_lessons(
+    deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+) -> Page[Lesson]:
+    return paginate(
+        lambda after, n: deps.lessons.list_lessons(caller.tenant_id, after=after, limit=n),
+        _LESSON_ORDER, list_name="lessons", tenant_id=caller.tenant_id, cursor=cursor,
+        limit=limit, filters={},
+    )
 
 
 systems = APIRouter(prefix="/systems", tags=["systems"])
@@ -255,8 +293,15 @@ def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> Syste
 
 
 @systems.get("")
-def list_systems(deps: Deps, caller: Caller) -> list[System]:
-    return [_served(deps, caller, s) for s in deps.systems.list_systems(caller.tenant_id)]
+def list_systems(
+    deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+) -> Page[System]:
+    return paginate(
+        lambda after, n: [_served(deps, caller, s) for s in
+                          deps.systems.list_systems(caller.tenant_id, after=after, limit=n)],
+        _SYSTEM_ORDER, list_name="systems", tenant_id=caller.tenant_id, cursor=cursor,
+        limit=limit, filters={},
+    )
 
 
 def _system(deps: ApiDeps, caller: Principal, system_id: str) -> System:

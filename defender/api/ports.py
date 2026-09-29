@@ -36,6 +36,11 @@ from .models import (
 )
 
 
+#: A position in a newest-first list: the last row served's timestamp and id. A list answers
+#: only rows strictly after it in its order (`api/pages.py`).
+TimePosition = tuple[_dt.datetime, str]
+
+
 @model(frozen=True)
 class Principal:
     """Who is calling. The tenant scopes every read and write; the user id reaches only the
@@ -75,9 +80,10 @@ class AlertsRepository(Protocol):
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
         severity: str | None,
+        after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
-        """Newest `fired_at` first."""
+        """Up to `limit` alerts strictly after `after`, newest first by `(fired_at, alert_id)`."""
         ...
 
     def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None: ...
@@ -105,9 +111,10 @@ class InvestigationsRepository(Protocol):
         ...
 
     def list_investigations(
-        self, tenant_id: str, *, alert_id: str | None, limit: int
+        self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
-        """Newest first; deleted investigations are left out."""
+        """Up to `limit` strictly after `after`, newest first by `(created_at,
+        investigation_id)`; deleted investigations are left out."""
         ...
 
     def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
@@ -139,22 +146,30 @@ class LearningJobsRepository(Protocol):
         ...
 
     def list_learning_jobs(
-        self, tenant_id: str, *, investigation_id: str | None, limit: int
+        self, tenant_id: str, *, investigation_id: str | None, after: TimePosition | None,
+        limit: int,
     ) -> list[LearningJob]:
-        """Newest first."""
+        """Up to `limit` strictly after `after`, newest first by `(created_at,
+        learning_job_id)`."""
         ...
 
     def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None: ...
 
 
 class LessonsRepository(Protocol):
-    def list_lessons(self, tenant_id: str) -> list[Lesson]: ...
+    def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
+        """Up to `limit` lessons with a `lesson_id` greater than `after`, by `lesson_id`."""
+        ...
 
 
 class SystemsRepository(Protocol):
     """Settings only. Whether a system has credentials is the secret store's answer."""
 
-    def list_systems(self, tenant_id: str) -> list[SystemSettings]: ...
+    def list_systems(
+        self, tenant_id: str, *, after: str | None, limit: int
+    ) -> list[SystemSettings]:
+        """Up to `limit` systems with a `system_id` greater than `after`, by `system_id`."""
+        ...
 
     def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None: ...
 

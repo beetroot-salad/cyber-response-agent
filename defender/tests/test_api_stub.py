@@ -26,7 +26,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
 from defender.api.demo import demo_deps, demo_tokens  # noqa: E402
-from defender.api.fakes import InMemoryAudit, InMemoryStore, TokenAuthenticator  # noqa: E402
+from defender.api.fakes import (  # noqa: E402
+    InMemoryAudit,
+    InMemorySecrets,
+    InMemoryStore,
+    StubArtifactLinks,
+    StubSystemChecker,
+    TokenAuthenticator,
+)
 from defender.api.models import (  # noqa: E402
     Alert,
     AlertSummary,
@@ -51,6 +58,7 @@ NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
 A = "tenant-a"
 USER = "ann@a.example"
 AUTH = {"Authorization": "Bearer tok-a"}
+AUTH_B = {"Authorization": "Bearer tok-b"}
 BASE = "http://testserver"
 
 ALERT = Alert(
@@ -160,7 +168,10 @@ class Api:
         self.audit = InMemoryAudit()
         ports: Any = self.ports
         self.client = TestClient(create_app(ApiDeps(
-            authenticator=TokenAuthenticator({"tok-a": Principal(tenant_id=A, user_id=USER)}),
+            authenticator=TokenAuthenticator({
+                "tok-a": Principal(tenant_id=A, user_id=USER),
+                "tok-b": Principal(tenant_id="tenant-b", user_id="bob@b.example"),
+            }),
             alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
             systems=ports, secrets=ports, checker=ports, artifact_links=ports,
             audit=self.audit, clock=lambda: NOW,
@@ -345,7 +356,7 @@ def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
 def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
     api = Api(list_systems=[SETTINGS], has_credentials=has,
               get_system=SETTINGS, check=lambda tenant, system: SystemCheck(ok=True, detail="x"))
-    listed = api.client.get("/systems", headers=AUTH).json()
+    listed = api.client.get("/systems", headers=AUTH).json()["items"]
     assert listed == [System(**SETTINGS.model_dump(), has_credentials=has).model_dump(mode="json")]
     api.client.post("/systems/tix/check", headers=AUTH)
     ((_, checked), _), = api.ports.called("check")
@@ -390,10 +401,11 @@ def test_an_aware_time_and_the_filters_reach_the_store_as_given() -> None:
     response = api.client.get("/alerts", headers=AUTH, params={
         "fired_after": after.isoformat(), "severity": "high", "limit": 7,
     })
-    assert response.json() == [SUMMARY.model_dump(mode="json")]
+    assert response.json() == {"items": [SUMMARY.model_dump(mode="json")], "next_cursor": None}
     ((tenant,), kwargs), = api.ports.called("list_alerts")
     assert tenant == A
-    assert kwargs == {"fired_after": after, "fired_before": None, "severity": "high", "limit": 7}
+    assert kwargs == {"fired_after": after, "fired_before": None, "severity": "high",
+                      "after": None, "limit": 8}
     assert kwargs["fired_after"].utcoffset() == _dt.timedelta(hours=2)
 
 
@@ -443,6 +455,113 @@ def test_a_naive_time_cannot_be_served() -> None:
                       created_at=NOW.replace(tzinfo=None))
 
 
+# --- pagination ----------------------------------------------------------------------------
+
+LATER = NOW + _dt.timedelta(hours=1)
+INV_2 = INV.model_copy(update={"investigation_id": "inv-2", "created_at": LATER})
+JOB_2 = JOB.model_copy(update={"learning_job_id": "lj-2", "created_at": LATER})
+SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "al-2", "fired_at": LATER})
+LESSON_2 = LESSON.model_copy(update={"lesson_id": "le-2"})
+SETTINGS_2 = SETTINGS.model_copy(update={"system_id": "tiy"})
+
+#: (path, port, the store's first two rows in the list's order, the position the second page
+#: must start after — the first row's, as the port's order names it).
+LISTS = [
+    ("/alerts", "list_alerts", [SUMMARY_2, SUMMARY], (LATER, "al-2")),
+    ("/investigations", "list_investigations", [INV_2, INV], (LATER, "inv-2")),
+    ("/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "lj-2")),
+    ("/lessons", "list_lessons", [LESSON, LESSON_2], "le-1"),
+    ("/systems", "list_systems", [SETTINGS, SETTINGS_2], "tix"),
+]
+
+
+def _rows_after(rows: list[Any]) -> Callable[..., list[Any]]:
+    """The store as a function of `after`: both rows from the start, the second after the first."""
+    return lambda tenant, *, after, limit, **_filters: (rows if after is None else rows[1:])[:limit]
+
+
+@pytest.mark.parametrize(("path", "port", "rows", "first_after"), LISTS, ids=[x[0] for x in LISTS])
+def test_every_list_pages_by_cursor_from_the_last_row_served(
+    path: str, port: str, rows: list[Any], first_after: Any,
+) -> None:
+    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    first = api.client.get(path, headers=AUTH, params={"limit": 1}).json()
+    assert len(first["items"]) == 1
+    assert first["next_cursor"]
+    second = api.client.get(path, headers=AUTH,
+                            params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert len(second["items"]) == 1
+    assert second["items"] != first["items"]
+    assert second["next_cursor"] is None
+    (_, first_kwargs), (_, second_kwargs) = api.ports.called(port)
+    assert (first_kwargs["after"], first_kwargs["limit"]) == (None, 2)
+    assert (second_kwargs["after"], second_kwargs["limit"]) == (first_after, 2)
+
+
+def test_a_short_page_is_the_last_page() -> None:
+    api = Api(list_investigations=[INV_2, INV])
+    page = api.client.get("/investigations", headers=AUTH, params={"limit": 2}).json()
+    assert (len(page["items"]), page["next_cursor"]) == (2, None)
+
+
+def _cursor(api: Api, path: str, params: dict[str, str] | None = None) -> str:
+    page = api.client.get(path, headers=AUTH, params={"limit": 1, **(params or {})}).json()
+    cursor: str = page["next_cursor"]
+    assert cursor
+    return cursor
+
+
+@pytest.mark.parametrize("cursor", [
+    "!!not-base64!!",
+    "bm90IGpzb24",                               # base64 of "not json"
+    "eyJ2IjogMn0",                               # base64 of {"v": 2}
+    "e30",                                       # base64 of {}
+])
+def test_a_cursor_this_api_did_not_issue_is_refused_before_the_store(cursor: str) -> None:
+    api = Api()
+    response = api.client.get("/investigations", headers=AUTH, params={"cursor": cursor})
+    assert response.status_code == 422
+    assert api.ports.calls == []
+
+
+def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
+    issuer = Api(list_investigations=[INV_2, INV], list_lessons=[LESSON, LESSON_2])
+    by_alert = _cursor(issuer, "/investigations", {"alert_id": "al-1"})
+    lessons = _cursor(issuer, "/lessons")
+
+    api = Api()
+    refusals = [
+        api.client.get("/investigations", headers=AUTH, params={"cursor": by_alert, "alert_id": "al-2"}),
+        api.client.get("/investigations", headers=AUTH, params={"cursor": by_alert}),
+        api.client.get("/systems", headers=AUTH, params={"cursor": lessons}),
+        api.client.get("/lessons", headers=AUTH_B, params={"cursor": lessons}),
+    ]
+    assert [r.status_code for r in refusals] == [422, 422, 422, 422]
+    assert api.ports.calls == []
+
+
+def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() -> None:
+    store = InMemoryStore(lambda: NOW)
+    fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
+    for n, at in enumerate(fired):
+        store.add_alert(A, ALERT.model_copy(update={"alert_id": f"al-{n}", "fired_at": at}))
+    client = TestClient(create_app(ApiDeps(
+        authenticator=TokenAuthenticator({"tok-a": Principal(tenant_id=A, user_id=USER)}),
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
+        secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
+        audit=InMemoryAudit(), clock=lambda: NOW,
+    )))
+    seen: list[str] = []
+    params: dict[str, Any] = {"limit": 2}
+    while True:
+        page = client.get("/alerts", headers=AUTH, params=params).json()
+        seen += [a["alert_id"] for a in page["items"]]
+        if page["next_cursor"] is None:
+            break
+        params = {"limit": 2, "cursor": page["next_cursor"]}
+    assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
+
+
 # --- the demo server -----------------------------------------------------------------------
 
 
@@ -452,14 +571,14 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     seen: dict[str, set[str]] = {}
     for token, principal in demo_tokens(tenants).items():
         auth = {"Authorization": f"Bearer {token}"}
-        alerts = client.get("/alerts", headers=auth).json()
+        alerts = client.get("/alerts", headers=auth).json()["items"]
         assert alerts, token
         for alert in alerts:
             assert client.get(f"/alerts/{alert['alert_id']}", headers=auth).status_code == 200
         seen.setdefault(principal.tenant_id, set()).update(a["alert_id"] for a in alerts)
     assert set(seen) == set(tenants)
     assert not seen["t-one"] & seen["t-two"]
-    systems = client.get("/systems", headers={"Authorization": "Bearer t-one-analyst"}).json()
+    systems = client.get("/systems", headers={"Authorization": "Bearer t-one-analyst"}).json()["items"]
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
 
 
