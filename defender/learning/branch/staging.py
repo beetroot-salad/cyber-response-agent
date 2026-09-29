@@ -100,6 +100,11 @@ class StagingRefused(Exception):
     """
 
 
+class TeardownUnrecorded(StagingRefused):
+    """A teardown failure the review record could not take (the record is refused): the names
+    left live are in this message and nowhere else."""
+
+
 # ---------------------------------------------------------------------------------------
 # the namespace guard
 # ---------------------------------------------------------------------------------------
@@ -465,9 +470,9 @@ def teardown(episode: Episode, *, door: Any) -> list[str]:
             failures.append({"name": name, "detail": f"{type(bad).__name__}: {bad}"})
     if failures:
         unrecorded = _record_teardown_failure(failures, episode)
-        raise StagingRefused(
-            "teardown did not verify every staged name gone: "
-            + "; ".join(f"{f['name']} ({f['detail']})" for f in failures) + unrecorded)
+        message = ("teardown did not verify every staged name gone: "
+                   + "; ".join(f"{f['name']} ({f['detail']})" for f in failures) + unrecorded)
+        raise TeardownUnrecorded(message) if unrecorded else StagingRefused(message)
     return [str(r.get("name")) for r in rows]
 
 
@@ -848,6 +853,7 @@ __all__ = [
     "KIND_ALIAS",
     "KIND_INDEX",
     "StagingRefused",
+    "TeardownUnrecorded",
     "check_configured_patterns",
     "check_exclusion_predicate",
     "default_door",

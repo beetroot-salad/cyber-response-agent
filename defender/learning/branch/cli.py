@@ -1158,9 +1158,9 @@ def _teardown_without_masking(episode: Episode, door: Any, *, aborting: bool) ->
     """Tear the episode's staged names down without letting a failure displace an abort in flight.
 
     In a `finally` a second exception would replace the first, and the abort is what the
-    operator must act on. So while aborting, a teardown failure is logged (it names what it
-    could not verify gone, and says so when the review record could not take them); otherwise
-    it is re-raised.
+    operator must act on. So while aborting, a teardown failure is logged, saying where its
+    unverified names are: the review record, or only this message when that record was
+    refused (`TeardownUnrecorded`); otherwise it is re-raised.
     """
     # `aborting` is passed in, not read from `sys.exc_info()`, which is thread-global and would
     # report an in-flight exception from any caller up the stack.
@@ -1169,10 +1169,12 @@ def _teardown_without_masking(episode: Episode, door: Any, *, aborting: bool) ->
     except Exception as cleanup_failed:  # noqa: BLE001 — never mask an in-flight abort; re-raised otherwise
         if not aborting:
             raise
+        where = ("only in this message: the review record was refused"
+                 if isinstance(cleanup_failed, staging_mod.TeardownUnrecorded)
+                 else "in the review record")
         _logger.error(f"teardown also failed ({cleanup_failed!r}); the names it could not "
-                      "verify gone are named in that failure, and recorded in the review record "
-                      "unless it says that record was refused. The failure that ended the "
-                      "episode is what follows")
+                      f"verify gone are {where}. The failure that ended the episode is what "
+                      "follows")
 
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
