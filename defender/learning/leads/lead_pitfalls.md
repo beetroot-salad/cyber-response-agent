@@ -65,6 +65,8 @@ params:
 
 The `command` value is the whole pipe the subagent ran: the payload it read on the left, the `defender-sql` invocation on the right. The `stderr_digest` is DuckDB's own complaint about that SQL (`Binder Error: …`, `Parser Error: …`, `Conversion Error: …`). Together they name the mistake; the SQL alone rarely does.
 
+**Positional rows are queried declared.** A payload whose rows are bare arrays behind a list of column names (ES|QL's `{columns, values}`) is queried with `defender-sql --rows values --names columns '<SQL>'`, by column name; that is the current form, so do not record a position-and-unpack recipe for it.
+
 **Scope a reducer bullet to the payload shape it applies to.** `defender/skills/gather/defender-sql.md` is read before *every* reduce of *every* system's payload, so an unscoped rule ("always cast the column") is advice handed to every future reduce, on envelopes it was never true of — where the same sentence on one system's `execution.md` is read only when working that system. Name the payload shape the failure was about (a nested envelope, a `data` array of objects, a truncated capture) in the bullet itself.
 
 ## What a pitfall entry looks like

@@ -1341,6 +1341,59 @@ def test_gather_bash_keeps_local_computation(tmp_path):
     assert not _decide("cat ../../etc/passwd | defender-sql 'SELECT 1'", gather, run_dir).allow
 
 
+#: The raw ES|QL response the fake `esql` verb hands the adapter's own shaping step.
+_ESQL_RAW = {
+    "columns": [{"name": "failed", "type": "long"}, {"name": "source.ip", "type": "ip"}],
+    "values": [[412, "203.0.113.7"], [9, "198.51.100.22"], [3, "203.0.113.40"]],
+}
+
+
+def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captured(tmp_path):
+    """#1138 O7 end to end — the lead queries ES|QL with the `query` tool, then declares the
+    captured payload's positional rows from its bash lane:
+    `cat <payload> | defender-sql --rows values --names columns '<SQL>'`. The REAL gate must
+    admit the flags (before #1138 it refused them and pointed at the `query` tool, C11), and the
+    real shim must answer over the declared table: 3 rows — the unflagged count over this
+    object is 1 (C4) — and `failed` summed as the number it was sent as, with no cast."""
+    from defender.scripts.adapters.elastic_adapter import esql_payload
+
+    rec = VerbRecorder()
+
+    def esql(ctx: VerbContext, *, native_query: str) -> dict:
+        rec.record("esql", ctx, {"native_query": native_query})
+        return esql_payload(native_query, _ESQL_RAW)
+
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
+    command = (f"cat {payload_abs} | defender-sql --rows values --names columns "
+               "'SELECT count(*) AS n, sum(failed) AS s FROM data'")
+    main = ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": LEAD, "system": "elastic", "goal": "g", "what_to_summarize": ["e"]})]),
+        Turn(text="done"),
+    ])
+    gather = ReplayFn([
+        q("elastic", "esql", {"native_query": "FROM logs-* | STATS failed = COUNT(*) BY source.ip"}),
+        Turn(tool_calls=[("bash", {"command": command})]),
+        DONE,
+    ])
+    drive(run_dir, run_id="q1138", main=main, gather=gather,
+          verbs=FakeVerbs({"elastic": {"esql": esql}}))
+
+    assert json.loads(payload_abs.read_text(encoding="utf-8"))["values"] == _ESQL_RAW["values"], (
+        "premise: the query tool captured the ES|QL payload the bash call reads")
+    assert len(gather.seen) >= 3, "the replay never reached the turn after the bash call"
+    before, after = gather.seen[1], gather.seen[2]
+    assert after.startswith(before), "the replay's message history is not cumulative"
+    bash_result = after[len(before):]
+    assert "Blocked" not in bash_result, f"the gate refused the declared pipe: {bash_result!r}"
+    if not _sql_shim_aggregates():
+        pytest.skip("this tree's defender-sql cannot aggregate (no duckdb in the venv it "
+                    "re-execs into) — the gate half of the test ran and held")
+    assert re.search(r'"n":\s*3\b', bash_result), bash_result
+    assert re.search(r'"s":\s*424\b', bash_result), bash_result
+
+
 def test_main_cannot_reach_a_payload_by_any_surface(tmp_path):
     """main_cannot_reach_a_payload_by_any_surface — the main loop cannot read a gather_raw payload
     by ANY surface, including a bash command carrying a `# record_query` comment. Main's clamp is
