@@ -12,10 +12,10 @@ a positive control on the same address.
 
 The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
 `verify_family(episode, ...)`, `archive_episode(episode, run_dirs)`,
-`record_staged(episode, row)`, `prime_base(source_run_dir, episode)`,
-`load_family(episode)` / `manifest_digest(episode)` / `check_manifest_digest(episode, digest)`;
-`prepare_episode(...)` returns the `Episode`. The doors keep their path signatures:
-`cli.main`, `grade_episode(episode_dir, ...)`.
+`record_staged(episode, row)`, `prime_base(source_run_dir, episode)`; the manifest readers
+take a view (rev 3, R1): `load_family(view)` / `manifest_digest(view)` /
+`check_manifest_digest(view, digest)`; `prepare_episode(...)` returns the `Episode`. The doors
+keep their path signatures: `cli.main`, `grade_episode(episode_dir, ...)`.
 
 Every link is planted twice over: pointing at a host folder OUTSIDE the episode, and at a folder
 elsewhere INSIDE the episode. An owner accessor's containment resolve stops an outside link, so
@@ -37,18 +37,21 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
   seam, its ONE held call is `write(LAYOUT.staged, <row>, mode="append", durable=True)`, on the
   episode the caller holds (no second `hold`).
 - H4 the priming claim alone keeps a second launcher out while the first primes; the primed base
-  alone refuses a rival base that lands just before its create (a recording `Held` plants it,
-  then delegates the create — D7' replaces rev 1's FIFO interleaving, S3).
-- H5 the manifest readers (`load_family`, `manifest_digest`, `check_manifest_digest`), handed the
-  `Episode`, refuse a symlink or a hard link at `family.yaml` without reading what it reaches.
+  alone refuses a rival base that lands after its listing and just before its create (a
+  recording `Held` plants it, then delegates the create — D7' replaces rev 1's FIFO
+  interleaving, S3).
+- H5 the manifest readers (`load_family`, `manifest_digest`, `check_manifest_digest`), handed
+  the episode's view, refuse a symlink or a hard link at `family.yaml` without reading what it
+  reaches.
 - H7 `defender._io.Bound`'s public surface is exactly `read`, `read_jsonl`, `entries`, `under`,
   `close` (O3) — for a `bind` and for `episode.view()`.
 
 The census that holds every migrated module to the handle is `test_1133_census.py`.
 
-Red before rev 2: every site handed an `Episode` (rev 1's signatures take paths), H3, H4's
-returned `Episode` and the H4 base test. Green today and pinned to stay: the sites driven through
-`cli.main` / `grade_episode` (H1 launcher and judge rows, H2).
+Red before rev 3 (on the rev-2 tree): H5 (the readers take the `Episode` and read its
+`family.read()`; a `Bound` has no `family`), and every leaf-link row checked with
+`assert_refusal` (no `_io.NotPlainEntry`). The folder-link rows, H3, H4 and H7 hold today and are
+pinned to keep holding.
 """
 from __future__ import annotations
 
@@ -924,11 +927,12 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
 
 def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_its_create(
         tmp_path):
-    """`prime_base(source_run_dir, episode)` reads the whole capture, then writes the base with
-    ONE exclusive create — the create itself is the check. A recording `Held` behind the
-    episode's `io=` seam plants a rival base (a plain file, by path) just before it delegates
-    that create: the create's collision is the "already primed" `LedgerError`, and the rival
-    keeps its bytes. A check-then-write, a replace or an append would clobber it.
+    """`prime_base(source_run_dir, episode)` lists `served/` (no base there), reads the whole
+    capture, then writes the base with ONE exclusive create, which still refuses a caller
+    without the claim (R3 step 4). A recording `Held` behind the episode's `io=` seam plants a
+    rival base (a plain file, by path) just before it delegates that create: the create's
+    collision is the "already primed" `LedgerError`, and the rival keeps its bytes. A
+    check-then-write, a replace or an append would clobber it.
 
     Control on the same address: with no rival, the same capture primes the base, by one
     `create` and nothing else."""
@@ -979,10 +983,11 @@ MARKER = "host-manifest-1133-never-read"
 
 
 def _readers(fam: Any, digest: str) -> dict[str, Any]:
+    """Each manifest reader, handed a view (rev 3, R1)."""
     return {
         "load_family": fam.load_family,
         "manifest_digest": fam.manifest_digest,
-        "check_manifest_digest": lambda episode: fam.check_manifest_digest(episode, digest),
+        "check_manifest_digest": lambda view: fam.check_manifest_digest(view, digest),
     }
 
 
@@ -990,12 +995,12 @@ def _readers(fam: Any, digest: str) -> dict[str, Any]:
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
 def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it(
         tmp_path, entry, kind):
-    """`load_family(episode)`, `manifest_digest(episode)` and `check_manifest_digest(episode,
-    digest)` read `family.yaml` as the episode's `family` record, which follows nothing below
-    the episode dir and refuses a hard link: over a symlink to a host file holding a valid
-    manifest, or a hard link whose other name is that host file, each raises `FamilyError`,
-    returns nothing, and never reads what the link reaches — the host manifest's text appears
-    in no message.
+    """`load_family(view)`, `manifest_digest(view)` and `check_manifest_digest(view, digest)`
+    read `family.yaml` through the episode's view (rev 3, R1), which follows nothing below the
+    episode dir and refuses a hard link: over a symlink to a host file holding a valid
+    manifest, or a hard link whose other name is that host file, each raises `FamilyError`
+    naming `family.yaml`, returns nothing, and never reads what the link reaches — the host
+    manifest's text appears in no message.
 
     Control on the same address: the same bytes as a plain `family.yaml` load, digest to the
     digest the check is handed, and check clean."""
@@ -1006,7 +1011,7 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
     manifest = ep / "family.yaml"
     good = manifest.read_bytes()
     with S.open_episode(ep) as episode:
-        digest = fam.manifest_digest(episode)
+        digest = fam.manifest_digest(episode.view())
     call = _readers(fam, digest)[entry]
 
     host = tmp_path / "host"
@@ -1021,18 +1026,19 @@ def test_h5_the_manifest_readers_refuse_a_link_at_family_yaml_without_reading_it
 
     answered: list[Any] = []
     with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: answered.append(call(episode)))
+        raised = S.raised_by(lambda: answered.append(call(episode.view())))
     assert answered == [], f"{entry} answered {answered!r} over a {kind} at family.yaml"
     assert isinstance(raised, fam.FamilyError), f"{entry} over a {kind}: {raised!r}"
     text = "".join(str(e) for e in (raised, raised.__cause__) if e is not None)
     assert MARKER not in text, f"{entry} read through the {kind}: {text}"
+    assert str(LAYOUT.family) in str(raised), f"{entry}'s refusal does not name the record"
     assert os.path.lexists(manifest), f"the {kind} at family.yaml was removed"
     assert other.read_bytes() == good
 
     manifest.unlink()
     manifest.write_bytes(good)
     with S.open_episode(ep) as episode:
-        got = call(episode)
+        got = call(episode.view())
     if entry == "load_family":
         assert [w.story for w in got.worlds][1] == MARKER
     elif entry == "manifest_digest":

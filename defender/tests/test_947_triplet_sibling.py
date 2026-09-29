@@ -320,7 +320,7 @@ def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_p
     assert "captured_patterns" not in doc, "the capture must not name the pattern on its own"
     ep = T.episode(tmp_path, doc=doc)
     with Episode.open(ep) as episode, pytest.raises(_family.FamilyError, match="logs"):
-        _family.load_family(episode)
+        _family.load_family(episode.view())
     world = _run().resume_world(
         Episode.open(ep), "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
     assert world.family.configured_patterns == T.CONFIGURED

@@ -1,5 +1,5 @@
 """#1133 — the `Episode` handle holds the episode dir open, and every verb works relative to it
-(rev 2: O2, O3, O6, N-g, N-h, D1', D2', D7').
+(rev 2: O2, O3, O6, N-g, N-h, D1', D2', D7'; rev 3: R1's write-only records, D7'').
 
 The handle this suite builds against (every name is gathered in `_spec1133`'s docstring):
 
@@ -7,7 +7,8 @@ The handle this suite builds against (every name is gathered in `_spec1133`'s do
   `Episode.create(episode_dir, *, io=_io)` — one `io.hold_new(episode_dir.parent,
   episode_dir.name)`. Each returns the `Episode`, which is its own context manager (`.dir`,
   `.view()`, `.close()`); `Episode(<path>)` is a `TypeError`.
-* records (`.path` plus exactly the verbs their row grants, as CLASS attributes): `family`,
+* records (`.path` plus exactly the verbs their row grants, as CLASS attributes; rev 3: no
+  record answers `read` — a record is read through `episode.view()`): `family`,
   `family_stamp`, `review`, `samples`, `judge`, `timing`, `staged`, `learning_html`,
   `served_base`, `priming_lock` (properties); `served_world(token)`, `wire_log(name)`
   (methods); `world(label).draw(n)`, `world(label).run_dir_pointer`;
@@ -28,9 +29,9 @@ What each section pins:
 - The `io=` seam (a recorder offering ONLY `hold` / `hold_new`): opening is exactly one `hold`
   (creating exactly one `hold_new`), and every verb is exactly ONE call on the held root — the
   record's `LAYOUT` name, the payload, the mode (`write` -> replace, `create` -> create,
-  `append` / `append_durable` -> append, the latter `durable=True`); `read` -> `Held.read`,
-  `delete` -> `Held.unlink`, `ensure` -> `Held.mkdir`. No holding-folder `mkdir` before a
-  write (the write's own walk makes it), no second `hold`.
+  `append` / `append_durable` -> append, the latter `durable=True`); `delete` ->
+  `Held.unlink`, `ensure` -> `Held.mkdir`. No holding-folder `mkdir` before a write (the
+  write's own walk makes it), no second `hold`.
 - D7' matrix 1 (O2), records x granted verbs x plant site, on an OPENED episode: refused in the
   core's row, the whole tree unchanged, promptly; control on the same address.
 - D7' matrix 2, folders x `ensure` x plant site.
@@ -48,8 +49,9 @@ What each section pins:
 - No iterable text: a record's write verb refuses anything but `str` / `bytes`.
 - Name checks run before any held call.
 
-Red before rev 2: `Episode.open` / `Episode.create` do not exist, the rev-1 bare constructor
-does, rev-1 verbs are bound per instance, and `_io` has no `hold` / `hold_new`.
+Red before rev 3 (on the rev-2 tree): `family` / `review` still answer `read` (their class is a
+read-write class of its own, not the `write` class the other write-only records share), every
+leaf-plant row (no `_io.NotPlainEntry`), and the dot-less non-case-stable token row.
 """
 from __future__ import annotations
 
@@ -108,8 +110,6 @@ def opened(tree: Tree):
 
 
 def verb_call(rec: Any, verb: str, key: str, tag: str) -> Any:
-    if verb == "read":
-        return lambda: rec.read()
     if verb == "delete":
         return lambda: rec.delete()
     return lambda: getattr(rec, verb)(payload(key, tag))
@@ -120,9 +120,10 @@ def verb_call(rec: Any, verb: str, key: str, tag: str) -> Any:
 # =======================================================================================
 
 def test_d2_the_shipped_tables_are_the_designs_row_for_row():
-    """Rev 2 keeps rev 1's records and folders unchanged in name and verbs: the shipped
-    `RECORD_VERBS` equals the spec's copy key for key and verb set for verb set, and `FOLDERS`
-    names exactly the spec's five folders. A record added or dropped is a change to this spec."""
+    """Rev 2 kept rev 1's records and folders; rev 3 (R1) makes records write-only (`family`
+    and `review` lose `read`): the shipped `RECORD_VERBS` equals the spec's copy key for key and
+    verb set for verb set, and `FOLDERS` names exactly the spec's five folders. A record added
+    or dropped is a change to this spec."""
     mod = S.handle()
     shipped = {k: set(v) for k, v in mod.RECORD_VERBS.items()}
     assert shipped == {k: set(v) for k, v in S.RECORD_VERBS.items()}, shipped
@@ -300,12 +301,11 @@ def test_d2_open_is_one_hold_and_create_one_hold_new_through_the_io_seam(tree):
 def test_d2_each_verb_is_one_call_on_the_held_root_with_its_name_payload_and_mode(
         tree, key, verb):
     """D2': each write verb is one `held.write(LAYOUT name, payload, mode=..., durable=...)`
-    whose own walk makes the holding folders (no `mkdir` first); `read` is one `held.read(name)`
-    answering what the held root answered; `delete` one `held.unlink(name)`. No second `hold`,
-    and the episode is not closed by a verb."""
+    whose own walk makes the holding folders (no `mkdir` first); `delete` one
+    `held.unlink(name)`. No second `hold`, and the episode is not closed by a verb."""
     rec_io = S.RecordingIo()
     rel = S.expected_record_rel(key)
-    if verb in ("read", "delete"):
+    if verb == "delete":
         (tree.ep / rel).parent.mkdir(parents=True, exist_ok=True)
         (tree.ep / rel).write_text("plain\n", encoding="utf-8")
     with S.open_episode(tree.ep, io=rec_io) as episode:
@@ -316,10 +316,7 @@ def test_d2_each_verb_is_one_call_on_the_held_root_with_its_name_payload_and_mod
         assert len(calls) == 1, f"{key}.{verb} made {len(calls)} held calls: {calls}"
         [call] = calls
         assert call.name == rel, f"{key}.{verb} named {call.name}, not {rel}"
-        if verb == "read":
-            assert call.method == "read", calls
-            assert got == ("plain\n", None), f"{key}.read answered {got!r}"
-        elif verb == "delete":
+        if verb == "delete":
             assert call.method == "unlink", calls
             assert got is True
         else:
@@ -374,12 +371,6 @@ def _assert_landed(path: Path, key: str, verb: str, tag: str, *, prior: bytes = 
 
 def _positive_controls(rec: Any, key: str, verb: str, path: Path) -> None:
     """The same verb on the same address: with nothing there, then with a plain file there."""
-    if verb == "read":
-        assert rec.read()[0] is None, f"control: {key}.read of nothing returned text"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{key} plain\n", encoding="utf-8")
-        assert rec.read() == (f"{key} plain\n", None), f"control: {key}.read of a plain file"
-        return
     if verb == "delete":
         assert rec.delete() is False, f"control: {key}.delete of nothing did not answer False"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -405,27 +396,21 @@ def _positive_controls(rec: Any, key: str, verb: str, path: Path) -> None:
 @pytest.mark.parametrize(("key", "verb", "kind", "site"), list(_record_matrix()))
 def test_o2_d7_a_record_verb_into_a_plant_is_refused_and_changes_nothing(
         tree, opened, key, verb, kind, site):
-    """O2: no handle write lands outside the episode dir or through a non-plain entry, and no
-    handle read follows a link. A write verb raises the core's refusal row for the plant;
-    `read` answers `(None, reason)`; neither blocks on a FIFO. The whole temp tree is unchanged.
+    """O2: no handle write lands outside the episode dir or through a non-plain entry. A write
+    verb raises the core's refusal row for the plant (R2: `NotPlainEntry` at the name, the plain
+    folder refusal on the way) and does not block on a FIFO. The whole temp tree is unchanged.
     Then, on the same address, the verb succeeds with nothing there and with a plain file there
-    (`create` over a plain file is the unmarked `FileExistsError`)."""
+    (`create` over a plain file is the unmarked `FileExistsError`). A record's read is the
+    view's; its plant rows are in `test_1133_rev3.py`."""
     rec = S.resolve(opened, key)
     rel = S.expected_record_rel(key)
     path = tree.ep / rel
     planted = S.plant(tree.ep, rel, site, kind, host=tree.host)
     before = S.census(tree.tmp)
 
-    if verb == "read":
-        got = S.in_time(rec.read, fifo=planted.fifo)
-        assert isinstance(got, tuple), f"{key}.read answered {got!r}, not (text, reason)"
-        assert got[0] is None, f"{key}.read of a {kind} plant returned {got!r}"
-        assert isinstance(got[1], str), f"{key}.read of a {kind} gave no reason"
-        assert got[1], f"{key}.read of a {kind} gave an empty reason"
-    else:
-        raised = S.raised_by(verb_call(rec, verb, key, "refused"), fifo=planted.fifo)
-        S.assert_refusal(raised, "symlink" if kind == "dangling" else kind,
-                         where=f"{key}.{verb}{f' @{site}' if site else ''}")
+    raised = S.raised_by(verb_call(rec, verb, key, "refused"), fifo=planted.fifo)
+    S.assert_refusal(raised, "symlink" if kind == "dangling" else kind,
+                     where=f"{key}.{verb}{f' @{site}' if site else ''}")
     assert S.census(tree.tmp) == before, f"{key}.{verb} into a {kind} plant changed the tree"
 
     planted.remove()
@@ -504,7 +489,8 @@ def test_n_g_create_refuses_a_plant_at_the_episode_dirs_own_name(tmp_path, kind)
         episode.family.write("family: made\n")
     assert stat.S_ISDIR(os.lstat(ep).st_mode)
     with S.create_episode(ep) as episode:
-        assert episode.family.read() == ("family: made\n", None), "a real dir was not adopted"
+        assert episode.view().read(LAYOUT.family).text == "family: made\n", (
+            "a real dir was not adopted")
 
     fresh = tmp_path / "fresh-root" / EPISODE_ID
     with S.create_episode(fresh) as episode:
@@ -523,7 +509,7 @@ def test_n_g_open_follows_the_episode_dirs_own_spelling_and_create_does_not(tmp_
     alias.symlink_to(real, target_is_directory=True)
     with S.open_episode(alias) as episode:
         episode.family.write("family: through the root's spelling\n")
-        assert episode.family.read() == ("family: through the root's spelling\n", None)
+        assert episode.view().read(LAYOUT.family).text == "family: through the root's spelling\n"
         episode.served.ensure()
     assert (real / "family.yaml").read_text(encoding="utf-8") == (
         "family: through the root's spelling\n")
@@ -719,6 +705,11 @@ _BAD_NAMES = [
     pytest.param(lambda ep: ep.world("a/b").draw(0).write("x"), id="label-two-components"),
     pytest.param(lambda ep: ep.world("..").dir.ensure(), id="label-dotdot"),
     pytest.param(lambda ep: ep.served_world("e1133.B").append(""), id="token-not-case-stable"),
+    # Rev 3's patch: the WHOLE token is judged, not only the text after its last dot.
+    pytest.param(lambda ep: ep.served_world("Control").append(""),
+                 id="token-dotless-not-case-stable"),
+    pytest.param(lambda ep: ep.served_world("E1133.b").append(""),
+                 id="token-head-not-case-stable"),
     pytest.param(lambda ep: ep.served_world("e1133/b").append(""), id="token-two-components"),
     pytest.param(lambda ep: ep.served_world("..").append(""), id="token-dotdot"),
     pytest.param(lambda ep: ep.wire_log("a/b.jsonl").write("x"), id="wire-log-two-components"),
@@ -733,7 +724,8 @@ _BAD_NAMES = [
 
 @pytest.mark.parametrize("call", _BAD_NAMES)
 def test_d1_a_bad_component_is_a_value_error_before_any_held_call(tree, call):
-    """Writers use the owner's MINTING checks (a case-stable label; a case-stable token label),
+    """Writers use the owner's MINTING checks (a case-stable label; a case-stable token, judged
+    whole since rev 3),
     `wire_log` takes one component, and a draw index is a non-negative int. Each is a
     `ValueError` raised before the held root is called and with the tree unchanged, whether the
     check fires at the accessor or at the verb. Control: the matrices above."""

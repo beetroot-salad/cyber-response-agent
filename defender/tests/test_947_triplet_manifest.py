@@ -293,10 +293,10 @@ def test_947_the_manifest_digest_is_recorded_in_the_review_and_rechecked_on_resu
     doc = T.family_doc()
     with Episode.open(T.episode(tmp_path)) as episode:
         fam.write_family(episode, doc)
-        recorded = fam.manifest_digest(episode)
+        recorded = fam.manifest_digest(episode.view())
         fam.write_family(episode, T.family_doc(base_story="edited after review"))
         with pytest.raises(_refusal()) as bad:
-            fam.check_manifest_digest(episode, recorded)
+            fam.check_manifest_digest(episode.view(), recorded)
     assert "digest" in str(bad.value)
 
 

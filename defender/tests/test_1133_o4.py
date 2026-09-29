@@ -9,25 +9,30 @@ every negative has a positive control on the same address.
 
 - O4.1 `staged.yaml`'s header is an exclusive create, tolerating `FileExistsError` (through
   `cli.main`, whose signature is unchanged).
-- O4.2 `staging.merge_review(episode, key, block)` reads the record without following links,
-  then replaces it.
+- O4.2 `staging.merge_review(episode, key, block)` reads the record through the view without
+  following links, then replaces it. Rev 3 (R1): a REFUSED record (a link, a non-plain entry,
+  undecodable bytes) is `StagingRefused` naming the reason, and nothing is written.
 - O4.3 / O4.8.3 `capture.prime_base(source_run_dir, episode)` creates the base whole with one
-  exclusive create: a linked `served/` is refused, and a plain file (`FileExistsError`), a link
-  or any non-plain entry at `served/base.jsonl` is the one "already holds a primed base"
-  `LedgerError` — the create itself is the check (rev 1's pre-check is gone).
+  exclusive create. Rev 3 (R3): anything named `base.jsonl` in the `served/` listing (a plain
+  file, a link, a hard link, a FIFO, a directory) is the one "already holds a primed base"
+  `LedgerError`, before the capture is read; the create still refuses a rival that lands after
+  the listing. A linked `served/` is the core's FOLDER refusal (R2), raised as is — not the
+  "already primed" refusal.
 - O4.4 `Ledger.for_world(episode, token)`: a plant at `served/<token>.jsonl` or at `served/`
   refuses `declare()` and `record()`.
 - O4.8.1 `Ledger.for_world(episode, <bad or non-case-stable id>)` is `LedgerError` at
   construction, before anything is written — every id the owner's minting check refuses (a
-  newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees.
+  newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees;
+  since rev 3 the WHOLE token must be case-stable (a dot-less `Control`, an upper-case head).
 - D4' the scratch ledger: one scratch `Episode` serves two worlds; its base is created empty
   once; a base holding rows is still the review's refusal.
 - O4.5 the priming claim, through `cli.prepare_episode`, which now returns the `Episode` (and
   closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`.
-- O4.6 / S1 the judge's draw removal: a non-plain draw (ELOOP / EMLINK) is refused, logged and
-  left, and the pass goes on; any OTHER `OSError` from the removal (EACCES, EPERM, EROFS, and
-  equally EIO or ENOTDIR, injected through the `Episode`'s `io=` seam) stops the pass and the
-  stale draw stays.
+- O4.6 / S1 the judge's draw removal: a non-plain draw (the core's leaf refusal, rev 3's
+  `NotPlainEntry`) is refused, logged and left, and the pass goes on; any OTHER `OSError` from
+  the removal (EACCES, EPERM, EROFS, and equally EIO or ENOTDIR, injected through the
+  `Episode`'s `io=` seam) stops the pass and the stale draw stays. (A linked `judge/` folder is
+  not the leaf class: `test_1133_rev3.py`.)
 - D3' `enqueue.draws_on_disk(view, label)` / `draws_on_disk_report(view, label)`: every `.yaml`
   entry of any kind is counted, and a link at `worlds/`, `worlds/<label>` or its `judge/` yields
   no draws (C13: `worlds/b -> worlds/c` never yields c's draws under b).
@@ -39,10 +44,10 @@ every negative has a positive control on the same address.
   before anything is spent; and it holds ONE descriptor on the episode dir for the run — the
   `Episode` it hands the lifecycle.
 
-Red before rev 2: every call that hands an `Episode` (the rev-1 signatures take paths), the
-O4.8 rows, S1's propagation, the view-taking draw reader, the `grade_episode` missing-dir
-refusal and the `run.py` name refusal. Green today and pinned to stay green: O4.1, the
-`render_episode` missing-dir refusal and the legacy-token read.
+Red before rev 3 (on the rev-2 tree): the O4.2 refusal rows (today an `OSError` from the
+replace), the linked-`served/` prime (today mapped to "already primed"), the dot-less and
+upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refusal` (no
+`_io.NotPlainEntry`). Everything else holds today and is pinned to keep holding.
 """
 from __future__ import annotations
 
@@ -220,8 +225,9 @@ def test_o4_2_merge_review_keeps_every_other_key_and_replaces_the_record_whole(t
 
 
 def test_o4_2_merge_review_does_not_read_through_a_hard_link_at_the_record(tmp_path):
-    """A hard link at `review.yaml` whose other name holds bytes that are not text is refused
-    as an alias OSError — the other name's bytes are never decoded — and nothing changes."""
+    """A hard link at `review.yaml` whose other name holds bytes that are not text is the
+    view's refusal — the other name's bytes are never decoded — so the merge is
+    `StagingRefused` naming the alias reason (R1), and nothing changes."""
     staging = T.mod("learning.branch.staging")
     ep, host = bare_episode(tmp_path)
     other = host / "other-name-of-review.yaml"
@@ -232,14 +238,16 @@ def test_o4_2_merge_review_does_not_read_through_a_hard_link_at_the_record(tmp_p
     with S.open_episode(ep) as episode:
         raised = S.raised_by(lambda: staging.merge_review(episode, "teardown", {"ok": False}))
 
-    assert isinstance(raised, OSError), f"merge over a hard link: {raised!r}"
-    assert not isinstance(raised, UnicodeError)
+    assert isinstance(raised, staging.StagingRefused), f"merge over a hard link: {raised!r}"
     assert "aliased" in str(raised), raised
+    assert "codec" not in str(raised), f"the other name's bytes were decoded: {raised}"
     assert S.census(tmp_path) == before, "a refused merge changed the tree"
     assert os.lstat(other).st_nlink == 2
 
 
 def test_o4_2_merge_review_refuses_a_symlink_at_the_record_and_leaves_it(tmp_path):
+    """A symlink at `review.yaml` is the view's refusal: `StagingRefused` naming the alias
+    reason (R1), nothing written, the link and what it reaches left as they were."""
     staging = T.mod("learning.branch.staging")
     ep, host = bare_episode(tmp_path)
     target = host / "review-target.yaml"
@@ -248,7 +256,8 @@ def test_o4_2_merge_review_refuses_a_symlink_at_the_record_and_leaves_it(tmp_pat
     before = S.census(tmp_path)
     with S.open_episode(ep) as episode:
         raised = S.raised_by(lambda: staging.merge_review(episode, "episode", {"o": 1}))
-    S.assert_refusal(raised, "symlink", where="merge_review over a symlink")
+    assert isinstance(raised, staging.StagingRefused), f"merge over a symlink: {raised!r}"
+    assert "aliased" in str(raised), raised
     assert S.census(tmp_path) == before
 
 
@@ -266,8 +275,11 @@ def _source_with_one_call(tmp_path: Path) -> Path:
 def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where_it_points(
         tmp_path):
     """`prime_base(source_run_dir, episode)` writes the base with `served_base.create(rows)`,
-    whose walk never follows a link at `served/`: refused (the walk's ELOOP, raised as is or
-    under the priming `LedgerError`), and the folder the link points at gains no `base.jsonl`.
+    whose walk never follows a link at `served/`. A direct caller (no `served.ensure()` first)
+    reaches the core's FOLDER refusal there (R2): a plain `OSError(ELOOP)`, raised as is — not
+    the leaf class `NotPlainEntry` and not the "already holds a primed base" `LedgerError` (the
+    listing of a linked `served/` is refused, so the create judges it) — and the folder the link
+    points at gains no `base.jsonl`.
 
     Control on the same address: a real `served/` takes the whole capture as one plain,
     single-linked file; a second prime is the "already primed" `LedgerError`, base untouched."""
@@ -283,9 +295,9 @@ def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where
 
     with S.open_episode(ep) as episode:
         raised = S.raised_by(lambda: capture.prime_base(run_dir, episode))
-    refused = S.refusal_in(raised)
-    assert refused is not None, f"prime_base through a linked served/: {raised!r}"
-    assert refused.errno == errno.ELOOP, raised
+    assert not isinstance(raised, ledger.LedgerError), (
+        f"a linked served/ was read as an existing base: {raised!r}")
+    S.assert_refusal(raised, "folder_link_outside", where="prime_base through a linked served/")
     assert S.census(tmp_path) == before, "the primer wrote through the linked served/"
     assert list(elsewhere.iterdir()) == []
 
@@ -305,11 +317,11 @@ def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where
 @pytest.mark.parametrize("kind", ["plain", "symlink", "dangling", "hardlink", "fifo",
                                   "directory"])
 def test_o4_8_3_anything_at_the_base_is_the_one_already_primed_refusal(tmp_path, kind):
-    """O4.8.3: the "already primed" check is the exclusive create itself. A plain file at
-    `served/base.jsonl` (`FileExistsError`), a link (live or dangling) or any non-plain entry (a
-    hard link, a FIFO, a directory: the core's refusal) each map to the same `LedgerError`, and
-    the entry is left exactly as it was — nothing written through it, no dangling target made,
-    no blocking on the FIFO."""
+    """O4.8.3 / R3: anything named `base.jsonl` in `served/` — a plain file, a link (live or
+    dangling) or any non-plain entry (a hard link, a FIFO, a directory) — is the same "already
+    holds a primed base" `LedgerError`, and the entry is left exactly as it was — nothing
+    written through it, no dangling target made, no blocking on the FIFO. (That the capture is
+    not read first, and the base not read at all, is `test_1133_rev3.py`'s.)"""
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     run_dir = _source_with_one_call(tmp_path)
@@ -407,6 +419,9 @@ def test_o4_4_a_linked_served_folder_refuses_the_world_ledgers_declare(tmp_path)
     pytest.param("e1133.b\n", id="newline"),
     pytest.param("e1133.b\x00", id="nul"),
     pytest.param("e1133." + "b" * 250, id="longer-than-a-file-name"),
+    # Rev 3's patch: the WHOLE token must be case-stable, not only the text after its last dot.
+    pytest.param("Control", id="dotless-not-case-stable"),
+    pytest.param("E1133.b", id="head-not-case-stable"),
 ])
 def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world_id):
     """O4.8.1: `Ledger.for_world(episode, world_id)` builds its `served_world` record at
@@ -743,7 +758,8 @@ def _stale_draw(ep: Path) -> Path:
                          ids=["EACCES", "EPERM", "EROFS", "EIO", "ENOTDIR"])
 def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothing_silently(
         tmp_path, code):
-    """S1: only the core's non-plain refusal (ELOOP / EMLINK) is contained. Any other `OSError`
+    """S1: only the core's non-plain refusal at the draw's name (rev 3: the leaf class
+    `NotPlainEntry`) is contained. Any other `OSError`
     from removing a stale plain draw — the design's EACCES, EPERM and EROFS, and equally an EIO
     or an ENOTDIR, which its parenthetical does not list — injected through the `Episode`'s
     `io=` seam (the held root's `unlink` of `worlds/b/judge/0.yaml` raises it) propagates out of
@@ -782,8 +798,8 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo", "directory"])
 def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind):
     """The contained rows, through the same loop: a symlink or a FIFO or a directory at the
-    malformed draw's name (the core's ELOOP) or a hard link (EMLINK) is refused, logged, and
-    left for the reap scan, and the loop goes on to draw 1."""
+    malformed draw's name (the core's leaf refusal, ELOOP) or a hard link (EMLINK) is refused,
+    logged, and left for the reap scan, and the loop goes on to draw 1."""
     ep = _judged_episode(tmp_path)
     draw = ep / "worlds" / "b" / "judge" / "0.yaml"
     host = tmp_path / "host"

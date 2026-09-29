@@ -14,14 +14,18 @@ The held root, pinned here on the core itself (the `Episode` handle's matrices a
   the held folder with it), and fsyncs the parent on an `O_RDONLY|O_DIRECTORY` handle — whether
   it made the directory or adopted one, the handle opened relative to the parent's descriptor
   (the parent is resolved by path once), and a failed sync failing the call.
-* `Held.write` / `read` / `mkdir` / `unlink` against every plant: the core's refusal row, the
-  tree unchanged, and a positive control on the same address.
+* `Held.write` / `mkdir` / `unlink` against every plant: the core's refusal row (rev 3: a plant
+  AT the name is `_io.NotPlainEntry`, one at a folder on the way is not), the tree unchanged,
+  and a positive control on the same address. Rev 3 (R1) removes `Held.read`: reads are the
+  view's, and the view's plant matrix and close race are in `test_1133_rev3.py`.
 * One walk per write: during a verb every open is relative to a held descriptor (the root is
   never re-resolved by path) and each holding folder is opened once, made in the same walk.
 * Durable append: the leaf is fsynced with every byte on it, then its holding folder on a
   directory handle opened `O_RDONLY|O_DIRECTORY` (an `O_PATH` handle cannot be fsynced). Every
   open is relative to a held descriptor, so after a rename the MOVED folder is the one synced;
-  a failed folder sync fails the append.
+  a failed folder sync fails the append. Rev 3 (R4): a durable append walks WITHOUT making a
+  folder, so every durable row here writes into holding folders that already exist, and the
+  one-walk row for a missing folder expects `FileNotFoundError`.
 * No iterable `text`: anything but `str` / `bytes` is a `TypeError` before any I/O.
 * The view: a `Bound` over the same handle, the readers' surface only, owning nothing.
 * Lifetime (dup-per-verb): a verb in flight when `close()` lands keeps working off its own
@@ -35,8 +39,9 @@ The held root, pinned here on the core itself (the `Episode` handle's matrices a
 Faults are real (plants, renames, removals, a reused descriptor number) or come through the
 core's own `os_` seam; nothing is monkeypatched.
 
-Red before rev 2: `_io` has no `hold` / `hold_new` / `Held` (every held-root test fails on the
-missing attribute). The `rooted_*` tests hold today and must keep holding.
+Red before rev 3 (on the rev-2 tree): every leaf-plant row (no `_io.NotPlainEntry`) and the
+durable one-walk row over missing folders (rev 2's durable walk makes them). The `rooted_*`
+tests and the folder-plant rows hold today and must keep holding.
 """
 from __future__ import annotations
 
@@ -179,7 +184,7 @@ def test_d1_hold_opens_the_root_following_its_spelling_and_closes_it_on_exit(tre
     with S.hold(spelled) as held:
         assert isinstance(held, _io.Held), f"hold answered {type(held).__name__}, not Held"
         assert len(S.open_fds_on(root)) == 1, "hold does not hold exactly one root descriptor"
-        assert held.read("rec.txt") == ("held\n", None)
+        assert held.view().read("rec.txt").text == "held\n"
     assert S.open_fds_on(root) == [], "leaving the `with` did not release the root"
     if spelling == "symlinked":
         assert spelled.is_symlink()
@@ -255,7 +260,8 @@ def test_d1_hold_new_refuses_a_plant_at_the_name_and_leaves_it(tmp_path, kind):
     assert stat.S_ISDIR(os.lstat(at).st_mode)
     assert (at / "family.yaml").read_text(encoding="utf-8") == "made\n"
     with S.hold_new(parent, name) as held:
-        assert held.read("family.yaml") == ("made\n", None), "an existing real dir not adopted"
+        assert held.view().read("family.yaml").text == "made\n", (
+            "an existing real dir not adopted")
     assert (at / "family.yaml").read_text(encoding="utf-8") == "made\n"
 
 
@@ -406,7 +412,7 @@ def test_d1_hold_new_opens_its_parent_by_path_once_and_everything_else_relative_
 # =======================================================================================
 
 def _held_matrix():
-    for verb in (*WRITE_VERBS, "unlink", "read"):
+    for verb in (*WRITE_VERBS, "unlink"):
         for kind in S.LEAF_PLANTS:
             yield pytest.param(verb, kind, None, id=f"{verb}-{kind}")
         for site in S.holding_folders(REC_REL):
@@ -415,16 +421,8 @@ def _held_matrix():
 
 
 def _held_control(held: Any, verb: str, path: Path) -> None:
-    """The same verb on the same address, nothing planted, then a plain file there."""
-    if verb == "read":
-        text, reason = held.read(REC)
-        assert text is None, "control: a read of nothing answered text"
-        assert reason, "control: a read of nothing gave no reason"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("plain\n", encoding="utf-8")
-        assert held.read(REC) == ("plain\n", None)
-        assert held.read(REC, binary=True) == (b"plain\n", None)
-        return
+    """The same verb on the same address, nothing planted, then a plain file there. A durable
+    append makes no folder (R4), so its holding folders are made real first."""
     if verb == "unlink":
         assert held.unlink(REC) is False
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,6 +430,8 @@ def _held_control(held: Any, verb: str, path: Path) -> None:
         assert held.unlink(REC) is True
         assert not os.path.lexists(path)
         return
+    if verb == "append_durable":
+        path.parent.mkdir(parents=True, exist_ok=True)
     S.held_verb(held, verb, REC, _payload(verb, "landed"))
     assert path.read_text(encoding="utf-8") == _payload(verb, "landed")
     assert os.lstat(path).st_nlink == 1
@@ -451,23 +451,18 @@ def _held_control(held: Any, verb: str, path: Path) -> None:
 def test_d1_a_held_verb_into_a_plant_is_refused_and_changes_nothing(tree, verb, kind, site):
     """O2 on the core's held root: a symlink (live or dangling), hard link, FIFO or directory
     at the name, or a link (outside or inside), file or FIFO at a holding folder, is the core's
-    refusal row for every write verb and for `unlink`, and `(None, reason)` for `read`; neither
-    blocks on a FIFO, and the whole tree is unchanged. Control on the same address: the plant
-    removed, the verb lands (and over a plain file, too)."""
+    refusal row for every write verb and for `unlink` (R2: `NotPlainEntry` at the name, a plain
+    folder refusal on the way); none blocks on a FIFO, and the whole tree is unchanged. Control
+    on the same address: the plant removed, the verb lands (and over a plain file, too). The
+    read rows moved to the view (`test_1133_rev3.py`)."""
     root, host = tree
     path = root / REC
     with S.hold(root) as held:
         planted = S.plant(root, REC_REL, site, kind, host=host)
         before = S.census(root.parent)
-        if verb == "read":
-            got = S.in_time(lambda: held.read(REC), fifo=planted.fifo)
-            assert got[0] is None, f"read followed a {kind} plant: {got!r}"
-            assert isinstance(got[1], str), f"read of a {kind} gave no reason"
-            assert got[1], f"read of a {kind} gave an empty reason"
-        else:
-            raised = S.raised_by(lambda: S.held_verb(held, verb, REC), fifo=planted.fifo)
-            S.assert_refusal(raised, "symlink" if kind == "dangling" else kind,
-                             where=f"Held.{verb}{f' @{site}' if site else ''}")
+        raised = S.raised_by(lambda: S.held_verb(held, verb, REC), fifo=planted.fifo)
+        S.assert_refusal(raised, "symlink" if kind == "dangling" else kind,
+                         where=f"Held.{verb}{f' @{site}' if site else ''}")
         assert S.census(root.parent) == before, f"Held.{verb} into a {kind} changed the tree"
         planted.remove()
         _held_control(held, verb, path)
@@ -508,7 +503,10 @@ def test_d1_one_write_is_one_walk_off_the_held_root_that_makes_its_holding_folde
     is never re-opened by path), each holding folder is opened successfully exactly once, and a
     missing one is made in that same walk (`mkdir` of exactly the missing folders). Rev 1 made
     the folders in one `rooted_*` call and wrote in another, re-opening the root and every
-    folder twice."""
+    folder twice.
+
+    Rev 3 (R4): a DURABLE append walks without making: over missing folders it is
+    `FileNotFoundError`, it makes no folder and writes nothing."""
     root, _host = tree
     if folders == "present":
         (root / "fa" / "fb").mkdir(parents=True)
@@ -516,6 +514,15 @@ def test_d1_one_write_is_one_walk_off_the_held_root_that_makes_its_holding_folde
     with S.hold(root, os_=spy) as held:
         opens_at, mkdirs_at = len(spy.opens), len(spy.mkdirs)
         target = "fa/fb" if verb == "mkdir" else REC
+        if verb == "append_durable" and folders == "absent":
+            before = S.census(root)
+            with pytest.raises(FileNotFoundError):
+                S.held_verb(held, verb, target, _payload(verb, "walk"))
+            assert spy.mkdirs[mkdirs_at:] == [], (
+                f"a durable append made folders: {spy.mkdirs[mkdirs_at:]}")
+            assert S.census(root) == before, "a durable append into missing folders made something"
+            assert [o for o in spy.opens[opens_at:] if o.dir_fd is None] == []
+            return
         S.held_verb(held, verb, target, _payload(verb, "walk"))
         opens = spy.opens[opens_at:]
     by_path = [o for o in opens if o.dir_fd is None]
@@ -545,6 +552,7 @@ def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
     address: a plain append fsyncs nothing."""
     root, _host = tree
     leaf = root / rel
+    leaf.parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
     spy = S.OsSpy(watch=leaf)
     with S.hold(root, os_=spy) as held:
         at = len(spy.fsyncs)
@@ -578,6 +586,7 @@ def test_d1_a_failed_holding_folder_sync_fails_the_durable_append(tree, rel):
     otherwise take a record whose entry may not survive a crash for a durable one). Control on
     the same address: a plain append does not sync the folder, and succeeds."""
     root, _host = tree
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
     with S.hold(root, os_=DirSyncFails()) as held:
         raised = S.raised_by(lambda: held.write(rel, ROW, mode="append", durable=True))
         assert isinstance(raised, OSError), (
@@ -592,6 +601,7 @@ def test_d1_a_durable_append_opens_nothing_by_path(tree, rel):
     folder's sync handle — is a relative name off a held descriptor (`dir_fd`), never a path:
     the folder synced is the one the walk holds, not whatever the name resolves to now."""
     root, _host = tree
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
     spy = S.OsSpy()
     with S.hold(root, os_=spy) as held:
         at = len(spy.opens)
@@ -657,8 +667,10 @@ def test_d1_held_write_takes_str_or_bytes_and_refuses_anything_else_before_any_i
     """`text` is `str | bytes`: a list, an iterator, a generator (which a fallback create would
     consume on its first pass and leave an empty file, C17), an int, `None` or a dict is a
     `TypeError` before anything is opened or made — the holding folders included. `bytearray`
-    is not pinned either way. Control: `str` and `bytes` land."""
+    is not pinned either way. Control: `str` and `bytes` land (into holding folders that exist:
+    a durable append makes none, R4)."""
     root, _host = tree
+    (root / "fa" / "fb").mkdir(parents=True)
     with S.hold(root) as held:
         before = S.census(root.parent)
         with pytest.raises(TypeError):
@@ -677,7 +689,7 @@ def test_o3_the_view_is_a_bound_over_the_same_handle_owning_nothing(tree, tmp_pa
     """`view()` is a `Bound` whose public surface is exactly the readers and `close`; it reads
     through the held handle (after the root is renamed it reads the moved folder); its `close()`
     releases nothing (the `Held` still writes); and once the `Held` closes, the view answers a
-    refusal, never text."""
+    refusal (`Bad file descriptor`), never text and never an exception."""
     root, _host = tree
     (root / "rec.txt").write_text("before\n", encoding="utf-8")
     held = S.hold(root)
@@ -701,14 +713,16 @@ def test_o3_the_view_is_a_bound_over_the_same_handle_owning_nothing(tree, tmp_pa
         held.close()
     after = view.read("rec.txt")
     assert after.text is None, f"the view still reads after its Held closed: {after!r}"
-    assert after.reason, f"the closed view's read gave no reason: {after!r}"
+    assert after.reason == os.strerror(errno.EBADF), (
+        f"the closed view's read is not refused as a closed descriptor: {after!r}")
 
 
 # =======================================================================================
 # Lifetime: dup-per-verb
 # =======================================================================================
 
-_LIFETIME_VERBS = (*WRITE_VERBS, "mkdir", "unlink", "read")
+#: Rev 3 has no `Held.read`: the view's own close race is in `test_1133_rev3.py`.
+_LIFETIME_VERBS = (*WRITE_VERBS, "mkdir", "unlink")
 
 
 def _lifetime_name(verb: str) -> str:
@@ -736,8 +750,6 @@ def _assert_acted_on_root(root: Path, verb: str, got: Any) -> None:
     elif verb == "unlink":
         assert got is True, f"the in-flight unlink answered {got!r}"
         assert not os.path.lexists(rec), "the in-flight unlink left the root's record"
-    elif verb == "read":
-        assert got == ("ROOT\n", None), f"the in-flight read answered {got!r}"
     elif verb in ("create", "replace"):
         assert rec.read_text(encoding="utf-8") == _payload(verb, "in-flight")
     else:
@@ -754,11 +766,11 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
     relative operation) and returns promptly — it does not wait for the verb — and releases the
     root's descriptor. That number is then taken by a DECOY folder of the same shape (`dup2`),
     as another open in a live process would take it. The verb completes on the ROOT (the record
-    written, removed or read there) and the decoy is untouched; afterwards the reused number
+    written or removed there) and the decoy is untouched; afterwards the reused number
     still names the decoy (nothing closed it a second time).
 
-    Then a verb after `close()` raises `OSError(EBADF)` (a read may answer `(None, reason)`
-    instead) and touches nothing — neither the root nor the decoy sitting on the old number."""
+    Then a verb after `close()` raises `OSError(EBADF)` and touches nothing — neither the root
+    nor the decoy sitting on the old number."""
     root, decoy = _lifetime_trees(tmp_path, verb)
     decoy_before = S.census(decoy)
     spy = S.OsSpy()
@@ -802,14 +814,9 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
         root_before = S.census(root)
         after = S.raised_by(lambda: S.held_verb(held, verb, "fa/after.jsonl"
                                                 if verb != "mkdir" else "fa/after"))
-        if verb == "read" and after is None:
-            answer = held.read("fa/after.jsonl")
-            assert answer[0] is None, f"a read after close answered {answer!r}"
-            assert answer[1], f"a read after close gave no reason: {answer!r}"
-        else:
-            assert isinstance(after, OSError), f"Held.{verb} after close raised {after!r}"
-            assert after.errno == errno.EBADF, (
-                f"Held.{verb} after close raised {after!r}, not OSError(EBADF)")
+        assert isinstance(after, OSError), f"Held.{verb} after close raised {after!r}"
+        assert after.errno == errno.EBADF, (
+            f"Held.{verb} after close raised {after!r}, not OSError(EBADF)")
         assert S.census(root) == root_before, f"Held.{verb} after close touched the root"
         assert S.census(decoy) == decoy_before, f"Held.{verb} after close touched the decoy"
     finally:
@@ -829,9 +836,9 @@ def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp
     another thread and given a grace period. Had the verb read the root's number outside
     `close`'s lock, that close would finish inside the grace period and free the number the verb
     is about to dup — and the next open in a live process takes it: here a DECOY folder of the
-    same shape is put on it (`dup2`). The verb must still act on the ROOT (the record written,
-    removed or read there), leave the decoy untouched, and the close completes once the verb
-    holds its dup."""
+    same shape is put on it (`dup2`). The verb must still act on the ROOT (the record written
+    or removed there), leave the decoy untouched, and the close completes once the verb holds
+    its dup."""
     root, decoy = _lifetime_trees(tmp_path, verb)
     decoy_before = S.census(decoy)
     spy = S.OsSpy()
@@ -881,17 +888,20 @@ def test_d1_close_is_idempotent_and_the_with_exit_after_it_is_clean(tree):
 
 def test_n_h_every_descriptor_a_held_root_opens_is_close_on_exec(tree):
     """The held root and every descriptor a verb opens (walk handles, the leaf, the durable
-    folder handle, a dup) carry `FD_CLOEXEC`, checked with `fcntl(F_GETFD)` the moment each is
-    returned."""
+    folder handle, a dup) — and every one the view's reads open — carry `FD_CLOEXEC`, checked
+    with `fcntl(F_GETFD)` the moment each is returned."""
     root, _host = tree
     spy = S.OsSpy()
     with S.hold(root, os_=spy) as held:
         [root_fd] = S.open_fds_on(root)
         assert S.fd_cloexec(root_fd), "the held root is inheritable"
-        for verb in (*WRITE_VERBS, "read", "unlink"):
+        for verb in (*WRITE_VERBS, "unlink"):
             name = REC if verb != "create" else "fa/fb/created.jsonl"
             S.held_verb(held, verb, name, _payload(verb, "cloexec"))
         held.mkdir("fa/fc")
+        # The view's reads open (and, rev 3, dup) through the same seam.
+        held.view().read("fa/fb/created.jsonl")
+        held.view().under("fa").entries()
     opened = [o for o in spy.opens if o.fd is not None]
     assert opened, "no open reached the os_ seam"
     inheritable = [o for o in opened if not o.cloexec]
@@ -960,6 +970,8 @@ def test_o6_a_held_root_that_was_removed_refuses_every_write_and_is_never_recrea
         assert isinstance(raised, OSError), f"Held.{verb} on a removed root: {raised!r}"
         assert not os.path.lexists(root), f"Held.{verb} recreated the removed root"
     root.mkdir()
+    if verb == "append_durable":
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: it makes no folder
     with S.hold(root) as held:
         S.held_verb(held, verb, rel if verb != "mkdir" else "fa")
 
@@ -970,6 +982,8 @@ def test_o6_a_held_root_that_was_renamed_is_written_in_its_new_place(tmp_path, v
     moved folder and nothing reappears at the old name."""
     root = tmp_path / "root"
     root.mkdir()
+    if verb == "append_durable":
+        (root / "fa").mkdir()  # R4: a durable append makes no folder
     moved = tmp_path / "moved"
     with S.hold(root) as held:
         root.rename(moved)
@@ -1030,11 +1044,11 @@ def test_an_interrupt_mid_walk_never_closes_a_descriptor_twice(scratch, op):
     ops[op](control)
 
 
-@pytest.mark.parametrize("verb", ["replace", "append_durable", "unlink", "mkdir", "read"])
+@pytest.mark.parametrize("verb", ["replace", "append_durable", "unlink", "mkdir", "view_read"])
 def test_an_interrupt_mid_walk_of_a_held_verb_never_closes_a_descriptor_twice(scratch, verb):
-    """The same on the held root: a verb interrupted just after its walk's first close closes
-    no number twice (its dup included), the interrupt propagates, and the held root survives it
-    — the next verb on the same `Held` lands."""
+    """The same on the held root: a verb (or the view's read, rev 3's only read) interrupted
+    just after its walk's first close closes no number twice (its dup included), the interrupt
+    propagates, and the held root survives it — the next verb on the same `Held` lands."""
     root, leaf, _host = scratch
     leaf.write_text(PRIOR, encoding="utf-8")
     spy = InterruptAfterFirstClose()
@@ -1042,9 +1056,15 @@ def test_an_interrupt_mid_walk_of_a_held_verb_never_closes_a_descriptor_twice(sc
     held = S.hold(root, os_=spy)
     try:
         spy.armed = True
+        def interrupted() -> None:
+            if verb == "view_read":
+                held.view().read(str(DEEP))
+            else:
+                S.held_verb(held, verb, str(DEEP) if verb != "mkdir" else "a/b/c",
+                            _payload(verb, "interrupted"))
+
         with pytest.raises(KeyboardInterrupt):
-            S.held_verb(held, verb, str(DEEP) if verb != "mkdir" else "a/b/c",
-                        _payload(verb, "interrupted"))
+            interrupted()
         spy.armed = False
         assert spy.failed == [], f"{verb}: a close failed after the interrupt: {spy.failed}"
         assert len(spy.closed) == len(set(spy.closed)), (

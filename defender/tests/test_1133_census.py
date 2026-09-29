@@ -1,6 +1,8 @@
-"""#1133 D6' — the census, rev 2: every write into an episode tree goes through the `Episode`
-handle, the handle reaches the core only by `hold` / `hold_new` and the `Held` verbs, and (O5)
-no function takes a path to something below the episode dir.
+"""#1133 D6' — the census, rev 2 (rev 3's D7'' removes the rows R1 made dead: `episode._answers`'
+`path` parameter, and `delta_o` / `_answers` as N-b readers and a tolerated door): every write
+into an episode tree goes through the `Episode` handle, the handle reaches the core only by
+`hold` / `hold_new` and the `Held` verbs, and (O5) no function takes a path to something below
+the episode dir.
 
 **The first scan** (D6, whose allowlist and vocabulary stand) collects, across D6's modules plus
 `run.py`, `learning/branch/episode.py` and `learning/judge/{family,render,run}.py` (D6'), every
@@ -78,11 +80,9 @@ call `hold` and `hold_new`, so the check is not vacuous.
 Every scan is self-tested on synthetic source: each violating shape is collected, each compliant
 shape is not. A module that is missing or does not parse fails the scan.
 
-Red on rev 1: `_episode_handle.py` still calls the `rooted_*` core and never `hold` /
-`hold_new`; `scratch_ledger` and `Ledger._append` still write around the handle; path-typed
-writers and readers (`merge_review(path)`, `teardown(review_path=)`, `prime_base(base_path)`,
-`draws_on_disk(draw_dir)`, `load_family(path)`, ...) and `EpisodePaths(` calls in writers
-remain; and no door calls `Episode.open` / `Episode.create`.
+Red on the rev-2 tree (rev 3's rows): `episode._answers(path)` is flagged and no longer
+allowed, `delta_o` / `_answers` call `EpisodePaths(` / `base_file(` outside `NB_READERS`, and
+`delta_o` opens an `Episode` outside the doors.
 """
 from __future__ import annotations
 
@@ -779,8 +779,9 @@ _CARVE_ARITH = ("O5 carve-out: the judge's pointer-containment arithmetic, which
 _GIT = "a path inside a git revision (`git show <rev>:<path>`), not a file on disk"
 _QUEUE = "N-d: the judge queue writer's own files (learning state, not the episode)"
 _ALERT = "the investigation's alert input, a run file read before any episode exists"
+#: Rev 3 (R1) removes `episode._answers(path)`'s row: `_answers` takes the rows `delta_o` read
+#: through its one `bind`, not a path.
 PARAM_ALLOWLIST = frozenset({
-    ("learning.branch.episode", "_answers", "path", _CARVE_READ),
     ("learning.branch.ledger", "Ledger._absorb", "path", _CARVE_READ),
     ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
     ("learning.judge.run", "_resolves", "world_dir", _CARVE_ARITH),
@@ -837,14 +838,14 @@ NB_READERS = frozenset({
     ("scripts.visualize.visualize_episode", "_Episode"),
     # The O5 carve-outs: `read_jsonl_rows_report(base_file(...))` (the review's capture read),
     # the stale-`served/*.jsonl` glob (the launcher's door), `base_file` itself, the path-taking
-    # readers and their one caller each, the containment arithmetic, and `episode.py`'s reader
-    # of a world's served file (`EpisodePaths(dir).at(LAYOUT.served_world(token))`, D3').
+    # readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
+    # `episode._answers` and `episode.delta_o`: `delta_o` reads the base and each world's served
+    # file through its one `bind` (`read_jsonl(LAYOUT.served_base)`, `read_jsonl(LAYOUT.
+    # served_world(token))`), naming no path.
     ("learning.branch.review", "review"),
     ("learning.branch.cli", "prepare_episode"),
     ("learning.branch.ledger", "base_file"),
     ("learning.branch.ledger", "Ledger._absorb"),
-    ("learning.branch.episode", "_answers"),
-    ("learning.branch.episode", "delta_o"),
     ("learning.judge.family", "leads_by_id"),
     ("scripts.visualize.visualize_episode", "_load_world_leads"),
     ("learning.judge.run", "_resolves"),
@@ -864,11 +865,10 @@ DOORS = frozenset({
     ("learning.branch.review", "review"),
     ("learning.branch.review", "replay_one"),
 })
-#: Callers D3' does not place but whose callees take the `Episode`: `delta_o` hands its episode
-#: to `load_family` / `Ledger.for_world`, and the page script's `main` to `_write_page`. Each
-#: may open its own.
+#: Callers D3' does not place but whose callees take the `Episode`: the page script's `main`
+#: hands one to `_write_page`, and may open its own. Rev 3 (R1) removes `delta_o`: it opens no
+#: `Episode`, reading the manifest as `load_family(bound)` through its one `bind`.
 DOORS_TOLERATED = frozenset({
-    ("learning.branch.episode", "delta_o"),
     ("scripts.visualize.visualize_episode", "main"),
 })
 #: What the doors must call, so the scan is not vacuous: `(module, function-or-alternatives,

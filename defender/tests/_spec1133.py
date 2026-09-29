@@ -1,9 +1,14 @@
-"""Shared machinery for #1133's Episode-handle spec, rev 2. It defines NO tests.
+"""Shared machinery for #1133's Episode-handle spec, rev 3. It defines NO tests.
 
 The contract is issue #1133's intent+design doc as amended by rev 2 (O2, O3 replaced, O4.1-O4.8,
-O5, O6, N-a..N-h, D1'-D7', S1-S5). The implementation must expose exactly these names; every
-test in the ``test_1133_*`` suite reaches them lazily, per test, so a missing one fails its own
-tests and never a whole file at collection.
+O5, O6, N-a..N-h, D1'-D7', S1-S5) and rev 3 (R1-R4, the patches, D7''). The implementation must
+expose exactly these names; every test in the ``test_1133_*`` suite reaches them lazily, per
+test, so a missing one fails its own tests and never a whole file at collection.
+
+Rev 3 in one line each: reads belong to the view (``Held.read`` and the records' ``read`` are
+gone; the manifest readers take a ``Bound``); the core's leaf refusal is its own exception class,
+``_io.NotPlainEntry(OSError)``, and a linked folder is not it; ``prime_base`` has one write and an
+``allow_empty`` switch; a durable write never makes a folder, and one leaf writer owns the fd.
 
 Core, ``defender._io`` (D1'):
 
@@ -13,13 +18,25 @@ Core, ``defender._io`` (D1'):
   (following its spelling), makes or adopts ``name`` off the parent's handle without following
   it (a link, file or FIFO there is the core's folder refusal), holds THAT descriptor, then
   fsyncs ``parent`` reopened ``O_RDONLY|O_DIRECTORY``; ``name`` is one path component;
-* ``class Held``: ``read(name, *, binary=False) -> (text | bytes | None, reason | None)``;
-  ``write(name, text, *, mode, durable=False) -> None`` (``mode`` in ``create`` / ``replace`` /
-  ``append``; ``text`` is ``str | bytes``, anything else a ``TypeError`` before any I/O;
-  ``durable`` is append-only, a ``ValueError`` otherwise); ``mkdir(folder) -> None``;
+* ``class Held`` (rev 3: no ``read``; its public surface is exactly ``write``, ``mkdir``,
+  ``unlink``, ``view``, ``close``): ``write(name, text, *, mode, durable=False) -> None``
+  (``mode`` in ``create`` / ``replace`` / ``append``; ``text`` is ``str | bytes``, anything else
+  a ``TypeError`` before any I/O; ``durable`` is append-only, a ``ValueError`` otherwise, and a
+  durable write walks WITHOUT making a folder: a missing holding folder is
+  ``FileNotFoundError`` and nothing is made); ``mkdir(folder) -> None``;
   ``unlink(name) -> bool``; ``view() -> Bound`` (sharing the handle, owning nothing);
   ``close()``; context-manager use. Every descriptor it opens is ``O_CLOEXEC``; each verb works
-  off a private ``dup`` of the root; a verb after ``close()`` raises ``OSError(EBADF)``.
+  off a private ``dup`` of the root (through ``os_.dup``, under the shared handle's lock); a
+  verb after ``close()`` raises ``OSError(EBADF)``. A durable write of a ``str`` that cannot be
+  encoded leaves no descriptor open.
+* ``class Bound`` (the view, R1): ``read`` / ``read_jsonl`` / ``entries`` (and their ``under``
+  derivations) each work off a private ``os_.dup`` of the root taken under the SAME lock
+  ``close`` takes, so a close landing mid-read never redirects it; a closed one answers refused
+  (``Bad file descriptor``) and never raises.
+* ``class NotPlainEntry(OSError)`` (R2): the core's refusal of a link, hard link or other
+  non-plain entry AT a name, keeping its errno (``ELOOP``; ``EMLINK`` for a hard link) and its
+  ``write_guarded_alias`` mark. A linked or non-directory FOLDER on the way stays a plain
+  ``OSError(ELOOP)`` / ``NotADirectoryError``. ``is_not_plain_refusal`` is gone.
 
 Handle, ``defender._episode_handle`` (D2'):
 
@@ -30,32 +47,44 @@ Handle, ``defender._episode_handle`` (D2'):
   with ``.dir``, ``.view()``, ``.close()``; ``Episode(<path>)`` is a ``TypeError`` (no public bare
   constructor);
 * ``RECORD_VERBS: dict[str, tuple[str, ...]]`` and ``FOLDERS: tuple[str, ...]`` -- exactly the
-  tables below (rev 2 keeps rev 1's records and folders, names and verbs unchanged);
+  tables below (rev 2 kept rev 1's records and folders; rev 3 makes records write-only:
+  ``family`` and ``review`` lose ``read`` and share the ``write`` class);
 * records answer ``.path`` plus exactly the verbs their row grants, as CLASS attributes (one
   class per verb set); folders answer ``.path`` and ``.ensure()``. Each record verb is ONE call
-  on the held root: ``read`` -> ``Held.read(rel)``; ``write`` -> ``Held.write(rel, text,
-  mode="replace")``; ``create`` -> ``mode="create"``; ``append`` -> ``mode="append"``;
-  ``append_durable`` -> ``mode="append", durable=True``; ``delete`` -> ``Held.unlink(rel)``;
-  ``ensure`` -> ``Held.mkdir(rel)``.
+  on the held root: ``write`` -> ``Held.write(rel, text, mode="replace")``; ``create`` ->
+  ``mode="create"``; ``append`` -> ``mode="append"``; ``append_durable`` -> ``mode="append",
+  durable=True``; ``delete`` -> ``Held.unlink(rel)``; ``ensure`` -> ``Held.mkdir(rel)``.
+  Reading a record is ``episode.view().read(LAYOUT.<record>)``: present, absent or refused.
 
 Address grammar: an address is an attribute path on an ``Episode``. A bare name (``family``,
 ``served_world``) is an attribute of the episode; ``world.<name>`` one of
 ``episode.world(label)``. A method takes the record's components (``served_world(token)``,
 ``wire_log(name)``, ``world(label).draw(n)``); anything else is a property.
 
-Entry points, with the rev-2 signatures the suite calls (D3'):
+Entry points, with the signatures the suite calls (D3', rev 3):
 
 * ``cli.prepare_episode(episode_id, source_run_dir, *, tenant, prime=)`` -> the ``Episode``
   (closed by ``prepare_episode`` itself on its own exception); ``prime(source_run_dir, episode)``;
+  its default primer is ``prime_base`` with ``allow_empty=True`` (R3);
+  ``cli._prime_once(episode, episode_id, source_run_dir, prime)`` (the claim, driven directly
+  for R2's folder row: ``prepare_episode`` has no ``io=`` seam);
+  ``cli._teardown_without_masking(episode, door, *, aborting)``;
 * ``cli.start_family(episode, labels, *, spawn=, tenant_id=, tenants_root=)``;
   ``cli.verify_family(episode, run_dirs, *, source=)``;
   ``archive.archive_episode(episode, run_dirs)``;
-* ``staging.record_staged(episode, row)``; ``staging.merge_review(episode, key, block)``;
-* ``capture.prime_base(source_run_dir, episode)``;
+* ``staging.record_staged(episode, row)``; ``staging.merge_review(episode, key, block)`` (a
+  refused review record is ``StagingRefused``, nothing written); ``staging.teardown(episode, *,
+  door=)``;
+* ``capture.prime_base(source_run_dir, episode, *, allow_empty=False)``;
 * ``ledger.Ledger.for_world(episode, world_id)`` (``LedgerError`` at construction for a bad or
-  non-case-stable id); ``review.scratch_ledger(scratch_episode, *, world_label=)``;
-* ``_family.load_family(episode, ...)``, ``manifest_digest(episode)``,
-  ``check_manifest_digest(episode, recorded)``;
+  non-case-stable id, the WHOLE token judged); ``review.scratch_ledger(scratch_episode, *,
+  world_label=)``; ``_episode_paths.check_minted_token(token)``;
+* ``_family.load_family(view, ...)``, ``manifest_digest(view)``,
+  ``check_manifest_digest(view, recorded)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
+  reader's own ``bind``);
+* ``episode.delta_o(episode_dir, *, invoke=)``;
+* ``run._resume_target(ns, *, episode, settings)`` (``--resume`` with no held episode is
+  ``SystemExit``);
 * ``enqueue.draws_on_disk(view, label)`` / ``draws_on_disk_report(view, label)``;
 * ``judge._run_world_draws(episode, label, *, judge, draws, model, effort, prompt)`` (S1);
 * the path doors ``judge.grade_episode(episode_dir, ...)``, ``visualize_episode.render_episode(
@@ -101,11 +130,13 @@ TOKEN = "e1133.b"
 WIRE_NAME = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
 DRAW_N = 0
 
-#: D1's record table (kept by D2'), row for row: address -> the verbs that row grants.
+#: D1's record table (kept by D2'), row for row: address -> the verbs that row grants. Rev 3
+#: (R1): records are write-only, so `family` and `review` lose `read`; reading a record is the
+#: view's `read(LAYOUT.<record>)`.
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
-    "family": ("read", "write"),
+    "family": ("write",),
     "family_stamp": ("write",),
-    "review": ("read", "write"),
+    "review": ("write",),
     "samples": ("write",),
     "judge": ("write",),
     "timing": ("write",),
@@ -123,7 +154,8 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
 #: `world(label).draws`.
 FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
 
-#: Every verb a record can be granted.
+#: Every verb name a record could answer. `read` stays listed although rev 3 grants it to no
+#: record, so the class and surface pins check its ABSENCE on every record.
 ALL_VERBS = ("read", "write", "create", "append", "append_durable", "delete")
 
 #: The write verbs, and the `Held.write` mode each is (D2': one `held.write` per write verb).
@@ -255,10 +287,28 @@ CORE_REFUSAL = r"aliased|symlinked|not a directory"
 #: errno, and whether it carries the alias mark. A dangling link is a symlink.
 ROWS = {**O6_ROWS, "dangling": O6_ROWS["symlink"]}
 
+#: The plants that sit at a FOLDER on the way (or at a folder's own name): the walk's refusal, a
+#: plain `OSError(ELOOP)` or `NotADirectoryError`, never the leaf class (R2). Every other row of
+#: `ROWS` is a plant AT the name: the core's leaf refusal, `_io.NotPlainEntry`.
+FOLDER_ROWS = frozenset({"folder_link_inside", "folder_link_outside", "folder_file",
+                         "folder_fifo"})
+
+
+def not_plain_entry() -> type[OSError]:
+    """`_io.NotPlainEntry` (rev 3, R2), looked up per call: its absence fails the calling test,
+    never the suite's collection."""
+    cls = getattr(_io, "NotPlainEntry", None)
+    assert isinstance(cls, type), (
+        "defender._io has no `NotPlainEntry` — rev 3 (R2) gives the core's refusal of a "
+        "non-plain entry at a name its own exception class")
+    assert issubclass(cls, OSError), "`_io.NotPlainEntry` is not an OSError"
+    return cls
+
 
 def assert_refusal(exc: BaseException | None, kind: str, *, where: str) -> None:
     """`exc` is the core's refusal row for a `kind` plant: its type, its errno and its alias
-    mark (`write_guarded_alias`; absent and False are both unmarked)."""
+    mark (`write_guarded_alias`; absent and False are both unmarked). Rev 3 (R2): a plant AT the
+    name is the leaf class `_io.NotPlainEntry`; a plant at a folder on the way is not."""
     typ, code, marked = ROWS[kind]
     assert exc is not None, f"{where}: a {kind} plant was not refused"
     want = f"the core's {typ.__name__} {errno.errorcode[code]}"
@@ -267,6 +317,17 @@ def assert_refusal(exc: BaseException | None, kind: str, *, where: str) -> None:
     assert bool(getattr(exc, "write_guarded_alias", False)) is marked, (
         f"{where}: a {kind} plant's refusal is {'un' if marked else ''}marked as an alias; the "
         f"core's table says {'marked' if marked else 'unmarked'}")
+    if kind in FOLDER_ROWS:
+        leaf = getattr(_io, "NotPlainEntry", None)
+        if isinstance(leaf, type):
+            assert not isinstance(exc, leaf), (
+                f"{where}: a {kind} plant is a folder on the way, but its refusal is the leaf "
+                f"class NotPlainEntry ({exc!r}) — a containment keyed on the class would read a "
+                "linked folder as a planted leaf")
+    else:
+        assert isinstance(exc, not_plain_entry()), (
+            f"{where}: a {kind} plant at the name raised {exc!r}, not the core's leaf refusal "
+            "`_io.NotPlainEntry`")
 
 
 def refusal_in(exc: BaseException | None) -> OSError | None:
@@ -426,8 +487,8 @@ class RecordingHeld:
             self._before(method, args, kwargs)
         return getattr(self._inner, method)(*args, **kwargs)
 
-    def read(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call("read", *args, **kwargs)
+    # No `read`: rev 3's `Held` has none, so a handle that reaches for it shows up in `calls` as
+    # `getattr:read` and fails on the real `Held`.
 
     def write(self, *args: Any, **kwargs: Any) -> Any:
         return self._call("write", *args, **kwargs)
@@ -626,7 +687,8 @@ def run_in_thread(fn: Callable[[], Any], *, timeout: float = DEADLINE) -> bool:
 
 def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\n") -> Any:
     """One `Held` verb by the name the suite parametrizes over: the write modes (`create`,
-    `replace`, `append`, `append_durable`), `mkdir`, `unlink`, `read`."""
+    `replace`, `append`, `append_durable`), `mkdir`, `unlink`. (Rev 3 has no `Held.read`; a
+    read is the view's.)"""
     if verb == "append_durable":
         return held.write(name, payload, mode="append", durable=True)
     if verb in ("create", "replace", "append"):
@@ -635,6 +697,10 @@ def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\
         return held.mkdir(name)
     if verb == "unlink":
         return held.unlink(name)
-    if verb == "read":
-        return held.read(name)
     raise AssertionError(verb)
+
+
+#: `Held`'s whole public surface in rev 3 (R1: no `read`).
+HELD_SURFACE = frozenset({"write", "mkdir", "unlink", "view", "close"})
+#: The view's (`Bound`'s) whole public surface (O3).
+VIEW_SURFACE = frozenset({"read", "read_jsonl", "entries", "under", "close"})

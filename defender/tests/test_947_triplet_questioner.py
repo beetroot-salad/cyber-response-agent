@@ -555,7 +555,7 @@ def test_947_a_manifest_reloads_with_the_overlay_keys_its_launcher_accepted(tmp_
     with Episode.open(T.episode(tmp_path)) as episode:
         family_mod.write_family(episode, doc)
         # Resume time: the sibling has only the file.
-        reloaded = family_mod.load_family(episode)
+        reloaded = family_mod.load_family(episode.view())
     assert narrow in reloaded.world("b").overlay.elastic, "the staged corpus did not survive"
     assert reloaded.captured_patterns == (narrow,), (
         "the manifest did not carry the set its overlays were judged against")
