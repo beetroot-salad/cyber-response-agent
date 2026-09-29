@@ -7448,6 +7448,13 @@ handoff:
   - 'test_s3_no_settings_copy_census — structure: a census over the production tree that finds no settings copy (G30: none today); a survival pin, green at base by design.'
   - 'test_model_asks_to_read_the_tenants_secrets_env — reuse: G32''s deny-by-location already refuses settings/secrets.env for the main and gather roles; a survival pin (s048), green at base by design.'
   deviations:
+  - 'LENS: phase B''s fourth lens was environment/resource, not the profile''s default adversarial-input; this change''s
+    danger zone is env steering and per-tenant secrets/endpoints. The strong author covered the adversarial-input and
+    concurrency regions explicitly.'
+  - 'EFFORT: phase C''s answerers ran as general-purpose Sonnet/Haiku at the session''s default effort (at or above the
+    contract''s low); no low-effort agent type was available.'
+  - 'ON REBASE onto #1116''s merge: update base: here; expect a conflict in .claude/spec-flow.json (keep both edits);
+    claim path:line anchors are informational and will drift.'
   - 'DEGRADATION: §7 ran in two passes, forks before phase D (driven by 17 material forks) and the gate residue
     after it (60-residue.md, 62-holes-reground.md). Both passes are recorded in the frontier .spec-flow/frontiers/70-resolutions.md
     (phase §7), which supersedes the draft 70-resolutions.draft.md.'
