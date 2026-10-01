@@ -59,6 +59,7 @@ from defender.skills.invlang.validate import (
     class_slots,
     is_open_slot,
 )
+from defender import _yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
@@ -445,7 +446,6 @@ def _render_frontmatter(fm: dict) -> str:
 
     YAML rather than `str(value)` so lists appear in the spelling the model reads elsewhere.
     """
-    import yaml
 
     kept = {k: v for k, v in fm.items() if k not in HIDDEN_KEYS}
     # `safe_dump({})` renders `{}`; show nothing instead.
@@ -456,7 +456,7 @@ def _render_frontmatter(fm: dict) -> str:
     # `default_flow_style=None` (unlike `build_corpus_manifest`'s `False`): leaf lists render
     # as `[a, b]`, the one-line spelling both prompts require lesson files to use, and it
     # saves ~12 of a 3-hit block's ~30 lines.
-    dumped = yaml.safe_dump(
+    dumped = _yaml.safe_dump(
         kept, sort_keys=True, default_flow_style=None, allow_unicode=True, width=10**9
     )
     return "\n".join(f"  {line}" for line in dumped.strip().splitlines())

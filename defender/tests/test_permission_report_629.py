@@ -725,19 +725,22 @@ def test_report_body_zero_width_and_combining_mark_density(env):
     assert env.decide("report.md", report(body=over_body)).allow is False
 
 
-def test_report_frontmatter_yaml_alias_amplification_under_byte_bound(env):
-    """fork12 (rides F2 -> raw span) — a frontmatter using YAML anchors/aliases whose RAW
-    between-fence text is <= 512 B commits (Decision(True)), even though its re-serialized
-    parsed mapping expands well past 512 B: F2 measures the RAW span, so alias expansion is
-    invisible to the bound. The fixture re-probes that the two spans genuinely diverge, so a
-    re-serialized-span impl (the rejected horn) would deny it and this test would catch it."""
+def test_report_frontmatter_using_a_yaml_alias_is_denied_however_small(env):
+    """fork12, closed by #1127 — a frontmatter using YAML anchors/aliases whose RAW
+    between-fence text is <= 512 B, while its parsed mapping expands well past 512 B: F2
+    measures the RAW span, so alias expansion was invisible to the bound and the report
+    committed. No YAML the tree reads may reuse a node by alias (a few hundred bytes of aliases
+    stand for billions of values to whatever walks the result), so the gate's parse refuses it
+    and the gate fails CLOSED — under the byte bound. The fixture re-probes that the two spans
+    genuinely diverge, so the denial is about the alias and not the size."""
     scalar = "x" * 60
     lines = ["disposition: benign", f'a: &a "{scalar}"'] + [f"k{i}: *a" for i in range(12)]
     raw = "\n".join(lines) + "\n"
     text = f"---\n{raw}---\nbody\n"
-    fm, raw_span, _ = split_frontmatter(text)
-    assert len(raw_span.encode("utf-8")) <= FM_BOUND < len(yaml.safe_dump(fm).encode("utf-8"))
-    assert env.decide("report.md", text).allow is True
+    assert len(raw.encode("utf-8")) <= FM_BOUND < len(yaml.safe_dump(yaml.safe_load(raw)).encode("utf-8"))
+    d = env.decide("report.md", text)
+    assert d.allow is False
+    assert d.reason
 
 
 # regression (finalize / PR #677) — the gate FAILS CLOSED, never raises
@@ -799,19 +802,19 @@ def test_report_duplicate_key_sees_through_a_merge_key(env):
     `{a, b, <<}` (no duplicate) while `safe_load` resolved two `disposition` entries and kept one:
     a report whose raw frontmatter carries `totally-bogus` alongside `benign` committed, and the
     text that rides verbatim into the judge prompt and the ticket egress disagreed with the
-    decision the gate made about it. Positive control: a merge that injects NO duplicate still
-    commits, so the flatten did not turn every `<<:` into a deny."""
-    shadowed = ("a: &a {disposition: benign}\n"
-                "b: &b {disposition: totally-bogus}\n"
-                "<<: [*a, *b]\n")
+    decision the gate made about it. Merged from inline mappings: since #1127 a merge through
+    an alias is refused at the parse, and a merge without one is still a merge. Positive
+    control: a merge that injects NO duplicate still commits, so the flatten did not turn every
+    `<<:` into a deny."""
+    shadowed = ("<<: [{disposition: benign}, {disposition: totally-bogus}]\n"
+                "case_id: c1\n")
     fm = yaml.safe_load(shadowed)  # re-probe: the merge really does resolve one disposition
     assert fm["disposition"] == "benign"
-    assert fm["b"]["disposition"] == "totally-bogus"
     d = env.decide("report.md", f"---\n{shadowed}---\nbody\n")
     assert d.allow is False
     assert "more than once" in d.reason
     # positive control: a non-shadowing merge is untouched.
-    benign_merge = "base: &a {case_id: c1}\n<<: *a\ndisposition: benign\n"
+    benign_merge = "<<: {case_id: c1}\ndisposition: benign\n"
     assert env.decide("report.md", f"---\n{benign_merge}---\nbody\n").allow is True
 
 

@@ -15,10 +15,9 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender import _yaml  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
 
 GOLDEN_DIR = Path(__file__).resolve().parent
@@ -36,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     ns = p.parse_args(argv)
     ledger_path = ns.ledger if ns.ledger is not None else LEDGER
 
-    manifest = yaml.safe_load((ns.case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load((ns.case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     if manifest.get("split") != "held-out":
         print(f"!! {ns.case_dir.name} is split={manifest.get('split')!r}; only held-out "
               f"results are ledgered", file=sys.stderr)
@@ -58,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
               f"Re-score under the correct tag; do not rename the file.", file=sys.stderr)
         return 1
 
-    doc = yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}
+    doc = _yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}
     entries = doc.get("entries") or []
     key = (ns.case_dir.name, ns.tag)
     for entry in entries:
@@ -77,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the file's explanatory header (everything before `entries:`).
     head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
     ledger_path.write_text(
-        head + yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,
+        head + _yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,
                               allow_unicode=True),
         encoding="utf-8")
     print(f"recorded {key[0]}/{key[1]}")

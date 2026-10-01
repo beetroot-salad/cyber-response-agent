@@ -75,8 +75,8 @@ def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
 
     An absent or unparseable record is not an outcome: it is an episode the launcher has not
     written yet, and must not gate the readers. Only a recorded `incomplete` refuses. A refused
-    record (a link, a non-plain entry, undecodable bytes) is not "none recorded": it may be
-    hiding one, so it refuses.
+    record (a link, a non-plain entry, undecodable bytes, a YAML alias) is not "none recorded":
+    it may be hiding one, so it refuses.
     """
     rec = bound.read(LAYOUT.review)
     if rec.text is None and not rec.absent:
@@ -89,6 +89,13 @@ def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
         return None, ""
     try:
         record = _yaml.safe_load(text)
+    except _yaml.AliasRefused as refused:
+        # A document, refused for its aliases (the pre-#1127 writer wrote them), may record an
+        # `incomplete` outcome: refused like any refused record, never read as none.
+        raise EpisodeError(
+            f"the review record ({LAYOUT.review}) is refused ({refused}) — it is where an "
+            f"{INCOMPLETE!r} outcome is recorded, so whether this episode is comparable cannot "
+            "be read") from refused
     except yaml.YAMLError:
         return None, ""
     if not isinstance(record, dict):

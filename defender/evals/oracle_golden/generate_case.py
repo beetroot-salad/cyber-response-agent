@@ -53,8 +53,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import yaml
-
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 RUNNER = REPO_ROOT / "playground-v2" / "attacks" / "runner.py"
@@ -87,7 +85,11 @@ def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
 
 
 def scenario_entry(scenario: str, catalog_path: Path) -> dict:
-    catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
+    # Imported here, like `_tenant` below: the script runs by path, and its stdlib-only paths
+    # (`--help`, the argument checks) must not need `defender` importable.
+    from defender import _yaml
+
+    catalog = _yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
     entries = catalog.get("scenarios") or catalog.get("attacks") or []
     for entry in entries:
         if entry.get("id") == scenario:

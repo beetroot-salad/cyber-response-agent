@@ -7,14 +7,21 @@ import json
 import re
 import shlex
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import guarded_mkdir, json_safe, read_jsonl_rows, write_guarded
+from defender._io import (
+    JsonTooDeep,
+    guarded_mkdir,
+    json_nesting_depth,
+    json_safe,
+    read_jsonl_rows,
+    write_guarded,
+)
 from defender._model import model
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
@@ -124,10 +131,66 @@ def _request_key(system: Any, verb: Any, params: Any) -> str:
     return json.dumps(json_safe(call, non_finite="text"), sort_keys=True)
 
 
-def _json_safe_params(value: Any) -> Any:
-    # Text for a non-finite float: the record is what a reader diagnoses a query from, and a
-    # `threshold` of infinity is not a missing one. The same rule `_request_key` keys by.
-    return json_safe(value, non_finite="text")
+#: The deepest a call's params may nest, the params map itself counting as one level. A
+#: product bound, not derived from any reader: no real query nests near it, and it sits far
+#: enough under `JSON_NESTING_LIMIT` that every record embedding a call's arguments stays
+#: readable — the query row and the branch ledger one level down, the gather wire log several.
+PARAMS_NESTING_LIMIT = 32
+
+
+class ParamsTooDeep(Exception):
+    """`field` nests past `PARAMS_NESTING_LIMIT`; nothing was stored. Every refusal of a
+    too-deep call says it in this sentence, naming the field.
+
+    An `Exception`, not a `ValueError`: `ServedCall` cleans its params as it is built, and
+    pydantic would wrap a `ValueError` raised there into its own `ValidationError` (`_model`)."""
+
+    def __init__(self, field: str = "params") -> None:
+        # The field alone is the argument, so a copy or a pickle rebuilds the same error.
+        super().__init__(field)
+        self.field = field
+
+    def __str__(self) -> str:
+        return (f"{self.field} nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a "
+                "stored call can carry")
+
+
+def _json_safe_params(value: Any, *, field: str = "params") -> Any:
+    """@owns PARAMS_NESTING_LIMIT — params as every table stores them, or `ParamsTooDeep`
+    naming `field`.
+
+    Text for a non-finite float: the record is what a reader diagnoses a query from, and a
+    `threshold` of infinity is not a missing one. The same rule `_request_key` keys by.
+
+    Refuses rather than cuts: a cut value would key differently from its live call. The walk
+    stops at the limit, so no params can exhaust the stack here or anywhere downstream."""
+    try:
+        return json_safe(value, non_finite="text",
+                         max_depth=PARAMS_NESTING_LIMIT, deeper="refuse")
+    except JsonTooDeep:
+        raise ParamsTooDeep(field) from None
+
+
+def params_too_deep(value: Any) -> bool:
+    """Would `value`, stored as a call's params, be refused as too deep?
+
+    Asks the storing step itself, so no check can disagree with what the writers refuse."""
+    try:
+        _json_safe_params(value)
+    except ParamsTooDeep:
+        return True
+    return False
+
+
+def call_args_too_deep(args: Any) -> bool:
+    """Would any argument of a model's call, stored as params, be refused as too deep?
+
+    `args` is the call's whole argument object, as text or decoded. Text is judged on its
+    bytes, because text too deep for `json.loads` decodes to nothing and would look shallow;
+    the argument object sits one level above each argument, hence the `+ 1`."""
+    if isinstance(args, str):
+        return json_nesting_depth(args) > PARAMS_NESTING_LIMIT + 1
+    return isinstance(args, Mapping) and any(params_too_deep(v) for v in args.values())
 
 
 def lead_rows(run_dir: Path, lead: str) -> list[dict]:
@@ -208,8 +271,9 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     next seq, persist the payload sidecar, and append one row in `QUERY_ROW_COLUMNS` order.
 
     Every writer goes through here. A row whose keys or order differ from the declaration is a
-    `RuntimeError` at the first write. `error_class` and `payload_sha256` are derived here so a
-    caller cannot disagree with them.
+    `RuntimeError` at the first write. Params past `PARAMS_NESTING_LIMIT` are `ParamsTooDeep`
+    before anything is written, so every row is one its reader can read back. `error_class`
+    and `payload_sha256` are derived here so a caller cannot disagree with them.
 
     `system_key` is required: `""` is a real answer, so a default would hide a writer that
     should have fingerprinted. It cannot be derived here because the string it fingerprints is
@@ -219,6 +283,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     synchronous bash tool also runs on the event loop thread, so `(lead_id, seq)` stays unique.
     Moving either writer off-thread would let two threads compute the same `_next_seq` and lose
     a payload sidecar; add a cross-writer lock first."""
+    # First, so too-deep params are refused before a seq is taken or a sidecar written.
+    stored_params = _json_safe_params(dict(params))
     seq = _next_seq(run_dir, lead_id)
     payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
     row: dict[str, Any] = {
@@ -227,7 +293,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         "system": system,
         "verb": verb,
         "query_id": query_id,
-        "params": _json_safe_params(dict(params)),
+        "params": stored_params,
         "raw_command": raw_command,
         "payload_path": payload_rel,
         "exit_code": exit_code,

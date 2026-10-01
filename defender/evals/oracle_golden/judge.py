@@ -26,6 +26,8 @@ from typing import Any
 
 import yaml
 
+from defender import _yaml
+
 from defender._model import model
 
 GOLDEN_DIR = Path(__file__).resolve().parent
@@ -228,7 +230,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     env_path = case_dir / "environment.yaml"
     # Must be a mapping; refused here so the error names the file rather than surfacing as a
     # `ValidationError` from `LeadInputs`.
-    environment_notes = yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
+    environment_notes = _yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
     if not isinstance(environment_notes, dict):
         raise ValueError(
             f"{env_path}: environment.yaml must be a YAML mapping, "
@@ -246,7 +248,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
 
 
 def _block(name: str, body: Any) -> str:
-    rendered = body if isinstance(body, str) else yaml.safe_dump(
+    rendered = body if isinstance(body, str) else _yaml.safe_dump(
         body, sort_keys=False, allow_unicode=True, default_flow_style=False
     )
     return f"<{name}>\n{rendered.rstrip()}\n</{name}>"
@@ -287,7 +289,7 @@ def _document(raw: str) -> dict:
         lines = [ln for ln in text.splitlines() if not ln.strip().startswith("```")]
         text = "\n".join(lines).strip()
     try:
-        doc = yaml.safe_load(text)
+        doc = _yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise GrammarError(f"output is not YAML: {exc}") from exc
     if not isinstance(doc, dict):

@@ -64,6 +64,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from defender import _yaml
+
 DEFENDER = Path(__file__).resolve().parents[1]
 
 #: The episode token / world token shapes the design fixes (design-doc "Two ids per world, one
@@ -241,7 +243,6 @@ CLEAN = Fault()
 @dataclass(frozen=True)
 class DoorCall:
     """One thing the staging write door was ASKED to do."""
-
     op: str                       # create_index | create_alias | delete | exists | count | resolve
     name: str
     payload: dict[str, Any] = field(default_factory=dict)
@@ -549,11 +550,9 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
 
 def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
     """Materialise `episodes/<id>/family.yaml` and return its path."""
-    import yaml
-
     episode_dir.mkdir(parents=True, exist_ok=True)
     manifest = episode_dir / "family.yaml"
-    manifest.write_text(yaml.safe_dump(doc if doc is not None else family_doc()),
+    manifest.write_text(_yaml.safe_dump(doc if doc is not None else family_doc()),
                         encoding="utf-8")
     return manifest
 
@@ -968,16 +967,13 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
 
 def staged_rows(episode_dir: Path) -> list[dict]:
     """`staged.yaml`'s rows, in written order."""
-    import yaml
-
     text = (episode_dir / "staged.yaml").read_text(encoding="utf-8")
-    return list(yaml.safe_load(text) or [])
+    return list(_yaml.safe_load(text) or [])
 
 
 def review_doc(episode_dir: Path) -> dict:
-    import yaml
 
-    return yaml.safe_load((episode_dir / "review.yaml").read_text(encoding="utf-8"))
+    return _yaml.safe_load((episode_dir / "review.yaml").read_text(encoding="utf-8"))
 
 
 def lesson_row(run_dir: Path, name: str = "L1",
