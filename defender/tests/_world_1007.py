@@ -625,7 +625,6 @@ import json
 from pathlib import Path
 
 from defender.runtime.verbs import VerbContext, verb
-from defender import _yaml
 
 CALLS = "adapter-calls.jsonl"
 ANSWERS = "world_1007_answers.json"
