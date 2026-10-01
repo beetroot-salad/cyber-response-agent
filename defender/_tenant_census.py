@@ -24,6 +24,7 @@ from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_con
 from defender.runtime.run_tenant import catalog_templates, correlation_dispatch
 from defender.runtime.verb_dispositions import (
     CensusGaps,
+    Disposition,
     census_gaps,
     dispositions_path,
     load_dispositions,
@@ -91,11 +92,17 @@ def _unreadable_adapters(
 @dataclasses.dataclass(frozen=True)
 class TableFindings:
     """One tenant's table judged against a census: its residue in both directions, and the
-    lead-zero config's disagreement, if any. Clean when `lines` is empty."""
+    lead-zero config's disagreement, if any. Clean when `lines` is empty. `dispositions` are
+    the rows that were judged — a caller reporting on the table reads them here, never by
+    loading the table a second time."""
 
-    rows: int
+    dispositions: tuple[Disposition, ...]
     gaps: CensusGaps
     lead_zero_fault: str | None
+
+    @property
+    def rows(self) -> int:
+        return len(self.dispositions)
 
     def lines(self, table: Path | str) -> list[str]:
         """Each finding as one line naming the pair and what to do in `table`."""
@@ -116,7 +123,7 @@ def table_findings(settings: Path, census: Census) -> TableFindings:
     catalog. Raises `DispositionError` naming the table when it does not load."""
     rows = load_dispositions(dispositions_path(settings))
     return TableFindings(
-        rows=len(rows), gaps=census_gaps(census.walked, rows),
+        dispositions=rows, gaps=census_gaps(census.walked, rows),
         lead_zero_fault=_lead_zero_fault(settings, rows, census.catalog))
 
 

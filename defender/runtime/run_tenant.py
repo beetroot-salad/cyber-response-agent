@@ -89,10 +89,8 @@ def correlation_dispatch(
 
     config = lead_zero_config_path(settings)
     template_id = load_correlation_template(config)
-    try:
-        return lead_zero_mod.resolve_correlation_dispatch(template_id, templates, grant)
-    except (lead_zero_mod.CorrelationDispatchError, GrantError) as disagreement:
-        raise type(disagreement)(f"{config}: {disagreement}") from disagreement
+    return lead_zero_mod.resolve_correlation_dispatch(
+        template_id, templates, grant, source=config)
 
 
 def refusals() -> tuple[type[Exception], ...]:

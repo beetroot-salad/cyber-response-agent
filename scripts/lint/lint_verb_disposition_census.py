@@ -43,7 +43,6 @@ from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
     dispositions_path,
     grant_for,
-    load_dispositions,
 )
 
 #: The product repo's own knowledge folders this gate walks: the template `tenant.py scaffold`
@@ -93,11 +92,10 @@ def main(argv: list[str]) -> int:
             continue
         lines = findings.lines(dispositions_path(settings).relative_to(root))
         if not lines:
-            rows = load_dispositions(dispositions_path(settings))
             print(
                 f"lint_verb_disposition_census: {name}: clean — {findings.rows} dispositions "
                 f"cover {len(census.systems)} system(s) with no residue "
-                f"({len(grant_for('gather', rows).entries)} granted to gather)."
+                f"({len(grant_for('gather', findings.dispositions).entries)} granted to gather)."
             )
             continue
         worst = max(worst, 1)

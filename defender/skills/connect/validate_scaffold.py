@@ -232,7 +232,6 @@ def main() -> None:
     import argparse
 
     from defender import _tenant
-    from defender._paths import PATHS
     from defender._tenants import add_tenant_arguments
 
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
@@ -252,7 +251,7 @@ def main() -> None:
         if args.tenant is None:
             raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
         settings_dir = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), args.tenant, defender_dir=PATHS.defender_dir).settings
+            _tenant.resolve_data_root(), args.tenant, defender_dir=defender).settings
     except _tenant.TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")

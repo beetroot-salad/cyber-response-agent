@@ -36,7 +36,6 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
 
 from defender._paths import process_defender_dir
 from defender import _tenant
-from defender._paths import PATHS
 from defender._tenants import add_tenant_arguments
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
@@ -193,13 +192,14 @@ def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
                        settings_dir=Path(settings_dir))
 
 
-def _accepted_settings(tenant_id: str | None) -> Path:
+def _accepted_settings(tenant_id: str | None, defender_dir: Path) -> Path:
     """The `--tenant`'s settings half, accepted under `$DEFENDER_DATA_ROOT` as a run accepts it
-    — never a folder found through `$DEFENDER_DIR` or the checkout."""
+    — never a folder found through `$DEFENDER_DIR` or the checkout — and held outside
+    `defender_dir`, the code tree this command serves the verb against."""
     if tenant_id is None:
         raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
     return _tenant.accept_tenant(
-        _tenant.resolve_data_root(), tenant_id, defender_dir=PATHS.defender_dir).settings
+        _tenant.resolve_data_root(), tenant_id, defender_dir=defender_dir).settings
 
 
 def main():
@@ -207,7 +207,7 @@ def main():
     args = parser.parse_args()
     defender_dir = process_defender_dir()
     try:
-        settings_dir = _accepted_settings(args.tenant)
+        settings_dir = _accepted_settings(args.tenant, defender_dir)
     except _tenant.TenantRefused as refusal:
         print(f"error: {refusal}", file=sys.stderr)
         sys.exit(2)

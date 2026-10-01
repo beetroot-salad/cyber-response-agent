@@ -15,6 +15,7 @@ the template without an import cycle and has no catalog.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 from defender._model import model
 
 from defender._corpus import QueryTemplate, is_established
@@ -50,7 +51,8 @@ def _pair(system: str, verb: str) -> str:
 
 
 def resolve_correlation_dispatch(
-    template_id: str, templates: Iterable[QueryTemplate], grant: VerbGrant,
+    template_id: str, templates: Iterable[QueryTemplate], grant: VerbGrant, *,
+    source: Path | None = None,
 ) -> CorrelationDispatch:
     """Resolve `template_id` against `templates` and check it agrees with `grant`.
 
@@ -65,37 +67,45 @@ def resolve_correlation_dispatch(
       (d) `(template.system, template.verb)` is not exactly the holder's one query pair.
 
     The grant passes through unchanged: the config selects a template, only the table grants.
+    `source`, when given, is the config file the id was read from: every refusal opens with it,
+    so an operator is told which file to edit.
     """
-    system = correlation_system(grant)
+    def at(message: str) -> str:
+        return message if source is None else f"{source}: {message}"
+
+    try:
+        system = correlation_system(grant)
+    except GrantError as two_systems:
+        raise GrantError(at(str(two_systems))) from two_systems
     if system is None:
         return CorrelationDispatch(template_id, None, grant)
     # The loader already refuses a second query verb; this guards grants built elsewhere.
     query_pairs = sorted((s, v) for s, v, _ in grant.entries if v != HEALTH_CHECK)
     if len(query_pairs) != 1:
-        raise GrantError(
+        raise GrantError(at(
             f"the correlation grant for role {grant.role!r} holds {len(query_pairs)} query "
             f"pairs ({[_pair(s, v) for s, v in query_pairs]}) — the template is checked "
             "against ONE, and only a one-query-pair grant determines it."
-        )
+        ))
     table_system, table_verb = query_pairs[0]
     granted = _pair(table_system, table_verb)
 
     matches = [t for t in templates if t.id == template_id and is_established(t)]
     if not matches:
-        raise CorrelationDispatchError(
+        raise CorrelationDispatchError(at(
             f"lead-zero config names correlation template {template_id!r}, which resolves "
             "to no established template in this deployment's catalog (a draft, a demoted or "
             "a renamed file does not count, nor does a file the catalog walk skipped as "
             "malformed — see any `warn: skipping` line above) — the lead would be told to "
             f"bind a template its index cannot list, while the table grants {granted} to it"
-        )
+        ))
     if len(matches) > 1:
         paths = ", ".join(str(t.path) for t in matches)
-        raise CorrelationDispatchError(
+        raise CorrelationDispatchError(at(
             f"correlation template {template_id!r} is carried by {len(matches)} established "
             f"files ({paths}) — the catalog does not say which one the lead binds; give all "
             "but one of them another id"
-        )
+        ))
     template = matches[0]
 
     from defender.scripts.gather_tools.record_query import resolve_query_id
@@ -104,23 +114,23 @@ def resolve_correlation_dispatch(
     # fallback, losing the template identity the learning loop keys on.
 
     if resolve_query_id(template.system, template.verb, template_id) != template_id:
-        raise CorrelationDispatchError(
+        raise CorrelationDispatchError(at(
             f"correlation template {template_id!r} at {template.path} carries an id the "
             f"lead could not bind as its own on {template.system!r}, the system the file is "
             "filed under (a template id is `{system}.{kebab-name}`, and its prefix must be "
             "that system) — fix the file's id or its location, not the table"
-        )
+        ))
     if template.verb == "":
-        raise CorrelationDispatchError(
+        raise CorrelationDispatchError(at(
             f"correlation template {template_id!r} at {template.path} is malformed: it "
             "declares no `verb:` in its front matter, so the pair it binds cannot be compared "
             "with the table's grant — fix the template, not the table"
-        )
+        ))
     if (template.system, template.verb) != (table_system, table_verb):
-        raise CorrelationDispatchError(
+        raise CorrelationDispatchError(at(
             f"the correlation template and the verb-disposition table disagree: template "
             f"{template_id!r} binds {_pair(template.system, template.verb)}, but the table "
             f"grants {granted} to the lead. Either move the holder's rows to the template's "
             "pair or configure a template that binds the granted one"
-        )
+        ))
     return CorrelationDispatch(template_id, system, grant)
