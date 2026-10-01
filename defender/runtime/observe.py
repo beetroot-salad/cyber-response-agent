@@ -37,10 +37,11 @@ POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 #: Denials record a bounded digest of the params, never the raw model-controlled blob.
 _DENIAL_PARAM_DIGEST_LEN = 16
 
-#: The deepest a logged message is written, the message itself counted; deeper values are cut
-#: to their repr. The record wraps its message in one level, so every line stays readable
-#: under `JSON_NESTING_LIMIT`. Only the log cuts (#1117): a call refused as too deep to store
-#: stays in the lead's history and is logged again with every later request.
+#: The deepest a logged RESPONSE is written, the message itself counted; deeper values are cut
+#: to their repr. The record wraps its message in one level, so the line stays readable under
+#: `JSON_NESTING_LIMIT`. Only the log cuts (#1117). A response is where a model's too-deep
+#: call arrives; the query tool then replaces its arguments in the history, so the requests
+#: that re-send the history never carry it and are written as they are.
 _MESSAGE_DEPTH = JSON_NESTING_LIMIT - 1
 
 
@@ -114,7 +115,8 @@ class RequestLogger:
         self._denial_seq = 0
 
     def _emit(
-        self, agent_id: str, kind: str, message: dict, cap: int, **extra: Any
+        self, agent_id: str, kind: str, message: dict, cap: int, *, cut: bool = False,
+        **extra: Any,
     ) -> None:
         seq = self._seq.get(agent_id, 0)
         self._seq[agent_id] = seq + 1
@@ -129,10 +131,11 @@ class RequestLogger:
             "message": message,
         }
         self.messages.append(rec)
-        # Cut first: the cut is a bounded walk, so no message can exhaust the stack in `_trim`
-        # or the encoder either.
-        on_disk = json_safe(message, non_finite="text", max_depth=_MESSAGE_DEPTH)
-        self._write_record({**rec, "message": _trim(on_disk, cap)})
+        # A cut message is cut first: the cut is a bounded walk, so `_trim` and the encoder
+        # never walk past it.
+        on_disk = json_safe(message, non_finite="text", max_depth=_MESSAGE_DEPTH) if cut else message
+        disk = {**rec, "message": _trim(on_disk, cap)} if cut or cap > 0 else rec
+        self._write_record(disk)
 
     def _write_record(self, rec: dict) -> None:
         """The single write path for every wire-log record kind.
@@ -151,13 +154,19 @@ class RequestLogger:
         cap = self._cap
         for dumped in ModelMessagesTypeAdapter.dump_python(request_messages, mode="json"):
             self._emit(agent_id, "request", dumped, cap)
-        resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
+        try:
+            resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
+        except ValueError as e:
+            # A response pydantic cannot dump (a tool call's arguments nested past its own
+            # bound, about 250 levels) still cost a request: its record keeps the usage that
+            # prices it, and says why its parts are not here.
+            resp_dump = {"kind": "response", "parts": [], "unlogged": f"{type(e).__name__}"}
         extra: dict[str, Any] = {}
         if toon_gate is not None:
             # The TOON gate's counters, carried on the response record.
             extra["toon_gate"] = toon_gate
         self._emit(
-            agent_id, "response", resp_dump, cap,
+            agent_id, "response", resp_dump, cap, cut=True,
             model=getattr(response, "model_name", None),
             usage=_usage_dict(getattr(response, "usage", None)),
             duration_ms=round(duration_ms, 1),

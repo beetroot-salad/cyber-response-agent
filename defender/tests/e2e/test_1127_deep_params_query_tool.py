@@ -454,6 +454,40 @@ def test_a_call_at_the_limit_leaves_every_wire_log_line_readable(tmp_path, form)
     assert len(read_jsonl_rows(path)) == len(lines)
 
 
+#: Past the session store's own bound (200 levels of payload): the depth at which a refused
+#: call still in the history ended the lead. Past pydantic's own message dump (about 252) the
+#: replay harness's model cannot run at all (it serializes every argument to estimate usage);
+#: the wire log's side of that depth is pinned on the logger itself (`test_1127_wire_log`).
+PAST_THE_STORE = 205
+
+
+def test_a_refused_dict_call_leaves_nothing_deep_in_the_history_the_lead_goes_on(tmp_path):
+    """#1127 second review: refusing a call did not take it out of the lead's history, so its
+    arguments were stored, logged and re-sent with every later request. As a dict (the form a
+    provider that parses arguments hands over), past the session store's bound the next store
+    write refused the history and the lead ended — just after the host told the model to retry
+    — and past pydantic's message dump the request's wire-log records were dropped.
+
+    A refused too-deep call's arguments are replaced in the history by a short host
+    placeholder: the call after the refusal runs, every wire-log line reads back, and the
+    response that carried the deep call is still logged."""
+    shape = Shape("dict-past-the-store", "dict", PAST_THE_STORE)
+    r, rec = drive(tmp_path, shape.name, [deep_call(shape), q("elastic", "query", VALID), DONE])
+
+    assert [c.verb for c in rec.calls] == ["query"], \
+        "the call after the refusal did not run: the lead ended on the refused call's history"
+    path = RunPaths(r.run_dir).wire_log
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    skipped = [(json_nesting_depth(line), line[:80]) for line in lines
+               if parse_jsonl_row(line) is None]
+    assert skipped == [], f"the wire log holds lines its reader skips: {skipped}"
+    records = [json.loads(line) for line in lines]
+    responses = [rec for rec in records
+                 if rec.get("kind") == "response" and str(rec.get("agent_id")).startswith("gather")]
+    assert len(responses) == 3, \
+        f"a response record was dropped: {len(responses)} of the lead's 3 responses logged"
+
+
 def test_a_refused_deep_call_leaves_every_later_wire_log_line_readable(tmp_path):
     """#1127 review: a refused call stays in the lead's message history, so every later request
     the lead logs embeds its arguments again, a few levels under the record. Refused at 150

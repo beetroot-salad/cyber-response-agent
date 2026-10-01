@@ -142,6 +142,10 @@ PARAMS_TOO_DEEP = (
     + " — the call was not run. Send flatter arguments."
 )
 
+#: What a refused too-deep call's arguments become in the lead's history. Host text, shallow,
+#: and still an argument object, as every provider requires of a tool call.
+_REFUSED_ARGS = {"refused": "arguments nested too deep to keep; see the retry that follows"}
+
 def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
         return e.code
@@ -385,23 +389,27 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
-        # Too deep to store is a schema rejection whether or not pydantic refused it; judged on
-        # the call as sent, since text too deep to decode would read as `{}` once decoded.
-        too_deep = call_args_too_deep(args)
+        # Too deep to store is a schema rejection, decided before pydantic parses anything;
+        # judged on the call as sent, since text too deep to decode would read as `{}` once
+        # decoded.
+        if call_args_too_deep(args):
+            # The refused call stays in the lead's history, which is stored, logged and re-sent
+            # with every later request: its arguments must not. Past the session store's bound
+            # its next write refused the history and ended the lead.
+            call.args = (dict(_REFUSED_ARGS) if isinstance(call.args, dict)
+                         else json.dumps(_REFUSED_ARGS))
+            await self._reject(ctx, args, None)
         try:
-            validated = await handler(args)
+            return await handler(args)
         except (ValidationError, ModelRetry) as refused:
-            await self._reject(ctx, args, refused, too_deep=too_deep)
-        if too_deep:
-            await self._reject(ctx, args, None, too_deep=True)
-        return validated
+            await self._reject(ctx, args, refused)
 
     async def _reject(
-        self, ctx, args: Any, refused: ValidationError | ModelRetry | None, *, too_deep: bool,  # noqa: ANN001 — the framework's run context
+        self, ctx, args: Any, refused: ValidationError | ModelRetry | None,  # noqa: ANN001 — the framework's run context
     ) -> NoReturn:
         """Row a schema-rejected `query` call, charge it to the lead's guards, and raise what
-        the model is told. `refused` is pydantic's (or a validator's) refusal; `None` when
-        pydantic accepted a call that is too deep to store."""
+        the model is told. `refused` is pydantic's (or a validator's) refusal; `None` for a
+        call too deep to store, which pydantic is never shown."""
         # After the door closed, a schema-refused call is neither retried (that would charge
         # the retry budget on a stopped lead) nor rowed.
         if _door_closed(ctx.deps):
@@ -416,12 +424,12 @@ class QueryCapture(AbstractCapability[Any]):
         # sooner, not later.
         raw_system = as_str(raw.get("system"))
         verb = as_str(raw.get("verb"))
-        params = {} if too_deep else _as_dict(raw.get("params"))
+        params = {} if refused is None else _as_dict(raw.get("params"))
         system, system_key = self._coarsen(raw_system)
         trip = self._rejection_guard(ctx.deps, system, verb, params, system_key=system_key)
         # `str(refused)` carries model text, so a coarsened row gets a host-composed detail,
         # and a too-deep call the fixed host sentence (pydantic's error echoes the input).
-        if too_deep or refused is None:
+        if refused is None:
             rejection = PARAMS_TOO_DEEP
         elif self._was_coarsened(system):
             rejection = self._coarse_schema_detail(refused)
@@ -445,8 +453,8 @@ class QueryCapture(AbstractCapability[Any]):
                 target=self._undeclared_target(recorded=system, raw=raw_system),
                 verb=verb,
             )) from refused
-        if too_deep or refused is None:
-            raise ModelRetry(PARAMS_TOO_DEEP) from refused
+        if refused is None:
+            raise ModelRetry(PARAMS_TOO_DEEP)
         raise refused
 
     async def _record_denied(
