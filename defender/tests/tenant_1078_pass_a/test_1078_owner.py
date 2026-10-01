@@ -520,6 +520,7 @@ def _d0_entry_surfaces(tmp_path: Path, root: Path, refusals: dict) -> None:
                       entry="the branch launcher")
 
     fresh = tmp_path / "fresh-root"
+    H.place_knowledge(fresh, "playground")  # #1120 DC2: the operator's clone precedes setup
     ok = H.run_setup(fresh, "playground")
     H.assert_setup_ran(ok)
     assert ok.returncode == 0, H.setup_output(ok)

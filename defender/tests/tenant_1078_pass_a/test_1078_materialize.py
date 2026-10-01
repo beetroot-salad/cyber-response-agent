@@ -35,7 +35,11 @@ T_ID = H.VALID_ID
 
 
 def _materialize(alert: Path, run_id: str | None, tenant_id: str, **kw):
-    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id, **kw).run_dir
+    """The entry's pipeline (#1120 D1): resolve the data root and accept `tenant_id` there
+    (`accept_tenant` — the row check pass (A) made materialize's step 1 now runs here, at the
+    entry), then `materialize_run(tenant=...)` over the accepted `Tenant`."""
+    tenant = H.accept(H.resolve_data_root(), tenant_id)
+    return H.run_common().materialize_run(alert, run_id, tenant=tenant, **kw).run_dir
 
 
 def _refused(fn) -> str:
@@ -133,14 +137,16 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     tenant.json there exists because setup wrote it.
 
     Materialize and a real replayed run over it (which opens the store): `<root>/T/` then holds
-    exactly the row, `runs/` and `sessions/`, the row byte-identical to what create_tenant
+    exactly the row, the operator-placed `knowledge/` (#1120 DC2), `runs/` and `sessions/`, the row byte-identical to what create_tenant
     wrote, and the data root holds T alone."""
     row_bytes = H.row_path(tenant_root, T_ID).read_bytes()
     run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
-    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "runs"]), (
+    # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
+    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs"]), (
         "materialize wrote beside runs/")
     _replay(run_dir)
-    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "runs", "sessions"])
+    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs",
+                                                     "sessions"])
     assert H.entries(tenant_root) == [T_ID]
     assert H.row_path(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
 
@@ -180,7 +186,10 @@ def test_g_r7_family_base_world_id_coherence(tmp_path, tenant_root):
 def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     """materialize_run with its tenant_id keyword set to T, with no row for T is refused before creating anything
     and never writes <root>/T/tenant.json; after a successful materialize for an existing T
-    the row is byte-identical."""
+    the row is byte-identical.
+
+    #1120 D1: the row check is the entry's `accept_tenant` (materialize takes the accepted
+    `Tenant`), so the refusal is observed on that accept-then-materialize pipeline."""
     root = tmp_path / "data"
     root.mkdir()
     H.set_data_root(monkeypatch, root)
@@ -204,7 +213,10 @@ def test_d2_materialize_order(tmp_path, monkeypatch):
     Observed as which refusal wins: (1) no row — nothing is created, no runs base; (2) no row
     over a base whose record names U — require_tenant's refusal, not the record's; (3) a row,
     and a record naming U — ensure_runs_base_record's refusal (step 4), not Run.for_tenant's
-    (step 5), and no run dir; (4) the ordinary case — the runs base made, the record minted."""
+    (step 5), and no run dir; (4) the ordinary case — the runs base made, the record minted.
+
+    #1120 D1: step 1 is now the entry's `accept_tenant` (whose row check is `require_tenant`'s,
+    verbatim) ahead of `materialize_run(tenant=...)`; cells (1) and (2) observe that pipeline."""
     alert = H.plant_alert(tmp_path / "in")
     root = tmp_path / "unknown"
     root.mkdir()
@@ -285,18 +297,19 @@ def test_pre_a_process_with_the_old_knob_pointed_into_the_tenants_runs_base(tmp_
 
 
 def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
-    """require_tenant runs once, at materialize step 1; a row removed after it does not stop
-    the later steps (no re-check within the call).
+    """The row is checked once, at step 1; a row removed after it does not stop the later
+    steps (no re-check within the call).
 
-    The removal is the REAL unlink of the real row, timed to the instant the owner's
-    `require_tenant` first returns inside the call (a profile hook on that return — no attribute
-    is patched; the design names that step). The materialize then completes: the run dir and a
-    stamp naming T."""
+    #1120 D1 moved step 1 to the entry: `accept_tenant` reads the row and hands
+    `materialize_run` the accepted `Tenant`. The removal is the REAL unlink of the real row,
+    timed to the instant the owner's `accept_tenant` returns inside the pipeline (a profile
+    hook on that return — no attribute is patched). The materialize then completes: the run
+    dir and a stamp naming T."""
     row = H.row_path(tenant_root, T_ID)
     fired: list[str] = []
 
     def hook(frame, event, _arg):
-        if (event == "return" and not fired and frame.f_code.co_name == "require_tenant"
+        if (event == "return" and not fired and frame.f_code.co_name == "accept_tenant"
                 and frame.f_globals.get("__name__") == "defender._tenant"):
             row.unlink()
             fired.append("row removed")
@@ -308,7 +321,7 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
         run_dir = Path(_materialize(alert, "r1", T_ID))
     finally:
         sys.setprofile(previous)
-    assert fired, "materialize never ran defender._tenant.require_tenant (D2 step 1)"
+    assert fired, "the pipeline never ran defender._tenant.accept_tenant (D2 step 1)"
     assert not row.exists()
     assert run_dir == tenant_root / T_ID / "runs" / "r1"
     assert run_dir.is_dir()

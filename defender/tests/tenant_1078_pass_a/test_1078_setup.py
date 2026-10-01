@@ -91,25 +91,33 @@ def test_o10_rowless_folder_refused(tmp_path, shape):
 
 @pytest.mark.parametrize("shape", ["absent", "empty", "missing-parent"])
 def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
-    """Setup into an absent or empty data root creates exactly <root>/<id>/tenant.json and
-    nothing else (no runs/). An absent root several levels below anything that exists is
-    created whole (J07)."""
+    """Setup into a data root whose only entry is the operator-placed <root>/<id>/knowledge
+    creates exactly <root>/<id>/tenant.json and nothing else (no runs/), leaving the knowledge
+    folder byte-identical.
+
+    SUPERSEDED BY #1120 (spec_graph_1120-piece1 x1078_o10_fresh_root_writes_exactly_row): a
+    setup over a fresh root with NO knowledge folder now refuses (DC2), so this test pins the
+    superseding outcome's nearest surviving case, d7_setup_guarded_lane — over an adopted
+    knowledge/, setup's one write is the row. The shape names are kept: `absent` and
+    `missing-parent` are roots that do not exist until the operator's placement (the clone)
+    creates them, so J07's missing-parent cell is moot (P-DC2-1 leg C); `empty` is a root that
+    existed, empty, before the placement."""
     top = tmp_path / "top"
     root = {"absent": top, "empty": top, "missing-parent": top / "a" / "b" / "c"}[shape]
     if shape == "empty":
         root.mkdir()
+    H.place_knowledge(root, TID)
+    before = H.census(top)
     proc = H.run_setup(root, TID)
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
     rel_root = root.relative_to(top).as_posix()
     prefix = "" if rel_root == "." else f"{rel_root}/"
-    expected = {f"{prefix}{TID}", f"{prefix}{TID}/{H.ROW_NAME}"}
-    if prefix:
-        parts = rel_root.split("/")
-        expected |= {"/".join(parts[:i]) for i in range(1, len(parts) + 1)}
-    assert set(H.census(top)) == expected, (
-        f"setup wrote more (or less) than the row: {sorted(H.census(top))}")
-    assert H.census(top)[f"{prefix}{TID}/{H.ROW_NAME}"][0] == "file"
+    after = H.census(top)
+    assert set(after) - set(before) == {f"{prefix}{TID}/{H.ROW_NAME}"}, (
+        f"setup wrote more (or less) than the row: {sorted(set(after) - set(before))}")
+    assert {k: after[k] for k in before} == before, "setup changed the placed knowledge folder"
+    assert after[f"{prefix}{TID}/{H.ROW_NAME}"][0] == "file"
     row = json.loads(H.row_path(root, TID).read_text(encoding="utf-8"))
     assert row["tenant_id"] == TID
 
@@ -129,6 +137,7 @@ def test_setup_refuses_a_path_shaped_id_before_looking_under_the_data_root(tmp_p
     assert "not a valid tenant id" in said, said
     assert "secret-name" not in said, f"the refusal listed a directory outside the root: {said}"
     assert not root.exists() or list(root.iterdir()) == []
+    H.place_knowledge(root, H.VALID_ID)  # #1120 DC2: the operator's clone precedes setup
     assert H.run_setup(root, H.VALID_ID).returncode == 0
 
 
@@ -136,6 +145,7 @@ def test_setup_reports_a_corrupt_row_instead_of_already_exists(tmp_path):
     """A row that is already there but corrupt is reported as what is wrong with it — the
     owner's `require_tenant` refusal, verbatim — not folded into "already exists"."""
     root = tmp_path / "data"
+    H.place_knowledge(root, H.VALID_ID)  # #1120 DC2: the operator's clone precedes setup
     assert H.run_setup(root, H.VALID_ID).returncode == 0
     H.row_path(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
     proc = H.run_setup(root, H.VALID_ID)
@@ -149,6 +159,7 @@ def test_o10_rerun_no_second_row(tmp_path):
     """A re-run of setup with the same id, where the root's only entry is <id>/ holding a valid
     row, succeeds and leaves that row byte-identical."""
     root = tmp_path / "data"
+    H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
@@ -174,6 +185,7 @@ def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
     (the root's only entry is <id>/ with a valid row): no second row, nothing under <T>/
     changes, success exit (F0)."""
     root = tmp_path / "data"
+    H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
@@ -193,6 +205,7 @@ def test_something_other_than_the_tenant_appears_at_the_data_root_top_level(tmp_
     """An entry beside <id>/ at the data root's top level makes a setup re-run refused by O10,
     naming the entry, with nothing written."""
     root = tmp_path / "data"
+    H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
@@ -234,23 +247,33 @@ def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
     refused by O10, and any other id's entry is still refused.
 
     The leftover is the shape J09 names: `create_tenant`'s own `<id>/` mkdir predates the row
-    write, so an interrupted or disk-full setup leaves an EMPTY own folder."""
+    write, so an interrupted or disk-full setup leaves an own folder with no row.
+
+    #1120 SUPERSEDES THE POSITIVE LEG (spec_graph_1120-piece1 x1078_s7_j08_rowless_own_folder):
+    an EMPTY rowless own folder now refuses (no knowledge/, DC2), so the leg completes the
+    rowless own folder holding the operator-placed knowledge/ — the one name the setup protocol
+    sanctions there — and setup adds exactly the row. The control legs stand unchanged; each
+    also carries a placed knowledge/ so that only O10's guard can refuse it, and the refusal
+    must be O10's."""
     root = tmp_path / "data"
-    H.tenant_dir(root, TID).mkdir(parents=True)
+    H.place_knowledge(root, TID)
+    before = H.census(root)
     done = H.run_setup(root, TID)
     H.assert_setup_ran(done)
     assert done.returncode == 0, f"the unfinished setup was not completed:\n{H.setup_output(done)}"
-    assert set(H.census(root)) == {TID, f"{TID}/{H.ROW_NAME}"}
+    assert set(H.census(root)) == set(before) | {f"{TID}/{H.ROW_NAME}"}
     assert H.require_tenant(root, TID).tenant_id == TID
 
     foreign = tmp_path / "foreign-in-own"
-    H.tenant_dir(foreign, TID).mkdir(parents=True)
+    H.place_knowledge(foreign, TID)
     (H.tenant_dir(foreign, TID) / "runs").mkdir()
-    _refused_writing_nothing(foreign, names=TID)
+    out = _refused_writing_nothing(foreign, names=f"{TID}/runs")
+    assert O10_TEXT in out, out
 
     other = tmp_path / "other-id"
     H.tenant_dir(other, "other").mkdir(parents=True)
-    _refused_writing_nothing(other, names="other")
+    out = _refused_writing_nothing(other, names="other")
+    assert O10_TEXT in out, out
 
 
 # ======================================================================================

@@ -30,18 +30,23 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     """TenantPaths is a member of _OWNER_CLASS_ORIGINS, so the #1077 lint treats a join onto a
     TenantPaths accessor as owner-derived.
 
+    RE-PLUMBED FOR #1120 (spec_graph_1120-piece1 x1078_d1_tenantpaths_owner_class): the public
+    TenantPaths is gone; its record locations are owned by the accepted `Tenant`, a PARTIAL
+    owner (`_astlib.PARTIAL_OWNER_ATTRS`) whose only constructor is `accept_tenant`. So the
+    same joins are driven onto `accept_tenant(...).runs`.
+
     Observed by DRIVING the join arm (G10, executed): a swept module that joins onto
-    `TenantPaths(root, T).runs` — directly, and through a local bound to it — is reported, as
-    the same shapes onto `EpisodePaths(ep).runs` already are (the control). The second
-    hand-kept registration line brief R4(c) found, `_accessor_names()`, lists the new owner's
-    accessors too."""
+    `accept_tenant(root, T, ...).runs` — directly, and through a local bound to it — is
+    reported, as the same shapes onto `EpisodePaths(ep).runs` already are (the control). The
+    second hand-kept registration line brief R4(c) found, `_accessor_names()`, lists the
+    owner's accessors too (the row file's path is `Tenant.row_path`, N6)."""
     source = (
-        "from defender._tenant import TenantPaths\n"
+        "from defender._tenant import accept_tenant\n"
         "from defender._episode_paths import EpisodePaths\n\n"
-        "def direct(root, t, run_id):\n"
-        "    return TenantPaths(root, t).runs / run_id\n\n"
-        "def through_a_local(root, t, run_id):\n"
-        "    runs = TenantPaths(root, t).runs\n"
+        "def direct(root, t, d, run_id):\n"
+        "    return accept_tenant(root, t, defender_dir=d).runs / run_id\n\n"
+        "def through_a_local(root, t, d, run_id):\n"
+        "    runs = accept_tenant(root, t, defender_dir=d).runs\n"
         "    return runs / run_id\n\n"
         "def control(ep, run_id):\n"
         "    return EpisodePaths(ep).runs / run_id\n")
@@ -50,11 +55,11 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     assert any("control()" in d for d in joins), f"the join arm is not live: {joins}"
     for fn in ("direct()", "through_a_local()"):
         assert any(fn in d for d in joins), (
-            f"a join onto a TenantPaths accessor in {fn} is not owner-derived to the lint: "
+            f"a join onto a Tenant accessor in {fn} is not owner-derived to the lint: "
             f"{joins}")
     accessors = S.gate()._accessor_names()
-    missing = {"row", "episodes", "learning"} - set(accessors)
-    assert not missing, f"_accessor_names() does not list TenantPaths' {sorted(missing)}"
+    missing = {"row_path", "episodes", "learning"} - set(accessors)
+    assert not missing, f"_accessor_names() does not list Tenant's {sorted(missing)}"
 
 
 def test_d1_row_constant_not_exempt(tmp_path):

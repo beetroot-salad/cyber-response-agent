@@ -107,7 +107,7 @@ def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
     assert not (tmp_path / "run").exists()
     H.make_tenant(data_root, H.VALID_ID)
     got = _accepted([str(alert), "--tenant", H.VALID_ID], H.Recorder(tmp_path / "run2"))
-    assert got["tenant_id"] == H.VALID_ID
+    assert got["tenant"].id == H.VALID_ID
 
 
 def test_o1_run_id_resume_without_tenant_refused(tmp_path, data_root, capsys):
@@ -175,7 +175,7 @@ def test_o2_unknown_tenant_refused_writes_nothing(tmp_path, data_root):
                       entry="run.py main")
     H.make_tenant(data_root, "acme")
     assert _accepted([str(alert), "--tenant", "acme"],
-                     H.Recorder(tmp_path / "run2"))["tenant_id"] == "acme"
+                     H.Recorder(tmp_path / "run2"))["tenant"].id == "acme"
 
 
 def test_o2_existing_tenant_runs(tmp_path, data_root):
@@ -185,12 +185,13 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
     alert = H.plant_alert(tmp_path / "in")
     rec = H.Recorder(tmp_path / "run")
     got = _accepted([str(alert), "--tenant", "acme"], rec)
-    assert got["tenant_id"] == "acme"
+    assert got["tenant"].id == "acme"
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
 def test_d3_materialize_seam_tenant(tmp_path, data_root):
-    """main calls the materialize seam with T as its tenant_id keyword argument;
+    """main calls the materialize seam with T as its tenant keyword argument (#1120 D1: the
+    accepted `Tenant` whose id is T, where pass A handed the bare id as `tenant_id`);
     _Investigate's parameters are unchanged by #1078.
 
     For a fresh run AND for a `--resume` sibling (which names T too, checked against its
@@ -200,8 +201,9 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
     H.make_tenant(data_root, H.VALID_ID)
     alert = H.plant_alert(tmp_path / "in")
     fresh = _accepted([str(alert), "--tenant", H.VALID_ID], H.Recorder(tmp_path / "run"))
-    assert "tenant_id" in fresh, f"materialize was not handed tenant_id by keyword: {fresh}"
-    assert fresh["tenant_id"] == H.VALID_ID, fresh
+    assert "tenant" in fresh, f"materialize was not handed the tenant by keyword: {fresh}"
+    assert isinstance(fresh["tenant"], H.tenant().Tenant), fresh
+    assert fresh["tenant"].id == H.VALID_ID, fresh
 
     base = H.runs_dir(data_root, H.VALID_ID)
     H.plant_record(base, H.VALID_ID)
@@ -209,7 +211,8 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
     manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
     sibling = _accepted(H.resume_argv(manifest, "b", "--tenant", H.VALID_ID),
                         H.Recorder(tmp_path / "sib"))
-    assert sibling.get("tenant_id") == H.VALID_ID, sibling
+    assert isinstance(sibling.get("tenant"), H.tenant().Tenant), sibling
+    assert sibling["tenant"].id == H.VALID_ID, sibling
 
     params = list(inspect.signature(H.run_py()._Investigate.__call__).parameters)
     assert params == INVESTIGATE_PARAMS, f"_Investigate's parameters changed: {params}"
@@ -226,7 +229,7 @@ def test_o5_sibling_tenant_from_record(tmp_path, data_root):
     _stamp_tenant(src, "acme")
     got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
-    assert got["tenant_id"] == "acme"
+    assert got["tenant"].id == "acme"
 
 
 def test_o5_forged_stamp_ignored(tmp_path, data_root):
@@ -242,7 +245,7 @@ def test_o5_forged_stamp_ignored(tmp_path, data_root):
     _stamp_tenant(src, "victim")
     got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
-    assert got["tenant_id"] == "acme", f"the sibling took its tenant from the stamp: {got}"
+    assert got["tenant"].id == "acme", f"the sibling took its tenant from the stamp: {got}"
     _refused(H.resume_argv(manifest, "b", "--tenant", "victim"), H.Recorder(tmp_path / "sib2"))
 
 
@@ -261,7 +264,7 @@ def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
     assert "victim" in said, f"the refusal does not name the disagreeing --tenant: {said!r}"
     got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib2"))
-    assert got["tenant_id"] == "acme"
+    assert got["tenant"].id == "acme"
 
 
 def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
@@ -276,7 +279,7 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
     got = _accepted(H.resume_argv(manifest, "b", "--tenant", derived),
                     H.Recorder(tmp_path / "sib2"))
-    assert got["tenant_id"] == derived
+    assert got["tenant"].id == derived
 
 
 def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
@@ -289,7 +292,7 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
         manifest, "a", settings=lambda: H.T1106.PLAYGROUND_SETTINGS).run_id
     got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
-    assert got["tenant_id"] == "acme"
+    assert got["tenant"].id == "acme"
     assert got["run_id"] == world_run_id, (
         f"the resume path took --run-id over the manifest's sibling id: {got['run_id']!r}")
     _refused(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "victim"),
@@ -345,6 +348,7 @@ def test_setup_shell_and_run_shell_resolve_different_data_roots(tmp_path, monkey
     either root. Naming the resolved root in the message is not demanded."""
     setup_root, run_root = tmp_path / "setup-root", tmp_path / "run-root"
     run_root.mkdir()
+    H.place_knowledge(setup_root, "acme")  # #1120 DC2: the operator's clone, before setup
     done = H.run_setup(setup_root, "acme")
     H.assert_setup_ran(done)
     assert done.returncode == 0, H.setup_output(done)
@@ -415,6 +419,7 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     argv = [str(alert), "--run-id", "case-x", "--tenant", "acme"]
     _refused(argv, H.Recorder(tmp_path / "run"))
 
+    H.place_knowledge(new, "acme")  # #1120 DC2: the operator's clone, before setup
     proc = H.run_setup(new, "acme")
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
@@ -426,7 +431,7 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     H.assert_verbatim(said, location, entry="run.py --resume (old root)")
 
     got = _accepted(argv, H.Recorder(tmp_path / "run2"))
-    assert got["tenant_id"] == "acme"
+    assert got["tenant"].id == "acme"
     assert H.census(old) == old_census, "the old data root was touched"
 
 
@@ -443,13 +448,15 @@ def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path
     (base / H.RECORD_NAME).write_text(body, encoding="utf-8")
     alert = H.plant_alert(tmp_path / "in")
     with pytest.raises(SystemExit) as refused:
-        H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None)
+        H.run_py()._materialize_run(alert, None, tenant=H.accept(data_root, H.VALID_ID),
+                                     model=None)
     said = H.refusal_text(refused.value)
     assert said.startswith("[run.py] "), said
     assert str(base / H.RECORD_NAME) in said, said
 
     (base / H.RECORD_NAME).unlink()
-    run_dir = H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None).run_dir
+    run_dir = H.run_py()._materialize_run(alert, None, tenant=H.accept(data_root, H.VALID_ID),
+                                     model=None).run_dir
     assert Path(run_dir).is_dir()
 
 

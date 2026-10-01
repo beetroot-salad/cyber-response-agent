@@ -5,7 +5,8 @@ D5: `run_env` and `infra_env` keep exporting `DEFENDER_RUNS_BASE=run_dir.parent`
 the tenant's runs base (`<root>/<T>/runs`) for a fresh run, or an episode's `runs/` for a
 sibling. The value is DERIVED — no operator sets it — so the invlang corpus (O8, read by the
 real `defender-invlang` shim off that variable, C15) is scoped by construction. Every run dir
-here is built by the REAL `materialize_run(..., tenant_id=T)` where the demand is about a
+here is built by the REAL `materialize_run(..., tenant=T)` (T accepted at the entry by the
+real `accept_tenant`, #1120 D1) where the demand is about a
 run's own environment, so "the run's runs base" is what the code made, never a path the test
 composed and then asserted it had composed.
 
@@ -32,11 +33,13 @@ TENANT = H.VALID_ID
 
 def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
     """A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the
-    data root this process resolves (the tenant is created first, through `create_tenant`)."""
+    data root this process resolves (the tenant is created first, through `create_tenant`
+    over a placed knowledge folder, then accepted there as the entry does)."""
     if not H.row_path(root, tenant_id).is_file():
         H.make_tenant(root, tenant_id)
     alert = H.plant_alert(root.parent / f"alert-{run_id}")
-    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id).run_dir
+    tenant = H.accept(H.resolve_data_root(), tenant_id)
+    return H.run_common().materialize_run(alert, run_id, tenant=tenant).run_dir
 
 
 def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path, Path]:
@@ -48,7 +51,8 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
     manifest = H.family_for(src, episode_dir)
     world = H.run_py().resume_world(manifest, "b", settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run(
-        src / "alert.json", world.run_id, tenant_id=TENANT, world=world).run_dir
+        src / "alert.json", world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
+        world=world).run_dir
     return Path(run_dir), episode_dir
 
 
@@ -344,11 +348,15 @@ def test_d9_replay_harness_survives(tmp_path, monkeypatch):
     """The replay harness scenarios pass with no tenant configured.
 
     One small scenario through the harness (C22: it builds its own run dir and needs no
-    tenant), with DEFENDER_DATA_ROOT and DEFENDER_RUNS_BASE both unset."""
+    tenant configured), with DEFENDER_RUNS_BASE unset and the test's data root holding no
+    tenant at all. #1120: the driver runs only as an accepted tenant, so the harness sets the
+    committed fixture tenant up itself under the test's data root (the autouse fresh root,
+    left set — an unset root is no longer a harness the driver can run under); the test
+    configures nothing."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e import _replay_harness as R
 
-    H.set_data_root(monkeypatch, None)
+    assert H.entries(H.resolve_data_root()) == [], "a tenant was configured before the harness"
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
     run_dir = R.materialize(tmp_path, R.GOLDEN_AB3)
     replay = R.ReplayFn([

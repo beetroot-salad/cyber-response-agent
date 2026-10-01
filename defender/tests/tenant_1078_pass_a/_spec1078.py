@@ -196,10 +196,28 @@ def sessions_dir(root: Path, tenant_id: str) -> Path:
     return Path(root) / tenant_id / "sessions"
 
 
+def place_knowledge(root: Path, tenant_id: str = VALID_ID) -> Path:
+    """#1120 DC2: the knowledge folder the operator clones to `<root>/<T>/knowledge` BEFORE
+    setup — a copy of the committed fixture, with `agent/.tenant-id` naming T. Returns it."""
+    knowledge = Path(root) / tenant_id / "knowledge"
+    shutil.copytree(T1106.FIXTURE, knowledge, symlinks=True)
+    (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
+    return knowledge
+
+
 def make_tenant(root: Path, tenant_id: str = VALID_ID) -> Any:
     """`tenant_id` created in `root` through the REAL `create_tenant` (D10: fixtures call it
-    directly, against a fresh tmp root). Returns the `TenantRow` it wrote."""
+    directly, against a fresh tmp root), over the knowledge folder the operator placed first
+    (#1120 DC2: `place_knowledge`, the one entry O10 sanctions in a rowless own folder).
+    Returns the `TenantRow` it wrote."""
+    place_knowledge(Path(root), tenant_id)
     return create_tenant(Path(root), tenant_id)
+
+
+def accept(root: Path, tenant_id: str = VALID_ID) -> Any:
+    """#1120 D1: the accepted `Tenant` an entry point hands inward — the REAL `accept_tenant`
+    over `root`, keyed to this checkout's `defender/`, refusing as it would."""
+    return tenant().accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER)
 
 
 def plant_row(root: Path, tenant_id: str, body: str | bytes | None = None, *,
@@ -422,9 +440,7 @@ def place_knowledge_for_rows() -> None:
     for row in sorted(root.glob("*/tenant.json")):
         knowledge = row.parent / "knowledge"
         if not os.path.lexists(knowledge):
-            shutil.copytree(T1106.FIXTURE, knowledge)
-            (knowledge / "agent" / ".tenant-id").write_text(
-                f"{row.parent.name}\n", encoding="utf-8")
+            place_knowledge(root, row.parent.name)
 
 
 def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
