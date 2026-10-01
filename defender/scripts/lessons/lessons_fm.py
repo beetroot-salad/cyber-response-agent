@@ -12,7 +12,7 @@ body can never false-match a tag query:
      so callers grep only tokens that exist and authors reuse a spelling
      instead of coining a near-synonym.
 
-There is deliberately NO index — a per-call directory scan, fine at this scale.
+No index: a per-call directory scan is fine at this scale.
 
 Retrieval dimensions (frontmatter list fields):
   source_signature   alert rule.id(s) the lesson came from / bites
@@ -39,10 +39,9 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-# The one `defender.*` import allowed above the guard: `_venv` is stdlib-only by contract, and
-# every other module in the tree may resolve pydantic (#1067) or PyYAML at import — packages the
-# bare interpreter this script is first launched under does not have.
-# `test_corpus_fold_seed.test_c2c` pins that ordering for every script that calls the guard.
+# The only `defender.*` import allowed above the guard: `_venv` is stdlib-only, while other
+# modules may import pydantic or PyYAML, which the bare launching interpreter lacks.
+# `test_corpus_fold_seed.test_c2c` pins this ordering.
 from defender.scripts._venv import reexec_into_venv
 
 if __name__ == "__main__":

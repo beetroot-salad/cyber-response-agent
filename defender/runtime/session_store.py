@@ -1,4 +1,4 @@
-"""The per-case SQLite session store — #705's canonical, append-only message log.
+"""The per-case SQLite session store: the canonical, append-only message log.
 
 One file per `case_id`, sibling of the runs base (never a child): `message` rows form a
 parent-chain tree (never updated, never deleted), `message_payload` holds the verbatim
@@ -30,11 +30,8 @@ from defender._io import guarded_mkdir, write_guarded
 from defender._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
 from defender._run_paths import RunPaths, SessionPaths
 from defender._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
-# THE `truncated_by` vocabulary — every value any writer of that column may put in it — and
-# its one normalizer are OWNED by `runtime/run_end.py` (which also says why `dead-end` is the
-# only lead-only member). Re-exported here so the column's own writers keep importing them
-# from the store; the readers that are not store readers (the ticket lane, the family judge)
-# take them from the owner and never import this module.
+# The `truncated_by` vocabulary and its normalizer are owned by `runtime/run_end.py`;
+# re-exported for the column's writers. Non-store readers import them from the owner.
 from defender.runtime.run_end import (  # noqa: F401 — re-exports
     TRUNCATED_BY_ABORTED,
     TRUNCATED_BY_BUDGET,
@@ -49,13 +46,8 @@ from defender.runtime.run_end import (  # noqa: F401 — re-exports
 SCHEMA_VERSION = 2
 PAYLOAD_ENSURE_ASCII = True
 ROLES = ("send", "analysis", "actor")
-# `POINTER_FILENAME` was a re-binding of the owner's `SESSION_POINTER` (#1077 D7), and the
-# one the review named: two modules joined `run_dir / session_store.POINTER_FILENAME` while
-# this module's own readers had already moved to the accessor, so a rename through the owner
-# would have left them opening a file nobody writes. The path is `RunPaths(d).session_pointer`.
-#: The closed set `append`'s `reason` keyword is validated against — a Python constant, not
-#: a SQL CHECK (`reason_is_a_python_closed_set_not_a_sql_check`). `fork` has no legitimate
-#: caller through `append` at all: `fork()` writes its own entry directly.
+#: The closed set `append`'s `reason` is validated against (a Python constant, not a SQL
+#: CHECK). `append` refuses `fork`: `fork()` writes its own entry.
 HEAD_MOVE_REASONS = ("fork", "fold")
 
 _CONFIG_REQUIRED_FIELDS = ("models", "corpus", "prompts", "versions")
@@ -90,9 +82,8 @@ class UnknownReadRole(StoreError):
 
 
 class UnresolvablePathElement(StoreError):
-    """A walked path names a message id no `message` row resolves — a corrupted
-    `parent_id` chain, reached only through direct file damage since the foreign key
-    keeps a phantom id out of every write the store's own API can make."""
+    """A walked path names a message id no `message` row resolves (only reachable through
+    direct file damage; the foreign key blocks it on every API write)."""
 
 
 class IngestTailUnderflow(StoreError):
@@ -213,8 +204,8 @@ COMMIT;
 """
 
 
-# gather_boundary's extraction — pure Python, registered as a SQL function so a
-# malformed or pathologically deep `args` value can never abort the query (adv:PO2).
+# gather_boundary's extraction: pure Python, registered as a SQL function, and swallowing
+# every error so a malformed or pathologically deep `args` value can never abort the query.
 
 def _first_wins_pairs(pairs: list[tuple[str, Any]]) -> dict:
     out: dict = {}
@@ -256,20 +247,18 @@ def _extract_lead_id(payload_text: str) -> str | None:
             if lead_id is not None:
                 return lead_id
         return None
-    except Exception:  # noqa: BLE001 — the whole point: never abort the query
+    except Exception:  # noqa: BLE001 — never abort the query
         return None
 
 
-#: How long an append blocks on a lock another connection holds before `sqlite3` gives up.
-#: ONE anchor for both halves of that wait: `sqlite3.connect(timeout=)` sets the busy handler
-#: in SECONDS and the pragma resets it in MILLISECONDS, so spelled separately they are the
-#: same number in two units, and the survivor of any disagreement is whichever runs last.
+#: How long an append blocks on another connection's lock. One constant for both
+#: `sqlite3.connect(timeout=)` (seconds) and the `busy_timeout` pragma (milliseconds).
 STORE_BUSY_TIMEOUT_MS = 30_000
 
 
 def _bare_connect(path: Path) -> sqlite3.Connection:
     """A connection with no pragma and no function registered yet — so a stale-version
-    refusal can fire before the WAL pragma rewrites the file's header (FK-G)."""
+    refusal can fire before the WAL pragma rewrites the file's header."""
     return sqlite3.connect(str(path), timeout=STORE_BUSY_TIMEOUT_MS / 1000,
                            isolation_level=None)
 
@@ -285,14 +274,13 @@ def _finish_connect(conn: sqlite3.Connection) -> None:
 
 @model
 class StoreHandle:
-    """One handle, ONE `sqlite3.Connection`, shared by the main agent's session and every
-    concurrently-dispatched gather sub-agent's session.
+    """One `sqlite3.Connection` shared by the main agent's session and every concurrent
+    gather sub-agent's session.
 
     Safe only because `append()`'s `BEGIN IMMEDIATE … COMMIT` block contains no `await`:
-    pydantic_ai dispatches parallel `gather` calls as asyncio tasks on one thread, so without
-    a suspension point two tasks cannot interleave halfway through one transaction. **Adding
-    any `await` inside that block reintroduces interleaved-transaction corruption** — give
-    each session its own connection first.
+    parallel `gather` calls are asyncio tasks on one thread, so they cannot interleave within
+    a transaction. Adding an `await` there would corrupt transactions; give each session its
+    own connection first.
     """
 
     path: Path
@@ -317,10 +305,9 @@ class StoreHandle:
         `session_head_log` entry, both inside one `BEGIN IMMEDIATE`: a fault between the two
         writes would leave a session with a head and no branch-point record.
 
-        `last_render_len` is seeded to the SEND-role length of the inherited prefix, not the
-        raw row count: if `at_message_id` is a response with an unresolved tool call — the
-        natural boundary for a dispatched sub-agent — the raw count over-counts by one against
-        what `ingest` treats as already-rendered."""
+        `last_render_len` is seeded to the send-role length of the inherited prefix, not the
+        raw row count, which over-counts by one when `at_message_id` is a response with an
+        unresolved tool call."""
         new_id = uuid.uuid4().hex
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
@@ -392,10 +379,8 @@ class StoreHandle:
             committed = True
             conn.execute("SELECT 1")
         except BaseException:
-            # Only roll back a transaction that is still open. Past COMMIT there is none,
-            # and `ROLLBACK` with no active transaction itself raises — which would replace
-            # whatever brought us here with an unrelated error, and get the run classified
-            # as a routine "store" truncation even though the rows are already durable.
+            # Past COMMIT there is no transaction, and `ROLLBACK` would raise an unrelated
+            # error that masks the original even though the rows are durable.
             if not committed:
                 with contextlib.suppress(sqlite3.Error):
                     conn.execute("ROLLBACK")
@@ -430,9 +415,6 @@ class StoreHandle:
     def close(self) -> None:
         self.connection.close()
 
-    # A handle is also a context manager, so a short-lived open (a reader after the run, the
-    # `Run` handle's `session_db(...).open()`) closes on the way out of its block. The
-    # driver's long-lived open still calls `close()` itself.
     def __enter__(self) -> StoreHandle:
         return self
 
@@ -441,14 +423,12 @@ class StoreHandle:
 
 
 def _walk_parents(conn: sqlite3.Connection, tip: int) -> list[int]:
-    """Tip-to-root row ids, refusing a cyclic chain. The one PYTHON walk both the reader
-    (`path_row_ids`) and the writer (`append`'s cycle guard) go through, so a corrupted chain
-    cannot stay invisible at write time. Terminates cleanly on a phantom id (returning it as
-    the path's oldest element) — `hydrate`/`synthesized_flags` fail closed on that.
+    """Tip-to-root row ids, refusing a cyclic chain. Shared by the reader (`path_row_ids`) and
+    `append`'s write-time cycle guard. On a phantom id it returns it as the oldest element;
+    `hydrate`/`synthesized_flags` fail closed on that.
 
-    `gather_boundary`'s `WITH RECURSIVE` (in `DDL`) is a SECOND implementation of this walk,
-    deliberately weaker on both corruption shapes. A change to the traversal rule here has to
-    be made there too — they are not one walk."""
+    `gather_boundary`'s `WITH RECURSIVE` (in `DDL`) is a second, weaker implementation of this
+    walk; a traversal change here must be made there too."""
     ids: list[int] = []
     seen: set[int] = set()
     current: int | None = tip
@@ -512,18 +492,12 @@ def _validate_seq(seq: Any) -> None:
 
 
 def _validate_duration_ms(duration_ms: Any) -> None:
-    """`duration_ms` is bound straight into the INSERT, so it never meets
-    `_find_nonrepresentable` — the isfinite discipline every other float in the row is held
-    to. Unchecked, SQLite silently stores a NaN as SQL NULL and an inf round-trips verbatim,
-    later serializing to the bare token `Infinity`, which is not valid JSON.
+    """`duration_ms` is bound directly into the INSERT and skips `_find_nonrepresentable`.
+    Unchecked, SQLite stores NaN as NULL and inf round-trips to the invalid JSON `Infinity`.
 
-    Deliberately NOT a pydantic strict-`float` adapter (#1067 PR5 tried one and backed it out):
-    a bare scalar argument is not an object to hang a validator on, and pydantic's strict
-    `float` is WIDER than this `isinstance` — it ACCEPTS a `Decimal` or a `Fraction`, silently
-    coercing it to `float` in the value it returns. A check that validates and then binds the
-    ORIGINAL argument (as a gate that returns nothing must) lets the un-coerced value through
-    to sqlite3, which refuses to bind it inside the open transaction as a `ProgrammingError`
-    no caller's `except PayloadNotRepresentable` names."""
+    Not a pydantic strict-`float` check: that accepts `Decimal`/`Fraction` by coercion, while
+    the original value is what gets bound, and sqlite3 would reject it mid-transaction with an
+    error no caller handles."""
     if duration_ms is None:
         return
     if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
@@ -565,8 +539,8 @@ def _classify_move(
     conn: sqlite3.Connection, session_id: str, *, parent_id: int | None,
     reason: str | None, synthesized: bool,
 ) -> tuple[int | None, int | None, bool]:
-    """Resolve the first row's parent, refuse the write-time hazards obligation 7 and
-    P55 name, and classify the move as linear or not. Returns
+    """Resolve the first row's parent, refuse write-time hazards (orphaning rows, cycles, a
+    non-linear move without a reason), and classify the move. Returns
     `(prev_head, first_parent, is_linear)`."""
     prev_head = _read_head(conn, session_id)
     first_parent = parent_id if parent_id is not None else prev_head
@@ -575,7 +549,7 @@ def _classify_move(
             "append into a session that holds rows but has no recorded head is "
             "refused rather than silently orphaning them")
     if first_parent is not None:
-        _walk_parents(conn, first_parent)  # write-time cycle guard (correction R3)
+        _walk_parents(conn, first_parent)  # write-time cycle guard
     is_linear = first_parent == prev_head
     if reason is not None:
         if is_linear and not synthesized:
@@ -593,9 +567,8 @@ def _move_head(
     conn: sqlite3.Connection, session_id: str, *, prev_head: int | None, new_head: int,
     attached_to: int | None, reason: str | None,
 ) -> None:
-    """`is_linear` is deliberately NOT a parameter here: it is `attached_to == prev_head`,
-    already known from those two — carrying it separately would let a caller pass a value
-    that disagrees with the very fields it derives from."""
+    """`is_linear` is derived here (`attached_to == prev_head`) rather than passed, so it
+    cannot disagree with the fields it comes from."""
     conn.execute(
         "UPDATE session SET head_message_id = ? WHERE session_id = ?",
         (new_head, session_id))
@@ -617,10 +590,8 @@ def _next_seq(conn: sqlite3.Connection, session_id: str, agent_id: str, synthesi
 
 
 def _tool_name(message: Any) -> str | None:
-    """Every distinct tool named by the message, comma-joined in first-seen order. One response
-    legitimately carries several tool calls (the `gather` tool dispatches sibling leads in
-    parallel from one turn), and returning only the first would make the `actor` projection
-    disagree with `observe.write_trace`, which re-derives the same fact and lists all."""
+    """Every distinct tool named by the message, comma-joined in first-seen order (a response
+    can carry several parallel calls). Must agree with `observe.write_trace`, which lists all."""
     names: list[str] = []
     for part in getattr(message, "parts", []):
         if isinstance(part, (ToolCallPart, ToolReturnPart)) and part.tool_name not in names:
@@ -653,9 +624,8 @@ _TOO_DEEP = object()
 
 
 def _find_nonrepresentable(obj: Any) -> Any:
-    """Iterative, not recursive, and depth-capped: a tool-call `args` dict is
-    attacker-influenced by construction, and both a recursive scan AND `dump_python` crash on a
-    deep one well before SQLite's ~1000-level JSON ceiling."""
+    """Iterative and depth-capped: tool-call `args` are attacker-influenced, and both a
+    recursive scan and `dump_python` crash on deep nesting."""
     stack: list[tuple[Any, int]] = [(obj, 0)]
     while stack:
         current, depth = stack.pop()
@@ -670,15 +640,15 @@ def _find_nonrepresentable(obj: Any) -> Any:
 # open / resolve
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    """The store for `case_id` beside `runs_base` — asked of the owner (#1077), which also
-    refuses an id that is malformed or not case-stable (`InvalidCaseId`)."""
+    """The store for `case_id` beside `runs_base`. Raises `InvalidCaseId` for a malformed or
+    non-case-stable id."""
     return SessionPaths(runs_base).session_db(case_id)
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:
     """Read `PRAGMA user_version` and refuse anything but `SCHEMA_VERSION`, before any DDL
     and before the WAL pragma — so a refused file is left byte-identical and no `-wal`/`-shm`
-    sidecar is written beside it. No migration path is offered, deliberately."""
+    sidecar is written beside it. There is no migration path."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version != SCHEMA_VERSION:
         raise UnknownSchemaVersion(f"store reports schema version {version}")
@@ -686,8 +656,7 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
 
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
-    # Created under the root the OWNER names — the runs base's parent today — never one
-    # composed here: the owner decides where the store goes and what it must sit under.
+    # Guarded under the trust root `SessionPaths` names, not one composed here.
     guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)
     fresh = not path.exists()
     conn = _bare_connect(path)
@@ -705,16 +674,11 @@ def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
 
 
 def open_store_for_read(store_path: Path) -> StoreHandle:
-    """Open an EXISTING store file for reading only — never creates one.
+    """Open an existing store file for reading; never creates one, so a reader fails closed
+    instead of conjuring an empty database. Refuses a stale version before DDL/WAL.
 
-    `open_store` deliberately creates-if-missing; a reader (the visualizer, run after the fact
-    from just a `run_dir`) must fail closed instead of conjuring an empty database where a real
-    one used to be. It is also the only opener that meets a file it did not create, so it
-    refuses a stale version at the same pre-DDL, pre-WAL point.
-
-    RESIDUE: it issues NO DDL, and `SCHEMA_VERSION` did not move when `gather_boundary` was
-    rescoped — so an old file still carries the old, unscoped view definition and this path
-    serves it with no signal. A reader added here must rebuild it first."""
+    Issues no DDL, so an older file may still carry an unscoped `gather_boundary` view with
+    the same `SCHEMA_VERSION`; a reader of that view must rebuild it first."""
     store_path = Path(store_path)
     if not store_path.is_file():
         raise FileNotFoundError(f"session store not found: {store_path}")
@@ -733,11 +697,9 @@ def write_case_pointer(
 ) -> None:
     """Record which database holds this run's messages, and which session in it is the run's.
 
-    `session_id` is what makes the pointer answer for a RESUMED run. A sibling forks into the
-    source's database, so the store alone resolves to the ROOT of the lineage — a reader that
-    walks run_dir -> store -> `main_session_id` renders the SOURCE run's transcript for the
-    sibling. Recorded, the run says which session is its own; omitted (every fresh run, where
-    the two coincide), a reader falls back to the root and is right.
+    `session_id` is needed for a resumed run: a sibling forks into the source's database, so
+    the store's root session is the source run's. Omitted for a fresh run, where readers fall
+    back to the root correctly.
     """
     run_dir = Path(run_dir)
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
@@ -752,11 +714,8 @@ def resolve_store_path(run_dir: Path) -> Path:
 
 
 def resolve_session_id(run_dir: Path) -> str | None:
-    """The session this run OWNS, or `None` when the pointer names none.
-
-    `None` is the honest answer for every run written before the field existed and for every
-    fresh run, where the run's session is the store's only root — so a caller falls back to
-    `main_session_id` rather than being handed a guess.
+    """The session this run owns, or `None` when the pointer names none (a fresh run); the
+    caller then falls back to `main_session_id`.
     """
     data = json.loads(RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
     session_id = data.get("session_id")
@@ -766,9 +725,8 @@ def resolve_session_id(run_dir: Path) -> str | None:
 # the path walk
 
 def path_row_ids(store: Any, session_id: str) -> list[int]:
-    """The parent walk from the session's RECORDED head — never from the highest-id row it
-    happens to own. A NULL head reads as an empty path; nothing re-derives a tip from
-    insertion order."""
+    """The parent walk from the session's recorded head, never from its highest-id row. A NULL
+    head is an empty path."""
     conn = store.connection
     head = _read_head(conn, session_id)
     if head is None:
@@ -781,8 +739,7 @@ def path_row_ids(store: Any, session_id: str) -> list[int]:
 # the log readers
 
 def displaced_tip(store: Any, session_id: str) -> int | None:
-    """The MOST RECENT fold's displaced tip — `None` for a session with no fold entry
-    and for a session_id that does not exist."""
+    """The most recent fold's displaced tip, or `None` (no fold, or unknown session)."""
     row = store.connection.execute(
         "SELECT from_message_id FROM session_head_log WHERE session_id = ? "
         "AND reason = 'fold' ORDER BY id DESC LIMIT 1", (session_id,),
@@ -791,8 +748,7 @@ def displaced_tip(store: Any, session_id: str) -> int | None:
 
 
 def fold_history(store: Any, session_id: str) -> list[int | None]:
-    """Every fold's displaced tip, in head-move order — `displaced_tip` is its last element.
-    The ordered accessor is what makes the FIRST fold's displaced tip reachable at all."""
+    """Every fold's displaced tip, in head-move order; `displaced_tip` is the last element."""
     rows = store.connection.execute(
         "SELECT from_message_id FROM session_head_log WHERE session_id = ? "
         "AND reason = 'fold' AND from_message_id IS NOT NULL ORDER BY id", (session_id,),
@@ -801,10 +757,9 @@ def fold_history(store: Any, session_id: str) -> list[int | None]:
 
 
 def branch_point(store: Any, session_id: str) -> int | None:
-    """The session's branch point — a log row that is BOTH origin-less and fork-reasoned.
-    Neither alone suffices: an origin-less row can be a fold of an empty path, and a
-    fork-reasoned row can be smuggled in with a non-NULL origin by a caller that bypasses
-    `append`'s own refusal."""
+    """The session's branch point: a log row that is both origin-less and fork-reasoned.
+    Neither alone suffices (a fold of an empty path is origin-less; a caller bypassing
+    `append` could write a fork row with an origin)."""
     row = store.connection.execute(
         "SELECT to_message_id FROM session_head_log WHERE session_id = ? "
         "AND reason = 'fork' AND from_message_id IS NULL ORDER BY id DESC LIMIT 1",
@@ -814,12 +769,8 @@ def branch_point(store: Any, session_id: str) -> int | None:
 
 
 def main_session_id(store: Any, *, agent_id: str = "main") -> str:
-    """The ROOT-OF-LINEAGE session for `agent_id` in this store: never an ordering pick.
-
-    A forked session inherits its parent's `agent_id`, so it can carry `agent_id='main'` too
-    and sort ahead of the session it forked from — an ORDER-BY-anything fallback would
-    silently resolve the wrong lineage. Raises on zero or more than one match, because picking
-    one would act on the wrong session's history with no signal that it did."""
+    """The root-of-lineage session for `agent_id`. Forks inherit `agent_id`, so ordering
+    cannot pick the right one; raises unless exactly one root matches."""
     rows = store.connection.execute(
         "SELECT session_id FROM session WHERE agent_id = ? AND parent_session_id IS NULL",
         (agent_id,),
@@ -833,8 +784,7 @@ def main_session_id(store: Any, *, agent_id: str = "main") -> str:
 # the one role-scoped reader
 
 def _check_schema_version(store: Any) -> None:
-    """`_refuse_stale_version`'s refusal, re-checked at read time against the handle actually
-    in hand — one comparison, not two copies of it."""
+    """Re-check the schema version at read time against the handle in hand."""
     _refuse_stale_version(store.connection)
 
 
@@ -890,9 +840,8 @@ def _complete_prefix_len(messages: list) -> int:
 
 
 def _require_resolved(ids: list[int], table: dict[int, Any]) -> None:
-    """`_walk_parents` terminates cleanly on a phantom id instead of raising, so the read
-    side is what fails closed: a dict lookup that would otherwise die on an uncaught
-    `KeyError` raises the store's own, named error instead."""
+    """Fail closed on a phantom id (which `_walk_parents` returns rather than raising) with a
+    named store error instead of a `KeyError`."""
     missing = [i for i in ids if i not in table]
     if missing:
         raise UnresolvablePathElement(
@@ -955,10 +904,7 @@ def _has_extra_keys(raw: Any, redumped: Any) -> bool:
                 return True
         return False
     if isinstance(raw, list):
-        # Same verdict as the dict branch: a type change or a dropped element IS skew.
-        # Returning False here would report "no skew" for exactly the case
-        # PayloadSchemaSkew exists to catch — an adapter that reshapes a list-typed field
-        # (`parts`) on the round-trip instead of raising.
+        # A type change or dropped element is skew (e.g. an adapter reshaping `parts`).
         if not isinstance(redumped, list) or len(raw) != len(redumped):
             return True
         return any(_has_extra_keys(a, b) for a, b in zip(raw, redumped, strict=True))

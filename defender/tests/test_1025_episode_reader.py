@@ -59,6 +59,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from defender._io import bind
 from defender._run_paths import RunPaths
 from defender.tests import _judge_921 as J
 from defender.tests._spec791 import PROJECT_PROFILE
@@ -999,7 +1000,7 @@ def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
     DRAWS_DIRNAME)` answers that world's completed draws keyed by draw index — the reader finds
     the directory the writer wrote.
     """
-    owner, enqueue = J.mod("_episode_paths"), J.mod("learning.judge.enqueue")
+    enqueue = J.mod("learning.judge.enqueue")
     assert "draws_on_disk" in enqueue.__all__, "the per-draw reader is not exported"
     # NO MODULE HOLDS THE NAME ANY MORE (#1077 D7). The old form of this check asserted the
     # writer and the reader held the same OBJECT as `archive.DRAWS_DIRNAME` — which was true,
@@ -1013,7 +1014,10 @@ def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
 
     grade = _grade(ep, tmp_path)
-    draws = enqueue.draws_on_disk(owner.EpisodePaths(ep).world("b").draws)
+    # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
+    # draws dir path directly.
+    with bind(ep) as view:
+        draws = enqueue.draws_on_disk(view, "b")
 
     assert grade.draws["completed"] > 0, "positive control: the pass completed no draw"
     assert sorted(draws) == list(range(grade.draws["completed"])), (
@@ -1031,21 +1035,29 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     positive control — the same bytes as a regular `1.yaml` are read.
     """
     enqueue = J.mod("learning.judge.enqueue")
-    draw_dir = tmp_path / "judge"
-    draw_dir.mkdir()
+    owner = J.mod("_episode_paths")
+    # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2): the draws
+    # dir it reads is `worlds/<label>/judge`, derived from the episode root, never handed in
+    # directly as a path.
+    episode_dir = tmp_path / "ep"
+    label = "b"
+    draw_dir = owner.EpisodePaths(episode_dir).world(label).draws
+    draw_dir.mkdir(parents=True)
     outside = tmp_path / "outside.yaml"
     outside.write_text("findings: [{bucket: planted}]\n", encoding="utf-8")
     (draw_dir / "0.yaml").write_text("findings: []\n", encoding="utf-8")
     (draw_dir / "1.yaml").symlink_to(outside)
 
-    assert enqueue.draws_on_disk(draw_dir) == {0: {"findings": []}}, (
-        "a link planted at a draw's name was followed: its target's findings were read back "
-        "as this episode's draw")
+    with bind(episode_dir) as view:
+        assert enqueue.draws_on_disk(view, label) == {0: {"findings": []}}, (
+            "a link planted at a draw's name was followed: its target's findings were read "
+            "back as this episode's draw")
 
     (draw_dir / "1.yaml").unlink()
     (draw_dir / "1.yaml").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
-    assert sorted(enqueue.draws_on_disk(draw_dir)) == [0, 1], (
-        "positive control: the same bytes as a regular file were not read")
+    with bind(episode_dir) as view:
+        assert sorted(enqueue.draws_on_disk(view, label)) == [0, 1], (
+            "positive control: the same bytes as a regular file were not read")
 
 
 # ---------------------------------------------------------------------------------------

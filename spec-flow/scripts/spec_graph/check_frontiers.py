@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """spec-graph check #5 — frontier-chain conservation and the resume scan.
 
-The write-tests frontier files (SKILL.md, "Frontiers") carry one machine-read sliver:
-YAML frontmatter with `phase`, `status`, `inventory`, and `inputs` echoing the consumed
-frontiers' inventories. Conservation — counts in equal counts out, every drop named —
-was previously an LLM leaf walking the chain in phase F; it is arithmetic over
-frontmatter, so this check walks it instead, and the orchestrator can run it at every
-phase boundary: a broken frontier is found where it was written, not at the final baton.
+The write-tests frontier files (SKILL.md, "Frontiers") carry YAML frontmatter with
+`phase`, `status`, `inventory`, and `inputs` echoing the consumed frontiers' inventories.
+Conservation (counts in equal counts out, every drop named) is arithmetic over that
+frontmatter, so it runs at every phase boundary and a broken frontier is caught where it
+was written.
 
 What is checked, per `*.md` file in the frontiers directory:
 
 * frontmatter parses, `status` is in the closed vocabulary, `phase` is present,
   `inventory` is a mapping of category → integer count;
 * every `inputs` entry names an existing sibling file, and its `inventory_echo` equals
-  the producer's actual `inventory` — a mismatch means the two declarations disagree,
-  and the count must be recomputed from the payload content, never resolved by copying
-  either side (in the contract's smoke runs the break was a producer misdeclaring,
-  caught by the consumer's computed echo);
+  the producer's actual `inventory` (a mismatch must be resolved by recomputing from the
+  payload, never by copying either side);
 * the `## Digest` section exists and holds ≤15 lines (the leaf's inline return, verbatim);
 * the dispositions sum rule: an inventory carrying `settled`/`forks`/`silent_branches`/
   `drops` (`consensus` is the pre-escalation spelling of `settled`) must sum to the source
@@ -24,14 +21,19 @@ What is checked, per `*.md` file in the frontiers directory:
   source count is the LARGEST `premises` echo, not their sum: an escalation sidecar echoes
   a subset of the same premises (phases/answer.md, (b)), never new ones.
 
+`--only <file>` lints that one frontier and reports nothing else — the leaf's pre-return
+self-check, run while its phase siblings may still be half-written beside it. The rest of
+the chain is still loaded, so the named file's echoes reconcile against their producers.
+
 `--resume` prints the chain's state (file, phase, status, staleness against its inputs)
 and where to re-enter: the first frontier that is blocked, unparseable, or older than an
 input. Informational — always exits 0 when the directory exists.
 
 Usage:
-    spec-graph frontiers [dir] [--resume]
+    spec-graph frontiers [dir] [--resume | --only <file>]
 (default dir: <repo root>/.spec-flow/frontiers)
-Exit codes: 0 clean, 1 findings, 2 the directory is missing or holds no frontiers.
+Exit codes: 0 clean, 1 findings, 2 the directory is missing or holds no frontiers, or
+`--only` names no frontier in it.
 """
 from __future__ import annotations
 
@@ -61,8 +63,7 @@ class Frontier:
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            # Same class as unparseable frontmatter: a finding on this file, never a traceback
-            # that takes the whole chain's report down with it.
+            # A finding on this file, not a traceback that ends the whole report.
             self.error = f"unreadable ({e.__class__.__name__})"
             return
         m = re.match(r"\A---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
@@ -132,10 +133,8 @@ def _lint_digest(name: str, f: Frontier, findings: list[str]) -> None:
 def _lint_input_shapes(name: str, f: Frontier, findings: list[str]) -> None:
     """Every `inputs` entry must be a mapping.
 
-    Split from the reconciliation below because the `inputs` property keeps only
-    mappings — a bare string (`inputs: [10-brief.md]`, the natural shorthand) would
-    otherwise vanish from reconciliation entirely: no echo check, no finding, no
-    staleness. This is the pass that sees the raw list.
+    The `inputs` property keeps only mappings, so a bare-string shorthand
+    (`inputs: [10-brief.md]`) would otherwise vanish silently; this pass reads the raw list.
     """
     raw_inputs = f.meta.get("inputs")
     for entry in (raw_inputs if isinstance(raw_inputs, list) else []):
@@ -152,26 +151,20 @@ def _lint_input_echoes(
 ) -> int | None:
     """Each input's `inventory_echo` against its producer's actual `inventory`.
 
-    Returns the premise count this frontier consumed — SUMMED across inputs, never
-    last-wins: a frontier that fans in two producers consumed both their premise counts,
-    and comparing the dispositions against only the last echo both false-flags a
-    conserved chain and hides a real drop. `None` means no input declared one, which is
-    what switches the dispositions rule off.
+    Returns the premise count this frontier consumed (the largest echo; see below), or
+    `None` when no input declared one, which switches the dispositions rule off.
     """
     echoed_premises: int | None = None
     for inp in f.inputs:
         ref = str(inp.get("path") or "")
         if not ref:
-            # A pathless entry has no producer to reconcile against — and in the resume
-            # scan it would resolve to the directory itself (false STALE on every write).
             findings.append(
                 f"{name}: input entry carries no `path` — the echo has no producer to "
                 f"reconcile against."
             )
             continue
-        # `./10-brief.md` and `frontiers/10-brief.md` name the same sibling: reconcile by
-        # the bare filename, but keep the raw ref in messages so the author sees their own
-        # spelling. A decorated ref that skipped normalization skipped the echo check too.
+        # Reconcile by bare filename (`./10-brief.md` == `frontiers/10-brief.md`); messages
+        # keep the author's spelling.
         norm = Path(ref).name
         producer = frontiers.get(norm)
         if producer is None:
@@ -184,9 +177,8 @@ def _lint_input_echoes(
             findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
             continue
         if isinstance(echo.get("premises"), int):
-            # Escalation copies re-consume a SUBSET of the answerer's premises, so the
-            # source count is the largest echo, not the sum (summing counted a 42-premise
-            # copy as 42 new premises and demanded a disposition for each twice).
+            # Escalation copies re-consume a subset of the same premises, so the source count
+            # is the largest echo, not the sum.
             echoed_premises = max(echoed_premises or 0, echo["premises"])
         if echo != producer.inventory:
             findings.append(_echo_mismatch(name, ref, echo, producer.inventory))
@@ -196,9 +188,8 @@ def _lint_input_echoes(
 def _lint_absent_producer(
     name: str, ref: str, norm: str, directory: Path, findings: list[str]
 ) -> None:
-    """An input naming no frontier in the chain. Only a numeric-prefixed name CLAIMS to be
-    a sibling here — anything else (the design doc, an issue thread, a sidecar payload) is
-    an external or non-frontier input with no frontmatter to reconcile against."""
+    """An input naming no frontier in the chain. Only a numeric-prefixed name claims to be
+    a sibling; anything else is an external input with nothing to reconcile."""
     if not re.match(r"^\d+-", norm):
         return
     if norm.endswith(".md"):
@@ -226,9 +217,8 @@ def _lint_dispositions(
 ) -> None:
     """The sum rule: settled + forks + silent_branches + drops == premises in.
 
-    ANY present disposition key engages the rule (phases/answer.md mandates all four):
-    requiring the full set let a partial inventory (`drops` omitted) skip the sum
-    entirely — exactly the shape a silent drop hides in.
+    Any present disposition key engages the rule (all four are mandated), so a partial
+    inventory cannot skip the sum.
     """
     spelled = [k for k in _SETTLED_SPELLINGS if k in f.inventory]
     present = (_DISPOSITIONS & set(f.inventory)) | set(spelled)
@@ -246,8 +236,7 @@ def _lint_dispositions(
             f"disposition categories are mandated, and a missing one is an unrecorded "
             f"exit for a premise."
         )
-    # Non-int counts were already flagged above (counts are computed, never recalled) —
-    # skip them here rather than lose the whole report behind a TypeError mid-sum.
+    # Non-int counts were already flagged; skip them rather than raise mid-sum.
     total = sum(v for k in sorted(present) if isinstance(v := f.inventory[k], int))
     if total != echoed_premises:
         findings.append(
@@ -257,13 +246,13 @@ def _lint_dispositions(
         )
 
 
-def check(directory: Path) -> list[str]:
+def check(directory: Path, only: str | None = None) -> list[str]:
     frontiers = _load(directory)
     findings: list[str] = []
     for name, f in frontiers.items():
+        if only is not None and name != only:
+            continue
         if f.error:
-            # An unreadable file is one finding and no further questions: every rule
-            # below reads frontmatter this file does not have.
             findings.append(f"{name}: {f.error}.")
             continue
         _lint_frontmatter(name, f, findings)
@@ -283,8 +272,7 @@ def resume(directory: Path) -> int:
         if f.error:
             state.append(f"UNPARSEABLE ({f.error})")
         elif f.status == "design-refuted":
-            # A deliberate halt, not a hole in the chain: the run stops before the next
-            # dispatch and the correction routes to the human (SKILL.md, "Early exit").
+            # A deliberate halt; the correction routes to the human (SKILL.md, "Early exit").
             halted = True
         elif f.status != "complete":
             state.append(str(f.status).upper())
@@ -292,9 +280,8 @@ def resume(directory: Path) -> int:
         for inp in f.inputs:
             ref = str(inp.get("path") or "")
             if not ref:
-                # `directory / ""` is the directory itself, whose mtime bumps on every sibling
-                # write — a pathless entry would false-STALE the chain and move the re-entry
-                # point. check() flags the entry; the scan just skips it.
+                # `directory / ""` is the directory, whose mtime would false-STALE; check()
+                # flags the entry.
                 continue
             src = directory / ref
             if src.exists() and src.stat().st_mtime > mtime:
@@ -313,8 +300,7 @@ def resume(directory: Path) -> int:
     if first_anomaly:
         print(f"\n[resume] re-enter at `{first_anomaly}` — first blocked/stale/unparseable frontier.")
     elif frontiers:
-        # The scan walks only files that EXIST — a run that died after writing 2 of 5
-        # same-phase frontiers has no anomaly on disk, so completeness here is bounded.
+        # Only written files are seen; a run that died mid-phase leaves no anomaly on disk.
         print(
             f"\n[resume] chain is complete through {list(frontiers)[-1]} — this scan sees only "
             f"frontiers already written; cross-check the phase map for frontiers not yet "
@@ -327,8 +313,9 @@ def resume(directory: Path) -> int:
 
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
-    opts, args = _cli.parse_argv(argv, flags={"--resume"})
+    opts, args = _cli.parse_argv(argv, valued={"--only"}, flags={"--resume"})
     do_resume = opts["resume"]
+    only = Path(opts["only"]).name if opts["only"] else None
     directory = Path(args[0]) if args else _config.repo_root() / ".spec-flow" / "frontiers"
     if not directory.is_dir():
         if do_resume:
@@ -341,10 +328,16 @@ def main(argv: list[str]) -> int:
     if not any(directory.glob("*.md")):
         print(f"check_frontiers: no *.md frontiers under {directory}", file=sys.stderr)
         return 2
-    findings = check(directory)
+    if only is not None and not (only.endswith(".md") and (directory / only).is_file()):
+        # A sidecar's `.py` payload is not a frontier; name its `.md` sidecar instead.
+        print(f"check_frontiers: --only {only} names no frontier (*.md) in {directory}",
+              file=sys.stderr)
+        return 2
+    findings = check(directory, only)
     for f in findings:
         print(f"  CONSERVATION {f}")
-    print(f"\n[check_frontiers] {len(findings)} finding(s) over {directory}.")
+    scope = f"{directory}/{only}" if only else str(directory)
+    print(f"\n[check_frontiers] {len(findings)} finding(s) over {scope}.")
     return 1 if findings else 0
 
 

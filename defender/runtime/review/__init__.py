@@ -20,14 +20,9 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 
 
 def role_prompt(name: str) -> str:
-    """One review role's system instruction, loaded whole.
+    """One review role's system instruction, loaded verbatim from `prompts/<name>.md`.
 
-    The tree's prompt-asset pattern: every model-facing `.md` here is read verbatim as an
-    agent's `instructions`, and the per-case material arrives separately as the user message.
-    Nothing substitutes slots — the one place this tree does (the gather query templates)
-    leaves an unfilled slot in the text verbatim and reports nothing, which is not a mechanism
-    to copy into a prompt. Prompts live as files rather than Python literals so the wording can
-    be read and reviewed without reading the builder."""
+    No slot substitution: per-case material arrives separately as the user message."""
     path = PROMPTS / f"{name}.md"
     if not path.is_file():
         raise FileNotFoundError(f"no role prompt for {name!r} at {path}")

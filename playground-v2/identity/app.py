@@ -1,17 +1,14 @@
 """Identity stub — authoritative authz API over realm.yaml × inventory.yaml.
 
-Exposes the same join `hosts/base/seed-users.py` does at container start, but
-from the per-user perspective: "which hosts is user U authorized on, and with
-what shell/sudo?" The soc-agent uses this to resolve legitimacy contracts
-without having to reimplement the join or trust whatever `/etc/passwd` happens
-to contain on a given host.
+The same join `hosts/base/seed-users.py` does at container start, from the
+per-user side: "which hosts is user U authorized on, with what shell/sudo?",
+so the agent need not trust a host's `/etc/passwd`.
 
 Source files baked into the image:
   /opt/identity/realm.yaml      ← keycloak/realm.yaml
   /opt/identity/inventory.yaml  ← hosts/inventory.yaml
 
-Read-only. No write surface; no overlay/chaos endpoints yet (deferred until a
-stale-IdP scenario needs one). Auth-less; loopback-exposed on the VPS.
+Read-only, no chaos overlay. Auth-less; loopback-exposed on the VPS.
 """
 
 from __future__ import annotations
@@ -73,9 +70,8 @@ def _load() -> None:
 def _materialize_access() -> None:
     """Build the per-user → per-host access map.
 
-    Mirrors hosts/base/seed-users.py:resolve_users but inverted: that fn answers
-    "which users on host H?", we answer "which hosts for user U?". Per-host
-    `users:` overrides still win over role-wide rules.
+    The inverse of hosts/base/seed-users.py:resolve_users; keep them in sync.
+    Per-host `users:` overrides win over role-wide rules.
     """
     for username, urec in USERS.items():
         role_name = urec["realm_role"]

@@ -5,7 +5,7 @@ D5: `run_env` and `infra_env` keep exporting `DEFENDER_RUNS_BASE=run_dir.parent`
 the tenant's runs base (`<root>/<T>/runs`) for a fresh run, or an episode's `runs/` for a
 sibling. The value is DERIVED — no operator sets it — so the invlang corpus (O8, read by the
 real `defender-invlang` shim off that variable, C15) is scoped by construction. Every run dir
-here is built by the REAL `materialize_run_dir(..., tenant_id=T)` where the demand is about a
+here is built by the REAL `materialize_run(..., tenant_id=T)` where the demand is about a
 run's own environment, so "the run's runs base" is what the code made, never a path the test
 composed and then asserted it had composed.
 
@@ -26,29 +26,30 @@ import pytest
 
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._episode_handle import Episode  # noqa: E402
 
 TENANT = H.VALID_ID
 
 
 def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
-    """A fresh run of `tenant_id` materialised by the REAL `materialize_run_dir` under the
+    """A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the
     data root this process resolves (the tenant is created first, through `create_tenant`)."""
     if not H.row_path(root, tenant_id).is_file():
         H.make_tenant(root, tenant_id)
     alert = H.plant_alert(root.parent / f"alert-{run_id}")
-    return H.run_common().materialize_run_dir(alert, run_id, tenant_id=tenant_id)
+    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id).run_dir
 
 
 def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path, Path]:
     """A pass-(A) sibling: its source at a tenant location, its episode under the OLD
     episodes base (outside the data root — O4's gap until (B)), materialised by the real
-    `materialize_run_dir`'s sibling arm. Returns (sibling run dir, episode dir)."""
+    `materialize_run`'s sibling arm. Returns (sibling run dir, episode dir)."""
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
     episode_dir = episodes_root / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(manifest, "b", tenant=H.T1106.playground_run_tenant)
-    run_dir = H.run_common().materialize_run_dir(
-        src / "alert.json", world.run_id, tenant_id=TENANT, world=world)
+    world = H.run_py().resume_world(Episode.open(manifest.parent), "b", tenant=H.T1106.playground_run_tenant)
+    run_dir = H.run_common().materialize_run(
+        src / "alert.json", world.run_id, tenant_id=TENANT, world=world).run_dir
     return Path(run_dir), episode_dir
 
 

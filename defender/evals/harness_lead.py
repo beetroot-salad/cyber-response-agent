@@ -41,7 +41,6 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         shutil.copy(path, dst)
 
     # The copied learning tree imports this shared frame primitive directly.
-    # Keep the relocated harness self-contained for the changed import boundary.
     shutil.copy(REAL_DEFENDER / "_untrusted.py", tmp / "defender" / "_untrusted.py")
 
     shutil.copytree(
@@ -54,10 +53,8 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         dst = tmp / "defender" / "skills" / skill.parent.name / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
-        # The materialized tree carries no `defender/scripts/adapters/`, so the
-        # declared-systems resolver would refuse the whole lane. A stub adapter per copied
-        # SKILL.md declares the systems this harness drives the lead author against — cold
-        # (never imported), matching the resolver's contract.
+        # The materialized tree has no adapters dir, so the declared-systems resolver would
+        # refuse the lane. Stub one (never imported) per copied SKILL.md.
         (adapters_dst / f"{skill.parent.name.replace('-', '_')}_adapter.py").write_text(
             "VERBS = {}\n", encoding="utf-8",
         )

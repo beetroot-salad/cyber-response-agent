@@ -34,23 +34,10 @@ def _is_catalog_path(path: str) -> bool:
 def _is_catalog_template(path: str) -> bool:
     """`{catalog}/{system}/…/{name}.md` — a file the content rule may read AS a template.
 
-    Narrower than `_is_catalog_path`, which is true of anything under the catalog including
-    `SCHEMA.md`, a `{system}/README.md` and a note dropped at the catalog root. The scaffold
-    content rule reads a file as a template (`id:`, `verb:`, a system derived from its parent
-    dir), so pointing it at one of those refuses the file for a reason that is not its defect.
-
-    `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
-    where a template sits, so a depth test alone lets the content rule refuse a system's
-    catalog notes for "no `id:`".
-
-    What is NOT excluded is EXTRA depth. A `{system}/sub/x.md` is nobody's catalog note: the
-    documented shape is two segments, so a third is a file the content rule should still read
-    and refuse (its parent dir names no system, so the resolver raises). Keying on
-    `len(parts) == 2` would hand that shape a silent pass.
-
-    The draft exclusion is `_under_draft`, the DOCUMENTED depth, not "`_draft` appears anywhere
-    in the path": a membership test over every segment would take `{system}/sub/_draft/x.md`
-    back out — the same dropped guard by the other spelling.
+    Narrower than `_is_catalog_path`: excludes a root-level note and `README.md` (by name,
+    since `{system}/README.md` sits at template depth). Extra depth is not excluded, so a
+    `{system}/sub/x.md` is still read and refused by the content rule rather than silently
+    passed. Drafts are excluded only at `_under_draft`'s documented depth, for the same reason.
     """
     if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
         return False

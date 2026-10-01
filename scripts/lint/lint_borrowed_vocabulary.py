@@ -1,56 +1,43 @@
 #!/usr/bin/env python3
-"""Borrowed-vocabulary smell — flag a module that imports someone else's closed vocabulary and
+"""Borrowed-vocabulary smell: flag a module that imports someone else's closed vocabulary and
 re-derives, itself, what a value in it means.
 
-The mechanical shape of #785. `report.md`'s disposition had one parser and six interpreters:
-each consumer imported ``DISPOSITION_ENUM`` and wrote its own membership test on top of the
-shared parse. They then disagreed on the same bytes — three different reactions to an invalid
-value — and five of the six silently dropped #722's zero-width strip, on a field an attacker
-influences by construction. No single site looked wrong; the divergence only existed BETWEEN
-them, which is why review never caught it and a census did.
+When each consumer imports e.g. ``DISPOSITION_ENUM`` and writes its own membership test, they
+end up disagreeing on the same bytes (different reactions to an invalid value, some skipping a
+security-relevant normalization such as a zero-width strip). No single site looks wrong; the
+divergence exists only between them, so review does not catch it.
 
-What arms this gate is the *existence of an owner's answer*. A vocabulary is watched once the
-module that DEFINES it also defines a function that tests membership on it — that function is
-the owner's answer to "is this value in the vocabulary, and what does it normalize to", and
-every other module should be calling it. Until such a function exists there is nothing to
-call, so the vocabulary is not watched and a plain membership test elsewhere is fine. That
-makes the gate self-arming: the next fold that adds a normalizer starts guarding its own
-vocabulary the moment it lands, with no edit here.
+The gate arms on the existence of an owner's answer: a vocabulary is watched once the module
+that defines it also defines a function testing membership on it. That function is the answer
+to "is this value in the vocabulary, and what does it normalize to", and every other module
+should call it. Until one exists there is nothing to call, so the gate is self-arming.
 
 What this flags: ``x in NAME`` / ``x not in NAME`` where ``NAME`` resolves to an ALL-CAPS
-module-level constant defined in ANOTHER module that has an armed normalizer for it. How the
-borrow is *spelled* does not matter — the three ways to reach someone else's constant all
-resolve to the same vocabulary (the #602 rule the other AST gates already follow):
+module-level constant defined in another module that has an armed normalizer for it, however
+the borrow is spelled:
 
   - ``from m import NAME`` / ``from m import NAME as N``  then ``x in NAME`` / ``x in N``
   - ``import m``                                          then ``x in m.NAME``
   - ``LOCAL = NAME`` / ``LOCAL = m.NAME`` at module level  then ``x in LOCAL``
 
-That last one is why a module-level ALL-CAPS assignment counts as OWNING a vocabulary only
-when its right-hand side actually *defines* one. Re-binding an import to a module-level name
-is the ordinary way to shorten a long import, and treating it as ownership would let the
-cheapest possible refactor disarm the gate.
+Hence a module-level ALL-CAPS assignment counts as owning a vocabulary only when its right-hand
+side defines one; otherwise a one-line alias would disarm the gate.
 
-What it does NOT flag:
-  - a module testing membership on a vocabulary it defines itself — that IS the owner's
-    answer, and 54 of the 62 membership tests in the tree today are this shape.
-  - passing the vocabulary somewhere (``_check_vocab(v, NAME, ...)``) — that is delegating to
-    a shared checker, the cure rather than the smell.
-  - equality against a bare literal (``x == "benign"``). This is a real hole and named
-    deliberately: the invlang validator's benign gate failed open on exactly that form and
-    this lint would NOT have caught it. Flagging every ``==`` against every vocabulary member
-    is too noisy to gate on; the defence there is that the vocabulary now has one normalizer
-    and one place to route through, not a lint.
-  - test modules — a test legitimately parametrizes over a vocabulary to assert on it.
+What it does not flag:
+  - a module testing membership on a vocabulary it defines itself (the owner's answer; the
+    large majority of membership tests in the tree).
+  - passing the vocabulary to a shared checker (``_check_vocab(v, NAME, ...)``) — the cure.
+  - equality against a bare literal (``x == "benign"``). This is a real hole: a gate can fail
+    open on exactly that form and this lint will not catch it. Flagging every ``==`` against
+    every member is too noisy; the defence is a single normalizer to route through.
+  - test modules, which legitimately parametrize over a vocabulary.
 
 Mark a deliberate site with ``# lint-vocabulary: ok — <reason>``, on the site's own lines or
-anywhere in the comment block directly above it. There is at least one real
-one: a WRITE gate is supposed to be exact where a reader normalizes, because on write there is
-still an author to send retry text to. The suppression is how that asymmetry gets STATED at
-the site instead of being rediscovered.
+anywhere in the comment block directly above it. A real case: a write gate should be exact
+where a reader normalizes, because on write there is still an author to send retry text to.
 
 Pre-existing sites are ratcheted via ``lint_borrowed_vocabulary_baseline.json`` (see
-scripts/lint/_baseline.py); the gate fails only on a NEW file+function+vocabulary triple.
+scripts/lint/_baseline.py); the gate fails only on a new file+function+vocabulary triple.
 
 Run from repo root:  python scripts/lint/lint_borrowed_vocabulary.py
 Regenerate the baseline:  python scripts/lint/lint_borrowed_vocabulary.py --update-baseline
@@ -87,8 +74,8 @@ def _in_scope(path: Path, root: Path) -> bool:
 
 
 def _is_vocabulary_name(name: str) -> bool:
-    """ALL-CAPS and long enough to be a vocabulary. `str.isupper()` already requires at least
-    one cased character, so digits-and-underscores alone do not qualify."""
+    """ALL-CAPS and long enough to be a vocabulary. `str.isupper()` requires a cased
+    character, so digits-and-underscores alone do not qualify."""
     return len(name) >= _MIN_NAME_LEN and name.isupper()
 
 
@@ -108,16 +95,14 @@ def _module_level_assignments(tree: ast.Module) -> list[tuple[str, ast.expr | No
 
 
 def _is_reference(value: ast.expr | None) -> bool:
-    """Whether this right-hand side merely POINTS at something else (``NAME``, ``m.NAME``)
-    rather than constructing a vocabulary. A pure reference is an alias, not a definition —
-    see the module docstring on why aliasing must not count as ownership."""
+    """Whether this right-hand side merely points at something else (``NAME``, ``m.NAME``)
+    rather than constructing a vocabulary; an alias is not a definition."""
     return isinstance(value, (ast.Name, ast.Attribute))
 
 
 def _module_level_names(tree: ast.Module) -> set[str]:
-    """The ALL-CAPS constants this module DEFINES at module level — the vocabularies it owns.
-    A name bound to a bare reference is excluded: it is someone else's vocabulary wearing a
-    local name, and counting it as owned would let a one-line alias disarm the gate."""
+    """The ALL-CAPS constants this module defines at module level — the vocabularies it owns.
+    A bare-reference binding is excluded, so a one-line alias cannot disarm the gate."""
     return {
         name for name, value in _module_level_assignments(tree)
         if value is not None and not _is_reference(value)
@@ -137,8 +122,8 @@ def _membership_targets(tree: ast.AST) -> set[str]:
 
 
 def _armed_vocabularies(tree: ast.Module) -> set[str]:
-    """The vocabularies this module owns AND answers for — defined here, and tested for
-    membership inside a function here. That function is what every other module should call."""
+    """The vocabularies this module owns and answers for: defined here, and tested for
+    membership inside a function here."""
     owned = _module_level_names(tree)
     answered: set[str] = set()
     for node in ast.walk(tree):
@@ -148,8 +133,8 @@ def _armed_vocabularies(tree: ast.Module) -> set[str]:
 
 
 def _imported_names(tree: ast.Module) -> set[str]:
-    """Every local name bound by an import — including the module bindings (``import m``,
-    ``from pkg import m``) that a ``m.NAME`` borrow is reached through."""
+    """Every local name bound by an import, including the module bindings a ``m.NAME``
+    borrow is reached through."""
     bound: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -160,9 +145,8 @@ def _imported_names(tree: ast.Module) -> set[str]:
 
 
 def _vocabulary_refs(tree: ast.Module) -> dict[str, str]:
-    """local name -> the vocabulary it ultimately names, for every way of reaching another
-    module's constant: a from-import (with or without ``as``), and a module-level re-bind of
-    either a from-imported name or a ``m.NAME`` attribute path."""
+    """local name -> the vocabulary it ultimately names: a from-import (with or without
+    ``as``), or a module-level re-bind of a from-imported name or a ``m.NAME`` path."""
     refs: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -170,8 +154,7 @@ def _vocabulary_refs(tree: ast.Module) -> dict[str, str]:
                 if _is_vocabulary_name(a.name):
                     refs[a.asname or a.name] = a.name
     imported = _imported_names(tree)
-    # Alias chains resolve by repetition (`A = IMPORTED; B = A`); two passes settle every
-    # chain the tree actually contains, and a third would be a fixpoint loop over nothing.
+    # Alias chains (`A = IMPORTED; B = A`): two passes settle every chain in the tree.
     for _ in range(2):
         for name, value in _module_level_assignments(tree):
             if not _is_reference(value):
@@ -186,8 +169,8 @@ def _referenced_vocabulary(
     value: ast.expr, refs: dict[str, str], imported: set[str]
 ) -> str | None:
     """The vocabulary a reference expression points at, or `None` when it points at something
-    local. ``m.NAME`` counts only when ``m`` is an imported name, so an attribute read off a
-    local object cannot fabricate a vocabulary out of a same-named field."""
+    local. ``m.NAME`` counts only when ``m`` is imported, so a local object's same-named field
+    cannot fabricate a vocabulary."""
     if isinstance(value, ast.Name):
         return refs.get(value.id)
     if (
@@ -201,10 +184,8 @@ def _referenced_vocabulary(
 
 
 def _suppressed(node: ast.AST, lines: list[str]) -> bool:
-    """The marker on the site's own line span, OR anywhere in the contiguous comment block
-    directly above it. The block form is deliberate: a suppression here has to explain why one
-    site is exempt from a rule the rest of the tree follows, and that never fits on one line —
-    forcing it to would buy a shorter comment at the cost of the reason being written down."""
+    """The marker on the site's own line span, or anywhere in the contiguous comment block
+    directly above it (the reason rarely fits on one line)."""
     start = getattr(node, "lineno", 0)
     end = getattr(node, "end_lineno", start) or start
     if any(SUPPRESS in lines[i - 1] for i in range(start, end + 1) if 0 < i <= len(lines)):
@@ -279,9 +260,8 @@ def _corpus(root: Path) -> list[tuple[str, ast.Module, list[str]]]:
 
 
 def _scan(root: Path = DEFENDER) -> list[Finding]:
-    """Two passes over ONE corpus. `root` is the scan scope — the testability seam the other
-    gates carry, and load-bearing here beyond convenience: arming is a whole-corpus property,
-    so a gate that could only ever scan the real tree could not be shown to arm and disarm."""
+    """Two passes over one corpus. `root` is the test seam; arming is a whole-corpus
+    property, so tests need it to show the gate arming and disarming."""
     corpus = _corpus(root)
     # Pass 1: which vocabularies have an owner's answer, and whose is it.
     armed: dict[str, str] = {}
@@ -316,10 +296,8 @@ def main(
     if not root.is_dir():
         print(f"scan root not found at {root}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Worse here
-    # than for a single-pass lint: an unreadable OWNER silently disarms its vocabulary for the
-    # whole repo. Exit 2 — the gate could not run, which is not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus, and an unreadable owner silently disarms
+    # its vocabulary repo-wide. Exit 2: the gate could not run, which is not "clean".
     try:
         findings = _scan(root)
     except ScanBlind as exc:

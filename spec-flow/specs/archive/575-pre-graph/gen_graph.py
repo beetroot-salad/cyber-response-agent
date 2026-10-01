@@ -8,7 +8,7 @@ def D(i, k, f, b, o, r=None):
     }
 
 demands = [
- # §A containment model
+ # containment model
  D("a1","behavior","test",["decide_bash","Grant.pattern","Grant.scope"],
    "A command is allowed only if it matches a grant's pattern AND every operand PROGRAMS extracts resolves into that grant's scope."),
  D("a2","negative","test",["Grant.pattern","Grant.pins_path"],
@@ -33,7 +33,7 @@ demands = [
    "A relative operand is rebased on defender_dir.parent, the cwd the executor uses, before it is resolved."),
  D("a12","behavior","test",["decide_bash"],
    "Every pipe stage is operand-gated: an in-scope cat piped into a cat of /etc/passwd is DENIED on the second stage."),
- # §B PROGRAMS + OPENS_NOTHING
+ # PROGRAMS + OPENS_NOTHING
  D("b1","behavior","test",["PROGRAMS","PROGRAMS.domain.distinguished[cat]","PROGRAMS.domain.distinguished[OPENS_NOTHING]"],
    "PROGRAMS maps cat to the real extractor and every other granted program to OPENS_NOTHING."),
  D("b2","behavior","test",["compile_policy","PROGRAMS.domain.distinguished[absent]"],
@@ -51,7 +51,7 @@ demands = [
  D("b8","negative","test",["PROGRAMS.domain.distinguished[OPENS_NOTHING]","Grant.pattern"],
    "Structurally, no OPENS_NOTHING grant's pattern admits a long option or a dash-prefixed positional, so the single-dash-bundle and no-leading-dash conventions become enforced properties a future grammar author cannot silently drop.",
    ["Leave it as the convention it is today (gnu_flags.bundle emits single-dash only). Rejected: that is exactly what let the judge's unrestricted cat shape be written."]),
- # §C behavior-change ledger
+ # behavior-change ledger
  D("c1","domain-outcome","test",["Grant.pattern","read_surface.access[bash]"],
    "The file-operand viewer forms now DENY and their cat-piped equivalents ALLOW, for grep, head, tail and wc alike."),
  D("c2","negative","test",["MAIN_DEF.bash_allow","GATHER_DEF.bash_allow"],
@@ -64,7 +64,7 @@ demands = [
    "The RAW_MARKER substring scan is gone: a main command that merely MENTIONS gather_raw in a grep pattern now ALLOWS, where at HEAD it denies purely because the command string contains the literal text."),
  D("c6","survival","test",["CORPUS_AUTHOR_DEF.bash_allow","curator_prompt"],
    "On the curator lane a grep with a file operand denies, its cat-piped equivalent allows, and ls of the lessons dir denies because the corpus manifest shipped in #574 replaces the listing."),
- # §D read surface
+ # read surface
  D("d1","domain-outcome","test",["GATHER_RAW_SHAPE","MAIN_DEF.bash_allow","GATHER_DEF.bash_allow"],
    "A cat of a gather_raw payload ALLOWS for gather and DENIES for main, by positive enumeration rather than a substring clamp."),
  D("d2","behavior","test",["decide_read","read_surface.access[read-tool]"],
@@ -78,7 +78,7 @@ demands = [
    "The allow-matrix: for every agent and path in a fixed corpus, the read-tool verdict equals the bash-lane cat verdict."),
  D("d6","negative","test",["read_surface.access[bash]","read_surface.access[read-tool]","denylist"],
    "The secret denylist still applies INSIDE scope: a dot-env file whose name matches the corpus markdown shape still denies, and so does an ssh-key path."),
- # §E pins_path grants
+ # pins_path grants
  D("e1","negative","test",["JUDGE_DEF.bash_allow","ticket_grant"],
    "A judge ticket command WITHOUT the require-closed flag DENIES and with it ALLOWS; the mandatory-flag lookahead is the security property, and a boolean-flag allowlist would silently make it optional."),
  D("e2","behavior","test",["JUDGE_DEF.bash_allow","ticket_grant"],
@@ -87,7 +87,7 @@ demands = [
    "The require-closed flag cannot be smuggled inside a quoted operand, because the NUL token-space sentinel keeps every space in the joined argv a true token boundary."),
  D("e4","behavior","test",["ACTOR_DEF.bash_allow","LEAD_AUTHOR_DEF.bash_allow"],
    "The actor's pinned python script and the lead author's rm of a skills markdown file still allow, while an arbitrary script path and a traversing rm deny."),
- # §F routing / layering
+ # routing / layering
  D("f1","seam","test",["BashDecision","interacts(tool_bash->bash_exec)"],
    "BashDecision still carries pipelines, adapter_argv and sql_pipe, all three consumed by the tool's capture path, and Grant.route tags reader-lane grants only."),
  D("f2","behavior","test",["decide_bash","_decide_adapter"],
@@ -101,12 +101,12 @@ demands = [
  D("f6","shape","test",["interacts(tool_bash->bash_exec).payload"],
    "The argv EXECUTED is the argv GATED: run_parsed receives exactly the pipelines the decision carries, so no validator/executor parser differential can reopen.",
    ["Re-parse the command string in the executor. Rejected: that differential is what shell=False plus the single-parse decision exist to close."]),
- # §G prompt surface
+ # prompt surface
  D("g1","negative","test",["deny_reason","_overflow_filter_hint"],
    "No deny reason and no overflow hint names a program the agent cannot run: each program-looking word is checked against that agent's OWN lane, not against a hardcoded dead-name list."),
  D("g2","behavior","test",["_overflow_filter_hint","_lane_admits"],
    "The overflow hint still reaches the jq branch for main and gather, the sql branch for the judge, and the read-tool fold for the rest, and _lane_admits goes through the real decide seam rather than fullmatching over a tuple that now holds Grants."),
- # §H lifecycle
+ # lifecycle
  D("h1","behavior","test",["compile_policy_for"],"compile_policy_for is idempotent for the same definition and roots."),
  D("h2","uniqueness","test",["compile_policy_for","resolve_roots"],
    "No cross-run bleed: two run dirs compiled in one process yield policies whose scopes anchor on their OWN run dir, which matters because gather binds per dispatch, many times per run."),
@@ -114,7 +114,7 @@ demands = [
    "An empty denylist axis contributes no lookahead and does not brick the reader lane."),
  D("h4","behavior","test",["compile_policy_for","resolve_roots","LEAD_AUTHOR_DEF.bash_allow"],
    "Grants anchor on the defender_dir and run_dir THREADED IN, never on the import-time PATHS constant: a lead author bound with a worktree defender_dir gets an rm grant anchored on the WORKTREE's skills dir, and the main checkout's skills dir DENIES. Both re-exec drivers (replay_actor, harness_lead) relocate the tree anchor onto whatever tree they run in."),
- # §I CLI
+ # CLI
  D("i1","behavior","test",["defender_policy_cli"],
    "defender-policy show prints each agent's read, write and bash grants with their scopes, and an exempt grant reports its PATTERN as the containment rather than a misleading empty scope."),
  D("i2","parity","test",["defender_policy_cli","decide_bash"],

@@ -224,6 +224,8 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     R14 records the coordinate change as an accepted difference rather than a silent one,
     and `visualize_runtime`'s footer check (the fourth frozen reader) is driven in the same
     page render: the footer's event-presence check must still find its events."""
+    from defender import run_common
+    from defender._run_handle import Run
     from defender.scripts.visualize import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
@@ -242,9 +244,9 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
         f"the re-minted coordinate must carry the session component; got {ids}")
     assert all("#" in i for i in ids), ids
 
-    rendered = visualize_run.render_and_mirror(run_dir)
-    assert any(p.name == "runtime.html" for p in rendered) or (run_dir / "runtime.html").is_file()
-    footer_page = (run_dir / "runtime.html").read_text()
+    run_common.visualize(Run.at(run_dir))
+    assert (run_dir / "runtime.html").is_file(), "the post-run step saved no page record"
+    footer_page = (run_dir / "runtime.html").read_text(encoding="utf-8")
     assert "result" in footer_page or str(replay.calls) in footer_page, (
         "visualize_runtime's footer check found no events in the moved projection")
 
@@ -280,11 +282,11 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
-    """`render_and_mirror` writes `runtime.html` with a truncating write under ONE
-    `run_id`, and it has two drivers: `run_common.visualize()`'s subprocess and the
-    in-process render. Driven in turn over one run dir, the second render does not silently
-    replace the first's page with an emptier one — the page still carries the run's own
-    event content after each driver has run, and the two drivers agree on how many
+    """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two
+    drivers: the standalone re-render (`visualize_run.main`, #1110 O8) and the post-run step
+    `run_common.visualize(run)`. Driven in turn over one run dir, the second render does not
+    silently replace the first's page with an emptier one — the page still carries the run's
+    own event content after each driver has run, and the two drivers agree on how many
     assistant entries it shows.
 
     R2's `unique-key` + `serial` form: drive the writers IN TURN and pin that the second
@@ -294,6 +296,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     demand while `message`, `wire_log` and `tool_trace` all got one; the rule could not fire
     because the second driver lived only in an `nl:` evidence string (F2)."""
     from defender import run_common
+    from defender._run_handle import Run
     from defender.scripts.visualize import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
@@ -306,8 +309,8 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         return {name: (run_dir / name).read_text()
                 for name in ("runtime.html",)}
 
-    # driver A — the in-process transcript render
-    visualize_run.render_and_mirror(run_dir)
+    # driver A — the standalone re-render, in-process
+    assert visualize_run.main(["visualize_run.py", str(run_dir)]) == 0
     after_a = pages()
     for name, page in after_a.items():
         assert marker in page, (
@@ -318,8 +321,8 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         "positive control: runtime.html must render the run's assistant entries, or the "
         "count comparison below is between two zeroes")
 
-    # driver B — the subprocess hop `run_common.visualize()` takes, over the SAME run_id
-    run_common.visualize(run_dir)
+    # driver B — the post-run step `run.py main` takes, over the SAME run_id
+    run_common.visualize(Run.at(run_dir))
     after_b = pages()
     for name, page in after_b.items():
         assert marker in page, (
@@ -337,11 +340,12 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
 def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage):
-    """A visualizer that cannot resolve the store FAILS CLOSED: the child process exits
-    non-zero, and `run_common.visualize()` surfaces that failure to its caller instead of
-    writing it to stderr and returning None. The two real breakages are the two that
-    actually occur — a run dir carrying no pointer file, and a pointer naming a store that
-    is no longer there.
+    """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render
+    (`python visualize_run.py <run_dir>`) exits non-zero, and the post-run step
+    `run_common.visualize()` raises `VisualizeFailed` to its caller instead of writing the
+    failure to stderr and returning None. The two real breakages are the two that actually
+    occur — a run dir carrying no pointer file, and a pointer naming a store that is no longer
+    there.
 
     Symmetry is the point: `store_append_is_fail_closed` and
     `rg4_store_append_failure_stops_the_run_through_a_handled_exit` demand fail-closed on
@@ -352,13 +356,14 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     `auth:P8` (executed) found run dirs really are relocated by an allowlist copy that
     carries no pointer. Left as it is, `runtime.html` renders stale or not at all on a run
     the operator believes succeeded, with nothing in the suite to show it. Positive control:
-    the same call over an intact run dir returns normally and writes both pages."""
+    the same call over an intact run dir returns normally and writes the page."""
     from defender import run_common
+    from defender._run_handle import Run
 
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
 
-    # positive control — intact, the wrapper renders both pages and does not raise
-    run_common.visualize(run_dir)
+    # positive control — intact, the post-run step renders the page and does not raise
+    run_common.visualize(Run.at(run_dir))
     for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
@@ -373,17 +378,19 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
             Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
         store.close()
 
-    # the child really exits non-zero — the real script, the real argv, the real broken input
-    child = subprocess.run(  # noqa: S603 — the argv run_common.visualize() itself builds
-        [sys.executable, str(run_common.VISUALIZE_SCRIPT), str(run_dir)],
+    # the standalone re-render really exits non-zero — the real script, the real argv, the
+    # real broken input
+    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
+    child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run dir
+        [sys.executable, str(script), str(run_dir)],
         capture_output=True, text=True, encoding="utf-8", check=False)
     assert child.returncode != 0, (
         f"the visualizer exited 0 with an unresolvable store ({breakage}); its stdout was "
         f"{child.stdout!r}")
 
-    # and the wrapper surfaces it rather than swallowing it to stderr
+    # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:
-        run_common.visualize(run_dir)
+        run_common.visualize(Run.at(run_dir))
     assert str(run_dir) in str(raised.value), (
         "the surfaced failure must name the run dir it could not render")
     assert not (run_dir / "runtime.html").is_file(), (
@@ -401,7 +408,8 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     own access table (FK17, R16's escaping demand). The POSITIVE CONTROL is that the crafted
     text is present at all: an escaping assertion over a page that never rendered the
     payload passes vacuously."""
-    from defender.scripts.visualize import visualize_run
+    from defender import run_common
+    from defender._run_handle import Run
 
     payload = crafted_html_payload()
     run_dir = materialize(tmp_path, GOLDEN)
@@ -424,9 +432,9 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
         "the crafted payload never reached the store — the fixture, not the renderer, "
         "would be what this test measured")
 
-    visualize_run.render_and_mirror(run_dir)
+    run_common.visualize(Run.at(run_dir))
     for page_name in ("runtime.html",):
-        page = (run_dir / page_name).read_text()
+        page = (run_dir / page_name).read_text(encoding="utf-8")
         assert html.escape(payload) in page or "&lt;script&gt;" in page, (
             f"{page_name}: positive control — the payload must be RENDERED, escaped, or "
             f"the absence assertions below are vacuous")

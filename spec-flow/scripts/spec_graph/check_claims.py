@@ -1,46 +1,30 @@
 #!/usr/bin/env python3
-"""spec-graph check #3 — a probed claim's instrument matches its kind (#633).
+"""spec-graph check #3 — a probed claim's instrument matches its kind.
 
-The ledger records, per claim, the `probe_kind` actually used (`executed | read | search`).
-The escape this closes: a `behavior` or `primitive` claim — a claim about what code does over
-an input — "probed" by READING the code. A read holds at parse level over exactly the input
-the bug needs to see, so the suite pins the bug green. The prose rule "run it and watch" never
-bit because nothing separated an execution from an inspection at gate time; this check is that
-separation.
+The ledger records, per claim, the `probe_kind` used (`executed | read | search`). A
+`behavior` or `primitive` claim (what code does over an input) cannot be settled by reading
+the code: a read never sees the input the bug needs.
 
-THE CHECK (deterministic, no LLM): for every claim whose verdict means it was probed
-(`holds | refuted | unrefuted`), require a `probe_kind` present and drawn from the set its
-`kind` admits — the `_REQUIRED` table below is the single source of truth for the mapping.
-`unprobed`/`deferred` carry no instrument and are skipped (an `unprobed` load-bearing claim is
-step-9's own finding, not this check's). An unknown `kind` or `probe_kind` is flagged too — the
-closed vocabulary is enforced here.
+INSTRUMENT: every claim whose verdict means it was probed (`holds | refuted | unrefuted`)
+needs a `probe_kind` drawn from the set its `kind` admits (`_REQUIRED`). `unprobed` and
+`deferred` are skipped. Unknown `kind` or `probe_kind` values are flagged.
 
-THE TYPING PASS (same run): the table above is keyed on a kind the AUTHOR declares, so
-mis-typing is a free way past it — and that is not hypothetical, it is how the claim behind
-the most recent shipped defect closed on a read while predicting what every persisted record
-holds. A claim whose sentence makes a runtime prediction (`raises`, `returns`, `coerces`,
-`defaults to`, `silently`) may not be typed `referential` or `census`, whatever its author
-believed. Grammar only, never judgment; the escape hatch is a reviewed baseline entry.
+TYPING: `kind` is author-declared, so mis-typing would bypass the table. A claim whose
+sentence makes a runtime prediction (`raises`, `returns`, `coerces`, `defaults to`,
+`silently`, ...) may not be typed `referential` or `census`. Grammar only; the escape
+hatch is a reviewed baseline entry.
 
-THE PROBE-CORPUS PASS (same run): the instrument can be right and the probe still blind, if it
-ran over the one input class that cannot fail. A probe that ENUMERATES NAMES out of a tree
-(`ls-tree`, a glob, a directory walk) must record the `alphabet:` it sampled — ordinary names,
-non-ASCII, a name with a space, and the cwd it ran from. #869 shipped three defects through a
-probe that was executed, correctly typed and correctly instrumented, whose output was
-transcribed into the reader and into the test that asserted on it: the tree it enumerated was
-ASCII, at the repo root, so C-quoting, `.split()`-on-spaces and cwd-relative output were all
-invisible. A class that cannot arise closes by saying so; the check reads the presence of the
-sentence, never its content.
+PROBE CORPUS: a probe that enumerates names out of a tree (`ls-tree`, a glob, a directory
+walk) must record the `alphabet:` it sampled: ordinary names, non-ASCII, a name with a
+space, and the cwd it ran from. An ASCII-only sample at the repo root hides C-quoting,
+whitespace splitting and cwd-relative output. The check reads only that each class is
+addressed, never the answer.
 
-THE SPEND-POINT PASS (same run): rules.md's "a spend-point closes only by citation", as a
-field — `cites: [<claim id>, ...]`. Any `cites` anywhere in the gate block or on a demand
-must resolve to a claim that exists and was probed (`holds | refuted | unrefuted`) — a
-citation of an `unprobed`/`deferred` claim rests on nothing executed. `cites` is REQUIRED
-on: a `fired: false` for a judgment rule (R0, R5, R6 — where no slot predicate computed the
-no; `spec-graph gate` verifies the computed rules' `fired` flags against the slots), every
-`pre_discharged` credit, and every `form: waiver` demand. The `binds_waivers` /
-`exercise_waivers` / `actor_waivers` maps cannot carry a `cites` without a shape change
-check_binds/check_actors would trip over — those citations stay a phase-F hand check.
+SPEND POINTS: `cites: [<claim id>, ...]` anywhere in the gate block or on a demand must
+resolve to a probed claim. `cites` is required on a judgment rule's (R0, R5, R6)
+`fired: false`, every `pre_discharged` credit, and every `form: waiver` demand. The
+`*_waivers` maps cannot carry `cites` without a shape change, so those stay a phase-F hand
+check.
 
 Usage:
     spec-graph claims [graph.yaml ...] [--config <path>]
@@ -60,17 +44,15 @@ import _cli
 import _config
 import _schema
 
-# kind -> the probe_kinds it may legitimately close on. The one place the mapping lives: the
-# rules.md prose describes it for the human, this table enforces it, and the check flags any
-# drift. `read`/`search` are inspections; only `executed` runs the logic under test — which is
-# why the behavior/primitive/reachability claims (about what code DOES) demand it.
+# kind -> the probe_kinds it may close on (rules.md describes it; this table enforces it).
+# Only `executed` runs the logic, so claims about what code does demand it.
 _REQUIRED: dict[str, set[str]] = {
     "referential": {"read", "search"},   # the symbol/path exists — read/import/stat, or a defs search
     "census": {"search"},                # the full hit list — the search that established it
     "behavior": {"executed"},            # what existing code does on an input — run it
     "primitive": {"executed"},           # an I/O primitive's contract — execute it
     "reachability": {"executed"},        # a break-attempt is an execution
-    "discharge": {"executed", "read", "search"},  # inherits its cited claim's instrument (#634 pins the cross-claim link)
+    "discharge": {"executed", "read", "search"},  # inherits its cited claim's instrument
 }
 _PROBE_KINDS = {"executed", "read", "search"}
 _PROBED = {"holds", "refuted", "unrefuted"}   # an instrument was used — require probe_kind
@@ -78,15 +60,12 @@ _UNPROBED = {"unprobed", "deferred"}          # nothing run yet — skip (step-9
 #: fired:false here rests on an agent's reading, not a slot predicate — it must cite.
 _JUDGMENT_RULES = set(_schema.JUDGMENT)
 
-#: The kinds a claim may close on WITHOUT running anything. The typing pass below exists
-#: because membership here is what the instrument table trusts, and the author declares it.
+#: The kinds a claim may close on without running anything (guarded by `check_typing`).
 _INSPECTABLE = {"referential", "census"}
 
-#: Runtime-action grammar: verbs that predicate over an INPUT rather than over the tree's
-#: shape. Deliberately narrow — a claim can say "exists", "is defined", "is imported by" and
-#: mean it, but nothing that only exists can also raise, coerce, or default. Each is a whole
-#: word so `returns` does not fire on `returning-path`, and each is a verb a reader cannot
-#: settle: seeing the `raise` statement is not seeing that this input reaches it.
+#: Runtime-action grammar: verbs that predicate over an input rather than the tree's shape
+#: ("exists", "is defined" stay allowed). Whole words, so `returns` does not match
+#: `returning-path`.
 _RUNTIME_GRAMMAR = re.compile(
     r"\b(raise[sd]?|throws?|returns?|coerces?|normali[sz]es?|parses?|seriali[sz]es?"
     r"|rejects?|accepts?|swallows?|truncates?|overwrites?|crashe[sd]?"
@@ -95,19 +74,15 @@ _RUNTIME_GRAMMAR = re.compile(
 )
 
 
-#: Instruments that ENUMERATE names out of a tree — a directory listing, a VCS tree read, a
-#: glob. Closed and concrete on purpose: these are the probes whose recorded OUTPUT becomes an
-#: implementation, and whose answer depends on what the names in the sampled tree looked like.
-#: A probe that runs a function over a value it constructed is not in this class — its input
-#: is written down in the probe itself.
+#: Instruments that enumerate names out of a tree (directory listing, VCS tree read, glob):
+#: their answer depends on what the sampled names looked like.
 _ENUMERATION_GRAMMAR = re.compile(
     r"\b(ls-tree|ls-files|--name-only|--porcelain|rglob|iterdir|scandir|listdir"
     r"|os\.walk|\.glob\(|glob\(|find -)",
     re.IGNORECASE,
 )
 
-#: The value classes a name-enumerating probe must say it sampled, and why each is here. Every
-#: one is a class the #869 probe did not sample and the shipped reader then got wrong.
+#: The value classes a name-enumerating probe must say it sampled, and why each matters.
 _ALPHABET_CLASSES: dict[str, str] = {
     "ascii": "the ordinary names — the sample every probe already takes",
     "non-ascii": "git C-QUOTES a non-ASCII path under `--name-only`, and a shell tool may "
@@ -121,45 +96,21 @@ _ALPHABET_CLASSES: dict[str, str] = {
 
 
 def check_alphabet(path: Path, graph: dict) -> list[str]:
-    """rules.md's "probe values must sample the types the boundary admits", made mechanical
-    for the one value space no reader can enumerate by looking: a NAME read out of a tree.
+    """rules.md's "probe values must sample the types the boundary admits", for names read out
+    of a tree.
 
-    The escape this closes is the shipped #869/#908 defect. A `primitive` claim recorded an
-    executed probe — `git ls-tree -r --name-only HEAD -- defender/skills/` over a planted
-    ASCII tree at the repo root — and the observed output, INCLUDING its depth constant, was
-    transcribed verbatim into both the implementation and the test that asserted on it. The
-    probe was honest, executed, correctly typed, and correctly instrumented; every gate in
-    this toolchain passed it. What it never recorded was its ALPHABET, and three preconditions
-    rode along unnoticed: C-quoting of non-ASCII paths, `.split()` tearing a spaced path, and
-    cwd-relative output. Each silently un-declared a real system.
-
-    So a probe that enumerates names owes a sentence per class in `_ALPHABET_CLASSES` — what
-    it sampled, or why the class cannot arise here. The sentence is the whole mechanism: an
-    author who has to write down what `non-ascii` did looks, and looking is what the ASCII
-    fixture prevented. Grammar only, never judgment — an out-of-scope class closes by saying
-    so, exactly as a waiver does, and the check never reads the answer.
+    A probe that enumerates names owes a sentence per class in `_ALPHABET_CLASSES`: what it
+    sampled, or why the class cannot arise here. Writing it forces the author to look. The
+    check reads only that a non-empty answer exists.
     """
     findings: list[str] = []
     for c in graph.get("claims", []) or []:
-        # NOT gated on `probe_kind == "executed"` (#949). It was, and that made the rule
-        # unfireable on exactly the claims it was written for: `_REQUIRED["census"] == {"search"}`
-        # and `check()`'s `pk not in _REQUIRED[kind]` arm make a census claim that closed on any
-        # other instrument a finding in its own right, so no gate-clean graph can ever present a
-        # census claim with
-        # `probe_kind: executed`. Nine committed census claims enumerate a tree with `ls-files`
-        # / `rglob` / `iterdir` and record no alphabet; every one of them was skipped here.
-        # An enumeration is spelled as a `search` or a `read` probe as readily as an executed one.
+        # Not gated on `probe_kind == "executed"`: census claims must close on `search`, and an
+        # enumeration is as often a `search` or `read` probe. Unprobed claims owe nothing yet.
         #
-        # The `_UNPROBED` skip STAYS: nothing has been run yet, so there is no alphabet to owe.
-        #
-        # The text scope is left wide (claim + probe + observed) deliberately. Matching the
-        # `probe:` field alone reads tighter and was the first proposal, but measured over the
-        # committed corpus it drops `spec_graph_540.yaml:C53a`, a real detection that fires
-        # today — its probe says "walked it" and the instrument is named in the claim. The cost
-        # of the wide scope is a prose match on a claim ABOUT enumerating code (two `read` probes
-        # in `spec_graph_647.yaml` reading two line ranges each); those are baselined, and
-        # tightening the GRAMMAR rather than the scope is the way to reach them without
-        # giving up C53a.
+        # The text scope is wide (claim + probe + observed): matching `probe:` alone misses
+        # claims that name the instrument in the claim text. The few prose false positives
+        # this admits are baselined.
         if c.get("verdict") in _UNPROBED:
             continue
         text = " ".join(str(c.get(k, "")) for k in ("claim", "probe", "observed"))
@@ -197,27 +148,18 @@ def check_alphabet(path: Path, graph: dict) -> list[str]:
 
 
 def check_typing(path: Path, graph: dict) -> list[str]:
-    """The hole under the instrument table: a claim's `kind` is DECLARED, and the table
-    trusts it, so mis-typing is a free way past the whole ledger.
+    """A claim whose sentence makes a runtime prediction may not be typed into an inspectable
+    kind: `kind` is author-declared, and a read cannot falsify a prediction over an input.
 
-    The escape this closes is not hypothetical — the claim behind the most recent shipped
-    defect asserted a universal about what every persisted record holds, and it closed on a
-    read, because the read instrument is legitimate for the kind its author wrote down. A
-    read cannot falsify a prediction over an input; only running it can. So a claim whose
-    sentence makes a runtime prediction may not be typed into an inspectable kind, however
-    honestly the typing was meant.
-
-    Deterministic and deliberately narrow: it flags the grammar, never the judgment. The
-    remedy is to retype the claim and run its probe, and the escape hatch is the same one
-    the rest of this repo's gates use — a reviewed baseline entry, not a field an author can
-    write to silence the check on their own claim.
+    Flags grammar only. The remedy is to retype and run the probe; the escape hatch is a
+    reviewed baseline entry, not a field the author can set.
     """
     findings: list[str] = []
     for c in graph.get("claims", []) or []:
         if c.get("kind") not in _INSPECTABLE or c.get("verdict") in _UNPROBED:
             continue
         if c.get("probe_kind") == "executed":
-            continue  # typed inspectable, ran it anyway — the instrument is stronger, not weaker
+            continue  # a stronger instrument than required
         m = _RUNTIME_GRAMMAR.search(str(c.get("claim", "")))
         if m:
             findings.append(
@@ -237,8 +179,7 @@ def _cited(entry: dict) -> list[str]:
 
 
 def check_spend_points(path: Path, graph: dict) -> list[str]:
-    # Ids coerced with str() to match `_cited`, which stringifies every citation — an
-    # int-keyed ledger made `cites: [12]` dangle against the claim it names.
+    # str() to match `_cited`, so an int id (`cites: [12]`) resolves.
     verdicts = {
         str(c.get("id")): c.get("verdict")
         for c in graph.get("claims", []) or []
@@ -274,9 +215,7 @@ def check_spend_points(path: Path, graph: dict) -> list[str]:
     for e in gate.get("obligations", []) or []:
         resolve(f"gate.obligations[{e.get('element')}]", e)
     for e in gate.get("holes", []) or []:
-        # A hole that spawned a demand (`resolved_to`) closes through that demand; one
-        # closed by judgment alone ("unreachable", "out of scope") is a spend-point —
-        # rules.md: it closes only by citation.
+        # A hole closed by judgment alone (no spawned `resolved_to` demand) must cite.
         need = ("a hole resolved with no spawned demand"
                 if e.get("resolution") and not e.get("resolved_to") else None)
         resolve(f"gate.holes[{e.get('element')}]", e, need)
@@ -317,17 +256,12 @@ def check(path: Path, graph: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    # utf-8 out, like every other main in this family: the finding text carries em-dashes,
-    # so a C/ascii-locale runner raises UnicodeEncodeError on the very `print` that reports a
-    # finding — a traceback behind exit 1 ("looked, found something") for output that never
-    # arrived. `check_binds` and `check_claims` were the only two mains without this call.
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--config"})
     cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
-        # 2, not 0: the whole toolchain's contract (verify.md) is 2 = could not look —
-        # a run with nothing to check must not read as clean.
+        # Nothing to check is could-not-look (2), not clean.
         print("check_claims: no spec_graph_*.yaml found", file=sys.stderr)
         return 2
     findings: list[str] = []
@@ -336,22 +270,17 @@ def main(argv: list[str]) -> int:
     alphabet: list[str] = []
     unreadable: list[Path] = []
     for p in paths:
-        # Parsed ONCE and handed to both passes: the two used to load the same graph
-        # independently, doubling every read and parse. Both passes run INSIDE the try —
-        # nested wrong shapes (a string where a mapping belongs) surface as AttributeError
-        # mid-walk, the same could-not-read class as a bad top level.
+        # Parsed once for all passes. The passes run inside the try: nested wrong shapes
+        # surface as AttributeError mid-walk, the same could-not-read class.
         try:
             graph = _cli.load_graph(p)
             findings.extend(check(p, graph))
             spend.extend(check_spend_points(p, graph))
             typing.extend(check_typing(p, graph))
             alphabet.extend(check_alphabet(p, graph))
-        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
-        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
-        # ("looked, found something") for a gate that read nothing.
+        # `ValueError` covers UnicodeDecodeError, which is not an OSError.
         except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
-            # Collected, not returned on: bailing here threw away every finding the
-            # already-checked graphs produced.
+            # Collected, not returned on, so other graphs' findings still print.
             print(f"check_claims: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             unreadable.append(p)
             continue
@@ -363,10 +292,7 @@ def main(argv: list[str]) -> int:
         print(f"  CORPUS {f}")
     for f in spend:
         print(f"  CITATION {f}")
-    # Counted by kind: an instrument mismatch, a mis-typed claim, an unstated probe corpus and
-    # an uncited spend-point are four different slips. The middle two are how the first is
-    # evaded — by declaring a weaker kind, or by running the right instrument over the one
-    # input class that cannot fail.
+    # Counted by kind: four different slips.
     print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(typing)} "
           f"claim-typing finding(s), {len(alphabet)} probe-corpus finding(s), {len(spend)} "
           f"spend-point citation finding(s) over {len(paths)} graph(s).")

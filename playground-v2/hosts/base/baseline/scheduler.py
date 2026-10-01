@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Baseline activity scheduler — batch 8.
+"""Baseline activity scheduler.
 
 One process per host. Spawns a dispatch loop per (action, identity) binding
 drawn from /opt/soc-playground/baseline/catalog.yaml. Each loop samples
 exponential inter-arrival times modulated by a time-of-day shape function
 and executes actions as the bound realm identity via `runuser`.
 
-Design intent (docs/playground-environment-v2.md §Baseline activity generators):
+  - Jittered (Poisson, not cron) intervals.
+  - Time-of-day shape: workhours peak, non-zero off-peak floor.
+  - Weekday/weekend variation: service accounts flat, humans quieter on weekends.
+  - Seeded: same BASELINE_SEED → same arrival sequence.
 
-  - Jittered (Poisson, not cron) — draw intervals from random.expovariate.
-  - Time-of-day shape — workhours peak, non-zero off-peak floor.
-  - Weekday/weekend variation — service accounts flat, humans quieter on weekends.
-  - Seeded reproducibility — same BASELINE_SEED → same arrival sequence.
-
-The scheduler is state-free across restarts: on container recreate it starts
-a fresh sequence (seeded from env), not resumed. Good enough for playground
-baselines.
+State-free across restarts: a recreated container starts a fresh seeded sequence.
 """
 from __future__ import annotations
 
@@ -96,9 +92,8 @@ def load_host(host_name: str) -> dict:
 def users_on_host(host_name: str) -> list[str]:
     """All realm usernames that seed-users.py would create on this host.
 
-    Mirrors seed-users.py's resolve_users expansion. We don't import it
-    directly (filename has a dash, not a valid module name) — duplicating
-    the ~20-line resolve keeps scheduler.py standalone.
+    Duplicates seed-users.py's resolve_users (its dashed filename is not
+    importable); keep the two in sync.
     """
     inv = yaml.safe_load(INVENTORY.read_text())
     host = next((h for h in inv["hosts"] if h["name"] == host_name), None)
@@ -149,11 +144,8 @@ def dispatch(action_id: str, user: str, cmd: str, log: logging.Logger) -> None:
     """Execute `cmd` as `user` via runuser. Captures exit code + elapsed time."""
     start = time.monotonic()
     try:
-        # runuser on util-linux treats -u and -s as mutually exclusive, so we
-        # skip -s and pass `bash -c` as the explicit argv instead — this
-        # overrides the identity's login shell (e.g., /usr/sbin/nologin for
-        # service accounts) in exactly the same way systemd timers dispatch
-        # jobs as nologin service users.
+        # runuser -u and -s are mutually exclusive, so pass `bash -c` as argv;
+        # this also bypasses a nologin shell on service accounts.
         proc = subprocess.run(
             ["runuser", "-u", user, "--", "bash", "-c", cmd],
             capture_output=True, text=True, timeout=60,
@@ -190,8 +182,8 @@ def run_binding(action: dict, user: str, host: dict, seed: str,
         effective_mean = mean_s / max(multiplier, 0.01)
         interval = prng.expovariate(1.0 / effective_mean)
 
-        # Resolve ${target} / ${wrong} just-in-time — same-seeded prng so the
-        # sequence of targets is deterministic per binding.
+        # Resolved per dispatch from the binding's prng, so deterministic.
+
         cmd = action["cmd"]
         if "${target}" in cmd:
             targets = _resolve_targets(action, host)

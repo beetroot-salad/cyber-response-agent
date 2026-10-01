@@ -26,8 +26,6 @@ from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
 
-# The SAME byte ruler the artifact bounds are measured with — a write tool that reports
-# "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._env import env_int
 from defender.scripts.gather_tools.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
@@ -39,16 +37,13 @@ from defender.hooks.record_lesson_load import (
 )
 
 
-#: The queries table's infra code — `circuit_breaker.INFRA_EXIT_CODES`' member for a fault
-#: that is the environment's, not the caller's. Named so a reader of `_shim_exit_code` sees
-#: WHICH taxonomy the number belongs to.
+#: The queries table's infra exit code (a member of `circuit_breaker.INFRA_EXIT_CODES`).
 _INFRA_EXIT_CODE = 2
 
 _BASH_TIMEOUT_S = 120
 
-#: The `verb` a bash-lane row carries. Deliberately not a registry verb: it keeps a shim row
-#: outside `repeat_trip`'s `(system, verb, params)` key by construction, so an observational
-#: row can never be mistaken for a dispatch attempt and trip the guard.
+#: The `verb` a bash-lane row carries. Not a registry verb, so an observational shim row can
+#: never trip `repeat_trip`'s `(system, verb, params)` guard.
 _BASH_VERB = "bash"
 
 
@@ -62,7 +57,7 @@ def _overflow_filter_hint(
 ) -> str:
     sql_shim = permission.command_shape.SQL_SHIM
     if _lane_admits(policy, f"{sql_shim} 'SELECT 1'"):
-        reducer = f'{sql_shim} "SELECT count(*) FROM data"'
+        reducer = f'{sql_shim} "DESCRIBE data"'
     else:
         return (
             "You have no bash reducer for this. Narrow it with the read tool's substring "
@@ -73,13 +68,11 @@ def _overflow_filter_hint(
 
 
 def _read_char_cap() -> int:
-    """The cap on reading an AUTHORED file — a SKILL, a lesson, a design doc.
+    """The cap on reading an authored file — a SKILL, a lesson, a design doc.
 
-    Deliberately its OWN number, not the 8 KB capture ceiling. The property that matters is
-    one-directional: a lead must not `read_file` a persisted payload and recover what the
-    capture view withheld. Sharing one constant over-serves it — `defender/SKILL.md` is 33 KB
-    and most of `docs/` clears 8 KB — so `_cap_for` applies the capture ceiling only where a
-    capture is being re-read."""
+    Separate from the 8 KB capture ceiling, which only needs to apply when a captured payload
+    is re-read (so a read cannot recover what the capture view withheld); authored docs are
+    often larger."""
     return env_int("DEFENDER_AUTHORED_READ_MAX_CHARS", 65536)
 
 
@@ -88,9 +81,7 @@ def _cap_for(p: Path) -> int:
 
 
 def _bounded_read(
-    # `path` is not read by this body — it is kept for the call sites that pass it
-    # positionally, and defaulted so a lane with no file to name (the bash return) does not
-    # have to invent one.
+    # `path` is unused; kept for positional callers and defaulted for the bash lane.
     text: str, path: str = "", *, cap: int, filter_hint: str, read_tool: str = "read_file",
     subject: str = "This file",
 ) -> str:
@@ -121,24 +112,17 @@ class AgentDeps:
     run_id: str
     policy: permission.AgentPolicy = field(kw_only=True)
     cwd_anchor: Path = field(kw_only=True)
-    #: `BoxLike`, not the concrete `BoxExecutor` (#1067): the only thing production code ever
-    #: calls on this field is `run_parsed(...)` (`runtime/tools/_bash.py`), and a strict field
-    #: typed to the concrete class refused every test double that duck-types a box instead of
-    #: constructing a real one with a fake `transport`. See `BoxLike`'s own comment.
+    #: `BoxLike`, not `BoxExecutor`: only `run_parsed(...)` is called, and a strict concrete
+    #: type would refuse duck-typed test doubles.
     box: box_mod.BoxLike = field(kw_only=True, default_factory=box_mod.BoxExecutor)
     budget_started_monotonic: float = field(kw_only=True, default_factory=time.monotonic)
-    #: `SkipValidation` on this and `review_state` (#1067): each is THE ONE mutable container
-    #: a frozen deps carries, and `dataclasses.replace(deps, ...)` — the driver's sub-agent
-    #: deps, `LeadStop`'s copy — has to hand the SAME object to the copy, or the turn count,
-    #: the raised asks and the authored paths fork silently between the two. A validated
-    #: `set[Path]`/`dict` field is rebuilt on every construction, which is exactly that fork.
+    #: `SkipValidation` on this and `review_state`: mutable containers shared across
+    #: `dataclasses.replace` copies. Validation would rebuild them, silently forking state.
     authored_paths: Annotated[set[Path], SkipValidation] = field(
         kw_only=True, default_factory=set, compare=False, repr=False
     )
-    #: The gate's per-run mutable state (turn count, raised-lead ids, the terminal-close
-    #: flag) — ONE mutable container, following the `authored_paths` precedent, since
-    #: `AgentDeps` is frozen and cannot carry a plain int counter.
-    #: `defender.runtime.challenge_gate.ReviewState.of(deps)` owns what lives inside it.
+    #: The review gate's per-run mutable state; `challenge_gate.ReviewState.of(deps)` owns its
+    #: contents. A container because `AgentDeps` is frozen.
     review_state: Annotated[dict, SkipValidation] = field(
         kw_only=True, default_factory=dict, compare=False, repr=False
     )
@@ -175,11 +159,9 @@ class AgentDeps:
 
 @model(frozen=True)
 class DeadEnd:
-    """A guard's stop, as the two strings main is shown: the request the guard refused
-    (`reason`) and the fixed sentence handing the decision to main (`escape`). Strings and
-    not the `GatherDeadEnd` that carried them: an exception object pins its traceback — the
-    tripping call's whole frame chain, `lead_rows`' list included — for as long as it is
-    held, and this record is held for the rest of the lead's run."""
+    """A guard's stop, as the two strings main is shown: the refused request (`reason`) and
+    the sentence handing the decision to main (`escape`). Strings rather than the exception,
+    whose traceback would pin the tripping frames for the rest of the lead."""
 
     reason: str
     escape: str
@@ -187,20 +169,12 @@ class DeadEnd:
 
 @model
 class LeadStop:
-    """Whether the HARNESS stopped this lead's querying, and by which of its two stops.
+    """Whether the harness stopped this lead's querying, and by which of its two stops.
 
-    ONE MUTABLE OBJECT PER LEAD, written by whichever frame stops the lead and read once,
-    by `_run_gather`, after the run: a GUARD closes the query door (`dead_end`) from inside
-    the query tool when a repeat or a rejection budget trips, and answers every later `query`
-    call from it; the request CEILING marks itself (`ceiling`) from `RequestCeiling`'s round
-    hook, at the moment it tells the model its final request is the summary. Mutable inside
-    a frozen `GatherDeps` for the reason `review_state` is: the deps are copied by
-    `replace`, and pydantic-ai's hook signatures give a tool no other way to hand a fact
-    back up.
-
-    Both stops are recorded HERE, at the moment they happen, so nothing downstream has to
-    infer afterwards whether a lead that ended cleanly was told to stop — the frame that
-    told it wrote it down."""
+    One mutable object per lead, read once by `_run_gather` after the run. A guard sets
+    `dead_end` from the query tool (repeat or rejection budget) and answers later `query`
+    calls from it; the request ceiling sets `ceiling` when it tells the model its final
+    request is the summary. Mutable because hooks have no other way to hand a fact back up."""
 
     dead_end: DeadEnd | None = None
     ceiling: int | None = None
@@ -211,8 +185,7 @@ class LeadStop:
         return self.dead_end is not None
 
     def close_door(self, dead_end: DeadEnd) -> None:
-        """First close wins: two siblings tripping in one round keep the first's reason, and
-        the notice main reads names the request that actually stopped the lead."""
+        """First close wins, so main's notice names the request that actually stopped the lead."""
         if self.dead_end is None:
             self.dead_end = dead_end
 
@@ -227,29 +200,21 @@ class GatherDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.GATHER
 
     lead_id: str | None = None
-    #: `None` outside a dispatch (deps bound by hand, lead zero's harness-driven calls): a
-    #: guard's dead end then unwinds as the exception it always was, because no frame would
-    #: read the record. `_run_gather` is the one place that makes one, and the one that reads
-    #: it. The request ceiling itself is not here: it is `ctx.usage_limits.request_limit`,
-    #: the number the run was handed, and every hook reads it there.
+    #: Made and read by `_run_gather`. `None` outside a dispatch (e.g. lead zero's harness
+    #: calls), where a guard's dead end unwinds as an exception instead.
     stop: LeadStop | None = field(kw_only=True, default=None, compare=False, repr=False)
 
 
 def _record_lesson_load(
     deps: AgentDeps, path: Path, corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA, *, kind: str,
 ) -> None:
-    """The ONE writer of `lessons_loaded.jsonl` — a row per lesson that reached an agent.
+    """The one writer of `lessons_loaded.jsonl` — a row per lesson that reached an agent.
 
-    @owns kind — `hooks.record_lesson_load.LOAD_KIND_READ` when the model chose to open the
-    lesson (`_gated_read`), `LOAD_KIND_PUSH` when the runtime put it in front of MAIN without
-    a read (the write-return recall and the compaction fold, both through
-    `runtime/lessons_push.record`). Required and keyword-only: a default would let a new
-    call site record a push as a read, or the reverse, with nothing in the diff saying so.
-    @owns role — the calling deps' `AgentRole` value, so a row says WHICH agent the lesson
-    reached: a GATHER read and a MAIN read used to write the same row (#936).
+    @owns kind — `LOAD_KIND_READ` when the model opened the lesson, `LOAD_KIND_PUSH` when the
+    runtime pushed it. Keyword-only with no default, so a new call site must choose.
+    @owns role — the calling deps' `AgentRole` value, so a row says which agent it reached.
 
-    Legacy rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`
-    rather than assuming a read.
+    Older rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`.
     """
     if kind not in _LOAD_KINDS:
         raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")

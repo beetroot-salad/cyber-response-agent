@@ -36,6 +36,7 @@ reaches the check the grant is validated by.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 import json
@@ -53,6 +54,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.registry import EstateError, WorldRegistry  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
+from defender._episode_handle import Episode  # noqa: E402
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     PASSTHROUGH,
@@ -209,18 +211,38 @@ def fake_estate(tmp_path: Path) -> Path:
     return adapters
 
 
+#: The open `Episode` handles of the running test, closed when it ends (`_held_episodes`).
+_HELD: list[contextlib.ExitStack] = []
+
+
+@pytest.fixture(autouse=True)
+def _held_episodes():
+    """Scope every handle `primed_ledger` opens to the test that asked for it."""
+    with contextlib.ExitStack() as stack:
+        _HELD.append(stack)
+        try:
+            yield
+        finally:
+            _HELD.pop()
+
+
 def primed_ledger(tmp_path: Path, name: str = "served.jsonl") -> Ledger:
     """A ledger over `name`, with the primed capture beside it that #947 makes REQUIRED.
 
     Empty, because these arms are not about the capture: what the base file has to be here is
     a FILE, which is the ordering guarantee `Ledger.__post_init__` enforces — the episode was
     primed before any sibling opened a ledger over it.
+
+    #1133 rev 2: a ledger is built only by `Ledger.for_world` over an open `Episode` (O4.8.1);
+    the handle stays open for the rest of the test (the ledger writes through it) and is closed
+    by `_held_episodes`.
     """
     served = tmp_path / SERVED_DIRNAME
     served.mkdir(parents=True, exist_ok=True)
     base = served / BASE_FILENAME
     base.touch()
-    return Ledger(served / name, base_path=base)
+    episode = _HELD[-1].enter_context(Episode.open(tmp_path))
+    return Ledger.for_world(episode, name.removesuffix(".jsonl"))
 
 
 def fake_docker(tmp_path: Path) -> Path:

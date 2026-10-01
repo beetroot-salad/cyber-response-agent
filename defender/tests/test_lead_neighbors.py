@@ -1,10 +1,4 @@
-"""Top-k neighbor scorer — tokenizer units + regression-pin fixture.
-
-The fixture pins the scorer's current top-3 output for each bundled
-catalog template. A tokenizer / IDF / weighting change that re-ranks
-any case shows up as a test failure — the human author decides
-whether the change is desired.
-"""
+"""Top-k neighbor scorer — tokenizer units, catalog loading and the query-variant extractor."""
 from __future__ import annotations
 
 import pytest
@@ -51,105 +45,12 @@ def test_tokenize_query_preserves_hyphenated_index_name():
 
 
 
-REGRESSION_FIXTURE: tuple[dict, ...] = (
-    {
-        "case_id": "auth-events",
-        "query_id": "wazuh.auth-events",
-        "expected_top3": (
-            "wazuh.sudo-commands",
-            "wazuh.file-integrity-changes",
-            "wazuh.recent-rule-fires",
-        ),
-    },
-    {
-        "case_id": "sudo-commands",
-        "query_id": "wazuh.sudo-commands",
-        "expected_top3": (
-            "wazuh.file-integrity-changes",
-            "wazuh.auth-events",
-            "wazuh.recent-rule-fires",
-        ),
-    },
-    {
-        "case_id": "file-integrity-changes",
-        "query_id": "wazuh.file-integrity-changes",
-        "expected_top3": (
-            "wazuh.sudo-commands",
-            "wazuh.recent-rule-fires",
-            "wazuh.agent-alerts-in-window",
-        ),
-    },
-    {
-        "case_id": "recent-rule-fires",
-        "query_id": "wazuh.recent-rule-fires",
-        "expected_top3": (
-            "wazuh.dns-query-history",
-            "wazuh.file-integrity-changes",
-            "wazuh.agent-alerts-in-window",
-        ),
-    },
-    {
-        "case_id": "agent-alerts-in-window",
-        "query_id": "wazuh.agent-alerts-in-window",
-        "expected_top3": (
-            "wazuh.falco-rules-by-container",
-            "wazuh.recent-rule-fires",
-            "wazuh.file-integrity-changes",
-        ),
-    },
-    {
-        "case_id": "dns-query-history",
-        "query_id": "wazuh.dns-query-history",
-        "expected_top3": (
-            "wazuh.recent-rule-fires",
-            "wazuh.file-integrity-changes",
-            "wazuh.agent-alerts-in-window",
-        ),
-    },
-)
-
-
 @pytest.fixture(scope="module")
 def catalog():
     cat = ln.load_catalog()
     if not cat:
         pytest.skip("catalog not present in this checkout")
     return cat
-
-
-@pytest.fixture(scope="module")
-def idf(catalog):
-    return ln.build_idf(ln._all_query_variants(catalog))
-
-
-_V2_CATALOG_PENDING = pytest.mark.skip(
-    reason="regression baseline pinned against the v1 wazuh catalog (stripped on "
-    "defender-v2-env); regenerate against v2 templates once the catalog is populated"
-)
-
-
-@_V2_CATALOG_PENDING
-@pytest.mark.parametrize("case", REGRESSION_FIXTURE,
-                         ids=[c["case_id"] for c in REGRESSION_FIXTURE])
-def test_top3_pinned(catalog, idf, case):
-    neighbors = ln.top_k_neighbors(case["query_id"], catalog, idf=idf, k=3)
-    actual = tuple(n.template_id for n in neighbors[:3])
-    expected = tuple(case["expected_top3"])
-    assert actual == expected, (
-        f"top-3 changed for {case['case_id']}:\n"
-        f"  expected: {expected}\n"
-        f"  actual:   {actual}"
-    )
-
-
-@_V2_CATALOG_PENDING
-def test_cli_firewall(catalog):
-    """A wazuh template's neighbors must all be wazuh (CLI firewall)."""
-    neighbors = ln.top_k_neighbors("wazuh.auth-events", catalog, k=10)
-    for n in neighbors:
-        assert n.template_id.startswith("wazuh."), (
-            f"CLI firewall leaked: {n.template_id} returned for wazuh source"
-        )
 
 
 def test_unresolved_query_id_raises(catalog):

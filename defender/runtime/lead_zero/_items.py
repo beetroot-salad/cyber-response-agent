@@ -1,19 +1,7 @@
-"""Harness-executed lead-0.
+"""The two turn-zero lead-0 items: ancestor resolution (item 1) and correlation (item 3).
 
-Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
-and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
-run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
-the review gate cite them like any model-dispatched lead.
-
-This module owns every backend call, run-dir write and dispatch those two items add;
-``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
-returned block as one more ORIENT section.
-
-The two turn-zero items themselves: ancestor resolution, and correlation.
-
-`_resolve_item1` is the one function in the tree that suppresses all three complexity
-limits at once, and its own comment says why — keeping it here rather than in the facade
-is what makes that visible.
+Both write into the run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so
+the learning loop and the review gate cite them like any model-dispatched lead.
 """
 from __future__ import annotations
 
@@ -44,19 +32,12 @@ _DS_RE = re.compile(r"^\.ds-(?P<name>.+)-[^-]+-\d{4}\.\d{2}\.\d{2}-\d+$")
 
 
 class _NarrowedRegistry(VerbRegistry):
-    """Item 3's registry: the production registry's verb RESOLUTION under the correlation
-    lead's own, narrower grant — so `esql` (never `confine_index`'d) is denied at the grant
-    check rather than reaching a transport.
+    """Item 3's registry: the production registry's verb resolution under the correlation
+    lead's narrower grant, so `esql` (never `confine_index`'d) is denied at the grant check
+    rather than reaching a transport.
 
-    A thin re-grant wrapper, at module scope so a test can build one over a planted table
-    (#999): the grant it is handed is `correlation_grant(rows)`, and the production dispatch
-    hands it the grant its `CorrelationDispatch` carries — the same projection over the
-    shipped rows, checked at run start against the template it binds (#1003).
-
-    `grant_home` names the table for the same reason `ModuleVerbRegistry` does: since #999
-    the grant here is the table's projection too, so a refusal that points at the file points
-    at the one place that can widen or withdraw it. It is the INNER registry's pointer — the
-    same run's resolved table (#1106) — never a fixed path.
+    `grant_home` is the inner registry's pointer to the run's resolved table, so a refusal
+    names the one place that can widen the grant.
     """
 
     def __init__(self, inner: VerbRegistry, grant: VerbGrant):
@@ -75,9 +56,8 @@ class _NarrowedRegistry(VerbRegistry):
 
 
 def _map_backing_index(index: str) -> str:
-    """An open, bounded rewrite from a concrete `.ds-<name>-<namespace>-<date>-<generation>`
-    backing index to the datastream pattern it belongs to, never a hardcoded substring table.
-    A no-match passes the string through UNCHANGED so `confine_index`'s gate refuses it."""
+    """Map a `.ds-<name>-<namespace>-<date>-<generation>` backing index to its datastream
+    pattern. A no-match passes through unchanged so `confine_index`'s gate refuses it."""
     if not isinstance(index, str):
         return index
     m = _DS_RE.match(index)
@@ -87,11 +67,9 @@ def _map_backing_index(index: str) -> str:
 
 
 async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict, int]], int, bool]:
-    """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one per
-    ancestor. Returns `(docs, requested_count, truncated_any)` where each doc is paired with
-    the queries-table `seq` of the call that returned it (the elision pointer's target).
-    `issue` is the caller's budget-gated, success-tracking call wrapper: it returns
-    `(envelope, seq)` and is told whether this call could produce an ancestor at all."""
+    """Fetch ancestors with one call per distinct mapped backing index. Returns
+    `(docs, requested_count, truncated_any)`, each doc paired with the queries-table `seq` of
+    the call that returned it. `issue` is the caller's budget-gated call wrapper."""
     by_index: dict[str, list[str]] = {}
     for a in ancestors:
         aid = a.get("id")
@@ -120,7 +98,7 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
     return docs, sum(len(v) for v in by_index.values()), truncated_any
 
 
-async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
+async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — shell fetch, group/fallback branches and per-call budget gating are one resolution
     *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
     capture: Any, env: dict, limits: dict, tenant: Any,
 ) -> tuple[str, str]:
@@ -130,13 +108,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
     })
     if claimed != CLAIMED:
-        # Someone else already owns L0 (a planted collision): degrade rather than issue backend
-        # calls or append a second, inconsistent `:L findings` row under an id this call does
-        # not own. Mirrors `prepare_correlation_lead`'s L3 collision arm.
-        #
-        # `!= CLAIMED` and not `== ALREADY_CLAIMED`: a claim that could not be WRITTEN leaves
-        # this frame owning exactly as little as a collision does, and the harness has no more
-        # right than the model to run a lead with no leads row.
+        # Degrade rather than issue calls or append rows under an id this call does not own.
+        # A claim that failed to write is treated the same as a collision.
         return (_unavailable(
             f"{L0} is already claimed by something else on this run dir"
             if claimed == ALREADY_CLAIMED else f"{L0}'s leads row could not be claimed"
@@ -161,28 +134,17 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     ledger = _CallLedger(run_dir)
     issued_any = False
     answered_any = False
-    # COUNTS, not booleans: one batched call per distinct backing index means "an ancestor call
-    # answered" and "the ancestor calls answered" are different facts, and the rendering arms
-    # below need both.
+    # Counts, not booleans: with one call per backing index, some ancestor calls can answer
+    # while others fail, and the rendering arms below distinguish the two.
     ancestor_issued = 0
     ancestor_answered = 0
 
     async def _issue(verb: str, params: dict, *, ancestor: bool) -> tuple[dict | None, int]:
-        """`ancestor=False` marks a call that CANNOT produce an ancestor document — item 1's
-        opening by-`alert_id` fetch of the alert's own shell.
+        """`ancestor=False` marks the alert-shell fetch, which cannot produce an ancestor.
 
-        The discriminator matters because the shell fetch answers on every alert with a
-        resolvable `alert_id`: a single success flag set from every call is therefore always
-        true, `STATUS_FAILED` becomes unreachable however the ancestor calls ended, and an
-        outage on them renders as `_(unavailable: … found nothing)` — an absence of ancestors,
-        which is triage evidence, asserted over a backend that never answered.
-
-        `ancestor` has NO DEFAULT deliberately: a call site added later that forgets it must
-        not silently read as an ancestor call.
-
-        `answered_any` is tracked beside it because "no ancestor call was made" is not by
-        itself a resolved absence: when the shell fetch is the ONLY call and it failed, the
-        group-id branch was never reachable, so nothing was established."""
+        Without the split, the shell fetch's success would mask an outage on every ancestor
+        call and render it as "found nothing", a false absence. `ancestor` has no default so
+        a new call site must choose."""
         nonlocal issued_any, answered_any, ancestor_issued, ancestor_answered
         issued_any = True
         if ancestor:
@@ -194,8 +156,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
             answered_any = True
             if ancestor:
                 ancestor_answered += 1
-        # The seq is read AFTER the call, off the row it just wrote: a document's elision
-        # pointer must name the payload of the fetch that returned it, not its own position.
+        # Read after the call: the elision pointer names the payload of the fetch that
+        # returned the document.
         return envelope, _last_row_seq(run_dir, L0)
 
     shell: dict | None = None
@@ -237,11 +199,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     docs = _sort_chrono(docs)
 
-    # One call per DISTINCT MAPPED BACKING INDEX means a resolution can have both an ancestor
-    # call that answered and one that faulted. Gating the absence sentence below on "at least
-    # one answered" makes an alert whose ancestors span two indices — the first matching
-    # nothing, the second faulting — render "the resolution reached the backend and found
-    # nothing": a resolved absence claimed over an index that never answered.
+    # A partial failure must not render as a resolved absence over an index that never
+    # answered.
     ancestor_failed = ancestor_issued - ancestor_answered
 
     body_lines = []
@@ -249,33 +208,23 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         for doc, seq in docs:
             body_lines.append(_render_doc(doc, L0, seq))
     elif ancestor_issued and not ancestor_answered:
-        # Not "every backend call this resolution attempted failed": the shell fetch answered,
-        # and only the calls that could have produced an ancestor did not.
+        # The shell fetch answered; only the ancestor calls failed.
         body_lines.append(_unavailable(
             "every backend call that could have resolved an ancestor failed"))
     elif not answered_any:
-        # No ancestor call was ISSUED and the only call this resolution made — the shell fetch
-        # whose group id decides whether an ancestor branch exists at all — failed. Nothing
-        # answered, so the group branch was never reachable and no absence was established;
-        # without this arm the run renders `_(unavailable: … found nothing)`, a false claim
-        # over a silent backend.
+        # Only the shell fetch ran and it failed, so no absence was established.
         body_lines.append(_unavailable("every backend call this resolution attempted failed"))
     elif ancestor_failed:
-        # SOME answered and some did not, and nothing came back from the ones that did: the
-        # absence holds only over the indices actually reached, never over the alert.
+        # The absence holds only over the indices actually reached.
         body_lines.append(_unavailable(
             f"{ancestor_failed} of {ancestor_issued} ancestor fetches failed; the rest "
             "reached the backend and found nothing"))
     else:
-        # Every ancestor call this resolution issued answered, and none matched — or the alert
-        # declared no usable ancestor and its shell answered with no group id, so there was no
-        # ancestor call to make. Both are a resolved absence, which is what this sentence says.
+        # Every ancestor call answered empty, or there was none to make: a resolved absence.
         body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
 
     if docs and ancestor_failed:
-        # The docs-present half of the same distinction. The count note below reads as "the
-        # backend did not have them"; this one says the other thing that can be true at the
-        # same time, and the two compose.
+        # Distinct from the count shortfall below, which reads as "the backend lacked them".
         body_lines.append(
             f"{SHORTFALL} {ancestor_failed} of {ancestor_issued} ancestor fetches failed — "
             "the documents above are what the rest returned)"
@@ -289,17 +238,10 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     text = "\n\n".join(body_lines)
 
-    # FAILED when no call that could have contributed answered. `ancestor_issued` guards the
-    # ancestor half so an alert with nothing to ask for stays EMPTY: a resolution that issued
-    # no ancestor call has no failed call to report. The `answered_any` half keeps a resolution
-    # whose SHELL FETCH was its only call, and failed, out of EMPTY — it asked nothing further
-    # because the answer that would have told it what to ask never came.
-    #
-    # A PARTIAL ancestor failure stays EMPTY/TRUNCATED rather than earning a fifth status: the
-    # over-claim it could produce is in what MAIN is TOLD, which the arms above now say, while
-    # the status has exactly two consumers — the dispatch gate, which refuses FAILED and EMPTY
-    # alike, and `_user_prompt`, which forwards it. Moving a partial failure to FAILED would
-    # discard the documents the calls that DID answer returned.
+    # FAILED when no call that could have contributed answered (including a failed shell fetch
+    # that was the only call); an alert with nothing to ask for stays EMPTY. A partial ancestor
+    # failure stays EMPTY/TRUNCATED so the documents that did return are kept; the text above
+    # already tells MAIN about the failures.
     if not ancestor_answered and (ancestor_issued or not answered_any):
         status = STATUS_FAILED
     elif not docs:
@@ -317,14 +259,9 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 def _correlation_contract(
     alert: dict, ancestor_block: str, template_id: str,
 ) -> tuple[str, list[str]] | None:
-    """The contract carries item 1's RESOLVED DOCUMENTS and the lead chooses the correlation
-    axes off them, and names `template_id` — the id the run-start check resolved in the
-    lead's own index — as the template to bind.
-
-    What gates the dispatch is item 1 resolving documents, which `prepare_correlation_lead`'s
-    status check already decides — there is no entity-emptiness arm here. `GatherRequest`
-    carries `goal` and `what_to_summarize` and nothing else, so handing over a harness-extracted
-    entity triple instead would ask the lead to correlate on entities it had never seen."""
+    """Build the correlation lead's goal and summary asks. The goal carries item 1's resolved
+    documents so the lead chooses the correlation axes from them, and names `template_id` as
+    the template to bind. Returns None when the alert has no parseable timestamp."""
     ts = alert.get("alert_timestamp")
     if not isinstance(ts, str) or not ts.strip():
         return None
@@ -356,36 +293,15 @@ def _correlation_contract(
         "contract needs. The template says where its count is read; each count below is that "
         "number, not the size of the returned sample."
     )
-    # Vendor-neutral by construction (#1003): the goal above names no field, no index and no
-    # envelope shape. The three vendor facts it used to state — search the ALERTS INDEX only,
-    # that a sequence alert's ancestors carry `kibana.alert.rule.*`, and that the count is the
-    # envelope's `total` which the `hits` cap does not bound — are the TEMPLATE's to say (its
-    # Goal and Pitfalls), where every gather lead binding it reads them, and the lead is told
-    # to read the template first. What stays here is the frame that is true of any backend:
-    # prior alerts not telemetry, breadth over this alert's own rule, bind the configured id.
+    # The goal is vendor-neutral: field names, index choice and where the count is read are the
+    # template's to say, and the lead is told to read it first.
     #
-    # Two COUNT dimensions, each answerable by ONE call of the granted verb, plus a third line
-    # that is not a count. A fourth — "whether any correlated alert is already benign-explained" — is
-    # deliberately absent: `kibana.alert.workflow_status` is `"open"` on every alert this
-    # environment produces, and the systems that could carry a benign explanation (`ticket`,
-    # `change-mgmt`) are outside this lead's grant, so it has exactly one possible answer.
-    #
-    # "across any rule", not "same-signature": the goal says do NOT narrow to this alert's own
-    # rule, and a per-rule breakdown over the 8 installed rules is 8-16 `alerts` calls against a
-    # request limit of 8 — the one verb that could group-by in a single call (`esql`) is exactly
-    # what this lead's grant withholds for index confinement.
-    #
-    # Each dimension names its ENTITY SCOPE, and as SCOPED/UNSCOPED rather than
-    # "on-host"/"fleet-wide". Read literally, "alerts fleet-wide" counts every alert the
-    # environment emitted — a number about the SOC, not this alert — and the host-centric
-    # spelling collapses on any source whose alerts all report the same shared host: the
-    # on-host count degenerates to "every alert this source emitted" and the fleet-wide one has
-    # nothing left to bind. Scoped/unscoped asks for the same two measurements without naming
-    # which field carries them.
-    #
-    # The third line exists because the lead CHOOSES what the first two are counted over: a
-    # number whose predicate MAIN cannot see is not a measurement MAIN can weigh, and the prose
-    # summary is the only thing that reaches it.
+    # Two counts, each answerable by one call of the granted verb. "Already benign-explained" is
+    # omitted: workflow_status is always "open" here and ticket/change-mgmt are outside the
+    # grant. "Across any rule" because a per-rule breakdown would exceed the request limit
+    # without `esql`, which the grant withholds. Scoped/unscoped rather than on-host/fleet-wide,
+    # which collapses when every alert reports the same shared host. The third line is there
+    # because MAIN cannot weigh a count whose predicate it cannot see.
     what = [
         "the count of alerts in the window scoped to the entities you judged central — one "
         "call, across any rule (the count the template says to read, not the sample size)",
@@ -404,10 +320,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     budget_started_monotonic: float = 0.0, catalog: str | None,
     dispatch: CorrelationDispatch, tenant: Any,
 ) -> str | None:
-    """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
-    shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
-    `prepare_correlation_lead` already claimed the leads row synchronously, before MAIN's first
-    turn.
+    """The async half of item 3: dispatch the gather subagent for `l-00c` through
+    `tools_gather._run_gather` with `pre_claimed=True` (`prepare_correlation_lead` already
+    claimed the row).
 
     `dispatch` is the identity the run-start check resolved (#1003): the system this lead is
     dispatched on and cache-keyed by, and the grant that narrows its registry. Both are read
@@ -422,24 +337,15 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from ..tools import GatherDeps
     from ..tools_gather import GatherRequest, _run_gather
 
-    # `prepare_correlation_lead` gated on this BEFORE claiming the row, so a dispatch reached
-    # with the table granting the lead no query verb is a caller that skipped the synchronous
-    # half. Not a fault worth a raise — the same answer that half gives: nothing to dispatch.
-    #
-    # NOT named `system`: `gather_factory` below takes a parameter of that name (the one
-    # `_run_gather` hands it, which is what the prompt-cache key is derived from). The two
-    # carry the same string today, and a local that shadowed the parameter would let a later
-    # edit swap the cache lane with nothing to notice it.
+    # Not named `system`: that would shadow `gather_factory`'s parameter, which keys the
+    # prompt cache.
     dispatch_system = dispatch.system
     if dispatch_system is None:
         return None
 
     registry = _NarrowedRegistry(verbs, dispatch.grant)
 
-    # The SAME spelling `_run_gather` derives for the agent id it hands `gather_factory` and
-    # `stamp_terminator`. Spelled as a literal here, the session this frame opens and the one
-    # those two callbacks key would drift apart the moment the prefix moved, with nothing to
-    # catch it — the store would carry an orphan row.
+    # Must match the agent id `_run_gather` derives, or the store gets an orphan session row.
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{L3}"
     gather_session_id: str | None = None
     if store is not None:
@@ -450,10 +356,8 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
         extra: list = []
         if store is not None and gather_session_id is not None:
-            # `request_limit` arrives from `_run_gather` — the value it is about to enforce —
-            # rather than being read again from `CORRELATION_REQUEST_LIMIT` here: the recorder
-            # withholds the doomed round by comparing against it, so it must not measure a
-            # ceiling this dispatch did not receive.
+            # Use the limit `_run_gather` enforces, not a re-read constant: the recorder
+            # compares against it to withhold the doomed round.
             extra = _gather_extra_capabilities(
                 store, gather_session_id, _agent_id, request_limit=request_limit,
             )
@@ -461,14 +365,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
             verb_grant=dispatch.grant,
-            # Same per-system cache-key convention as the model-dispatched path
-            # (`driver.py::_build_gather`).
-            #
-            # KNOWN MISMATCH, not fixed here: this key is shared with MAIN's own gather leads
-            # on the same system, and the prefix behind it is NOT the same text — the template
-            # index is grant-filtered, so this role renders one template where role `gather`
-            # renders fourteen. One lane, two prefixes. The fix is to key on role as well as
-            # system; that changes `driver.py`'s convention too, so it is not made here.
+            # Same per-system cache key as `driver.py::_build_gather`. Known mismatch: the
+            # grant-filtered template index makes this prompt prefix differ from MAIN's gather
+            # leads on the same key; fixing it means keying on role in `driver.py` too.
             cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
@@ -482,11 +381,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
     gbase = bind(gather_def_for(dispatch.grant), run_dir, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
-    # Thread the RUN's own budget-clock origin through, the way `_run_gather`'s model-dispatched
-    # path does. Otherwise `bind`'s `AgentDeps` default (`default_factory=time.monotonic`)
-    # stamps a FRESH origin whenever this coroutine happens to start, and under
-    # `DEFENDER_BUDGET_ENFORCE` the correlation lead's wall-clock enforcement measures elapsed
-    # time from its own start rather than the run's true remaining budget.
+    # Carry the run's budget-clock origin; `bind`'s default would start a fresh clock and
+    # overstate the remaining wall-clock budget.
+
     gdeps = replace(
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
         tenant=tenant,

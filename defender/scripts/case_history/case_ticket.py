@@ -15,35 +15,30 @@ from defender._run_paths import RunPaths
 from defender.runtime.tenant_settings import read_regular_bytes
 
 
-#: The mapping's path inside a tenant's `settings/` folder (#1106). Every reader is HANDED the
-#: run's folder — nothing here finds it from the process environment or this file's location.
+#: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
 _MAPPING_RELPATH = "systems/case-history/mapping.yaml"
 
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
 
-#: #767 D3/O8 — ONE bound, 4096 UTF-8 BYTES on the rendered comment body. The cut rounds DOWN
-#: to the last whole character and the ellipsis sits INSIDE the bound. Retires the old
-#: `_TICKET_REASON_MAX` (472 characters), sized against the `close.resolution` field D5 deletes.
+#: The one bound on the rendered comment body, in UTF-8 bytes. The cut rounds down to a whole
+#: character and the ellipsis fits inside the bound.
 WIRE_BOUND_BYTES = 4096
 _ELLIPSIS = "…"
 
-#: D3's empty-narrative marker — rendered in the narrative segment alone.
+#: The empty-narrative marker, rendered in the narrative segment alone.
 NO_NOTES = "(no notes)"
 
-#: D2 — a run whose report yields no parsable disposition still comments, with this fixed host
-#: sentence and no narrative (§7 R10/FK06). Never built as a bespoke emptiness check: this
-#: branch is reached only through `_report.read_report`'s own verdict (`read_case_record`
-#: below), via `ReportNotParsable`.
+#: A run whose report yields no parsable disposition still comments, with this fixed sentence
+#: and no narrative. Reached only via `ReportNotParsable`, i.e. `_report.read_report`'s own
+#: verdict, not a separate emptiness check.
 UNREADABLE_COMMENT_BODY = (
     "No disposition could be recorded for this case: report.md was missing or carried no "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "parsable disposition to record."
 )
 
-#: #1047 O2 — a run cut short with no verdict (an `aborted` exit, or a forced-close-set exit
-#: whose own forced report is unusable) leaves the case open and asks a person to escalate.
-#: `{exit}` is the exit class the driver stamped; it is the one rendered value, and it comes
-#: from the driver's closed vocabulary, never from anything the box wrote.
+#: A run cut short with no verdict leaves the case open and asks a person to escalate.
+#: `{exit}` is the driver's exit class, from a closed vocabulary — never box-written text.
 ESCALATION_COMMENT_BODY = (
     "Investigation ended without a verdict (exit: {exit}) — the environment appears "
     "unreachable or the investigation could not complete automatically. Escalate for manual "
@@ -56,8 +51,8 @@ class CaseTicketError(Exception):
 
 
 class ReportNotParsable(CaseTicketError):
-    """`read_case_record`'s own signal that `_report.read_report` found no disposition — the
-    unreadable-report branch, never a mapping or template defect (§7 R10)."""
+    """`_report.read_report` found no disposition — the unreadable-report branch, never a
+    mapping or template defect."""
 
 
 @model(frozen=True)
@@ -162,13 +157,11 @@ def _thawed(mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:
-    """The one invariant the whole gate rests on, checked where EVERY reader of the mapping
-    passes — the loader — rather than in one consumer: nothing the host writes may put a
-    case into the released state. `open.status` must be a LITERAL (a `{placeholder}` would
-    let alert text pick the status) and must differ from `released.status` (a case would
-    open already released, and the writer would then refuse every record on it). Each is
-    checked only when its section is present; the sections' own presence is each consumer's
-    question (`release_predicate`, `_comment_section`)."""
+    """The invariant the gate rests on, checked in the loader so every reader gets it: nothing
+    the host writes may put a case into the released state. `open.status` must be a literal (a
+    `{placeholder}` would let alert text pick the status) and must differ from
+    `released.status` (cases would open already released). Each is checked only when present;
+    section presence is each consumer's concern."""
     open_status = _dig(mapping, "open.status")
     if open_status is not None and (not isinstance(open_status, str) or not open_status.strip()):
         raise CaseTicketError("case-history mapping's `open.status` must be a non-empty string")
@@ -197,10 +190,8 @@ def _dig(obj: Any, dotted: str) -> Any:
 
 
 def _format(template: str, ctx: dict[str, str], where: str) -> str:
-    """`str.format_map` with every fault it can raise on a bad TEMPLATE (a stray `{`, a
-    positional `{0}`, an attribute/index path) folded into `CaseTicketError` — the mapping is
-    an operator file, and a broken one must refuse-and-receipt like every other mapping fault,
-    never escape as a bare `ValueError` into the post-step's catch-all."""
+    """`str.format_map`, with every bad-template fault folded into `CaseTicketError` so a
+    broken operator mapping refuses with a receipt like any other mapping fault."""
     try:
         return template.format_map(ctx)
     except KeyError as e:
@@ -334,17 +325,13 @@ def signature_label(alert: dict[str, Any], *, mapping: CaseMapping | CaseTicketE
 
 
 # --------------------------------------------------------------------------------------------
-# D3 — the comment renderer and D1's mapping accessors
+# The comment renderer and the mapping accessors
 # --------------------------------------------------------------------------------------------
 
-# Not a document's own fence: this strips an ATTACKER-PLANTED delimiter from free text (never
-# required to start with a fence), the same reasoning the retired `_sanitize_ticket_reason`
-# carried for the same regex. A STANDALONE line (S4): three dashes and nothing else but
-# whitespace on either side — an indented fence is still a fence, while a `----` rule or a
-# `--- | ---` table row is ordinary markdown and must survive. Line boundaries are normalised
-# first (`_LINE_BREAKS`): a fence behind a bare `\r` or a Unicode line separator is a
-# standalone line to any UI that breaks on those, so it is one here too.
-_FENCE_SPLIT = re.compile(r"(?m)^[ \t]*---[ \t]*$")  # lint-frontmatter: ok — see comment above
+# Strips an attacker-planted frontmatter delimiter from free text. Only a standalone `---`
+# line counts (indentation allowed); `----` rules and `--- | ---` table rows survive. Line
+# breaks are normalised first (`_LINE_BREAKS`), since a UI may break on `\r` or U+2028.
+_FENCE_SPLIT = re.compile(r"(?m)^[ \t]*---[ \t]*$")  # lint-frontmatter: ok — strips a planted delimiter from free text, not a frontmatter parse
 _LINE_BREAKS = re.compile("\r\n|\r|\u2028|\u2029|\x85|\x0b|\x0c")
 
 
@@ -359,8 +346,8 @@ def _comment_section(mapping: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_comment_author(mapping: dict[str, Any]) -> str:
-    """§7 R1/FAM-1: fail closed rather than send an unattributable comment. Stripped once,
-    like `released.status`, so a quoted scalar with stray whitespace names the same identity."""
+    """Fail closed rather than send an unattributable comment. Stripped, like
+    `released.status`."""
     author = _comment_section(mapping).get("author")
     if not isinstance(author, str) or not author.strip():
         raise CaseTicketError("case-history mapping's `comment.author` is missing or empty")
@@ -382,25 +369,20 @@ def _host_comment(body: str, mapping: CaseMapping | CaseTicketError) -> dict[str
 
 def _strip_planted_fence(text: str) -> str:
     """Strip everything from the first line-anchored `---` onward (a planted frontmatter
-    fence, second and later fences included — S4/`d_first_fence_wins`). Runs BEFORE the wire
-    bound (§7 FK07: strip first, then bound) — a cut inside `---foo` can only ever yield
-    `---…`, never a bare standalone fence. Applied to every free-text render slot
-    (`cause` as well as `narrative`): `cause` is host-composed from a closed vocabulary today
-    (c3) and never needs this in practice, but the guard is a property of the RENDERED SLOT,
-    not an assumption about who is allowed to have populated it."""
+    fence). Runs before the wire bound, so a cut cannot produce a bare fence. Applied to every
+    free-text slot, `cause` included, even though `cause` is host-composed today."""
     return _FENCE_SPLIT.split(_LINE_BREAKS.sub("\n", text))[0].strip()
 
 
 def _prepare_narrative(narrative: str) -> str:
-    """`_strip_planted_fence`, then substitute the no-notes marker for an empty result — the
-    narrative-only half of fence protection (the no-notes marker is `narrative`'s own)."""
+    """`_strip_planted_fence`, with the no-notes marker for an empty result."""
     stripped = _strip_planted_fence(narrative)
     return stripped if stripped else NO_NOTES
 
 
 def _bound_wire_bytes(text: str) -> str:
-    """§7 R2/FK01: ONE bound, 4096 UTF-8 bytes, on the whole rendered body. The cut rounds DOWN
-    to the last whole character and the ellipsis sits INSIDE the bound."""
+    """Bound the whole rendered body to `WIRE_BOUND_BYTES`, cutting at a whole character with
+    the ellipsis inside the bound."""
     encoded = text.encode("utf-8")
     if len(encoded) <= WIRE_BOUND_BYTES:
         return text
@@ -447,22 +429,19 @@ def escalation_comment_payload(
 
 
 # --------------------------------------------------------------------------------------------
-# D4 — the release predicate, safe by construction (§7 R1)
+# The release predicate
 # --------------------------------------------------------------------------------------------
 
 
 @model(frozen=True)
 class ReleasePredicate:
-    """A case is RELEASED when a person has moved it to the mapping's `released.status` —
-    the lifecycle state the vendor's own store enforces as a closed vocabulary. One question,
-    asked of the ticket alone: the status is compared exactly (the store canonicalises it;
-    nothing here trims, folds or tolerates), and an undecidable ticket — not an object, no
-    string status — reads as UNRELEASED, the direction that serves nothing (FAM-1).
+    """A case is released when a person has moved it to the mapping's `released.status`.
+    Compared exactly (the store canonicalises it); an undecidable ticket reads as unreleased,
+    the direction that serves nothing.
 
-    There is deliberately no "who wrote this comment" predicate beside it. A comment's
-    `author` is whatever the client that posted it chose to send, so a rule built on it was
-    never sound; the screen serves an unreleased ticket's comments to nobody and a released
-    ticket's comments whole, and the person's close is the one act that moves between them."""
+    There is no "who wrote this comment" predicate: a comment's `author` is whatever the
+    posting client sent. Unreleased tickets' comments are served to nobody, released ones'
+    whole."""
 
     released_status: str
 
@@ -494,9 +473,7 @@ def release_predicate(mapping: CaseMapping | CaseTicketError) -> ReleasePredicat
         raise CaseTicketError(
             "case-history mapping's `released.status` must be a non-empty string"
         )
-    # The open/released collision and the literal-status rule are the LOADER's
-    # (`_check_lifecycle`): they have to hold for the open leg too, not only for readers of
-    # this predicate.
+    # The open/released collision and literal-status rules live in `_check_lifecycle`.
     return ReleasePredicate(released_status=status.strip())
 
 
@@ -505,7 +482,7 @@ def is_released(ticket: Any, *, mapping: CaseMapping | CaseTicketError) -> bool:
 
 
 # --------------------------------------------------------------------------------------------
-# The seed-era helpers D5 deliberately leaves (RF1/g13) — no obligation here retires them.
+# Ticket field helpers
 # --------------------------------------------------------------------------------------------
 
 

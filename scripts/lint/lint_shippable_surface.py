@@ -30,9 +30,8 @@ from _gitscope import git_ignored
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The per-system carve-out is DERIVED from the resolver rather than re-typed here (#995) — see
-# `excluded_prefixes`. Importing the defender package from a lint gate is new; the alternative
-# was this file keeping its own idea of which systems exist, which is the defect being closed.
+# The per-system carve-out is derived from the resolver (see `excluded_prefixes`) rather than
+# re-typed here, so this file keeps no separate idea of which systems exist.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
@@ -41,29 +40,22 @@ from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E40
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 
-# Directories under defender/ that are allowed to contain vendor names
-# (they ARE per-vendor by design, or are not part of the shipped surface).
+# Directories under defender/ allowed to contain vendor names (per-vendor by design, or not
+# part of the shipped surface).
 EXCLUDED_PREFIXES = (
-    # Gather query templates are all per-system (+ the SCHEMA doc that documents
-    # them) — the per-vendor surface, not env-agnostic code.
+    # Gather query templates (+ their SCHEMA doc) are per-system.
     "defender/skills/gather/queries/",
-    # (No settings carve-out: since #1106 each tenant's per-system config, verb-disposition
-    # table and lead-zero config live under `knowledge/tenants/<id>/settings/` at the REPO
-    # ROOT, outside the scanned `defender/` surface — the shipped runtime still names no
-    # vendor, and the per-deployment data that must is simply not part of it.)
+    # No settings carve-out: per-tenant settings live under `knowledge/tenants/<id>/settings/`
+    # at the repo root, outside the scanned surface.
     "defender/fixtures/",
-    # Vendored golden RUNS replayed by the e2e harness (tests/test_replay_*) —
-    # captured from the v2 playground, so env-specific test data BY DESIGN, like
-    # defender/fixtures/ above; not the shipped vendor-neutral surface.
+    # Vendored golden runs replayed by the e2e harness: env-specific test data by design.
     "defender/fixtures-e2e/",
     "defender/tests/",
     "defender/lessons/",
     "defender/lessons-actor/",
-    # Per-environment lesson corpus (sibling to lessons-actor) + learning-loop
-    # calibration/eval fixtures — internal, not the shipped vendor-neutral surface.
+    # Per-environment lesson corpus + learning-loop calibration/eval fixtures (internal).
     "defender/lessons-environment/",
-    # #1007: the questioner's own corpus — findings about a WORLD, not about the runtime
-    # defender agent; internal like the two above.
+    # The questioner's corpus: findings about a world, not the runtime agent (internal).
     "defender/lessons-questioner/",
     "defender/learning/judge-alignment/",
     "defender/evals/",
@@ -78,13 +70,9 @@ EXCLUDED_PREFIXES = (
     # other platform module interprets them (the census test `d4_elastic_keys_one_place` holds
     # that). A file, not a directory: the carve-out is this module and nothing beside it.
     "defender/runtime/tenant_settings.py",
-    # Per-vendor corpus STAGERS for the turn-N branch (#920), the read-side twin of
-    # scripts/adapters/. Staging a sibling world means retargeting a query at that world's
-    # view of the corpus, and how an index is addressed is irreducibly per-vendor: elastic
-    # carries it in an ES|QL `FROM` clause for 12 of its 15 templates and in an `index`
-    # parameter for the rest. This carve-out is deliberately ONE directory deep so the
-    # boundary is enforced rather than asserted — `estate/registry.py` beside it stays inside
-    # the gate, and a vendor name leaking into the agnostic seam still fails.
+    # Per-vendor corpus stagers, the read-side twin of scripts/adapters/: how an index is
+    # addressed is irreducibly per-vendor. One directory deep so `estate/registry.py` beside
+    # it stays inside the gate.
     "defender/learning/branch/estate/stagers/",
 )
 
@@ -93,16 +81,12 @@ EXCLUDED_FILES = {
     "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",
     "defender/pyproject.toml",         # may name vendor-specific deps
-    # The lint scripts themselves live at repo-root scripts/lint/, outside the
-    # scanned defender/ surface, so they need no exclusion here.
 }
 
 # Suffixes considered text.
 TEXT_SUFFIXES = {".py", ".md", ".json", ".sh", ".yaml", ".yml", ".toml"}
 
-# Word-boundary patterns. Case-insensitive. The order is irrelevant
-# (each line is checked against all). Hyphen + underscore variants
-# both covered explicitly.
+# Word-boundary patterns, case-insensitive; hyphen and underscore variants listed explicitly.
 FORBIDDEN = [
     re.compile(r"\bwazuh\b", re.IGNORECASE),
     re.compile(r"\belastic(?:search)?\b", re.IGNORECASE),
@@ -120,19 +104,11 @@ FORBIDDEN = [
 
 
 def excluded_prefixes(root: Path) -> tuple[str, ...]:
-    """`EXCLUDED_PREFIXES` plus one `defender/skills/<system>/` per system `root` DECLARES.
+    """`EXCLUDED_PREFIXES` plus one `defender/skills/<system>/` per system `root` declares.
 
-    The per-system skill dirs used to be seven hand-written entries under a comment reading
-    "keep this list in step with the actual skills/<system>/ dirs". They were not in step:
-    eight systems existed, and `defender/skills/tacit-knowledge/` was missing. Nothing caught
-    it because that name is not a vendor word this scanner looks for, so the list had been
-    quietly wrong for as long as it had been incomplete — the same defect as #995's grant, in
-    the same shape, one file over.
-
-    Derived from the resolver rather than remembered. A system's skill dir is per-vendor BY
-    DESIGN, which is a fact about the system existing, not a fact anyone should have to
-    re-type. Nothing about permissions is decided here — this gate only says which files may
-    say "elastic" out loud.
+    Derived from the resolver rather than hand-listed: a hand-kept list drifts silently when
+    a system's name is not a vendor word this scanner looks for. This decides only which
+    files may name a vendor, nothing about permissions.
     """
     return (*EXCLUDED_PREFIXES, *(
         f"defender/skills/{system}/" for system in sorted(declared_systems(root))
@@ -140,13 +116,11 @@ def excluded_prefixes(root: Path) -> tuple[str, ...]:
 
 
 def _excluded(rel: str, prefixes: tuple[str, ...]) -> bool:
-    """`prefixes` is REQUIRED, not defaulted to a fresh `excluded_prefixes(REPO_ROOT)`:
-    resolving them shells out to git, and this is called once per file in a corpus of
-    thousands. The one caller resolves them once and threads them in."""
+    """`prefixes` is required rather than defaulted: resolving them shells out to git, and
+    this is called once per file across thousands of files."""
     if rel in EXCLUDED_FILES:
         return True
-    # Flat pytest modules (test_*.py / *_test.py) anywhere — fixture/scaffold code
-    # that names systems for its scenarios, like the already-excluded tests/ dir.
+    # Flat pytest modules anywhere are fixture code, like the excluded tests/ dir.
     name = rel.rsplit("/", 1)[-1]
     if name.startswith("test_") or name.endswith("_test.py"):
         return True
@@ -155,11 +129,8 @@ def _excluded(rel: str, prefixes: tuple[str, ...]) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    # Minus what git ignores — see `_gitscope`. `EXCLUDED_PREFIXES` covers what is deliberately
-    # out of scope; only git covers the run artifacts a working tree accumulates but a fresh CI
-    # checkout never has (66 findings here against CI's zero).
-    # Resolved ONCE: `excluded_prefixes` runs the system resolver, which shells out to git for
-    # its committed-marker half, and the corpus here is thousands of files.
+    # Minus what git ignores (see `_gitscope`): run artifacts a working tree accumulates but a
+    # fresh CI checkout never has. Prefixes are resolved once, since the resolver shells out.
     prefixes = excluded_prefixes(REPO_ROOT)
     candidates = [
         p for p in DEFENDER.rglob("*")
@@ -179,9 +150,8 @@ def _scan() -> list[Finding]:
                 m = pat.search(line)
                 if m:
                     token = m.group(0).lower()
-                    # Fingerprint is file+token, line-number-free: a new line that
-                    # references an already-accepted token in the same file does
-                    # not re-trip the gate; a token in a NEW file does.
+                    # File+token, no line number: another line with an accepted token in
+                    # the same file does not re-trip the gate.
                     findings.append(
                         Finding(
                             fingerprint=f"{rel}:{token}",
@@ -206,12 +176,9 @@ def main(argv: list[str]) -> int:
     if not DEFENDER.is_dir():
         print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
-    # `LeadAuthorError` for the same reason, since #995: the per-system carve-out is resolved
-    # rather than typed, so an unresolvable systems roster means the scan would run with the
-    # WRONG exclusions — over-reporting at best, and never a clean verdict anyone should trust.
+    # An unreadable file never entered the corpus, and an unresolvable systems roster would
+    # run the scan with the wrong exclusions. Exit 2: the gate could not run, which is not
+    # "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:

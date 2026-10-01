@@ -11,23 +11,17 @@ from pathlib import Path
 from defender._io import guarded_mkdir
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
-#: `claim_lead`'s three answers. Three, because a caller has to tell "the row is on disk and
-#: this dispatch owns the id" from "nothing was written". If success and every silent skip
-#: shared one code, a `goal=""` (the tool schema admits a bare `str`) would dispatch gather
-#: under an id with NO leads row — and nothing then bounds how many sessions run under that id,
-#: since the reuse gate IS the sidecar's `O_EXCL` create, so each would overwrite the last one's
-#: `gather_summaries/{id}.md`.
+#: `claim_lead`'s answers. Success must be distinguishable from "nothing was written": the
+#: sidecar's `O_EXCL` create is the only id-reuse gate, so dispatching without a row would let
+#: unbounded sessions share an id and overwrite each other's `gather_summaries/{id}.md`.
 CLAIMED = 1
 NOT_CLAIMED = 0
 ALREADY_CLAIMED = 2
 
 
 def _say_already_dispatched(lead_id: object) -> None:
-    """The model's remedy for a taken id, on stderr. ONE spelling, called from both arms that
-    answer `ALREADY_CLAIMED`: the `O_EXCL` EEXIST gate below, and the containment refusal in
-    `_claim_path`. A refusal the model cannot act on is a refusal it repeats — the two arms
-    are indistinguishable to it (the id is held, by a row or by a planted entry), so they owe
-    it the same correctable instruction."""
+    """The model's remedy for a taken id, on stderr — the same for both `ALREADY_CLAIMED`
+    arms, since to the model they are indistinguishable."""
     print(
         f"lead_id {lead_id!r} already dispatched; append a new :L "
         f"findings row and echo its id (a retry is a new lead, never "
@@ -43,41 +37,31 @@ def _claim_path(run_dir: Path, lead_id: str) -> Path | int:
     try:
         guarded_mkdir(paths.gather_raw, base=run_dir)
     except (OSError, ValueError):
-        # ValueError as well as OSError: `guarded_mkdir` raises it for a target outside the
-        # tree the anchor names. This hook's whole contract is "return a code, never raise".
+        # `guarded_mkdir` raises ValueError for a target outside the anchor; never raise here.
         return NOT_CLAIMED
     try:
         return paths.lead_claim(lead_id)
     except ValueError:
-        # The owner's SHAPE half (`_check_component`): the argument is not a plain single
-        # segment. Nobody holds the name — nothing was refused, the caller handed us one we
-        # cannot compose — so this is `NOT_CLAIMED`, not the taken-id answer below. Caught at
-        # all because the contract is "return a code, never raise" and the owner raises here
-        # where the old hand-composed f-string silently accepted anything.
+        # Not a plain single segment: nobody holds the name, so not the taken-id answer.
         return NOT_CLAIMED
     except OSError:
-        # The owner's CONTAINMENT half (`_confine`, an alias-marked `OSError`): an entry
-        # planted at the claim's name that resolves outside the run dir. SOMETHING holds the
-        # name, which is what the `O_EXCL` create would have said of it (EEXIST) — so the
-        # posture is the same one, #771 D3: an alias refusal is exempt from every failure
-        # circuit, and it owes the model the same remedy that arm prints.
+        # An entry planted at the claim's name resolves outside the run dir. Something holds
+        # the name, as EEXIST would say, so answer the same way (alias refusals are exempt from
+        # failure circuits).
         _say_already_dispatched(lead_id)
         return ALREADY_CLAIMED
 
 
 def claim_lead(dispatch: dict) -> int:
-    """Write this lead's leads-table row and claim its id, atomically. Returns `CLAIMED` only
-    when the sidecar was created BY THIS CALL; `ALREADY_CLAIMED` when the id was already taken
-    (the `O_EXCL` reuse gate); `NOT_CLAIMED` for every other outcome — a dispatch the shape
-    checks refuse, and any filesystem fault. Never raises: the contract is a code."""
+    """Write this lead's leads-table row and claim its id, atomically. `CLAIMED` only when this
+    call created the sidecar; `ALREADY_CLAIMED` when the id was taken; `NOT_CLAIMED` for a
+    refused dispatch or any filesystem fault. Never raises."""
     run_dir = dispatch.get("run_dir")
     lead_id = dispatch.get("lead_id")
     goal = dispatch.get("goal")
     wtc = dispatch.get("what_to_summarize") or []
 
-    # `.strip()` as well as truthiness: the body below records the STRIPPED goal, so a
-    # whitespace-only goal would claim the id and write a leads row whose goal is `""` — the
-    # same empty row the falsy arm refuses.
+    # The stripped goal is recorded, so a whitespace-only goal is as empty as a missing one.
     if not run_dir or not lead_id or not goal or not str(goal).strip():
         return NOT_CLAIMED
     if not isinstance(wtc, list):
@@ -91,8 +75,7 @@ def claim_lead(dispatch: dict) -> int:
     body: dict = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
     provenance = dispatch.get("provenance")
     if provenance:
-        # Written only when the caller names one (the harness's own reserved-id claims) — an
-        # absent field reads as model-authored.
+        # Absent means model-authored; the harness names one for its reserved-id claims.
         body["provenance"] = str(provenance)
     payload = json.dumps(body, indent=2) + "\n"
 
@@ -106,9 +89,7 @@ def claim_lead(dispatch: dict) -> int:
     try:
         fh = os.fdopen(fd, "w", encoding="utf-8")
     except OSError:
-        # THE ONLY branch where this hook still owns `fd`: `fdopen` takes ownership when it
-        # succeeds. Close to unreachable (`fd` is a freshly created regular file), but kept so
-        # the never-took-ownership path stays covered.
+        # The only branch where this hook still owns `fd`; `fdopen` takes it on success.
         with contextlib.suppress(OSError):
             os.close(fd)
         with contextlib.suppress(OSError):
@@ -118,13 +99,9 @@ def claim_lead(dispatch: dict) -> int:
         with fh:
             fh.write(payload)
     except OSError:
-        # No `os.close(fd)`. The `with` closes the fd on the way out INCLUDING when the failure
-        # is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case this arm exists
-        # for — so a second `os.close(fd)` would hit EBADF or, worse, whatever unrelated
-        # descriptor the OS had since handed that same number, silently. The race is real:
-        # `claim_lead` runs on the event-loop thread while lead-0's fire-and-forget correlation
-        # task issues adapter calls through `asyncio.to_thread` into `subprocess.run`, which
-        # opens pipes.
+        # No `os.close(fd)`: the `with` already closed it, even when the failure is the flush
+        # in `close()` (ENOSPC/EDQUOT/EIO). A second close could hit a descriptor another
+        # thread has since been handed the same number for (adapter subprocess pipes).
         with contextlib.suppress(OSError):
             os.unlink(sidecar_path)
         return NOT_CLAIMED

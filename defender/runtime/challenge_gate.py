@@ -1,40 +1,21 @@
-"""The live write-time review gate's HARNESS: bounds, per-run review state, the numbered
-review record, stage invocation with a real wall-clock deadline, and the trace rows.
+"""The write-time review gate's harness: bounds, per-run review state, the review record,
+stage invocation with a wall-clock deadline, and the trace rows.
 
-`challenge_gate(deps, disposition, companion, *, stages, bounds) -> GateVerdict` is the seam the close
-tool drives for every disposition but the host's own `unresolved` (#923) — a CONFIDENT
-disposition against its conclusion, and since #992, `inconclusive` against its ceiling claim.
-It never writes report.md or the review record itself — the close tool (`close_tool.py`) owns
-both writes, in record-first order, and is the one place a fault is held until both are
-attempted.
+`challenge_gate` reviews every close except the host's own `unresolved`: a confident
+disposition against its conclusion, `inconclusive` against its ceiling claim. It never writes
+report.md or the review record; `close_tool.py` owns both writes.
 
-The reviewer is BLIND LENSES plus a COMPOSER. Each lens reads a projection of the
-investigation that withholds the belief movement it is asked to reconstruct, and they run
-concurrently because none reads another's output. The composer runs last and is the only role
-that sees both the readings and the investigation's own account — it may be anchored by that
-account precisely because the independent work is already banked. The composer's own user
-message carries the question it is being asked, keyed on the disposition the close was called
-with (`composer_projection`'s `disposition` argument) — a confident close asks whether the
-conclusion follows, `inconclusive` asks whether the ceiling holds — and both are phrased so
-that "yes" means the close stands, because the system prompt's answer contract fixes that
-polarity once for every question.
+The reviewer is blind lenses plus a composer. Each lens reads a projection that withholds the
+belief movement it must reconstruct, and lenses run concurrently since none reads another's
+output. The lenses are SUPPORT and its ABLATION (the same reading with one load-bearing edge
+withheld): a soundness plus a sensitivity check. The composer runs last and alone sees both
+the readings and the investigation's own account; its question is keyed on the disposition and
+phrased so "yes" always means the close stands.
 
-The lens set is SUPPORT and its ABLATION: one reading of what the observed evidence carries,
-and the same reading again with one load-bearing edge withheld — a soundness check plus a
-sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
-
-FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the finding
-under review to the host's own `unresolved` (#923) — never a silently-committed close. ONE RULE
-FOR EVERY REVIEWED DISPOSITION: an unexamined model claim never commits as the model's claim.
-`inconclusive` is a claim like any other — "nothing further could be measured" is what #992
-sends it here to have checked — so a review that could not check it overrides it the same way
-it overrides a confident verdict; letting it stand would recreate, on the override arms alone,
-the unreviewed `inconclusive` this whole gate was extended to end — and every reader of the
-committed report (the case corpus, the held-out scorer, the ticket) takes `inconclusive` as the
-model's own "nothing further could be measured", where `unresolved` says only that the run
-ended without a settled finding. The override commits the SAME outcome as one the evidence
-produced; what separates the two is the typed `failure_kind`, set only when the machinery is
-what failed.
+Fail closed: a stage that raises, times out, or otherwise does not complete overrides any
+reviewed disposition (including `inconclusive`) to the host's `unresolved`, so an unexamined
+model claim never commits as the model's claim. The typed `failure_kind` distinguishes a
+machinery failure from an evidence-driven override with the same outcome.
 """
 
 from __future__ import annotations
@@ -59,16 +40,14 @@ EXTRA_TURN_BOUND = 2
 
 REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 
-#: The review roles this gate dispatches, in the order it reports faults for. The ONE home for
-#: that list: the trace-marking walk reads it rather than restating the names, so a role added
-#: to the gate cannot arrive with a trace file the incomplete-marker never touches.
+#: The review roles this gate dispatches, in fault-report order. The trace-marking walk reads
+#: this, so a new role cannot have a trace file the incomplete-marker misses.
 REVIEW_ROLES: tuple[str, ...] = ("support", "ablation", "composer")
 
 
 def stage_timeout() -> int:
-    """The review stages' own deadline knob — 450s default, matching the offline pipeline's
-    `subagent_timeout()` default IN VALUE only. A SEPARATE env var: the two must not move
-    together."""
+    """The review stages' deadline (default 450s). Its own env var, independent of the offline
+    pipeline's `subagent_timeout()`."""
     return env_int(REVIEW_TIMEOUT_ENV, 450)
 
 
@@ -81,8 +60,7 @@ def _retry_budget() -> int:
 
 
 def _shipped_base_request_limit() -> int:
-    """The run's UNRAISED request ceiling, read from its one home. Same deferred import and
-    same reason as `_retry_budget`."""
+    """The run's unraised request ceiling. Deferred import, as in `_retry_budget`."""
     from . import driver
 
     return driver.DEFAULT_REQUEST_LIMIT
@@ -90,14 +68,11 @@ def _shipped_base_request_limit() -> int:
 
 @model(frozen=True)
 class Bounds:
-    """Every bound is INJECTED, never hardcoded at a call site — `EXTRA_TURN_BOUND` is the
-    shipped DEFAULT, not a literal restated elsewhere. There is one review pass per close
-    attempt and no second ask, so there is no round budget here.
+    """The review gate's injected bounds. One review pass per close attempt, so there is no
+    round budget.
 
-    `base_request_limit` rides along because the raised ceiling is base-plus-cap: with the base
-    a module constant reachable only by import, "read FROM the bounds" could not be told apart
-    from a hardcoded copy. It is also what lets the ceiling's third reader (the message store's
-    withhold check) be handed the same value the run was, rather than mirroring a stale one."""
+    `base_request_limit` is carried so the raised ceiling (base plus `extra_turns`) is read
+    from the bounds the run was handed, including by the message store's withhold check."""
 
     extra_turns: int = EXTRA_TURN_BOUND
     stage_timeout: float = field(default_factory=stage_timeout)
@@ -119,29 +94,23 @@ class Bounds:
 
 
 def default_bounds() -> Bounds:
-    """The shipped bounds. Kept as a FUNCTION though it passes no arguments: every call site is
-    a `# lint-default: ok` default-resolution site, and a named zero-argument constructor is
-    what makes "the caller passed nothing, so use the shipped default" readable there rather
-    than a bare `Bounds()` that looks like a literal. It deliberately restates none of the
-    dataclass's own defaults, so the shipped value lives in one place."""
+    """The shipped bounds. A named function so default-resolution call sites read as such
+    rather than as a literal `Bounds()`."""
     return Bounds()
 
 
 def raised_request_limit(bounds: Bounds) -> int:
-    """Read FROM the bounds the run was handed — both terms — never restated as a literal, and
-    never half-read from a module constant the caller cannot move."""
+    """The raised request ceiling, with both terms read from the run's bounds."""
     return bounds.base_request_limit + bounds.extra_turns
 
 
 @model
 class ReviewState:
-    """The run's per-run mutable review state — lives in exactly ONE mutable container field
-    on the frozen `AgentDeps` (`deps.review_state`)."""
+    """Per-run mutable review state, held in `deps.review_state` on the frozen `AgentDeps`."""
 
     turns: int = 0
-    #: target -> how much of the record mentioned it when the ask was raised.
-    #: A dict rather than a set because the overlap rule asks whether the turn already
-    #: spent on a target BOUGHT anything, not merely whether the target came up before.
+    #: target -> how much of the record mentioned it when the ask was raised, so the overlap
+    #: rule can tell whether the turn spent on it recorded anything new.
     raised_asks: dict = field(default_factory=dict)
     closed: bool = False
     disposition: str | None = None
@@ -154,9 +123,8 @@ class ReviewState:
         return box["state"]
 
 
-# The review record — beside the run, temp-plus-rename, keyed by run + turn. The PATH is
-# owned by `defender._run_paths.RunPaths.review_record` (#1077 D1); this module keeps only the
-# write.
+# The review record: beside the run, temp-plus-rename, keyed by turn. The path is owned by
+# `RunPaths.review_record`.
 
 
 def write_review_record(run_dir, turn: int, record: dict) -> None:
@@ -180,8 +148,7 @@ class StageRequest:
 @model
 class StageOutcome:
     text: str | None
-    #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`
-    #: (deliberately not re-listed here — an enumerated subset goes stale).
+    #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`.
     failure_kind: str | None
     detail: str | None = None
 
@@ -191,9 +158,7 @@ class StageOutcome:
 
 
 async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcome:
-    # Deferred import, same reason as every other close_tool reference here: close_tool imports
-    # this module at module scope. The two kinds are READ from the published vocabulary rather
-    # than spelled here, so the fleet's counting key has exactly one definition site.
+    # Deferred: close_tool imports this module at module scope.
     from .close_tool import STAGE_ERROR, TIMEOUT
 
     try:
@@ -201,38 +166,26 @@ async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcom
         return StageOutcome(text=text, failure_kind=None)
     except TimeoutError:
         return StageOutcome(text=None, failure_kind=TIMEOUT, detail=f"{role} timed out after {request.timeout}s")
-    except Exception as e:  # noqa: BLE001 — RS9: any stage fault fails the whole review closed
+    except Exception as e:  # noqa: BLE001 — any stage fault fails the whole review closed
         return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=f"{role} failed: {e!r}")
 
 
 def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageRequest:
-    """One stage call's request: its own fresh salt, and the prompt RENDERED against it.
+    """One stage call's request: a fresh salt and the prompt rendered against it.
 
-    Every stage call carries its OWN fresh salt (never the investigation's session salt) — the
-    review roles never hold the delimiter of the frame their own output returns inside. The
-    salt is minted BEFORE the prompt and handed to the renderer, because the frame the
-    payload-derived record is inlined inside is keyed on it; minting it afterwards leaves the
-    review's inbound half unframed."""
+    A fresh salt (never the session salt) keeps review roles from holding the delimiter of the
+    frame their output returns inside. It is minted before rendering because the prompt's
+    framing of the payload-derived record is keyed on it."""
     salt = uuid.uuid4().hex
     return StageRequest(prompt=render(salt), salt=salt, timeout=bounds.stage_timeout)
 
 
-# The trace path moved to `defender._run_paths.RunPaths.review_trace` (#1077 D1): the run
-# dir's readers (the runtime visualizer) need the shape, and a second site spelling
-# `review_{role}_trace.jsonl` is a filename with two owners.
-
-
 def _is_row_shaped(raw_reply: str) -> bool:
-    """Would any physical line of this framed reply stand in the file as a trace ROW?
+    """Whether any line of this framed reply would parse as a trace row.
 
-    `read_jsonl_rows` — every other trace consumer — skips a line it cannot parse, which is
-    what makes the raw-line path below safe for a reply of PROSE. The composer's reply is a
-    JSON object by contract, and its framed form puts that object on a line of its own: a
-    round-less row carrying the review's prose that every trace reader counts as gate metadata.
-
-    ASKED of `_io.parse_jsonl_row` — the same predicate the reader applies — rather than
-    re-derived here. The two must agree exactly, because this side decides what goes out as a
-    raw line on the strength of the other side skipping it."""
+    Trace readers skip unparseable lines, so a prose reply can go out as raw lines; a JSON
+    reply (the composer's) would be read as a row. Uses the reader's own predicate
+    (`_io.parse_jsonl_row`) so the two agree exactly."""
     from defender._io import parse_jsonl_row
 
     return any(parse_jsonl_row(line) is not None for line in raw_reply.splitlines())
@@ -241,16 +194,11 @@ def _is_row_shaped(raw_reply: str) -> bool:
 def _write_trace_row(
     run_dir, role: str, round_no: int, row: dict, *, raw_reply: str | None = None,
 ) -> None:
-    """Append one trace row, JSON-metadata-only, PLUS (optionally) the stage's raw wrapped
-    reply — as its own literal text line when it cannot be mistaken for a row, and inside the
-    row's own JSON value when it can.
+    """Append one trace row, optionally followed by the stage's raw wrapped reply.
 
-    A `wrap(...)`-framed reply carries real newline characters; folded into a JSON string field
-    `json.dumps` escapes them to `\\n`, so the exact framed substring a containment test looks
-    for would never appear literally in the file. Keeping the frame as a separate raw line is
-    what makes "wrapped, never bare" a checkable property of the bytes on disk — but only for a
-    reply no reader can parse. A reply that IS a JSON object goes inside the value instead; on
-    its own line it would corrupt the trace's row structure."""
+    The reply goes out as literal lines, so its framing is checkable in the bytes on disk
+    (inside a JSON string the newlines would be escaped), unless it could be parsed as a row,
+    in which case it goes inside the row's JSON instead."""
     from pathlib import Path
 
     from defender._io import guarded_mkdir, write_guarded
@@ -262,11 +210,8 @@ def _write_trace_row(
     line = json.dumps(payload) + "\n"
     if raw_reply is not None and not inline:
         line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
-    # ONE guarded append per row, not one per physical line: the two lines are a single trace
-    # record, and splitting them across two `write_guarded` calls leaves a window in which the
-    # metadata row is on disk without the reply it describes. The component is created HERE, at
-    # the sole writer (the path resolver on `RunPaths` stays pure), anchored on the run dir —
-    # the box's rw bind, and so the first component it could plant a link at.
+    # One guarded append so the row and its reply land together. The directory is created
+    # here (the `RunPaths` resolver stays pure), guarded from the run dir: the box's rw bind.
     from defender._run_paths import RunPaths
 
     path = RunPaths(Path(run_dir)).review_trace(role)
@@ -275,16 +220,11 @@ def _write_trace_row(
 
 
 def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
-    """Every review role's trace gets the marker, so a round that ended early is not left
-    reading as if it had completed. The roster comes from `REVIEW_ROLES` rather than being
-    restated here — with no roles bound this writes nothing, which is the honest record of a
-    gate that dispatched nothing.
+    """Mark every review role's trace incomplete, so a round that ended early does not read
+    as completed.
 
-    The reason rides FRAMED, on a wrap-time salt, exactly as the stage replies on the same
-    files do. Half of what can land here is stage-derived — a refused reply quotes the model's
-    own `finding`/`target`, a stage error carries the provider's message — so an unframed
-    reason puts payload-influenced text into the one artifact whose every other untrusted line
-    is wrapped."""
+    The reason is framed like the stage replies because it can be stage-derived (a quoted
+    `finding`/`target`, a provider error message)."""
     for role in REVIEW_ROLES:
         _write_trace_row(
             deps.run_dir, role, round_no,
@@ -296,11 +236,9 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
 class GateVerdict:
     """One gate attempt's classification.
 
-    `outcome` says what happened to the disposition (three values). `cause` is the HOST'S own
-    sentence for the human reading the case — one of `close_tool.REPORT_CAUSES`, chosen here
-    and never composed from a stage's reply. `detail` is the diagnostic and is the ONLY one of
-    the three that may quote a stage: it names which stage broke and what it said, so it goes
-    to the numbered review record and never to report.md."""
+    `cause` is the host's own sentence (one of `close_tool.REPORT_CAUSES`), never composed from
+    a stage reply. `detail` is the only field that may quote a stage, so it goes to the review
+    record and never to report.md."""
 
     outcome: str
     disposition: str
@@ -312,17 +250,9 @@ class GateVerdict:
 
 
 def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
-    """Every way the review can fail to deliver: one outcome, one cause, and the typed kind
-    carrying which. The kind comes from the stage outcome rather than from this function, so a
-    timeout and a raise stay apart without a branch here to keep in step with the one in
-    `_call_stage`.
-
-    Deliberately does NOT take the disposition under review: the override is the same for every
-    one of them (module docstring, FAIL CLOSED), so there is nothing here for it to key on.
-
-    `turns_used` is the run's OWN count, passed in rather than written as zero: a challenged
-    close comes back and reviews again, so a hardcoded zero reports a second-pass fault as a run
-    that had spent no forced turn."""
+    """The verdict for a review that failed to deliver. The override is the same for every
+    disposition; the failure kind comes from the stage outcome. `turns_used` is the run's
+    count, since a challenged close reviews again."""
     from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
 
     return GateVerdict(
@@ -333,23 +263,12 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
 
 
 def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
-    """The verdict for a close whose companion could not be read at all (`tools.CompanionRead`
-    with no text: an I/O fault, a planted non-plain entry at the name, bytes that are not
-    UTF-8). Decided by the close BEFORE any gate or stage, and reported exactly as the
-    projector arm reports a body it cannot project from — the host's `unresolved`,
-    `CAUSE_REVIEW_INCOMPLETE`, failure kind `error`, the reason on the record — because it is
-    the same fact: a review that cannot run. The gate used to reach this on its own strict
-    second read of the file; now the close's one read is what says the document cannot be
-    judged, and this is where that answer becomes a verdict.
+    """The verdict for a close whose companion could not be read at all (I/O fault, planted
+    non-plain entry, non-UTF-8). Reported like a projector fault: a review that cannot run.
 
-    The round's traces get their incomplete rows, as every other early end of a round does, so
-    a review that never started is not left reading as if no round had been attempted. That
-    write is CONTAINED here, unlike the gate's own marker calls: those are reached on a fault
-    of the REVIEW (a stage, a projection), while this arm is reached on a fault of the RUN DIR's
-    own contents, which is the one place a write beside the unreadable file is likeliest to
-    fail too. A trace row that cannot be written is logged and the verdict still returns; the
-    verdict, not the row, is what the close commits, and an `OSError` escaping a tool body
-    ends the run with no report.md at all."""
+    The trace-marker write is contained here, unlike elsewhere: this arm is reached on a fault
+    in the run dir itself, where the write is likely to fail too, and an `OSError` escaping the
+    tool would end the run with no report.md."""
     from .close_tool import STAGE_ERROR
 
     state = ReviewState.of(deps)
@@ -366,15 +285,9 @@ def review_cannot_run(deps: Any, reason: str) -> GateVerdict:
 async def _dispatch(
     role: str, stages: Any, render: Callable[[str], str], bounds: Bounds,
 ) -> StageOutcome:
-    """Look the stage up, BUILD ITS REQUEST, and call it — all three inside the fault arm.
-
-    A lookup outside the fault arm lets a bundle missing an attribute raise past the gate, past
-    the close tool, and into a driver that classifies five exception kinds and not that one. A
-    partial bundle is a review that cannot run — the same fact as a stage that raised.
-
-    The RENDER is inside for the same reason: it walks and serialises the parsed companion, a
-    document the investigator authored out of attacker-influenced payloads, so it can raise. A
-    projection that cannot be built is a review that cannot run."""
+    """Look the stage up, build its request, and call it, all inside the fault arm: a partial
+    stage bundle or a render that raises over the model-authored companion is a review that
+    cannot run, not an exception for the driver."""
     from .close_tool import STAGE_ERROR
 
     try:
@@ -386,35 +299,23 @@ async def _dispatch(
 
 
 def _mentions(companion: Any, target: str) -> int:
-    """How much of the record touches `target`, coarsely.
+    """How much of the record touches `target`, coarsely: the overlap rule's measure.
 
-    The overlap rule's measure. Keying purely on "was this target raised before" would refuse a
-    second ask on the alert's own subject vertex, which most asks name (a run has three to eight
-    vertices where it has many leads). What the rule means is that a repeat is wasteful only
-    when the turn already spent bought nothing about that target, so that is what is measured:
-    if the investigation recorded anything new naming it, the ask is fresh again.
-
-    Deliberately a count of occurrences rather than a typed walk. A target may be a vertex, an
-    edge, a lead or a hypothesis, and the shapes that can mention each differ; a typed measure
-    would need an arm per kind and would silently return zero for the kind it forgot."""
+    A repeat ask is refused only if the previous turn recorded nothing new naming the target
+    (asks often name the alert's own subject vertex). A raw occurrence count rather than a
+    typed walk, which would need an arm per target kind and silently miss one."""
     return json.dumps(companion, sort_keys=True, default=str).count(target)
 
 
 def _route(
     state: ReviewState, bounds: Bounds, disposition: str, review: Any, companion: Any,
 ) -> GateVerdict:
-    """The composer's finding, plus host state no review role can see, into one arm.
+    """Route the composer's finding plus host state into one verdict.
 
-    The reviewer never picks the outcome. Whether a gap becomes `challenged` or an override
-    turns on the turn count, the raised-ask state and the cap — none of which a review role is
-    shown, and all of which decide what the run can still afford.
-
-    `disposition` decides two things only: what a STANDS or CHALLENGED verdict carries, and
-    which sentence a `holds` earns (#992: a held ceiling claim is a different finding from a
-    settled story). It never decides whether an override happens or what it commits — the
-    override arms are the same for every reviewed disposition (module docstring, FAIL CLOSED),
-    which is what keeps this function free of a per-disposition branch to keep in step with
-    `_fail`'s."""
+    The reviewer never picks the outcome: challenge vs override turns on the turn count, the
+    raised-ask state and the cap, none of which a review role sees. `disposition` only decides
+    what a stands/challenged verdict carries and which cause a `holds` earns; the override
+    arms are the same for every disposition."""
     from .close_tool import (
         CAUSE_CEILING_EXAMINED,
         CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
@@ -438,17 +339,14 @@ def _route(
         return _verdict(STANDS, disposition, cause, review.review)
 
     if review.ask is None:
-        # A gap with nothing measurable behind it. Forcing the host verdict costs the run
-        # nothing further; spending a turn on an ask the reviewer could not name would tax
-        # the investigation for a question nobody has.
+        # A gap with no nameable ask: don't spend a turn on it.
         return _verdict(
             FORCED_INCONCLUSIVE, HOST_ONLY_DISPOSITION, CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
             review.review,
         )
 
     target = review.ask.target
-    # Measured ONCE: the check and the watermark it writes must be the same number, and
-    # `_mentions` serialises the whole companion to get it.
+    # Measured once: the check and the watermark must be the same number.
     mentions_now = _mentions(companion, target)
     before = state.raised_asks.get(target)
     if before is not None and mentions_now <= before:
@@ -464,7 +362,7 @@ def _route(
 
     state.raised_asks[target] = mentions_now
     state.turns += 1
-    # NO_CAUSE: this attempt commits nothing, so there is no report.md for a cause to land in.
+    # NO_CAUSE: this attempt commits no report.md.
     return _verdict(
         CHALLENGED, disposition, NO_CAUSE, review.review,
         material=((target, review.ask.prose),),
@@ -474,27 +372,12 @@ def _route(
 async def challenge_gate(
     deps: Any, disposition: str, companion: CompanionBody, *, stages: Any, bounds: Bounds,
 ) -> GateVerdict:
-    """Review one disposition — confident, or (#992) `inconclusive` — never `unresolved`: the
-    blind lenses, then the composer, then routing.
+    """Review one disposition (confident or `inconclusive`, never `unresolved`): the blind
+    lenses concurrently, then the composer, then routing.
 
-    Each lens reads a projection of the investigation that withholds the belief movement it
-    is asked to reconstruct, and they run CONCURRENTLY because none of them reads another's
-    output. The composer runs after all of them and is the only role that sees both the
-    readings and the investigation's own account. `disposition` is the close's own argument —
-    the gate never re-derives which question it is asking from anything else, including what
-    the companion itself concludes — and it threads through to `composer_projection` (which
-    question) and to `_route` (what a stands or a challenge carries). It does NOT reach `_fail`
-    or `_route`'s override arms: an override commits the same thing whatever was under
-    review.
-
-    `companion` is the close's ONE parse of `investigation.md` — the body the entry-price gate
-    just priced, handed in rather than re-read. The gate used to take its own strict read of
-    the file the price gate had decoded leniently, so one document got two answers: the price
-    collected, then the review failed over the byte the price gate had read past. Every reader
-    on the close now judges the same object, and the receipts the report carries are the rows
-    the review saw. What is left for this gate to refuse is a body with nothing in it
-    (`EmptyInvestigation`) — unreachable for a priced keyword, which the price gate refused
-    first, reachable for a confident close over an empty or unparseable document."""
+    `disposition` is the close's own argument; the gate never re-derives it from the
+    companion. `companion` is the close's single parse of `investigation.md`, handed in rather
+    than re-read so every reader on the close judges the same object."""
     from .close_tool import STAGE_ERROR, UNREADABLE
     from .review.projector import (
         EmptyInvestigation,
@@ -506,18 +389,12 @@ async def challenge_gate(
     from .review.reply import Unreadable, citable_refs, read_composer_reply, read_lens_reading
 
     state = ReviewState.of(deps)
-    # The trace's round is the review PASS this close attempt is, not a hardcoded zero: a
-    # challenged close comes back and reviews again, so every row of the second pass would
-    # otherwise be indistinguishable from the first's on disk.
+    # A challenged close reviews again; the round keeps the passes apart on disk.
     round_no = state.turns
 
-    # The ablation target is chosen under the SAME guard as the emptiness check: a walk over a
-    # model-authored document, so a step that can raise past all three frames.
-    #
-    # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
-    # same effort, same prompt — so its reading is a difference against the support reading
-    # and not a difference between two configurations. A record with no strong belief movement
-    # has nothing load-bearing to withhold; that is recorded rather than passed over.
+    # Guarded like the emptiness check: a walk over a model-authored document can raise. The
+    # ablation is the support lens with one edge withheld (same role, model and prompt), so
+    # its reading differs from support's only by that edge.
     try:
         ablated = ablation_target(require_investigation(companion))
     except EmptyInvestigation as e:
@@ -526,9 +403,7 @@ async def challenge_gate(
     except Exception as e:  # noqa: BLE001 — a projector fault is a review that cannot run
         _mark_traces_incomplete(deps, round_no, repr(e))
         return _fail("projector", StageOutcome(None, STAGE_ERROR, repr(e)), turns_used=state.turns)
-    # Each lens is a RENDERER, not a rendered string: `_fresh_stage_request` mints the call's
-    # own salt and the projection is framed on it, so the prompt cannot be built before the
-    # salt exists.
+    # Renderers, not strings: the prompt is framed on a salt minted per call.
     lenses: dict[str, Callable[[str], str]] = {
         "support": lambda salt: support_projection(companion, salt).text,
     }
@@ -538,10 +413,7 @@ async def challenge_gate(
             lambda salt: support_projection(companion, salt, without_edge=ablated_edge).text
         )
     else:
-        # NO `ok` KEY. `ok` is the answer verdict of a call that was made, and every trace
-        # reader — including the replay's own "the reviewer really ran" assertion — takes
-        # `ok: true` as "this stage answered". A lens that was never dispatched has no verdict;
-        # `skipped` alone is the honest row.
+        # No `ok` key: readers take `ok` as "this stage answered", and it was never dispatched.
         _write_trace_row(
             deps.run_dir, "ablation", round_no,
             {"skipped": "no strong belief movement cites an edge to withhold"},
@@ -550,9 +422,7 @@ async def challenge_gate(
         _dispatch(lens, stages, render, bounds) for lens, render in lenses.items()
     ))
 
-    # EVERY dispatched lens gets its row before any of them is judged. The calls ran
-    # concurrently and all completed; returning on the first fault mid-walk would throw away the
-    # replies the other lenses already produced, recording a subset of the calls made.
+    # Record every lens's reply before judging any, so a fault doesn't drop the others'.
     for lens, outcome in zip(lenses, outcomes, strict=True):
         _write_trace_row(
             deps.run_dir, lens, round_no, {"ok": outcome.ok},

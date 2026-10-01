@@ -12,10 +12,8 @@ def _split_quoted(
     keep_empty: bool = False,
     strip: bool = True,
 ) -> list[str]:
-    """THE tokenizer. `strip=False` hands back the raw span between two delimiters instead of a
-    stripped copy — a knob rather than a fork, because the whole value of `_split_cells_raw` is
-    that it finds the SAME boundaries `_split_cells` does, and a second hand-written scanner
-    makes that agreement a thing review has to re-establish after every edit to this one."""
+    """The cell tokenizer. `strip=False` returns raw spans; a knob rather than a second
+    scanner, so `_split_cells_raw` always finds the same boundaries as `_split_cells`."""
     parts: list[str] = []
     cur: list[str] = []
     in_q = False
@@ -23,13 +21,9 @@ def _split_quoted(
     while i < len(s):
         ch = s[i]
         if ch == "\\" and i + 1 < len(s):
-            # ONE branch decides what an escape pair means: `\<sep>` unescapes when asked,
-            # every OTHER pair is consumed verbatim, 2 bytes at a time. Falling through on
-            # unclaimed pairs would let the `"` of a `\"` reach the quote toggle below, so a
-            # row with an odd number of `\"` before its last cell flips into "inside a quote",
-            # swallows the remaining `|`s, and `_row_cells` pads the short record with empty
-            # strings — cells silently merged, no RowError. `_has_unbalanced_quote` skips the
-            # pair the same way.
+            # Every escape pair is consumed whole (`\<sep>` unescaped when asked), so the `"` of
+            # a `\"` never reaches the quote toggle and silently merges cells.
+            # `_count_unescaped_quotes` skips pairs the same way.
             if unescape_delim and s[i + 1] == sep:
                 cur.append(sep)
                 i += 2
@@ -64,19 +58,11 @@ def _split_cells(row: str) -> list[str]:
 
 
 def _split_cells_raw(row: str) -> list[str]:
-    """Cell BOUNDARIES only — every byte the author wrote survives, whitespace and escapes
-    alike. `_split_cells` strips each cell and unescapes `\\|`; a repair that rebuilds a row
-    from THAT output normalises padding away and corrupts an escaped pipe (#954/F-47). This is
-    the no-strip boundary scanner a raw-text rebuild needs: it finds the same unquoted `|`
-    delimiters `_split_cells` does, so cell N here is cell N there, but hands back the raw
-    span rather than a stripped, unescaped copy — so a caller that replaces exactly one cell
-    and rejoins with `"|"` leaves every other cell byte-identical to what the author wrote.
+    """Cell boundaries only, every byte preserved (no strip, no unescape).
 
-    ONE scanner, reached through a knob, rather than a second one written to match: "cell N here
-    is cell N there" is the whole contract, and a forked state machine would leave it true only
-    by inspection — the next fix to the escape branch above lands in one copy and not the
-    other, `_swap_cell` then writes `class` over the author's `value`, and the re-split gate in
-    `_illegal_key_diagnostic` cannot see it because a wrong-cell swap still counts right."""
+    Cell N here is cell N of `_split_cells`, so a caller can replace one cell and rejoin with
+    `"|"` leaving the others byte-identical; rebuilding from `_split_cells` output would lose
+    padding and corrupt escaped pipes."""
     return _split_quoted(row, "|", keep_empty=True, strip=False)
 
 
@@ -90,33 +76,17 @@ def _unquote(s: str) -> str:
     return s
 
 
-#: What the format writes where a row has nothing to say (`docs/dense-investigation-
-#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
-#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
-#: filtering a sentinel back out.
-#:
-#: Lives at this layer rather than beside the conclude projection because `_row_cells` is a
-#: SECOND reader: `none` is also how an empty TABLE is written (`:T conclude.surviving`
-#: carrying one `none` row), and a one-cell row under a two-column header is exactly the shape
-#: the required-cell check refuses. One owner, so the two readings cannot drift apart.
+#: What the format writes where a row has nothing to say. A list row holding it projects as
+#: absence. Also the empty-table marker (a single `none` row), which `_row_cells` must accept,
+#: hence this layer.
 _CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
 
 
 def is_conclude_empty_marker(value: object) -> bool:
-    """Does this conclude row value spell "nothing to say"? THE membership test for the
-    vocabulary above, beside the vocabulary.
+    """Does this value spell "nothing to say" (`none` / `n/a`, quoted or not, any case)?
 
-    A SCALAR row keeps the marker — only the list branch drops it — so a gate that asks
-    "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
-    none` is the row that explicitly says there is no defect, and it is not blank.
-
-    `_unquote`d, because every OTHER reader of a cell sees through the author's quoting and
-    this one has to agree with them. A block whose single row is `"none"` is the empty-TABLE
-    marker written by an author who quotes uniformly; read raw, it lands as a RECORD whose id
-    is `"none"` — an `lp*` that fails four of rule #18's arms, an undeclared `h-*` at
-    `:T conclude.surviving`'s reference site — and the refusal never says the author wrote the
-    marker. Unquoting an already-unquoted cell is identity, so this is the read every caller
-    wanted.
+    A scalar row keeps the marker, so gates asking "did the run state something" must use
+    this rather than a blank test: `detection_notes none` is not blank.
     """
     return (
         isinstance(value, str)
@@ -125,8 +95,7 @@ def is_conclude_empty_marker(value: object) -> bool:
 
 
 def _count_unescaped_quotes(s: str) -> int:
-    """How many `"` the tokenizer will TOGGLE on — escape pairs skipped, exactly as
-    `_split_quoted` consumes them."""
+    """How many `"` the tokenizer toggles on, skipping escape pairs as `_split_quoted` does."""
     quotes = 0
     i = 0
     while i < len(s):
@@ -140,13 +109,9 @@ def _count_unescaped_quotes(s: str) -> int:
 
 
 def _has_unbalanced_quote(s: str) -> bool:
-    """True when a row opens a `"` it never closes — the multi-line author's signature.
+    """True when a row opens a `"` it never closes, the sign of a value spilled across lines.
 
-    invlang is line-oriented: `_tokenize_fence` makes ONE row per line for every block, so a
-    value written across two lines keeps line one (quote dangling) and reparses the rest as
-    fresh rows. Parity is the test, not a leading `"`: `summary  "sensu" login is sanctioned`
-    is a valid one-line row that starts with a quote, and denying it would block a conclusion
-    the author cannot rewrite into anything the check likes better.
+    Tested by parity, not a leading `"`: `summary  "sensu" login is sanctioned` is valid.
     """
     return _count_unescaped_quotes(s) % 2 == 1
 
@@ -161,21 +126,9 @@ def _strip_quote_wrapper(s: str) -> str:
 def _quotes_wrap_whole_values(cell: str) -> bool:
     """Does every `"` in this cell WRAP a value, rather than open mid-token?
 
-    Row parity is not enough: `bastion"/internal|bastion"-01` carries an EVEN number of quotes,
-    so `_has_unbalanced_quote` stays silent, yet the first one opens a quoted span that
-    swallows the `|` between them. Every cell after it shifts left and the optional trailing
-    column absorbs the shift, so the count check cannot see it either — an `attrs` value slides
-    into `ident`, where nothing gates it.
-
-    A quote is legal wrapping the whole cell (`"free text with a | in it"`), a whole
-    `;`-subcell, or the whole right-hand side of a `k=v` (`flags="EXE_WRITABLE|EXE_LOWER"`).
-    That is every shape the shipped corpus uses. Anything else is a quote opening inside a
-    token, which is the malformation; an inner quote that is meant literally spells itself
-    `\\"` and never reaches the toggle.
-
-    Rows in blocks that declare no `[a|b|c]` header never arrive here — `:T conclude` and
-    `:T resolutions` carry free text with bare quotes and are projected by their own readers,
-    not by cell splitting.
+    Row parity is not enough: `bastion"/internal|bastion"-01` has balanced quotes but the span
+    swallows a `|`, shifting later cells silently. A quote may wrap a whole cell, a whole
+    `;`-subcell, or the whole value of a `k=v`; a literal inner quote is written `\\"`.
     """
     if _count_unescaped_quotes(cell) == 0:
         return True
@@ -195,8 +148,7 @@ def _quotes_wrap_whole_values(cell: str) -> bool:
 
 def _row_cells(block: Block, row: str, expected: int) -> list[str]:
     cells = _split_cells(row)
-    # Before either count check, because a bad count is usually this defect's SYMPTOM and
-    # the author needs the cause named: a quote that opens mid-token merged the cells.
+    # Before the count checks: a bad count is usually this defect's symptom.
     for cell in cells:
         if not _quotes_wrap_whole_values(cell):
             raise RowError(
@@ -211,8 +163,7 @@ def _row_cells(block: Block, row: str, expected: int) -> list[str]:
             f"row has {len(cells)} cells but {expected} expected{header} "
             f"(check for unescaped `|` inside an attrs/value cell)"
         )
-    # "Empty arrays render as a single `none` row" (`docs/dense-investigation-format.md`), so
-    # a lone marker is a COMPLETE row saying the table is empty — not a truncated one.
+    # A lone `none` row is the complete empty-table marker, not a truncated row.
     if len(cells) == 1 and is_conclude_empty_marker(cells[0]):
         return cells + [""] * (expected - 1)
     if len(cells) < block.required_cells:

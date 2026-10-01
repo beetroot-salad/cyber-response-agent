@@ -25,11 +25,9 @@ FRONTIER_SENTINEL = "Settled investigation frontier (completed loops)."
 
 
 def enabled() -> bool:
-    """Whether the store-backed fold is on for this process (`DEFENDER_COMPACTION`). HERE,
-    beside the mechanism, because two callers must agree: the driver folds on it, and the
-    write-return lessons push (`tools/_document._frontier_recall`) withholds its block on the
-    write that advances the fold boundary, since the fold at the next render displaces that
-    return before the model reads it and carries the same block itself (#936)."""
+    """Whether the store-backed fold is on (`DEFENDER_COMPACTION`). Shared by the driver and
+    the write-return lessons push (`tools/_document._frontier_recall`), which withholds its
+    block on a write that advances the fold boundary, since the fold carries it instead."""
     return env_bool("DEFENDER_COMPACTION", False)
 
 
@@ -105,12 +103,8 @@ _LEAD_ROW_RE = re.compile(r"l-\S*\|(\d+)\|")
 @model(frozen=True)
 class FrozenState:
 
-    #: `SkipValidation` for the same reason `CompactionStep.history` carries it (below): the
-    #: prefix holds the orientation message BY IDENTITY (`_build_prefix` takes it straight
-    #: from `history[orientation_index]`), and a validated `tuple[Message, ...]` is rebuilt
-    #: element by element, each `dict` shallow-copied — so every "reused" step would re-send
-    #: copies, and an edit to the live orientation message would never show through the
-    #: frozen prefix.
+    #: `SkipValidation`: the prefix holds the orientation message by identity, and validation
+    #: would copy each dict, hiding later edits to the live message.
     prefix: Annotated[tuple[Message, ...], SkipValidation]
     freeze_index: int
     frozen_through: int
@@ -119,14 +113,9 @@ class FrozenState:
 @model(frozen=True)
 class CompactionStep:
 
-    #: `SkipValidation` (#1067): pydantic validates a `list[Message]` field by rebuilding the
-    #: list (and, one level in, WOULD rebuild each `dict`), so a plain strict field breaks the
-    #: zero-copy guarantee this carries — `step.history is history` and, deeper,
-    #: `step.history[i] is history[j]` for a reused entry (`test_reuses_within_frozen_loop`).
-    #: Compaction runs on every fold and a run's history can be large; re-copying it on every
-    #: step for a field that is passed straight through, never read field-by-field here, would
-    #: be a real cost for no gained safety. `Message` stays the declared element type for
-    #: static checking — this only turns off the runtime rebuild.
+    #: `SkipValidation`: validation would rebuild the list and its dicts, breaking the
+    #: zero-copy guarantee (`step.history is history`, reused entries by identity) and copying
+    #: a potentially large history on every step. The type still serves static checking.
     history: Annotated[list[Message], SkipValidation]
     state: FrozenState | None
     action: str
@@ -155,8 +144,8 @@ _FRONTIER_HEAD = (
 #: to resume from it.
 RESUME_FROM_TAIL = "Resume the CURRENT loop from the messages after this one."
 
-#: The store-backed fold is restart-shaped — the frontier is the LAST row on the path, so
-#: there are no messages after it and pointing the model at a tail would point it at nothing.
+#: The store-backed fold is restart-shaped: the frontier is the last row on the path, with
+#: no tail after it.
 RESUME_RESTART_SHAPED = (
     "The turns that produced this record are no longer in the history — it is all "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "that remains of them. Work the CURRENT loop from it and from investigation.md "
@@ -181,9 +170,8 @@ def render_frontier_message(frontier_md: str) -> Message:
 
 
 def frontier_text(investigation_md: str, fold_through: int) -> str:
-    """The frontier body for a STORE-BACKED fold through loop `fold_through` — the public
-    composition `selection.render(fold=True, text=…)` takes, so the driver never has to
-    reach into `_frontier_through` itself."""
+    """The frontier body for a store-backed fold through loop `fold_through`, as passed to
+    `selection.render(fold=True, text=…)`."""
     return frontier_body(
         _frontier_through(investigation_md, fold_through), resume=RESUME_RESTART_SHAPED)
 
@@ -284,15 +272,13 @@ def apply_writes(current: str, response: Message) -> str:
             except (ValueError, TypeError):
                 continue
         name = part.get("tool_name")
-        # `append_block` carries no path — the run has one transcript and the verb is bound
-        # to it — so it is targeted by name and must be tested BEFORE the path filter, which
-        # would otherwise drop every call as "not investigation.md".
+        # `append_block` carries no path (it is bound to the run's one transcript), so it
+        # must be matched before the path filter.
         if name == "append_block":
             text = args.get("text", "")
             if not isinstance(text, str):
                 continue
-            # Same separator rule the tool itself applies (`tools._tool_append_block`),
-            # including the empty-append case: appending nothing changes nothing.
+            # Same separator rule as `tools._tool_append_block`.
             sep = "\n" if current and text and not current.endswith("\n") else ""
             current = current + sep + text
             continue

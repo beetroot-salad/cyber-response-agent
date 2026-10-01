@@ -25,11 +25,8 @@ WARNING_THRESHOLD = 0.75
 
 TAIL_ALLOWANCE = 10
 
-#: The close tool's budget exemption — an explicit roster rather than a side effect of which
-#: tier a tool lands in. `close_tool.py` re-exports this name so
-#: `defender.runtime.close_tool.BUDGET_EXEMPT_TOOLS` resolves to the SAME object. Closing must
-#: always be possible even under budget pressure, since the gate's own forced turns are what
-#: push a run into that pressure.
+#: Tools never refused for budget (re-exported by `close_tool.py`). Closing must always be
+#: possible, since the gate's own forced turns are what push a run into budget pressure.
 BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
@@ -40,9 +37,8 @@ BUDGET_REFUSAL_MESSAGE = (
     "Do not retry this tool; close the investigation now and record your report from "
     "the evidence you already have."
 )
-# `fix_row` is named because the survivor set would otherwise be WRONG whenever a repair
-# window is open: both `append_block` and the close are refused while a row is flagged, so a
-# message offering only those two sends the model to a close it will be refused.
+# `fix_row` is named because while a row is flagged both `append_block` and the close are
+# refused, so offering only those would send the model to a refused close.
 
 
 class BudgetKill(Exception):
@@ -74,23 +70,11 @@ def open_budget(run_dir: Path, run_id: str) -> dict:
 
 
 def read_budget(run_dir: Path) -> dict:
-    """The budget state, `{}` when there is none — including when `budget.json` holds valid
-    JSON that is not a state at all.
+    """The budget state, `{}` when there is none or `budget.json` is not a JSON object (the
+    boxed adapter can write the run root, so a planted non-dict must not crash readers).
 
-    The narrowing for that last case lives at `read_json_locked`, not here. Without it `[]`,
-    `3`, `"x"` and `null` come back as the state itself, and `_budget_state_for_enforcement`'s
-    `{**state, …}` raises `TypeError: 'list' object is not a mapping` out of
-    `lead_zero._budget_gate` — a path NOT gated on `DEFENDER_BUDGET_ENFORCE`, before MAIN's
-    first prompt is built.
-
-    `{}` rather than `make_budget_state(...)`: this reader has no run id, and every caller
-    already treats a missing state as "no budget recorded yet" (`account_call` coalesces with
-    `or make_budget_state`, `tail_exhausted` and `should_refuse` read absent counters as
-    unspent). Inventing a fresh `created_at` here would restart the wall clock on every read.
-
-    The named writer is the boxed adapter subprocess: it bind-mounts the run root rw while the
-    defender tree is readonly, and it handles attacker-influenced payloads. This is the DoS
-    lever `docs/runtime-sandbox-design.md` §7 D3 exists to deny."""
+    `{}` rather than `make_budget_state(...)`: callers treat absent counters as unspent, and a
+    fresh `created_at` would restart the wall clock on every read."""
     return read_json_locked(RunPaths(run_dir).budget)
 
 
@@ -138,9 +122,8 @@ def account_call(
         try:
             _write_budget_atomic(run_dir, state)
         except OSError as e:
-            # §7 D3: a write refused because an alias was planted counts toward nothing and can
-            # never end a run — otherwise the box holds a DoS lever. An ORDINARY write failure
-            # (a squatted directory, a full disk) still escalates.
+            # An alias refusal never counts toward the kill circuit, or the box would hold a
+            # DoS lever. Ordinary write failures (squatted directory, full disk) still escalate.
             if getattr(e, "write_guarded_alias", False):
                 _record_alias_refusal(run_dir, RunPaths(run_dir).budget)
                 return read_budget(run_dir) or state
@@ -157,14 +140,9 @@ def _accounting_failure_path(run_dir: Path) -> Path:
 
 
 def accounting_failure_state(run_dir: Path) -> dict:
-    """The two accounting-failure counters, NORMALISED — a corrupt sidecar reads as "no
-    failures yet", never as a value the callers then arithmetic on.
-
-    `read_json_locked` narrows the DOCUMENT to a dict; it says nothing about the values inside
-    it, and both readers of this state do arithmetic: `int(state.get(...))` raises `ValueError`
-    on a string count, and `_record_accounting_failure`'s `time.monotonic() - first_failure_at`
-    raises `TypeError` on a non-number stamp — from inside `account_call`'s `except OSError`
-    arm, which has no handler for either."""
+    """The two accounting-failure counters, normalised: a corrupt value reads as "no failures
+    yet". Callers do arithmetic on them inside an `except OSError` arm that cannot handle the
+    `ValueError`/`TypeError` a bad value would raise."""
     state = read_json_locked(_accounting_failure_path(run_dir))
     stamp = state.get("first_failure_at")
     return {
@@ -202,33 +180,24 @@ def _reset_accounting_failure(run_dir: Path) -> None:
 
 
 def _write_accounting_failure(run_dir: Path, state: dict) -> None:
-    write_atomic(_accounting_failure_path(run_dir), json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount (X6)
+    write_atomic(_accounting_failure_path(run_dir), json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount
 
 
 def _record_alias_refusal(run_dir: Path, path: Path) -> None:
-    """§7 D7: the alias-refusal record lives in the accounting-failure sidecar — a SIBLING of
-    the run dir, outside every box mount — not as a new artifact inside the shared tree. An
-    in-tree sink would be a sixteenth writer the box could itself plant an alias at, making the
-    record suppressible by the exact attack it exists to observe."""
+    """Record an alias refusal in the accounting-failure sidecar, outside every box mount: an
+    in-tree record could itself be aliased by the attack it exists to observe."""
     p = _accounting_failure_path(run_dir)
     state = read_json_locked(p)
     refusals = list(state.get("alias_refusals", []))
     refusals.append({"path": str(path), "ts": datetime.now(UTC).isoformat()})
     state["alias_refusals"] = refusals
-    write_atomic(p, json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount (X6/D7)
+    write_atomic(p, json.dumps(state))  # lint-unguarded-tree-write: ok — outside every box mount
 
 
 
 def _wall_origin(state: dict) -> datetime | None:
-    """The run's wall-clock origin as an AWARE UTC datetime, never a naive one.
-
-    A bare `datetime.fromisoformat` parses an offset-less stamp — which `open_budget`'s
-    `setdefault` PRESERVES rather than replaces — into a naive datetime, and `_elapsed`'s
-    `datetime.now(UTC) - origin` then raises `TypeError: can't subtract offset-naive and
-    offset-aware datetimes`, which no `except ValueError` catches.
-
-    `_clock.parse_iso_utc` reads a naive stamp AS UTC and accepts the trailing `Z` that
-    hand-written seeds carry."""
+    """The run's wall-clock origin as an aware UTC datetime. A naive one (from a preserved
+    offset-less stamp) would make `_elapsed`'s subtraction raise `TypeError`."""
     for key in ("created_at", "started_at"):
         parsed = parse_iso_utc(state.get(key))
         if parsed is not None:
@@ -255,15 +224,9 @@ def tail_exhausted(state: dict, limits: dict) -> bool:
     return elapsed is not None and elapsed > limits["wall_clock_timeout"] + limits["grace_seconds"]
 
 
-#: Main's own bookkeeping verbs: reading and recording cost budget but are never REFUSED for
-#: it, or a run that hits the cap could no longer write down what it already found.
-#: `append_block` is main's only writer, so omitting it would leave the transcript
-#: budget-refusable mid-investigation. `write_file`/`edit_file` stay listed because the tier is
-#: keyed on a name, not a grant, and a stale name here is inert. `fix_row` is here for the same
-#: reason as `append_block`: while a row is flagged BOTH the append and the close are refused,
-#: so a repair verb at `core` tier would be permanently withdrawn at the cap and leave the run
-#: with nothing that can reopen either.
-#: METERED, not exempt — a model looping on repairs is still stoppable at `tail_exhausted`.
+#: Main's bookkeeping verbs: metered but never refused at the cap, so a capped run can still
+#: record what it found. `fix_row` is included because while a row is flagged both the append
+#: and the close are refused. Still stoppable at `tail_exhausted`. Stale names are inert.
 _MAIN_TAIL_TOOLS = ("read_file", "append_block", "fix_row", "write_file", "edit_file")
 
 

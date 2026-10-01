@@ -33,6 +33,7 @@ already owns, for exploits this code does not contain.)
 """
 from __future__ import annotations
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 from defender.tests._spec791 import (
     SpecTail,
@@ -112,7 +113,7 @@ def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
 
 def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path, monkeypatch):
     """A run id whose dir was removed and reused (the operator's retry) starts with NO run-end
-    record beside it: `materialize_run_dir` clears a stale sidecar host-side, before the box
+    record beside it: `materialize_run` clears a stale sidecar host-side, before the box
     exists, so an attempt that ends before writing its own (a setup failure, an unhandled
     fault) cannot be archived under the previous attempt's exit class."""
     from defender import _tenant
@@ -125,12 +126,12 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
     _tenant.create_tenant(data_root, tenant_id)
     run_common = S.mod("run_common")
 
-    run_dir = run_common.materialize_run_dir(alert, "case-1047-retry", tenant_id=tenant_id)
+    run_dir = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
     S.plant_sidecar(run_dir, truncated_by="aborted")
     import shutil
     shutil.rmtree(run_dir)
 
-    again = run_common.materialize_run_dir(alert, "case-1047-retry", tenant_id=tenant_id)
+    again = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
 
     assert again == run_dir
     assert not S.sidecar_path(again).exists(), (
@@ -149,11 +150,12 @@ def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp
     archive = S.mod("learning.branch.archive")
 
     S.plant_sidecar(run_dir, truncated_by="aborted")
-    archive.archive_episode(ep, {"b": run_dir})
-    assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
+    with Episode.open(ep) as episode:
+        archive.archive_episode(episode, {"b": run_dir})
+        assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
 
-    S.sidecar_path(run_dir).unlink()
-    archive.archive_episode(ep, {"b": run_dir})
+        S.sidecar_path(run_dir).unlink()
+        archive.archive_episode(episode, {"b": run_dir})
     assert not (ep / "worlds" / "b" / S.run_end_name()).exists(), (
         "a stale run-end record survived a re-archive whose run has none")
     assert S.graded(S.cut_short_episode(tmp_path / "control"))["b"].get("cut_short") is None

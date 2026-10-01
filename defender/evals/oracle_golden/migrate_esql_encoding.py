@@ -1,36 +1,26 @@
 #!/usr/bin/env python3
-"""Re-encode the golden corpus's ES|QL payloads to production's positional shape (#1054).
+"""Re-encode the golden corpus's ES|QL payloads to production's positional shape.
 
-#842 moved the `esql` verb (and `controls.py`, through the same `esql_payload` shaper) to
-emit `values` as the wire sends them — rows are bare arrays, cell `i` bound to
-`columns[i]` — but the committed corpus under `evals/oracle_golden/cases/*/hidden/` was
-never migrated: every ES|QL payload on disk still holds the pre-#842 dict-row form. A
-`controls.py` rerun (which `known_defects.yaml`'s own `repair:` notes tell someone to do)
-only regenerates `hidden/controls/`, so the observed half would stay dict-row while the
-controls half came back positional — one judge prompt, two encodings of the same data.
+The `esql` verb and `controls.py` (via the shared `esql_payload` shaper) emit `values` as
+the wire sends them: bare-array rows, cell `i` bound to `columns[i]`. Re-running
+`controls.py` only regenerates `hidden/controls/`, so any dict-row payloads left under
+`hidden/observed/` would give one judge prompt two encodings of the same data.
 
-This script closes that gap in one pass: every ES|QL payload anywhere under
-`cases/*/hidden/{observed,controls}/**/*.json` is re-encoded from dict rows to positional
-rows, losslessly (re-zipping by `columns[].name` reproduces the original exactly) and
-minimally (a file keeps its own JSON serialization; a file with nothing to migrate is not
-touched at all). It is idempotent — a second run over an already-migrated tree rewrites
-nothing — which is also why a future `controls.py` rerun cannot re-split the corpus: its
-writer already goes through `esql_payload`, so it only ever writes what this script also
-writes.
+This re-encodes every ES|QL payload under `cases/*/hidden/{observed,controls}/**/*.json`
+from dict rows to positional rows, losslessly (re-zipping by `columns[].name` reproduces
+the original) and minimally (a file keeps its own serialization; a file with nothing to
+migrate is untouched). It is idempotent.
 
-A payload is found by SHAPE (any dict carrying all four of `query`, `columns`, `row_count`,
-`values`), never by an enumerated list of positions. An enumerated sweep is exactly the bug
-that produced #1054: #842 moved the shape, and nothing that only knew a fixed set of
-positions noticed a payload sitting somewhere else (`attack_contribution.payload`, or any
-future position). The guard that keeps this true going forward lives beside the shaper it
-protects: `tests/evals/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`.
+Payloads are found by shape (a dict carrying `query`, `columns`, `row_count` and
+`values`), never by a list of known positions, so a payload in a new position is not
+missed. The guard that keeps the corpus positional is
+`tests/evals/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`.
 
 Usage:
   python defender/evals/oracle_golden/migrate_esql_encoding.py [--cases-dir DIR]
 
-`--cases-dir` defaults to this script's own `cases/` directory, so the committed,
-replayable command is the bare invocation; the flag exists so the migration can also be
-driven over a temporary copy of the tree (how it is tested).
+`--cases-dir` defaults to this script's own `cases/` directory; the flag lets the
+migration run over a temporary copy of the tree (how it is tested).
 """
 from __future__ import annotations
 
@@ -43,16 +33,12 @@ from typing import Any
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 
-#: The four keys that make a dict an ES|QL payload — see `esql_payload` in
-#: `scripts/adapters/elastic_adapter.py`. No non-ES|QL shape under `hidden/` carries all
-#: four (a lookup/state stub has neither `columns` nor `values`), so this classifies
-#: cleanly with no false positives on the corpus as it exists today.
+#: The four keys that make a dict an ES|QL payload (see `esql_payload` in
+#: `scripts/adapters/elastic_adapter.py`). No other shape under `hidden/` carries all four.
 ESQL_KEYS = ("query", "columns", "row_count", "values")
 
-#: The three JSON serializations every file under `hidden/` is reproduced by exactly
-#: (census: 526 compact, 342 indent=2+newline, 9 indent=2, 80 zero-byte, 0 unmatched). A
-#: rewritten file is written back through whichever of these reproduced its ORIGINAL bytes,
-#: so a 482-file data migration stays a data migration and not a 957-file whitespace diff.
+#: The JSON serializations that exactly reproduce every file under `hidden/`. A rewritten
+#: file uses whichever reproduced its original bytes, so the diff stays data-only.
 _SERIALIZATIONS: tuple[tuple[str, Any], ...] = (
     ("compact", lambda doc: json.dumps(doc)),
     ("indent2", lambda doc: json.dumps(doc, indent=2)),
@@ -68,25 +54,14 @@ def is_esql_payload(obj: Any) -> bool:
 def to_columnar(payload: dict) -> dict:
     """`payload` with `values` re-encoded to positional rows (cell *i* named `columns[i]`).
 
-    Every other key keeps its value, and the returned dict keeps `payload`'s own key
-    order — anything else would move bytes outside `values`, which is exactly the diff
-    noise the rewrite is supposed to avoid. A payload whose rows are already lists, or
-    whose `values` is empty, comes back equal to its input (this is what makes the
-    transform a fixed point on its own output, and the migration idempotent).
-
-    Each row is judged on ITS OWN, not by inspecting `values[0]` alone and assuming the
-    rest match: a payload can hold a dict row after an already-positional one — the exact
-    shape a partially-applied hand edit or an interrupted `controls.py` rerun leaves behind
-    — and a first-row-only check would pass such a payload through with its dict row
-    untouched.
+    Key order and every other key are preserved. Already-positional or empty payloads come
+    back unchanged, so the transform is idempotent. Each row is judged on its own, since a
+    partially migrated payload can mix dict and list rows.
 
     Raises `ValueError` (message names "column") when:
-      - a dict row's key list is not exactly `[c["name"] for c in payload["columns"]]` —
-        reordered, missing a column, or carrying one the columns don't name. Re-zipping
-        such a row by position would silently corrupt it.
-      - a row that is already a list is not exactly `len(columns)` cells wide — the wrong
-        width is not "already migrated", it is a truncated or corrupted row that must not
-        be waved through as a no-op.
+      - a dict row's keys are not exactly `[c["name"] for c in payload["columns"]]`
+        (re-zipping it by position would corrupt it);
+      - a list row is not exactly `len(columns)` cells wide (truncated or corrupt);
       - a row is neither a dict nor a list.
     """
     rows = payload.get("values") or []
@@ -124,8 +99,7 @@ def to_columnar(payload: dict) -> dict:
 def to_dict_rows(payload: dict) -> dict:
     """The inverse of `to_columnar`: positional rows re-zipped to dicts in `columns` order.
 
-    This is the round-trip half of losslessness, and the migration runs it on every
-    payload it rewrites to confirm nothing was lost before touching disk.
+    The migration round-trips every rewritten payload through this before touching disk.
     """
     rows = payload.get("values") or []
     if not rows or isinstance(rows[0], dict):
@@ -139,20 +113,11 @@ def to_dict_rows(payload: dict) -> dict:
 def _migrate_document(doc: Any) -> int:
     """Walk `doc` recursively, re-encoding every ES|QL payload found by shape, in place.
 
-    Recursive and shape-driven rather than an enumerated list of positions: today's
-    payloads sit at three known positions (the observed root, `controls[i].payload`,
-    `attack_contribution.payload`), and a sweep written against that list would miss a
-    fourth the day one appears — which is the day the corpus splits again unnoticed.
+    Returns the number of payloads actually re-encoded.
 
-    Returns the number of payloads actually re-encoded (payloads that were already
-    positional, or empty, don't count — nothing about them changed).
-
-    Before committing a change to this document, re-zips the NEW positional rows and
-    compares them against the rows that were ACTUALLY here before `to_columnar` ran — never
-    against a value re-derived from the transform's own output, which would confirm nothing
-    about a `to_columnar` bug that is consistent with itself (a reversed cell order, a
-    dropped row) but wrong about the data. `ValueError` here aborts the whole file (see
-    `migrate_file`) rather than writing a payload this check cannot vouch for.
+    Verifies each change by re-zipping the new rows and comparing against the original rows
+    (not against the transform's own output, which would miss a self-consistent bug). A
+    mismatch raises `ValueError`, aborting the whole file.
     """
     rewritten = 0
     if isinstance(doc, dict):
@@ -189,15 +154,10 @@ def _detect_serialization(doc: Any, original_text: str):
 def migrate_file(path: Path) -> int:
     """Rewrite one JSON file's ES|QL payloads in place. Returns payloads rewritten.
 
-    A zero-byte file is skipped (a recorded capture failure, not an empty result — see
-    `README.md`) and returns 0 without being parsed. A file with nothing to migrate is not
-    written at all: not re-serialized, not touched, byte-identical, so a file whose format
-    this script cannot reproduce never fails a run that had no business touching it.
-
-    A file that DOES have something to migrate keeps its own serialization — whichever of
-    `json.dumps(doc)` / `json.dumps(doc, indent=2)` / `json.dumps(doc, indent=2) + "\\n"`
-    reproduces its ORIGINAL bytes. If none does, raises `ValueError` (message names
-    "serializ") and leaves the file untouched rather than silently reformatting it.
+    A zero-byte file (a recorded capture failure) is skipped unparsed. A file with nothing
+    to migrate is never written. A migrated file keeps whichever `_SERIALIZATIONS` form
+    reproduces its original bytes; if none does, raises `ValueError` (message names
+    "serializ") and leaves the file untouched.
     """
     raw = path.read_bytes()
     if not raw.strip():
@@ -217,10 +177,6 @@ def migrate_file(path: Path) -> int:
             f"{path}: cannot reproduce this file's serialization from any known form; "
             "refusing to rewrite it (that would silently reformat it, not just migrate it)")
 
-    # A one-shot local migration a developer runs by hand over the git-committed golden
-    # corpus, never a runtime/box writer — there is no adversarial actor able to race a
-    # symlink swap during this invocation the way write_guarded's callers (a live agent
-    # run's shared tree) must defend against.
     path.write_text(render(migrated_doc), encoding="utf-8")  # lint-unguarded-tree-write: ok — local dev-run migration of the committed corpus, not a runtime/box writer
     return rewritten
 

@@ -7,9 +7,8 @@ from pathlib import Path
 from defender._corpus import iter_lessons
 from defender._io import use_utf8_stdio
 
-# No `reexec_into_venv` re-export: this module resolves pydantic through `_corpus`/`_io` at
-# import, so a script that fetched the guard from here would have already imported what the
-# guard exists to route around. The guard comes from `defender.scripts._venv` alone.
+# No `reexec_into_venv` re-export: this module imports pydantic (via `_corpus`/`_io`), which is
+# what the guard exists to avoid, so scripts take it from `defender.scripts._venv`.
 __all__ = [
     "iter_lessons", "use_utf8_stdio",
     "as_list", "as_str_set", "csv_set", "rel_to_repo", "resolve_corpus",
@@ -42,41 +41,20 @@ def rel_to_repo(path: Path, repo_root: Path) -> str:
 def resolve_corpus(
     raw: str | None, default: Path, ap: argparse.ArgumentParser
 ) -> Path:
-    """`--corpus` RELOCATES a corpus walk; it never SELECTS a different corpus.
+    """`--corpus` relocates a corpus walk; it never selects a different corpus.
 
-    Shared by every script that takes a `--corpus` operand, because the containment argument is
-    the same one each time and one of them getting it subtly wrong is the whole risk. The
-    legitimate relocations — a worktree copy for the forward-check, a fixture for a test —
-    change the root but never the corpus, so the rule is the LEAF NAME rather than one absolute
-    path. (`defender-lessons --show` holds the same line for a different operand shape — a
-    LESSON path, contained by `relative_to` against a fixed corpus — so `lessons_fm.cmd_show`
-    keeps its own check rather than calling this one.)
+    Shared by every script taking `--corpus`. Legitimate relocations (a forward-check worktree,
+    a test fixture) change the root but not the corpus, so the rule is the leaf name.
+    (`lessons_fm.cmd_show` contains a lesson path with its own `relative_to` check.)
 
-    It has to live in the script rather than the permission gate: these scripts are PINNED
-    grants, and a pinned grant is argv-blind by design (`docs/runtime-gates.md`) — the gate
-    admits `python3 <script> <anything>` and never inspects the operands. Without this check
-    the malicious actor, the one agent the gray-box design deliberately blinds to the
-    defender's playbook, could pass `--corpus defender/lessons` to a script grant-listed for
-    the environment corpus and enumerate what `decide_read` denies it.
+    The check lives here, not in the permission gate, because these scripts are pinned grants
+    and pinned grants are argv-blind (`docs/runtime-gates.md`); without it a role could point a
+    script at a corpus `decide_read` denies it.
 
-    Resolving BEFORE the name test is what makes the leaf name sufficient: a symlink or a
-    `..` cannot dress another corpus up in the expected name once the path is real.
-
-    An EMPTY or CWD-only operand is refused rather than resolved: `""`, `.`, `./` and
-    `some/..` all name the process CWD, which would then be tested against whatever that
-    directory happens to be called — a containment check on a path the caller never named.
-    Every legitimate relocation (a forward-check worktree, a test fixture) names a real
-    directory.
-
-    `os.path.normpath` rather than `Path(raw) == Path(".")`: `Path` collapses `.` and a
-    trailing slash but NOT `..`, so `--corpus 'x/..'` slipped past the equality test, resolved
-    to the CWD, and was admitted whenever the CWD happened to carry the expected leaf name.
-    `normpath` folds every spelling of "here" — including `""` — to `os.curdir`.
-
-    The operand is stripped ONCE, before both tests. `Path` does not strip, so testing
-    `raw.strip()` and then building `Path(raw)` blamed a padded operand on the corpus name:
-    `--corpus "  .../lessons "` resolved to a leaf spelled `lessons ` and earned the
-    containment refusal rather than the whitespace one.
+    The path is resolved before the name test, so a symlink or `..` cannot disguise another
+    corpus. Any spelling of the CWD (`""`, `.`, `x/..` — folded by `os.path.normpath`, unlike
+    `Path`) is refused rather than tested by whatever the CWD happens to be called. The operand
+    is stripped once, before both tests.
     """
     if raw is None:
         return default

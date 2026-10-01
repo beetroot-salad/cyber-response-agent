@@ -1,49 +1,31 @@
 #!/usr/bin/env python3
-"""Shared-oracle smell — a test that computes its EXPECTED value with the same git
-query the code under test runs.
+"""Shared-oracle smell: a test that computes its expected value with the same git query the
+code under test runs.
 
-A test whose oracle re-runs production's own command is not a test of that command.
-It cannot disagree with the code about how the tree is read; it can only confirm the
-code does what the test's own copy does. Every input on which the shared primitive is
-wrong is invisible to the suite BY CONSTRUCTION — the assertion and the implementation
-fail together, in the same direction, and the run stays green.
+A test whose oracle re-runs production's own command cannot disagree with the code about how
+the tree is read. Every input on which the shared primitive is wrong is invisible to the suite
+by construction: assertion and implementation fail together and the run stays green.
 
-THE SHIPPED CASE (#869/#908). `declared_systems._marker_names` read the committed tree
-with::
+Example: production lists skill markers with
+``git ls-tree -r --name-only HEAD -- <dir>`` then ``listing.split()`` and a
+``count("/") == 3`` filter, and the test computes its expected set the same way. Neither
+notices that ``--name-only`` C-quotes non-ASCII paths, ``.split()`` tears paths containing a
+space, or ``ls-tree`` output is cwd-relative. Routing the call through the ``defender._git``
+facade satisfies ``lint_raw_git_subprocess``; hand-rolling the parse of its output re-opens the
+same hole one layer up.
 
-    _git.git(["ls-tree", "-r", "--name-only", "HEAD", "--", SKILLS_REL], cwd=repo_root)
-    ... for rel in listing.split(): if rel.count("/") != 3: continue
-
-and `test_869_resolver.py` computed the set it asserted against with the SAME argv and
-the SAME `count("/") == 3`. Both were transcribed from an executed probe recorded in the
-spec, run over ASCII fixtures at the repo root. Three preconditions travelled with that
-probe unstated and unnoticed by 57 tests: `--name-only` C-QUOTES a non-ASCII path (so it
-no longer ends in `/execution.md`), `.split()` TEARS a path containing a space, and
-`ls-tree`'s output is CWD-relative while the `cat-file -e HEAD:<path>` probe beside it is
-project-root-relative. Each silently un-declared a real system — the exact failure #869
-existed to prevent. The `-z`/spaced-path half of this is a REPLAY: `lint_raw_git_subprocess`'s
-own docstring records "the non-`-z` copies mis-handled spaced paths" from #460. Routing the
-call through the `defender._git` facade satisfied that gate; hand-rolling the PARSE of what
-it returned re-opened the same hole one layer up.
-
-WHAT THIS FLAGS: a git QUERY argv shape that appears in both a production module and a
-test module under `defender/`. The shape is the run of literal tokens up to `--` (the
-pathspec after it is variable by construction), with a leading `git` and `-C <path>`
-stripped, so the facade's `_git.git(["ls-tree", ...])` and a test's raw
-`subprocess.run(["git", "-C", str(repo), "ls-tree", ...])` normalize to the same string.
-Only READ subcommands count (`_READ_SUBCOMMANDS`): a fixture builds its tree with
-`init`/`add`/`commit`, and planting a tree is never how an oracle gets rigged — you know
-what you planted. A shape of one token (a bare `show`) is too generic to mean anything and
+What this flags: a git query argv shape that appears in both a production module and a test
+module under `defender/`. The shape is the run of literal tokens up to `--` (the pathspec is
+variable), with a leading `git` and `-C <path>` stripped, so the facade's
+`_git.git(["ls-tree", ...])` and a test's `subprocess.run(["git", "-C", str(repo), "ls-tree",
+...])` normalize to the same string. Only read subcommands count (`_READ_SUBCOMMANDS`): a
+fixture that plants a tree already knows what it planted. A one-token shape is too generic and
 is skipped.
 
-WHAT IT DOES NOT FLAG, and cannot: an oracle that duplicates production's LOGIC without
-duplicating its argv, and a shared shape whose test use is an identity read rather than a
-derived expectation (`rev-parse HEAD` to learn which commit was just made). The second is
-why this gate is baseline-ratcheted with `require_reasons`: the benign sites are real, and
-the ratchet costs them one sentence each while making a NEW shared query unmergeable.
-The remedy for a true positive is never to change the argv — it is to assert against the
-tree the test PLANTED (it already knows the answer), so the oracle and the implementation
-can disagree.
+What it cannot flag: an oracle that duplicates production's logic without its argv. And a
+shared shape can be benign — an identity read like `rev-parse HEAD` to learn which commit was
+just made — hence the baseline with `require_reasons`. The fix for a true positive is to
+assert against the tree the test planted, not to change the argv.
 
 Suppress a deliberate site with `# lint-oracle: ok — <reason>` on the call's line span.
 
@@ -67,11 +49,9 @@ BASELINE_PATH = Path(__file__).with_name("lint_shared_oracle_baseline.json")
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKER = "lint-oracle: ok"
 
-#: git subcommands that ANSWER a question about the tree, as opposed to changing it. Only
-#: these can rig an oracle: a fixture's `init`/`add`/`commit`/`checkout` builds the state
-#: the test planted, and a test that plants a tree already knows what is in it. Kept as a
-#: closed positive table — "not obviously a write" would sweep in every future subcommand
-#: unread, which is the direction that produces false alarms nobody triages.
+#: git subcommands that answer a question about the tree rather than change it; only these
+#: can rig an oracle. A closed positive table: "not obviously a write" would sweep in every
+#: future subcommand unread.
 _READ_SUBCOMMANDS = frozenset({
     "blame", "cat-file", "count-objects", "describe", "diff", "for-each-ref", "grep",
     "log", "ls-files", "ls-remote", "ls-tree", "merge-base", "name-rev", "rev-list",
@@ -79,9 +59,8 @@ _READ_SUBCOMMANDS = frozenset({
     "whatchanged",
 })
 
-#: Below this many literal tokens the shape carries no information — a bare `show` or
-#: `status` says nothing about HOW the answer was derived, and matching on it would pair
-#: unrelated calls.
+#: Below this many literal tokens (a bare `show`) the shape says nothing about how the answer
+#: was derived and would pair unrelated calls.
 _MIN_SHAPE_TOKENS = 2
 
 
@@ -91,8 +70,8 @@ def _in_scope(path: Path) -> bool:
 
 def _is_test_module(rel: str) -> bool:
     """A ``tests/`` dir, or a flat ``test_*.py`` / ``*_test.py`` / ``conftest.py``. Matches
-    ``lint_raw_git_subprocess._is_test_module`` — the same partition of this tree, read
-    from the other side: that gate exempts tests, this one is about them."""
+    ``lint_raw_git_subprocess._is_test_module``: that gate exempts tests, this one is about
+    them."""
     p = Path(rel)
     return (
         "tests" in p.parts
@@ -105,15 +84,13 @@ def _is_test_module(rel: str) -> bool:
 def _shape(elts: list[ast.expr], env) -> str | None:
     """The normalized git-query shape of an argv list literal, or None if it is not one.
 
-    Non-literal elements (``str(repo)``, a ``*flags`` splat, a Path expression) are DROPPED
-    rather than ending the shape: they are the parts that legitimately differ between a
-    production call and a test's, and stopping at the first one would make every shape a
-    one-token prefix. `str_value` resolves module-level string constants too, so hoisting a
-    literal into a named constant — which this repo asks for — does not evade the match.
+    Non-literal elements (``str(repo)``, a ``*flags`` splat) are dropped rather than ending
+    the shape: they are the parts that legitimately differ between production and test.
+    `str_value` resolves module-level string constants, so hoisting a literal does not evade
+    the match.
 
-    Truncated at ``--``: everything after it is a pathspec, which the two sides spell
-    differently (a module constant on one, an imported name the resolver cannot see on the
-    other) for reasons that have nothing to do with whether they ask git the same question.
+    Truncated at ``--``: the pathspec after it is spelled differently on the two sides for
+    reasons unrelated to whether they ask git the same question.
     """
     toks = [v for e in elts if (v := str_value(e, env)) is not None]
     if toks[:1] == ["git"]:
@@ -140,11 +117,8 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
 def _raised(tree: ast.Module) -> set[ast.AST]:
     """Every node under a ``raise`` statement.
 
-    An argv can be DATA as well as a command: `raise GitError(["rev-parse", "HEAD"], 128,
-    ...)` names the call that failed so the error can report it, and executes nothing. A
-    shape reached only by raising cannot rig an oracle, and reading it as one puts an
-    entry in the baseline whose honest annotation is "this is not a git call" — which is a
-    detector bug wearing a reason. Cheap and sound: raising is not running.
+    An argv can be data: `raise GitError(["rev-parse", "HEAD"], 128, ...)` names the failed
+    call and executes nothing, so it cannot rig an oracle.
     """
     out: set[ast.AST] = set()
     for node in ast.walk(tree):
@@ -223,11 +197,8 @@ def main(argv: list[str]) -> int:
     if not SCOPE.is_dir():
         print(f"defender/ not found at {SCOPE}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652). It is doubly
-    # wrong here: an unread PRODUCTION file also shrinks the corpus every test is matched
-    # against, so a blind scan under-reports the tests it did read.
+    # An unreadable file never entered the corpus; an unread production file also shrinks
+    # what every test is matched against. Exit 2: the gate could not run, which is not "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:

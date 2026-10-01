@@ -5,22 +5,19 @@ Two subcommands:
     defender-policy show <agent> --run-dir <dir> [--defender-dir <tree>]
     defender-policy explain <agent> '<command>' --run-dir <dir> [--defender-dir <tree>] [--json]
 
-Gather's verb grant is a RUN's, projected from one tenant's table (#1106), so `gather` also
-takes `--tenant <id>` (and `--tenants-root <dir>`, default `<checkout>/knowledge/tenants`):
-the policy shown is the one a run for that tenant would compile.
+Gather's verb grant belongs to a run and is projected from one tenant's table, so `gather` also
+takes `--tenant <id>` (and `--tenants-root <dir>`, default `<checkout>/knowledge/tenants`): the
+policy shown is the one a run for that tenant would compile.
 
-`<agent>` is a role name, except that the actor role is bound by two legs with different
-scopes and is therefore named per leg: `actor` (adversarial) and `actor_benign`.
+`<agent>` is a role name.
 
-The one rule this module lives by: **it is a second CONSUMER of the gate, never a second
-implementation.** `explain` calls `permission.decide_bash` — the same function the driver calls
-— and prints what it returns. An audit tool that models the gate separately is worse than no
-audit tool, because it certifies a policy nobody runs.
+This is a second consumer of the gate, never a second implementation: `explain` calls
+`permission.decide_bash`, the same function the driver calls, and prints what it returns. An
+audit tool that modelled the gate separately would certify a policy nobody runs.
 
-It is an OPERATOR tool, not an agent one: `hooks/_cmd_segments.OPERATOR_TOOLS` keeps it out of
-the adapter taxonomy, and no agent's grant list names it, so every agent's lane denies it. An
-agent that could read its own gate would hold a map of what to attack — and the judge, a map of
-exactly which grants stand between it and the answer key."""
+An operator tool, not an agent one: `hooks/_cmd_segments.OPERATOR_TOOLS` keeps it out of the
+adapter taxonomy and no agent's grant names it. An agent able to read its own gate would hold a
+map of what to attack."""
 
 from __future__ import annotations
 
@@ -46,13 +43,8 @@ from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
-# ONE CLI NAME PER ROLE SINCE #922. The actor was the one role bound by TWO legs with
-# different scopes — the adversarial leg ran both lesson scripts and read both corpora, the
-# FP-hunting benign leg bound strictly less — so a bare `actor` named no single answer and
-# each leg carried its own CLI name and its own refusal when none was given. The role and both
-# legs went with the old pipeline, and the leg table went with them rather than staying behind
-# as an empty map nothing can key: a role that binds two scopes has to reintroduce the
-# mechanism in a diff, which is the same rule the registry itself follows.
+# One CLI name per role. A role bound by two legs with different scopes would need its own
+# per-leg names reintroduced explicitly.
 AGENT_NAMES = sorted(_ROLES)
 
 
@@ -79,9 +71,8 @@ def _policy(
     defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
     *, agent: str | None = None,
 ) -> AgentPolicy:
-    # effective_tools_for is the one place that knows any role's typed-capability switching.
-    # This tool asks it for "the effective tools for this role" and never names a bit itself, so
-    # its own source carries no map of typed capabilities to attack (N4).
+    # `effective_tools_for` owns any role's typed-capability switching, so this source carries
+    # no map of capabilities to attack.
     return compile_policy_for(
         defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name, agent=agent),
         defender_dir=defender_dir, tools=effective_tools_for(defn),
@@ -91,10 +82,9 @@ def _policy(
 def _definition(
     role: AgentRole, defender_dir: Path, tenants_root: Path | None, tenant: str | None,
 ) -> AgentDefinition:
-    """The role's definition as a run would bind it. Gather's grant is the named tenant's
-    (#1106 M2: this entry point is handed the root and the tenant, and resolves them the way a
-    run does — refused, like a run, when gather could query nothing under it); every other
-    role's definition carries its own grant and needs no tenant."""
+    """The role's definition as a run would bind it. Gather's grant is the named tenant's,
+    resolved the way a run does (and refused, like a run, when gather could query nothing);
+    other roles carry their own grant."""
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
@@ -112,12 +102,10 @@ def _definition(
 
 
 def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[str]:
-    """The roots a read must land within, straight off the gate's own resolver (N1: a second
-    CONSUMER of the gate, never a second model of it).
+    """The roots a read must land within, straight off the gate's own resolver.
 
     The resolver may raise on a hostile operand (symlink cycle, embedded NUL); where the gate
-    fails CLOSED, the audit tool reports the fault rather than raising — "this cannot be
-    resolved" is an honest answer, a traceback is not."""
+    fails closed, this reports the fault rather than a traceback."""
     from defender.runtime.permission.files import _resolved_read_roots
 
     try:
@@ -133,9 +121,8 @@ def _shapes(g: Grant) -> str:
 def _containment(g: Grant) -> str:
     if g.pins_path:
         base = f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
-        # A pins_path grant that ALSO opted into a resolve()+scope recheck on its operand (the
-        # curator's `rm`) is not pattern-pinned alone: surface the recheck so the audit does not
-        # hide a real containment the gate applies.
+        # A pins_path grant that also rechecks its resolved operand (the curator's `rm`):
+        # show the recheck too.
         if g.resolve_operand:
             base += f"; operand resolve()d + rechecked against {_shapes(g)}"
         return base
@@ -159,10 +146,8 @@ def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> 
         print(f"  {s.pattern}")
     if not policy.read_allow:
         print("  (no shape filter — reads are bounded by the roots alone)")
-    # The ROOTS are the containment every read is checked against, and for most roles they are
-    # the whole answer (`read_allow` is empty) — they are also the one thing that differs
-    # between the two actor legs (the adversarial leg confines to both lesson corpora, the
-    # benign leg to one). Read off the gate's OWN resolver, never re-derived here.
+    # The roots bound every read and, with `read_allow` usually empty, are most roles' whole
+    # answer. Read off the gate's own resolver.
     print("  roots:")
     for root in _read_roots(policy, run_dir, defender_dir):
         print(f"    {root}")
@@ -188,9 +173,8 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
             "allow": d.allow,
             "grant": grants,
             "reason": d.reason or "",
-            # The argv half of the verdict (#959 F2/O3): allow/grant/reason alone cannot show
-            # the class of change where allow does not move but the argv the gate authorises
-            # does, and this is the one surface a human audits.
+            # The authorised argv: allow/grant/reason alone cannot show a change where the
+            # verdict holds but the argv moves.
             "pipelines": None if d.pipelines is None else [
                 [list(st.argv) for st in pl.stages] for pl in d.pipelines
             ],
@@ -202,12 +186,9 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
         print("matched: " + ", ".join(grants))
     else:
         print(f"reason: {d.reason}")
-    # The argv half of the verdict on THIS path too (#959 F2/O3). `--json` is not the surface an
-    # operator types; this one is, and it carried allow/grant/reason alone — which cannot show
-    # the class of change where allow does not move but the authorised argv does. CONNECTOR and
-    # STDERR ride along because they are half of that class: `A && B` demoted to `A ; B`, or a
-    # stage's stderr rerouted, are argv-identical and verdict-identical and neither is a thing
-    # a human should have to diff two runs to notice.
+    # The authorised argv here too, since this is the surface an operator reads. Connector and
+    # stderr routing are included: `A && B` demoted to `A ; B`, or a rerouted stderr, leave both
+    # argv and verdict identical.
     for pl in d.pipelines or ():
         stages = " | ".join(
             " ".join(repr(t) for t in st.argv)

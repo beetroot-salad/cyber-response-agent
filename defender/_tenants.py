@@ -1,31 +1,21 @@
-"""#1106 — the per-tenant knowledge folder: `<tenants root>/<tenant id>/{settings,agent}/`.
+"""The per-tenant knowledge folder: `<tenants root>/<tenant id>/{settings,agent}/`.
 
-WHY THIS EXISTS. A deployment's settings (each system's `config.env`, `verb-grants.yaml`,
-`lead-zero.yaml`, `systems/case-history/mapping.yaml`) used to live under
-`defender/knowledge/environment/`, inside the tree mounted read-only into every run's box. The
-platform needs one such folder per tenant, and the box must hold none of them. So each tenant
-gets a folder OUTSIDE `defender/`, in two halves:
+Lives outside `defender/` because that tree is mounted into every run's box, and the box must
+hold no tenant's settings. Two halves:
 
-  * `settings/` — HOST-ONLY. Every host-side reader of the four settings kinds reads the run's
-    tenant's copy. It is never a mount source.
-  * `agent/` — MODEL-FACING. Mounted read-only into the run's box at a fixed target (#1108
-    fills it; #1106 creates it empty).
+  * `settings/` — host-only (`config.env`s, `verb-grants.yaml`, `lead-zero.yaml`,
+    `systems/case-history/mapping.yaml`). Never a mount source.
+  * `agent/` — model-facing, mounted read-only into the run's box.
 
-WHERE THE ROOT COMES FROM (D2). No reader finds the tenants root itself — not from the code
-tree, `PATHS`, `__file__`, `DEFENDER_DIR` or the cwd. A process entry point is HANDED it (or
-takes `default_tenants_root(<its own checkout>)`) and passes it down. Which copy a worktree run
-reads is whatever its entry point was given.
+No reader discovers the tenants root (not from `PATHS`, `__file__`, `DEFENDER_DIR` or the cwd):
+an entry point is handed it, or uses `default_tenants_root(<its own checkout>)`, and passes it
+down.
 
-ONE RESOLVER. `tenant_dir` is the one place a tenant id becomes a path, so both escapes are
-closed here: the id's grammar (no separator, no `..`, no leading dot, not empty) and the link
-(the tenant folder must resolve under the root, each half must be a real directory whose
-resolved path is exactly `<resolved tenant>/<half>` — which catches `A/agent -> ../B/agent`
-and `A/agent -> ../settings`, both of which stay inside the root — and NOTHING inside the
-folder may be a link at all: a linked `config.env`, `systems/<sys>/` or knowledge file would
-hand one tenant another's endpoints or knowledge while staying inside the root, and a rule
-that named the files it covers would miss the next one). The retired bootstrap id `default`
-names no tenant on any path (N10). An absent folder, half or required file is a
-`TenantDirError` naming the path, with no fallback (D3).
+`tenant_dir` is the one place a tenant id becomes a path. It checks the id (`TenantId`) and
+that the folder and each half resolve to exactly `<root>/<id>/<half>` (catching `A/agent ->
+../B/agent`, which stays inside the root), and refuses any link inside the folder, since a
+linked file would hand one tenant another's settings. Anything absent is a `TenantDirError`
+naming the path, with no fallback.
 """
 from __future__ import annotations
 
@@ -36,9 +26,8 @@ from pathlib import Path
 
 from defender._tenant import TenantId, TenantRefused
 
-#: D3's files required AT START, relative to a tenant's `settings/`. A system's `config.env`
-#: is deliberately not here: some adapters need none, and its absence stays the per-call
-#: `ConfigFault` (exit 2, which trips the breaker).
+#: Files required at start, relative to `settings/`. A system's `config.env` is not here: some
+#: adapters need none, and its absence is the per-call `ConfigFault` (exit 2, trips the breaker).
 REQUIRED_SETTINGS: tuple[str, ...] = (
     "verb-grants.yaml",
     "lead-zero.yaml",
@@ -69,10 +58,8 @@ class TenantDir:
 
 
 def default_tenants_root(repo_root: Path) -> Path:
-    """An entry point's default tenants root: `<repo_root>/knowledge/tenants`.
-
-    Computed from the checkout the entry point is HANDED, never discovered — so a worktree's
-    entry point defaults to the worktree's copy, and nothing works out which checkout it is."""
+    """An entry point's default tenants root: `<repo_root>/knowledge/tenants`, from the checkout
+    it is handed (so a worktree defaults to the worktree's copy)."""
     return Path(repo_root) / "knowledge" / "tenants"
 
 
@@ -82,8 +69,7 @@ def template_dir(repo_root: Path) -> Path:
 
 
 def _check_id(tenant_id: object) -> TenantId:
-    """The id as a `TenantId` — O3's one grammar, the same one a run and the records hold it
-    to (it admits no separator, dot or empty name) — or `TenantDirError` naming it."""
+    """The id as a `TenantId` (the one grammar runs and records use too), or `TenantDirError`."""
     try:
         return TenantId(tenant_id)
     except TenantRefused as bad:
@@ -91,9 +77,8 @@ def _check_id(tenant_id: object) -> TenantId:
 
 
 def _refuse_links(folder: Path, tenant_id: str) -> None:
-    """Refuse any link anywhere inside a tenant folder: a symlink (file or directory, never
-    followed) or a hard-linked file (a second name for another tenant's bytes). A directory the
-    walk cannot read is refused too — skipped, it would hide whatever links are below it."""
+    """Refuse any symlink or hard-linked file inside a tenant folder. An unreadable directory
+    is refused too, since skipping it would hide links below it."""
 
     def unreadable(error: OSError) -> None:
         raise TenantDirError(
@@ -129,7 +114,7 @@ def _half(tenant_real: Path, tenant_id: str, name: str) -> Path:
 
 
 def tenant_dir(tenants_root: Path, tenant_id: object) -> TenantDir:
-    """Resolve `tenant_id` under `tenants_root` to its two halves, or refuse (O4, O5, D3)."""
+    """Resolve `tenant_id` under `tenants_root` to its two halves, or raise `TenantDirError`."""
     tenant_id = _check_id(tenant_id)
     root = Path(tenants_root)
     folder = root / tenant_id
@@ -161,12 +146,12 @@ def tenant_dir(tenants_root: Path, tenant_id: object) -> TenantDir:
 
 
 def add_tenant_arguments(parser: argparse.ArgumentParser, *, reads: str) -> None:
-    """`--tenant` and `--tenants-root` for an operator command that reads a tenant's settings
-    (#1106). `reads` says what the command takes from the tenant's `settings/`, for `--help`."""
+    """`--tenant` and `--tenants-root` for an operator command that reads a tenant's settings.
+    `reads` says what the command takes from the tenant's `settings/`, for `--help`."""
     parser.add_argument(
         "--tenant", default=None,
         help=f"the tenant whose settings/ {reads}; required wherever the command reads a "
-             "tenant — there is no default tenant (#1078)")
+             "tenant — there is no default tenant")
     parser.add_argument(
         "--tenants-root", type=Path, default=None,
         help="the folder holding one sub-folder per tenant; default <checkout>/knowledge/tenants, "
@@ -178,11 +163,9 @@ def entry_tenant_args(
 ) -> tuple[Path, str]:
     """An operator command's `(tenants root, tenant id)`, from its own arguments.
 
-    ONE derivation for every such command: the tenants root defaults to the checkout that holds
-    `defender_dir`, the code tree the command itself runs against, so a command pointed at a
-    worktree's tree reads that worktree's tenants and never another checkout's. The tenant id
-    is the request's own, and `TenantDirError` when the command was given none — there is no
-    default (#1078)."""
+    The tenants root defaults to the checkout holding `defender_dir`, so a command pointed at a
+    worktree reads that worktree's tenants. The tenant id is the request's own: none is a
+    `TenantDirError`, since there is no default tenant."""
     if tenant_id is None:
         raise TenantDirError("--tenant is required: there is no default tenant")
     root = tenants_root if tenants_root is not None else default_tenants_root(
@@ -193,9 +176,9 @@ def entry_tenant_args(
 def entry_tenant(
     defender_dir: Path, tenants_root: Path | None, tenant_id: str | None,
 ) -> TenantDir:
-    """An operator command's tenant FOLDER (`entry_tenant_args`, then `tenant_dir`), or
-    `TenantDirError` — for a command that reads a file from it and needs nothing else checked.
-    A command that uses the tenant's grants goes through `run_tenant.resolve_tenant`."""
+    """An operator command's tenant folder, or `TenantDirError` — for a command that only reads
+    a file from it. A command that uses the tenant's grants goes through
+    `run_tenant.resolve_tenant`."""
     return tenant_dir(*entry_tenant_args(defender_dir, tenants_root, tenant_id))
 
 

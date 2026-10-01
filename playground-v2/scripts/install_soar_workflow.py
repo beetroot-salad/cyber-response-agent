@@ -169,10 +169,8 @@ def retarget(workflow: dict, org_id: str, env_name: str) -> dict:
     wf = json.loads(json.dumps(workflow))  # deep copy
     wf["org_id"] = org_id
     wf.pop("owner", None)
-    # The workflow-level default, not just the per-node ones: leaving the source
-    # instance's name here is the "queued forever, no error" failure the
-    # ENVIRONMENT_NAME comment in soar/compose.yml warns about. Only rewritten
-    # when the export actually carries the field, so nothing is invented.
+    # The workflow-level default too: a stale environment name here queues runs
+    # forever with no error. Only rewritten when the export carries the field.
     if "execution_environment" in wf:
         wf["execution_environment"] = env_name
     for action in wf.get("actions") or []:

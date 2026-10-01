@@ -22,7 +22,7 @@ import re
 import pytest
 import yaml
 
-from defender._episode_paths import EpisodePaths
+from defender._episode_handle import Episode
 
 from defender.tests import _triplet_947 as T
 
@@ -552,10 +552,10 @@ def test_947_a_manifest_reloads_with_the_overlay_keys_its_launcher_accepted(tmp_
     doc = T.family_doc(worlds=[T.base_world(), world], captured_patterns=[narrow])
     # Author time: the launcher knows the capture, and passes it.
     family_mod.parse_family(doc, captured_patterns=(narrow,))
-    episode = T.episode(tmp_path)
-    family_mod.write_family(episode, doc)
-    # Resume time: the sibling has only the file.
-    reloaded = family_mod.load_family(EpisodePaths(episode).family)
+    with Episode.open(T.episode(tmp_path)) as episode:
+        family_mod.write_family(episode, doc)
+        # Resume time: the sibling has only the file.
+        reloaded = family_mod.load_family(episode.view())
     assert narrow in reloaded.world("b").overlay.elastic, "the staged corpus did not survive"
     assert reloaded.captured_patterns == (narrow,), (
         "the manifest did not carry the set its overlays were judged against")

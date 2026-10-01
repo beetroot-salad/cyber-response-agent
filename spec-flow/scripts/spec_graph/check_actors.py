@@ -1,27 +1,18 @@
 #!/usr/bin/env python3
-"""spec-graph check #2 — execution-context census (the F2 class).
+"""spec-graph check #2 — execution-context census.
 
-A write-tests spec graph enumerates `structure.actors` — the callers/frames a change is
-modelled against. That list is authored from the DESIGN, so it captures the production
-consumers and misses execution contexts nobody thought to write down. The canonical escape
-(the project this check was forged in): an EVAL HARNESS drove the change through a subprocess
-in which a module-level "constant" — the anchor path the guard trusted — was silently relocated
-onto a tmp tree, so the guard's hidden assumption ("the anchor is the fixed main checkout") was
-never tested and it false-positived there. No actor, no demand, no test → escape.
+A spec graph's `structure.actors` is authored from the design, so it lists production
+consumers and misses execution contexts nobody wrote down, e.g. an eval harness that
+re-executes a module in a subprocess where a module-level anchor path points at a tmp tree.
+No actor means no demand and no test for that context.
 
-THE CHECK (mechanical, grep-derived — the "enumerate consumers from reality, not the design
-doc" lane): derive the set of EXECUTION CONTEXTS that drive the changed subsystem straight
-from the repo — every CLI / harness / eval entrypoint that reaches a changed module (directly,
-or via the 1-hop CLI that wraps it, or by subprocessing it) — then diff against what the graph
-models. A driver context the graph neither names nor maps to an actor is a blind spot: model
-it (and discover its hidden axes) or waive it consciously.
+This check derives the execution contexts from the code instead: every CLI / harness / eval
+entrypoint that reaches a changed module (by transitive import, or by subprocessing one of
+the project's modules), then diffs that against what the graph models. An unmodelled driver
+must be modelled or waived.
 
-Independence is the point (Fable): the driver set comes from the CODE, so it can't inherit
-the design doc's blind spots the way a design-grounded enumerator would.
-
-Where the project's code lives, which stems are entrypoints, and what the graph calls each
-actor are all read from `.claude/spec-flow.json` (see `_config.py`) — the method is portable,
-the census targets are not.
+Code roots, entrypoint stems, and actor aliases come from `.claude/spec-flow.json` (see
+`_config.py`).
 
 Usage:
     spec-graph actors [graph.yaml] [--base <ref>] [--config <path>]
@@ -31,18 +22,12 @@ Exit codes:
   0  the census answered, and no unmodelled driver reaches the change
   1  an unmodelled driver reaches the change. Waive an out-of-scope context by listing its
      stem under a top-level `actor_waivers:` in the graph.
-  2  the census COULD NOT ANSWER — no graph artifacts matched, the source census came back
-     empty, `--base` names no commit in this checkout (misspelled, or not fetched on a shallow
-     clone), git refused the diff that builds the changed set, or a file the gate could not
-     parse/read sits somewhere a driver could hide.
-     Never a silent pass (the #618/#621 convention: a gate that cannot look must not report
-     clean).
+  2  the census could not answer: no graph artifacts matched, the source census is empty,
+     `--base` names no commit here, git refused the diff, or a file that could hide a driver
+     could not be parsed/read. A gate that cannot look must not report clean.
 
-The 1-vs-2 split is the point. Exit 1 means the gate looked and found something; exit 2 means
-it could not look. Collapsing them would let a broken intermediate file — which denies exactly
-the import edges the reach question needs — certify the graph clean. A gap that is NOT
-load-bearing (no entrypoint reaches the file, no diff touched it) stays a stderr WARN and
-changes no exit code: reddening on a vendored fixture nobody imports would be noise.
+A census gap that is not load-bearing (no entrypoint reaches the file, no diff touched it)
+is only a stderr WARN.
 """
 from __future__ import annotations
 
@@ -59,41 +44,24 @@ import _config
 
 
 class CensusBlind(RuntimeError):
-    """The census could not be built well enough to answer. Distinct from "answered: nothing
-    found" — see `main`'s exit-code contract. A gate that cannot look must not report clean."""
+    """The census could not be built well enough to answer (exit 2, not "nothing found")."""
 
 
-# file → why it contributes no import edges. Every path that drops a file out of the import graph
-# records here: one `ast.parse` rejects, or one the walk cannot read. A driver whose only reach to
-# the change runs through such a file goes UNREPORTED, so the gap must never be silent.
+# file → why it contributes no import edges (unparseable or unreadable). A driver reaching the
+# change only through such a file would go unreported, so gaps are never silent.
 _GAPS: dict[Path, str] = {}
 
 
 def _gap(path: Path, reason: str) -> None:
-    """Record a census gap AND surface it. stderr, not stdout: the findings stream is the tool's
-    parsed output. Recording is what lets `main` ask the question the WARN alone could not —
-    whether this particular blindness sits on a path that could hide a driver (load-bearing, exit
-    2) or on a file no entrypoint reaches and no diff touched (a warning, exit unaffected)."""
+    """Record a census gap and warn on stderr (stdout is the parsed findings stream). `main`
+    later decides whether the gap is load-bearing."""
     _GAPS[path] = reason
     print(f"  WARN [check_actors] {path}: {reason}", file=sys.stderr)
 
 
 def _sh(cmd: list[str]) -> str:
-    # encoding pinned (not the ambient locale): the child is git, and `git diff --name-only` can
-    # emit non-ASCII paths — decoding those under a C/ascii locale would raise, and this is the very
-    # output that drives the changed set (a crash here is a gate that never looked). Same #588/#589
-    # class as the source reads, subprocess side.
-    #
-    # The RETURN CODE IS READ (#949). This used to return `.stdout` alone under `check=False`, so
-    # any git failure — an unresolvable ref, a corrupt index, a repo git declines to read — came
-    # back as the empty string and was indistinguishable from "the diff touched nothing". That is
-    # the shape the comment in `_changed_paths` warns about, arriving through this function rather
-    # than around it. A census that could not run git has not answered; it has gone blind.
-    #
-    # And a DECODE failure is blindness too, not a traceback: pinning the encoding defeats the
-    # ambient locale, but `text=True` still decodes STRICTLY, so a repo with `core.quotePath=false`
-    # and a latin-1 path name raises out of `subprocess.run` itself — before the returncode check
-    # below can say anything — and exit 1 ("looked, found something") is what the caller reads.
+    # utf-8 pinned: `git diff --name-only` can emit non-ASCII paths. A non-zero exit or a decode
+    # failure is blindness, not an empty diff, so both raise `CensusBlind`.
     try:
         proc = subprocess.run(
             cmd, cwd=_config.repo_root(),
@@ -115,31 +83,16 @@ def _sh(cmd: list[str]) -> str:
 
 
 def _changed_paths(base: str) -> set[Path]:
-    # Anchored at the repo root, both times. git resolves a pathspec against the process CWD, so
-    # running `spec-graph` from a subdirectory (`cd defender && …`, exactly what this project's
-    # gate command does) would scope `*.py` to that subtree — and a diff that touched nothing
-    # under it would come back EMPTY. The census would then find no changed module to match, go
-    # quiet, and exit 0: a gate that passes green on a diff it never looked at.
+    # Run at the repo root: git resolves pathspecs against CWD, so from a subdirectory `*.py`
+    # would scope to that subtree and an unrelated diff would come back empty (a false pass).
     #
-    # PATH-granular (not stem-granular): two modules can share a stem (`pkg_a/driver.py` vs
-    # `pkg_b/driver.py`), so the reach comparison keys on the resolved file path, not the stem —
-    # both here and through the transitive closure. A stem key false-fires on same-stem changes
-    # in a package the entrypoint never actually reaches.
+    # Path-granular, not stem-granular: two modules can share a stem.
     #
-    # UNFILTERED on purpose. This used to drop `"/tests/" in f`, a SECOND definition of "a test
-    # path" that disagreed with the census's own (`_config._kept`: a `tests` component, so
-    # top-level `tests/foo.py` survived here and was excluded there). The disagreement was inert
-    # only because `check` intersects this set against the reach, which is census-bounded — so the
-    # census predicate already decides membership, and a local filter can only ever re-diverge
-    # from it. One definition, in `_config._kept`, applied where the census is built.
+    # Unfiltered: test paths are excluded by `_config._kept` when the census is built, and
+    # `check` intersects this set with census-bounded reach.
     root = _config.repo_root()
-    # THE BASE RESOLVES FIRST (#949), the same preflight `trace.drivers` already carries and for
-    # the same reason: `git diff` against a ref that does not name a commit here — misspelled, or
-    # simply not fetched on a shallow CI clone — exits 128 with empty stdout. Measured on this repo
-    # before the fix: `--base main` reported 286 findings and `--base does-not-exist-ref` reported
-    # 42, the same as a near-empty diff, with nothing said about the ref. `rev-parse` is the cheap
-    # oracle for "does this name a commit here", and it runs before the diff so the diagnostic
-    # names the ref rather than the symptom.
+    # Resolve the base first, so a misspelled or unfetched ref is named as such rather than
+    # surfacing as a failed (or empty) diff.
     probe = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
         cwd=root, capture_output=True, text=True, encoding="utf-8", check=False,
@@ -157,23 +110,14 @@ def _changed_paths(base: str) -> set[Path]:
 def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
     """The project module FILES a file imports, resolved on the filesystem.
 
-    Namespace-package resolution (defender has no `__init__.py`): a dotted name `a.b.c` maps to
-    `root/a/b/c.py` directly — no `__init__.py` walk, which would fail to resolve `defender.x`.
-    Relative imports resolve against the importer's own directory. `from pkg import name` credits
-    `pkg/name.py` when that submodule file exists (a real module reach) and `pkg.py` when THAT
-    exists (then `name` is a symbol of module `pkg`); a `from pkg import some_symbol` that names
-    neither resolves to nothing — no phantom driver invented for a function or a class.
-    `from pkg import *` binds `pkg`'s submodule namespace, so when `pkg` is a directory it credits
-    its DIRECT `pkg/*.py` children (and `pkg.py` if `pkg` is a module, via the `base_mod` fallback)
-    — never `pkg/sub/*.py`, because binding a sub-PACKAGE does not auto-import its module files,
-    exactly as the named arm resolves `from pkg import subpkg` to nothing. That is the conservative
-    reach a star can bind, bounded by the `fileset` intersection in `_import_edges` so it invents no
-    out-of-census reach."""
+    Namespace-package resolution (no `__init__.py` walk): `a.b.c` maps to `root/a/b/c.py`.
+    Relative imports resolve against the importer's directory. `from pkg import name` credits
+    `pkg/name.py` and/or `pkg.py` when they exist; a name that is only a symbol credits nothing
+    extra. `from pkg import *` on a package directory credits its direct `*.py` children only
+    (binding a sub-package does not import its modules)."""
     try:
         tree = ast.parse(text)
     except SyntaxError as e:
-        # Not a silent skip: an unparseable file contributes NO import edges, so every driver whose
-        # only reach to the change runs through it stops being reported. Surface it (see _gap).
         _gap(importer, f"unparseable ({e.__class__.__name__}: {e}) — contributes no import edges")
         return set()
     targets: set[Path] = set()
@@ -192,20 +136,14 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
                     base = base / Path(*node.module.split("."))
             else:
                 base = root / Path(*(node.module or "").split("."))
-            # A relative import with more leading dots than the file has package ancestors walks
-            # `base` above the repo root: it names no project module, and `base.with_suffix` would
-            # raise on the filesystem root. Bound resolution to within (or at) the root.
+            # Too many leading dots walks above the repo root: no project module (and
+            # `with_suffix` would raise on the filesystem root).
             if base != root and root not in base.parents:
                 continue
             for alias in node.names:  # each name may be a submodule file …
                 if alias.name == "*":
-                    # `from pkg import *` — alias.name is the literal "*", which pathlib cannot
-                    # glob (`base/"*.py"` never `.is_file()`). When `base` is a package directory
-                    # the star binds its submodule namespace, so credit its DIRECT `base/*.py`
-                    # children (the same conservative model, and the same one-level depth, the named
-                    # arm uses) — `glob`, not `rglob`. When `base` is a module file, the star names
-                    # that module's symbols — left to the `base_mod` fallback below. `is_file`
-                    # filters a directory that merely ends in `.py`, which `glob("*.py")` matches.
+                    # Package: credit direct children only (`glob`, not `rglob`); `is_file`
+                    # skips a directory named `*.py`. Module: handled by `base_mod` below.
                     if base.is_dir():
                         targets.update(p for p in base.glob("*.py") if p.is_file())
                     continue
@@ -219,14 +157,10 @@ def _module_targets(importer: Path, text: str, root: Path) -> set[Path]:
 
 
 def _read_texts(files: list[Path]) -> dict[Path, str]:
-    """Every census file's source, read ONCE. Both consumers — the import graph and the
-    per-entrypoint scan — read the same text, so reading here (rather than at each use) keeps the
-    two from disagreeing about which files exist: a file the graph tolerated as unreadable used to
-    crash the entrypoint loop on a second, unguarded read.
+    """Every census file's source, read once and shared by the import graph and the entrypoint
+    scan so they agree on which files exist.
 
-    Only the KEYS are dropped for an unreadable file, never the file itself — it stays a census
-    member (see `_import_edges`), because a module nobody can read is still a module others import
-    and still a module the diff can touch."""
+    An unreadable file is omitted here but stays a census member (see `_import_edges`)."""
     texts: dict[Path, str] = {}
     for f in files:
         try:
@@ -237,26 +171,21 @@ def _read_texts(files: list[Path]) -> dict[Path, str]:
 
 
 def _import_edges(files: list[Path], texts: dict[Path, str], root: Path) -> dict[Path, set[Path]]:
-    """The project import graph, bounded to the census: file → the census files it imports. A
-    reach that leaves the codeRoots (into a non-census module) is dropped here, so it can never
-    re-enter — an outside-codeRoots-only reach is an accepted, silent gap.
+    """The project import graph, bounded to the census: file → the census files it imports.
+    Reach through non-census modules is an accepted gap.
 
-    `fileset` spans ALL census files, not just the readable ones: an unreadable (or unparseable)
-    module loses its OUTGOING edges — it cannot say what it imports — but must remain a valid
-    TARGET, or a changed module would stop being reported merely because it failed to decode."""
+    An unreadable module loses its outgoing edges but remains a valid target, so a changed
+    module is still reported when it fails to decode."""
     fileset = set(files)
     return {f: _module_targets(f, texts[f], root) & fileset if f in texts else set() for f in files}
 
 
 class _Census:
-    """The repo-derived half of the check — the changed set, the source census, and the import
-    graph over it. All three depend only on (base, cfg), NOT on the graph under test, so they are
-    built ONCE and reused across every artifact: `main()` checks 14 graphs in this project, and
-    rebuilding meant 14 git subprocesses, 14 filesystem walks and 14 full-repo AST parses to
-    produce identical results."""
+    """The repo-derived half of the check: the changed set, the source census, and its import
+    graph. Depends only on (base, cfg), so it is built once and shared across graphs."""
 
     def __init__(self, base: str, cfg: dict) -> None:
-        _GAPS.clear()  # this census owns the gap set; a second one in-process starts clean
+        _GAPS.clear()
         self.root = _config.repo_root()
         self.changed = _changed_paths(base)
         self.files = _config.source_files(cfg)
@@ -279,15 +208,9 @@ class _Census:
     def load_bearing_gaps(self) -> dict[Path, str]:
         """The census gaps that could actually be hiding a driver.
 
-        A parse failure denies a file's OUTGOING edges — but not its incoming ones: `_module_targets`
-        resolves a target by `is_file()` on the filesystem and never parses it, so who imports the
-        blind file is still known. That is what makes this question answerable at all, and it is why
-        "fail closed only where the gap could matter" does not need the very edges the failure denied.
-
-        A gap is load-bearing when an entrypoint reaches the blind file (the reach continues THROUGH
-        it into territory we cannot see) or when the diff touched it (we cannot tell what the changed
-        file itself imports). Everything else — a vendored fixture, a file using syntax newer than the
-        runner, anything no entrypoint reaches and no diff touched — stays a WARN and reds nothing."""
+        A blind file loses only its outgoing edges (targets resolve via `is_file()`, not parsing),
+        so who imports it is still known. A gap is load-bearing when an entrypoint reaches the
+        file, the diff touched it, or it is itself an entrypoint; anything else stays a WARN."""
         if not _GAPS:
             return {}
         reachable: set[Path] = set()
@@ -300,8 +223,7 @@ class _Census:
 
 
 def _reach(entry: Path, edges: dict[Path, set[Path]]) -> set[Path]:
-    """Every census file `entry` reaches transitively via project-module imports. Cycle-safe (a
-    `visited` set), so a 2-node ↔, an N-node ring, or a self-loop terminates rather than hangs."""
+    """Every census file `entry` reaches transitively via project-module imports. Cycle-safe."""
     seen: set[Path] = set()
     stack = list(edges.get(entry, set()))
     while stack:
@@ -314,10 +236,9 @@ def _reach(entry: Path, edges: dict[Path, set[Path]]) -> set[Path]:
 
 
 def _subprocessed_py_stems(text: str) -> set[str]:
-    """The `.py` module stems a file names as SUBPROCESS targets — `str(tmp / … /
-    "lead_author.py")` yields `lead_author`. This is the F2 signature: re-executing one of the
-    project's own modules as a subprocess is exactly what relocates a module-level "constant"
-    (a `PATHS`-style anchor computed from the tree it runs in) onto a different tree."""
+    """The `.py` module stems a file names as subprocess targets (`"lead_author.py"` →
+    `lead_author`). Re-executing a project module in a subprocess can relocate a module-level
+    anchor computed from the tree it runs in."""
     if "subprocess" not in text and "Popen" not in text:
         return set()
     return {m.group(1) for m in re.finditer(r"['\"][^'\"]*?([A-Za-z_][\w]+)\.py['\"]", text)}
@@ -326,13 +247,9 @@ def _subprocessed_py_stems(text: str) -> set[str]:
 def _is_entrypoint(path: Path, text: str, extra_stems: set[str]) -> bool:
     """A driver context: a CLI main, an eval/harness file, or a project-declared runner stem
     (`specGraph.entrypointStems`). Excludes pytest files (`test_*`) and private internals
-    (`_foo.py`) — those are not execution contexts that drive the subsystem.
+    (`_foo.py`) by default.
 
-    The config is consulted FIRST, so an explicit listing beats both exclusions. `entrypointStems`
-    exists precisely to name the runners the heuristics miss, and the heuristics used to run
-    before it: a project declaring `"entrypointStems": ["_harness"]` had that entry silently
-    ignored — a config option that did not do what it said, with no warning. The `_`/`test_` rules
-    stay as DEFAULTS for stems nobody declared."""
+    The config is consulted first, so an explicitly declared stem beats both exclusions."""
     stem = path.stem
     if stem in extra_stems:
         return True
@@ -355,21 +272,16 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
     edges, project_stems = census.edges, census.project_stems
 
     findings: list[str] = []
-    # One read, in `_read_texts` (utf-8 pinned): the entrypoint scan and the import graph now share
-    # it, so they cannot disagree about which files the census contains. The twin unguarded read
-    # that used to live here crashed on exactly the files `_import_edges` had chosen to tolerate.
     for f in census.entrypoints:
         text = census.texts[f]
-        # Two ways a driver reaches the change: an in-process import of a changed module —
-        # resolved to files and followed TRANSITIVELY over the project import graph, then
-        # intersected with the changed set (the arm stays gated on `changed`) — or a subprocess
-        # RE-EXEC of one of the project's own modules (the F2 relocated-anchor hazard).
+        # A driver reaches the change by transitive import of a changed module, or by
+        # re-executing one of the project's modules in a subprocess.
         reached_changed = (_reach(f, edges) - {f}) & changed
         subprocs = (_subprocessed_py_stems(text) & project_stems) - {f.stem}
         if not reached_changed and not subprocs:
             continue
-        # Suppression is keyed on the ENTRYPOINT (its stem or contextAlias), never a module on the
-        # reach path — a modelled intermediate must not silence an unmodelled entrypoint.
+        # Keyed on the entrypoint, never a module on the reach path: a modelled intermediate must
+        # not silence an unmodelled entrypoint.
         stem = f.stem
         if stem in waivers:
             continue
@@ -380,11 +292,8 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
         )
         if modelled:
             continue
-        # Say which arm(s) fired, and don't overclaim. When both trip, report BOTH reasons —
-        # neither masks the other. The subprocess arm is deliberately NOT gated on `changed`: a
-        # re-exec context is a standing hazard, and a guard introduced anywhere can make a
-        # long-unchanged harness newly load-bearing, so it fires on drivers that need not touch
-        # this diff at all — a claim the import arm has not made.
+        # Report every arm that fired. The subprocess arm is not gated on `changed`: a re-exec
+        # context is a standing hazard that any new guard can make load-bearing.
         rel = f.relative_to(root)
         reasons: list[str] = []
         if reached_changed:
@@ -406,13 +315,10 @@ def check(graph_path: Path, census: _Census, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    # utf-8 out is the OUTPUT twin of the utf-8-pinned reads in `_read_texts` — see _cli.
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
     cfg = _config.load(opts["config"])
-    # The profile's branch, not a hardcoded "main" (#949). The preflight this PR adds turns a
-    # wrong default into a hard exit 2 rather than a quiet empty diff, so the default has to be
-    # the one the project actually declares.
+    # The profile's branch, not "main": an unresolvable base is a hard exit 2.
     base = opts["base"] or cfg["defaultBranch"]
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
     try:
@@ -423,17 +329,14 @@ def main(argv: list[str]) -> int:
                 f"Checking zero graphs finds zero findings for a reason that has nothing to do "
                 f"with the code; fix the glob, or pass a graph path explicitly."
             )
-        census = _Census(base, cfg)  # repo-derived, graph-independent — built once, not per graph
+        census = _Census(base, cfg)
         all_findings: list[str] = []
         unreadable: list[Path] = []
         for g in graphs:
-            # The family's could-not-read contract (exit 2): a list-top-level graph used
-            # to surface as an AttributeError traceback behind exit 1 ("found findings").
+            # An unreadable graph is exit 2 (could not look), not a traceback behind exit 1.
             try:
                 all_findings.extend(check(g, census, cfg))
-            # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
-            # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
-            # ("looked, found something") for a gate that read nothing.
+            # `ValueError` covers UnicodeDecodeError, which is not an OSError.
             except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
                 print(f"check_actors: cannot read {g}: {e.__class__.__name__}: {e}",
                       file=sys.stderr)
@@ -444,9 +347,7 @@ def main(argv: list[str]) -> int:
         print(f"check_actors: {exc}", file=sys.stderr)
         return 2
     if blind:
-        # Exit 2, not 1, and deliberately NOT waivable through actor_waivers: this is not a driver
-        # we found, it is a place we could not look — and it sits on a path that could hide one.
-        # `main` keeps the exit-1 channel meaning "the census answered, and the answer is a finding".
+        # Exit 2 and not waivable: a place we could not look, on a path that could hide a driver.
         print("check_actors: the census went blind where it matters —", file=sys.stderr)
         for f, reason in sorted(blind.items()):
             print(f"  {f}: {reason}", file=sys.stderr)

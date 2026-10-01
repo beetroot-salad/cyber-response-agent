@@ -5,11 +5,8 @@ Walks the FIXTURE set (``defender/fixtures/held-out/``), locates each fixture's 
 under the runs dir (``--tenant``'s ``<T>/runs``, or the ``runs_dir`` argument) by run-id
 convention, and reports defender disposition correctness.
 
-**Ground truth never leaves this repo's fixture dirs.** The eval owns the labels and
-reads them where they live; nothing is copied into a run dir, which is inside the
-agent's own readable workspace. The direction matters: this walks fixtures and looks
-for runs, not runs and looks for labels. That is what lets the run dir carry no
-provenance back to its fixture and no answer key.
+Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
+carries no labels and no pointer back to its fixture.
 
 Every run names its tenant, and there is no default (#1078): create one once with
 ``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
@@ -18,14 +15,10 @@ Every run names its tenant, and there is no default (#1078): create one once wit
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
         --tenant playground --run-id <slug> --no-learn
 
-``--no-learn`` keeps a scored run out of the learning corpora. The second, independent net
-that refused held-out fixtures at the queue write left with the learn queue in #922.
+``--no-learn`` keeps a scored run out of the learning corpora.
 
-Failure accounting per design doc §Metrics: a run that fails to produce a
-parseable ``report.md`` (missing, frontmatter unparseable, disposition not
-in the closed enum, or a runtime crash that aborted the run) counts as
-**wrong** against the ground-truth class. Excluding failures would let
-regressions hide behind crashes.
+A run without a parseable ``report.md`` (missing, bad frontmatter, disposition outside
+the closed enum, or crashed) counts as **wrong**, so regressions cannot hide behind crashes.
 
 Usage (exactly one of the two — never both, never neither):
   python3 defender/evals/held_out.py --tenant playground
@@ -52,10 +45,7 @@ from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 
 def predicted_disposition(run_dir: Path) -> str | None:
     """This run's predicted disposition, or `None` when the report yields no usable headline.
-
-    Scoring must survive one broken report — a metric that raises tells you nothing about the
-    other 40 fixtures — so this is the DEGRADE side of the shared accessor, and an unscoreable
-    run lands in the eval's own failure column rather than as an exception.
+    Degrades rather than raising so one broken report does not stop scoring the rest.
     """
     return read_report(RunPaths(run_dir).report).disposition
 

@@ -1,15 +1,4 @@
-"""Harness-executed lead-0.
-
-Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
-and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
-run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
-the review gate cite them like any model-dispatched lead.
-
-This module owns every backend call, run-dir write and dispatch those two items add;
-``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
-returned block as one more ORIENT section.
-
-Issuing a turn-zero call, and recording what came back.
+"""Lead-0: issuing a turn-zero call and recording what came back.
 
 The budget gate, the per-run call ledger, and the declaring `:L findings` row a harness
 lead must own before it may write anything.
@@ -43,31 +32,22 @@ _logger = logging.getLogger(__name__)
 
 @model(frozen=True)
 class LeadZeroResult:
-    """Item 1's result: `text` is its rendered block — already sanitized, elided and wrapped —
-    and it is also what item 3's contract carries, so the correlation lead reads the same bytes
-    MAIN reads at ORIENT and picks its own correlation axes off them.
+    """Item 1's result. `text` is the rendered block (sanitized, elided, wrapped); item 3's
+    contract carries the same bytes so the correlation lead picks its own axes off them.
 
-    Deliberately NO extracted-entity field. A fixed `host.name`/`user.name`/`source.ip` triple
-    fits exactly one class of alert source (host-level auth logs) and produces noise on any
-    source that carries its entities elsewhere: a container-runtime source names every alert
-    with the shared host the runtime runs on, nests the real actor under a vendor-specific
-    namespace, and has no source address at all. Which entities matter is a property of the
-    alert, not of a schema — and choosing what to filter on is what every other gather lead
-    already does."""
+    No extracted-entity field: a fixed host/user/source-ip triple fits only host-level auth
+    sources and is noise elsewhere (e.g. container sources that all report one shared host)."""
 
     text: str
     status: str
 
 
 def _run_sync(coro: Any) -> Any:
-    """Run an async coroutine from a SYNCHRONOUS caller, whether or not an event loop is
-    already running on this thread. `resolve_lead_zero` is a synchronous entry point called
-    both from bare pytest functions (no loop) and from inside `run_investigation` (already
-    inside one) — the latter cannot call `asyncio.run()` directly, so the coroutine goes to a
-    fresh thread with its own loop.
+    """Run a coroutine from a synchronous caller, whether or not a loop is already running
+    on this thread (if one is, it runs on a fresh thread with its own loop).
 
-    The thread runs in a COPY OF THE CALLER'S CONTEXT: a pool thread starts empty, and "run it
-    as if here" includes the run id and tenant every log line inside it is stamped with."""
+    The thread runs in a copy of the caller's context so log lines keep the run id and
+    tenant."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -80,21 +60,12 @@ def _run_sync(coro: Any) -> Any:
 
 
 def _sanitize(text: Any) -> str:
-    """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
-    externally-sourced content before it is INTERPOLATED into text that crosses an agent
-    boundary unframed.
+    """Defang `<run-…-…>`-shaped delimiters and markdown fence runs in external content
+    before it is interpolated into text that crosses an agent boundary.
 
-    The fence half is unconditional: a ``` run ends the fenced block whichever consumer put the
-    text inside one.
-
-    The DELIMITER half is NOT about the untrusted frame — `wrap_fresh` mints this section's
-    delimiter after the body is assembled and re-mints on collision, so no content can close
-    the frame that wraps it. It is about item 3's contract: the correlation lead's GOAL is free
-    prose built from those same attacker-derived values and handed to the gather subagent as a
-    dispatch argument, inside no frame at all, so no re-mint covers it.
-
-    DEFANGED, NEVER DELETED: the evidence has to survive in a form the reader can still see, or
-    the sanitizer passes by destroying what it was protecting."""
+    The delimiter half matters for item 3's goal, which is handed to the gather subagent
+    unframed (the ORIENT frame re-mints its own delimiter on collision). Characters are
+    replaced, never deleted, so the evidence stays visible."""
     if not isinstance(text, str):
         text = str(text)
     text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
@@ -121,13 +92,9 @@ def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
 
 
 def _last_row_seq(run_dir: Path, lead_id: str) -> int:
-    """The queries-table `seq` the LAST call under `lead_id` wrote — the payload sidecar a
-    document resolved by that call is elided against.
-
-    Item 1 issues several calls and one batched call returns many documents, so a document's
-    POSITION in the rendered block is not its payload's seq: printing the position points four
-    documents off one fetch at `gather_raw/l-000/{0..3}.json`, files no writer produced. `-1`
-    when no row exists (a screened call, or a table write that could not land)."""
+    """The queries-table `seq` of the last call under `lead_id`, which documents from that
+    call are elided against (a document's position in the block is not its payload's seq).
+    `-1` when no row exists."""
     rows = _rows_for(run_dir, lead_id)
     seq = rows[-1].get("seq") if rows else None
     return seq if isinstance(seq, int) else -1
@@ -136,20 +103,15 @@ def _last_row_seq(run_dir: Path, lead_id: str) -> int:
 async def _capture_issue(
     capture: Any, deps: _CaptureDeps, verb: str, params: dict, env: dict,
 ) -> tuple[dict | None, str]:
-    """Issue ONE call through the REAL `QueryCapture.wrap_tool_execute` — the model's own
-    routing, so all eight screens (grant, breaker, repeat-guard, traversal, param validation,
-    self-ticket, confine_index, guard_outbound) run as they do for a model-dispatched query.
+    """Issue one call through the real `QueryCapture.wrap_tool_execute`, so every screen runs
+    as for a model-dispatched query.
 
-    Returns `(envelope_or_None, raw_result_text)`. `None` covers "screened" — a breaker trip
-    (no row written at all), or a repeat trip or a grant denial (a `∅.` sentinel row, nonzero
-    exit; the denial's since #860) — and "attempted but failed" (a row IS written, with a
-    nonzero exit code)."""
+    Returns `(envelope_or_None, raw_result_text)`; `None` covers both a screened call and one
+    that was attempted but failed."""
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
-    # Stash the in-memory result as `handler` produces it, so a later write failure (below) can
-    # recover it WITHOUT re-issuing the same backend call. `wrap_tool_execute` runs `handler`
-    # at most once per call.
+    # Kept so a later write failure can recover the result without re-issuing the call.
     captured: list[Any] = []
 
     async def handler(_args: dict) -> Any:
@@ -164,10 +126,8 @@ async def _capture_issue(
     try:
         text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
     except (OSError, ValueError):
-        # RENDER FROM THE IN-MEMORY RESULT: a queries-table write that cannot land (a directory
-        # squatting the table's own name) must cost the run its evidence ROW, never its
-        # evidence, and never a second real backend call for the same logical fetch —
-        # `captured` holds whatever `handler` returned before `_record`'s write raised.
+        # A queries-table write that cannot land costs the evidence row, not the evidence,
+        # and must not trigger a second backend call.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), ""
     after = _rows_for(deps.run_dir, deps.lead_id)
@@ -178,9 +138,7 @@ async def _capture_issue(
         return None, text
     payload_path = row.get("payload_path")
     if not isinstance(payload_path, str):
-        # A successful call (exit_code == 0) whose sidecar payload failed to PERSIST leaves
-        # `payload_path` None; fall back to the in-memory result this call already produced
-        # rather than crashing on `Path(...) / None`.
+        # The sidecar payload failed to persist; use the in-memory result.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), text
     try:
@@ -192,30 +150,20 @@ async def _capture_issue(
     return data, text
 
 
-#: The capped path's default exit code for an UNMAPPED fault. Mirrors
-#: `query_tool.DEFAULT_FAULT_EXIT` rather than importing it: that constant is an internal
-#: detail of the model-facing capture, not a shared contract.
+#: The capped path's exit code for an unmapped fault. Mirrors `query_tool.DEFAULT_FAULT_EXIT`
+#: without importing it, since that is internal to the model-facing capture.
 _UNMAPPED_FAULT_EXIT = 2
 
 
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row through THE constructor — `record_query.append_query_row`,
-    the same call `QueryCapture._record` and the gather bash lane make — so item 1's rows carry
-    the columns `QUERY_ROW_COLUMNS` declares, in its order, and gain a fifteenth on the day the
-    writer does (#1017 D1/O6). This function used to spell the fourteen keys as its own literal,
-    which is how #877 (`payload_sha256`) and #871 (`system_key`) each had to reach in here by
-    hand. The two derived columns the constructor cannot derive from the payload's TEXT —
-    `payload_status` and `raw_command` — come from the column owner's own helpers
-    (`record_query.payload_status` / `raw_command`), the same ones `QueryCapture._record`
-    spends, not from a copy of their rule; what stays here is only what this CALLER decides:
-    the display digest and the host constant in `system`.
+    """Write a queries-table row through `record_query.append_query_row`, the shared row
+    constructor, so the columns always match `QUERY_ROW_COLUMNS`. Derived columns come from
+    the column owner's helpers; only the display digest and `system` are decided here.
 
-    Deliberately WITHOUT feeding `circuit_breaker.record_outcome` — `append_query_row` does
-    not, and that is what lets item 1's calls past its first recorded failure keep running
-    without pushing the breaker's per-system counter over the trip boundary on lead-0's behalf.
-    The cap bounds RECORDED failures, not calls."""
+    Does not feed `circuit_breaker.record_outcome`, so capped calls keep running without
+    pushing the breaker over its trip boundary on lead-0's behalf."""
     from defender.scripts.gather_tools.record_query import (
         append_query_row,
         payload_digest,
@@ -239,10 +187,8 @@ def _record_manual_row(
         payload_digest=(
             payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
         ),
-        # Through the column's owner, like the writer's other derived columns (#871). The
-        # ARGUMENTS say what is true here and are not the same value twice: nothing
-        # model-authored named a system on this path (`raw_system` is `""`), and the system of
-        # record is the host's own constant — the DECLARED case, whose answer is `""`.
+        # No model-authored system name on this path (`raw_system` is `""`); the system is
+        # the host's own constant.
         system_key=system_fingerprint("", ITEM1_SYSTEM),
     )
 
@@ -255,10 +201,8 @@ def _breaker_failures(run_dir: Path) -> int:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    # `3`, `"x"` and `[…]` are all valid JSON and none is a breaker state (the "parsed fine,
-    # wrong shape" case `circuit_breaker._load` guards too). Without these isinstance checks a
-    # corrupted or planted `circuit_breaker.json` raises `AttributeError`/`ValueError` here,
-    # uncaught, degrading item 1's WHOLE resolution instead of just this one state read.
+    # Valid JSON of the wrong shape (corrupted or planted) must degrade only this read, not
+    # item 1's whole resolution.
     if not isinstance(state, dict):
         return 0
     systems = state.get("systems")
@@ -274,9 +218,8 @@ def _breaker_failures(run_dir: Path) -> int:
 
 
 class _CallLedger:
-    """Tracks item 1's OWN contribution to the elastic per-system breaker across a resolution,
-    so a second (and later) infra failure can still be ISSUED without being RECORDED past the
-    cap."""
+    """Tracks item 1's contribution to the per-system breaker, so later infra failures can
+    still be issued without being recorded past the cap."""
 
     def __init__(self, run_dir: Path):
         self.run_dir = run_dir
@@ -287,8 +230,7 @@ class _CallLedger:
 
         before = _breaker_failures(self.run_dir)
         if self.capped:
-            # Past the cap: issue the call directly (bypassing QueryCapture's own automatic
-            # `record_outcome`), still writing a queries-table row of the same shape.
+            # Past the cap: bypass QueryCapture's `record_outcome`, still writing a row.
             try:
                 fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
@@ -298,15 +240,10 @@ class _CallLedger:
                 return envelope, ""
             except (circuit_breaker.RunAborted, asyncio.CancelledError,
                     KeyboardInterrupt, GeneratorExit):
-                # Cancellation/control-flow signals must propagate, not be absorbed as "a
-                # capped call's own fault": swallowing `CancelledError` breaks task
-                # cancellation, and `KeyboardInterrupt`/`GeneratorExit` are never a query's
-                # fault to begin with.
+                # Control-flow signals propagate; they are never the query's fault.
                 raise
             except AdapterFault as e:
-                # A MAPPED fault keeps its own exit code/class (matching
-                # `QueryCapture._record`'s `except AdapterFault` arm) instead of being filed
-                # as `error_class="infra"`.
+                # A mapped fault keeps its own exit code, as in `QueryCapture._record`.
                 _record_manual_row(deps, verb, params, None, exit_code=e.exit_code)
                 return None, ""
             except BaseException:  # noqa: BLE001 — an unmapped capped-call fault must not raise
@@ -338,9 +275,8 @@ def _build_deps(
 
 
 def _budget_gate(run_dir: Path, limits: dict) -> None:
-    """Unconditional, not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness pre-turn work,
-    and its wall-clock discipline is not a product toggle the way the model's tool refusals
-    are."""
+    """Not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness work, not a model tool
+    refusal."""
     state = read_budget(run_dir)
     if tail_exhausted(state, limits):
         raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
@@ -354,41 +290,16 @@ def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) ->
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:
-    """The HARNESS writes lead-0's declaring `:L findings` row into `investigation.md` before
-    MAIN's first turn: with no such row, `invlang_validate` refuses any citation of the
-    reserved id as an "undeclared lead".
+    """Write lead-0's declaring `:L findings` row into `investigation.md` before MAIN's first
+    turn; without it, a citation of the reserved id is refused as an undeclared lead.
 
-    `system` is the CALLER's, not a module constant: this frame serves both reserved ids and
-    they do not share an authority for it — item 1's is the literal its own backend calls name
-    (`ITEM1_SYSTEM`), item 3's is the one its `CorrelationDispatch` carries — derived from
-    the grant that confines it, and made equal to the system of the template the lead binds
-    by the run-start agreement check (#1003). They are the same string today; a shared constant
-    would silently mislabel one of the two rows the moment they stop being — and #1003 made
-    item 3's movable by config while item 1's stays one vendor's by construction (N2).
+    `system` comes from the caller because the two reserved ids get it from different
+    authorities (item 1's constant, item 3's dispatch), which can diverge.
 
-    THE SEED IS VALIDATED LIKE ANY OTHER APPEND (#964). This writer runs before MAIN's first
-    turn and reaches `write_guarded` directly — it is not a tool call, so there is no
-    `permission.decide_write` in front of it — which made it the one writer of this document
-    that no schema had seen. Harmless in fact (one block, one row, so it cannot form the
-    within-block duplicate the validator refuses) and load-bearing anyway: the invariant every
-    other gate is designed against is "a committed investigation parses", and an ungated
-    writer makes that true only of the verbs the MODEL calls. It is checked here rather than
-    routed through the permission gate because that gate answers WHO MAY WRITE WHERE from a
-    policy and a role, and this frame has neither — what it needs is the content schema, which
-    `validate_artifact` is the neutral leaf for.
-
-    A SEED THAT FAILS IS NOT WRITTEN, and the id stays undeclared. That is the deliberate half
-    (the issue asks for a decision, not just a check). Writing it anyway would rebuild the
-    bypass under a new name — the whole point is that no unvalidated bytes reach this
-    document. Skipping costs a reserved id that MAIN may then cite, and the validator answers
-    that citation with `undeclared lead` — a refusal MAIN reads, can act on, and can clear by
-    declaring the lead itself. So the failure is loud, actionable and recoverable, where a
-    laundered write is none of the three. The likely reason for a failure is a document that
-    was ALREADY malformed when this frame read it, in which case the seed is the messenger and
-    the refusal names the real fault.
-
-    Best-effort is preserved in both directions: a refusal logs and returns, and never
-    raises into a run that has not started."""
+    This write bypasses `permission.decide_write`, so the content schema is applied here via
+    `validate_artifact`, keeping "a committed investigation parses" true. A seed that fails
+    validation is not written: the id stays undeclared and MAIN gets a recoverable
+    `undeclared lead` refusal instead of unvalidated bytes. Best-effort: never raises."""
     from defender._artifact_schema import validate_artifact
     from defender._run_paths import RUN_LAYOUT
     from defender._io import write_guarded
@@ -402,8 +313,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         "```\n\n"
     )
     try:
-        # `None` for an absent file, matching what `permission.decide_write` passes as the
-        # append-only baseline — `""` would claim an empty document was committed.
+        # `None`, not `""`, for an absent file, matching `permission.decide_write`'s baseline.
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)

@@ -108,7 +108,8 @@ Walks a write-tests run's `.spec-flow/frontiers/` chain: frontmatter parses, sta
 vocabulary, every `inputs.inventory_echo` equals its producer's actual `inventory` (counts in equal
 counts out), digests hold the ≤15-line cap, and the dispositions sum rule (consensus + forks +
 silent_branches + drops == premises consumed) balances. The orchestrator runs it at every phase
-boundary; `--resume` names the first blocked/stale/unparseable frontier to re-enter at (and treats
+boundary; each leaf runs `--only <its-file>` before returning, which lints that one frontier (echoes
+still reconciled against the chain) and ignores half-written siblings; `--resume` names the first blocked/stale/unparseable frontier to re-enter at (and treats
 `design-refuted` as the deliberate halt it is).
 
 ## check_calls.py / check_stub.py — the suite drives the target (`spec-graph calls` / `nullstub`)

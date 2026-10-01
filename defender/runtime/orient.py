@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from defender._frontmatter import strip_frontmatter
@@ -16,6 +16,10 @@ _REPO_ROOT = _DEFENDER_DIR.parent
 
 _SHIM_TIMEOUT_S = 20
 
+#: Runs one read-only shim (`argv` under `env`) and returns its stripped stdout, or `None` when
+#: it failed or printed nothing — which drops that section, as a failed shim always has.
+ShimRunner = Callable[[list[str], dict[str, str]], "str | None"]
+
 
 def _shim(argv: list[str], env: dict[str, str]) -> str | None:
     try:
@@ -23,12 +27,8 @@ def _shim(argv: list[str], env: dict[str, str]) -> str | None:
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, cwd=str(_REPO_ROOT), timeout=_SHIM_TIMEOUT_S,
         )
-    # `ValueError` belongs here with the rest: `subprocess.run` raises a bare
-    # `ValueError("embedded null byte")` — NOT an `OSError` — before it ever forks, for any
-    # argv element carrying a NUL. The one argv element this module builds from the alert is
-    # the signature, external data (`rule.id`), so a NUL in it would unwind out of
-    # `orientation()` past `driver.py`'s unguarded call and kill the run before the first
-    # model request. A shim that cannot be spawned is a shim with no output.
+    # `subprocess.run` raises `ValueError` (not `OSError`) for a NUL in argv, and the
+    # signature argv element is external alert data; uncaught it would kill the run.
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     out = (proc.stdout or "").strip()
@@ -45,21 +45,11 @@ def _catalog() -> str:
 
 
 def _alert_signature(alert_path: Path) -> str | None:
-    """The alert's `rule.id`, always as a `str` — the annotation, honoured.
+    """The alert's `rule.id` as a `str`, or `None`.
 
-    Both consumers take the value as text (`re.escape` in `_build_lessons_section`, a
-    `subprocess.run` argv in `_build_corpus_vocab_section`), and a foreign-SIEM `alert.json`
-    carrying a numeric id (`"id": 5710`) would otherwise detonate on `orientation()`'s
-    unguarded path and kill the run before the first model request — a breach of this module's
-    "orientation must never break the run" invariant. Coercing at the reader fixes both.
-
-    Empty and `None` collapse to `None`: an empty signature would build a `.*` lessons pattern
-    matching every row, which is not "the alert has no signature".
-
-    So does a NON-SCALAR id. `str()` is total, so a bare coercion turns `"id": []` into the
-    signature `"[]"` — a string that is not an id, handed to a lessons grep and to a shim argv
-    as though it were one. `bool` is excluded explicitly: it is an `int` to `isinstance`, and
-    `"id": false` would otherwise become the signature `"False"`."""
+    Coerced because both consumers need text and a numeric id (`"id": 5710`) would otherwise
+    crash orientation. Empty, non-scalar and `bool` ids give `None`: an empty signature would
+    match every lesson, and `[]` or `False` would become bogus signatures."""
     try:
         rid = json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -96,10 +86,10 @@ def _invlang_grammar(defender_dir: Path) -> str | None:
     )
 
 
-def _build_lessons_section(env: dict[str, str], sig: str | None) -> str | None:
-    tags = _shim(["defender-lessons", "--tags"], env)
+def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunner) -> str | None:
+    tags = shim(["defender-lessons", "--tags"], env)
     hits = (
-        _shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
+        shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
         if sig else None
     )
     lesson_lines = []
@@ -117,10 +107,12 @@ def _build_lessons_section(env: dict[str, str], sig: str | None) -> str | None:
     return None
 
 
-def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | None:
+def _build_corpus_vocab_section(
+    env: dict[str, str], sig: str | None, shim: ShimRunner,
+) -> str | None:
     if not sig:
         return None
-    vocab_out = _shim(
+    vocab_out = shim(
         ["defender-invlang", "hypothesis-vocabulary", "--signature", sig], env
     )
     if vocab_out:
@@ -134,7 +126,11 @@ def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | N
 def orientation(
     run_dir: Path, defender_dir: Path, alert_path: Path,
     *, systems: Sequence[str], lead_zero_section: str | None = None,
+    shim: ShimRunner | None = None,
 ) -> str:
+    """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
+    subprocesses; omitted, they run for real."""
+    run_shim = shim if shim is not None else _shim
     try:
         from defender import run_common
         env = run_common.run_env(defender_dir, run_dir)
@@ -152,9 +148,7 @@ def orientation(
     if alert_block:
         sections.append(alert_block)
 
-    # Lead-0's ancestor resolution has already run, sync, before this text is assembled:
-    # `resolve_lead_zero` did the I/O and the table writes, this is a pure formatting append
-    # (orient.py stays a text-assembler).
+    # `resolve_lead_zero` already did the I/O; this module only assembles text.
     if lead_zero_section:
         sections.append(lead_zero_section)
 
@@ -176,11 +170,11 @@ def orientation(
     if grammar:
         sections.append(grammar)
 
-    lessons = _build_lessons_section(env, sig)
+    lessons = _build_lessons_section(env, sig, run_shim)
     if lessons:
         sections.append(lessons)
 
-    corpus = _build_corpus_vocab_section(env, sig)
+    corpus = _build_corpus_vocab_section(env, sig, run_shim)
     if corpus:
         sections.append(corpus)
 

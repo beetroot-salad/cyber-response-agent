@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Recruit one oracle-calibration case against the live stack.
 
-A detection rule firing is NOT load-bearing. **The oracle does not see the alert** —
-`oracle/prompt.md` opens by saying so — and the alert exists only to make `defender/run.py`
-emit a realistic lead set. So a cell whose activity trips no rule is not an unrecruitable
-cell; it is a cell whose alert has to come from somewhere else (`synthesise_alert`).
+A detection rule firing is not required: the oracle never sees the alert, which exists
+only to make `defender/run.py` emit a realistic lead set. If no rule fires, the alert is
+synthesised from the runner record (`synthesise_alert`).
 
-**A `--target` the scenario cannot honour is refused before the stack is touched**
-(`retarget_problem`). A LOCAL scenario acts on its own host and never reads `${target}`,
-but `runner.py` records the override regardless — so recruiting one "at db-1" builds a
-case whose every lead investigates a host the activity never ran on.
+A `--target` the scenario cannot honour is refused before the stack is touched
+(`retarget_problem`): a LOCAL scenario never reads `${target}`, but `runner.py` records the
+override anyway, so every lead would investigate a host the activity never ran on.
 
   fire       playground-v2/attacks/runner.py run <scenario> --seed --user --target
   alert      the rule's own alert if one fired, else synthesised from the runner record
@@ -18,30 +16,24 @@ case whose every lead investigates a host the activity never ran on.
   assemble   RETIRED — see the refusal in `main`
   controls   controls.py cases/<id>
 
-**RECRUITMENT IS OFF (#922).** The assembler this drove — the step that turned a finished
-run dir plus a story into a `cases/<id>` tree — was the retired oracle's, and it went with
-the oracle. Every step before it still works and every reader of the EXISTING cases still
-works (`controls.py`, `score.py`, `report.py`, `validate_cases.py`); what has no
-implementation is the one in the middle. So this refuses up front rather than firing a
-scenario against the live stack and failing after the expensive part. Restoring it means
-naming the estate replay harness that replaces the oracle path — the same successor
-`validate_cases.py` names where its replay-boundary check used to be.
+**Recruitment is currently off.** The assemble step (finished run dir plus story into a
+`cases/<id>` tree) has no implementation, so this refuses up front rather than firing a
+scenario and failing after the expensive part. Every other step, and every reader of the
+existing cases, still works. Restoring it needs the estate replay harness that succeeds
+the oracle path.
 
-Two properties the hand path could not guarantee, and this one gets for free:
+Properties this path guarantees:
 
-  - **the story cannot leak the evaluation**, because the renderer's only input is the
-    runner's record (`story_from_run.py`);
-  - **a control uses the lead's own predicate**, because it IS the lead's own query with
-    its `@timestamp` bounds moved (`controls.py`).
+  - **the story cannot leak the evaluation**: the renderer's only input is the runner's
+    record (`story_from_run.py`);
+  - **a control uses the lead's own predicate**: it is the lead's own query with its
+    `@timestamp` bounds moved (`controls.py`).
 
-`--split` is a GENERATOR FLAG, set before the first replay ever runs. That is what makes
-held-out honest here: there is no moment at which someone sees a result and then decides
-which side of the split it belongs on.
+`--split` is set before the first replay runs, so no result can influence which side of
+the split a case lands on.
 
-Baseline generators stay **ON**. `attacks/catalog.yaml` used to advise disabling them,
-which is right for capturing an alert fixture and wrong for calibration: the oracle's
-answer is a signed diff over baseline, so with the generators off `+noise` cannot occur
-at all and `+event` is easier than production.
+Baseline generators stay **on**: the oracle's answer is a signed diff over baseline, so
+with them off `+noise` cannot occur and `+event` is easier than production.
 
 Usage (every run names its tenant, and there is no default — #1078; create one once with
 `python3 defender/scripts/tenant.py setup playground`):
@@ -72,16 +64,13 @@ EXTRACT_ALERT = REPO_ROOT / "experiments" / "oracle-telemetry-fidelity" / "extra
 DEFENDER_RUN = REPO_ROOT / "defender" / "run.py"
 ENVIRONMENT_TEMPLATE = HERE / "environment_template.yaml"
 
-#: The subprocess seam. Injected in tests so alert selection and synthesis can be
-#: exercised without a live stack — it is the piece that produced the campaign's one
-#: silently-wrong case, so it needs to be testable.
+#: The subprocess seam, injected in tests so alert selection and synthesis run without a
+#: live stack.
 Runner = Callable[..., subprocess.CompletedProcess]
 
-#: How long to give a real rule before synthesising. Short, because the outcome no longer
-#: decides whether the case exists. Both are env-overridable because the right wait is the
-#: rule's own interval: a 5m-interval detection rule (the Falco ones) cannot fire inside the
-#: 2m default, so capturing it rather than synthesising needs ORACLE_ALERT_ATTEMPTS raised
-#: past one rule tick.
+#: How long to wait for a real rule before synthesising. Env-overridable because the right
+#: wait is the rule's interval: a 5m-interval rule (the Falco ones) cannot fire within the
+#: 2m default, so raise ORACLE_ALERT_ATTEMPTS past one rule tick to capture it.
 ALERT_ATTEMPTS = int(os.environ.get("ORACLE_ALERT_ATTEMPTS", "4"))
 ALERT_INTERVAL = int(os.environ.get("ORACLE_ALERT_INTERVAL", "30"))
 
@@ -109,9 +98,7 @@ def scenario_entry(scenario: str, catalog_path: Path) -> dict:
 def honours_target(entry: dict) -> bool:
     """Do this scenario's own commands interpolate `${target}`?
 
-    `runner.py` records `resolved.target_host = overrides.target or scenario.target_host`
-    whether or not any command reads it, so the record, the story header and the
-    manifest's `host_pair` all repeat an override the activity never obeyed.
+    `runner.py` records a `--target` override whether or not any command reads it.
     """
     return any("${target}" in (step.get("cmd") or "")
                for step in entry.get("steps") or [])
@@ -121,26 +108,15 @@ def retarget_problem(scenario: str, target: str | None, source: str | None = Non
                      catalog_path: Path) -> str | None:
     """Why this scenario cannot be pointed at `target`, or `None` if it can.
 
-    A LOCAL scenario acts on its own host and never reads `${target}` — appending to
-    canary-1's `/root/.ssh/authorized_keys`, say. Recruited with `--target db-1`, the
-    override reaches only the runner's record, the story's "directed at" header and the
-    synthesised alert, so `defender/run.py` investigates a host the activity never ran on
-    and every lead queries an envelope that cannot contain it.
-
-    The runner's `--source` knob is what actually relocates a local scenario: it moves
-    where the commands run. So the defect is not "you cannot retarget a local scenario",
-    it is "you moved the label without moving the execution". A local scenario is coherent
-    exactly when the host the commands run on (effective source) is the host the story,
-    alert and leads name (effective target).
-
-    A case built the incoherent way is not merely mislabelled. Its leads are unusable and
-    no manifest edit recovers them — the envelope has to be re-gathered against an alert
-    on the host the activity actually touched.
+    A LOCAL scenario never reads `${target}`; an override would reach only the record,
+    story header and synthesised alert, so every lead would query an envelope that cannot
+    contain the activity (unrecoverable by editing the manifest). `--source` is what
+    relocates a local scenario, so it is coherent exactly when effective source equals
+    effective target.
     """
     entry = scenario_entry(scenario, catalog_path)
     if honours_target(entry):
-        # A ${target} scenario SSHes source -> target; the two are meant to differ,
-        # and moving either is safe because the command carries the target itself.
+        # Source and target are meant to differ; the command carries the target itself.
         return None
     eff_source = source or entry.get("source_host")
     eff_target = target or entry.get("target_host")
@@ -156,22 +132,16 @@ def retarget_problem(scenario: str, target: str | None, source: str | None = Non
     )
 
 
-#: Everything a completed recruitment leaves behind. Their presence means this case id
-#: is taken; `.generate/` alone means a run is in flight or died partway.
+#: What a completed recruitment leaves behind; any of them means the id is taken.
+#: `.generate/` alone means a run is in flight or died partway.
 CASE_ARTIFACTS = ("manifest.yaml", "environment.yaml", "oracle_visible", "hidden")
 
 
 def occupancy_problem(case_dir: Path) -> str | None:
     """Why this case id cannot be recruited into, or `None` if it is free.
 
-    Two recruitments of one case id do not collide loudly — they interleave. The second
-    overwrites `.generate/alert.json` while the first is still investigating, and what lands
-    is a case assembled from both: a story describing one run, leads from an investigation of
-    another host's alert, a manifest window from a third. Story and envelope disagree, and
-    nothing downstream detects it because every individual file is well-formed.
-
-    Refusing an occupied id is not about protecting committed work; it is about making the
-    collision loud at the only moment it is cheap.
+    Two recruitments of one id interleave silently, producing a case assembled from both
+    whose every file is individually well-formed. Refusing here makes the collision loud.
     """
     if not case_dir.exists():
         return None
@@ -209,9 +179,8 @@ def rules_fired_since(since: datetime, target_host: str | None = None, *,
                       run: Runner = subprocess.run) -> list[str]:
     """Detection rules that actually fired since `since`, most relevant first.
 
-    The generator does NOT predict which rule a cell will trip. `cross-tier-ssh-probe`
-    against db-1 raises `v2-sshd-failed-auth-burst`, not the `v2-cross-tier-ssh-pivot`
-    its name suggests — so the case's alert is whatever the environment actually raised.
+    The rule a scenario trips is not predictable from its name (`cross-tier-ssh-probe`
+    against db-1 raises `v2-sshd-failed-auth-burst`), so take whatever actually fired.
     """
     stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     query = json.dumps({
@@ -275,19 +244,12 @@ def wait_for_alert(rule_id: str | None, since: datetime, out_path: Path, *,
 def synthesise_alert(meta: dict, out_path: Path) -> dict:
     """Build the alert the activity WOULD have raised, from the runner's own record.
 
-    The nine keys `defender/run.py` consumes, every one of them derived from what the
-    activity actually did — host and user from the runner's resolved facts, the window
-    from its timestamps, the index from the step it ran. Nothing here asserts that a
-    detection rule fired: the rule id is `synthetic-<scenario>`, which names no rule in
-    `install_detection_rules.py`, and the manifest records `alert_source: synthesised`
-    beside it. A case whose alert claims a rule that never fired would be a fabricated
-    record, and the whole suite is an argument about not fabricating records.
+    Every key `defender/run.py` consumes is derived from what the activity did. The rule
+    id `synthetic-<scenario>` names no real rule, and the manifest records
+    `alert_source: synthesised`, so nothing claims a rule fired.
 
-    What it deliberately does NOT do is tell the defender it is synthetic. The premise
-    being preserved is "the envelope production actually issues", and a defender told
-    its alert is a test artifact is not investigating under that premise. The synthesis
-    is disclosed where a reader looks for provenance — the manifest — not inside the
-    input whose realism is the point.
+    The alert itself does not say it is synthetic: the defender must investigate as it
+    would in production. Provenance is disclosed in the manifest instead.
     """
     resolved = meta.get("resolved") or {}
     steps = meta.get("steps") or []
@@ -328,15 +290,9 @@ def investigate(
 ) -> Path:
     """One defender investigation — the LLM cost floor, and the envelope source.
 
-    `run.py` refuses to reuse an existing run dir, so a retried cell picks the next free
-    suffix rather than clobbering the earlier attempt's transcript. Keeping the failed
-    attempt is deliberate: it is the only record of why it failed.
-
-    #1078 D4/J32: `tenant_id` is checked (`require_tenant`, and `resolve_data_root` behind it)
-    BEFORE the free-suffix prediction or the child spawn — a tenant with no row, or no data
-    root at all, is refused with nothing spent and no hardcoded runs-base fallback of its own.
-    `run` is the child-process seam (the same shape `rules_fired_since`/`wait_for_alert` take):
-    the child is `defender/run.py`, handed `--tenant` alongside `--run-id`.
+    `run.py` refuses to reuse a run dir, so a retry takes the next free suffix and the
+    failed attempt's transcript survives. `tenant_id` is checked before anything is spent;
+    the child `run.py` is handed it as `--tenant`.
     """
     from defender import _tenant
 
@@ -361,12 +317,9 @@ def investigate(
 
 
 def write_environment(path: Path, capture_environment: str) -> None:
-    """Emit the case's `environment.yaml` — a REQUIRED judge input, not a nicety.
+    """Emit the case's `environment.yaml`, a required input to both judge passes.
 
-    Both judge passes read it, and it carries the facts that decide whether a cross-window
-    difference is real at all: which columns rotate across lever-ups, how the controls were
-    built, what `window_live: false` means. Rendered from one template so the hand-written
-    cases and every recruited one say the same thing.
+    Rendered from one template so every case says the same thing.
     """
     body = ENVIRONMENT_TEMPLATE.read_text(encoding="utf-8")
     path.write_text(body.format(capture_environment=capture_environment), encoding="utf-8")
@@ -445,29 +398,16 @@ def build_parser() -> argparse.ArgumentParser:  # lint-dup: ok — argparse only
 
 
 def _assemble(run_dir: Path, story: Path, controls_yaml: Path, case_dir: Path) -> None:
-    """The step with no implementation. Kept as a named hole rather than an inline `raise`,
-    so the shape the successor has to fill is still written down: a finished run dir, the
-    story rendered from its runner record, and the controls provenance, in, one `cases/<id>`
-    tree out. `main` refuses long before reaching it."""
+    """The unimplemented step, kept as a named hole documenting its shape: run dir, story and
+    controls provenance in, one `cases/<id>` tree out. `main` refuses before reaching it."""
     raise SystemExit(
         "generate_case.py: the case assembler retired with the oracle in #922 "
         f"(wanted: {run_dir}, {story}, {controls_yaml} -> {case_dir})")
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Parse, then refuse — BEFORE the stack is touched.
-
-    The assemble step is gone (see the module docstring), so every minute `_recruit` would
-    spend firing a scenario, waiting on an alert and running a full investigation buys a run
-    dir nothing can turn into a case. Argument validation still runs, so `--help` and a
-    malformed invocation answer as they always did.
-
-    `_recruit` is kept, uncalled, rather than deleted: it is the executable record of how the
-    committed cases were recruited, and the successor harness has the same five steps to make.
-
-    #1078 D4/J32: `--tenant` is checked at entry too — before prediction, scoring or spawn,
-    and before the retirement refusal below — with the owner's own refusal (grammar, then
-    `require_tenant`) surfaced verbatim.
+    """Parse, then refuse before the stack is touched: with no assemble step, a recruitment
+    run would produce nothing usable. Argument validation still runs, `--tenant` first.
     """
     ns = build_parser().parse_args(argv)
     from defender import _tenant
@@ -484,22 +424,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _recruit(argv: list[str] | None = None) -> int:
-    """The recruitment run, kept as the record of how the committed cases were made. Uncalled
-    since #922 deleted the assembler it reaches at `_assemble`."""
+    """The recruitment run, uncalled; kept as the record of how the committed cases were made
+    and as the template for a successor harness."""
     ns = build_parser().parse_args(argv)
 
-    # A local scenario retargets on --source. Default its story/alert target to the
-    # execution host so `--source db-1` alone stays coherent — the operator names the
-    # host once, not twice. A ${target} scenario is left untouched: its source and
-    # target are meant to differ.
+    # A local scenario retargets on --source; default its target to match so `--source db-1`
+    # alone is coherent.
     entry = scenario_entry(ns.scenario, CATALOG)
     if ns.source and ns.target is None and not honours_target(entry):
         ns.target = ns.source
 
-    # First, before the stack is touched OR a directory is created: a target the
-    # scenario cannot honour produces a case whose leads point at the wrong host, and
-    # nothing downstream notices. A refusal that has already made `cases/<id>/` leaves a
-    # half-case behind for the next reader to wonder about.
+    # Before touching the stack or creating `cases/<id>/`, so a refusal leaves nothing behind.
     problem = retarget_problem(ns.scenario, ns.target, ns.source, catalog_path=CATALOG)
     if problem is not None:
         print(f"!! {problem}", file=sys.stderr)
@@ -537,9 +472,7 @@ def _recruit(argv: list[str] | None = None) -> int:
     _run([sys.executable, HERE / "story_from_run.py", run_record / "meta.json", story],
          timeout=120, label="story")
 
-    # The assembler wanted a controls.yaml verbatim; the real, per-query controls are
-    # measured by controls.py below. This records the provenance of that measurement
-    # rather than pretending to be a hand-measured baseline.
+    # Provenance only; the per-query controls are measured by controls.py below.
     controls_yaml = work / "controls.yaml"
     controls_yaml.write_text(
         "# Per-query controls are measured mechanically into hidden/controls/ by\n"

@@ -1,47 +1,32 @@
 """The archive: one directory per world, holding everything a later reader may ask about.
 
-#947's M8. When a family has run, the episode dir becomes the object #921 grades and a human
-reads — and D3's claim about it is not "the episode dir is where we happened to put things"
-but **self-containment**: after the archive, `delta_o` and `verdicts` answer from
-`episodes/<id>/` alone, with no re-run and no path outside it. That is only true if the copy
-here is complete, which is why the archived world carries SEVEN roles rather than a report and
-a pointer: the report, the investigation document, the two tables, the run's own provenance
-stamp, the scrub verdict, the run-end record (#1047 — how the run ended, and whether the model
-had closed before it did), and a text pointer naming the run dir the bytes came from.
+After archiving, `delta_o`, `verdicts` and the grader answer from `episodes/<id>/` alone, with no
+re-run and no path outside it. That self-containment requires a complete copy: the report, the
+investigation document, the two tables, the run's provenance stamp, the scrub verdict, the
+run-end record, the lessons-loaded table, the alert, the gather summaries, and a text pointer
+naming the source run dir.
 
-**None of the seven is sourced from another.** The pointer is informational: it is a text file,
-never a symlink, and nothing in this design follows it. A reader that resolved it would make
-the episode self-contained only for as long as the runs base happens to still hold the run,
-which is the property the archive exists to stop depending on — the sibling run dirs are
-disposable, and one test deletes all three and asks both readers the same questions again.
+None is sourced from another. The pointer is a text file, never a symlink, and nothing follows
+it: sibling run dirs are disposable, and resolving it would make the episode self-contained only
+while the runs base still holds the run.
 
-**The scrub verdict and the run-end record are SIDECARS, and reaching for either inside the
-run dir finds nothing.** `scrub.verdict_path(tree)` is `tree.parent /
-f"{tree.name}.scrub-verdict.json"` (#771 §7 D8, re-probed here as G17) and
-`run_end.sidecar_path` has the same shape: both are written OUTSIDE the tree they describe
-precisely because such a file inside a box-writable tree is both plantable and forgeable. So
-the archive reads two RUNS-BASE paths, and a copy written against the design's "inside the run
-dir" sentence would copy a file that is never there and archive a world with no verdict at all
-— silently, since absence and "the scan did not run" are the same bytes on disk.
+The scrub verdict and run-end record are sidecars beside the run dir (`scrub.verdict_path`,
+`run_end.sidecar_path`), written outside the tree they describe because a file inside a
+box-writable tree is plantable and forgeable. Looking for them inside the run dir would silently
+archive a world with no verdict.
 
-**Every read out of the run dir goes through the lstat screens, and the screening happens
-BEFORE anything lands.** The run dir is the box's rw bind, so an entry there may be a symlink
-the model planted at an artifact's name; `shutil.copy2` follows it and writes the TARGET's
-bytes into the archive, where every later reader — the derived readers here, #921's grader, a
-human — takes them for a legitimate in-run artifact and no later gate can tell. The two tables
-go through `lead_repository.stage_tables`, the repository's own screened staging path (it
-`artifact_file`s the queries table, `artifact_dir`s `gather_raw`, and walks the tree with
-`symlinks=True` plus a per-entry ignore hook); the four single files go through
-`_run_paths.artifact_file` directly. The whole world is screened first and copied second, so a
-world carrying one planted link archives NOTHING rather than a half-world whose missing file
-reads as a run that did not produce one.
+Every read out of the run dir is lstat-screened before anything lands. The run dir is the box's
+rw bind, so an artifact's name may be a planted symlink, and `shutil.copy2` would copy the
+target's bytes into the archive as if they were in-run artifacts. The tables go through
+`lead_repository.stage_tables` (its own screened staging); single files through
+`_run_paths.artifact_file`. The whole world is screened before anything is copied, so a world
+carrying one planted link archives NOTHING rather than a half-world whose missing file reads as a
+run that did not produce one.
 
-**Absent and planted are different answers.** A path that is simply not there is skipped and
-reported (a sibling that died before writing its report has no report, and refusing the whole
-archive would throw away the artifacts it DID produce — the launcher's `incomplete` outcome is
-where that fact is recorded, not here). A path that EXISTS and is not a regular file (or, for
-`gather_raw`, not a real directory) is a refusal: nothing about the tree it was found in can
-be trusted after that, and the launcher's own verification is what should have caught it.
+Absent and planted are different answers. A missing path is skipped and reported (a sibling
+that died before writing its report still has other artifacts; the launcher's `incomplete`
+outcome records that). A path that exists but is not a regular file (or, for `gather_raw`, a
+real directory) is a refusal.
 """
 
 from __future__ import annotations
@@ -52,8 +37,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender._io import Bound, entry_present, guarded_mkdir, write_guarded
-from defender._episode_paths import LAYOUT, EpisodePaths, WorldPaths
+from defender._episode_handle import Episode
+from defender._io import Bound, entry_present
+from defender._episode_paths import LAYOUT, WorldPaths
 from defender._run_paths import (
     RunPaths,
     artifact_dir,
@@ -70,37 +56,25 @@ from defender.runtime.scrub import verdict_path
 
 _logger = logging.getLogger(__name__)
 
-# EVERY NAME THIS MODULE USED TO BIND IS THE OWNER'S (#1077 D7). What stood here was ten
-# module-level constants, seven of them a bare re-binding of an owner name
-# (`ALERT_NAME = ALERT`) and three spelled outright (`RUNS_SUBDIR = "runs"`). A re-binding
-# reads as harmless — it tracks a rename, after all — and it is, right up until its home drops
-# the name: then every module that bound it off THIS one breaks at once, with no gate having
-# seen a thing. That is not hypothetical here; it is what `SERVED_DIRNAME`/`BASE_FILENAME` did
-# to six modules in this issue's own first pass, and why the rule is now "hold no record name"
-# rather than "spell no record name".
-#
-# The archive's own shape made the aliases look necessary: this module pairs a SOURCE in the
-# run dir with a DESTINATION under the episode, and the destination was reached as
-# `world_dir / <name>`. It is now `EpisodePaths(episode_dir).world(label)` — a handle whose
-# accessors ARE the destinations — so the pairing is two accessors and no names at all.
+# This module binds no record names of its own: sources and destinations are both reached
+# through the owners' accessors (`RunPaths`, `EpisodePaths`), so a rename in the owner cannot
+# strand a re-binding here.
 
 
 def read_family_stamp(bound: Bound) -> dict[str, Any] | None:
     """The episode-root family stamp — `{agreed: {...}, allow_dirty}` — or `None` when nothing
-    is at the name (#1025 J12).
+    is at the name.
 
-    A public accessor distinct from the per-world run-stamp reader (`family.json_mapping`,
-    tolerant and shape-agnostic): this one KNOWS the family stamp's own shape and refuses a
-    directory or a document that is not it, through the bound reader's own screen (#1049) —
-    the episode dir is reachable from a sibling box's rw bind, exactly like every other
-    episode-root record, and the refusal names the relative name, never the operator's tree.
+    Unlike the tolerant per-world stamp reader (`family.json_mapping`), this knows the family
+    stamp's shape and refuses anything else, through the bound reader's screen: the episode dir
+    is reachable from a sibling box's rw bind. The refusal names the relative name only.
     """
     stamp = LAYOUT.family_stamp
     rec = bound.read(stamp)
     if rec.absent:
         return None
-    # A directory squatting the name is refused by the walk itself — no separate `is_dir()`
-    # check, which would be an unscreened read of the same box-writable entry the walk judges.
+    # A directory at the name is refused by the bound walk; a separate `is_dir()` would be an
+    # unscreened read of the same entry.
     if rec.text is None:
         raise ValueError(f"{stamp} could not be read: {rec.reason}")
     try:
@@ -116,47 +90,26 @@ def read_family_stamp(bound: Bound) -> dict[str, Any] | None:
 class ArchiveRefused(ValueError):
     """A world that cannot be archived honestly.
 
-    Raised for exactly one thing: an artifact's name in the source run dir is occupied by
-    something that is not the artifact (a symlink, a FIFO, a device, a link where a directory
-    belongs). A `ValueError`, so a caller that already funnels this design's refusals through
-    one boundary catch keeps them all; named, so the launcher can say which world and which
-    name rather than reporting "the archive failed".
+    Raised when an artifact's name (in the source run dir or the destination) is occupied by
+    something that is not the artifact: a symlink, FIFO, device, or a link where a directory
+    belongs. A `ValueError` so callers can catch this design's refusals at one boundary.
     """
 
 
 def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], ...]:
-    """The seven single-file roles, as `(source, destination)` — two accessors per row.
+    """The single-file roles, as `(source, destination)` accessor pairs.
 
-    Spelled once, in the order the archived-world row declares them, because two readers of
-    this list exist — the screen and the copy — and a role in one and not the other is an
-    artifact that is checked and not copied, or copied and not checked.
-
-    BOTH SIDES ARE ACCESSORS NOW (#1077 D7). This tuple used to pair a source path with the
-    archived NAME, and the two sides drifted apart in exactly the way that shape invites: six
-    rows reached their source through `RunPaths` while the seventh hand-joined
-    `run_dir / LESSONS_LOADED_NAME`, so one role's source was composed by a different route
-    from its five neighbours'. Neither side spells a name now, and the destination carries
-    decision 2's containment check it never had.
-
-    D7 (#921) adds the last two: the lessons-loaded table and the alert, the two of the
-    judge's three new inputs that are single files. The gather summaries directory is the
-    third and is a DIRECTORY, so it takes the per-entry-screened walk beside `stage_tables`'
-    own two tables rather than a slot in this tuple — see `archive_episode`.
-
-    #1047 adds the seventh: the run-end record, the second host-side sidecar. Like the scrub
-    verdict it is read from BESIDE the run dir and takes the same screen, the same copy and
-    the same absent/planted split as the other six — the judge, not the archive, decides what
-    its bytes mean (`run_end.parse_record`), exactly as it does for the verdict.
+    Shared by the screen and the copy so no role can be checked without being copied or vice
+    versa. The gather summaries are a directory and are handled in `archive_episode`. The judge,
+    not the archive, decides what the sidecars' bytes mean.
     """
     paths = RunPaths(run_dir)
     return (
         (paths.report, world.report),
         (paths.investigation, world.investigation),
         (paths.provenance, world.provenance),
-        # The two SIDECARS beside the run dir, not paths inside it (G17). Their archived
-        # names are the episode owner's own (`scrub_verdict.json`, `run_end.json`): inside
-        # `worlds/<X>/` the world IS the directory, so the run-id-keyed spelling they carry
-        # outside it would carry a run id here that nothing may resolve.
+        # The two sidecars beside the run dir. Inside `worlds/<X>/` they take the episode
+        # owner's names, dropping the run-id-keyed spelling nothing here may resolve.
         (verdict_path(run_dir), world.scrub_verdict),
         (run_end_sidecar_path(run_dir), world.run_end),
         (paths.lessons_loaded, world.lessons_loaded),
@@ -167,13 +120,8 @@ def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], 
 def _screen(source: Path, *, world: str, is_dir: bool = False) -> bool:
     """Is `source` an artifact this archive may copy?
 
-    Three answers, not two. `True` — a regular file (or a real directory) that may be copied.
-    `False` — nothing is there at all, so there is nothing to copy and nothing to refuse. A
-    RAISE — something IS there under the artifact's name and it is not the artifact.
-
-    `exists() or is_symlink()` rather than `exists()` alone: a link pointing at a path that
-    does not exist is invisible to `exists()`, and a broken link at an artifact's name is
-    exactly as much of a signal as a working one.
+    `True`: a regular file (or real directory). `False`: nothing there. Raises: something is
+    there and it is not the artifact. `exists() or is_symlink()` so a broken link counts too.
     """
     if artifact_dir(source) if is_dir else artifact_file(source):
         return True
@@ -191,10 +139,8 @@ def _screened_sources(world: str, run_dir: Path,
                       dest: WorldPaths) -> list[tuple[Path, Path]]:
     """Every source that will be copied for one world, or the refusal — nothing copied yet.
 
-    The whole point of running this before the first `copy2`: an archive that refused halfway
-    would leave a world directory holding some of its seven roles, and a MISSING artifact is how
-    this design records "the run did not produce one". A half-archive is therefore not a
-    partial answer but a wrong one.
+    Runs before the first copy because a half-archived world is wrong, not partial: a missing
+    artifact is how this design records "the run did not produce one".
     """
     paths = RunPaths(run_dir)
     present = [(src, to) for src, to in _single_files(run_dir, dest)
@@ -207,28 +153,17 @@ def _screened_sources(world: str, run_dir: Path,
 
 def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
                          present: set[Path]) -> None:
-    """Judge every name this lane will write under the world dir, BEFORE the first copy — or
+    """Judge every name this lane will write under the world dir, before the first copy — or
     raise `ArchiveRefused`. `present` is the single-file destinations that have a source this
     time."""
-    # THE DESTINATION IS SCREENED TOO, and before the first copy for the same reason the
-    # sources are. `guarded_mkdir` judges the DIRECTORY components; nothing judged the leaf,
-    # and `shutil.copy2` opens the destination for writing, which resolves a link planted
-    # there — the episode dir is reachable from a sibling box's rw bind (it is why
-    # `merge_review` and the run-dir pointer both go through the guarded seam), so an entry
-    # at `worlds/<label>/report.md` would redirect an artifact copy out of the archive.
-    # `plain_file`, not `artifact_file`: a HARD link at the leaf is a regular file to
-    # `lstat`, and `copy2` opens it for writing all the same — the same rule
-    # `write_guarded` applies to every other write into this tree (#1047 F-F), applied to
-    # EVERY destination this lane writes: the seven single files here, the two tables and
-    # the summaries directory below, and each leaf `refusing_copy2` lands inside them.
+    # The episode dir is reachable from a sibling box's rw bind, and `copy2` opens the
+    # destination for writing, following a link planted there. The world folder's `ensure`
+    # only judges directory components, so each leaf is checked here. `plain_file`, not
+    # `artifact_file`, so a hard link is refused too.
     #
-    # EVERY single-file NAME is judged, not only the ones with a source. A MISSING artifact
-    # is how this design records "the run did not produce one", and that has to be true of
-    # the destination too: a plain file left at a name whose source is now absent (a
-    # re-archive after the sidecar or the report was lost) would be read by every later
-    # reader as this run's own, so it is removed — a plain regular file is exactly what the
-    # copy would have replaced. An ALIAS at such a name is refused, never removed (D1:
-    # removal is sanitizing, and an entry the archive deletes is one no scan can report).
+    # Every single-file name is judged, not only those with a source. A plain file left at a
+    # name whose source is now absent (a re-archive) would be read as this run's own, so it is
+    # removed. An alias is refused, never removed: deleting it would hide it from any scan.
     for _source, target in _single_files(run_dir, dest):
         if not entry_present(target):
             continue
@@ -239,20 +174,9 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
                 "copying onto a link would put this world's artifact wherever it points")
         if target not in present:
             target.unlink()
-    # The DIRECTORY destination is screened by the same rule and for the same reason. It is
-    # not covered by the loop above (which judges the single files) and `copytree` will not
-    # refuse it for us: under `dirs_exist_ok=True` its own `makedirs(dst, exist_ok=True)`
-    # RESOLVES a link planted at this name, writing the world's summaries wherever it
-    # points — the exact escape this screen exists to stop, one directory over.
-    # ALL THREE OF THEM, not only the one this design added. `stage_tables` runs the same
-    # `copytree(dirs_exist_ok=True)` onto `worlds/<label>/gather_raw` and a `copy2` onto
-    # `worlds/<label>/executed_queries.jsonl`, and it screens only its SOURCES — so the
-    # destination escape screened here for `gather_summaries/` was still open one directory
-    # over, on artifacts that predate it. The screen belongs to the destination tree, which
-    # is this function's, so it is applied to every name written into that tree.
-    # The two tables land under the world dir in the SOURCE run dir's own layout, so their
-    # destinations are `RunPaths` rooted at the world — the archive's one legitimate use of
-    # the run layout against an episode path.
+    # The directory and table destinations too: `copytree(dirs_exist_ok=True)` (here and in
+    # `stage_tables`) resolves a link planted at the destination, and `stage_tables` screens
+    # only its sources. The tables land in the run-dir layout rooted at the world dir.
     staged_dests = RunPaths(dest.dir)
     for target, is_dir in ((dest.gather_summaries, True), (staged_dests.gather_raw, True),
                            (staged_dests.executed_queries, False)):
@@ -266,43 +190,34 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
             "would write this world's archived artifact wherever it points")
 
 
-def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
-    """Archive each world's run dir into `episode_dir/worlds/<label>/`; return what was written.
+def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Path]:
+    """Archive each world's run dir into the episode's `worlds/<label>/`; return what was
+    written.
 
-    `run_dirs` is keyed by the SHORT world label, and the caller chooses its members: an
-    episode the launcher marked `incomplete` archives the siblings that were individually
-    clean and omits the one that was not, so this function is handed the set to archive rather
-    than deriving it from the manifest.
+    `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
+    archives only its clean siblings, so the set is not derived from the manifest.
 
-    Screening is per world and copying is per world, in that order (see `_screened_sources`),
-    and the worlds are processed in a stable sorted order so a partial failure leaves the same
-    prefix on every run rather than whichever order a dict was built in.
+    Each world is screened, then copied. Worlds go in sorted order so a partial failure always
+    leaves the same prefix.
     """
-    episode_dir = Path(episode_dir)
-    episode = EpisodePaths(episode_dir)
     archived: dict[str, Path] = {}
     for world in sorted(run_dirs):
         run_dir = Path(run_dirs[world])
-        dest = episode.world(world)
+        # The label passes the handle's minting check; the copy lane's own paths are the
+        # world's, under the episode dir the handle holds.
+        handle = episode.world(world)
+        dest = WorldPaths(episode.dir, LAYOUT.world(world))
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
-        guarded_mkdir(world_dir, base=episode_dir)
+        handle.dir.ensure()
         _screen_destinations(world, dest, run_dir, {to for _s, to in sources})
         for source, target in sources:
-            # Screened by `_screen` above, before this loop began: a link at any of these
-            # names has already raised, so nothing here can follow one.
             shutil.copy2(  # lint-tree-read-follows-link: ok — every source screened in `_screened_sources`
                 source, target)
-        # The two tables, through the repository's own screened staging path — which refuses a
-        # non-artifact ENTRY at any depth of `gather_raw` as well as at its root, a walk this
-        # module has no business writing a second copy of. It REFUSES rather than aborting (a
-        # dangling link deep in the gather tree must not cost a world its whole archive) and
-        # returns what it dropped, so the drop is said out loud instead of read later as a
-        # payload the run never wrote.
+        # `stage_tables` refuses non-artifact entries at any depth of `gather_raw` without
+        # aborting, and returns what it dropped so the drop is reported.
         refused = stage_tables(run_dir, world_dir)
-        # `gather_summaries/`, D7's directory-shaped input, through the SAME per-entry-screened
-        # walk as `gather_raw` — a non-artifact entry at any depth is refused and reported, and
-        # the rest of the directory (and the rest of the world) still archives.
+        # `gather_summaries/` through the same per-entry-screened walk as `gather_raw`.
         summaries_src = RunPaths(run_dir).gather_summaries
         summaries_dest = dest.gather_summaries
         if artifact_dir(summaries_src):
@@ -310,33 +225,22 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
             shutil.copytree(  # lint-tree-read-follows-link: ok — source root screened by `_screen`, destination root screened above and every entry by `refusing_copy2`
                 summaries_src, summaries_dest, symlinks=True,
                 ignore=refuse_non_artifacts(summaries_refused), dirs_exist_ok=True,
-                # THE DESTINATION AT EVERY DEPTH, not only at the root. The screen above judges
-                # `worlds/<label>/gather_summaries` itself; `dirs_exist_ok=True` then walks INTO
-                # it, and `copy2` opens each leaf destination for writing — so a link planted at
-                # `gather_summaries/<lead>.md` by a box whose rw bind reaches the episode dir was
-                # still followed and this world's summary written wherever it pointed.
+                # Screens each leaf destination too: `dirs_exist_ok=True` walks into the
+                # existing directory, where a planted link at a leaf would be followed.
                 copy_function=refusing_copy2(summaries_refused))
             refused = [*refused, *summaries_refused]
         if refused:
             _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
-        # The pointer, LAST and as TEXT: informational only, so it is written after the bytes
-        # it names have landed, and it is written through the guarded seam like every other
-        # write into a tree a box can reach.
-        write_guarded(dest.run_dir_pointer, f"{run_dir}\n")
+        # The pointer last, as text, through the episode handle.
+        handle.run_dir_pointer.write(f"{run_dir}\n")
         archived[world] = world_dir
     return archived
 
 
 __all__ = [
-    # NO RECORD NAMES (#1077 D7). This list used to re-export twelve of them, on the reasoning
-    # that "the judge reads every one of them back out of the archive this module writes, and
-    # a name spelled here and re-spelled there is a rename that leaves the writer and the
-    # reader looking at two different files". The premise was right and the remedy was the
-    # disease: a re-export is a SECOND HOME, and every module that bound a name off this one
-    # broke the moment this one stopped exporting it. The writer and the reader now share the
-    # owner's accessor, which is the only thing that was ever meant by "one spelling".
+    # No record names are re-exported: readers use the owner's accessors directly.
     "ArchiveRefused",
     "archive_episode",
     "read_family_stamp",

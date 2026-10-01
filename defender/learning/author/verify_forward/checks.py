@@ -38,27 +38,22 @@ class ForwardCheck:
 
     error_prefix: str
     prompt_path: Path | None
-    #: `(verdict, reasoning)` — verdict is GOOD or BAD; EXEMPT is the drain's own, via
-    #: `cfg.exempt(row)`, never the check's (M2's own data-model note).
+    #: `(verdict, reasoning)` — GOOD or BAD. EXEMPT is decided by the drain via
+    #: `cfg.exempt(row)`, never by the check.
     run: Callable[[CheckContext], tuple[str, str]]
 
 
-# The two records name each other, so whichever is decorated first cannot see the other:
-# `CheckContext.check` is finished here, once, rather than by the first thread to construct
-# one — which is inside `_Judgement.mint`'s worker pool.
+# The two records reference each other, so `CheckContext` is completed here once rather than
+# lazily by the first constructor, which runs inside `_Judgement.mint`'s worker pool.
 complete(CheckContext)
 
 
 def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) -> tuple[str, str]:
     stem = ctx.lesson_path.stem
     prefix = ctx.check.error_prefix
-    # `_verify` is the MODEL-BACKED lane, so the check it runs for must carry a prompt.
-    # A ForwardCheck may carry `prompt_path=None` — a check whose verdict is mechanical
-    # (pure retrieval) — it never reaches here. Checked rather than asserted: `StageWiring`
-    # takes a non-optional `Path`, and an assert would be stripped under `python -O`.
-    # `FatalConfigError`, not a bare raise: this is a fatal CONFIGURATION fault (O10, "a
-    # check with no prompt"), never a per-finding verdict — the drain's per-pair retry
-    # handler must let it propagate rather than degrade it to BAD.
+    # The model-backed lane needs a prompt; a mechanical check (`prompt_path=None`) never
+    # reaches here. Checked rather than asserted (`python -O`), and `FatalConfigError` so the
+    # drain's per-pair retry propagates it instead of degrading it to BAD.
     prompt_path = ctx.check.prompt_path
     if prompt_path is None:
         raise FatalConfigError(
@@ -83,11 +78,6 @@ def _verify(ctx: CheckContext, user: str, source_run_dir: Path, *, salt: str) ->
 
 
 def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> tuple[str, str]:
-    # #767 D5: the cited-covering-policy prompt section is deleted along with the
-    # resolution-decoding lane it read through — `forward.load_cited_policy` keyed on a
-    # cross-run citation menu no non-test code writes (c5), so this section was always the
-    # same neutral placeholder in production. Removing it closes the second model-facing read
-    # path structurally, rather than leaving a prompt section that never varies.
     stage_salt = salt if salt is not None else uuid4().hex
     transcript, recorded = forward.load_run_context(ctx.source_id, runs_dir=ctx.runs_dir)
     disposition = forward.expected_disposition(ctx.direction, recorded)
@@ -105,17 +95,12 @@ def _run_findings(ctx: CheckContext, *, salt: str | None = None) -> tuple[str, s
 
 
 def skips_forward_check(row: dict) -> bool:
-    """J12: a `direction: family` row is exempt from the forward check.
+    """A `direction: family` row is exempt from the forward check.
 
-    Its ground truth is `disposition_declared` on the family record, not a `source_refs.yaml`
-    it does not have — `forward.expected_disposition`/`load_run_context` resolve a row's
-    `run_id` under the RUNS dir, and a family row's `run_id` is an episode id under the
-    EPISODES root, a different tree entirely. Wired as the lessons channel's
-    `CorpusAuthorConfig.exempt` (#773 M2): the drain consults it per (file, finding) pair
-    BEFORE any verifier call and mints EXEMPT, so a family row never reaches `_run_findings`
-    at all — the exemption is a ROUTE, and the `direction` literal the check reads stays
-    `Literal["adversarial", "benign"]`, unwidened. `lessons.run._gate_findings` reads the
-    same predicate to route a family row past the disposition gate."""
+    Its ground truth is on the family record, and its `run_id` is an episode id, not a run
+    under the runs dir the check reads. Wired as the lessons channel's
+    `CorpusAuthorConfig.exempt`, so the drain mints EXEMPT before any verifier call; also
+    read by `lessons.run._gate_findings` to route family rows past the disposition gate."""
     return row.get("direction") == "family"
 
 

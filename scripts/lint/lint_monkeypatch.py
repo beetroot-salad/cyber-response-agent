@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 """Monkeypatch-setattr smell — flag `monkeypatch.setattr(...)` in defender/ tests.
 
-`monkeypatch.setattr` reaches into a module and swaps a collaborator (a function,
-class, or client) at import scope. It is the dependency-injection-avoidance smell
-the author-family refactors removed: instead of patching a drain's collaborator from
-a test, it is injected via a config/deps seam (AuthorConfig / LeadAuthorDeps / the
-ticket_writer transport seam), so the test constructs the object it wants and hands
-it in. setattr-patching couples tests to
-private module layout, survives renames silently, and leaks state across tests
-when `undo` is missed.
+`monkeypatch.setattr` swaps a collaborator (a function, class, or client) at import scope —
+the dependency-injection-avoidance smell. Collaborators are injected via a config/deps seam
+(AuthorConfig / LeadAuthorDeps / the ticket_writer transport seam), so the test constructs
+the object it wants and hands it in. setattr-patching couples tests to private module layout,
+survives renames silently, and leaks state across tests when `undo` is missed.
 
 Scope: this flags `monkeypatch.setattr` only. `monkeypatch.setenv` / `delenv`
 (legitimate environment setup) and other fixtures are NOT flagged.
 
 Pre-existing setattr sites are ratcheted via lint_monkeypatch_baseline.json (see
-scripts/lint/_baseline.py); the gate fails only on a NEW file+target pair, so new
-tests are pushed toward injection while the existing sites are paid down over time.
+scripts/lint/_baseline.py); the gate fails only on a new file+target pair.
 
 Suppress an intentional site with `# lint-monkeypatch: ok — <reason>` on the call.
 
@@ -119,9 +115,8 @@ def main(argv: list[str]) -> int:
     if not DEFENDER.is_dir():
         print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
         return 2
-    # A file inside the scan scope that could not be read or parsed never entered the corpus,
-    # so a violation could sit in it and this gate would still print 0 findings. Exit 2 — the
-    # gate could not run, which is categorically not "clean" (#618/#621/#652).
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:

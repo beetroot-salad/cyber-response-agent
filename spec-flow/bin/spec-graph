@@ -18,7 +18,7 @@
 #         spec-graph claims    [graph.yaml ...]            [--config <path>]
 #         spec-graph gate      [graph.yaml ...] [--residue] [--config <path>]
 #         spec-graph lint      [graph.yaml ...]            [--config <path>]
-#         spec-graph frontiers [dir] [--resume]
+#         spec-graph frontiers [dir] [--resume | --only <file>]
 #         spec-graph calls     [graph.yaml | suite-dir] [--target <mod> ...]
 #         spec-graph nullstub  [graph.yaml | suite-dir] [--target <mod> ...] [--python <interp>]
 #         spec-graph trace     {drivers [--base <ref>] | resource [<name> ...]}

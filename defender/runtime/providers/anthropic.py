@@ -55,7 +55,6 @@ class AnthropicProvider:
         return AnthropicModelSettings(**merged)  # type: ignore[typeddict-item]
 
     def cache_affinity(self, settings: ModelSettings | None, key: str) -> ModelSettings | None:
-        """Unchanged: Anthropic caching is declared by the breakpoint markers
-        `_cache_settings` already sets, and the cache is addressed by the prefix's own
-        content — there is no routing key to supply."""
+        """Unchanged: Anthropic caches by content via the breakpoints `_cache_settings` sets;
+        there is no routing key."""
         return settings

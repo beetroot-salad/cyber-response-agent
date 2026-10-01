@@ -1,21 +1,19 @@
-"""The family judge: grades an archived branched episode (#921).
+"""The family judge: grades an archived branched episode.
 
-`grade_episode` is the orchestration entry point `learning/branch/cli.py` calls at the tail of
-`_run_episode`, after the archive step and before the return (J10). It is also the launcher-
-independent entry point every test in this suite drives directly.
+`grade_episode` is called by `learning/branch/cli.py` after the archive step, and is also
+callable directly without the launcher.
 
 Flow, per `accepted` episode with no existing `judge.yaml`:
-1. `learning.judge.family.grade_family` — the mechanical five-fact pass, per non-control world.
-2. `learning.judge.render.render` + `learning.judge.run._build_prompt`/`validate_reply` — one
-   model call per graded world per draw, through the injected `judge=` seam, written to
-   `worlds/<X>/judge/<n>.yaml`.
-3. The episode's outcome — `gradable`, `discard` (mechanical-first, and BEFORE any world's
+1. `family.grade_family` — the mechanical pass, per non-control world.
+2. `render.render` + `run._build_prompt`/`validate_reply` — one model call per graded world
+   per draw, through the injected `judge=` seam, written to `worlds/<X>/judge/<n>.yaml`.
+3. The episode's outcome — `gradable`, `discard` (mechanical-first, and before any world's
    corpus-contradiction, so the answer does not depend on manifest order) or
-   `corpus-contradiction` — decided from the review record and THIS pass's own draws.
-4. `learning.judge.enqueue.enqueue_report` — for a `gradable` episode, one `FindingRow` per
-   surviving finding; nothing for `discard`/`corpus-contradiction` (O7).
-5. `episodes/<id>/judge.yaml` — written LAST, after the enqueue (J11), carrying the enqueued
-   row count and every world's completed-draw count, so its presence certifies the whole pass.
+   `corpus-contradiction` — decided from the review record and this pass's own draws.
+4. `enqueue.enqueue_report` — for a `gradable` episode, one `FindingRow` per surviving
+   defender finding; world findings are enqueued regardless of outcome.
+5. `episodes/<id>/judge.yaml` — written last, after the enqueue, so its presence certifies the
+   whole pass.
 """
 
 from __future__ import annotations
@@ -30,15 +28,14 @@ from typing import Annotated, Any
 from pydantic import AfterValidator, TypeAdapter, ValidationError
 
 
-# `JudgeRefused` lives in `_errors.py`, its own module, so every submodule below can import it
-# without a package-`__init__` import cycle; re-exported here as the ONE class object every
-# caller — including `_triplet_947.refusals()`'s `sym("learning.judge", "JudgeRefused")` — sees.
+# `JudgeRefused` lives in `_errors.py` to avoid an import cycle; re-exported here.
 from defender._model import model  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._io import Bound, bind, guarded_mkdir, write_guarded  # noqa: E402
+from defender._episode_handle import Episode  # noqa: E402
+from defender._io import Bound, NotPlainEntry, bind  # noqa: E402
 from defender._run_paths import WIRE_LOG_NAMES  # noqa: E402
-from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
+from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
@@ -46,29 +43,18 @@ from defender.learning.judge import run as run_mod  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
-#: The judge's own operator knobs — no `DEFENDER_` prefix (run1/G23: a judge knob spelled with
-#: one would be unsettable, matching `QUESTIONER_EFFORT`'s own convention). MODEL and EFFORT are
-#: deliberately NOT spelled here: they are `config.judge_model`/`judge_effort`'s knobs and this
-#: module reads them through those accessors, so a second constant naming the same env var would
-#: be a second place for one name to live. `run.py`'s docstring records who ELSE reads those
-#: two names — the collision did not leave with the old pipeline judge.
+#: The judge's own operator knobs — no `DEFENDER_` prefix, matching `QUESTIONER_EFFORT`. Model
+#: and effort are read through `config.judge_model`/`judge_effort`, not spelled here.
 DRAWS_KNOB = "JUDGE_DRAWS"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
-#: `judge.yaml`'s `episode_outcome` for an episode this pass DID NOT grade. Not a member of
-#: `_vocab.JUDGE_OUTCOME_ENUM` and deliberately not put there: that vocabulary is the FAMILY's
-#: word, which three schemas have to agree on, and "nothing was graded" is a fact about this
-#: record alone (`_vocab.py`'s own admission rule).
+#: `judge.yaml`'s `episode_outcome` for an episode this pass did not grade. Not in
+#: `_vocab.JUDGE_OUTCOME_ENUM`: that is the family's word, shared by three schemas, while "not
+#: graded" is a fact about this record alone.
 NOT_GRADED = "not-graded"
 
-
 def _judge_model() -> str:
-    """The judge's model, through `config`'s accessor rather than a second reading of the same
-    env var. `config.judge_model()` IS `env_str("JUDGE_MODEL", "kimi-k3")` — spelling that here
-    made a byte-identical copy, so a reader of this name could drift to a different DEFAULT
-    while still being impossible to configure APART. That caveat outlived the old pipeline
-    judge it was written about: `evals/oracle_golden/judge.py` reads the same two env vars with
-    its own defaults. `run.py`'s docstring carries the collision."""
+    """The judge's model, through `config`'s accessor so the default lives in one place."""
     from defender.learning.core.config import judge_model
 
     return judge_model()
@@ -119,17 +105,11 @@ def _rows_name_their_world(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @model
 class EpisodeGrade:
-    """`grade_episode`'s return value — the same shape `judge.yaml` is written as.
+    """`grade_episode`'s return value and the schema of `judge.yaml`, in both directions.
 
-    THE SCHEMA OF THE RECORD, in both directions: `_write_judge_yaml` dumps this class and
-    `_grade_from_document` constructs it from the file's keys, so the field list is spelled
-    here and nowhere else. A pydantic dataclass, STRICT (`defender._model.model`): every
-    construction — the live pass's and the read-back's alike — validates each field by type,
-    with no coercion (`"3"` is not an `int`, a list is not a `frozenset`), and a document of
-    the wrong shape is a `ValidationError` at the constructor rather than a value of the wrong
-    type in a field.
-    `episode_dir` and the three `frozenset` fields are DERIVED — never written, re-computed
-    from the rows on every read (`_DERIVED`).
+    Strict (no coercion), so a document of the wrong shape fails at the constructor.
+    `episode_dir` and the three `frozenset` fields are derived: never written, recomputed from
+    the rows on every read (`_DERIVED`).
     """
 
     episode_dir: Path
@@ -147,77 +127,50 @@ class EpisodeGrade:
     queue_malformed_rows: int = 0
     world_queue_malformed_rows: int = 0
     #: Findings this pass could not turn into a queue row, one line each naming the finding
-    #: and why. Dropped rather than raised on, so the drop is said out loud instead of read
-    #: later as a finding the model never emitted.
+    #: and why.
     unqueueable_findings: list[str] = field(default_factory=list)
     not_graded: NotGradedStamp | None = None
-    #: #1007's family-level half (M5): the family draw's own majority-resolved outcome word
-    #: (`_REPLY_OUTCOME_ENUM` — never the family's `verdict_word`, a different vocabulary), and
-    #: how many family-level rows this pass enqueued and where.
+    #: The family-level call's majority outcome word (`_REPLY_OUTCOME_ENUM`, a different
+    #: vocabulary from `verdict_word`).
     family_outcome: str | None = None
-    #: M5's own fault and its own malformed count, named the way a world's `draws_failed_reason`
-    #: / `malformed_replies` are: `family_outcome: None` alone cannot tell a call that ran and
-    #: reached no majority from one whose draw sink was refused.
+    #: The family call's own fault and malformed count: `family_outcome: None` alone cannot
+    #: tell "ran, no majority" from "its draw sink was refused".
     family_failed_reason: str | None = None
     family_malformed_replies: int = 0
     world_enqueued_rows: int = 0
     world_enqueued_to: str = ""
-    #: The withholding ladder's own record (O4/M3): every graded world's `withheld_reason`,
-    #: named — `withheld_worlds`/`measuring_worlds` partition `graded_worlds`.
+    #: `withheld_worlds`/`measuring_worlds` partition `graded_worlds`.
     withheld_worlds: frozenset[str] = field(default_factory=frozenset)
     measuring_worlds: frozenset[str] = field(default_factory=frozenset)
-    #: Every `subject: world` row this pass BUILT and handed to the appender (mechanical,
-    #: per-world model draws and the family draw alike), for an in-process caller that wants
-    #: them without re-reading the queue file. NOT "enqueued": this is
-    #: `EnqueueReport.world_rows`, and the questioner channel dedups on `finding_id`, so a
-    #: re-grade builds every row again and appends none — `world_enqueued_rows` is what
-    #: actually reached the queue, and the two disagree on any re-grade.
+    #: Every `subject: world` row this pass built — not enqueued: the questioner channel dedups
+    #: on `finding_id`, so on a re-grade `world_enqueued_rows` is 0 while this is full.
     world_findings: list[dict[str, Any]] = field(default_factory=list)
-    #: O4/F7: `{finding, world, reason}` for every defender finding this pass withheld rather
-    #: than enqueued (`enqueue.EnqueueReport.withheld_findings`) — the operator artifact O4
-    #: promises: not merely THAT a world's defender findings were withheld (`withheld_worlds`
-    #: already says that), but WHICH finding and why, since the draw document it came off is
-    #: not part of this design's write set.
+    #: `{finding, world, reason}` for every withheld defender finding — which finding and why,
+    #: since the draw document it came off may not survive.
     withheld_findings: list[dict[str, Any]] = field(default_factory=list)
-    #: THE LEDGER (`enqueue.EnqueueReport.dispositions`): what the pass DID with every finding
-    #: coordinate it touched — `{finding_id, lane, reason}`, one per finding, in walk order.
-    #: The page renders THIS, rather than re-deciding each finding's lane from the rows and
-    #: the verdict word: a decision is written down where it is taken, never reconstructed
-    #: where it is shown. `None` is a record that predates the ledger (or a `not_graded`
-    #: stamp) — distinct from a pass that walked nothing, which writes `[]`.
+    #: The ledger: `{finding_id, lane, reason}` per finding touched, in walk order. The page
+    #: renders this rather than re-deciding lanes. `None` for an older record or a
+    #: `not_graded` stamp; a pass that walked nothing writes `[]`.
     dispositions: Annotated[list[dict[str, Any]],
                             AfterValidator(_ledger_entries_name_a_lane)] | None = None
 
 
-#: The record's fields that are not the file's: the path it was read from, and the three sets
-#: `_grade_from_document` re-derives from the rows' own `ungradable`/`withheld_reason` (#1007)
-#: so no top-level list can disagree with what the rows themselves say.
+#: Fields not written to the file: the path, and the three sets re-derived from the rows so no
+#: top-level list can disagree with them.
 _DERIVED = frozenset({"episode_dir", "graded_worlds", "withheld_worlds", "measuring_worlds"})
 
 
 def _known_keys(record: type, doc: dict[Any, Any]) -> dict[Any, Any]:
-    """`doc` with every STRING key the record's schema does not name dropped (#1025 p8: a
-    record written by a newer pass renders on an older page, the field shown nowhere) — the
-    READER's tolerance, not the record's: `@model` refuses an unknown keyword (#1067), so the
-    live pass's own construction still cannot misspell a field into silence. A non-string
-    key is kept, for the constructor's own `TypeError` (see `_grade_from_document`)."""
+    """`doc` minus string keys the schema does not name, so a newer record still reads. A
+    reader-side tolerance only: `@model` still refuses unknown keywords at construction. A
+    non-string key is kept, for the constructor's own `TypeError`."""
     names = {f.name for f in dataclass_fields(record)}
     return {k: v for k, v in doc.items() if not isinstance(k, str) or k in names}
 
 
-def _judge_yaml_path(episode_dir: Path) -> Path:
-    return EpisodePaths(episode_dir).judge
-
-
 def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
-    # THE SCREENED READ, the ONE `family.screened_yaml_mapping` makes for the manifest too and
-    # for the same stated reason: this file sits in the episode dir, a tree a sibling box's rw
-    # bind reaches, so an entry at its name may be a link the model planted — and `is_file()`/
-    # `read_text` follow the link the write side refuses. This is the IDEMPOTENCY record: a
-    # planted document that parses as a mapping and carries no `not_graded` makes
-    # `_grade_from_document` return an attacker-supplied grade and the pass never runs at all.
-    # NOTHING AT THIS NAME (`None`) is an ordinary ungraded episode, while SOMETHING that is not
-    # the record is the refusal.
+    # Screened read: this is the idempotency record in a box-reachable tree, and a planted one
+    # would stop the pass from ever running. Nothing at the name is an ordinary ungraded episode.
     with bind(Path(episode_dir)) as bound:
         return family_mod.screened_yaml_mapping(bound, LAYOUT.judge, what="the family grade")
 
@@ -231,20 +184,14 @@ def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
     return (str(outcome) if isinstance(outcome, str) else "incomplete", str(reason or ""))
 
 
-#: Where `review.py` actually records the capture's disagreement with itself: on the CONTROL
-#: world's own consistency block, not on the episode block, and under this name. The judge used
-#: to look for `episode.control_drift_keys`, which no writer in this repo has ever emitted — so
-#: the mechanical-first `discard` arm below could not fire on a real episode at all.
+#: Where the review records the capture's disagreement with itself: on each world's
+#: `consistency` block (not the episode block), under this name.
 _DRIFT_KEYS_FIELD = "control_mismatch_keys"
 
 
 def _envelope_key(envelope: Any) -> str | None:
-    """The discriminating call's identity, in the SAME encoding every recorded key uses.
-
-    Through `family.mapping_key`, the one home for that encoding: the ledger row's key and this
-    one MUST agree for the drift check below to match anything, and they were two independent
-    `def`s doing the same three coercions around `ledger.request_key` — which the
-    duplicate-helper gate cannot see, because it keys on the symbol name."""
+    """The discriminating call's identity, in the same encoding every recorded key uses
+    (`family.mapping_key`), so the drift check can match."""
     if not isinstance(envelope, dict):
         return None
     return family_mod.mapping_key(envelope)
@@ -253,12 +200,8 @@ def _envelope_key(envelope: Any) -> str | None:
 def _control_drift_keys(review: dict[str, Any]) -> list[Any]:
     """The keys the review recorded the capture as having disagreed with itself on.
 
-    They live per world, on the CONTROL arm's `consistency` block (`review._review_world`
-    returns `control_mismatch_keys`, and `_record` files each world's result under
-    `worlds[<label>]`). Read across every world's block rather than by naming the control's
-    label: which arm is the control is the manifest's `role`, and this reader already has the
-    review in hand and not the manifest — a non-control world's block carries the control's
-    list copied in, so the union is the same set either way."""
+    Unioned across every world's block rather than picking the control: each block carries the
+    control's list, and this reader has the review but not the manifest's roles."""
     worlds = review.get("worlds")
     if not isinstance(worlds, dict):
         return []
@@ -272,13 +215,10 @@ def _control_drift_keys(review: dict[str, Any]) -> list[Any]:
 
 
 def _control_drift_discard(doc: dict[str, Any], review: dict[str, Any]) -> bool:
-    """Mechanical-first `discard`: the discriminator envelope's key is among the keys the review
-    recorded as control drift — the capture disagreed with itself on the discriminating call.
+    """Mechanical-first `discard`: the discriminator envelope's key is among the review's
+    control-drift keys — the capture disagreed with itself on the discriminating call.
 
-    Takes the two documents rather than re-reading them: `family.yaml` was being parsed by
-    `grade_family`, by this check, by the orchestration for `source_run_id` and once more per
-    world inside `render`, and `review.yaml` twice — five and two parses of two files that one
-    pass has already read, with no guarantee they are identical across them."""
+    Takes the already-parsed documents so the whole pass reads one copy of each."""
     key = _envelope_key(family_mod.discriminator_of(doc).get("envelope"))
     if key is None:
         return False
@@ -286,51 +226,39 @@ def _control_drift_discard(doc: dict[str, Any], review: dict[str, Any]) -> bool:
 
 
 def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threaded from the pass
-    episode_dir: Path, label: str, *, bound: Bound, payload_cap: int, git_show: Any,
+    episode: Episode, label: str, *, bound: Bound, payload_cap: int, git_show: Any,
     facts: family_mod.WorldFacts | None, lessons_commit: str | None,
     union: tuple[list[dict[str, Any]], dict[str, Any]], manifest: dict[str, Any],
     review: dict[str, Any], samples: dict[str, Any],
 ) -> str:
-    """One world's whole framed prompt, and its draw directory made.
+    """One world's whole framed prompt, with its draw directory made.
 
-    ITS OWN FRAME, so the caller can contain a fault here to the world it is about. Everything
-    in it touches the box-reachable episode tree — the render reads the archived document, the
-    report and each lead's summary; `guarded_mkdir` refuses a stale entry standing at
-    `worlds/<X>/judge` (P4: a retry clobbers and cleans nothing up) — and it all used to sit
-    inside the per-draw loop's frame but OUTSIDE both of that loop's containment arms, so a
-    fault on world N ended the whole pass with worlds 1..N-1's model calls already paid for and
-    no `judge.yaml` written. The per-draw SINK below stays uncontained on purpose; only the
-    setup is contained.
-
-    NO `runs_base`. `render` reads it only on the `union is None` fallback, and the caller always
-    hands the pass's own union over (J9) — so the argument was dead configuration that read as
-    live: set here it changed nothing, and "fixing" `render` to prefer it would reintroduce the
-    per-world walk of the operator's whole runs base J9 exists to remove."""
+    Its own frame so the caller can contain a fault here (all of it touches the box-reachable
+    episode tree) to this world. No `runs_base`: the caller always passes the pass's union, so
+    `render` never walks the runs base per world."""
     judge_input = render_mod.render(
-        episode_dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
+        episode.dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
         lessons_commit=lessons_commit, union=union, manifest=manifest,
         review=review, samples=samples, bound=bound)
-    guarded_mkdir(EpisodePaths(episode_dir).world(label).draws, base=episode_dir)
+    episode.world(label).draws.ensure()
     return run_mod._build_prompt(judge_input)
 
 
 def _run_world_draws(
-    episode_dir: Path, label: str, *, judge: Any, draws: int,
+    episode: Episode, label: str, *, judge: Any, draws: int,
     model: str, effort: str, prompt: str, scope: str = "world",
 ) -> tuple[int, dict[str, int], dict[int, dict[str, Any]], int]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
-    draw. Returns `(completed_draws, bucket_spread, this pass's draw documents KEYED BY DRAW
-    INDEX, malformed replies)`. A failed call writes a draw record naming its own failure; a MALFORMED REPLY
-    writes nothing at all and is counted — and both let the loop continue to the next draw.
+    draw. Returns `(completed_draws, bucket_spread, draw documents by index, malformed replies)`.
 
-    The documents are RETURNED rather than left to be read back: they are what this pass
-    produced, and a reader that re-globs the draw directory cannot tell them from a stale file
-    a wider earlier attempt left behind (P4: a retry clobbers, it does not clean up)."""
+    A failed call writes a draw record naming its failure; a malformed reply writes nothing and
+    is counted; either way the loop continues. Documents are returned, not read back, because
+    a retry does not clean up stale files from a wider earlier attempt."""
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
-    world = EpisodePaths(episode_dir).world(label)
-    world_dir = world.dir
+    world = episode.world(label)
+    world_dir = world.dir.path
 
     completed = 0
     spread: Counter[str] = Counter()
@@ -346,39 +274,32 @@ def _run_world_draws(
         try:
             reply_text = judge(prompt, role=AgentRole.JUDGE, agent_id=agent_id,
                                wiring=wiring)
-        # EVERY class the seam can raise, not `RunUnprocessable` alone — which is what this
-        # loop's own docstring already claims ("a failed call writes a draw record naming its
-        # own failure ... and both let the loop continue to the next draw"). `run_stage`
-        # deliberately re-raises `StageAbort` and `FatalConfigError` rather than wrapping them,
-        # and an injected seam may raise anything at all, so a misconfigured model or one bad
-        # transport class unwound the WHOLE pass — every already-completed world's draws
-        # thrown away and no `judge.yaml` written — which is precisely the blast radius the
-        # malformed-reply arm below was added to eliminate. The class is named in the record.
-        except Exception as failed:  # noqa: BLE001 — one draw's blast radius, see above
+        # Every class: `run_stage` re-raises `StageAbort`/`FatalConfigError` unwrapped and an
+        # injected seam may raise anything; one bad call must not discard the other worlds.
+        except Exception as failed:  # noqa: BLE001 — one draw's blast radius
             doc = {"failure_reason": f"{type(failed).__name__}: {failed}"}
-            _write_wire_log(episode_dir, agent_id=agent_id, prompt=prompt,
+            _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
                             reply=None, failure=f"{type(failed).__name__}: {failed}")
         else:
-            _write_wire_log(episode_dir, agent_id=agent_id, prompt=prompt,
+            _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
                             reply=reply_text, failure=None)
             try:
                 reply = run_mod.validate_reply(reply_text, scope=scope)
             except JudgeRefused:
-                # ONE DRAW, not the episode. A malformed reply is a model failure of the same
-                # kind as the transport failure above, and containing one while propagating the
-                # other threw away every already-completed world's draws and left no
-                # `judge.yaml` at all — the blast radius the enqueue path refuses for a single
-                # unusable finding. NOTHING IS WRITTEN TO THE DRAW DIRECTORY for it, because
-                # nothing may be read off a reply that failed validation; the raw bytes are
-                # already on the wire log above, which is where an operator looks for them.
+                # Costs one draw, not the episode. Nothing is written (the raw reply is on the
+                # wire log), and an earlier pass's file at this index is removed so a disk
+                # re-read cannot queue its findings as this pass's.
                 malformed += 1
-                # AND THE INDEX IS CLEARED. P4 says a retry clobbers each draw file in place
-                # and cleans nothing up, so writing nothing here would leave an EARLIER pass's
-                # `<n>.yaml` standing at an index this pass produced no answer for — and the
-                # enqueue, which reads the draw directory back, would queue that older pass's
-                # findings as this one's. Removing it is what makes "this pass wrote nothing at
-                # index n" true on disk as well as in memory.
-                world.draw(n).unlink(missing_ok=True)
+                try:
+                    world.draw(n).delete()
+                except NotPlainEntry as stuck:
+                    # Only the core's refusal of something not plain at the draw's name is
+                    # contained: it is left for the reap scan, and a later disk read counts it
+                    # unreadable, so it costs this draw, not the pass. Any other failure (a
+                    # denied or read-only tree, a linked folder on the way) would leave a stale
+                    # plain draw to be queued as this pass's, so it stops the pass.
+                    _logger.warning(f"world {label!r}: the earlier draw {world.draw(n).path.name} "
+                                    f"was not removed ({stuck})")
                 continue
             doc = run_mod._draw_document(reply, world_dir=world_dir, scope=scope)
             completed += 1
@@ -387,66 +308,42 @@ def _run_world_draws(
         import yaml
 
         documents[n] = doc
-        # NOT CONTAINED, deliberately: `test_921_both_episode_write_sinks_go_through_write_guarded`
-        # pins that a link planted at this sink REFUSES the pass rather than being written
-        # through or noted and passed over. The draw file is the artifact the enqueue reads back,
-        # so an aliased one is not an observability fault.
-        write_guarded(world.draw(n), yaml.safe_dump(doc, sort_keys=False),
-                      mode="replace")
+        # Not contained: a link planted at this sink refuses the pass. The draw file is what
+        # the enqueue reads back, so an aliased one is not an observability fault.
+        world.draw(n).write(yaml.safe_dump(doc, sort_keys=False))
     return completed, dict(spread), documents, malformed
 
 
 def _write_wire_log(
-    episode_dir: Path, *, agent_id: str, prompt: str, reply: str | None, failure: str | None,
+    episode: Episode, *, agent_id: str, prompt: str, reply: str | None, failure: str | None,
 ) -> None:
-    """The judge's own wire-log record — the whole framed prompt and the whole reply verbatim,
-    one file per call, under the same `wire_logs/` component the runtime's own
-    `observe.stage_trace_path` writes to (so the existing `files.names_wire_log_dir` policy
-    denial — a path-COMPONENT test — covers it with no policy change). Written by this pass
-    directly rather than left to `run_stage`, because the injected `judge=` seam stands in for
-    the whole call and carries no logger of its own.
+    """The judge's wire-log record — the whole framed prompt and reply verbatim, one file per
+    call, under `wire_logs/` so the existing wire-log policy denial covers it. Written here
+    because the injected `judge=` seam carries no logger.
 
-    ITS OWN FILE NAME, and that is the whole point of this function taking `agent_id` rather
-    than the wiring's `trace_name`. `run_stage` opens a `RequestLogger` on
-    `stage_trace_path(episode_dir, wiring.trace_name)` and streams the real request/response
-    records into it; writing this one-line summary to that same path with `mode="replace"`
-    DESTROYED it after every draw — every tool call, retry and token count the production seam
-    had just recorded, gone, and invisible to a suite in which every judge call is injected and
-    so never opens the real logger."""
-    from defender.runtime.observe import stage_trace_path
-
-    # THE SANITISATION AND THE SUFFIX ARE BOTH THE OWNER'S (#1077 D7). `agent_id` is
-    # `judge:<label>:<n>`, and a trace file called `judge:b:0_framed_trace.jsonl` is a name
-    # this design deliberately does not produce — the fold lived at three call sites, and the
-    # framed suffix had to agree with the UNFRAMED one the seam writes or the episode page
-    # pairs them on stems that do not match. One accessor per half, one owner for the pair.
-    path = stage_trace_path(Path(episode_dir), WIRE_LOG_NAMES.agent_framed_trace(agent_id))
+    Its own file name (from `agent_id`), not the wiring's `trace_name`: `run_stage` streams the
+    real request/response records to that path, and a replace-mode write there would destroy
+    them."""
+    # Name sanitisation and the framed suffix come from `WIRE_LOG_NAMES`, so the episode page
+    # can pair this file with the unframed trace the seam writes.
+    name = WIRE_LOG_NAMES.agent_framed_trace(agent_id)
     row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
-           "wire_log_written_at": path.name}
-    # BEST-EFFORT, like every other observability writer in this repo (`_deps._record_lesson_load`
-    # takes the same posture for the same reason). This sink is under the episode dir — a tree a
-    # sibling box has an rw bind on — so a link planted at this name makes `write_guarded` raise
-    # `OSError`, and a non-serialisable `reply` off the injected seam makes `json.dumps` raise
-    # `TypeError`. Called from inside BOTH per-draw containment arms, neither of which names
-    # those classes, either one refused the ENTIRE pass: every already-completed world's draws
-    # discarded and no `judge.yaml` at all — an observability fault costing the grade. The draw
-    # file two frames down is the artifact the enqueue reads back and stays uncontained.
+           "wire_log_written_at": name}
+    # Best-effort: a planted link (`OSError`) or an unserialisable reply (`TypeError`) here
+    # must not cost the grade.
     try:
-        write_guarded(path, json.dumps(row) + "\n", mode="replace")
-    except Exception as unwritable:  # noqa: BLE001 — see above: observability, never the grade
+        episode.wire_log(name).write(json.dumps(row) + "\n")
+    except Exception as unwritable:  # noqa: BLE001 — observability, never the grade
         _logger.warning(f"the wire log for {agent_id} could not be written ({unwritable!r}); the "
                         "draw itself is unaffected")
 
 
 def _majority_outcome(documents: dict[int, dict[str, Any]], n_completed: int,
                      word: str) -> bool:
-    """Did more than half of THIS pass's completed draws vote `word`?
+    """Did more than half of this pass's completed draws vote `word`?
 
-    Over the documents this pass produced, never over the draw directory: counting votes off
-    disk while dividing by this pass's completed count mixes two populations, so a re-grade at
-    a NARROWER draw count could be carried by the stale files a wider attempt left behind (P4
-    says nothing cleans them up) — two votes out of two stale files beating a two-draw pass
-    that voted the other way."""
+    Counted over this pass's documents, never the draw directory, where stale files from a
+    wider earlier attempt could outvote it."""
     if n_completed == 0:
         return False
     votes = sum(1 for doc in documents.values() if doc.get("episode_outcome") == word)
@@ -454,40 +351,23 @@ def _majority_outcome(documents: dict[int, dict[str, Any]], n_completed: int,
 
 
 def _default_judge_seam(episode_dir: Path) -> Any:
-    """The production `(prompt, *, role, agent_id, wiring) -> str` for every judge call, built
-    the way `seams.model_seam` builds the questioner's — `run_stage` under a deny-all key —
-    but under the judge's OWN one since #1008: `JudgeDeps`, and therefore
-    `AgentRole.JUDGE`'s definition (D2). It differs from the questioner's seam in that the
-    judge's `wiring` (model/effort/trace name) arrives from the caller rather than being built
-    here.
+    """The production `(prompt, *, role, agent_id, wiring) -> str` for every judge call:
+    `run_stage` under the judge's own deny-all role. `wiring` comes from the caller.
 
-    THE DEPS CLASS IS WHAT DECIDES THE ROLE, not the `role` kwarg above it. `build_stage_agent`
-    reads `type(deps).role` and looks the definition up in `AGENTS`
-    (`learning/_pydantic_stage.py`), so `deps=JudgeDeps()` is the line that makes a draw run as
-    the judge; the kwarg is the caller's declaration, and every production seam in the tree
-    ignores it. Nothing is passed to `run_stage` besides `deps` and the wiring — in particular
-    no `tools=` and no `verbs=`, either of which would widen the registered definition at call
-    time and hand a grant to a role whose whole posture is holding none.
+    `deps=JudgeDeps()` decides the role (`build_stage_agent` reads `type(deps).role`); the
+    `role` kwarg is ignored. No `tools=`/`verbs=` are passed, since either would widen a role
+    that holds no grants.
 
-    THE IMPORTS ARE INSIDE `invoke`, not out here. `_pydantic_stage` imports `pydantic_ai` at
-    module scope, and this seam is built for every `grade_episode` call that was handed no
-    `judge=` — including the two that never make a model call at all (an episode with an
-    existing `judge.yaml`, and one whose review says anything but `accepted`). Built eagerly it
-    charged those passes the whole provider import, and could DIE on it: the build sits above
-    `grade_episode`'s own `try`, so an `ImportError` or a provider `FatalConfigError` left the
-    package as its own native class, past the conversion this module's docstring says makes
-    every failure arrive as this design's refusal."""
+    Imports are inside `invoke` so passes that never call the model (already graded, or not
+    `accepted`) skip the provider import, which sits outside `grade_episode`'s error
+    conversion."""
     def invoke(prompt: str, *, role: Any = None, agent_id: str = "judge", wiring: Any = None,
               **_kw: Any) -> str:
         from defender.learning._pydantic_stage import run_stage
         from defender.learning.core.config import StageContext, subagent_timeout
         from defender.learning.judge.run import JudgeDeps
 
-        # `wiring` IS REQUIRED, and the default is what makes the signature honest about it.
-        # `run_stage`'s first statement is `label = wiring.label`, so a caller following the
-        # published shape and omitting it got `AttributeError: 'NoneType' object has no
-        # attribute 'label'` from deep inside the stage driver — swallowed by the draw loop's
-        # per-draw handler and recorded as a `failure_reason` naming no configuration problem.
+        # Required: without it `run_stage` fails with an opaque `AttributeError`.
         if wiring is None:
             raise JudgeRefused(
                 f"the judge seam was called for {agent_id!r} with no StageWiring — the model, "
@@ -519,52 +399,48 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
                               draws=draws, git_show=git_show, queue_dir=queue_dir)
     except JudgeRefused:
         raise
-    # EVERY input-driven failure arrives as this design's own refusal, not as whichever native
-    # class the input happened to produce. `OSError` alone left at least four live escapes —
-    # a `UnicodeDecodeError` (a `ValueError`) out of an archived document, a `yaml.YAMLError`
-    # (which is not a `ValueError`) out of a draw file, a `ValueError` out of the guarded mkdir
-    # on a manifest-authored path, a `TimeoutError` waiting on the queue lock — and each of
-    # them reached the launcher as a bare traceback past a handler that names `JudgeRefused`.
+    # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches:
+    # e.g. a decode error in an archived document, a YAML error in a draw file, a `ValueError`
+    # from the guarded mkdir, a timeout on the queue lock.
     except (OSError, ValueError, TimeoutError, yaml.YAMLError) as bad:
         raise JudgeRefused(f"episode {episode_dir}: {bad!r}") from bad
 
 
-def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestration, deliberately not split (its own steps are the demand)
+def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestration, kept whole
     episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
     git_show: Any, queue_dir: Path | None,
 ) -> EpisodeGrade:
-    # THE EXISTING RECORD IS CONSULTED FIRST, and a NOT-GRADED stamp does not count as one. An
-    # episode that was skipped because its review said `incomplete` can be repaired and graded
-    # afterwards; reading the outcome first meant the refusal stamp was found on the second
-    # attempt and returned as though it were the grade, so a repaired episode answered with the
-    # old refusal forever.
-    # THROUGH `read_grade`, the one reader (#1025 O8) — the page reads the record the same way.
+    # An existing grade short-circuits; a not-graded stamp does not, so a repaired episode can
+    # still be graded.
     existing = read_grade(episode_dir)
     if existing is not None and existing.not_graded is None:
         return existing
 
-    # BOUND ONCE FOR THE PASS (#1049): every read below — the review, the manifest, the samples,
-    # the mechanical pass, every world's render — walks from this one handle.
-    with bind(Path(episode_dir)) as bound:
+    # One handle for the pass: every read through its view, every write through it. A missing
+    # episode is refused, never recreated by the not-graded stamp.
+    try:
+        episode = Episode.open(episode_dir)
+    except FileNotFoundError as missing:
+        raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
+    with episode:
         return _grade_bound_episode(
-            bound, episode_dir, judge=judge, runs_base=runs_base, draws=draws,
+            episode.view(), episode, judge=judge, runs_base=runs_base, draws=draws,
             git_show=git_show, queue_dir=queue_dir)
 
 
 def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_grade_episode`
-    bound: Bound, episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
+    bound: Bound, episode: Episode, *, judge: Any, runs_base: Path | None, draws: int | None,
     git_show: Any, queue_dir: Path | None,
 ) -> EpisodeGrade:
+    episode_dir = episode.dir
     review = family_mod.read_review_record(bound) or {}
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
         reason = reason or f"the episode's {LAYOUT.review} outcome is {outcome!r}, not 'accepted'"
-        # `episode_outcome` says NOT-GRADED, never the `gradable` default: the field is what a
-        # reader keys on to tell what happened to an episode, and an episode nothing looked at
-        # reporting the same word as one the judge cleared is the one answer it must not give.
+        # Never the `gradable` default: an unexamined episode must not read like a cleared one.
         record = EpisodeGrade(episode_dir=episode_dir, episode_outcome=NOT_GRADED,
                               not_graded=NotGradedStamp(outcome=outcome, reason=reason))
-        _write_judge_yaml(episode_dir, record)
+        _write_judge_yaml(episode, record)
         return record
 
     configured_draws = draws if draws is not None else _judge_draws()
@@ -572,38 +448,18 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     knobs = {"draws": configured_draws, "model": model, "effort": effort, "payload_cap": cap}
 
     manifest = family_mod.read_manifest(bound)
-    # THE PARSE THIS PASS ALREADY MADE. `grade_family` read and parsed `family.yaml` a second
-    # time from the same directory — a tree a box can reach — so nothing held the two documents
-    # in agreement, and one pass paid for two reads of the file that says which worlds exist.
-    # `review=review` likewise hands over the record this frame already read, so `grade_family`
-    # does not read `review.yaml` a second time (#1007).
-    # ONCE PER PASS, at the same boundary `review` is read at, and threaded into BOTH readers —
-    # `grade_family` for the mechanical rows and every `render` below for the prompt section
-    # that claims to explain them. Read twice, the row and the prompt could come off two
-    # different parses of a file the box can reach.
+    # Manifest, review and samples are each parsed once and threaded into both `grade_family`
+    # and every `render`, so the mechanical rows and the prompt come off the same documents.
     samples = family_mod.read_samples_record(bound)
     grade = family_mod.grade_family(episode_dir, manifest=manifest, review=review,
                                     samples=samples, bound=bound, runs_base=runs_base)
     gradable = [row["world"] for row in grade.worlds if family_mod.is_gradable_row(row)]
 
-    # BOTH PER-PASS FACTS, RESOLVED ONCE AND THREADED (J8's own sentence, and J9's union with
-    # it). Every world of one episode investigates the same alert, so the sibling union's answer
-    # is identical for all of them while the walk costs one `alert.json` read and one report
-    # parse per run under the operator's whole runs base; and `lessons_commit` was read per
-    # world inside `render` AND read a second time out here purely to fill the record, so the
-    # value the record carried could disagree with what worlds 2..N actually rendered against.
-    # AND ONLY WHEN THERE IS A WORLD TO RENDER FOR. Both facts exist to be threaded into
-    # `render`, and `render` runs once per GRADABLE world — so an episode whose worlds are all
-    # ungradable (no `disposition_declared`, an absent archive, a malformed document) paid for a
-    # walk of the operator's entire runs base, one `alert.json` read and one report parse per run
-    # dir on it, to build a union no render would consume. The record it would have carried is
-    # the same either way: `lessons_commit` is `None` and the union is empty.
+    # Per-pass facts, resolved once and threaded into every render: every world shares one
+    # alert, and the record's `lessons_commit` must be the one the worlds rendered against. The
+    # runs-base walk is skipped when no world is gradable, since no render would consume it.
     lessons_commit = _pass_lessons_commit(bound, gradable)
-    # ONE `git show` PER (commit, path) FOR THE PASS. `lessons_commit` is a per-pass constant
-    # and the corpus is small, so N worlds loading the same lesson spawned N subprocesses for
-    # the same bytes. The memo wraps the injected seam rather than living inside `render`, so
-    # the render keeps taking a plain `(cwd, rev, path) -> str | None` and a caller that wants
-    # no memo simply does not add one.
+    # One `git show` per (commit, path) for the pass, memoized around the injected seam.
     git_show = _memoized_show(git_show if git_show is not None else render_mod._git_show_default)
     union = render_mod.sibling_union(
         Path(runs_base) if runs_base is not None and gradable else None,
@@ -616,18 +472,11 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     per_world_malformed: dict[str, int] = {}
     per_world_failed: dict[str, str] = {}
     for label in gradable:
-        # CONTAINED TO THE WORLD IT IS ABOUT, the same rule `family._grade_world` applies to the
-        # mechanical half (J5 tier 2) and `_run_world_draws` applies to one draw. The setup half
-        # of that call — `render`, `guarded_mkdir(worlds/<X>/judge)`, `_build_prompt` — sits
-        # OUTSIDE both of those containments and touches the same box-reachable episode tree: a
-        # stale entry at the draw directory's name (P4: a retry clobbers and cleans nothing up),
-        # a permission fault on a summary read, an unreadable archived document. Uncontained,
-        # any of them ended the whole pass on world N with worlds 1..N-1's model calls already
-        # paid for, their draw files on disk, and NO `judge.yaml` — the exact blast radius the
-        # per-draw and per-append arms exist to eliminate.
+        # Setup faults (box-reachable tree) are contained to this world, so earlier worlds'
+        # paid-for draws still reach `judge.yaml`.
         try:
             prompt = _prepare_world_prompt(
-                episode_dir, label, bound=bound, payload_cap=cap, git_show=git_show,
+                episode, label, bound=bound, payload_cap=cap, git_show=git_show,
                 facts=grade.world_facts.get(label), lessons_commit=lessons_commit, union=union,
                 manifest=manifest, review=review, samples=samples)
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
@@ -637,13 +486,10 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
             per_world_draws[label] = {}
             per_world_malformed[label] = 0
             continue
-        # THE DRAWS THEMSELVES ARE NOT CONTAINED HERE. The per-draw loop already contains a
-        # transport failure and a malformed reply, and its WRITE SINK is deliberately outside
-        # both: `test_921_both_episode_write_sinks_go_through_write_guarded` pins that a link
-        # planted at `worlds/<X>/judge/<n>.yaml` refuses the pass rather than being written
-        # through or noted and passed over.
+        # Draws are not contained here: the loop contains call and reply failures itself, and
+        # a link planted at its write sink must refuse the pass.
         completed, spread, documents, malformed = _run_world_draws(
-            episode_dir, label, judge=judge, draws=configured_draws,
+            episode, label, judge=judge, draws=configured_draws,
             model=model, effort=effort, prompt=prompt)
         per_world_completed[label] = completed
         per_world_spread[label] = spread
@@ -658,25 +504,13 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
         # is a different state from a draw that never ran; the record says which.
         row["malformed_replies"] = per_world_malformed.get(label, 0)
         if label in per_world_failed:
-            # NAMED ON THE ROW, never silent. A world whose draws could not even be set up ran
-            # nothing, so its `completed_draws` is 0 for the same reason an ungradable world's
-            # is — and without this the two are indistinguishable on the record.
+            # Distinguishes "setup failed" from "ungradable" (both have 0 completed draws).
             row["draws_failed_reason"] = per_world_failed[label]
-        # #1007 M3/M4: this world's OWN model-drawn `subject: world` findings, joined onto the
-        # mechanical ones family.py already put on the row — withholding is about the DEFENDER
-        # lane alone, so a withheld world's own world-subject findings still stand
-        # (`test_a_withheld_world_is_still_drawn_and_still_yields_world_findings`).
+        # This world's model-drawn world findings join the mechanical ones; withholding applies
+        # to the defender lane only.
         if "world_findings" in row:
-            # A1(b) — a world whose sample went unavailable (#1007 M4/O5) admits no finding
-            # that cites `samples.yaml#<that pattern>` as its evidence, whatever its bucket;
-            # every other world-subject finding still stands. `sample_unavailable_patterns`
-            # (not the blanket `sample_unavailable` bool) is what `cites_sample` checks the
-            # citation's own fragment against, so a two-pattern world's finding about the
-            # pattern it WAS shown is never refused for a gap in a sibling staged pattern.
-            # `.get(...)` WITHOUT `or []` — see `enqueue_report`'s own copy of this gate: an
-            # ABSENT list is `None`, which `cites_sample` documents as the blanket refusal, and
-            # an EMPTY one is "measured, nothing unavailable". Collapsing them turns A1(b) off
-            # for exactly the rows that never recorded the fact.
+            # Drop findings citing a sample for a pattern this world was not shown, per pattern.
+            # No `or []`: `None` (never recorded) is `cites_sample`'s blanket refusal.
             unavailable_patterns = row.get("sample_unavailable_patterns")
             for draw_doc in per_world_draws.get(label, {}).values():
                 for finding in draw_doc.get("findings") or []:
@@ -686,32 +520,22 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
                         continue
                     row["world_findings"].append(finding)
 
-    # M5: the family-level call — UNCONDITIONAL (even an episode with nothing to separate is
-    # exactly the one this call exists to say so about) and an ADDITION to the pass: its own
-    # fault (a bad prompt build, every draw failing) costs only its own contribution and never
-    # unwinds what the per-world draws already produced
-    # (`test_a_faulted_family_draw_isolates_and_leaves_verdict_word_intact`).
+    # The family-level call always runs (an episode with nothing to separate is what it exists
+    # to report) and is an addition: its own fault costs only its own contribution.
     family_documents: dict[int, dict[str, Any]] = {}
     family_completed = 0
     family_malformed = 0
-    # NAMED ON THE RECORD, never silent — the same rule `row["draws_failed_reason"]` applies to
-    # a world whose setup failed. Containment is not the same thing as silence: this arm also
-    # catches the DELIBERATELY UNCONTAINED refusals of `_run_world_draws`' own write sink (a
-    # link planted at `worlds/family/judge/<n>.yaml`) and of `guarded_mkdir` (an aliased
-    # `worlds/family`), and with nothing written and nothing logged `family_outcome: null` read
-    # identically for "the call ran and no word won a majority", "every reply was malformed"
-    # and "a planted alias refused the write". `family_malformed_replies` likewise: the
-    # per-world lane records its count on the row and this lane threw its away.
+    # Recorded, so a refused write sink is distinguishable from "no majority".
     family_failed_reason: str | None = None
     try:
         family_prompt = run_mod._build_family_prompt(manifest=manifest, grade=grade,
                                                       review=review)
-        guarded_mkdir(EpisodePaths(episode_dir).world("family").draws, base=episode_dir)
+        episode.world("family").draws.ensure()
         family_completed, _family_spread, family_documents, family_malformed = (
-            _run_world_draws(episode_dir, "family", judge=judge, draws=configured_draws,
+            _run_world_draws(episode, "family", judge=judge, draws=configured_draws,
                              model=model, effort=effort, prompt=family_prompt,
                              scope="family"))
-    except Exception as family_failed:  # noqa: BLE001 — the family call is an addition to the pass (M5); its own fault costs only itself, never the already-completed per-world draws
+    except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-completed per-world draws
         family_documents = {}
         family_completed = 0
         family_malformed = 0
@@ -727,11 +551,8 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     discard_evidence = {
         "review_pointer":
             f"{episode_dir.name}/{LAYOUT.review}#worlds.*.consistency.{_DRIFT_KEYS_FIELD}"}
-    # DISCARD IS MECHANICAL-FIRST, and that has to mean first across the WHOLE family, not
-    # first within whichever world the loop reached first. Checking both words per world and
-    # breaking on either made the episode's outcome depend on manifest order: one world voting
-    # discard and another voting corpus-contradiction answered differently depending on which
-    # was listed first, in a pass whose own docstring calls itself order-independent (O3).
+    # Discard wins across the whole family before corpus-contradiction is considered, so the
+    # outcome does not depend on manifest order.
     if _control_drift_discard(manifest, review) or any(
             _majority_outcome(per_world_draws[label], per_world_completed[label], "discard")
             for label in per_world_completed):
@@ -748,14 +569,9 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     questioner_file, _questioner_lock = enqueue_mod._questioner_queue_paths(queue_dir)
     enqueued_to = str(pending_file)
     world_enqueued_to = str(questioner_file)
-    # UNCONDITIONAL (#1007 O7/N2): a `discard`/`corpus-contradiction` episode blocks the
-    # DEFENDER lane alone — `enqueue_report`'s own `defender_blocked` gate reads `verdict_word`
-    # for that — but the WORLD lane (mechanical findings, per-world and family model-drawn
-    # world findings) is never gated on the defender's own outcome
-    # (`test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings`).
-    # The two fields `enqueue_report` reads, as the mapping it also takes (its bare re-enqueue
-    # callers hand it `judge.yaml`'s own dict) — not a second `FamilyGrade`, which would
-    # re-validate and copy every world row a third time just to swap in the episode's word.
+    # Always called: a blocked outcome closes only the defender lane (`enqueue_report` reads
+    # `verdict_word`), never the world lane. Passed as a mapping to avoid re-validating and
+    # copying every world row in a new `FamilyGrade`.
     report = enqueue_mod.enqueue_report(
         episode_dir, {"verdict_word": verdict_word, "worlds": grade.worlds},
         queue_dir=queue_dir, drawn=per_world_draws, family_drawn=family_documents)
@@ -781,18 +597,15 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
         measuring_worlds=grade.measuring_worlds, world_findings=report.world_rows,
         withheld_findings=withheld_findings, dispositions=report.dispositions,
     )
-    _write_judge_yaml(episode_dir, record)
+    _write_judge_yaml(episode, record)
     return record
 
 
 
 
 def _memoized_show(show: Any) -> Any:
-    """`show`, answering each `(cwd, rev, path)` once per pass and replaying the answer after.
-
-    `cwd` IS IN THE KEY even though the one in-tree caller always passes `REPO_ROOT`: this
-    wrapper advertises the wrapped seam's whole three-argument contract, so a memo keyed on two
-    of the three replays the first checkout's answer — a `None` included — for a second one."""
+    """`show`, answering each `(cwd, rev, path)` once per pass. `cwd` is in the key so the
+    wrapper honours the seam's full contract."""
     seen: dict[tuple[str, str, str], Any] = {}
 
     def invoke(cwd: Path, rev: str, path: str) -> Any:
@@ -805,11 +618,8 @@ def _memoized_show(show: Any) -> Any:
 
 
 def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
-    """The commit every lesson body in this pass is read at — J8's "resolved once per pass".
-
-    The FIRST graded world's provenance stamp, which is what the record has always reported;
-    resolving it here rather than letting each world fall back to its own inside `render` is
-    what makes the record's value and the rendered value the same value."""
+    """The commit every lesson body in this pass is read at: the first graded world's
+    provenance stamp, resolved once so the record and every render agree."""
     for label in labels:
         commit = render_mod._read_provenance(
             bound.under(LAYOUT.world(label).dir)).get("commit")
@@ -819,62 +629,32 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
 
 
 def _pass_alert_id(bound: Bound, labels: list[str]) -> Any:
-    """The alert this episode's worlds all investigate — the union's key.
-
-    Read off the first graded world that carries one: every world of a family branches from one
-    source run and therefore one alert, which is exactly why the union is a per-pass fact.
-    Through `render.episode_alert`, the one home for WHICH world's `alert.json` answers — the
-    enqueue derives every row's `alert_rule_key` from that same call, and two spellings of "the
-    first world that carries an alert" picked different worlds for the two."""
+    """The alert this episode's worlds all investigate (they share one source run) — the
+    union's key. Through `render.episode_alert`, the same rule the enqueue uses."""
     return render_mod.episode_alert(bound, labels).get("alert_id")
 
 
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:
-    """The episode's recorded grade, read off `judge.yaml` — or `None` when there is none.
+    """The episode's recorded grade off `judge.yaml`, or `None` when there is none.
 
-    THE ONE READER (#1025 O8): the same screened read and the same strict conversion
-    `grade_episode` itself uses when it finds an existing record, exposed so the episode page
-    reads the record through this package rather than re-parsing the YAML. Tolerant only of
-    ABSENCE — a field the file does not carry takes the schema's default (a pre-#1007 record
-    reads with `family_outcome: None`), and a key the schema does not name is ignored. A record
-    that is not one — a planted link at the name, a document that is not a mapping, a record
-    that fails the schema (`EpisodeGrade`, strictly: a present field of the wrong type is
-    refused, never defaulted) — is `JudgeRefused`, exactly as it is for the pass. A
-    `not_graded` stamp reads back as a grade carrying that stamp; deciding what to do about it
-    is the caller's.
+    The one reader, shared with the episode page. Absent fields take defaults and unknown keys
+    are ignored; a planted link, a non-mapping or a schema failure is `JudgeRefused`. A
+    `not_graded` stamp reads back as a grade carrying it.
     """
-    # COERCED HERE, as `grade_episode` coerces its own argument: the record's `episode_dir` is
-    # typed `Path`, and a `str` caller (a page reading the path off YAML) otherwise got a record
-    # unequal to the one `grade_episode` returns for the same episode.
     episode_dir = Path(episode_dir)
     doc = _existing_grade(episode_dir)
     return None if doc is None else _grade_from_document(episode_dir, doc)
 
 
 def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade:
-    # VALIDATED AGAINST THE SCHEMA, strictly, and a document that fails is REFUSED — never
-    # defaulted field by field and never let out as a bare `TypeError`/`KeyError`. `judge.yaml`
-    # lives in the episode dir, a tree a box can reach, and the writer stages and `os.replace`s
-    # so it never leaves a torn file: a record of the wrong shape (`verdict_word: null`,
-    # `world_findings: 5`, a `not_graded` stamp with no reason, a row naming no world) is one
-    # the pass never wrote, and the same answer the manifest gets — `JudgeRefused`, the one
-    # class `grade_episode`'s handler converts at. Refused, not re-graded: a planted record
-    # must not buy three model calls per launch, and the fix is a human deleting the file.
-    # `TypeError` BESIDE `ValidationError`: the keys are the file's, and a YAML mapping may key
-    # on `1:` / `true:` / `null:` — splatted as keywords those raise `TypeError: keywords must
-    # be strings` out of the constructor, before pydantic sees a single field, and `TypeError`
-    # is not in `grade_episode`'s conversion set — the bare traceback this comment promises
-    # never leaves.
+    # Strictly validated; a wrong shape is refused, not re-graded (a planted record must not
+    # buy model calls — a human deletes the file). The writer replaces atomically, so a bad
+    # shape is never a torn write. `TypeError` too: non-string YAML keys fail as keywords
+    # before pydantic runs.
     try:
         fields = _known_keys(EpisodeGrade, {k: v for k, v in doc.items() if k not in _DERIVED})
-        # The stamp is a NESTED strict dataclass, and this is Python-mode validation (the
-        # keys are a parsed YAML mapping, not JSON text): a strict nested dataclass admits
-        # only an instance of itself — a well-shaped `{outcome, reason}` mapping is refused
-        # as `dataclass_exact_type` before its keys are looked at. Built here, under the
-        # same refusal; a stamp of the wrong shape (no reason, an int outcome) still lands
-        # as `JudgeRefused` through the `except` below — and a key the stamp's schema does not
-        # name is dropped exactly as a top-level one is, so a stamp a newer pass wrote still
-        # reads.
+        # Built explicitly: in Python-mode strict validation a nested dataclass admits only an
+        # instance of itself, so a well-shaped mapping would be refused.
         if isinstance(fields.get("not_graded"), dict):
             fields["not_graded"] = NotGradedStamp(**_known_keys(NotGradedStamp, fields["not_graded"]))
         record = EpisodeGrade(**fields, episode_dir=episode_dir)
@@ -884,31 +664,25 @@ def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade
     measuring = frozenset(
         r["world"] for r in record.worlds
         if r["world"] in graded and r.get("withheld_reason") is None)
-    # ASSIGNED, not `dataclasses.replace`d: `replace` re-runs the constructor — every field
-    # through the strict validator a second time, `worlds` and each row copied again — to set
-    # three sets derived off rows the constructor has just admitted. No `validate_assignment`
-    # is configured, so the three are plain attribute writes onto the validated record.
+    # Assigned rather than `replace`d, which would re-validate and copy every row.
     record.graded_worlds = graded
     record.withheld_worlds = graded - measuring
     record.measuring_worlds = measuring
     return record
 
 
-#: The record's serializer, built ONCE: `TypeAdapter` construction is a schema build, and the
-#: writer is called once per pass — there is no reason to rebuild it per write.
+#: Built once: constructing a `TypeAdapter` is a schema build.
 _GRADE_ADAPTER: TypeAdapter[EpisodeGrade] = TypeAdapter(EpisodeGrade)
 
 
-def _write_judge_yaml(episode_dir: Path, record: EpisodeGrade) -> None:
+def _write_judge_yaml(episode: Episode, record: EpisodeGrade) -> None:
     import yaml
 
     doc = _GRADE_ADAPTER.dump_python(record, mode="json", exclude=set(_DERIVED))
-    # The stamp is a KEY THAT IS PRESENT OR ABSENT, never null: `not_graded is None` is what
-    # `_grade_episode` reads to tell a grade from a stamp, and the file says it the same way.
+    # The stamp is present or absent, never null.
     if doc["not_graded"] is None:
         del doc["not_graded"]
-    write_guarded(_judge_yaml_path(episode_dir), yaml.safe_dump(doc, sort_keys=False),
-                 mode="replace")
+    episode.judge.write(yaml.safe_dump(doc, sort_keys=False))
 
 
 __all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade"]

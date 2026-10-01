@@ -3,13 +3,11 @@ from __future__ import annotations
 
 
 class VerdictError(RuntimeError):
-    """The verifier replied, but its text carries no single readable verdict.
+    """The verifier replied, but its text carries no single readable verdict: no VERDICT
+    line, an unrecognized token, or conflicting VERDICT lines.
 
-    Replaces `parse_verdict`'s old `SystemExit` (a `BaseException`, which the drain's
-    per-pair handler could never catch): no VERDICT line at all, an unrecognized token, or
-    more than one distinct VERDICT line (§7 FK-11). A call that never COMPLETES — a
-    timeout, a transport error — is a different exception class entirely and is never this
-    one (§7 FK-9)."""
+    An ordinary `Exception` so the drain's per-pair handler can catch it. A call that never
+    completes (timeout, transport error) raises a different class."""
 
 
 def _verdict_lines(text: str) -> list[str]:
@@ -37,9 +35,8 @@ def parse_verdict(text: str, *, error_prefix: str) -> str:
 
 
 def reasoning_text(text: str) -> str:
-    """The model's prose, with its trailing VERDICT line(s) stripped — the second half of
-    `ForwardCheck.run`'s `(verdict, reasoning)` pair, kept alongside the verdict rather than
-    discarded (the loss this delta exists to stop, C2)."""
+    """The model's prose with its VERDICT line(s) stripped — the reasoning half of
+    `ForwardCheck.run`'s `(verdict, reasoning)` pair."""
     kept = [
         line for line in text.strip().splitlines()
         if not line.strip().strip("*`# ").strip().upper().startswith("VERDICT:")

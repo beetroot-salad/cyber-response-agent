@@ -13,8 +13,8 @@ from defender.runtime import tenant_settings as ts
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.case_history import case_ticket, ticket_writer
 from defender.scripts.visualize import visualize_run
+from defender.tests import _spec1047
 from defender.tests.tenant_1107_settings import _spec1107 as S
-from defender.tests.tenant_1107_settings import test_1107_ticket_writer as W
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -78,17 +78,14 @@ def test_a_raising_record_step_clears_a_stale_receipt(tmp_path, monkeypatch):
         raise PermissionError(13, "denied")
 
     monkeypatch.setattr(ticket_writer, "_post_comment", boom)  # lint-monkeypatch: ok — the seam is a private step with no deps hook; the test needs it to raise
-    W._shim(tmp_path, monkeypatch, *S.store_answers_ok("r-stale"))
-    root, _folder, alert = W._world(tmp_path)
-
-    def plant_stale(run_dir):
-        S.receipt_path(run_dir).write_text(
-            json.dumps({"key": "K-1", "status": "commented", "url": None, "ok": True,
-                        "reason": None}), encoding="utf-8")
-
-    rc, refused, run_dir, _rec = W._run(tmp_path, root, alert, run_id="r-stale", before=plant_stale)
-    assert refused is None
-    assert rc == 0
+    root = tmp_path / "tenants"
+    S.plant(root)
+    record = S.resolve(root)
+    run_dir = _spec1047.closed_run_dir(tmp_path / "run")
+    S.receipt_path(run_dir).write_text(
+        json.dumps({"key": "K-1", "status": "commented", "url": None, "ok": True,
+                    "reason": None}), encoding="utf-8")
+    S.record_step(run_dir, record, env={})
     assert S.receipt(run_dir) is None, "a stale success receipt outlived a raising record step"
 
 

@@ -8,8 +8,7 @@ The parsing itself lives in three modules, layered one way:
     functions; imports the tokenizer, never the projector.
   * `_project` — walks blocks and accumulates them into the finished companion body.
 
-This module keeps the two entry points and re-exports the names its readers already
-import from here, so the split is invisible at every call site.
+This module holds the two entry points and re-exports the names callers import from here.
 """
 
 from __future__ import annotations
@@ -159,16 +158,15 @@ def parse_dense_companion(
         fence_blocks, fence_warnings = _tokenize_fence(body)
         blocks.extend(fence_blocks)
         warnings.extend(fence_warnings)
-    # Return the warnings, not `[]`. A fence whose FIRST header was rejected opens no block at
-    # all, and dropping them here would let that document parse to a clean, empty companion.
+    # Keep the warnings: a fence whose first header was rejected opens no block, and must not
+    # parse to a clean, empty companion.
     if not blocks:
         return cast(CompanionBody, {}), warnings
     companion, projected = companion_from_blocks(blocks)
     return companion, warnings + projected
 
 
-#: Everything imported above is a RE-EXPORT: the name's real home is the module it
-#: comes from. Kept because a reader already imports it from here.
+#: Everything imported above is a re-export; each name's home is the module it comes from.
 __all__ = [
     "Any",
     "AttrPredictionRecord",

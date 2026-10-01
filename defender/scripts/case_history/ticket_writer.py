@@ -116,11 +116,9 @@ def open_case_ticket(
         _logger.warning(f"open raised, ignored: {e!r}")
 
 
-#: The receipt words. `commented` is the record (#767 D2) and `escalated` the cut-short note
-#: (#1047 O2) — the two comments the host can make; `refused-released` is a record the writer
-#: declined because a person had already released the case; `error` is a call that failed.
-#: There is no `closed`: the host never transitions a case, so a receipt claiming it would
-#: record a false event.
+#: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
+#: comments the host can make; `refused-released` means a person had already released the case;
+#: `error` is a failed call. There is no `closed`: the host never transitions a case.
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_REFUSED_RELEASED = "refused-released"
@@ -131,13 +129,12 @@ _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 def _build_comment_payload(
     run_dir: Path, case_id: str, truncated_by: str | None, mapping: case_ticket.CaseMapping | case_ticket.CaseTicketError,
 ) -> tuple[dict, str]:
-    """The outbound `{author, body}` for `record_case_ticket` and its receipt word. §7 R10: an
-    unreadable report takes the FIXED unreadable-branch sentence, never a second, bespoke
-    emptiness check — `case_ticket.ReportNotParsable` is `read_case_record`'s own signal for
-    exactly that case. #1047 F-K: for a forced-close-set exit that same signal means the
-    host's own forced close failed, so there is no verdict to propose and the escalation note
-    goes instead. Any other `CaseTicketError` (a bad mapping, a broken template) propagates
-    to the caller's refusal branch — no POST, a warning and an `error` receipt (§7 R1/FAM-1)."""
+    """The outbound `{author, body}` for `record_case_ticket` and its receipt word.
+
+    An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
+    on a forced-close exit, the escalation note, since the host's own forced close failed and
+    there is no verdict. Any other `CaseTicketError` propagates to the caller's refusal branch
+    (no POST, a warning, an `error` receipt)."""
     try:
         rec = replace(case_ticket.read_case_record(run_dir, mapping=mapping), case_id=case_id)
     except case_ticket.ReportNotParsable:
@@ -193,26 +190,24 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     defender_dir: Path, env: Mapping[str, str],
     key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
-    """D2: the host RECORDS its investigation into the case rather than closing it — at most
-    one `POST /tickets/{key}/comments`, never a transition. Closing is a person's act; the
-    host's client has no transition call, which is what lets the store's own `closed` mean
-    "a person reviewed this" to every later reader (#767 O1/O2).
+    """Record the investigation into the case, never close it: at most one
+    `POST /tickets/{key}/comments`, no transition. Closing is a person's act, which is what lets
+    the store's `closed` mean "a person reviewed this".
 
-    #1047 O2 — WHICH comment is decided per exit class, taken as an IN-PROCESS PARAMETER from
-    `run.py` (fork F3 reading A), never read off anything inside the run dir:
+    Which comment depends on the exit class, passed in-process from `run.py` (never read from
+    the run dir):
 
         aborted                        -> the escalation note: no verdict, a person escalates
         request-limit, retry-exhausted -> the record, proposing the host's own forced
                                           `unresolved`; no usable report (the forced close
-                                          itself failed, fork F-K) -> the escalation note
+                                          itself failed) -> the escalation note
         budget, store                  -> no call at all, no receipt
         anything else (None, a real
         vocabulary member with no arm, an out-of-vocabulary string)
                                         -> the record, proposing the report's disposition
 
-    `closed_before_cut` (fork F-A reading B) makes the two no-verdict arms (`aborted`,
-    `budget`/`store`) defer to a genuine model verdict instead: a run whose model had already
-    decided when the cut landed records off its own report exactly as an ordinary run would.
+    `closed_before_cut` makes the no-verdict arms (`aborted`, `budget`/`store`) record off the
+    model's own report instead, when it had already decided before the cut.
 
     §7 R6/FAM-3: a failed or colliding open does NOT suppress this attempt (the two post-steps
     are independent statements under one flag); every write fault is caught, warned once, and
@@ -274,9 +269,8 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
     payload: dict, word: str, ctx: VerbContext,
 ) -> None:
-    """The one write the host makes to a case: look (`_ticket_is_released`), then one
-    `POST /tickets/{key}/comments`, then the receipt on every branch (fork F-L: a failed call
-    never breaks the run and its outcome lands in the receipt)."""
+    """The one write the host makes to a case: check `_ticket_is_released`, one
+    `POST /tickets/{key}/comments`, and a receipt on every branch."""
     quoted = urllib.parse.quote(case_id, safe="")
     released, why_not = _ticket_is_released(config, deps, case_id, quoted, ctx)
     if released is None:
@@ -325,9 +319,7 @@ def _write_receipt(
         "reason": reason,
     }
     try:
-        # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam
-        # like every other host write into it, so a link planted at its name is refused, not
-        # followed.
+        # The run dir is box-writable: the guarded write refuses a planted link.
         write_guarded(RunPaths(run_dir).ticket_write, json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _logger.warning(f"could not write receipt: {e}")

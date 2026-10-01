@@ -252,14 +252,9 @@ def _handle_hypothesis_shape_cmd(args, corpus) -> int:
 
 
 def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
-    """Name → how many cases raised it, over BOTH declaration sites.
+    """Name → how many cases raised it, over both declaration sites.
 
-    The two-site walk is `queries.case_hypotheses`, not a hand-rolled copy — `_walkers`
-    owns that traversal.
-
-    The per-case name dedup stays here: it is this command's question (how many CASES raised a
-    name, not how many rows), and it strips, because a vocabulary key with trailing space is a
-    second entry for one word.
+    Counts cases, not rows, and strips names so trailing space does not split one word.
     """
     from collections import Counter
 
@@ -343,5 +338,5 @@ def _render_shape(out: dict) -> str:
     return header + "\n".join(body) + "\n"
 
 
-if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
+if __name__ == "__main__":  # lint-log-setup: ok — a model tool; the model reads its stderr as plain text
     raise SystemExit(main())

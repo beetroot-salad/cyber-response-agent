@@ -10,63 +10,39 @@ class AgentRole(Enum):
     VERIFIER = "verifier"
     LEAD_AUTHOR = "lead_author"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     CORPUS_AUTHOR = "corpus_author"
-    # #773 M4: the drain's ONE bounded repair spawn for a BAD-verdict lesson. A SEPARATE
-    # role, never a per-spawn override of CORPUS_AUTHOR's own definition (§7 F8) — its
-    # restricted toolset (write + lesson_read, no bash) is then a build-time fact about
-    # `CORPUS_REPAIR_DEF`, not a runtime choice a future caller could forget to apply.
+    # The drain's bounded repair spawn for a BAD-verdict lesson. A separate role rather than
+    # a per-spawn override of CORPUS_AUTHOR, so its restricted toolset (write + lesson_read,
+    # no bash) is fixed at build time.
     CORPUS_REPAIR = "corpus_repair"
-    # An enum key here grants compiled policy and names a trace file, so a member with no
-    # definition behind it is a live grant nothing claims — a retired stage retires its key.
-    # `judge`, `actor` and `oracle` left under #922 for exactly that reason: the pipeline that
-    # was their only caller was deleted, and `set(AGENTS.keys()) == set(AgentRole)` is asserted,
-    # so leaving the keys behind would have been red rather than merely wrong. `judge` came
-    # BACK in #1008 (below) bound to the family judge — a different role that wanted the same
-    # word, which is why it was re-added with its owner rather than held open here.
+    # A key here grants compiled policy and names a trace file, so every member must have a
+    # definition (`set(AGENTS.keys()) == set(AgentRole)` is asserted); a retired stage retires
+    # its key.
     #
-    # TWO roles, THREE calls: the ablation lens reuses SUPPORT rather than holding a key of
-    # its own, because its whole purpose is to be the support lens under a narrower
-    # projection — the reading is only interpretable against a support reading produced by
-    # the same model at the same effort, and a second role is a second place for those to
-    # drift apart. What separates the two calls is the projection they are handed, plus their
-    # own trace file and agent id; neither of those is keyed on the role.
+    # Two roles, three calls: the ablation lens reuses SUPPORT, since its reading is only
+    # interpretable against a support reading from the same model and effort. The calls
+    # differ by projection, trace file and agent id, none keyed on the role.
     SUPPORT = "support"
     COMPOSER = "composer"
-    # ONE DENY-ALL KEY PER PACKAGE — not per grant, and not per "kind of call". The
-    # questioner's THREE authoring calls plus the comparator's judging call all run under this
-    # ONE key because all four are the branch package's own machinery; what keeps them apart is
-    # their `agent_id` — `questioner`, `questioner:b`, `questioner:c` and the comparator's
-    # `comparator:<n>` — which is what the wire log and the per-id trace are partitioned on.
+    # One deny-all key per package, not per grant or per kind of call. The questioner's three
+    # authoring calls and the comparator's call all belong to the branch package and are told
+    # apart by `agent_id` (`questioner`, `questioner:b`, `questioner:c`, `comparator:<n>`).
     QUESTIONER = "questioner"
-    # The same rule, drawing the other side of the line: the family judge (`learning/judge/`)
-    # is its own package with its own orchestration, so it holds its own key even though its
-    # compiled policy is empty on every grant surface, exactly as the questioner's is. The two
-    # differ only in their refusal text. That is deliberate rather than waste, and the reason is
-    # PROSPECTIVE rather than present: a grant added to the questioner would otherwise reach the
-    # judge with nothing in the diff saying so, and the reviewer of that diff has no way to see
-    # it — `agent_id` separates traces, never policies. Reading the rule as "one key per grant"
-    # would have collapsed these two, and reading it as "one key per kind of call" invites a
-    # future `everything that judges` role spanning packages, which the per-PACKAGE wording
-    # forecloses.
+    # Same rule: the family judge (`learning/judge/`) is its own package, so it has its own key
+    # even though its policy is as empty as the questioner's. Otherwise a grant added to the
+    # questioner would silently reach the judge; `agent_id` separates traces, never policies.
     JUDGE = "judge"
 
 
-#: The turn-zero correlation lead's name in the verb-disposition table (#999). NOT an enum
-#: member, on the rule the ablation lens follows above: the lead is bound from `GATHER_DEF`,
-#: so gather's compiled policy, trace file and wire-log id are its own, and what separates it
-#: is only a NARROWER projection of the same table — a key here would be a second compiled
-#: policy over the same grant. What the lead does need is a name a table row can carry, so a
-#: withholding can be written against it and a projection asked for by it. Published from
-#: this leaf because `verb_dispositions` and `lead_zero` both read it and neither may import
-#: the other to agree on the spelling.
+#: The turn-zero correlation lead's name in the verb-disposition table. Not an enum member:
+#: the lead is bound from `GATHER_DEF` and differs only by a narrower projection of the same
+#: table, so a key would be a second policy over the same grant. Lives in this leaf because
+#: `verb_dispositions` and `lead_zero` both need it and cannot import each other.
 CORRELATION_GRANT_HOLDER = "lead-zero-correlation"
 
 
-#: The `agent_id` namespaces the run's ONE wire log (`llm_requests.jsonl`) is partitioned by:
-#: bare `main`, `gather:{lead_id}` per gather subagent, `review:{lens}` per review stage.
-#: Published HERE — the leaf that already owns agent identity — because the writers live in
-#: the runtime (`tools_gather`, `review_roles`) and the cost readers in `scripts/visualize/`,
-#: and a prefix that drifted on one side silently drops a whole namespace out of the run's
-#: accounted total. This module imports nothing but `enum`, so the reader pays no runtime
-#: edge to agree with the writer.
+#: The `agent_id` namespaces of the run's wire log (`llm_requests.jsonl`): bare `main`,
+#: `gather:{lead_id}`, `review:{lens}`. Defined in this dependency-free leaf so the runtime
+#: writers and the cost readers in `scripts/visualize/` share one spelling; a drifted prefix
+#: would silently drop a namespace from the run's accounted cost.
 GATHER_AGENT_ID_PREFIX = "gather:"
 REVIEW_AGENT_ID_PREFIX = "review:"

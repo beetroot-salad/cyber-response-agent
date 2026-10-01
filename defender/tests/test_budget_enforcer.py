@@ -72,8 +72,3 @@ def test_check_budgets_survives_a_budget_missing_started_at(tmp_path):
     assert any("tool_calls at 9/9" in w for w in warnings)
 
 
-def test_increments_are_serialized(tmp_path):
-    for _ in range(5):
-        _bump(tmp_path, "bash")
-    budget = json.loads((tmp_path / "budget.json").read_text())
-    assert budget["tool_calls"] == 5

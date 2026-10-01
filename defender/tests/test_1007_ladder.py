@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -677,9 +678,11 @@ def test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejec
     W.base_capture(ep, [W.captured_row(key="k1")])
     adapters = W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "other"}]}})
 
-    review.review(family_mod.parse_family(doc), episode_dir=ep, adapters=adapters,
-                  door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"),
-                  tenant=_tenants1106.playground_run_tenant(), runs_base=ep.parent / "runs-base")
+    with Episode.open(ep) as episode:
+        review.review(family_mod.parse_family(doc), episode=episode, adapters=adapters,
+                      door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"),
+                      tenant=_tenants1106.playground_run_tenant(),
+                      runs_base=ep.parent / "runs-base")
 
     block = W.review_doc(ep)["worlds"]["b"]["reachability"]
     for key in ("capture_replays", "capture_addressed", "reachable_by_capture"):

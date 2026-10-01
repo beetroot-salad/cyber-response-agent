@@ -1,13 +1,9 @@
 
 from __future__ import annotations
 
-# `typing_extensions.TypedDict`, not stdlib: pydantic's dataclass schema generation for a
-# TypedDict-typed field requires it on Python <3.12 (`defender/pyproject.toml`'s own comment on
-# the `typing-extensions` dependency has the PydanticUserError this avoids) — every dataclass in
-# the tree porting to `defender._model.model` (#1067) that carries one of these types on a field
-# (`corpus.Companion.body: CompanionBody` — even under `SkipValidation`, which still builds the
-# serialization schema) depends on this import, not just the `typing.TypedDict` spelling stdlib
-# also offers. The parser's `_Projector` also holds these, but stayed on stdlib `@dataclass`.
+# `typing_extensions.TypedDict`, not stdlib: pydantic needs it on Python <3.12 to build schemas
+# for `@model` fields typed with these (e.g. `corpus.Companion.body`), even under
+# `SkipValidation`.
 from typing_extensions import TypedDict
 
 AttributesMap = dict[str, str]
@@ -166,17 +162,11 @@ class _LeadPredRequired(TypedDict):
 
 
 class LeadPrediction(_LeadPredRequired, total=False):
-    """A `:L l-NNN.lead_preds` row — a pre-committed ROUTE, not a world-state prediction.
+    """A `:L l-NNN.lead_preds` row: a pre-committed route, not a world-state prediction.
 
-    `if` reads as a condition on what the lead comes back with, `read_as` the interpretation
-    that condition licenses, and `advance_to` the next lead (or `CONCLUDE` / `HYPOTHESIZE`)
-    that reading routes to. The distinction from `:H h-NNN.preds` is load-bearing: nothing
-    grades an `lp*`, no resolution head can cite one, and `_check_tested_commitment_refs`
-    leaves an `lp*` in `:L findings`' `tests` column alone for exactly that reason.
-
-    `condition`, not `if`: a class-syntax TypedDict key has to be an identifier, and `if` is a
-    keyword. The parser renames the cell the same way `_lead_header_record` renames
-    `trust_root` → `trust_root_reached`.
+    `if` is the condition on what the lead returns, `read_as` the interpretation it licenses,
+    and `advance_to` the next lead (or `CONCLUDE` / `HYPOTHESIZE`). Nothing grades an `lp*` and
+    no resolution cites one. The `if` cell is projected as `condition`, since `if` is a keyword.
     """
 
     condition: str
@@ -189,12 +179,11 @@ class _ImpactPredRequired(TypedDict):
 
 
 class ImpactPrediction(_ImpactPredRequired, total=False):
-    """A `:L l-NNN.impact_preds` row — the impact predicate a lead pre-registers at PREDICT
+    """A `:L l-NNN.impact_preds` row: the impact predicate a lead pre-registers at PREDICT
     and `:R impact` grades at ANALYZE.
 
-    Only `id` is required by the parser. Every other cell is checked by
-    `validate._check_impact_prediction_structure`, which can say what a blank `on_mismatch`
-    costs; a `RowError` here would say only that the row was dropped.
+    Only `id` is required by the parser; `validate._check_impact_prediction_structure` checks
+    the rest and can say what a blank cell costs.
     """
 
     dimension: str
@@ -207,25 +196,17 @@ class ImpactPrediction(_ImpactPredRequired, total=False):
 
 
 
-# The `:R` resolution buckets. Their rows are column-header driven — the author's `[a|b|c]`
-# header names the keys, and `_canonicalize_resolution_row` renames the ones it knows and
-# passes the rest through. So EVERY key is optional twice over: the header decides whether a
-# column exists at all, and an empty cell is dropped rather than stored as "". These types
-# name the keys the canonicalizer emits; they do not close the grammar.
-#
-# Key sets derive from the `:R` headers in docs/dense-investigation-format.md §`:R` and
-# defender/skills/invlang/SKILL.md, plus the provenance tuple rules of
-# docs/investigation-language.md. `ResolutionRow` holds the grounding/provenance keys all
-# three anchor-resolving buckets carry; each subtype adds only what its own header adds.
+# The `:R` resolution buckets. Rows are header-driven: the author's `[a|b|c]` header names
+# the keys and `_canonicalize_resolution_row` renames known ones, so every key is optional
+# (the column may not exist, and empty cells are dropped). These types name the keys the
+# canonicalizer emits; they do not close the grammar. `ResolutionRow` holds the keys shared
+# by the anchor-resolving buckets; each subtype adds its own header's.
 
 
 class ResolutionRow(TypedDict, total=False):
 
-    # Ownership and grounding are separate fields on purpose. `resolved_by_lead`
-    # names the one lead whose work closed the row out — it is the projection
-    # target, so it cannot be plural without the row landing on two outcomes and
-    # double-counting. `cites_leads` names sibling leads the verdict rests on,
-    # for the case where no single lead answers the question alone.
+    # `resolved_by_lead` is the one lead the row is projected onto (plural would double-count);
+    # `cites_leads` names sibling leads the verdict also rests on.
     resolved_by_lead: str
     cites_leads: list[str]
     verdict: str
@@ -245,10 +226,8 @@ class AuthzResolution(ResolutionRow, total=False):
     edge: str
     fulfills_contract: str
     cites_past_case: str
-    #: #983 mechanism C. On an `indeterminate` verdict, WHY the question is unsettled:
-    #: `vocab.AUTHZ_INDET_BASIS`, defaulting to `retry` when the cell is absent. `exhausted`
-    #: takes the contract off the retrieval frontier and changes nothing else — not the
-    #: verdict, not the forced `on_indet` escalation.
+    #: On an `indeterminate` verdict, why it is unsettled (`vocab.AUTHZ_INDET_BASIS`, default
+    #: `retry`). `exhausted` only takes the contract off the retrieval frontier.
     basis: str
 
 
@@ -300,9 +279,8 @@ class FindingRecord(_FindingRequired, total=False):
     tests_hypotheses: list[str]
     outcome: LeadOutcome
     query_details: QueryDetails
-    #: `:L l-NNN.lead_preds`. Named `predictions` because that is the field the spec's rule #18
-    #: constrains ("when `lead.predictions` is present"); it holds ROUTES, and the world-state
-    #: predictions a resolution cites live on the HYPOTHESIS as `HypothesisRecord.predictions`.
+    #: `:L l-NNN.lead_preds`, named as spec rule #18 names the field. These are routes; the
+    #: world-state predictions resolutions cite are `HypothesisRecord.predictions`.
     predictions: list[LeadPrediction]
     impact_predictions: list[ImpactPrediction]
     new_hypotheses: list[HypothesisRecord]
@@ -318,28 +296,19 @@ class Termination(TypedDict, total=False):
 
 
 class SurvivingHypothesis(TypedDict, total=False):
-    """A `:T conclude.surviving` row. `hypothesis` rather than `hyp_id`: it is the same
-    reference `:T resolutions` records already spell that way."""
+    """A `:T conclude.surviving` row, keyed `hypothesis` to match `:T resolutions` records."""
 
     hypothesis: str
     final_weight: str
 
 
 class DeferralRecord(TypedDict, total=False):
-    """One `:T conclude.deferred_*` row — a commitment the close is NOT closing, and why.
+    """One `:T conclude.deferred_*` row: a commitment the close leaves open, and why.
 
-    The escape hatch the three closure rules (#26 contracts, #31 impact predictions, #34
-    predictions) rest on: a run that could not answer a question it committed to says so here
-    instead of dropping it. Which is why the RATIONALE is the load-bearing cell — a blank one
-    turns the hatch into a way to discharge every commitment at once, so the closure rules
-    refuse it.
-
-    The three tables spell the reference column two ways — `contract_ref` on
-    `:T conclude.deferred_authz`, `prediction_ref` on the other two — and each row keeps the
-    spelling its own table uses. NOT normalized to one `ref` key: the column name is what
-    `docs/investigation-language.md` and `docs/dense-investigation-format.md` call the field,
-    and this whole issue is about the spec and the code drifting apart. `validate._deferral_index`
-    is the one reader and takes either.
+    The rationale is the load-bearing cell; a blank one would discharge a commitment for
+    free, so the closure rules refuse it. Each row keeps its table's reference column name
+    (`contract_ref` for `deferred_authz`, `prediction_ref` otherwise), matching the spec;
+    `validate._deferral_index` reads either.
     """
 
     contract_ref: str
@@ -356,43 +325,24 @@ class Conclude(TypedDict, total=False):
     matched_archetype: str | None
     ceiling_rationale: str | None
     summary: str | None
-    # What the DETECTOR got wrong, kept out of `summary` on purpose: a run can find two
-    # independent things (the alert's claim does not hold; the host is compromised anyway) and
-    # `disposition` has room for one. Free text, ONE line like every other row here. It reaches
-    # a reader because a synthesis render dumps this whole dict; deliberately NOT mirrored into
-    # `report.md`, which is host-rendered from typed values and carries no model prose.
+    # What the detector got wrong, separate from `summary` because a run can find two
+    # independent things (the alert's claim fails; the host is compromised anyway). Not
+    # mirrored into `report.md`, which carries no model prose.
     detection_notes: str | None
-    # The checks the run could NOT make — one entry per gap, which is why it is a list where its
-    # neighbours are scalars: a run names each unreachable source separately ("authorized_keys
-    # FIM on web-1 (auditd write events) not retrieved").
-    #
-    # Without it the judge cannot tell a benign close that checked everything from one that
-    # named a load-bearing gap.
-    #
-    # A bare `none` is the format's way of saying "no ceiling" and projects as absence, so
-    # `conclude.get("ceiling_test")` answers "did this run name a gap" without a sentinel.
+    # The checks the run could not make, one entry per gap, so a reader can tell a benign close
+    # that checked everything from one with a load-bearing gap. A bare `none` projects as
+    # absence.
     ceiling_test: list[str]
-    # The lead id that tested the ALERTED entity for suspicion independent of the alert's own
-    # claim. It is what makes `disposition false-positive` reachable: refuting the detector says
-    # nothing about the host, so the exit is gated on having looked at the host anyway.
-    #
-    # A lead id and not prose, because prose cannot be checked. `_check_false_positive_gating`
-    # resolves it against `:L findings` and requires the lead to have COMMITTED a result and to
-    # target a vertex the PROLOGUE already carried. The prologue clause is the load-bearing one:
-    # a run whose post-refutation leads all chase vertices the refutation itself introduced
-    # never asks about the host it was paged for.
+    # The lead id that tested the alerted entity independently of the alert's claim; gates
+    # `disposition false-positive`, since refuting the detector says nothing about the host.
+    # `_check_false_positive_gating` requires that lead to have committed a result on a vertex
+    # already in the prologue.
     entity_check: str | None
-    # The run's own list of what it thinks survived, from
-    # `:T conclude.surviving [hyp_id|final_weight]`. Projected so its `h-*` is checkable like
-    # the other three sites that name one.
-    #
-    # Self-reported and omittable, which is why benign-gating computes survival from the
-    # resolution record instead (enforcement ramp rule 5). Checkable, not authoritative.
+    # The run's own list of survivors, from `:T conclude.surviving`. Projected so its `h-*`
+    # ids are checkable; benign-gating computes survival from the resolution record instead.
     surviving_hypotheses: list[SurvivingHypothesis]
-    # The three deferral tables, from `:T conclude.deferred_{authz,impact,preds}`. Each is the
-    # ONLY answer other than "resolved" that its closure rule accepts, which is why all three
-    # are projected in the same change that arms those rules: a strict half without its escape
-    # hatch refuses documents that have no legal repair.
+    # The three deferral tables, from `:T conclude.deferred_{authz,impact,preds}`: the only
+    # alternative to "resolved" each closure rule accepts.
     deferred_authorizations: list[DeferralRecord]
     deferred_impact_predictions: list[DeferralRecord]
     deferred_predictions: list[DeferralRecord]

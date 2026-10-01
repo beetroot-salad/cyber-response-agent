@@ -33,6 +33,7 @@ pytest.importorskip("pydantic_ai")
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
+    DOOMED_CHILD_MEM_LIMIT_MB,
     EncoderFault,
     SpyEncoder,
     agent_run,
@@ -389,8 +390,8 @@ print(json.dumps({{
         '    value = {"a": value, "b": value}\n'
         "T.agent_run(toolset=T.foreign_toolset(value), capabilities=%s)\n"
     )
-    gated_bomb = run_isolated(bomb % "True", timeout=90.0)
-    plain_bomb = run_isolated(bomb % "False", timeout=90.0)
+    gated_bomb = run_isolated(bomb % "True", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
+    plain_bomb = run_isolated(bomb % "False", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not gated_bomb.timed_out, (
         "the guarded walk did not terminate on a 2**28-node payload — the node budget is not "
         "bounding the walk's own cost, which is the half a smaller k cannot prove"
@@ -572,6 +573,7 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
             '    value = {"n": value}'
         ),
     }
+    by_label = {}
     for label, build in battery.items():
         arms = {}
         for gated in (True, False):
@@ -598,6 +600,7 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
             )
             arms[gated] = run_isolated(child, timeout=120.0)
 
+        by_label[label] = arms
         gated_out, plain_out = arms[True], arms[False]
         assert not gated_out.timed_out, f"{label} hung with the gate"
         assert not plain_out.timed_out, f"{label} hung without the gate"
@@ -625,14 +628,11 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     #
     # So the honest statement is the ABSENCE of a gate-attributable stderr difference, and the
     # demand that actually carries O9 is the model-visible one: the text is identical.
-    brace = '{"rows": [{"}": i, "z": i} for i in range(20)]}'
-    harvest = (
-        "from defender.tests.e2e import _toon872 as T\n"
-        f"out = T.agent_run(toolset=T.foreign_toolset({brace}), capabilities=%s)\n"
-        "print((out.dispatched.texts() or [None])[0])\n"
-    )
-    gated = run_isolated(harvest % "True", timeout=120.0)
-    plain = run_isolated(harvest % "False", timeout=120.0)
+    #
+    # Read off the battery's own `}`-in-key arms: they already ran this payload both ways in
+    # their own interpreters and harvested the text, so two more children would re-measure it.
+    brace_arms = by_label["brace in key, row position"]
+    gated, plain = brace_arms[True], brace_arms[False]
     assert gated.returncode == 0, "a `}`-in-key payload stopped delivering with the gate"
     assert plain.returncode == 0, "a `}`-in-key payload stopped delivering without the gate"
     assert ("panicked at" in gated.stderr) == ("panicked at" in plain.stderr), (
@@ -641,7 +641,11 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     )
     # The gate ALWAYS frames, so raw stdout differs by construction (and by run id). What must
     # match is the framed CONTENT against the un-gated text — the bytes the model reads.
-    assert framed_content(gated.stdout.strip()) == plain.stdout.strip(), (
+    g_text = json.loads(gated.stdout.strip().splitlines()[-1])
+    p_text = json.loads(plain.stdout.strip().splitlines()[-1])
+    assert not g_text["text_raised"], "harvesting the gated arm's text raised"
+    assert not p_text["text_raised"], "harvesting the un-gated arm's text raised"
+    assert framed_content(g_text["text"]) == p_text["text"], (
         "the gate changed the model-visible text on a `}`-in-key payload"
     )
 

@@ -164,8 +164,7 @@ class _PhaseTagger:
         if tu_id and tu_id in self.consumed_tool_use_ids:
             return
         inp = blk.get("input", {}) or {}
-        # `append_block` and `fix_row` are bound to investigation.md and carry no path, so the
-        # path filter below cannot speak for them — the name already did.
+        # `append_block` and `fix_row` always target investigation.md and carry no path.
         if name not in ("append_block", "fix_row"):
             fp = str(inp.get("file_path") or inp.get("path") or "")
             if not fp.endswith(RUN_LAYOUT.investigation.name):
@@ -336,13 +335,10 @@ def _parse_timestamped_user_events(
 def _tile_phase_boundaries(
     parsed: list[tuple], phase_order: list[str]
 ) -> dict[str, dict]:
-    # Tile over BUCKETS, not appearances (#956). `out` is keyed on the name, so a repeated one
-    # is written twice and the last write wins — and the forward scan below is worse than a
-    # lost write: it finds the LATER appearance of a name whose `first_in_phase` is an EARLIER
-    # timestamp, so `## GATHER … ## ANALYZE … ## GATHER` (one bucket, non-adjacent) ends
-    # ANALYZE before it starts, clamps it to zero, and drops GATHER's first span on the
-    # overwrite. Collapsing first makes each bucket one contiguous tile that still covers the
-    # whole run.
+    # Tile over buckets, not appearances. `out` is keyed on the name, and scanning a render
+    # list with a non-adjacent repeat (`GATHER … ANALYZE … GATHER`) would end ANALYZE before
+    # it starts and drop GATHER's first span. Collapsing first makes each bucket one contiguous
+    # tile covering the run.
     phase_order = list(dict.fromkeys(phase_order))
     parsed.sort(key=lambda x: x[0])
     run_start = parsed[0][0]

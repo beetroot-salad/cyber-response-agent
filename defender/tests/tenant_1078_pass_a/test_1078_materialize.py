@@ -1,4 +1,4 @@
-"""#1078 pass (A) — `run_common.materialize_run_dir(alert, run_id, *, tenant_id, model, world)`
+"""#1078 pass (A) — `run_common.materialize_run(alert, run_id, *, tenant_id, model, world)`
 (D2, O2, O4, O6): the runs base follows from the tenant.
 
 D2's order, which every test here observes from the outside:
@@ -30,12 +30,13 @@ import pytest
 
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
 
 
 def _materialize(alert: Path, run_id: str | None, tenant_id: str, **kw):
-    return H.run_common().materialize_run_dir(alert, run_id, tenant_id=tenant_id, **kw)
+    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id, **kw).run_dir
 
 
 def _refused(fn) -> str:
@@ -47,7 +48,7 @@ def _refused(fn) -> str:
         return H.refusal_text(exc)
     except H.tenant().TenantRefused as exc:
         return str(exc)
-    raise AssertionError("materialize_run_dir was not refused")
+    raise AssertionError("materialize_run was not refused")
 
 
 @pytest.fixture
@@ -96,7 +97,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b"):
     _base, src = H.tenant_source(root, T_ID, row=False)
     ep = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, ep)
-    world = H.run_py().resume_world(manifest, label, tenant=H.T1106.playground_run_tenant)
+    world = H.run_py().resume_world(Episode.open(manifest.parent), label, tenant=H.T1106.playground_run_tenant)
     return src, ep, world
 
 
@@ -105,7 +106,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b"):
 # ======================================================================================
 
 def test_o4_materialize_layout(tmp_path, tenant_root):
-    """materialize_run_dir(alert, 'r1') with its tenant_id keyword set to T creates <root>/T/runs/r1/, the runs-base
+    """materialize_run(alert, 'r1') with its tenant_id keyword set to T creates <root>/T/runs/r1/, the runs-base
     record <root>/T/runs/_tenant.json names T, and the run's provenance stamp carries
     tenant_id T."""
     run_dir = _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID)
@@ -178,7 +179,7 @@ def test_g_r7_family_base_world_id_coherence(tmp_path, tenant_root):
 # ======================================================================================
 
 def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
-    """materialize_run_dir with its tenant_id keyword set to T, with no row for T is refused before creating anything
+    """materialize_run with its tenant_id keyword set to T, with no row for T is refused before creating anything
     and never writes <root>/T/tenant.json; after a successful materialize for an existing T
     the row is byte-identical."""
     root = tmp_path / "data"
@@ -187,7 +188,7 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     alert = H.plant_alert(tmp_path / "in")
     text = _refused(lambda: _materialize(alert, "r1", T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
-                      entry="materialize_run_dir")
+                      entry="materialize_run")
     assert H.entries(root) == [], "the refused materialize created something"
 
     H.make_tenant(root, T_ID)
@@ -197,7 +198,7 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
 
 
 def test_d2_materialize_order(tmp_path, monkeypatch):
-    """materialize_run_dir runs require_tenant before creating anything, then the runs base,
+    """materialize_run runs require_tenant before creating anything, then the runs base,
     guarded_mkdir, ensure_runs_base_record and Run.for_tenant in that order, so an unknown
     tenant leaves no runs base.
 
@@ -217,7 +218,7 @@ def test_d2_materialize_order(tmp_path, monkeypatch):
     H.plant_record(root / T_ID / "runs", "someone-else")
     text = _refused(lambda: _materialize(alert, "r1", T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
-                      entry="materialize_run_dir")
+                      entry="materialize_run")
 
     root = tmp_path / "disagreeing"
     H.set_data_root(monkeypatch, root)
@@ -226,7 +227,7 @@ def test_d2_materialize_order(tmp_path, monkeypatch):
     H.plant_record(base, "someone-else")
     text = _refused(lambda: _materialize(alert, "r1", T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                      entry="materialize_run_dir")
+                      entry="materialize_run")
     assert not (base / "r1").exists(), "the run dir was made before the record check"
 
     root = tmp_path / "ordinary"
@@ -237,7 +238,7 @@ def test_d2_materialize_order(tmp_path, monkeypatch):
 
 
 def test_o6_record_mismatch_refused(tmp_path, tenant_root):
-    """materialize_run_dir with its tenant_id keyword set to T, over a runs base whose record names U is refused by
+    """materialize_run with its tenant_id keyword set to T, over a runs base whose record names U is refused by
     ensure_runs_base_record's disagreement refusal at materialize step 4, and the record still
     names U, byte-for-byte unmodified."""
     base = tenant_root / T_ID / "runs"
@@ -245,7 +246,7 @@ def test_o6_record_mismatch_refused(tmp_path, tenant_root):
     before = record.read_bytes()
     text = _refused(lambda: _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                      entry="materialize_run_dir")
+                      entry="materialize_run")
     assert record.read_bytes() == before, "the disagreeing record was relabelled"
     assert H.entries(base) == [H.RECORD_NAME], "the refused materialize created a run dir"
 
@@ -261,7 +262,7 @@ def test_torn_runs_base_record_under_the_tenant(tmp_path, tenant_root, body):
     for run_id in ("r1", "r2"):
         text = _refused(lambda rid=run_id: _materialize(alert, rid, T_ID))
         H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                          entry="materialize_run_dir")
+                          entry="materialize_run")
         assert record.read_bytes() == body.encode("utf-8"), "the torn record was re-minted"
     record.unlink()
     _materialize(alert, "r3", T_ID)
@@ -279,7 +280,7 @@ def test_pre_a_process_with_the_old_knob_pointed_into_the_tenants_runs_base(tmp_
     for run_id in ("r1", "r2"):
         text = _refused(lambda rid=run_id: _materialize(alert, rid, T_ID))
         H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                          entry="materialize_run_dir")
+                          entry="materialize_run")
     assert record.read_bytes() == before
     assert H.entries(base) == [H.RECORD_NAME]
 
@@ -327,7 +328,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     second reads it (one base_world_id), and neither lands under `<root>/T/runs/` (O4's gap
     until (B))."""
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
-    world_c = H.run_py().resume_world(ep / "family.yaml", "c", tenant=H.T1106.playground_run_tenant)
+    world_c = H.run_py().resume_world(Episode.open(ep), "c", tenant=H.T1106.playground_run_tenant)
     alert = src / "alert.json"
     rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b))
     record_path = ep / "runs" / H.RECORD_NAME
@@ -357,7 +358,7 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
         H.assert_verbatim(str(H.owner_refusal(H.tenant_of_run_dir, src)), widened,
                           entry="tenant_of_run_dir")
         text = _refused(lambda: _materialize(alert, world.run_id, T_ID, world=world))
-        H.assert_verbatim(text, widened, entry="the sibling's materialize_run_dir")
+        H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
         assert not (ep / "runs" / world.run_id).exists()
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path.parent / "elsewhere-learning"))
     assert H.tenant_of_run_dir(src) == T_ID

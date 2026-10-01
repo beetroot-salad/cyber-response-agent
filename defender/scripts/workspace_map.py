@@ -16,29 +16,15 @@ from defender._run_paths import RUN_LAYOUT  # noqa: E402
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
 
-#: Run-dir children the map does not name. This listing is inlined into MAIN's message 0 under
-#: "use this in place of `ls`/`find`/`grep`", and MAIN has no `ls` — so the map IS the model's
-#: directory view, and naming a path the gate then refuses only teaches it to ask for one
-#: (`test_gather_raw_suppressed`). `wire_logs/` joins `gather_raw/` on exactly that ground: it
-#: holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)` read shape
-#: by construction — see `_run_paths.WIRE_LOG_DIR`. `budget.json` is listed here too, to keep
-#: the suppression in one place, and the provenance stamp joins it on the same ground: the
-#: run's record of the commit it was made against is infrastructure the OPERATOR reads, and
-#: naming it as a "canonical surface" would invite the investigator to reason about its own
-#: build. THE LAST TWO ARE NOT CONTAINMENT and must not be read as it: `read_shapes` is
-#: `under(run, SEG)`, one segment, so every run-ROOT file is inside MAIN's and GATHER's read
-#: shape and no deny names either of these. Suppressing the name keeps it out of the model's
-#: directory view; it does not put the file out of reach. `gather_raw`/`wire_logs` are the two
-#: that are actually refused (`permission.files`).
+#: Run-dir children the map does not name. The map is inlined into MAIN's message 0 as its
+#: directory view (MAIN has no `ls`), so naming a path the gate refuses only teaches it to ask
+#: for one (`test_gather_raw_suppressed`). `gather_raw/` and `wire_logs/` are actually refused
+#: by `permission.files`. `budget.json` and the provenance stamp are operator infrastructure
+#: and are only hidden, not out of reach: every run-root file is inside MAIN's and GATHER's
+#: `under(run, SEG)` read shape.
 def _unlisted() -> frozenset[str]:
-    """The run-dir entries this model-facing view suppresses, ASKED OF THE OWNER per call
-    (#1077 D7).
-
-    Held as a module-level frozenset before, which is the exact failure `PROVENANCE`'s own
-    docstring warns about one module over: a suppression that spells the filename
-    independently of the writer keeps suppressing a name that no longer exists the day the
-    writer renames it — after which the stamp silently reappears in MAIN's message 0, the
-    one outcome this suppression exists to prevent."""
+    """The run-dir entries this view suppresses, asked of `RUN_LAYOUT` per call so a writer's
+    rename cannot make a suppressed file silently reappear in MAIN's message 0."""
     return frozenset({
         RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.wire_log_dir.name,
         RUN_LAYOUT.budget.name, RUN_LAYOUT.provenance.name,
@@ -66,12 +52,9 @@ def _list_dir(d: Path) -> list[str]:
 
 
 def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
-    """The model's directory view of the run. `systems` is what the Adapters section lists:
-    the run's roster (`read_roster(...).accepted`, threaded down from `run_investigation`),
-    never a listing of the directory — a map that listed `*_adapter.py` filenames itself
-    named a `change-mgmt_adapter.py` (a hyphen in the filename) as dispatchable while every
-    `query(system="change-mgmt")` came back "unknown system": two readers of one directory
-    disagreeing on the surface the model reads first (#1035)."""
+    """The model's directory view of the run. `systems` (the Adapters section) is the run's
+    roster (`read_roster(...).accepted`), never a directory listing, so the map cannot name a
+    system that `query` would reject as unknown."""
     lines: list[str] = []
     lines.append("# Workspace map")
     lines.append("")
@@ -144,10 +127,8 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         sys.stderr.write("usage: workspace_map.py <run_dir>\n")
         return 2
-    # The CLI is the operator's view of the checkout, so it reads the checkout's roster at
-    # its own top — the one read this entry point performs. A checkout whose adapters tree
-    # cannot be read is a one-line refusal and exit 2, like the other CLIs over the same
-    # read, not a traceback.
+    # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
+    # refusal and exit 2, not a traceback.
     from defender.runtime.verbs import RegistryError, read_roster
 
     try:

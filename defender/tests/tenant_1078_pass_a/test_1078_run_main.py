@@ -27,12 +27,15 @@ import pytest
 from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._episode_handle import Episode  # noqa: E402
 
 #: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
 #: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
+# `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
+# ledger's writes.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world"]
+                      "model_override", "box", "tenant", "world", "episode"]
 
 
 # ======================================================================================
@@ -285,7 +288,7 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
     src, manifest = _sibling(tmp_path, data_root, "acme")
     H.plant_row(data_root, "victim")
     world_run_id = H.run_py().resume_world(
-        manifest, "a", tenant=H.T1106.playground_run_tenant).run_id
+        Episode.open(manifest.parent), "a", tenant=H.T1106.playground_run_tenant).run_id
     got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant_id"] == "acme"
@@ -316,7 +319,7 @@ def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypat
     EpisodePaths(ep).runs whatever the invoking cwd.
 
     Observed on what the materialize seam is handed: the world's `episode_dir`, the root
-    `materialize_run_dir`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
+    `materialize_run`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
     _src, manifest = _sibling(tmp_path, data_root, "acme")
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
@@ -442,13 +445,13 @@ def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path
     (base / H.RECORD_NAME).write_text(body, encoding="utf-8")
     alert = H.plant_alert(tmp_path / "in")
     with pytest.raises(SystemExit) as refused:
-        H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+        H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None)
     said = H.refusal_text(refused.value)
     assert said.startswith("[run.py] "), said
     assert str(base / H.RECORD_NAME) in said, said
 
     (base / H.RECORD_NAME).unlink()
-    run_dir = H.run_py()._materialize_run_dir(alert, None, tenant_id=H.VALID_ID, model=None)
+    run_dir = H.run_py()._materialize_run(alert, None, tenant_id=H.VALID_ID, model=None).run_dir
     assert Path(run_dir).is_dir()
 
 

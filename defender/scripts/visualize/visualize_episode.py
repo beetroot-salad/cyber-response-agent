@@ -1,28 +1,18 @@
-"""#1025 — the episode page: `render_episode(episode_dir) -> Path` renders `learning.html`
-beside `judge.yaml` from an episode directory alone, and `main(argv)` is the standalone CLI.
-The launcher (`branch/cli.py::_render_page`) calls `render_episode` after the JUDGE clock frame
-closes, under its own non-fatal boundary.
+"""The episode page: `render_episode(episode_dir) -> Path` renders `learning.html` beside
+`judge.yaml` from an episode directory alone; `main(argv)` is the standalone CLI. The launcher
+(`branch/cli.py::_render_page`) calls `render_episode` after the judge frame closes, under its
+own non-fatal boundary.
 
-TWO PHASES, ONE BOUNDARY. `load_episode` reads every record the page shows — the manifest, the
-six episode-level records, each world's draw documents, result event, archive and leads, the
-wire logs — EXACTLY ONCE, into the typed model below (`_Episode`), and runs the findings walk
-once over it. The section renderers take the model and never touch the directory. That is what
-makes the page's contract hold by construction rather than by inspection: only `family.yaml`
-refuses the whole page (d01); every other record a reader refuses, or a field whose shape is
-not the one the writer produces, lands in ITS OWN slot at load time — a `_Record.error`, an
-empty list, a `None` — and renders as that slot's own sentence. A renderer that only ever sees
-values the loader has already typed cannot take the page down over one stray scalar in one
-file, and no renderer can disagree with another about what a record says, because there is one
-reading of it. The page always reads through the package readers rather than re-parsing any
-record itself.
+Two phases. `load_episode` reads every record the page shows exactly once, through the package
+readers, into a typed model (`_Episode`), and runs the findings walk once over it. Section
+renderers take the model and never touch the directory. Only `family.yaml` refuses the whole
+page; any other unreadable record or malformed field lands in its own slot (a `_Record.error`,
+an empty list, a `None`) and renders as that slot's sentence, so one bad file cannot take the
+page down and no two renderers can read a record differently.
 
-A READER OF DECISIONS, NEVER A MAKER OF THEM. Where the page shows what a pass DID — which
-lane a finding took, whether a world was walked — it shows what that pass wrote down
-(`judge.yaml.dispositions`, the enqueue's own ledger), not a re-run of the pass's rule over
-the record's rows. Two earlier shapes of this page did the latter (a copied rule, then the
-borrowed rule fed with rebuilt inputs) and each disagreed with the pass at an edge the page
-was built to explain. When the page needs a decision the record does not carry, the fix is to
-the writer.
+The page shows the decisions passes wrote down (`judge.yaml.dispositions`, the enqueue ledger),
+never a re-run of a pass's rule over the rows: re-deriving them disagrees with the pass at the
+edges the page exists to explain. If a decision is not recorded, fix the writer.
 """
 from __future__ import annotations
 
@@ -36,7 +26,8 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])
     sys.path.insert(0, _root)
 
 from defender._clock import parse_iso_utc
-from defender._io import Bound, bind, write_guarded
+from defender._episode_handle import Episode
+from defender._io import Bound, bind
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
@@ -69,17 +60,10 @@ from defender.scripts.visualize.visualize_primitives import (
     fmt_duration,
 )
 
-#: The page's OWN stylesheet, inlined after the run pages' shared one (`CSS`: the tokens, the
-#: two-column layout, the sticky header and nav, the wrapping rules). The shared sheet knows
-#: nothing of this page's vocabulary — its `.tx-entry` is a two-column grid for a transcript
-#: turn, which put every response's text into a 56px gutter — so every class this module
-#: emits has its rule HERE, and `test_1025_every_class_the_page_emits_has_a_rule` holds the
-#: two in step (#1025).
+#: The page's own stylesheet, inlined after the shared run-page `CSS`, which knows nothing of
+#: this page's classes. `test_1025_every_class_the_page_emits_has_a_rule` keeps them in step.
 EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")
 
-# `PAGE_NAME` and `_TOOL_TRACE_NAME` were two more re-bindings of an owner name (#1077 D7).
-# The page's own file is `EpisodePaths(...).learning_html` and the run's event stream is
-# `RUN_LAYOUT.tool_trace`; neither is spelled here any more.
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"
 
@@ -96,15 +80,12 @@ _BUCKET_CLASS = {
 _CHIP_FIELDS = ("holding_queried", "doctored_answer_served", "difference_shown",
                 "injected_present", "capture_reasks_faulted", "envelope_ran")
 
-#: The three chips that exist ONLY on a `judge.yaml` row — never on a review reachability
-#: block. A world with no row (the control; any never-graded world) has nothing to name these
-#: from, so they are omitted entirely rather than shown as a promise "unrecorded" makes about
-#: a world that was measured (#1025 J16 c).
+#: Chips that exist only on a `judge.yaml` row. A world with no row (the control, any
+#: never-graded world) omits them rather than showing "unrecorded".
 _ROW_ONLY_CHIP_FIELDS = frozenset({"holding_queried", "doctored_answer_served",
                                    "difference_shown"})
 
-#: The mirror image of `_ROW_ONLY_CHIP_FIELDS`: never a row field, on any row shape — always
-#: read from the review's reachability block when present, with or without a row.
+#: Never a row field: always read from the review's reachability block when present.
 _REACH_ONLY_CHIP_FIELDS = frozenset({"envelope_ran"})
 
 _LADDER_FIELDS = ("holding_queried", "doctored_answer_served", "difference_shown",
@@ -117,28 +98,19 @@ _LADDER_FIELDS = ("holding_queried", "doctored_answer_served", "difference_shown
 
 
 def _safe_id(raw: str) -> str | None:
-    """`raw`, if it may safely become an html id/href/class component — grammar-gated on the
-    launcher's own run-id alphabet (#1025 J5). `None` otherwise: the caller renders an
-    "unnameable entry" line instead of building any attribute out of it."""
+    """`raw` if it may become an html id/href/class component (the run-id alphabet), else
+    `None`: the caller renders an "unnameable entry" line instead."""
     return raw if isinstance(raw, str) and is_valid_run_id(raw) else None
 
 
 def _uv(x: Any) -> str:
-    """A scalar rendered as text, through the untrusted escape — THE ONE spelling (#1025 O9):
-    almost nothing on this page is a structural literal this module wrote itself — every
-    string is a record field, and a record lives in a tree a box can reach. A second, plainer
-    alias would make every call site a silent decision that ITS value is exempt from the
-    event-handler split, which is exactly the kind of per-site judgment call this design's
-    `esc_untrusted` exists to remove; `esc()` alone is for the page's own literals and ids.
+    """A scalar rendered as text through the untrusted escape — the only spelling, since nearly
+    every string here is a record field from a box-reachable tree; `esc()` alone is for the
+    page's own literals and ids.
 
-    The SAME event-handler predicate `visualize_primitives.esc_untrusted` splits on, imported
-    rather than respelled: this page splits it across an ELEMENT boundary (`<wbr>`, a void tag
-    with no text of its own), not `esc_untrusted`'s zero-width character. Both defeat a naive
-    "onerror=" scan of the raw bytes, but only the element boundary survives a round trip
-    through this page's own text reader: a `<wbr>` contributes nothing to `Node.text()`'s walk,
-    so the two text pieces either side of it concatenate back to the ORIGINAL word exactly —
-    which several of this page's own adversarial tests assert directly (`word in page.text`),
-    a check a zero-width character would fail."""
+    Splits event-handler names with a `<wbr>` element rather than `esc_untrusted`'s zero-width
+    character: both defeat a raw "onerror=" scan, but `<wbr>` contributes no text, so the page's
+    text reader round-trips the original word (several adversarial tests assert this)."""
     if x is None:
         return "—"
     if isinstance(x, bool):
@@ -148,8 +120,7 @@ def _uv(x: Any) -> str:
 
 
 def _raw(x: Any) -> str:
-    """`x` as plain text with no markup escaping — for building a string another function will
-    escape exactly once. `None` reads as the same em dash `_uv` shows."""
+    """`x` as plain text, unescaped, for a string another function escapes once."""
     if x is None:
         return "—"
     if isinstance(x, bool):
@@ -162,14 +133,12 @@ def _unnameable(raw: str, *, what: str) -> str:
 
 
 def _money(cost: float) -> str:
-    """A total is gated where it is printed, not only where its addends were read: every row
-    passes `_finite`, and the sum of enough finite rows is still `inf` (review of PR #1042)."""
+    """Gated at print time too: a sum of finite rows can still be `inf`."""
     return f"${cost:.4f}" if math.isfinite(cost) else "—"
 
 
 def _items(x: Any) -> list[Any]:
-    """A record field that the writer produces as a list, or nothing: a scalar where a list
-    belongs is that field's own absence, never the page's crash."""
+    """A list field, or `[]` when the record holds anything else."""
     return x if isinstance(x, list) else []
 
 
@@ -217,15 +186,11 @@ def _read_review(bound: Bound) -> _Record:
 
 
 def _strict_samples_reader(bound: Bound, name: str) -> dict[str, Any] | None:
-    """The page's own STRICT reading of `samples.yaml` (#1025 F-4) — through `read_samples_
-    record`'s `reader=` seam. The DEFAULT reader `read_samples_record` uses everywhere else
-    stays permissive (#1007 M4/O5); this one refuses what it cannot read so the page's
-    "unreadable" state is distinguishable from "absent", and answers `None` on absence — the
-    typed answer `_read_samples` coalesces at its own read site (#1049 RF-R1). The screen
-    itself is the package's one home for a YAML record read (`screened_yaml_mapping`), not a
-    second spelling of it — `empty_ok=True` because a present-but-empty samples.yaml is
-    "nothing recorded yet", not a reason to call the whole record unreadable (the manifest's
-    own empty-document refusal is untouched)."""
+    """The page's strict reading of `samples.yaml`, via `read_samples_record`'s `reader=` seam.
+
+    The default reader stays permissive; this one refuses what it cannot read so "unreadable" is
+    distinguishable from "absent" (`None`). `empty_ok=True`: an empty file means nothing
+    recorded yet."""
     return family.screened_yaml_mapping(bound, name, what="the samples record", empty_ok=True)
 
 
@@ -262,8 +227,7 @@ def _read_family_stamp(bound: Bound) -> _Record:
 
 
 def _read_grade(episode_dir: Path) -> _Record:
-    # `read_grade` KEEPS the root and binds at entry (#1049 non-obligation) — its own refusal
-    # never quotes it (RF-C3), so no scrub is needed here either.
+    # `read_grade`'s refusal never quotes the root, so no scrub is needed.
     try:
         grade = read_grade(episode_dir)
     except JudgeRefused as bad:
@@ -282,20 +246,15 @@ class _ResultEvent:
 
     __slots__ = ("cost", "wall_ms", "state")
 
-    #: The ONE sentence each non-`ok` state reads as, wherever a run's cost is shown — the
-    #: world section and the stages table both take it from here, so the same trace cannot
-    #: read "no result event" in one and "unusable result event" in the other.
+    #: The one sentence each non-`ok` state reads as, shared by every surface showing a cost.
     TEXT = {
-        # No `tool_trace.jsonl` at all — a launcher-produced run that never wrote one, not a
-        # sibling whose trace simply lacks a terminal result row (#1025). "no result event"
-        # implies a trace WAS read; here nothing was there to read, so it reads the same
-        # words the questioner/judge steps use for the same absence.
+        # No `tool_trace.jsonl` at all: nothing was read, so it matches the questioner/judge
+        # steps' wording rather than "no result event".
         "absent": "no cost recorded",
         "refused": "no result event (refused)",
         "none": "no result event",
         "unusable": "unusable result event",
-        # A priced run shows its cost, not a sentence; the key is here so `text` can never
-        # raise out of a display helper (d01: only `family.yaml` is fatal).
+        # Present so `text` never raises out of a display helper.
         "ok": "",
     }
 
@@ -314,23 +273,19 @@ class _ResultEvent:
 
 
 class _Timing:
-    """The stage clock, DECIDED ONCE for every surface that shows it: the stages header, the
-    stage table's caption and the verdict tile's fallback all read the same answer here, so
-    they cannot disagree about whether the episode has a measured wall.
+    """The stage clock, decided once so every surface agrees on whether the episode has a
+    measured wall.
 
-    `error` is the reader's refusal (present but unreadable — the table's own distinct line);
-    `rows_by_step` the readable rows; `trusted_by_step` those whose pair is not inverted;
-    `launcher_wall_ms` the span over every trusted pair, or `None` when there is none — the
-    ONE bit `measured` turns on. `caption` is the table's fallback line for an unmeasured
-    clock, `None` once there is a real wall to show instead."""
+    `error` is the reader's refusal; `rows_by_step` the readable rows; `trusted_by_step` those
+    whose pair is not inverted; `launcher_wall_ms` the span over every trusted pair, or `None`
+    (which is what `measured` tests). `caption` is the table's fallback for an unmeasured
+    clock."""
 
     __slots__ = ("error", "present", "rows_by_step", "trusted_by_step", "launcher_wall_ms")
 
     def step_wall_ms(self, step: str) -> float | None:
-        """ONE step's wall: its first trusted entry's start to its last trusted entry's end
-        (J15) — never a sum, which double-counts a repeated step's own reported span — or
-        `None` with no trusted pair. The stage table's row and the RUNS step's launcher line
-        both read this, so they cannot disagree about one step (review of PR #1042)."""
+        """One step's wall: first trusted start to last trusted end (never a sum, which
+        double-counts a repeated step), or `None` with no trusted pair."""
         trusted = self.trusted_by_step.get(step, [])
         if not trusted:
             return None
@@ -344,13 +299,9 @@ class _Timing:
         if rec.ok:
             for row in rec.value or []:
                 self.rows_by_step.setdefault(row["step"], []).append(row)
-        # Only a NON-INVERTED pair feeds a span: an inverted row (`d < 0`, `_wall_between`'s
-        # own sentinel) shows "—" in its own cell rather than a number, and letting its
-        # untrustworthy pair still widen or narrow min(start)/max(end) would silently corrupt
-        # the one aggregate the row's own display just refused to state (#1025 p5). A
-        # ZERO-length pair is not inverted: the clock stamps whole seconds (`now_iso()`), so a
-        # step that starts and ends within one is a real step whose endpoints belong in the
-        # span.
+        # Only non-inverted pairs feed a span: an inverted row shows "—" in its own cell and
+        # must not skew min(start)/max(end). A zero-length pair is valid — the clock stamps
+        # whole seconds.
         for step, rows in self.rows_by_step.items():
             self.trusted_by_step[step] = [
                 r for r in rows
@@ -371,10 +322,7 @@ class _Timing:
         if self.error is not None:
             return None  # the table renders the refusal itself, as its own `st-error` line
         if not self.rows_by_step:
-            # ABSENT vs a present record with no completed step (an abort before the first
-            # step finished leaves `{"steps": []}`, a legitimate record) — told apart by the
-            # reader's own `present` (#1049 D-J7: derived from `rows is not None`, never
-            # `bool(rows)`), never conflated into one caption.
+            # Absent vs present with no completed step (an early abort writes `{"steps": []}`).
             if self.present:
                 return "model-call time — no completed stages"
             return "model-call time — no timing record"
@@ -382,9 +330,8 @@ class _Timing:
 
 
 class _WorldArchive:
-    """What `worlds/<label>/` holds for the world section: the archived report (its own
-    `absent` when nothing is at its name; a refused entry is its `reason`), whether the
-    investigation is archived, and the two JSON stamps (`None` when absent or unreadable)."""
+    """What `worlds/<label>/` holds: the archived report, whether the investigation is
+    archived, and the two JSON stamps (`None` when absent or unreadable)."""
 
     __slots__ = ("report", "investigation_present", "provenance", "scrub")
 
@@ -397,39 +344,30 @@ class _WorldArchive:
 
 
 class _WorldLeads:
-    """One world's leads block, read: the served-ledger note (or `None`), whether the world is
-    archived at all, the investigation's refusal (or `None`), whether the hand-off moved, and
-    every lead's chain in roster order (a refused gather summary is the chain's own sentence).
+    """One world's leads block: the served-ledger note, whether the world is archived, the
+    investigation's refusal, whether the hand-off moved, and each lead's chain in roster order.
 
-    The ledger and the document are TWO slots (#1025): each is read by its own package reader
-    and refuses on its own, so a served ledger that is absent or unreadable costs the block its
-    malformed-row count and nothing else — the resolutions, the hand-off note and the
-    referenced-lead roster all come off `investigation.md`, which is read whether or not the
-    ledger could be."""
+    The ledger and `investigation.md` are read and refused independently: a missing ledger costs
+    only the malformed-row count."""
 
     __slots__ = ("ledger_note", "archived", "dir_error", "facts_error", "moved", "chains")
 
     def __init__(self) -> None:
         self.ledger_note: str | None = None
         self.archived = False
-        #: `worlds/<label>` is there but is not a listable real directory (a planted link, a
-        #: file squatting the name, a permission fault): the bind's own refusal, said once for
-        #: the block — no lead is rostered off a directory that was never listed.
+        #: `worlds/<label>` exists but is not a listable real directory: the bind's refusal,
+        #: said once for the block.
         self.dir_error: str | None = None
         self.facts_error: str | None = None
         self.moved = False
         self.chains: list[tuple[str, dict[str, Any]]] = []
 
 
-#: The three shapes a roster item takes — decided ONCE at load (`_build_roster`), so the
-#: worlds and leads sections render the list they are handed and their headings count that
-#: same list. A renderer that re-decides membership on the way through (is this label
-#: nameable? is it a world at all?) is how a heading came to count a different set than the
-#: sections under it (#1025).
+#: The three shapes a roster item takes, decided once at load (`_build_roster`) so the worlds
+#: and leads sections and their headings all count the same list.
 ROSTER_WORLD = "world"
-#: A `runs/` artifact dir whose name did not decompose into `<episode_id>-<label>` (J7 iv):
-#: a section keyed on its full name, no record-driven parts, a leads block that reads "not
-#: archived".
+#: A `runs/` dir whose name does not decompose into `<episode_id>-<label>`: sectioned under its
+#: full name, with a leads block reading "not archived".
 ROSTER_STRAY_RUN_DIR = "stray_run_dir"
 #: A label (or directory name) that cannot become an html id (`_safe_id`): rendered as one
 #: "unnameable entry" line in the worlds section, and given NO section, NO leads block and
@@ -459,10 +397,9 @@ class WorldEntry:
         self.in_manifest = False
         self.manifest_doc: dict[str, Any] | None = None
         self.row: dict[str, Any] | None = None  # judge.yaml row, if any
-        #: Whether the label may be joined into a path at all (`family.world_label_names_
-        #: directory`): a label carrying `..` or a separator names a directory OUTSIDE the
-        #: episode, so the loader reads nothing for it and the sections render it as an
-        #: unnameable entry — the same grammar the grading pass refuses such a manifest on.
+        #: Whether the label may be joined into a path (`family.world_label_names_directory`):
+        #: a label with `..` or a separator names a directory outside the episode, so nothing
+        #: is read for it and it renders as unnameable.
         self.nameable = False
         self.run_dir_name: str | None = None  # the runs/ dir that decomposed to this label
         self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
@@ -510,12 +447,9 @@ class _WireLogs:
         self.traces: dict[str, _Trace] = {}
 
     def stems_for(self, role_prefix: str) -> set[str]:
-        """Every call's own STEM for a role — the union of plain trace files and framed twins,
-        since a launcher-produced episode writes only the framed one for some roles (#1025
-        J13a/b): a stem with no plain trace file still gets a block, built entirely from its
-        framed record."""
-        # No plainness test: an entry exists in `traces` only because a plain file or a
-        # framed twin was seen at load, so every stem here already has one of the two.
+        """Every call's stem for a role — plain trace files and framed twins together, since
+        some roles write only the framed record."""
+        # Every entry in `traces` already has one of the two.
         return {s for s in self.traces if s.startswith(role_prefix)}
 
     def plain_stems(self, *, agent_prefix: str) -> list[str]:
@@ -525,11 +459,9 @@ class _WireLogs:
                       if t.plain != "absent" and s[: -len("_trace")].startswith(agent_prefix))
 
     def role_cost(self, role_prefix: str) -> _RoleCost:
-        """The cost of every trace file this stage's role owns — one call per FILE. A call is
-        "priced" when its response row carries `usage` and a `model` the pricing table
-        resolves; the wall total sums `duration_ms` only where present, independently of
-        whether the call priced (#1025 J13b). Computed ONCE per role at load (`_cost_totals`)
-        and read off `_Episode.role_costs` by every surface after."""
+        """The cost of every trace file this role owns — one call per file. A call is priced
+        when a response row carries `usage` and a `model` the pricing table resolves; the wall
+        sums `duration_ms` wherever present, priced or not. Computed once per role at load."""
         agent_prefix = "questioner" if role_prefix == "questioner" else "judge_"
         out = _RoleCost()
         for stem in self.plain_stems(agent_prefix=agent_prefix):
@@ -553,9 +485,8 @@ class _WireLogs:
         return out
 
     def comparator_cost(self) -> tuple[float, int]:
-        """`(cost, priced calls)` — `calls` counts response rows that actually priced, not files:
-        an empty (or response-less) comparator trace contributes a file to the stream list but no
-        call here, so the review row still reads "no model calls" (#1025 J13b)."""
+        """`(cost, priced calls)` — counts priced response rows, not files, so an empty
+        comparator trace still reads "no model calls"."""
         total = 0.0
         calls = 0
         for stem in self.plain_stems(agent_prefix="comparator_"):
@@ -574,25 +505,18 @@ class _WireLogs:
 
 def _priced(model: Any, usage: Any) -> float | None:
     """This response row's bill, or `None` when it does not price: no `usage` mapping, no
-    `model` string, a model the table does not know, or token counts that are not numbers — a
-    wire log sits in a tree a sibling box can write, so a count spelled as text is that row's
-    own unpriced state, never the page's crash."""
-    # `model` EMPTY is unpriced here, not `pricing.model_key`'s absorbed pre-provider case: a
-    # wire-log row that recorded no model at all is a call the page cannot bill, and billing
-    # it at the absorbed row's rate would put a figure on the stage table for a model that
-    # was never named.
+    `model`, an unknown model, or non-numeric token counts (wire logs are box-writable)."""
+    # An empty `model` is unpriced here, unlike `pricing.model_key`'s absorbed case: billing an
+    # unnamed model at some rate would invent a figure.
     if not (isinstance(usage, dict) and isinstance(model, str) and model):
         return None
     try:
         cost = pricing.usage_cost(model, usage)
         pricing.model_key(model)
     except (pricing.UnknownModel, TypeError, ValueError, OverflowError):
-        # `OverflowError`: a token count spelled as a 400-digit literal is an int, and
-        # int-times-rate overflows before `_finite` ever sees the product.
+        # `OverflowError`: a 400-digit token count overflows before `_finite` sees it.
         return None
-    # The same gate `_result_event` puts on `total_cost_usd`: a usage block is box-writable,
-    # and a negative, NaN or overflowing token count priced straight into the verdict tile
-    # and the stages total as `$-146.7500` / `$inf` (#1025).
+    # Usage blocks are box-writable: reject negative, NaN or infinite costs.
     priced = _finite(cost)
     return priced if priced is not None and priced >= 0 else None
 
@@ -622,8 +546,7 @@ class _Finding:
     raw: Any
 
     def __init__(self, **kw: Any) -> None:
-        # REFUSED, not dropped: a misspelled keyword at any construction site would otherwise
-        # become a silent `None` field on every row.
+        # Refused rather than dropped, or a misspelled keyword becomes a silent `None` field.
         unknown = set(kw) - set(self.__slots__)
         if unknown:
             raise TypeError(f"_Finding: unknown field(s) {sorted(unknown)}")
@@ -632,10 +555,9 @@ class _Finding:
 
 
 class _Findings:
-    """The findings walk's one answer, shared by the verdict tiles, the cards and the findings
-    section: the rows, the disposition counts, each label's draw-read report, the failed draws,
-    each draw's dropped count, and each heading's group number — the `fg-<n>` a card's footer
-    links and the findings section renders are the SAME numbering by construction."""
+    """The findings walk's one answer, shared by the verdict tiles, cards and findings section:
+    rows, disposition counts, each label's draw-read report, failed draws, dropped counts, and
+    each heading's group number (the `fg-<n>` cards link to)."""
 
     __slots__ = ("rows", "counts", "world_reports", "draw_failures", "dropped", "group_index")
 
@@ -653,26 +575,20 @@ class _Episode:
     """One read of the episode directory — everything a section renders, already typed."""
 
     def __init__(self, episode_dir: Path, manifest: dict[str, Any]) -> None:
-        #: Held for EXACTLY two readers that are not this page's to rewrite — the lead
-        #: repository (`family.leads_by_id`, the run dir's own surface) and the draw reader
-        #: (`draws_on_disk_report`) — and reached only past the bind's own listing having
-        #: judged the world directory real. Never formatted into the page.
+        #: Held only for the lead repository and the draw reader, reached after the bind's
+        #: listing judged the world directory real. Never formatted into the page.
         self.dir = episode_dir
-        # NO bound reader is stored here (#1049 D-V2): `load_episode` binds once, threads the
-        # handle through every loader as an argument, and closes it when it returns — every
-        # read the page makes happens at load, and a renderer has no tree to reach for.
+        # No bound reader is stored: `load_episode` threads it through the loaders and closes
+        # it, so renderers have no tree to reach for.
         self.manifest = manifest
         self.episode_id = family.episode_id_of(manifest)
-        # BUILT OR ABSENT, never the raw id in its place: the token is joined into
-        # `served/<token>.<label>.jsonl`, and an id the builder refuses (`../../x`) joined raw
-        # would name a file OUTSIDE the episode dir this page promises to read from alone.
-        # With no token there is no ledger to read, and the leads block says so.
+        # Built or absent, never the raw id: the token is joined into
+        # `served/<token>.<label>.jsonl`, and a raw `../../x` would escape the episode dir.
         try:
             self.episode_token: str | None = episode_token_for(self.episode_id)
         except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger
             self.episode_token = None
-        # The manifest's world entries, as MAPPINGS: a scalar where the list belongs, or a
-        # scalar among the entries, is nothing to render a section for.
+        # Only mapping entries: scalars have nothing to render.
         self.manifest_worlds: list[dict[str, Any]] = [
             w for w in _items(manifest.get("worlds")) if isinstance(w, dict)]
         self.control_label: str | None = next(
@@ -695,8 +611,7 @@ class _Episode:
         self.archived_world_dirs: list[str] = []
         self.alert: Any = None
         self.draws: dict[str, tuple[dict[int, dict[str, Any]], DrawsSkipReport]] = {}
-        #: One leads block per ROSTER label — a `runs/` directory that decomposed to no world
-        #: (J7 iv) gets one too, keyed by its full name, so the section reads the same for it.
+        #: One leads block per roster label, stray `runs/` dirs included (keyed by full name).
         self.leads: dict[str, _WorldLeads] = {}
         self.wire = _WireLogs()
         self.findings = _Findings()
@@ -704,23 +619,19 @@ class _Episode:
         self.total_cost = 0.0
         #: Did ANY run's result event price the run — the runs sub-total's own gate.
         self.runs_costed = False
-        #: Did anything at all price this episode (a run, a questioner call, a judge call) —
-        #: the grand total's gate. A flag, not `total_cost`'s truthiness: an episode whose
-        #: every run cost $0.0000 is priced, and owes its total line, exactly as the runs
-        #: sub-total below it does.
+        #: Did anything price this episode — the grand total's gate. A flag rather than
+        #: `total_cost`'s truthiness: an all-$0.0000 episode is still priced.
         self.costed = False
         self.worlds_wall = ""
         self.lower_bound = ""
-        #: Each model role's spend, decided ONCE at load and read by the verdict tile, the
-        #: stages header and the stage table alike — never re-walked at a render site.
+        #: Each model role's spend, decided once at load for every surface that shows it.
         self.role_costs: dict[str, _RoleCost] = {}
         self.review_cost = 0.0
         self.review_calls = 0
 
     @property
     def sectioned(self) -> list[RosterItem]:
-        """The roster items that get a section and a leads block — the count both headings
-        show, by construction the same list the sections are rendered from."""
+        """The roster items that get a section and a leads block — what both headings count."""
         return [item for item in self.roster if item.sectioned]
 
     @property
@@ -729,12 +640,11 @@ class _Episode:
 
     @property
     def not_graded(self) -> bool:
-        """J14: a `not_graded` stamp voids the whole family's word."""
+        """A `not_graded` stamp voids the whole family's word."""
         return self.grade is not None and self.grade.not_graded is not None
 
     def manifest_world(self, label: str) -> dict[str, Any] | None:
-        """The FIRST manifest entry naming `label` — the section's own; the guide renders every
-        entry verbatim regardless (J7 iii)."""
+        """The first manifest entry naming `label`; the guide still renders every entry."""
         return next((w for w in self.manifest_worlds if w.get("world_id") == label), None)
 
     def review_block(self, label: str) -> dict[str, Any] | None:
@@ -749,8 +659,8 @@ class _Episode:
 
 
 def load_episode(episode_dir: Path) -> _Episode:
-    """Every record the page shows, read once. Raises `JudgeRefused` for the manifest alone
-    (d01: the ONE fatal refusal); every other refusal is a slot on the model."""
+    """Every record the page shows, read once. Raises `JudgeRefused` for the manifest alone;
+    every other refusal is a slot on the model."""
     episode_dir = Path(episode_dir)
     with bind(episode_dir) as bound:
         return _load_episode(episode_dir, bound)
@@ -780,9 +690,8 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
         if w is not None:
             w.row = row
 
-    # EVERY path below is joined from a label; only a label that names a directory of its
-    # own reaches the disk. `archived_world_dirs` are real directory names, but a name is not
-    # a label (`..` is a name) — the same gate applies.
+    # Every path below is joined from a label, so only labels naming their own directory reach
+    # the disk. Real directory names get the same gate (`..` is a name).
     nameable = [w.label for w in ep.entries.values() if w.nameable]
     labels = [w["world_id"] for w in ep.manifest_worlds
               if isinstance(w.get("world_id"), str) and w["world_id"] in nameable]
@@ -790,7 +699,7 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
         n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = (_load_draws(ep, bound, label)
+        ep.draws[label] = (_load_draws(bound, label)
                            if label == _FAMILY_LABEL or ep.entries[label].nameable
                            else ({}, DrawsSkipReport()))
     for w in ep.entries.values():
@@ -810,29 +719,21 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     return ep
 
 
-def _load_draws(ep: _Episode, bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
-    """The draws under `worlds/<label>/judge/` through the enqueue's own reader — which takes
-    a path — reached ONLY when the bind's listing of `worlds/<label>` says the draw directory
-    is a real one (never a link the page would otherwise hand the reader to follow)."""
-    world = bound.under(LAYOUT.world(label).dir).entries()
-    if not world.has_dir(WORLD_LEAVES.draws.name):
-        return {}, DrawsSkipReport()
-    return draws_on_disk_report(EpisodePaths(ep.dir).world(label).draws)
+def _load_draws(bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
+    """The draws under `worlds/<label>/judge/`, through the enqueue's reader over this pass's
+    root handle (a link anywhere on the way lists nothing)."""
+    return draws_on_disk_report(bound, label)
 
 
 def _duration(value: Any) -> float | None:
-    """A `duration_ms` that can be shown: finite AND non-negative — the same gate
-    `_result_event` puts on `total_cost_usd`. A negative wall off a box-writable trace made
-    the worlds' wall range and the lower-bound estimate count backwards (review of PR #1042)."""
+    """A showable `duration_ms`: finite and non-negative (traces are box-writable)."""
     ms = _finite(value)
     return ms if ms is not None and ms >= 0 else None
 
 
 def _finite(value: Any) -> float | None:
-    """`value` as a float when it is a real, finite number — `json.loads` admits `NaN` and
-    `Infinity`, and `fmt_duration`'s `int(...)` rejects both — else `None`. The coercion goes
-    through `float(...)` first: a 400-digit literal is an int, not `inf`, and `math.isfinite`
-    on it raises `OverflowError` rather than answering (review of PR #1042)."""
+    """`value` as a finite float, else `None`. `json.loads` admits `NaN`/`Infinity`, and a
+    400-digit int makes `math.isfinite` raise, so it goes through `float(...)` first."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
@@ -849,16 +750,14 @@ def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
     return None
 
 
-def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision (manifest ∪ judge.yaml rows ∪ runs/ dirs), the roster every other section keys on
+def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision the roster keys on
                   *, grade_present: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
-    """Every world label the page must give a section to: manifest worlds ∪ `judge.yaml`
-    rows ∪ `runs/` directories that decompose to `<episode_id>-<label>` (#1025 J7/J8).
+    """Every world label that gets a section: manifest worlds ∪ `judge.yaml` rows ∪ `runs/`
+    directories that decompose to `<episode_id>-<label>`.
 
-    Returns the entries by label (manifest order first, then extras), the roster — each label
-    in section order, then each undecomposable `runs/` directory by its FULL NAME, every item
-    classified once here (`ROSTER_WORLD` / `ROSTER_STRAY_RUN_DIR` / `ROSTER_UNNAMEABLE`) — and
-    the count of `worlds/` directories that are on neither the manifest nor the record
-    (reported on one templated line, never rendered)."""
+    Returns the entries by label (manifest order first), the classified roster (labels, then
+    undecomposable `runs/` dirs by full name), and the count of `worlds/` dirs on neither the
+    manifest nor the record (reported on one line, never rendered)."""
     entries: dict[str, WorldEntry] = {}
     order: list[str] = []
     runs = bound.under(LAYOUT.runs).entries()
@@ -871,19 +770,13 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
             order.append(label)
         return entries[label]
 
-    # A manifest world with no `judge.yaml` row contributes a section only once the episode
-    # has reached RUNS at all — `runs/` still exists, a grade record landed at some point
-    # (readable or not; `runs/` is disposable after it, J8), or a world was archived under
-    # `worlds/`. An episode that never got past REVIEW/STAGING (a rejection, an abort) has none
-    # of these: a manifest but no world to show anything about yet (#1025 J7/J8).
-    # (`run_dirs` non-empty implies `runs/` listed — it is listed from it — so the rule is
-    # these three, not four.)
+    # A manifest world with no grade row gets a section only once the episode reached RUNS:
+    # `runs/` exists, a grade record landed, or a world was archived. An episode rejected or
+    # aborted before then has no world to show.
     reached_runs = runs.entries is not None or grade_present or bool(ep.archived_world_dirs)
-    # `family` IS NOT A WORLD. It is the reserved label the family-level call's draws live under
-    # (`worlds/family/judge/`), and the judge refuses a manifest that spells a world with it —
-    # but the page reads whatever tree it is given, and a manifest row, a grade row or a
-    # `runs/<ep>-family` directory carrying the name would otherwise make the family lane a
-    # world entry as well, walking its draws twice under duplicate `f-family-*` ids.
+    # `family` is not a world: it is the reserved label for the family-level draws. The judge
+    # refuses such a manifest, but the page reads whatever tree it is given, and treating it as
+    # a world would walk its draws twice under duplicate ids.
     for w in ep.manifest_worlds:
         label = w.get("world_id")
         if not isinstance(label, str) or label == _FAMILY_LABEL:
@@ -892,8 +785,7 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
             continue
         entry(label)
         entries[label].in_manifest = True
-        # keep the FIRST manifest entry's fields as the section's own; the guide renders every
-        # entry verbatim regardless (J7 iii).
+        # The first manifest entry is the section's own.
         if entries[label].manifest_doc is None:
             entries[label].manifest_doc = w
 
@@ -909,11 +801,8 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
             continue
         entry(label).run_dir_name = child
 
-    # ONE ITEM PER LABEL. A stray directory's roster label is its full name, and a name that is
-    # already a world's label (`runs/<label>/` beside `runs/<ep>-<label>/`) would be a second
-    # item with the same `world-<label>`/`leads-<label>` ids, silently overwriting the world's
-    # leads block. It is reported on the off-roster line instead, beside the `worlds/` entries
-    # the roster does not carry.
+    # One item per label: a stray dir named like an existing label would duplicate its ids and
+    # overwrite that world's leads block, so it goes on the off-roster line instead.
     shadowed = [name for name in stray_run_dirs if name in entries]
     stray_run_dirs = [name for name in stray_run_dirs if name not in entries]
 
@@ -929,10 +818,8 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
 
 
 def _result_event(bound: Bound, run_rel: PurePosixPath) -> _ResultEvent:
-    # THE EPISODE BIND, WALKED THROUGH THE JSONL TWIN (#1049) — absent/refused are the
-    # primitive's own states, never an `entry_present` stat ahead of the read; a link or a
-    # FIFO at the name is refused at the open itself rather than crashing the page with a
-    # bare `PermissionError` (root ignores mode 000; a real non-root run does not, #1025).
+    # Through the bind's JSONL reader: absent/refused are its own states, and a link or FIFO is
+    # refused at the open rather than raising `PermissionError`.
     rows, _bad, rec = bound.read_jsonl(run_rel / RUN_LAYOUT.tool_trace)
     if rec.absent:
         return _ResultEvent(None, None, "absent")
@@ -949,11 +836,8 @@ def _result_event(bound: Bound, run_rel: PurePosixPath) -> _ResultEvent:
 
 
 def _load_world_archive(bound: Bound, label: str) -> _WorldArchive:
-    # NO PRE-CHECK OF `worlds/<label>` (#1049 D-36): each leaf below reads for itself, through
-    # the episode bind, and answers its own absent/refused/present state — a world with no
-    # `worlds/<label>` directory at all reads every leaf absent exactly as one with the
-    # directory but no file at a leaf does, because the walk's own ENOENT does not care which
-    # component was missing; a LINK at `worlds/<label>` is every leaf's own refusal.
+    # No pre-check of `worlds/<label>`: each leaf reads through the bind and reports its own
+    # absent/refused state, whichever path component was missing or a link.
     world_rel = LAYOUT.world(label)
     report = family.read_archived_report(bound, world_rel.report)
     investigation = bound.read(world_rel.investigation)
@@ -964,16 +848,13 @@ def _load_world_archive(bound: Bound, label: str) -> _WorldArchive:
         scrub=family.json_mapping(bound, world_rel.scrub_verdict))
 
 
-def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block (#1025 O3)
+def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  # noqa: C901, PLR0912 — the served ledger, the archive notes and every lead's chain are one world's leads block
     leads = _WorldLeads()
     world = bound.under(LAYOUT.world(label).dir)
 
-    # The served ledger is read ONCE, through the judge's own reader (`read_world_ledger`) —
-    # its `malformed_rows` is the judge's own count (a torn line AND a row whose `source` is
-    # outside the ledger's vocabulary), the number that lands on the `judge.yaml` row. A second
-    # read here through the bare tolerant reader counted only the torn lines and disagreed with
-    # the record. ITS OWN SLOT: the ledger's refusal is the ledger note, and never reaches the
-    # investigation read below.
+    # Read through the judge's own reader so `malformed_rows` matches the count on the
+    # `judge.yaml` row (torn lines and out-of-vocabulary `source` values). Its refusal is the
+    # ledger note only and does not affect the investigation read below.
     if ep.episode_token is None:
         leads.ledger_note = "served ledger: not readable — the episode id names no token"
     else:
@@ -988,12 +869,9 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
             elif malformed:
                 leads.ledger_note = f"{malformed} malformed row"
 
-    # DIRECTORY-LEVEL, OFF THE BIND'S OWN LISTING (#1049 D-36) — never a stat: a world whose
-    # `worlds/<label>` is wholly absent has nothing this block can chain leads over; one whose
-    # entry is there but is not a real, listable directory (a planted link, a file at the
-    # name) is refused ONCE, here, and nothing below it is rostered — a link is never a way to
-    # another tree's leads; one that exists but is missing individual records
-    # (investigation.md, a lead's summary) still renders every leaf it can, each its own arm.
+    # Off the bind's listing, never a stat. Wholly absent: nothing to chain. Present but not a
+    # real listable directory (a link, a file): refused once here, nothing rostered. Missing
+    # individual records: every other leaf still renders.
     listing = world.entries()
     leads.archived = not listing.absent
     if not leads.archived:
@@ -1012,17 +890,13 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
         if not read_facts.absent:
             facts = read_facts
 
-    # `leads_by_id` is the lead repository's own surface and takes the world's directory — the
-    # one path this block hands anyone, and only now that the listing above judged
-    # `worlds/<label>` a real directory.
+    # `leads_by_id` takes a path, handed over only after the listing judged it a real directory.
     try:
         all_leads = family.leads_by_id(EpisodePaths(ep.dir).world(label).dir)
     except Exception:  # noqa: BLE001
         all_leads = {}
 
-    # A summary is a `.md` plain file; anything else in the directory is invisible here — its
-    # stem is a lead id the roster below neutralizes on its own if it cannot be named. The
-    # judge prompt's roster and this one come off one spelling (`summary_lead_ids`).
+    # Only `.md` plain files are summaries; `summary_lead_ids` is shared with the judge prompt.
     summary_stems = family.summary_lead_ids(world)
 
     if facts is not None:
@@ -1034,9 +908,8 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
         resolutions_by_lead = {}
 
     for lead_id in sorted(roster):
-        # `lead_chain` reads the gather summary through the world's derived sub-bind and
-        # answers a refusal as the summary's own sentence; nothing is caught here, so the page
-        # and the grading pass see one and the same reader.
+        # `lead_chain` answers a refused summary as its own sentence; nothing is caught here so
+        # the page and the grading pass share one reader.
         chain = family.lead_chain(world, lead_id, resolutions_by_lead, leads=all_leads)
         leads.chains.append((lead_id, chain))
     return leads
@@ -1051,12 +924,8 @@ def _load_wire_logs(wire: Bound) -> _WireLogs:
     for name in sorted(listing.entries):
         if not name.endswith(".jsonl"):
             continue
-        # THE STEM IS THE OWNER'S, for both halves (#1077 D7). A trace and its framed
-        # companion are paired on this key, and the two branches used to derive it by
-        # different hand-spelled arithmetic — one stripping `_framed_trace.jsonl` and adding
-        # back `"_trace"`, the other stripping `.jsonl`. They agreed only by coincidence of
-        # the two suffixes; either one changing left every framed row keyed to a stem no
-        # trace holds, which renders a page with no prompt/reply pairs and no error.
+        # Both a trace and its framed twin take their stem from `WIRE_LOG_NAMES.trace_key`, so
+        # they always pair on the same key.
         if WIRE_LOG_NAMES.is_framed(name):
             stem = WIRE_LOG_NAMES.trace_key(name)
             trace = logs.traces.setdefault(stem, _Trace(stem))
@@ -1068,10 +937,8 @@ def _load_wire_logs(wire: Bound) -> _WireLogs:
             continue
         stem = WIRE_LOG_NAMES.trace_key(name)
         trace = logs.traces.setdefault(stem, _Trace(stem))
-        # `wire_logs/` sits under the episode dir, a tree a sibling box has an rw bind on
-        # (`judge.__init__._write_wire_log`'s own docstring names it): the bound reader
-        # refuses a link or a FIFO at the name at the open itself and answers a permission
-        # fault as a refusal rather than an exception.
+        # `wire_logs/` is box-writable: the bound reader refuses a link or FIFO at the open and
+        # answers a permission fault as a refusal.
         rows, unreadable, rec = wire.read_jsonl(name)
         if rec.text is None:
             trace.plain = "refused" if rec.refusal is not None else "absent"
@@ -1097,9 +964,8 @@ def _cost_totals(ep: _Episode) -> tuple[float, bool, bool, str, str]:
     j = ep.role_costs[str(Step.JUDGE)] = ep.wire.role_cost(Step.JUDGE)
     ep.review_cost, ep.review_calls = ep.wire.comparator_cost()
     total += q.cost + j.cost
-    # PRICED calls, not trace files: a role whose only trace is refused, unreadable or priced
-    # by no known model has spent nothing the page can name, and a "$0.0000" grand total over
-    # it is the line the stages table promises not to print (review of PR #1042).
+    # Priced calls, not trace files: a role whose only trace is refused or unpriceable has
+    # spent nothing the page can name, so it must not produce a "$0.0000" total.
     costed = runs_costed or bool(q.priced) or bool(j.priced)
     if walls:
         wall_range = f"{fmt_duration(min(walls))}–{fmt_duration(max(walls))}"
@@ -1116,8 +982,8 @@ def _cost_totals(ep: _Episode) -> tuple[float, bool, bool, str, str]:
 
 
 def _coordinate_of(finding_id: Any) -> str | None:
-    """`<label>/<draw>/<index>` off a `build_finding_row` id (`<run_id>/<label>/<draw>/
-    <index>`) — the spelling every record list keys a finding by. `None` for anything else."""
+    """`<label>/<draw>/<index>` from a `<run_id>/<label>/<draw>/<index>` finding id (how every
+    record list keys a finding), else `None`."""
     if not isinstance(finding_id, str):
         return None
     parts = finding_id.rsplit("/", 3)
@@ -1128,8 +994,7 @@ def _coordinate_of(finding_id: Any) -> str | None:
 
 
 def _ledger_of(grade: Any) -> dict[str, dict[str, Any]] | None:
-    """The record's ledger by coordinate (`EpisodeGrade.dispositions`, validated on read —
-    every entry names its finding and a lane), or `None` for a record that carries none."""
+    """The record's `dispositions` ledger by coordinate, or `None` when it carries none."""
     if grade is None or grade.dispositions is None:
         return None
     out: dict[str, dict[str, Any]] = {}
@@ -1141,8 +1006,8 @@ def _ledger_of(grade: Any) -> dict[str, dict[str, Any]] | None:
 
 
 def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
-    """The questioner rows the pass built (`world_findings`), by coordinate — the J9b stub's
-    text for a world-lane entry whose draw document is gone."""
+    """The pass's `world_findings` rows by coordinate — the stub text for a world-lane entry
+    whose draw document is gone."""
     out: dict[str, dict[str, Any]] = {}
     for row in _items(grade.world_findings):
         if isinstance(row, dict):
@@ -1153,8 +1018,8 @@ def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
 
 
 def _withheld_lookup(grade: Any) -> dict[str, dict[str, Any]]:
-    """The findings the pass withheld, whole (`withheld_findings`), by coordinate — the J9b
-    stub's text for a withheld entry whose draw document is gone."""
+    """The pass's `withheld_findings` by coordinate — the stub text for a withheld entry whose
+    draw document is gone."""
     out: dict[str, dict[str, Any]] = {}
     for item in _items(grade.withheld_findings):
         if isinstance(item, dict) and isinstance(item.get("finding"), dict):
@@ -1170,8 +1035,7 @@ def _bump(counts: dict[str, int], disposition: str) -> None:
 
 
 def _finding_fields(finding: Any) -> dict[str, Any]:
-    """The row's own fields off one draw finding, as `_Finding` keyword arguments. A finding
-    that is not a mapping (the ledger names those too — dropped, "not a mapping") has none."""
+    """One draw finding's fields as `_Finding` kwargs; a non-mapping finding has none."""
     if not isinstance(finding, dict):
         return {"raw": finding}
     return {"claim": finding.get("claim"), "root_cause": finding.get("root_cause"),
@@ -1186,10 +1050,9 @@ _LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author", LANE_WITHHE
 
 
 def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
-    """A finding on disk that the ledger does not name: the pass never walked it, and the
-    record says why without any lane being re-decided here — the world's own row is
-    `ungradable` (its draws are never walked), no row names the world at all, or the pass
-    simply did not see this document (a leftover from an earlier, wider attempt)."""
+    """Why the ledger does not name a finding on disk, without re-deciding a lane: the world's
+    row is ungradable, no row names the world, or the pass never saw this document (a leftover
+    from an earlier attempt)."""
     entry = ep.entries.get(label)
     row = entry.row if entry is not None else None
     if label != _FAMILY_LABEL and row is None:
@@ -1201,14 +1064,12 @@ def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
 
 
 def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
-    """Every finding row the page shows, keyed `(label, draw, index)`. Each row's fate is READ
-    OFF THE RECORD'S LEDGER (`EpisodeGrade.dispositions` — what the enqueue pass did with
-    that coordinate, written where it was decided) and never re-decided here: the page
-    carried first a copy of the lane rule and then the rule itself fed with inputs rebuilt
-    from the rows, and both drifted from the pass on the edges (#1025 amendment 3, and the
-    #1042 review's duplicate-label case). What the page adds is only what it can see and the
-    record cannot: a document on disk the ledger never named (`_off_ledger_disposition`), and
-    a ledger entry whose document is gone (a J9b stub)."""
+    """Every finding row the page shows, keyed `(label, draw, index)`.
+
+    Each row's fate is read off the record's ledger (`EpisodeGrade.dispositions`), never
+    re-decided here — re-deriving the lane rule drifts from the pass at the edges. The page adds
+    only what the record cannot see: documents the ledger never named
+    (`_off_ledger_disposition`), and ledger entries whose document is gone (stubs)."""
     out = _Findings()
     rows = out.rows
     counts = out.counts
@@ -1217,22 +1078,19 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     roster_labels = [*entries, _FAMILY_LABEL]
 
     def _walked(label: str) -> bool:
-        """Does the page walk this label's draws at all? With no grade record, every roster
-        label; otherwise the family lane always, and a world once a grade row or a manifest
-        entry names it (a bare `runs/` directory is a section with no findings)."""
+        """Does the page walk this label's draws? Without a grade record, every label;
+        otherwise the family lane, and worlds a grade row or manifest entry names."""
         if grade is None or label == _FAMILY_LABEL:
             return True
         entry = entries.get(label)
         return entry is not None and (entry.row is not None or entry.in_manifest)
 
-    # ONE population for every count tile 3 shows: the dropped/failed draws are read off the
-    # same labels the findings below are walked from, so "queued of N · M dropped" cannot
-    # add a draw the walk never opened to a split it does not appear in.
+    # Dropped/failed draws come from the same labels the findings are walked from, so the
+    # counts on tile 3 share one population.
     walked_labels = [label for label in roster_labels if _walked(label)]
 
-    # The draw-read reports of EVERY label the loader read, walked or not: the findings
-    # section's "N draw documents unreadable / skipped" totals and each world section's own
-    # line count the same directories (review of PR #1042).
+    # Draw-read reports for every loaded label, walked or not, so the findings section's totals
+    # and each world section's line count the same directories.
     for label in roster_labels:
         out.world_reports[label] = ep.draws[label][1]
 
@@ -1250,9 +1108,8 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     ledger = _ledger_of(grade)
 
     def _dispose(label: str, coord: str) -> tuple[str, str | None, Any]:
-        """The row's disposition word, its reason and the record's id for it: the ledger's
-        entry where there is one; otherwise the record's own account of why the pass never
-        reached it — or, with no ledger at all, that fact alone."""
+        """The row's disposition word, reason and recorded id: the ledger's entry, else the
+        record's account of why the pass never reached it."""
         if grade is None:
             return "no_grade", None, None
         if ledger is None:
@@ -1270,8 +1127,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 coord = f"{label}/{draw}/{index}"
                 disposition, reason, recorded_id = _dispose(label, coord)
                 _bump(counts, disposition)
-                # `subject` ABSENT reads as the defender's, as the enqueue pass reads it (the
-                # pre-#1007 draw shape); the row shows the same reading.
+                # A missing `subject` reads as the defender's, as the enqueue pass reads it.
                 subject = (finding.get("subject", SUBJECT_DEFENDER)
                            if isinstance(finding, dict) else None)
                 rows.append(_Finding(
@@ -1292,13 +1148,11 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 disposition=disposition, reason=reason, stub=False, recorded_id=recorded_id,
                 **_finding_fields(finding)))
 
-    # Record-only stubs (J9b): a ledger entry whose draw DOCUMENT is absent and whose text the
-    # record itself still carries — the questioner row the pass built for a world-lane entry
-    # (`world_findings`), the finding carried whole for a withheld one (`withheld_findings`).
-    # A defender or dropped entry with no document has no text anywhere on the record (its
-    # row went to the queue file, or nowhere), so it is a line in the queue accounting and
-    # not a row. THE GRAIN IS THE DOCUMENT (F-5): an entry naming a PRESENT document with
-    # fewer findings than the ledger knew renders no stub and no row.
+    # Record-only stubs: a ledger entry whose draw document is absent but whose text the
+    # record still carries (`world_findings` for a world-lane entry, `withheld_findings` for a
+    # withheld one). Defender or dropped entries have no text on the record, so they only
+    # appear in the queue accounting. The grain is the document: a present document with fewer
+    # findings than the ledger knew renders nothing extra.
     if ledger:
         present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
         world_rows_by_coord = _world_findings_lookup(grade)
@@ -1336,18 +1190,15 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
 
 
 def _group_numbering(rows: list[_Finding]) -> dict[str, int]:
-    """Each group heading's `fg-<n>`, numbered by first appearance in row order — the one
-    numbering both the findings section and the cards' footers render."""
+    """Each group heading's `fg-<n>`, by first appearance — shared by the findings section and
+    the cards' footers."""
     return {h: n for n, h in enumerate(dict.fromkeys(_disposition_heading_raw(f) for f in rows),
                                        start=1)}
 
 
 def _disposition_heading_raw(f: _Finding) -> str:
-    """The group heading's PLAIN text — never pre-escaped, so the one caller that embeds it
-    can escape it exactly once. `f.reason` is a record field folded straight into the literal
-    words around it; escaping happens at the render site, not here, so the two passes can
-    never compound into a double escape (`&amp;#x27;`, which no HTML parser undoes back to the
-    original character)."""
+    """The group heading's plain text, never pre-escaped: the caller escapes it once, so a
+    record-field `reason` cannot be double-escaped into an irreversible `&amp;#x27;`."""
     if f.disposition == "defender":
         return "defender: enqueued"
     if f.disposition == "world_author":
@@ -1376,21 +1227,25 @@ def _disposition_heading_raw(f: _Finding) -> str:
 
 
 def _encode_page(html_text: str) -> bytes:
-    """The document's bytes (#1025 F-7): `errors="replace"` turns a lone surrogate into the
-    encoder's own replacement character, but it leaves a literal NUL untouched — U+0000 encodes
-    to a plain 0x00 byte under UTF-8 — so a NUL is substituted with U+FFFD FIRST, on the same
-    path as a lone surrogate, and never reaches the guarded write."""
+    """The document's bytes. `errors="replace"` handles lone surrogates but not NUL (a plain
+    0x00 in UTF-8), so NUL is replaced with U+FFFD first."""
     return html_text.replace("\x00", "�").encode("utf-8", errors="replace")
 
 
-def _write_page(episode_dir: Path, html_text: str) -> Path:
-    page_path = EpisodePaths(Path(episode_dir)).learning_html
-    write_guarded(page_path, _encode_page(html_text), mode="replace")
-    return page_path
+def _write_page(episode: Episode, html_text: str) -> Path:
+    page = episode.learning_html
+    page.write(_encode_page(html_text))
+    return page.path
 
 
 def render_episode(episode_dir: Path) -> Path:
-    return _write_page(episode_dir, build_page(episode_dir))
+    """Render `episode_dir`'s page into it. A missing episode is `JudgeRefused`, never made."""
+    try:
+        episode = Episode.open(Path(episode_dir))
+    except FileNotFoundError as missing:
+        raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
+    with episode:
+        return _write_page(episode, build_page(episode_dir))
 
 
 def build_page(episode_dir: Path) -> str:
@@ -1430,8 +1285,7 @@ def _render_nav(body: str) -> str:
     for i in ids:
         if i.startswith("world-") or i.startswith("fg-") or i.startswith("sec-"):
             items.append(f'<li class="item"><a href="#{esc(i)}">{esc(i)}</a></li>')
-    # `nav.toc` / `li.item`: the shared stylesheet's own nav vocabulary, so the sticky
-    # left-column layout is the run pages' rule and not a second spelling of it.
+    # The shared stylesheet's nav classes, so the sticky layout matches the run pages.
     return f'<nav class="toc"><ul>{"".join(items)}</ul></nav>'
 
 
@@ -1488,7 +1342,7 @@ def _render_header(ep: _Episode) -> str:
 # =========================================================================================
 
 
-def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the band, lede, four tiles and cards are one section (#1025 O1/O2)
+def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the band, lede, four tiles and cards are one section
     grade = ep.grade
     if ep.not_graded:
         stamp = grade.not_graded
@@ -1513,10 +1367,8 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
     family_docs = ep.draws[_FAMILY_LABEL][0]
-    # Draw keys come in three shapes — a document's `int`, a record-only stub's `str`, a
-    # withheld entry's `None` — and a key that compares across them is what keeps one
-    # `withheld_findings` entry tagged `world: family` from raising `TypeError` out of the
-    # whole page (d01: only `family.yaml` is fatal).
+    # Draw keys may be `int` (document), `str` (stub) or `None` (withheld entry); the sort key
+    # compares across them so a mixed set cannot raise `TypeError` out of the page.
     for draw in sorted(family_groups, key=_draw_sort_key):
         doc = family_docs.get(draw) if isinstance(draw, int) else None
         outcome = str(doc.get("episode_outcome", "")) if isinstance(doc, dict) else ""
@@ -1529,9 +1381,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     if family_failed:
         lede_parts.append(f'<div class="vd-family-failed">{_uv(family_failed)}</div>')
 
-    # `is not None`, not `or` (CLAUDE.md, "anchor a default in one place"): `family_outcome`
-    # is the record's own `str | None`, and an empty string on it is the record's word, not
-    # an absence to fall through.
+    # `is not None`, not `or`: an empty `family_outcome` is the record's word, not an absence.
     family_outcome = getattr(grade, "family_outcome", None)
     badge_word = family_outcome if family_outcome is not None else grade.verdict_word
     queued = grade.enqueued_rows + grade.world_enqueued_rows
@@ -1546,8 +1396,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
     meta = f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}</span>'
 
-    # The record's OWN partition (`_grade_from_document` derives both off the rows with
-    # `is_gradable_row`, the one predicate), never a third spelling of it here.
+    # The record's own partition, never re-derived here.
     measuring = grade.measuring_worlds
     graded = grade.graded_worlds
     control_world = ep.manifest_world(ep.control_label) if ep.control_label else None
@@ -1563,13 +1412,11 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         declared = _normalized_disposition(row.get("declared"))
         if declared != control_declared:
             contrasting += 1
-        # The same normalizer as the contrast count beside it on this tile — a case or
-        # whitespace variant of one word must not agree on one figure and differ on the other.
+        # Same normalizer as the contrast count, so case/whitespace variants agree on both.
         if _normalized_disposition(row.get("verdict")) == declared:
             agree += 1
-    # The ladder's vocabulary is `_vocab.JUDGE_OUTCOME_ENUM`'s, asked of its own normalizer
-    # (case-insensitive, trimmed — a bare `in` over a local copy would call ` Survived` off
-    # the ladder, and would go stale the day the enum grows).
+    # Asked of the vocabulary's own normalizer (case-insensitive, trimmed) rather than a local
+    # copy of the enum.
     verdict_note = ("" if normalized_judge_outcome(grade.verdict_word) is not None
                     else ' <span class="vd-nonladder">(family outcome, not the ladder)</span>')
     tile1 = (
@@ -1596,20 +1443,16 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
                   f"{counts['dropped']} dropped"]
     if counts["never_eligible"]:
         split_parts.append(f"{counts['never_eligible']} never eligible")
-    # THE WALK'S OWN COUNT (J9c) — never `grade.enqueued_rows`, which is the RECORD's figure
-    # and is shown, separately, in the queue-accounting details alongside this one.
+    # The walk's own count, not `grade.enqueued_rows` (the record's figure, shown separately in
+    # the queue accounting).
     tile_queued = counts["defender"] + counts["world_author"]
     tile3 = (
         f'<div class="vd-tile" id="vd-tile-3">{tile_queued} of '
         f'{findings_total} <div class="vd-caption">{" / ".join(split_parts)}</div></div>')
 
-    # The lower-bound label is the STAGES header's own fallback caption — owed whenever there is
-    # no REAL wall to compute from: absent, present-but-unreadable (the STAGES table's own
-    # distinct "timing record unreadable" refusal) and readable-but-every-row-inverted all
-    # leave this tile with nothing better than the estimate, so all read the same here even
-    # though the stage table itself tells them apart (spec resolution, PR body). `measured` is
-    # the header's OWN decision, taken once at load, so the two cannot disagree: with a real
-    # wall the header carries the figure and this tile must not repeat the fallback beside it.
+    # Without a real wall (absent, unreadable, or every row inverted) this tile shows the
+    # lower-bound estimate. `measured` is decided once at load, so this agrees with the stages
+    # header, which carries the figure when there is one.
     bound_html = f'<br>{ep.lower_bound}' if not ep.timing.measured else ""
     tile4 = (
         f'<div class="vd-tile" id="vd-tile-4">{_money(ep.total_cost)}'
@@ -1630,10 +1473,8 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if isinstance(reach, dict) and reach.get("envelope_failed"):
             first_line = str(reach["envelope_failed"]).splitlines()[0]
             envelope_note = f'<div class="vd-envelope">{_uv(first_line)}</div>'
-        # The footer counts this world's DEFENDER rows and links the group its first one sits
-        # in — the same rows, so the count and the anchor cannot name different things; a
-        # world-author row that happens to come first in the walk is not what "N findings ·
-        # enqueued" is about.
+        # The footer counts this world's defender rows and links the group of the first one, so
+        # the count and the anchor refer to the same rows.
         world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
         if row.get("withheld_reason") is not None:
@@ -1675,8 +1516,7 @@ def _draw_sort_key(draw: Any) -> tuple[int, Any]:
 
 
 def _normalized_disposition(value: Any) -> Any:
-    """A declared/verdict disposition through the vocabulary's own normalizer, for the tile's
-    control-contrast count — the raw value where it is not a string the normalizer knows."""
+    """A disposition through the vocabulary's normalizer, or the raw value if it knows none."""
     if not isinstance(value, str):
         return value
     return normalized_disposition(value) or value
@@ -1750,9 +1590,8 @@ def _render_worlds(ep: _Episode) -> str:
         guide_rows.append(f'<div class="vd-guide-row">{esc(label)} '
                          f'({esc(str(w.get("role")))}) {_uv(declared)} {axis_html}</div>')
 
-    # The roster AS LOADED: each item already classified, so the heading counts the very list
-    # the sections below are rendered from — the sectioned items — and an unnameable label
-    # renders its one line without being counted as a section it never gets.
+    # The roster as loaded: the heading counts the sectioned items; unnameable ones render one
+    # line and are not counted.
     sections = [_render_roster_item(ep, item) for item in ep.roster]
 
     body = f'<div class="vd-guide">{"".join(guide_rows)}</div>{"".join(sections)}'
@@ -1772,9 +1611,7 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     if item.kind == ROSTER_UNNAMEABLE:
         return _unnameable(item.label, what="world directory")
     if item.kind == ROSTER_STRAY_RUN_DIR:
-        # A `runs/` directory whose name did not decompose into `<episode_id>-<label>` (J7
-        # iv) — it is not a world at all, so it gets a minimal section keyed on its own full
-        # name rather than the normal record-driven rendering.
+        # Not a world: a minimal section keyed on the directory's full name.
         link = f"{LAYOUT.run_page(item.label)}"
         return (f'<div id="world-{esc(item.label)}" class="w-section">'
                f'<span class="w-name">{_uv(item.label)}</span>'
@@ -1783,15 +1620,11 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     return _render_one_world(ep, item.label)
 
 
-def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, ladder, chips, archive, review) is one demand (#1025 J7/J8/J16)
+def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, ladder, chips, archive, review)
     entry = ep.entries[label]
-    # J14: a `not_graded` stamp voids the whole family's word, so every world's RECORD-derived
-    # state (the ladder, the bucket, the withheld reason) is exactly what an episode with no
-    # grade at all shows — "not graded" — even though the row is still physically on the
-    # document; the run-dir/archive-derived parts below are unaffected. (The "not in the
-    # manifest" note is the verdict CARD's, `_render_verdict`: a world reaches the roster only
-    # through the manifest, a grade row or a `runs/` dir, so no section could ever have shown
-    # it here.)
+    # A `not_graded` stamp voids the family's word: every record-derived part (ladder,
+    # bucket, withheld reason) renders as "not graded" even though the row exists. Run-dir and
+    # archive parts are unaffected.
     row = None if ep.not_graded else entry.row
     bits = []
 
@@ -1827,11 +1660,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
             bits.append(f'<div class="w-axis"><q class="verbatim">{_uv(axis)}</q></div>')
 
     result = entry.result
-    # BOTH, not just the result. `run_dir_name` is `str | None` and only a world whose runs/
-    # entry was found has one — the invariant that `result` is set only alongside it is real
-    # but nothing checks it, and the old hand-composed link rendered `runs/None/runtime.html`
-    # when it broke: a dead link, silently. The owner's accessor refuses `None` outright, so
-    # the invariant is now asserted here rather than assumed two hundred lines away.
+    # Both checked: `result` is only set alongside `run_dir_name`, but nothing enforces that,
+    # and `run_page` refuses `None`.
     if result is not None and entry.run_dir_name is not None:
         link = f"{LAYOUT.run_page(entry.run_dir_name)}"
         bits.append(f'<a href="{esc(link)}">runtime</a>')
@@ -1844,9 +1674,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
     else:
         bits.append('<div class="w-archive">run directory absent</div>')
 
-    # Each archived leaf is its own arm (d: "each missing piece renders its own absent arm"),
-    # and each arm names its leaf — two bare "not archived" lines in one section said the
-    # same words about two different files.
+    # Each archived leaf is its own line and names its leaf.
     archived = entry.archive
     if archived is None:
         bits.append('<div class="w-archive">not archived</div>')
@@ -1857,9 +1685,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
         else:
             headline = archived.report.disposition_or_unknown
             if archived.report.disposition is None and archived.report.reason:
-                # No headline: the reader's own reason (a refused entry at the name, a
-                # frontmatter that did not parse, a disposition outside the vocabulary) is the
-                # slot's answer, beside the placeholder.
+                # No headline: show the reader's own reason beside the placeholder.
                 headline += f" — {archived.report.reason}"
             bits.append(f'<div class="w-report">{_uv(headline)}</div>')
         if not archived.investigation_present:
@@ -1899,11 +1725,9 @@ def _ladder_html(row: dict[str, Any]) -> str:
         val = row.get(field)
         bits.append(f'<span class="w-ladder">{esc(field)} = {_uv(val)}</span>')
         if field == "doctored_answer_served" and row.get("holding_queried"):
-            # `has_refused` is asked only where a world actually got a HOLDING answer (#1025
-            # J16) — a withheld world never reaches this arm. The CAVEAT ("unrecorded") is the
-            # not-doctored branch's own answer for a row that never stored the flag; on the
-            # doctored branch the flag is not applicable and the row's own silence is never
-            # invented into that caveat's wording.
+            # `has_refused` applies only where the world got a holding answer. "unrecorded"
+            # is for a not-doctored row missing the flag; on the doctored branch it is not
+            # applicable.
             if "has_refused" in row:
                 bits.append(f'<span class="w-ladder">has_refused = {_uv(row["has_refused"])}</span>')
             elif val is False:
@@ -1924,17 +1748,12 @@ def _chip_html(row: dict[str, Any] | None, reach: dict[str, Any] | None) -> str:
             bits.append(f'<span class="w-chip">{esc(field)}: {_uv(row[field])}</span>')
         elif (field in _REACH_ONLY_CHIP_FIELDS or row is None) \
                 and isinstance(reach, dict) and field in reach:
-            # `envelope_ran` is NEVER a row field at all, on any row shape — it is always
-            # sourced from reach when present, row or no row. The other capture-measurement
-            # fields fall back to reach ONLY when there is no row at all (the control; an
-            # ungraded world): a row that EXISTS but omits one of THEM (a pre-#1007 shape, an
-            # ungradable row's bound slots) reads "unrecorded" rather than silently falling
-            # back to a different record's value (#1025 J16 d).
+            # `envelope_ran` always comes from reach. The other fields fall back to reach only
+            # when there is no row (the control, an ungraded world); a row that omits one reads
+            # "unrecorded" rather than borrowing another record's value.
             bits.append(f'<span class="w-chip">{esc(field)}: {_uv(reach[field])}</span>')
         elif row is None and field in _ROW_ONLY_CHIP_FIELDS:
-            # No row and no review-derived source for this field either (it is never on a
-            # reachability block) — there is nothing to say "unrecorded" ABOUT, so the chip is
-            # simply absent rather than a promise this world was ever measured for it.
+            # No row and never on a reachability block: omit the chip.
             continue
         else:
             bits.append(f'<span class="w-chip">{esc(field)}: unrecorded</span>')
@@ -1976,16 +1795,12 @@ def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of 
     if f.recorded_id is not None:
         bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
     if f.outcome is not None:
-        # J10: the draw's own `episode_outcome` word, bound beside its findings.
+        # The draw's own `episode_outcome`, beside its findings.
         bits.append(f'<span class="fr-outcome">{_uv(f.outcome)}</span>')
-    # The row's own id embeds its world LABEL verbatim (`f-<label>-<draw>-<index>`); a label
-    # that fails the id grammar must never reach an attribute, so such a row renders with no
-    # id at all rather than the raw label smuggled into one (#1025 J5).
+    # The row id embeds the world label, so a label failing the id grammar gets no id at all.
     id_attr = f' id="{esc(f.row_id)}"' if _safe_id(f.label) else ""
-    # Joined with a real space, not "": two adjacent inline `<span>`s with nothing between them
-    # let the test harness's whitespace-collapsing `text()` glue their words into one token —
-    # which is how an unrelated world label ending in "...session" and a bucket value starting
-    # "analyze..." produced the literal substring "nan" on the page (#1025).
+    # Joined with a space: adjacent inline spans would otherwise glue their words together in
+    # whitespace-collapsing text extraction.
     return f'<div{id_attr} class="fr-row">{" ".join(bits)}</div>'
 
 
@@ -2040,7 +1855,7 @@ def _render_findings_section(ep: _Episode) -> str:
 # =========================================================================================
 
 
-def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section (#1025 O4)
+def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the stage table, the two clocks and every trace block are one section
     timing = ep.timing
     rows_by_step = timing.rows_by_step
     review_total, review_calls = ep.review_cost, ep.review_calls
@@ -2051,9 +1866,7 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
         if timing.error:
             wall_text = ""
         elif entries_for_step:
-            # `trusted` (the clock's own non-inverted pairs), not every row — a step whose
-            # only rows are inverted read "—" only because `fmt_duration(0)` happens to spell
-            # zero as the dash.
+            # Trusted (non-inverted) pairs only.
             step_wall = timing.step_wall_ms(str(step))
             wall_text = fmt_duration(step_wall) if step_wall is not None else "—"
             if len(entries_for_step) > 1:
@@ -2065,19 +1878,14 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
         elif str(step) == "review":
             cost_text = f"{_money(review_total)}" if review_calls else "no model calls"
         elif str(step) == "runs":
-            # The RUNS step's own row names no model calls — its cost lives on the per-run
-            # sub-rows below, which are not "no model calls" (they are model calls the worlds
-            # themselves spent); the step row itself carries only its wall.
+            # The runs step row carries only its wall; its cost is on the per-run sub-rows.
             cost_text = ""
         else:
             cost_text = "no model calls"
         table_rows.append(f'<div class="st-row">{esc(str(step))} {esc(wall_text)} '
                          f'{esc(cost_text)}</div>')
 
-    # The table's own caption is the clock's decision (`_Timing.caption`): the refusal line
-    # for an unreadable record, the fallback sentence for an unmeasured one, nothing once
-    # there is a real wall — the same `measured` bit the header line and the verdict tile key
-    # on, so no surface can call a present record absent while another shows its figure.
+    # The caption is `_Timing`'s decision, shared with the header line and the verdict tile.
     if timing.error:
         table = f'<div class="st-error">{_uv(timing.error)}</div>' + "".join(table_rows)
     elif timing.caption is not None:
@@ -2085,13 +1893,10 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     else:
         table = "".join(table_rows)
 
-    # `ep.total_cost` already sums the worlds' results PLUS questioner and judge traces —
-    # adding `q_cost`/`j_cost` again here would double them.
+    # `ep.total_cost` already includes the questioner and judge traces.
     grand_total = ep.total_cost + review_total
-    # No line at all — not "$0.0000" — when nothing anywhere priced: a launcher-produced
-    # episode with no trace files owes no total any more than its own rows owe one (#1025).
-    # `ep.costed`, the model's own flag, not the float's truthiness: an episode whose every
-    # run cost $0.0000 is priced, and the runs sub-total below already says so.
+    # No total line when nothing priced; `ep.costed` rather than truthiness, since an
+    # all-$0.0000 episode is still priced.
     if ep.costed or review_calls:
         table += (f'<div class="st-total">{_money(grand_total)} — excludes gather subagents and '
                 f'the review gate</div>')
@@ -2115,9 +1920,7 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     if ep.runs_costed:
         runs_rows.append(f'<div class="rn-total">{_money(runs_total)}</div>')
 
-    # Only these four steps carry their own id (`stage-timing` covers the whole table already,
-    # and neither `staging` nor `verify` is a surface any test — or operator — addresses on
-    # its own): `staging`/`verify` render their row inline with no wrapper id.
+    # Only these steps get an id; `staging`/`verify` render inline.
     stages_id_map = {"questioner": "stage-questioner", "runs": "stage-runs",
                      Step.JUDGE: "stage-judge", "review": "stage-review"}
     stage_blocks = []
@@ -2159,8 +1962,8 @@ def _role_cost_text(role: _RoleCost) -> str:
 
 
 def _wall_between(start: str, end: str) -> float | None:
-    """The pair's wall in ms: `None` where either stamp does not parse, `-1` where the pair is
-    INVERTED (the end precedes the start), the plain delta — zero included — otherwise."""
+    """The pair's wall in ms: `None` if either stamp does not parse, `-1` if inverted (end
+    before start), else the delta (zero included)."""
     a, b = parse_iso_utc(start), parse_iso_utc(end)
     if a is None or b is None:
         return None
@@ -2177,20 +1980,16 @@ def _wall_span(starts: list[str], ends: list[str]) -> float:
 
 
 def _unattributed_traces(ep: _Episode) -> list[str]:
-    """Every `judge_*_trace.jsonl` stem that names no roster label or `family` (O4: its cost is
-    still priced into the judge row; only the transcript BLOCK is withheld). Membership goes
-    through `_stem_names_label`, the same digit-only-remainder check `_transcript_blocks_for_step`
-    uses to route a KNOWN label's own draws — not a `range(N)`-bounded set of literal stems,
-    which silently misclassified every draw at or past its bound as unattributed."""
+    """Every judge trace stem naming no roster label or `family`. Its cost is still in the judge
+    row; only the transcript block is withheld. Uses `_stem_names_label`, the same check the
+    judge block routes by."""
     known_labels = [*ep.entries, _FAMILY_LABEL]
-    # `stems_for` — plain trace files AND framed-only twins — the census the JUDGE block itself
-    # renders from; walked off the plain files alone, a framed-only trace naming no roster
-    # label was neither rendered nor listed (review of PR #1042).
+    # `stems_for` includes framed-only twins, matching what the judge block renders.
     return [stem for stem in sorted(ep.wire.stems_for(Step.JUDGE))
             if not any(_stem_names_label(stem, label) for label in known_labels)]
 
 
-def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 — one discovery pass per role, family-first ordering included (#1025 J13c)
+def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 — one discovery pass per role, family-first ordering included
     if step not in ("questioner", Step.JUDGE, "review") or not ep.wire.present:
         return ""
     blocks = []
@@ -2198,20 +1997,15 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
         for stem in sorted(ep.wire.stems_for("questioner")):
             blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == Step.JUDGE:
-        # Family first (J13c/d29), then each roster world in numeric draw order. A launcher-
-        # produced episode writes only the FRAMED twin for a judge call (no plain trace), so
-        # the stem set is the union of both — never just the plain trace files' own names.
+        # Family first, then each world in numeric draw order. Stems include framed-only
+        # twins, which is all some judge calls write.
         judge_stems = ep.wire.stems_for(Step.JUDGE)
         family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)),
                               key=lambda s: _draw_key_stem(s, _FAMILY_LABEL))
         for stem in family_stems:
             blocks.append(_transcript_block(ep.wire.traces[stem]))
         for label in sorted(ep.entries):
-            # `_stem_names_label`, not a bare `startswith`: two roster labels where one is the
-            # other's own prefix (`baseline` / `baseline_2`, both legal under `is_valid_run_id`,
-            # `_` included) would otherwise have `baseline`'s filter admit `baseline_2`'s own
-            # stems too — the SAME transcript rendered twice, once misattributed to the wrong
-            # world's block (#1025).
+            # Not a bare `startswith`: `baseline` would also claim `baseline_2`'s stems.
             label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)),
                                  key=lambda s: _draw_key_stem(s, label))
             for stem in label_stems:
@@ -2224,27 +2018,20 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
             if trace.rows:
                 blocks.append(_transcript_block(trace))
             else:
-                # J13b: an empty comparator trace prices nothing and is listed by stem rather
-                # than rendered as a stream with no rows.
+                # An empty comparator trace is listed by stem rather than rendered.
                 blocks.append(f'<div class="tx-note">{esc(stem)}: 0 rows</div>')
     return "".join(blocks)
 
 
 def _stem_names_label(stem: str, label: str) -> bool:
-    """Does `stem` (`judge_<label>_<n>_trace`) name a draw of `label` ITSELF — never a
-    DIFFERENT label that merely has `label` as its own string prefix (#1025). `judge_baseline_`
-    is a prefix of `judge_baseline_2_3_trace` too, so a bare `startswith` would have world
-    `baseline`'s filter admit world `baseline_2`'s own stems — both legal labels under
-    `is_valid_run_id`, `_` included. The remainder between the prefix and `_trace` must be the
-    draw index's OWN digit spelling, with nothing else in it."""
+    """Does `stem` (`judge_<label>_<n>_trace`) name a draw of `label` itself, rather than of a
+    label that merely starts with `label` (`baseline` vs `baseline_2`)? The remainder must be
+    the draw index's digits alone."""
     prefix = f"judge_{label}_"
     if not stem.startswith(prefix):
         return False
     remainder = stem[len(prefix):-len("_trace")]
-    # ASCII digits only — the same alphabet `draws_on_disk_report` holds a draw stem to, so
-    # the two readers of one name agree: a stem spelled with an Arabic-Indic or superscript
-    # digit (`str.isdigit` admits both) is unattributed here and unreadable there, never a
-    # draw of this world on one surface and a fault on the other.
+    # ASCII digits only, matching `draws_on_disk_report` (`str.isdigit` admits other scripts).
     return remainder.isascii() and remainder.isdigit()
 
 
@@ -2259,17 +2046,14 @@ def _draw_key_stem(stem: str, label: str) -> int:
 
 
 def _message_parts(row: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
-    """A wire row's `message` mapping and its `parts` list — each the empty value where the
-    row does not carry that shape."""
+    """A wire row's `message` mapping and `parts` list, each empty when absent."""
     msg = _mapping(row.get("message"))
     return msg, _items(msg.get("parts"))
 
 
 def _no_response_html(trace: _Trace) -> str:
-    """The line a call with no response reads as. A REFUSED plain trace (a link, a FIFO or an
-    unreadable file at its own name, tracked at load) is said as such: "no response recorded"
-    is a benign empty call's sentence, and a planted alias must not read the same as one
-    (review of PR #1042)."""
+    """The line for a call with no response. A refused plain trace (link, FIFO, unreadable)
+    says so, rather than reading like a benign empty call."""
     if trace.plain == "refused":
         return '<div class="tx-refused">trace refused — not a plain readable file at its name</div>'
     return '<div class="tx-entry">no response recorded</div>'
@@ -2289,8 +2073,8 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
                 break
     entries_html = [f'<div class="tx-label">{_uv(agent_id)}</div>'] if agent_id else []
     has_plain_response = any(r.get("kind") == "response" for r in rows)
-    # THE REQUEST HALF — the framed prompt, or (no framed twin) the plain trace's own request
-    # row — is its own element, never counted among the `tx-entry` response entries below.
+    # The request (framed prompt, or the plain trace's request row) is its own element, not a
+    # `tx-entry`.
     if framed is not None:
         prompt = framed.get("prompt")
         failure = framed.get("failure")
@@ -2299,11 +2083,8 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
         if failure:
             entries_html.append(f'<div class="tx-failure">{_uv(failure)}</div>')
         elif reply and not has_plain_response:
-            # A launcher-produced episode writes ONLY the framed twin for a judge call — no
-            # `model`/`usage`/`duration_ms` live on this record shape (#1025), so the reply
-            # renders as a bare response entry. When a plain trace's own response row is ALSO
-            # on disk, that row is the metadata-bearing one the loop below renders, and the
-            # framed twin's bare `reply` is the same call's text said twice — skipped here.
+            # Framed-only calls render the bare reply. When the plain trace has a response
+            # row, that row (with model/usage/duration) is rendered below instead.
             entries_html.append(f'<div class="tx-entry">{_uv(reply)}</div>')
     else:
         request = next((r for r in rows if r.get("kind") == "request"), None)
@@ -2350,9 +2131,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
 
     unreadable_html = (f'<div class="tx-unreadable">{trace.unreadable} unreadable rows</div>'
                        if trace.unreadable else "")
-    # The id embeds the wire-log FILENAME's stem: grammar-gated like every other
-    # filename-derived id on the page (`world-`/`leads-`/`f-`), never merely escaped — a stem
-    # outside the run-id alphabet renders as an unnameable entry with no id at all (J5).
+    # The id embeds a filename stem, so it is grammar-gated, not merely escaped.
     safe = _safe_id(trace.stem)
     if safe is None:
         return _unnameable(trace.stem, what="wire log")
@@ -2367,8 +2146,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
 
 
 def _render_leads_section(ep: _Episode) -> str:
-    # The same sectioned roster the worlds heading counts: one block per item, no re-deciding
-    # here which labels can be named.
+    # The same sectioned roster the worlds heading counts.
     blocks = [_render_world_leads(item.label, ep.leads[item.label]) for item in ep.sectioned]
     return _page_section("sec-leads", f"Leads ({len(ep.sectioned)})", "".join(blocks))
 
@@ -2392,12 +2170,9 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
 
     for lead_id, chain in leads.chains:
         safe = _safe_id(lead_id)
-        # `names_one_file` (family's own path-traversal screen) decides whether this id ever
-        # reaches a real file at all — when it does not, `lead_chain` already answers safely
-        # with its own descriptive sentence and nothing further needs neutralizing. Attribute
-        # safety (`is_valid_run_id`) is a SEPARATE, HTML-specific concern: a stem that names a
-        # real file but is not HTML-id-safe (space, `<`, `"`) is neutralized here instead,
-        # discarding whatever content it would have fetched (#1025 J5).
+        # `names_one_file` is the path-traversal screen; `lead_chain` already answered unsafe
+        # ids. An id that names a real file but is not HTML-id-safe is neutralized here,
+        # discarding its content.
         file_safe = isinstance(lead_id, str) and family.names_one_file(lead_id)
         if file_safe and safe is None:
             bits.append(_unnameable(lead_id, what="lead id"))
@@ -2424,7 +2199,7 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
 # =========================================================================================
 
 
-def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episode-level record's own slot in one section (#1025 O8)
+def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episode-level record's own slot in one section
     samples_rec, staged_rec, review_rec, stamp_rec = (
         ep.samples_rec, ep.staged_rec, ep.review_rec, ep.stamp_rec)
     bits = [f'<div class="rc-story">{_uv(ep.manifest.get("base_story"))}</div>']
@@ -2511,9 +2286,8 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
 
 
 def _diagnostics(ep: _Episode) -> list[str]:
-    """The stderr lines the CLI echoes beside the page path — off the MODEL's own refusal
-    slots, never a scan of the rendered bytes (a model-authored claim containing the words "no
-    grade record" is that finding's text, not a diagnostic)."""
+    """The stderr lines the CLI echoes beside the page path, from the model's refusal slots —
+    never a scan of the rendered bytes, which include model-authored text."""
     lines = []
     for name, rec in (("grade", ep.grade_rec), ("timing", ep.timing_rec),
                       ("review", ep.review_rec), ("samples", ep.samples_rec),
@@ -2530,21 +2304,20 @@ def main(argv: list[str]) -> int:
         print("usage: visualize_episode.py <episode_dir>", file=sys.stderr)
         return 1
     episode_dir = Path(argv[0])
-    # PLAIN `is_dir()`, not the lstat-screened `artifact_dir` — this is the OPERATOR's own
-    # command-line argument (d11: a symlink to the episode dir is an accepted spelling, J4),
-    # never an entry inside the episode tree a box could have planted.
-    if not episode_dir.is_dir():  # lint-tree-read-follows-link: ok — the operator's own CLI argument, not an episode-tree entry; a symlinked episode dir is an accepted spelling (d11/J4)
+    # Plain `is_dir()`: this is the operator's own argument, and a symlinked episode dir is
+    # accepted.
+    if not episode_dir.is_dir():  # lint-tree-read-follows-link: ok — the operator's own CLI argument, not an episode-tree entry; a symlinked episode dir is accepted
         print(f"not a directory: {episode_dir}", file=sys.stderr)
         return 1
     try:
         ep = load_episode(episode_dir)
     except JudgeRefused as bad:
-        # ONE LINE: the manifest's own refusal may wrap a multi-line YAML parser error, and
-        # d01 promises the CLI one reason line, not the parser's whole traceback-shaped text.
+        # One line: the refusal may wrap a multi-line YAML parser error.
         print(" ".join(str(bad).split()), file=sys.stderr)
         return 1
     try:
-        page_path = _write_page(episode_dir, _render_document(ep))
+        with Episode.open(episode_dir) as episode:
+            page_path = _write_page(episode, _render_document(ep))
     except OSError as bad:
         print(str(bad), file=sys.stderr)
         return 1
@@ -2555,10 +2328,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    # The standalone spelling the docstring promises — `python defender/scripts/visualize/
-    # visualize_episode.py <dir>` from anywhere — has no package on `sys.path` until it is put
-    # there, the same bootstrap `visualize_run.py` carries (#1025 F14). Under `-m` or an
-    # import the module-level imports above have already resolved and this is inert.
     from defender._log import configure_from_env
     configure_from_env()
     sys.exit(main(sys.argv[1:]))

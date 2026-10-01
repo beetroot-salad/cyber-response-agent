@@ -6,9 +6,9 @@ The investigation is driven by the in-process PydanticAI driver
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
-Usage (every run names its tenant, and there is no default — #1078; create one once with
-    `python3 defender/scripts/tenant.py setup playground`):
-    python3 defender/run.py <alert.json> --tenant playground [--run-id ID] [--no-learn] [--model M]
+Usage (every run names its tenant, and there is no default; create one once with
+    `python3 defender/scripts/tenant.py setup <tenant>`):
+    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
 needs a real billable API key. Inside a Claude Code session the *ambient*
@@ -24,9 +24,8 @@ import os
 import sys
 from pathlib import Path
 
-# Hand-rolled rather than `scripts/_venv.reexec_into_venv`, and irreducibly so: this must
-# run BEFORE any `defender.*` import resolves, and reaching that helper is itself such an
-# import.
+# Hand-rolled rather than `scripts/_venv.reexec_into_venv`: this must run before any
+# `defender.*` import, and reaching that helper is one.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
 if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
@@ -34,6 +33,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
+import contextlib  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
 from collections.abc import Callable  # noqa: E402
@@ -46,9 +46,11 @@ from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
-from defender._episode_paths import EpisodePaths  # noqa: E402
+from defender._episode_handle import Episode  # noqa: E402
+from defender._episode_paths import LAYOUT  # noqa: E402
 from defender._tenants import default_tenants_root  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -69,19 +71,11 @@ _logger = logging.getLogger(__name__)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """The entry point's whole argument surface — the ordinary run's, and the sibling's.
+    """The entry point's arguments, for an ordinary run and for a sibling world.
 
-    #947's D1 makes a sibling world a `run.py --resume` PROCESS rather than an in-process
-    call, so this parser grows exactly two arguments and one refusal. `--resume` names the
-    family manifest and `--world` names which arm of it this process is; everything else a
-    sibling needs — the source run, the branch point, T0, the continuation prompt, the world's
-    overlay — is DERIVED from that one document, which is what makes the manifest the contract
-    rather than a hint.
-
-    THE POSITIONAL ALERT BECOMES ILLEGAL UNDER `--resume`, refused rather than ignored. The
-    manifest already names the source run the alert would be copied from, so a command line
-    carrying both names two case inputs and there is no rule for which wins that is not a
-    guess. Refused at the parser, where the operator's own words are still in hand.
+    A sibling is `--resume <family manifest> --world <label>`; everything else it needs is
+    derived from the manifest. The positional alert is refused with `--resume`, since the
+    manifest already names the source run and there would be two case inputs.
     """
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, nargs="?", default=None,
@@ -152,11 +146,8 @@ def _source_one_provider_key(prov: providers.Provider) -> int:
 
 
 def _accepts(sig: inspect.Signature, *args: Any, **kwargs: Any) -> bool:
-    """Can the accessor this signature describes be CALLED this way?
-
-    Asked of the signature rather than by calling and catching `TypeError` — that would also
-    swallow a `TypeError` raised from INSIDE an accessor that took the argument fine, and
-    report a role with a broken model config as one that simply owns its own model."""
+    """Can the accessor this signature describes be called this way? Asked of the signature
+    so a `TypeError` raised inside the accessor is not mistaken for a non-matching call."""
     try:
         sig.bind(*args, **kwargs)
     except TypeError:
@@ -165,31 +156,17 @@ def _accepts(sig: inspect.Signature, *args: Any, **kwargs: Any) -> bool:
 
 
 def _role_model_name(defn: Any, model_override: str | None) -> str:
-    """The model name this role will ACTUALLY run on.
+    """The model name this role will actually run on.
 
-    The operator's per-run `--model` reaches every role whose accessor can TAKE it, and no
-    role that owns a knob of its own. Checking `defn.model()` alone would validate the ambient
-    default while the run is about to execute on the override.
-
-    Which roles those are is read off the accessor's SIGNATURE rather than a hand-list, which
-    would be a second registry to forget to update. Accepting the parameter is the whole of
-    what makes a role overridable: the already-resolved accessors (`gather_model`, the bundle
-    builder's `lambda: name`, the learning stages' own knobs) take none by construction.
-
-    What is read is whether the accessor can be HANDED the override, not merely whether it has
-    parameters. Non-empty arity is strictly weaker: `def m(*, explicit=None)` — the natural
-    spelling for an override parameter — reports a parameter and REFUSES a positional call, so
-    an arity check hands it one, the `TypeError` lands in `preflight_role_models`' broad
-    `except`, and every `--model` run refuses to start with "model config raised". A
-    keyword-only override is therefore passed by its NAME. An accessor naming more than one
-    keyword-only parameter names no single override, and is treated as one that owns its
-    model rather than guessed at."""
+    `--model` reaches every role whose accessor can take it (read off the signature, not a
+    hand-list); roles with their own knob keep it. A single keyword-only parameter is passed by
+    name (`def m(*, explicit=None)` refuses a positional call); several keyword-only parameters
+    name no single override, so the role keeps its own model."""
     if model_override is None:
         return str(defn.model())
     try:
         sig = inspect.signature(defn.model)
     except (TypeError, ValueError):
-        # A callable whose signature cannot be read is not one we can hand an override to.
         return str(defn.model())
     if _accepts(sig, model_override):
         return str(defn.model(model_override))
@@ -200,12 +177,9 @@ def _role_model_name(defn: Any, model_override: str | None) -> str:
 
 
 def preflight_role_models(model_override: str | None = None) -> int:
-    """Iterate EVERY registered role's model config at investigation STARTUP and fail fast if
-    a role's provider key is unusable. Build-time failure is provider-dependent (one provider
-    raises immediately on a missing key, another defers to first live call), and each review
-    stage's agent is built fresh per call — so a misconfigured review role would otherwise
-    silently downgrade confident investigations to unresolved ones, one at a time, deep into
-    paid-for runs."""
+    """Check every registered role's model config at startup and fail fast if a provider key
+    is unusable. Some providers only fail on first live call, and review agents are built per
+    call, so a broken review role would otherwise silently downgrade runs to unresolved."""
     from defender.agents import AGENTS
 
     seen_provider_ids: set[str] = set()
@@ -231,28 +205,20 @@ def preflight_role_models(model_override: str | None = None) -> int:
 
 
 class _Investigate(Protocol):
-    """The investigation seam's exact shape.
-
-    Spelled out rather than left as a bare `Callable[..., dict]` so BOTH halves of the
-    injection stay type-checked: the lifecycle's call site against this signature, and
-    `_drive_investigation` against `driver.run_investigation`'s own parameters. A `**kwargs`
-    passthrough checks neither, so a renamed driver keyword would type-check clean, pass every
-    test (they all inject the seam) and fail only on a real credentialed run.
+    """The investigation seam's exact shape, so both the call site and `_drive_investigation`
+    stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
-        world: Any = None,
+        world: Any = None, episode: Episode | None = None,
     ) -> dict[str, Any]: ...
 
 
 def _run_the_driver(**kwargs: Any) -> dict[str, Any]:
-    """The driver's coroutine, as a synchronous call.
-
-    Split out of `_drive_investigation` so the REGISTRY DECISION below has a seam of its own:
-    a test asking which registry a world does or does not build has no reason to also build an
-    event loop, and injecting one function for both questions made the registry unobservable.
+    """The driver's coroutine, as a synchronous call — separate so tests can observe the
+    registry decision without an event loop.
     """
     return asyncio.run(driver.run_investigation(**kwargs))
 
@@ -266,43 +232,33 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     model_name: str,
     model_override: str | None,
     box: Any,
-    #: The run's tenant (#1106) — its folder, its grants and its lead-zero dispatch, resolved
-    #: and checked by `main` before the box started, handed to the registry and the driver here.
+    #: The run's tenant (folder, grants, lead-zero dispatch), resolved by `main` before the box.
     tenant: RunTenant,
-    #: The world this process IS, on the `--resume` path; `None` on an ordinary run. The
-    #: parity that matters is that `None` builds exactly what it builds today.
+    #: The world this process is, on the `--resume` path; `None` on an ordinary run.
     world: Any = None,
+    #: The sibling's episode, held by `main`: the world ledger is written through it.
+    episode: Episode | None = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
 ) -> dict[str, Any]:
-    """The production investigation call, as a SYNCHRONOUS callable.
+    """The production investigation call, as a synchronous callable (injected by the
+    lifecycle so tests can pass a plain function).
 
-    `_run_investigation_lifecycle` injects this rather than reaching for the driver directly,
-    so a test can hand in a plain function — no coroutine to build, no event loop to drive,
-    no model credentials.
+    Passes `verbs=` explicitly: `run_investigation`'s fallback registry deliberately does not
+    enable lead-0, which hermetic tests rely on.
 
-    The ONLY real caller of `run_investigation`, so `verbs=` is built and passed HERE rather
-    than left to `run_investigation`'s internal fallback (`ModuleVerbRegistry(...)` when
-    `verbs is None`). That fallback is deliberately NOT what lead-0 reads (K12/d49): a test
-    `drive()` site injecting no registry asked for no backend, and lead-0 must stay off for
-    it — which is why `run_investigation` captures `lead_zero_verbs` before applying the
-    fallback. A real investigation always has a credentialed adapters tree, so it injects the
-    registry itself rather than riding the default the hermetic suite depends on lead-0 NOT
-    acquiring.
-
-    ON THE RESUME PATH THE PRODUCTION REGISTRY IS NEVER CONSTRUCTED, and that is a NEGATIVE
-    rather than a preference. A sibling's queries are answered from the family's primed
-    recording first and from its own staged corpus second; a module registry built beside that
-    is a live route from a model-dispatched verb to a real adapter body for every key the
-    capture happens not to hold, which is exactly the post-branch query the design forbids. The
-    two registries are therefore built in the two arms of one `if`, so there is no path on
-    which both exist.
+    On the resume path the production registry is never constructed: a sibling's queries must
+    be answered from the primed recording and staged corpus, and a module registry beside them
+    would route uncaptured keys to real adapters. The two registries are built in separate
+    arms of one `if` so both can never exist.
     """
-    # THE ROSTER, read once for this process and handed down as a value — to whichever
-    # registry the arm below builds, and to `run_investigation`, which builds the dispatch
-    # catalogs over the same read rather than reading the tree again for them.
+    # Read once and handed down to the registry and `run_investigation`.
     roster = read_roster(adapters_under(defender_dir))
     if world is not None:
+        if episode is None:
+            # The world's ledger is written through the episode `main` holds; there is no path
+            # to fall back to.
+            raise TypeError("_drive_investigation(world=…) needs the sibling's held `episode=`")
         from defender.learning.branch.estate.applier import WorldApplier
         from defender.learning.branch.estate.registry import WorldRegistry
         from defender.learning.branch.ledger import Ledger
@@ -311,10 +267,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         family = world.family
         verbs: Any = WorldRegistry(
             roster, tenant.grants.gather,
-            # DECLARED, not merely constructed: a world that serves nothing must still leave a
-            # ledger, or its silence is indistinguishable from an archive that lost the file.
-            world=world, ledger=Ledger.for_world(
-                world.episode_dir, world.world_id).declare(),
+            # Declared up front: a world that serves nothing must still leave a ledger.
+            world=world, ledger=Ledger.for_world(episode, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
             tenant=tenant, grant_home=tenant.table_pointer,
         )
@@ -342,32 +296,24 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     *,
     run_dir: Path,
     model: str,
-    #: The operator's RAW `--model`, carried alongside the resolved `model` rather than
-    #: derived from it. The review roles pin their own default; resolving this against the
-    #: investigator's would hand them a non-`None` model on every run, making that default
-    #: unreachable in production.
+    #: The operator's raw `--model`, kept separate from the resolved `model` so roles with
+    #: their own default still see `None` when no override was given.
     model_override: str | None,
     defender_dir: Path,
-    #: The run's tenant (#1106): the box mounts `tenant.agent` read-only and nothing else of
-    #: any tenant; the drive function builds the registry and the driver over it.
+    #: The run's tenant: the box mounts only `tenant.agent`, read-only.
     tenant: RunTenant,
-    #: The world this process IS, threaded through so the drive function can build the world
-    #: registry rather than the production one. Five signatures carry it — the parser, this
-    #: lifecycle, `main`'s call to it, the drive function and the protocol — so a world
-    #: declared on the command line cannot be dropped between any two of them.
+    #: The world this process is, threaded through so the drive function builds the world
+    #: registry rather than the production one.
     world: Any = None,
+    #: The sibling's held episode, threaded beside `world` for the world ledger's writes.
+    episode: Episode | None = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> dict[str, Any]:
-    """Start the box, run the investigation inside it, and reap both on every exit.
-
-    Sited one layer in from `main` so the lifecycle carries an injection seam a test can reach
-    (like `drains._run_worktree_batch`); `main` stays an argv entrypoint.
-
-    The exit half belongs to `box_mod.stop_and_scrub`, which owns the ordering, the
-    only-scrub-a-provably-dead-box rule, and the exception preference for both writable lanes.
+    """Start the box, run the investigation inside it, and reap both on every exit
+    (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
     """
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent)
     investigation_ok = False
@@ -382,6 +328,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             box=box,
             tenant=tenant,
             world=world,
+            episode=episode,
         )
         investigation_ok = True
     finally:
@@ -396,17 +343,11 @@ def _resolve_run_tenant(
     tenants_root: Path, tenant_id: _tenant.TenantId, *, runs_base: Path, defender_dir: Path,
     dispatches_lead_zero: bool,
 ) -> RunTenant:
-    """The run's tenant's settings, or the refusal — BEFORE the run dir, the box and any model
-    call (#1106 M5, D3).
+    """The run's tenant's settings, or the refusal — before the run dir, the box and any model
+    call, so tenant misconfiguration fails early. Refusals name the file to edit.
 
-    `tenant_id` is the REQUEST's (`_resolve_tenant_id`). Everything `run_tenant.resolve_tenant`
-    checks would otherwise fail later and quieter: an absent folder or required file, a link
-    inside the folder, a folder a box mounts (the code tree, this run's runs base), a table
-    gather can query nothing under, a lead-zero config the catalog or table disagrees with.
-    Every refusal names the file an operator edits.
-
-    `dispatches_lead_zero` is False for a `--resume` sibling: a resumed world dispatches no
-    turn-0 lead, so a template demoted since the source run must not refuse it."""
+    `tenant_id` is the request's (`_resolve_tenant_id`). `dispatches_lead_zero` is False for a
+    `--resume` sibling, which dispatches no turn-0 lead."""
     from defender.runtime import run_tenant as run_tenant_mod
 
     try:
@@ -418,14 +359,10 @@ def _resolve_run_tenant(
 
 
 def _sibling_tenant_agrees(world: Any, tenant_id: _tenant.TenantId) -> None:
-    """A sibling runs on the EPISODE's tenant, which is the source run's — read from the
-    source's HOST-ONLY runs-base record (`tenant_of_run_dir`), never from its box-writable
-    stamp — and the request must name that same tenant (#1078 O5). No world (an ordinary run):
-    nothing to agree with.
-
-    The launcher names the episode's tenant on every sibling's command line, so a disagreement
-    is a sibling resumed by hand for some other tenant: running it would query the episode's
-    staged corpus with another tenant's grants and endpoints."""
+    """Refuse a sibling whose request names a tenant other than the episode's — the source
+    run's, read from its runs-base record, never its box-writable stamp. The launcher names
+    the episode's tenant on each sibling's command line, so a disagreement is a sibling resumed
+    by hand for another tenant, which would query the staged corpus with that tenant's grants."""
     if world is None:
         return
     try:
@@ -438,13 +375,8 @@ def _sibling_tenant_agrees(world: Any, tenant_id: _tenant.TenantId) -> None:
 
 
 def _announce_provenance(run_dir: Path) -> None:
-    """Say out loud what this run was made against, reading the stamp back off the run dir
-    rather than re-asking git — so the line an operator sees is the RECORD, not a second
-    capture that could disagree with it.
-
-    The dirty marker is not decoration. A sha over a modified tree does not name the bytes that
-    ran, and an operator reading a later comparison needs to have been told so at the moment it
-    stopped being true, not months afterwards when they go looking."""
+    """Log what this run was made against, read back from the stamp (not re-asking git) so
+    the operator sees the record itself, including whether the tree was dirty."""
     rec = _provenance.read(RunPaths(run_dir).provenance)
     if rec is None:
         _logger.info("commit=unrecorded")
@@ -452,58 +384,47 @@ def _announce_provenance(run_dir: Path) -> None:
     if rec.commit is None:
         _logger.info(f"commit=unavailable ({rec.unavailable})")
         return
-    # `dirty is None` is neither clean nor dirty: git answered for HEAD and then could not
-    # answer for the working tree, and flattening that to either word would be a claim.
+    # `dirty is None` is unknown, neither clean nor dirty.
     mark = {True: " +dirty", False: "", None: " +dirt-unknown"}[rec.dirty]
     if rec.dirty is None:
-        # The REASON, on the one branch where it is most actionable: a corrupt index and a
-        # missing git send an operator at different knobs, and " +dirt-unknown" alone names
-        # neither. `capture_tree` kept the string for exactly this line.
+        # Include the reason: it tells the operator what to fix.
         detail = f" ({rec.unavailable})" if rec.unavailable else ""
     else:
-        # `if rec.dirty_path_count`, not `if rec.dirty`: this file is in the box's rw bind, so
-        # the count read back may be a default standing in for a corrupted one, and " (0
-        # paths)" beside "+dirty" is a QUANTITY nobody wrote — the announce's own version of
-        # filing an unknown as a fact.
+        # Keyed on the count: a corrupted count reads back as 0, and "(0 paths)" would be
+        # invented.
         detail = f" ({rec.dirty_path_count} paths)" if rec.dirty_path_count else ""
     _logger.info(f"commit={rec.commit[:12]}{mark}{detail}")
 
 
-def resume_world(manifest: Path, world_label: str, *, tenant: Callable[[], Any]) -> Any:
-    """The world this process IS, from the manifest — judged against the episode tenant's
-    configured corpus patterns only where the manifest does not record them.
+def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any]) -> Any:
+    """The world this process is, from `episode`'s manifest — judged against the episode
+    tenant's configured corpus patterns only where the manifest does not record them.
 
-    The episode dir is the manifest's own PARENT, and that is what makes the world ledger
-    resolve: the file a sibling appends to sits beside the family's primed base recording,
-    wherever the manifest lives. Deriving it any other way — from a configured root, from the
-    run dir — would make a sibling's ledger depend on something the manifest does not say, and
-    the manifest is the whole of what a sibling is told.
+    The episode dir is the manifest's own, so the world ledger sits beside the family's
+    primed recording and depends on nothing the manifest does not say.
 
-    A manifest written before #1106 carries no `configured_patterns`, and its overlays were
-    judged against the checkout's corpus config when it was authored. That config now lives in
-    the tenant's record, so for such a manifest — and only for one — the loader asks `tenant` for
-    the sibling's own `RunTenant` (resolved from the record the launcher seeded its runs base
-    with, naming the source's tenant) and takes its corpus patterns from the record's corpus-engine
-    view. A manifest that records its set is judged by the manifest, and no tenant is looked up.
+    A manifest that records no `configured_patterns` was judged against the checkout's corpus
+    config when it was authored. That config now lives in the tenant's record (#1107), so for
+    such a manifest — and only for one — the loader asks `tenant` for the sibling's own
+    `RunTenant` (resolved from the record the launcher seeded its runs base with, naming the
+    source's tenant) and takes its corpus patterns from the record's corpus-engine view. A
+    manifest that records its set is judged by the manifest, and no tenant is looked up.
     """
-    from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the one stager import this path needs: the tenant's configured corpus patterns an older manifest's overlays were judged against
+    from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
 
-    manifest = Path(manifest)
     return _family.resume_world_from(
         _family.load_family(
-            manifest, configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
-        world_label, manifest.parent)
+            episode.view(), configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
+        world_label, episode.dir)
 
 
 def _screened_source_alert(source_run_dir: Path) -> Path:
     """The source run's alert, or the refusal that says it is not a plain file.
 
-    THE SOURCE RUN DIR IS A PRIOR BOX'S WRITABLE BIND. `alert.json` there is model-writable, so
-    an entry at that name may be a link the model planted, and `materialize_run_dir` admits it
-    with `alert.is_file()` and copies it with `shutil.copy` — both of which FOLLOW a link. Asked
-    here, before the copy, so bytes from outside the source run never arrive in this run's own
-    dir under the case input's name, where the visualizer and the archive read them as the alert.
+    The source run dir was a box's writable bind, so `alert.json` may be a planted link, and
+    `materialize_run` follows links. Checked before the copy so outside bytes never become
+    this run's alert.
     """
     from defender._run_paths import artifact_file
 
@@ -516,18 +437,20 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     return alert
 
 
-def _resume_target(ns: argparse.Namespace, *, tenant: Callable[[], Any]) -> Any:
-    """The world this process is, or `None` for an ordinary run — and the sibling's two refusals.
+def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
+                   tenant: Callable[[], Any]) -> Any:
+    """The world this process is, or `None` for an ordinary run — plus the sibling's two
+    refusals, before anything is spent.
 
-    BOTH BEFORE ANYTHING IS SPENT, which is the whole reason this sits ahead of the preflight
-    rather than beside the lifecycle. `--update-ticket` is refused OUTRIGHT rather than accepted
-    and ignored: the two ticket calls are ordered around the curation marker, so suppressing one
-    of them would break the pairing instead of the obligation. And the world is resolved from the
-    manifest before the run dir exists, so a label the manifest does not declare costs an
-    operator a message rather than a materialised run dir nothing will ever fill.
+    `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
+    around the curation marker. An undeclared world label is refused before a run dir exists.
     """
     if ns.resume is None:
         return None
+    if episode is None:
+        # A sibling is only ever resumed through its held episode; without one it must not
+        # run on as an ordinary investigation.
+        sys.exit(f"[run.py] --resume {ns.resume}: no episode is held for it")
     from defender.runtime.branch._family import FamilyError
 
     if ns.update_ticket:
@@ -536,47 +459,35 @@ def _resume_target(ns: argparse.Namespace, *, tenant: Callable[[], Any]) -> Any:
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        # RESOLVED AT ENTRY (§7 J42): `resume_world`'s episode dir is the manifest's own PARENT,
-        # so a relative or symlinked `--resume` path made every path built from it relative or
-        # symlinked too — the sibling's `EpisodePaths(world.episode_dir).runs` among them.
-        return resume_world(ns.resume.resolve(), ns.world, tenant=tenant)
+        return resume_world(episode, ns.world, tenant=tenant)
     except FamilyError as refusal:
         sys.exit(f"[run.py] {refusal}")
 
 
-def _materialize_run_dir(
+def _materialize_run(
     alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None,
     world: Any = None,
-) -> Path:
-    """Build this run's directory, stamped with the code and the model it will run on — and,
-    for a forked sibling, with the world and lineage the manifest already declares (`world`,
-    the `ResumeWorld` this process resolved above, typed `Any` as `resume_world` is; the builder never re-derives it from a
-    path), and `tenant_id` the tenant the request named. A runs-base record naming another
-    tenant is refused, named, rather than stamped.
+) -> Run:
+    """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
+    handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
+    world and lineage.
 
-    A thin wrapper, and it earns its place three times. It is the seam `main` injects, so a test
-    can observe run-dir creation without a real runs base; and it is the ONE site that names the
-    builder, which is what keeps "the run dir has a single origin" a property of this file rather
-    than of whoever reads it — two call sites are two places for the stamp to be forgotten.
-
-    #1078 D3: the `materialize` seam gains `tenant_id`; `_Investigate` does not — everything it
-    drives follows from `run_dir` alone.
+    The single call site of the builder and the seam `main` injects; turns a tenant refusal
+    (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run_dir = _run.materialize_run_dir(alert, run_id, tenant_id=tenant_id, model=model,
-                                           world=world)
+        run = _run.materialize_run(alert, run_id, tenant_id=tenant_id, model=model, world=world)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
-    return run_dir
+    return run
 
 
 def _resolve_tenant_id(ns: argparse.Namespace) -> _tenant.TenantId:
-    """The request's tenant, or the refusal — surfaced as `[run.py] ...`, before the preflight
-    (#1078 D3, O1, O2). EVERY run names its tenant with `--tenant`, a sibling included: the
-    tenant comes from the request (for a platform, the acting user's authentication context),
-    never from a record or a stamp, and there is no default. It is checked against the grammar
-    and the row here (`request_tenant`); a sibling's is also checked against its source's
-    record once the manifest is resolved (`_sibling_tenant_agrees`)."""
+    """The request's tenant, or a `[run.py]` refusal before the preflight. Every run names it
+    with `--tenant`, a sibling included: it comes from the request (for a platform, the acting
+    user's authentication context), never from a record or a stamp, and there is no default.
+    A sibling's is also checked against its source's record once the manifest is resolved
+    (`_sibling_tenant_agrees`)."""
     try:
         if ns.tenant is None:
             raise _tenant.TenantRefused(
@@ -587,6 +498,34 @@ def _resolve_tenant_id(ns: argparse.Namespace) -> _tenant.TenantId:
         sys.exit(f"[run.py] {refused}")
 
 
+def _resume_episode_dir(ns: argparse.Namespace) -> Path | None:
+    """The episode dir a `--resume` sibling resumes, or `None` for an ordinary run: the
+    manifest's parent, RESOLVED AT ENTRY (§7 J42) so no path built from it is relative or
+    symlinked. A manifest not named `LAYOUT.family` is refused before anything is opened."""
+    if ns.resume is None:
+        return None
+    manifest = ns.resume.resolve()
+    if manifest.name != LAYOUT.family.name:
+        sys.exit(f"[run.py] --resume {ns.resume} is not an episode manifest — a sibling resumes "
+                 f"from its episode dir's {LAYOUT.family}")
+    return manifest.parent
+
+
+def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
+    """The alert this run investigates and its run id: a sibling's from its world (the source
+    run's alert, screened before the preflight like other argument errors), else the
+    operator's."""
+    if world is not None:
+        return _screened_source_alert(Path(world.family.source_run_dir)), world.run_id
+    return ns.alert.resolve(), ns.run_id
+
+
+def _runs_base(episode: Episode | None, tenant_id: _tenant.TenantId) -> Path:
+    """The runs base this run's box will mount — the tenant's own, or a sibling's inside its
+    episode — which the tenant's settings must not sit under."""
+    return _tenant.runs_base_for(tenant_id) if episode is None else episode.runs.path
+
+
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
     argv: list[str],
     *,
@@ -595,155 +534,119 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
-    materialize: Callable[..., Path] = _materialize_run_dir,
+    materialize: Callable[..., Run] = _materialize_run,
 ) -> int:
-    # The tail's three UNDRIVABLE dependencies — the credentialed investigation lifecycle, the
-    # HTML render, the case-ticket endpoint — take an injection seam, each defaulting to
-    # production, so what the tail DOES is observable. The curation trigger below is
-    # deliberately NOT part of that seam: it runs for real against a real queue.
+    # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
+    # injection seams defaulting to production.
     ns = parse_args(argv)
-    # RESOLVED AT THE BOUNDARY and threaded inward under its own name: the curation lane is a DI
-    # seam, and the name it is called by is what a reader — and the entry point's own shape
-    # demand — follows to see that the lane is still reached from here.
+    # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
-    # The tenants root is this entry point's to hand down (#1106 D2) — `--tenants-root`, else
-    # this checkout's `knowledge/tenants` — and nothing below finds it for itself.
+    # This entry point hands the tenants root down; nothing below finds it for itself.
     tenants_root = (ns.tenants_root if ns.tenants_root is not None
                     else default_tenants_root(DEFENDER_DIR.parent))
-    # THE TENANT, FROM THE REQUEST, before anything is spent (#1078 D3, O1/O2; #1106 M5):
-    # required on every run, a sibling included, and checked against the grammar and the row.
+    # The tenant, from the request, before anything is spent: required on every run, a sibling
+    # included, and checked against the grammar and the row.
     tenant_id = _resolve_tenant_id(ns)
-    # The runs base this run's box will mount — the tenant's own, or a sibling's inside its
-    # episode (`resume_world`'s episode dir is the manifest's parent) — which the tenant's
-    # settings must not sit under.
-    runs_base = (EpisodePaths(ns.resume.resolve().parent).runs if ns.resume is not None
-                 else _tenant.runs_base_for(tenant_id))
+    # A sibling's door: the episode it resumes, held for the whole run. The handle serves the
+    # manifest read and the world ledger's writes; nothing below reopens the episode by name.
+    episode_dir = _resume_episode_dir(ns)
+    try:
+        door: contextlib.AbstractContextManager[Episode | None] = (
+            contextlib.nullcontext() if episode_dir is None else Episode.open(episode_dir))
+    except OSError as missing:
+        sys.exit(f"[run.py] --resume {ns.resume}: its episode dir cannot be held ({missing})")
+    with door as episode:
+        runs_base = _runs_base(episode, tenant_id)
 
-    # THE SIBLING'S TWO REFUSALS, BOTH BEFORE ANYTHING IS SPENT. `--update-ticket` is refused
-    # OUTRIGHT rather than accepted and ignored: the two ticket calls are ordered around the
-    # curation marker, so suppressing one of them would break the pairing instead of the
-    # obligation. And the world is resolved from the manifest before the run dir exists, so a
-    # label the manifest does not declare costs nothing at all.
-    # ONE RESOLUTION of the run's tenant, shared by the two frames that need it: the old-
-    # manifest judge below (only for a manifest recording no corpus patterns) and the run.
-    tenant_of = functools.cache(lambda: _resolve_run_tenant(
-        tenants_root, tenant_id, runs_base=runs_base, defender_dir=DEFENDER_DIR,
-        dispatches_lead_zero=ns.resume is None))
-    world = _resume_target(ns, tenant=tenant_of)
-    _sibling_tenant_agrees(world, tenant_id)
+        # One tenant resolution, shared by the old-manifest judge (only for a manifest recording
+        # no corpus patterns) and the run.
+        tenant_of = functools.cache(lambda: _resolve_run_tenant(
+            tenants_root, tenant_id, runs_base=runs_base, defender_dir=DEFENDER_DIR,
+            dispatches_lead_zero=ns.resume is None))
+        world = _resume_target(ns, episode=episode, tenant=tenant_of)
+        _sibling_tenant_agrees(world, tenant_id)
 
-    # THE CASE INPUT IS RESOLVED AND SCREENED BEFORE ANYTHING IS SPENT, and before the
-    # preflight rather than after it. A link planted at the source run's `alert.json` is a fact
-    # about the operator's own arguments — the same class as an unknown world label — so it is
-    # answered while they are still just arguments, and its refusal does not depend on whether
-    # this host happens to have a usable model key.
-    if world is not None:
-        alert = _screened_source_alert(Path(world.family.source_run_dir))
-        run_id: str | None = world.run_id
-    else:
-        alert = ns.alert.resolve()
-        run_id = ns.run_id
+        alert, run_id = _case_input(ns, world)
 
-    # THE TENANT'S SETTINGS, resolved and checked BEFORE anything is spent (#1106 M5), and
-    # nothing below reads them again.
-    tenant = tenant_of()
+        # The tenant's settings, resolved before anything is spent; nothing below reads them again.
+        tenant = tenant_of()
 
-    model = driver.resolve_main_model(ns.model)
-    # ONE provider-key pass: the all-roles preflight is a strict superset of the
-    # investigator+gather pair (same resolvers, same per-provider key sourcing, and MAIN/GATHER
-    # are two of the roles it walks). IT RUNS IN THE SIBLING TOO, and the family-level pass the
-    # launcher makes is an early exit rather than a substitute: the model is resolved PER
-    # PROCESS, so three siblings launched into a changed environment are a comparison across
-    # two models unless each one checks and each one records what it resolved.
-    rc = preflight(ns.model)
-    if rc:
-        return rc
+        model = driver.resolve_main_model(ns.model)
+        # Runs in siblings too: models are resolved per process, so each sibling must check (and
+        # record) its own.
+        rc = preflight(ns.model)
+        if rc:
+            return rc
 
-    # ONE BUILDER CALL. The two paths differed only in what they hand it, and both values were
-    # settled above: a sibling's case input is the SOURCE run's screened alert and its run id is
-    # derived from the manifest (`{episode_id}-{world}`); an ordinary run's are the operator's
-    # own path and `--run-id` (or the auto timestamp).
-    run_dir = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+        # The handle, not just its directory: the post-run step saves the run page through it.
+        run = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+        run_dir = run.run_dir
 
-    # EVERY LOG LINE FROM HERE ON NAMES THIS RUN — its crash included — by the tenant this
-    # process resolved once above and hands inward as one value.
-    with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
-        if ns.update_ticket:
-            ticket_writer.open_case_ticket(
-                run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
-                env=_run.run_env(DEFENDER_DIR, run_dir))
+        # Every log line from here on, the crash included, names this run and the tenant this
+        # process resolved once above and hands inward as one value.
+        with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
+            if ns.update_ticket:
+                ticket_writer.open_case_ticket(
+                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    env=_run.run_env(DEFENDER_DIR, run_dir))
 
-        _logger.info(f"run_dir={run_dir} model={model}")
-        _announce_provenance(run_dir)
+            _logger.info(f"run_dir={run_dir} model={model}")
+            _announce_provenance(run_dir)
 
-        summary = lifecycle(
-            run_dir=run_dir,
-            model=model,
-            model_override=ns.model,
-            defender_dir=DEFENDER_DIR,
-            tenant=tenant,
-            world=world,
-        )
+            summary = lifecycle(
+                run_dir=run_dir,
+                model=model,
+                model_override=ns.model,
+                defender_dir=DEFENDER_DIR,
+                tenant=tenant,
+                world=world,
+                episode=episode,
+            )
 
-        # Every consumer below reads the tree the lifecycle just scrubbed. None of them is
-        # reachable on a tainted tree: `summary` only exists if the lifecycle returned, and
-        # nothing here catches what it raises.
-        out = str(summary.get("output") or "")
-        _logger.info(f"done ({summary.get('requests')} model requests); "
-                     f"output: {out[:200]}")
+            # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
+            out = str(summary.get("output") or "")
+            _logger.info(f"done ({summary.get('requests')} model requests); "
+                         f"output: {out[:200]}")
 
-        artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
-        _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
-        # The reap scan's verdict is deliberately sited OUTSIDE the tree it judges (§7 D8: in-tree
-        # it would be both plantable and forgeable by the box that is root on that mount), so the
-        # run-dir listing above can never show it. Named explicitly because this run dir SURVIVES
-        # as the artifact an operator opens, and whether the tree was ever walked is part of what
-        # they are opening it to find out.
-        verdict = box_mod.verdict_path(run_dir)
-        if verdict.is_file():
-            _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the run dir, "
-                         "not in it")
-        else:
-            _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
+            artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
+            _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
+            # The reap-scan verdict sits outside the tree it judges (in-tree, the box could forge
+            # it), so the listing above cannot show it; name it for the operator.
+            verdict = box_mod.verdict_path(run_dir)
+            if verdict.is_file():
+                _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the run dir, "
+                             "not in it")
+            else:
+                _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
 
-        _run.cross_check_tables(run_dir)
+            _run.cross_check_tables(run_dir)
 
-        # There is no automatic feed into the offline learning pipeline: the only path onto the
-        # learn queue is the operator's own invocation of the learning entrypoint over a run dir.
-        # Catalog curation has its own trigger here instead, behind the tree certification the
-        # lifecycle already performed — a corpus optimisation, cheap to lose, so its failure is
-        # reported and swallowed rather than costing the investigation its exit status.
-        # The investigation is RECORDED onto the case ticket BEFORE the request is published — a
-        # comment, never a close; closing is a person's act (#767). A curation drainer can start the
-        # moment the marker lands, and the ordering keeps the record ahead of it.
-        if ns.update_ticket:
-            # #1047 O2: the lane decides per exit class, and both halves of the run-end record —
-            # the exit class and whether the model had already closed — come off the driver's own
-            # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
-            # is an input: a failed or stale sidecar cannot split the record between two sources.
-            ticket_writer.record_case_ticket(
-                run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
-                env=_run.run_env(DEFENDER_DIR, run_dir), truncated_by=summary.get("truncated_by"),
-                closed_before_cut=summary.get("closed_before_cut") is True)
+            # No automatic feed into the learning pipeline; only catalog curation is triggered
+            # here, and its failure does not affect the exit status. The ticket comment (never a
+            # close — that is a person's act) is recorded before the curation marker, which a
+            # drainer may pick up immediately.
+            if ns.update_ticket:
+                # Both inputs come from the driver's summary, not from a possibly stale sidecar.
+                ticket_writer.record_case_ticket(
+                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    env=_run.run_env(DEFENDER_DIR, run_dir), truncated_by=summary.get("truncated_by"),
+                    closed_before_cut=summary.get("closed_before_cut") is True)
 
-        # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
-        # omission. Routing a sibling through this `main` acquires both automatic lanes; a world is
-        # a synthetic continuation whose evidence was staged on purpose, so a curation marker for
-        # it would feed an authored corpus back into the lesson catalog as if it were a real case.
-        if world is not None:
-            _logger.info("--resume: a sibling world is not enqueued for curation")
-        elif ns.no_learn:
-            # Fail-closed: the flag governs catalog curation, the one automatic lane left.
-            _logger.info("--no-learn set; not enqueuing for curation")
-        elif enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
-            _logger.info("enqueued for catalog curation")
+            # A sibling's evidence was staged on purpose, so it must never feed the catalog.
+            if world is not None:
+                _logger.info("--resume: a sibling world is not enqueued for curation")
+            elif ns.no_learn:
+                _logger.info("--no-learn set; not enqueuing for curation")
+            elif enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
+                _logger.info("enqueued for catalog curation")
 
-        try:
-            visualize(run_dir, update_ticket=ns.update_ticket)
-        except _run.VisualizeFailed as e:
-            _logger.warning(f"{e}")
-        return 0
+            try:
+                visualize(run, update_ticket=ns.update_ticket)
+            except _run.VisualizeFailed:
+                _logger.warning("the run page was not saved", exc_info=True)
+            return 0
+
 
 if __name__ == "__main__":
     _log.configure_from_env()

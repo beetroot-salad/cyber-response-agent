@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 
@@ -243,7 +244,8 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.playground_run_tenant(),
         world=_run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant),
+        episode=Episode.open(ep),
         investigate=lambda **kw: seen.update(kw) or {},
     )
     registry = seen["verbs"]
@@ -269,7 +271,8 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.playground_run_tenant(),
         world=_run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant),
+        episode=Episode.open(ep),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
 
@@ -299,7 +302,7 @@ def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant)
     assert world.episode_dir == ep
     assert world.ledger_path == ep / "served" / f"{TOKEN_B}.jsonl"
 
@@ -320,10 +323,10 @@ def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_p
     del doc["configured_patterns"]
     assert "captured_patterns" not in doc, "the capture must not name the pattern on its own"
     ep = T.episode(tmp_path, doc=doc)
-    with pytest.raises(_family.FamilyError, match="logs"):
-        _family.load_family(ep / "family.yaml")
+    with Episode.open(ep) as episode, pytest.raises(_family.FamilyError, match="logs"):
+        _family.load_family(episode.view())
     world = _run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant)
     assert world.family.configured_patterns == T.CONFIGURED
 
 
@@ -377,7 +380,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant)
     assert world.token == TOKEN_B
     assert confinement.world_view(T.EVENTS_PATTERN, world.token).startswith(f"wv-{TOKEN_B}-")
     assert world.ledger_path.name == f"{TOKEN_B}.jsonl"
@@ -391,7 +394,7 @@ def test_947_world_applier_compares_the_same_world_token_the_other_three_sites_u
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant)
     applier = applier_mod.WorldApplier()
     prepared = applier.prepare("elastic", "query", {"index": T.EVENTS_PATTERN}, world, None)
     assert prepared["index"] == f"wv-{TOKEN_B}-logs-"
@@ -411,11 +414,23 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
+    tenant = T.mod("_tenant").read_tenant(base)
+
+    def materialize(*_a, **_kw):
+        # #1110: the seam answers the run's tenant-bound HANDLE, built the way the real builder
+        # builds it (the tenant record at the runs base, then `Run.for_tenant`) — `main` keeps
+        # it for the post-run page render and reads the run dir off it.
+        order.append("materialize")
+        run_dir = T.sibling_run_dir(base, "b", stamp=False)
+        return T.sym("_run_handle", "Run").for_tenant(
+            tenant.tenant_id, run_dir.name, runs_base=base)
+
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m: order.append("preflight") or 0,
-                materialize=lambda *a, **kw: order.append("materialize") or
-                T.sibling_run_dir(base, "b", stamp=False))
+                materialize=materialize)
     assert order == ["preflight", "materialize", "lifecycle"]
+    assert rec.kwargs["run_dir"] == base / f"{T.EPISODE_ID}-b", (
+        "the lifecycle was not handed the run dir of the handle the builder answered")
 
 
 def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
@@ -431,7 +446,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     _run()._run_investigation_lifecycle(
         run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
-        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
+        Episode.open(ep), "b", tenant=T1106.playground_run_tenant),
         tenant=T1106.playground_run_tenant(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),

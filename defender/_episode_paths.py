@@ -20,14 +20,8 @@ from defender._run_paths import (
     _confine,
 )
 
-#: The episode-layout names (#1077 D1) — the OWNER's spellings, and the only place in the tree
-#: they are written. D7 finished the job D1 started: no module outside this one BINDS any of
-#: them any more (`archive.py`, `ledger.py`, `timing.py`, `staging.py`,
-#: `runtime/branch/_family.py` and `visualize_episode.py` used to re-bind them under local
-#: aliases). An alias IS a second spelling — it is safe exactly until its home drops the name,
-#: and then every downstream importer breaks at once with no gate having seen anything, which
-#: is what happened to `SERVED_DIRNAME`/`BASE_FILENAME` in this issue's own first pass.
-#: `scripts/lint/lint_run_records.py`'s import arm now refuses the alias outright.
+#: The episode-layout names — the only place they are spelled. Other modules must not re-bind
+#: them under local aliases (`scripts/lint/lint_run_records.py` refuses that).
 FAMILY_NAME = "family.yaml"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"
@@ -44,48 +38,47 @@ BASE_FILENAME = "base.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 RUN_DIR_POINTER_NAME = "run_dir"
 
-#: The archive projection's own flat spellings (D5/N5): the two sidecars, which live beside a
-#: run dir keyed by run id (`<run>.scrub-verdict.json`) and are re-homed under the world as a
-#: bare `<kind>.json` — names the archive OWNS because no run dir carries them. Every other
-#: archived name is the run dir's own and is imported from `_run_paths`, not re-spelled.
+#: The archive's names for the two sidecars, which live beside a run dir keyed by run id and
+#: are re-homed under the world as a bare `<kind>.json`. Other archived names are the run
+#: dir's own, from `_run_paths`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
 
 
 def _check_label(label: object, *, what: str = "label") -> str:
-    """A world label: a plain component that is also case-stable (decision 20). Two distinct
-    labels that differ only in case would otherwise compose to one directory on a
-    case-insensitive filesystem, and the archive would silently merge two worlds."""
+    """A world label: a plain, case-stable component — labels differing only in case would
+    merge into one directory on a case-insensitive filesystem."""
     label = _check_component(label, what=what)
     if not is_case_stable_id(label):
         raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
     return label
 
 
+def check_minted_token(token: object) -> str:
+    """A served-world token being minted (`<episode token>.<label>`): a plain component that is
+    case-stable as a whole, so two tokens differing only in case are never two files on a host
+    that folds them to one. Every minted token is (the episode token is casefolded, the label
+    case-stable). Readers of an existing token use the shape check on `LAYOUT.served_world`."""
+    token = _check_component(token, what="token")
+    if not is_case_stable_id(token):
+        raise ValueError(f"{token!r} is not case-stable ({CASE_STABLE_REQUIRED})")
+    return token
+
+
 # ==========================================================================================
-# THE LAYOUT — every episode record as a path RELATIVE to the episode dir.
+# THE LAYOUT — every episode record as a path relative to the episode dir.
 #
-# One spelling, two views (#1077 D7). The layout composes; `EpisodePaths` roots it at a real
-# directory and applies decision 2's containment check. The relative view is not a
-# convenience: the episode tree's readers are `_io.Bound` handles, which address records by a
-# name relative to the root they hold and never by an absolute path (that is the point of the
-# handle — it is the only value that ever held the root's spelling). Before D7 those readers
-# hand-composed their relative names from imported constants, which is the same drift as a
-# hand-composed absolute path and was invisible to the gate for the same reason. `Bound.read`,
-# `read_jsonl` and `under` all take `str | PurePath`, so the layout hands them a PATH and no
-# record name is ever spelled by a caller.
+# `EpisodePaths` roots it at a real directory with a containment check. The relative view
+# exists for `_io.Bound` readers, which address records relative to the root they hold and
+# never by absolute path, so no caller spells a record name.
 # ==========================================================================================
 
 
 @dataclasses.dataclass(frozen=True)
 class ArchivedWorldLeaves:
-    """One archived world's records by their OWN leaf name — relative to the WORLD dir.
-
-    Two views of one world, for the same reason the episode has two: a reader already bound
-    at `worlds/<label>/` addresses `alert.json`, while a reader bound at the episode root
-    addresses `worlds/<label>/alert.json`. Both used to be hand-composed from imported
-    constants at their call sites. `WorldLayout` is the episode-relative view and composes
-    itself out of this one, so the leaf is spelled once and the two can never disagree.
+    """One archived world's records relative to the world dir, for readers bound at
+    `worlds/<label>/`. `WorldLayout` (episode-relative) composes from this, so each leaf is
+    spelled once.
     """
 
     @property
@@ -98,16 +91,14 @@ class ArchivedWorldLeaves:
 
     @property
     def provenance(self) -> PurePosixPath:
-        """The world's own flat run stamp — the same spelling as the episode-root FAMILY
-        stamp, a different shape at the same file name (#1025 fk-8/J12)."""
+        """The world's own flat run stamp — same file name as the episode-root family stamp,
+        different shape."""
         return PurePosixPath(PROVENANCE)
 
     @property
     def scrub_verdict(self) -> PurePosixPath:
-        """The scrub verdict's name INSIDE the archive. Deliberately not the sidecar's own
-        spelling (`<run>.scrub-verdict.json`): inside `worlds/<X>/` the world IS the
-        directory, so the name that carried the run id outside it would carry a run id here
-        that nothing may resolve."""
+        """The scrub verdict's name inside the archive — not the sidecar's run-id-keyed
+        spelling, since the world directory already identifies it."""
         return PurePosixPath(ARCHIVED_SCRUB_VERDICT_NAME)
 
     @property
@@ -129,19 +120,10 @@ class ArchivedWorldLeaves:
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         """`gather_summaries/<lead_id>.md`.
 
-        NO COMPONENT CHECK, and that is the difference from the run-dir twin
-        (`RunPaths.gather_summary`, which applies `_check_component`). The two address
-        different moments. The run-dir accessor COMPOSES a name this process is about to
-        write, for a lead id the run itself minted (`l-<alnum>`), so the strict shape is the
-        right refusal. This one addresses a name ALREADY ON DISK in an archive the judge reads
-        back — written by a box, under whatever the investigation called its lead — and the
-        lane deliberately admits ids the strict check refuses (` spaced`, `two\\nlines`,
-        `.hidden`), which #1049 pins by name.
-
-        It is not ungated, it is gated ELSEWHERE and twice: `family.names_one_file` refuses a
-        traversal before this is called, and `_io.Bound`'s own name grammar refuses an
-        absolute spelling, a NUL, an empty component and `.`/`..` at the walk. Re-asking the
-        composing check here would refuse to read files that exist.
+        No component check, unlike `RunPaths.gather_summary`: that one composes a name about to
+        be written, while this reads a name already on disk that may not fit the strict shape
+        (` spaced`, `.hidden`). Traversal is refused by `family.names_one_file` and by
+        `_io.Bound`'s name grammar instead.
         """
         return self.gather_summaries / f"{lead_id}.md"
 
@@ -154,7 +136,7 @@ class ArchivedWorldLeaves:
 
     @property
     def run_dir_pointer(self) -> PurePosixPath:
-        """`run_dir` — a TEXT pointer, never a link (archive.py's docstring on why)."""
+        """`run_dir` — a text pointer, never a link."""
         return PurePosixPath(RUN_DIR_POINTER_NAME)
 
     @property
@@ -176,14 +158,8 @@ WORLD_LEAVES = ArchivedWorldLeaves()
 
 @dataclasses.dataclass(frozen=True)
 class WorldLayout:
-    """One archived world's records, relative to the EPISODE dir — `worlds/<label>/...`.
-
-    The archive projects a source run dir into this shape, so most of these names are the run
-    dir's own (imported from `_run_paths`, never re-spelled); the two sidecars are re-homed
-    under names only the archive uses, because no run dir carries them.
-
-    Every record is `dir / WORLD_LEAVES.<name>` — this view never spells a leaf, so the
-    episode-relative and world-relative forms cannot fall out of step.
+    """One archived world's records relative to the episode dir — `worlds/<label>/...`.
+    Every record is `dir / WORLD_LEAVES.<name>`.
     """
 
     label: str
@@ -312,63 +288,44 @@ class EpisodeLayout:
     # -- composing ------------------------------------------------------------------------------
 
     def run(self, run_dir_name: str) -> PurePosixPath:
-        """`runs/<run dir name>` — one sibling's run dir, addressed by the name it already
-        has on disk rather than recomposed from `(episode_id, label)`.
-
-        Distinct from `sibling_run_dir`, which MINTS the name and so applies decision 12's and
-        20's refusals to a freshly-authored label. This one is handed a directory the tree
-        already holds — the page walks `runs/` and reads back what is there — so the shape
-        check is all that applies; re-asking the minting rules of an existing entry would
-        refuse to render a directory that exists.
+        """`runs/<run dir name>` — an existing sibling run dir, by its on-disk name. Shape check
+        only; the minting rules live on `sibling_run_dir`.
         """
         return self.runs / _check_component(run_dir_name, what="run_dir_name")
 
     def run_page(self, run_dir_name: str) -> PurePosixPath:
-        """`runs/<run dir name>/runtime.html` — the episode page's link to one sibling's own
-        page. Composed HERE because it spans the two layouts: the episode owns the `runs/`
-        segment and the run owns the page's name, and a link built by joining one module's
-        constant onto the other's is the drift D7 removes, in the one direction that produces
-        a dead link rather than a crash."""
+        """`runs/<run dir name>/runtime.html` — the episode page's link to one sibling's page,
+        spanning the episode and run layouts."""
         return self.run(run_dir_name) / RUN_LAYOUT.runtime_html
 
     def world(self, label: str) -> WorldLayout:
         """One archived world's records, by label.
 
-        SHAPE ONLY — `_check_component`, not `_check_label`. This is the READ side: the
-        judge, the enqueue and the episode page address a world whose directory is already on
-        disk, under whatever label the manifest gave it, and a label that is merely not
-        case-stable still names a real directory they must be able to open. Case stability is
-        asked where a label is MINTED (`EpisodePaths.world`, `world_dir`, `sibling_run_dir`),
-        because that is where two labels differing only by case would collapse into one
-        directory — the same read/write split `ArchivedWorldLeaves.gather_summary` documents.
+        Shape check only: readers must be able to open an existing directory whose label is not
+        case-stable. Case stability is enforced where a label is minted (`EpisodePaths.world`,
+        `world_dir`, `sibling_run_dir`).
         """
         return WorldLayout(_check_component(label, what="label"))
 
     def served_world(self, token: str) -> PurePosixPath:
         """`served/<episode token>.<label>.jsonl`, by the token a manifest already declares.
-
-        SHAPE ONLY, for the reason `world` gives: this is the READ side. The judge names a
-        world's ledger to open it and to say so in a refusal, and a manifest whose label is
-        merely not case-stable still names a ledger on disk — #921's collision test loads
-        exactly such a label as its POSITIVE control, so refusing here would refuse the run
-        that proves the real refusal is about the collision. Case stability is asked on
-        `EpisodePaths.served_world`, which is where one is created.
+        Shape check only, as for `world`; `EpisodePaths.served_world` enforces case stability.
         """
         return self.served / f"{_check_component(token, what='token')}.jsonl"
 
     def stage_trace(self, stage: str) -> PurePosixPath:
-        """`wire_logs/<stage>.trace.jsonl` — the episode-root wire trace of one learning stage.
-        Shares `_run_paths.TRACE_SUFFIX` rather than re-spelling it (claim: one reused
-        constant, not two)."""
+        """`wire_logs/<stage>.trace.jsonl` — the episode-root wire trace of one learning stage."""
         stage = _check_component(stage, what="stage")
         return PurePosixPath(WIRE_LOG_DIR) / f"{stage}{TRACE_SUFFIX}"
 
+    def wire_log(self, name: str) -> PurePosixPath:
+        """`wire_logs/<name>` — an episode-root wire log by its full file name (the judge's
+        framed trace, named by `WIRE_LOG_NAMES`). One component."""
+        return PurePosixPath(WIRE_LOG_DIR) / _check_component(name, what="wire log name")
+
     def sibling_run_dir(self, episode_id: str, label: str) -> PurePosixPath:
-        """`runs/<episode_id>-<label>` — byte for byte as today (O3). Decision 20's
-        case-stability refusal applies to the freshly-authored `label`, and so does decision
-        12's delimiter refusal: an episode id ALWAYS carries `-` (`episode_id_for` derives it
-        as `<source run>-n<turn>`), so it is the label being `-`-free that keeps the pair
-        recoverable from the composed id — `ep-a-b` is `(ep-a, b)`, never `(ep, a-b)`."""
+        """`runs/<episode_id>-<label>`. The label must be case-stable and `-`-free: episode ids
+        always contain `-`, so a `-`-free label keeps `ep-a-b` unambiguously `(ep-a, b)`."""
         episode_id = _check_component(episode_id, what="episode_id")
         if "-" in str(label):
             raise ValueError(
@@ -384,17 +341,9 @@ LAYOUT = EpisodeLayout()
 
 @dataclasses.dataclass(frozen=True)
 class EpisodePaths:
-    """One episode's directories and its accessors — the episode-layout owner (#1077 D1).
-
-    Every accessor resolves relative to ``episode_dir``. The layout NAMES live in ``LAYOUT``
-    (relative, for the bound readers) and this class roots them at a real directory, applying
-    decision 2's containment check to every composed one. The episodes ROOT's resolution stays
-    in `learning/branch/cli.episodes_root` — a configured location this module deliberately
-    does not know how to find.
-
-    Reach the relative form through ``.rel`` (`EpisodePaths(d).rel.family`) or ``LAYOUT``
-    directly when no directory is in hand; a `_io.Bound` reader wants that form and never an
-    absolute path.
+    """One episode's directories and accessors, rooted at ``episode_dir`` with a containment
+    check on every composed path. The relative form is ``.rel`` / ``LAYOUT``. Locating the
+    episodes root is `learning/branch/cli.episodes_root`'s job, not this module's.
     """
 
     episode_dir: Path
@@ -411,14 +360,9 @@ class EpisodePaths:
         return _confine(self.episode_dir / rel, self.episode_dir, what=what)
 
     def at(self, rel: PurePosixPath, *, what: str = "path") -> Path:
-        """Root one of `LAYOUT`'s relative paths at this episode, with containment checked.
-
-        The READ side's way to get an absolute path (#1077 D7). A reader that holds a label
-        from a manifest wants `worlds/<label>/` as a directory, not a newly minted one — the
-        minting accessors (`world`, `world_dir`, `served_world`) re-ask decision 20's
-        case-stability rule, which would refuse a label that names a real directory on disk.
-        Takes a path the LAYOUT composed, never a name a caller spelled, so nothing is
-        hand-composed either way.
+        """Root one of `LAYOUT`'s relative paths at this episode, with containment checked —
+        the read side's way to an absolute path, without the minting accessors' case-stability
+        rule.
         """
         return self._at(rel, what=what)
 
@@ -430,8 +374,7 @@ class EpisodePaths:
 
     @property
     def family_stamp(self) -> Path:
-        """The family stamp shares `_run_paths.PROVENANCE`'s spelling at the episode root — a
-        DIFFERENT shape at the same file name (#1025 fk-8/J12)."""
+        """The family stamp: `_run_paths.PROVENANCE`'s file name, different shape."""
         return self.episode_dir / LAYOUT.family_stamp
 
     @property
@@ -478,33 +421,20 @@ class EpisodePaths:
     def worlds(self) -> Path:
         return self.episode_dir / LAYOUT.worlds
 
-    # -- composing accessors — decision 2's shape+containment rule applies to every one --------
+    # -- composing accessors — shape + containment checked on every one ------------------------
 
     def world(self, label: str) -> WorldPaths:
-        """One archived world, rooted at this episode. Every record the archive projects into
-        it is an accessor on the returned handle — the archive's source/destination pairing is
-        then two accessors and no names at all.
-
-        The WRITE side, so decision 20's case-stability refusal applies here (as it always did
-        on `world_dir`): this is where a world directory is created, and two labels differing
-        only by case would become one directory wherever the filesystem folds case.
+        """One archived world, rooted at this episode. The write side, so the label must be
+        case-stable.
         """
         return WorldPaths(self.episode_dir, LAYOUT.world(_check_label(label)))
 
     def served_world(self, token: str) -> Path:
-        """`served/<episode token>.<label>.jsonl` — the MINTING side.
-
-        Decision 12's delimiter refusal lives in `_family.world_token_for`, which composes the
-        token: the LABEL may not carry `.`, so the label is always the text after the token's
-        last dot — the episode token before it legitimately holds dots (`episode_token_for`
-        folds every `-` of the episode id onto `.`). Decision 20's case-stability rule is
-        re-asked of that label here.
+        """`served/<episode token>.<label>.jsonl` — the minting side. The label is the text
+        after the last dot (`_family.world_token_for` forbids dots in labels) and must be
+        case-stable.
         """
-        token = _check_component(token, what="token")
-        _head, sep, label = token.rpartition(".")
-        if sep and not is_case_stable_id(label):
-            raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
-        return self._at(LAYOUT.served_world(token), what="served_world")
+        return self._at(LAYOUT.served_world(check_minted_token(token)), what="served_world")
 
     def judge_draw(self, label: str, n: int) -> Path:
         """`worlds/<label>/judge/<n>.yaml`."""
@@ -541,11 +471,8 @@ class EpisodePaths:
 
 @dataclasses.dataclass(frozen=True)
 class WorldPaths:
-    """One archived world's records, rooted at a real episode directory.
-
-    Carries the relative layout beside the root so a caller can hand either form out: `.rel`
-    for a bound reader, the accessor itself for a filesystem path. Containment is checked on
-    every absolute form, exactly as on `EpisodePaths`.
+    """One archived world's records, rooted at a real episode directory; `.rel` gives the
+    relative form. Containment is checked on every absolute path.
     """
 
     episode_dir: Path

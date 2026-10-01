@@ -44,19 +44,14 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return stage()
     except SYSTEMIC_FAULTS as e:
         _logger.critical(f"{e}")
-        # A terse exit-2 line costs the traceback an unhandled fault would have printed, and
-        # with it the exception this one displaced. That matters for `RunTainted`, which
-        # deliberately outranks the work's own failure — `__context__` is the reason the batch
-        # was already dying, and nothing else on this path says it.
+        # The terse exit-2 line drops the traceback, and with it the exception this one
+        # displaced; for `RunTainted` that `__context__` is why the batch was already dying.
         if e.__context__ is not None:
             _logger.critical(f"...it displaced: {e.__context__!r}")
         return 2
     except RunAlreadyLive as e:
-        # Not an error and not a traceback: a caller asking for work another holder already
-        # has has made no mistake, and blocking would hang their terminal behind a full batch.
-        # The raiser this was written for (`run_one`) left with #922; the arm stays because
-        # the lease discipline it answers for is the drains', and #955 F-49's choice — say so,
-        # do nothing, exit clean — is the same answer for them.
+        # Not an error: another holder already has the work, and blocking would hang the
+        # terminal behind a full batch. Say so and exit clean.
         _logger.warning(f"{e}")
         return 0
     except RunUnprocessable as e:
@@ -104,7 +99,6 @@ def main(argv: list[str]) -> int:
     if ns.lead_author_drain:
         return _run_stage(lead_author_drain)
 
-    # No positional to fall through to since #922 removed the LEARN stage: a bare invocation
-    # is a usage error, not a request to process something.
+    # A bare invocation is a usage error.
     print("one of --author-drain / --lead-author-drain is required", file=sys.stderr)
     return 1

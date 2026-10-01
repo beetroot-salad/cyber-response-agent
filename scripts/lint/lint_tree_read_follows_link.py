@@ -1,49 +1,37 @@
 #!/usr/bin/env python3
-"""Link-following READ of a box-writable tree — the read-side twin of
+"""Link-following read of a box-writable tree: the read-side twin of
 ``lint_unguarded_tree_write``.
 
-#771 M3 settled the write side: a run dir is the box's rw bind, so an entry there may be a
-symlink the model planted, and every write into such a tree goes through the alias-refusing
-primitives. The READ side got no such seam, and the asymmetry is the bug: the same directory
-this repo refuses to write through unexamined is trusted when it is stat'ed and copied.
-``defender/_run_paths.artifact_file`` / ``artifact_dir`` are the answer — both ``lstat``, so
-they judge the ENTRY rather than what it points at — and this gate is what makes reaching for
-them the default instead of a thing an author has to remember.
+A run dir is the box's rw bind, so an entry there may be a symlink the model planted. Writes
+into such trees go through alias-refusing primitives; reads must not trust the same directory
+when it is stat'ed and copied. ``defender/_run_paths.artifact_file`` / ``artifact_dir`` are
+the answer — both ``lstat``, so they judge the entry rather than what it points at — and this
+gate makes reaching for them the default.
 
 What it flags, inside `SCOPE` (``defender/``) and only in `LINT_TREE_READER_MODULES`:
 
 * a call resolving to ``shutil.copy`` / ``copy2`` / ``copyfile`` / ``copytree`` / ``move``.
-  All five follow a link at the SOURCE, so copying a planted link writes the TARGET's bytes
-  into learning state under an artifact's name, where every later reader takes them for a
-  legitimate in-run file. Resolved by CALLEE, so ``from shutil import copy2 as cp`` is the
-  same finding as the spelled form.
-* the duck-typed ``<x>.is_file()`` / ``<x>.is_dir()`` shapes. Unresolvable by import origin —
-  the receiver is a ``Path`` VALUE, not a module — and matched the same way
-  ``lint_unguarded_tree_write`` matches ``<x>.write_text(...)``.
+  All five follow a link at the source, so copying a planted link writes the target's bytes
+  into learning state under an artifact's name. Resolved by callee, so aliases count.
+* the duck-typed ``<x>.is_file()`` / ``<x>.is_dir()`` shapes (the receiver is a ``Path``
+  value, not a module).
 
-What it does NOT flag, and why the omissions are the gate's whole precision:
+What it does not flag:
 
-* ``artifact_file`` / ``artifact_dir`` — the sanctioned lstat predicates. They are plain
-  calls, not attribute calls on a value, so they never match by construction.
-* ``.exists()``. The asymmetry is real, not an oversight. ``is_file()``/``is_dir()`` are
-  ADMIT checks — "this is the right kind of thing, so act on it" — and following a link
-  there admits the target. ``.exists()`` in this tree is a REFUSE check ("something is
-  already here, so stop"), where following a link fails CLOSED: the established safe idiom
-  is ``p.exists() or p.is_symlink()``, which covers the broken link ``exists()`` alone
-  misses. Flagging it would bury this gate's real findings under the pattern that is already
-  correct.
-* ``.is_symlink()`` / ``.lstat()`` — the link-aware spellings themselves.
+* ``artifact_file`` / ``artifact_dir`` — plain calls, never matching by construction.
+* ``.exists()``. ``is_file()``/``is_dir()`` are admit checks, where following a link admits
+  the target. ``.exists()`` here is a refuse check ("something is already here, so stop"),
+  where following a link fails closed; the safe idiom ``p.exists() or p.is_symlink()`` also
+  covers the broken link. Flagging it would bury real findings under correct code.
+* ``.is_symlink()`` / ``.lstat()`` — the link-aware spellings.
 
-Scoped to a POSITIVE census rather than all of ``defender/`` because ``.is_file()`` on a
-config path, a fixture, or an interpreter is ordinary and correct everywhere else; a gate that
-flagged those would carry a baseline nobody reads. The census is the set of modules that read
-a path INSIDE a run dir, an episode dir, or the drain corpus — the trees a live box can write.
-Adding a module that reads such a tree and not adding it here is the failure mode; the census
-is small enough to review in a diff for exactly that reason.
+Scoped to a positive census rather than all of ``defender/`` because ``.is_file()`` on a
+config path or fixture is ordinary and correct. The census is the set of modules that read a
+path inside a run dir, an episode dir, or the drain corpus. A module that reads such a tree
+and is not listed is not covered, so keep the census current.
 
 Ratcheted like its write-side twin (``lint_tree_read_follows_link_baseline.json``), with
-``require_reasons`` ON: the baseline ships small and fully annotated, so an entry added later
-with an empty reason fails the gate rather than joining a wall of un-triaged debt.
+``require_reasons`` on: every entry must be annotated.
 
 Run from repo root:  python scripts/lint/lint_tree_read_follows_link.py
 Regenerate the baseline:  python scripts/lint/lint_tree_read_follows_link.py --update-baseline
@@ -64,8 +52,8 @@ BASELINE_PATH = Path(__file__).with_name("lint_tree_read_follows_link_baseline.j
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
-#: Copy helpers that follow a link at the SOURCE. ``copytree``'s ``symlinks=True`` governs what
-#: it finds while WALKING and says nothing about the root it was handed, so it is here too.
+#: Copy helpers that follow a link at the source. ``copytree``'s ``symlinks=True`` governs what
+#: it finds while walking, not the root it was handed.
 _UNSAFE_CALLEES = frozenset({
     "shutil.copy",
     "shutil.copy2",
@@ -74,12 +62,11 @@ _UNSAFE_CALLEES = frozenset({
     "shutil.move",
 })
 
-#: The link-following ADMIT predicates. See the module docstring for why ``exists`` is absent.
+#: The link-following admit predicates (``exists`` is deliberately absent; see module doc).
 _UNSAFE_METHODS = frozenset({"is_file", "is_dir"})
 
 #: Modules that read a path inside a box-writable tree (a run dir, an episode dir, the drain
-#: corpus). A module that grows such a read and is not added here is a module this gate stops
-#: covering — the same failure ``lint_unguarded_tree_write``'s census comment names.
+#: corpus). A module that grows such a read and is not added here is not covered.
 LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "_provenance.py",
     "run_common.py",
@@ -89,35 +76,23 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/branch/ledger.py",
     "learning/core/persist.py",
     "learning/lead_repository.py",
-    # #947's readers of the episode tree, which holds three sibling run dirs (each a box's rw
-    # bind) plus the archived copies taken out of them. `archive.py` in particular already
-    # carried a `lint-tree-read-follows-link: ok` marker, which suppressed a gate that was not
-    # scanning the file — "adding a module that reads such a tree and not adding it here is the
-    # failure mode", per the module docstring above.
+    # Readers of the episode tree: sibling run dirs (each a box's rw bind) plus archived
+    # copies taken out of them.
     "learning/branch/archive.py",
     "learning/branch/episode.py",
     "learning/branch/review.py",
     "learning/branch/staging.py",
-    # #1025's stage timing record at the episode root, read back by the page: its reader goes
-    # through `read_guarded` like the rest of this census, and is listed here for the reason
-    # the comment above gives — a module that reads the episode tree and is not listed is one
-    # this gate has stopped covering.
+    # The stage timing record at the episode root.
     "learning/branch/timing.py",
     "learning/branch/questioner/__init__.py",
     "runtime/branch/_family.py",
-    # #921's family judge, whose whole input is that same episode tree read back: the archived
-    # world dirs (copied out of three boxes' rw binds), the episode's own `judge.yaml`/
-    # `review.yaml`/`family.yaml`, the per-draw records it writes and re-reads, and the
-    # operator's runs base. Four modules that grow such reads and are not added here are four
-    # modules this gate stops covering — the failure mode this census's own comment names.
+    # The family judge, whose input is the episode tree: archived world dirs, the episode's
+    # `judge.yaml`/`review.yaml`/`family.yaml`, per-draw records, and the runs base.
     "learning/judge/__init__.py",
     "learning/judge/enqueue.py",
     "learning/judge/family.py",
     "learning/judge/render.py",
-    # #1025's episode page: renders `learning.html` from the episode tree alone — every record
-    # and archived world leaf it reads goes through a package reader that already screens with
-    # `read_guarded`/`artifact_file`/`artifact_dir`; listed here for the reason every entry
-    # above is.
+    # The episode page, rendered from the episode tree through package readers.
     "scripts/visualize/visualize_episode.py",
 })
 

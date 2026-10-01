@@ -1,28 +1,22 @@
 """Calibrate the LABEL pass against the hand-derived labels, and measure its own noise.
 
-When a measurement comes from something other than a human reading the telemetry, that
-something is calibrated against hand-derived truth before its output is trusted. A
-systematic bias biases every case the same way, and no amount of `n` detects it — unlike
-human error, which is at least uncorrelated across cases.
+A machine measurement is calibrated against hand-derived truth before it is trusted: a
+systematic bias affects every case the same way, and no amount of `n` detects it.
 
 Two numbers come out:
 
-* **calibration** — does the label pass reproduce the hand labels, class for class?
-  A divergence is adjudicated by RE-MEASUREMENT, never by tuning the prompt until it
-  agrees. A judge fitted to the audit set calibrates nothing.
-* **self-agreement** — with `--repeats N`, how often does the same lead get the same
-  label? The judge runs at score time, so its variance is inside every interval the
-  report prints. Unmeasured, every one of them is understated.
+* **calibration**: does the label pass reproduce the hand labels, class for class? A
+  divergence is adjudicated by re-measurement, never by tuning the prompt until it
+  agrees; a judge fitted to the audit set calibrates nothing.
+* **self-agreement**: with `--repeats N`, how often does the same lead get the same label?
 
-The VERDICT pass cannot be calibrated this way: nothing hand-labelled exists for it.
-`--pass verdict` measures the two things that can be measured — self-agreement, and how
-often it returns `contradicts-measurement` — over the leads a real projection was scored
-on, reusing the same cached measurement `score.py` feeds it.
+The VERDICT pass has no hand labels. `--pass verdict` measures its self-agreement and how
+often it returns `contradicts-measurement`, over the leads a real projection was scored
+on, using the cached measurement `score.py` feeds it.
 
-**Why the verdict audit is not optional.** The judge runs at score time, so its variance
-sits inside every interval `report.py` prints. The dev active band is 7 leads: one lead
-that flips between runs moves the headline 14 points. Without this number, a prompt
-change smaller than the judge's own noise reads as an improvement.
+Because the judge runs at score time, its variance sits inside every interval `report.py`
+prints: in a 7-lead active band, one flipping lead moves the headline 14 points. A prompt
+change smaller than that noise is not an improvement.
 
 Usage:
   audit_judge.py [--pass label|verdict] [--repeats N] [--case CASE]... [--tag TAG]
@@ -47,9 +41,8 @@ from defender.evals.oracle_golden import judge, score  # noqa: E402
 GOLDEN_DIR = Path(__file__).resolve().parent
 CASES_DIR = GOLDEN_DIR / "cases"
 
-#: The audit set: the four observed seed cases, whose labels were derived by hand. Excludes
-#: any case labelled by a program (auditing against it would be auditing a copy) and the
-#: derived cases (no telemetry, so the label pass has nothing to measure).
+#: The audit set: the observed seed cases whose labels were derived by hand (not by a
+#: program, and not derived cases, which have no telemetry).
 AUDIT_CASES = (
     "case-001-ssh-bruteforce-canary",
     "case-002-authorized-keys-falco",
@@ -61,12 +54,9 @@ AUDIT_CASES = (
 #: no @timestamp bounds to move, so no baseline-diff semantics.
 STATE_SYSTEMS = frozenset({"cmdb", "identity", "threat-intel", "change-mgmt"})
 
-#: The hand labels speak the retired four-class vocabulary; the label pass speaks
-#: `delta_kind`. The mapping is mechanical and stated here rather than negotiated per
-#: divergence — the one place it is not 1:1 is `0`, which collapsed two distinct
-#: readings ("this event stream was quiet" and "this is a lookup, there is nothing to
-#: diff") into a single class. Expanding it by the lead's own systems is a property of
-#: the lead, not a judgement about the answer.
+#: Hand-label class → `delta_kind`. Fixed here rather than negotiated per divergence. `0`
+#: covers both a quiet event stream and a lookup with nothing to diff, so it is split by the
+#: lead's own systems (`expected_delta_kinds`).
 CLASS_TO_DELTA_KIND = {
     "+event": ("present",),
     "+noise": ("indistinguishable",),
@@ -75,7 +65,7 @@ CLASS_TO_DELTA_KIND = {
 }
 
 
-#: Anchored in `judge.py` so the calibration and the report's slice axis cannot drift.
+#: Shared with the report's slice axis.
 lead_systems = judge.lead_systems
 
 
@@ -129,27 +119,22 @@ class _Agreement:
 
 
 def _modal(answers: list) -> _Agreement:
-    """The modal answer and how dominant it was. `Counter.most_common(1)` breaks ties by
-    first-seen, which is arbitrary but consistent — and a tie is already reported as such,
-    because `fraction` shows it."""
+    """The modal answer and how dominant it was. Ties break by first-seen; `fraction` shows
+    the tie."""
     modal, modal_n = Counter(answers).most_common(1)[0]
     return _Agreement(modal=modal, modal_n=modal_n, n=len(answers))
 
 
 def _mean_agreement(rounds: list[_Agreement]) -> float | None:
-    """`None`, not zero, for an empty sweep: nothing was asked, so nothing agreed."""
+    """`None`, not zero, for an empty sweep."""
     return round(sum(r.fraction for r in rounds) / len(rounds), 3) if rounds else None
 
 
 def _sweep(entries: list[tuple], repeats: int, jobs: int, ask) -> dict[tuple[str, str], list[dict]]:
     """Ask `ask` about every entry `repeats` times, grouped back by (case, lead).
 
-    THE sweep, shared because the two audits' numbers are compared to each other: the label
-    pass's self-agreement and the verdict pass's are read side by side to say which pass a
-    prompt change moved, and that reading assumes both were measured the same way.
-
-    Every entry is a tuple whose first two elements are `(case_dir, lead_id)`; the rest is
-    the caller's, and reaches `ask` untouched.
+    Shared so both audits' self-agreement numbers are measured the same way and comparable.
+    Each entry starts with `(case_dir, lead_id)`; the rest is passed to `ask` untouched.
     """
     work = [entry for entry in entries for _rep in range(repeats)]
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(work) or 1))) as pool:
@@ -179,10 +164,8 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
         kinds = [x["delta_kind"] for x in labels]
         agreement = _modal(kinds)
         accepted = expected_delta_kinds(hand, lead)
-        # An ABSTENTION is not a divergence, and conflating them charges the judge for
-        # its own honesty. A divergence is the judge asserting a class the hand label
-        # rules out; `undecidable` asserts nothing, and the design excludes it from
-        # every denominator and tallies it separately.
+        # An abstention (`undecidable`) asserts nothing, so it is tallied separately rather
+        # than counted as a divergence.
         abstained = agreement.modal == "undecidable"
         agrees = agreement.modal in accepted
         rounds.append(agreement)
@@ -202,8 +185,6 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
     decided = [r for r in rows if not r["abstained"]]
     return {
         "pass": "label",
-        # The resolved judge, read back from every call rather than echoed from the request:
-        # a run that fell back mid-sweep would file two judges' answers under one tag.
         "judge_model": judge.sole_judge(replies, what="the label sweep"),
         "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),
@@ -219,9 +200,7 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
     }
 
 
-#: The oracle tag the verdict audit grades, unless `--tag` says otherwise. The verdict
-#: pass is a function of a PROJECTION, so unlike the label pass it cannot be audited
-#: without naming one.
+#: The oracle tag the verdict audit grades by default; the verdict pass needs a projection.
 DEFAULT_ORACLE_TAG = "glm-5.2_effort-none_prompt-711"
 
 
@@ -229,10 +208,7 @@ def verdict_set(case_names: tuple[str, ...],
                 oracle_tag: str) -> list[tuple[Path, str, object, dict]]:
     """(case_dir, lead_id, events, measurement) for every lead a real score judged.
 
-    Deliberately reuses the committed `labels/<judge-tag>.json` rather than re-measuring:
-    the question is how stable the VERDICT pass is given a fixed measurement, and letting
-    the label pass vary underneath it would fold the two variances into one number that
-    names neither.
+    Reuses the committed `labels/<judge-tag>.json` so only the verdict pass varies.
     """
     out: list[tuple[Path, str, object, dict]] = []
     model, effort = judge.judge_model(), judge.judge_effort()
@@ -249,9 +225,7 @@ def verdict_set(case_names: tuple[str, ...],
         preds, _ = score.load_predictions(proj)
         labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})
         for lead_id, label in sorted(labels.items()):
-            # The same two exclusions score.py applies: an unmeasured envelope has
-            # nothing to grade against, and a malformed projection never reaches the
-            # judge at all. Auditing either would measure a call that never happens.
+            # The same exclusions score.py applies before judging.
             if label.get("delta_kind") == "undecidable" or lead_id not in preds:
                 continue
             if score.grammar_problem(preds[lead_id]) is not None:
@@ -304,8 +278,7 @@ def run_verdict_audit(case_names: tuple[str, ...], oracle_tag: str, repeats: int
         "prompts_sha8": judge.prompts_sha8(), "repeats": repeats,
         "leads": len(rows),
         "unstable_leads": len(unstable),
-        # The number a prompt change has to beat. A dev band of 7 leads where 2 flip
-        # between runs cannot resolve a one-lead improvement.
+        # The number a prompt change has to beat.
         "noise_floor_leads": len(unstable),
         "contradicts_measurement": len(contradicts),
         "mean_self_agreement": _mean_agreement(rounds),

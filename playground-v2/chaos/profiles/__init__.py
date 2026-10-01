@@ -1,11 +1,9 @@
-"""M2 — chaos profiles: committed YAML, static fault descriptions.
+"""Chaos profiles: committed YAML, static fault descriptions.
 
-A profile owns nothing at runtime; `chaos.mutations.resolve_mutations`
-resolves it (with a seed and the live inventory) into what actually gets
-pushed. This module is the load side only. The day-one profiles committed
-alongside it (`cmdb-stale-owner.yaml`, `schema-drift-username.yaml`,
-`data-drop-syslog.yaml`) are the three shipped fault shapes, one per mode.
+The load side only; `chaos.mutations.resolve_mutations` turns a profile (with
+a seed and the live inventory) into what actually gets pushed.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

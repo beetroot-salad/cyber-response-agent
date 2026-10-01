@@ -9,7 +9,7 @@
       "defender/.venv/bin/mypy --config-file defender/pyproject.toml",
       "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
     ],
-    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree. EVERY pytest invocation on this box goes through one lock — prefix it `flock /tmp/defender-pytest.lock`, ad-hoc subsets and adversary runs included, not just the command above. Two sessions launching fleets independently put 20 xdist workers on 12 cores and OOM-killed the container; the lock makes them take the box in turn instead of thrashing it. It costs nothing when nothing else is running."
+    "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree. EVERY pytest invocation on this box goes through one lock — prefix it `flock /tmp/defender-pytest.lock`, ad-hoc subsets and adversary runs included, not just the command above. Two sessions launching fleets independently put 20 xdist workers on 12 cores and OOM-killed the container; the lock makes them take the box in turn instead of thrashing it. It costs nothing when nothing else is running. `test` above is CI's full-suite command, recorded so you can read what CI runs — a spec-flow leaf never runs it; it runs its own suite's files."
   },
   "tests": {
     "language": "python",
@@ -143,7 +143,7 @@
           "defender/runtime/selection.py::ingest",
           "defender/runtime/selection.py::fold",
           "defender/runtime/observe.py::write_trace",
-          "defender/scripts/visualize/visualize_run.py::render_and_mirror"
+          "defender/scripts/visualize/visualize_run.py::render_page"
         ],
         "grep": [
           "session_store",
@@ -164,7 +164,7 @@
       },
       "runs_base": {
         "writers": [
-          "defender/run_common.py::materialize_run_dir"
+          "defender/run_common.py::materialize_run"
         ],
         "readers": [
           "defender/_tenant.py::runs_base_for",
@@ -198,7 +198,7 @@
           "defender/runtime/tools/_files.py::_tool_write_file",
           "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
-          "defender/scripts/visualize/visualize_run.py::render_and_mirror",
+          "defender/scripts/visualize/visualize_run.py::publish_page",
           "defender/runtime/lead_zero/__init__.py::resolve_lead_zero",
           "defender/runtime/lead_zero/_items.py::dispatch_correlation",
           "defender/runtime/lead_zero/__init__.py::prepare_correlation_lead",

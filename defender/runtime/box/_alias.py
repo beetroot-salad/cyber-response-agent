@@ -28,9 +28,9 @@ from ._docker import (  # noqa: F401 — `_call` re-exported: runtime/box/__init
 
 
 class AliasBanNotInForce(Exception):
-    """§7 D5 — the ban-not-in-force fault. Deliberately NOT a `BoxFault` subclass (nor a
-    superclass): being not-opt-out-able is only enforceable if the broad
-    `except BoxFault: degrade` handler every other startup fault survives cannot catch it."""
+    """The alias ban is not in force. Not related to `BoxFault`, so the
+    `except BoxFault: degrade` startup handler cannot swallow it: this fault is not
+    opt-out-able."""
 
 
 def _alias_ban_fault_message(runtime: str, detail: str) -> str:
@@ -52,9 +52,8 @@ def _alias_ban_fault_message(runtime: str, detail: str) -> str:
     return message
 
 
-#: The probe's own I/O failed, so nothing it observed means anything. Distinct from "a banned
-#: shape was allowed" because the two demand OPPOSITE operator actions and are identical in an
-#: exit code. Both still fail closed (see `_probe_alias_ban`).
+#: The probe's own I/O failed, so nothing it observed means anything. Distinguished from "a
+#: banned shape was allowed" because the operator fixes differ; both still fail closed.
 _CONTROL_FAILED_MARKER = "alias-probe: CONTROL-FAILED: "
 
 
@@ -72,16 +71,12 @@ def _alias_probe_inconclusive_message(cwd: Path, detail: str) -> str:
 
 
 def _alias_probe_script(name_prefix: str) -> str:
-    """One probe body: each of the six banned shapes plus one ordinary create, under a
-    randomly-suffixed prefix whose leavings are swept whichever arm it takes. rc 0 + stdout on
-    total denial with a working control, rc 1 + stderr naming what was allowed (or which
-    control failed) otherwise — the shape `AliasProbeDocker.ProbeVerdict.as_completed` fakes,
-    so one reader classifies both.
+    """One probe body: each of the six banned shapes plus one ordinary create, under a random
+    prefix whose leavings are always swept. rc 0 on total denial with working controls, else
+    rc 1 with stderr naming what was allowed or which control failed.
 
-    EVERY file operation the probe makes on its own behalf is guarded, and a failure ABANDONS
-    the observation: an unguarded `open` for the hard-link source turns a full or read-only
-    mount into a traceback the host reads as "the ban is not in force", and running the link
-    attempts anyway would let a MISSING source fail `ENOENT` and count as DENIED."""
+    Every control operation is guarded and a failure abandons the observation; otherwise a
+    missing hard-link source would fail with `ENOENT` and count as denied."""
     return f'''
 import os, stat, sys
 
@@ -156,19 +151,14 @@ def _alias_probe_argv(name: str, cwd: Path) -> list[str]:
 
 
 def _probe_alias_ban(docker: DockerFn, name: str, cwd: Path, runtime: str) -> None:
-    """M2 — the startup positive control: observes the ban's EFFECT at every box start rather
-    than trusting the runtime's configuration, and faults unless every banned shape was
-    refused AND the ordinary create succeeded. Any non-zero exit reads as failed.
+    """Startup positive control: observe the ban's effect at every box start rather than
+    trusting configuration. Faults unless every banned shape was refused and the ordinary
+    create succeeded.
 
-    A probe that could not run its own controls still raises `AliasBanNotInForce`: "could not
-    be observed" and "is not in force" carry the same obligation to refuse, and softening the
-    first into a `BoxFault` would let the box buy a degraded start by breaking the probe's
-    writable mount. Only the MESSAGE differs.
+    An inconclusive probe also raises `AliasBanNotInForce` (with a different message): a
+    `BoxFault` would let a broken writable mount buy a degraded start. For the same reason
+    docker is invoked directly, not via `_call`, which would convert errors into `BoxFault`."""
 
-    NEVER `_call` — that helper converts a `TimeoutExpired`/`OSError` into `BoxFault`, which
-    the generic `except BoxFault: degrade` startup handler can swallow (h26). This is a
-    security gate: the docker invocation is driven directly, and any fault talking to the
-    daemon is `AliasBanNotInForce` too, exactly like a found alias would be."""
     argv = _alias_probe_argv(name, cwd)
     try:
         proc = docker(argv)

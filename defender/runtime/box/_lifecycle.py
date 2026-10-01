@@ -37,10 +37,9 @@ from ._spec import _DockerTransport
 _logger = logging.getLogger(__name__)
 
 
-#: Where a run's box sees its tenant's model-facing `agent/` half (#1106 M6): ONE fixed,
-#: absolute target outside the `defender_dir` and run-dir targets, so the model's view of "my
-#: tenant's knowledge" never depends on where an operator keeps the tenants root. Read-only;
-#: the tenant's `settings/` half is never a mount source.
+#: Where the box sees its tenant's model-facing `agent/` half: a fixed target, so the model's
+#: view never depends on where the operator keeps the tenants root. Read-only; the tenant's
+#: `settings/` half is never mounted.
 TENANT_AGENT_TARGET = Path("/tenant/agent")
 
 
@@ -49,10 +48,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
     *, tenant_agent: Path | None = None,
 ) -> Create:
-    # C46's uncovered-mount refusal runs BEFORE the image resolver (MF1 part 2): a tree that
-    # sits on no shared path is a topology fault the resolver's file reads cannot fix, and
-    # reading them first would surface the wrong refusal on a tree that is ALSO missing its
-    # three inputs.
+    # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
+    # masked by the resolver's file-read refusal on the same tree.
     subjects = [
         ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
         ("defender dir", defender_dir, "Check out the tree"),
@@ -62,8 +59,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
-    # M3 revised: resolved on the host, here — never earlier (BoxSpec's construction reads
-    # nothing off the mounted tree, #1092 d5).
+    # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
     env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
     run_src = _daemon_source(run_dir, mounts)
@@ -80,8 +76,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
     if tenant_agent is not None:
-        # Covered (checked above) but NOT sentinel-probed: a read-only bind is never planted
-        # into, so a wrong daemon mapping of this mount goes unnoticed — see `_daemon_source`.
+        # Not sentinel-probed (a read-only bind cannot be planted into), so a wrong daemon
+        # mapping of this mount goes unnoticed.
         argv += [
             "--mount",
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
@@ -98,9 +94,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
 
 
 def _plant(sentinel: Path, token: str) -> None:
-    """Host-side half of a sentinel probe. An unwritable/absent SOURCE is a box-startup fault
-    like any other (BoxFault), not a bare OSError that would escape start_box's classification
-    and the loud DEFENDER_ALLOW_UNSANDBOXED fallback."""
+    """Host-side half of a sentinel probe. An unwritable source raises `BoxFault`, not a bare
+    OSError that would escape start_box's fault handling."""
     try:
         write_guarded(sentinel, token)
     except OSError as e:
@@ -125,9 +120,8 @@ def _probe_sentinel(
                 "inside the box does not match the host"
             )
     except BaseException:
-        # The run-dir tier deliberately LEAVES its sentinel behind on a fault — the residue is
-        # the evidence the probe really wrote. The per-mount tier cleans up, because its
-        # sources include the live repo/worktree trees.
+        # The run-dir tier leaves its sentinel as evidence the probe wrote; the per-mount tier
+        # cleans up because its sources include live repo/worktree trees.
         if unlink_on_fault:
             sentinel.unlink(missing_ok=True)
         raise
@@ -140,10 +134,8 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
 
 
 def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
-    """M11 — every mount is individually probed at start: a host-planted token, read back
-    through the box, proves the tree inside the container is the tree on the host. An absent
-    bind SOURCE is caught earlier, at create; this catches a bind that SUCCEEDED but mapped
-    the wrong or empty tree."""
+    """Probe one mount: a host-planted token read back through the box proves the bind mapped
+    the right tree (an absent source is already caught at create)."""
     _probe_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
         f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
@@ -158,14 +150,8 @@ def _start_boxed(
     try:
         _reap_stale_before_create(docker, name)
     except BoxFault as e:
-        # The §7 D2 marker, on the arm that now raises MOST often. Every other fault path in
-        # this function writes it before raising, and `test_a_reap_that_cannot_reach_the_
-        # daemon_still_leaves_the_did_not_run_marker` pins the rule for the sibling arm: a
-        # startup fault that leaves no verdict makes the tree read "nobody has judged this
-        # run yet", which is the one state `write_did_not_run` exists to prevent. #955 F-49
-        # widened this arm's trigger from `running` alone to every state but exited/dead —
-        # i.e. to every leaked container on a REUSED name, repeatably — so the gap that was
-        # a rare corner is now the common wedge.
+        # Every startup fault path writes the did-not-run marker, so the tree never reads as
+        # "not yet judged". This arm fires on any leaked container under a reused name.
         write_did_not_run(run_dir, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex
@@ -174,22 +160,17 @@ def _start_boxed(
         tenant_agent=tenant_agent,
     )
     try:
-        # O4: the image is confirmed on the daemon BEFORE the create names it, so a missing
-        # image is its own refusal (with the build remedy) and never a create fault to be
-        # told apart from the others by its text. Marked like the reap arm above: the run
-        # could have happened, and the tree must not read as unjudged.
+        # Confirm the image before the create, so a missing image is its own refusal (with
+        # the build remedy) rather than a create fault told apart by its text.
         require_image(docker, create.rootfs)
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}")
         raise
     created = _call(docker, create.argv)
     if created.returncode != 0:
-        # `docker run --detach` is create-THEN-start, so a non-zero rc does not prove no
-        # container exists: a failure at task start (a profile the runtime rejects, a missing
-        # `runsc`, cgroup or pid exhaustion) leaves it behind in `created`, and nothing
-        # revisits this name — so without this reap the leak accrues one per faulted start.
-        # Marker and reap are BEST-EFFORT and may not replace the create's stderr, the only
-        # account of why the box failed. `owned_token` decides WHOSE container this is.
+        # `docker run --detach` is create-then-start, so a failure at task start can leave a
+        # `created` container behind; reap it if it carries our token. Marker and reap are
+        # best-effort and must not replace the create's stderr.
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
@@ -202,9 +183,8 @@ def _start_boxed(
         _plant_sentinel(run_dir, docker, name)
         _probe_alias_ban(docker, name, run_dir, spec.runtime)
     except BaseException as e:
-        # Unconditional (this box IS ours — create succeeded) but best-effort: a reap that
-        # raises here must not take the §7 D2 marker below down with it, nor replace the
-        # startup fault `e` with "could not invoke docker".
+        # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
+        # marker or replace `e`.
         _reap_on_fault(docker, name)
         write_did_not_run(
             run_dir, f"box startup faulted before the reap scan could run: {e}"
@@ -242,18 +222,15 @@ def _render_argv(
     env = _render_env(request.env, Path(request.workdir))
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
-    # M3 revised: resolved here — never at BoxRequest construction (#1092 d5).
+    # Resolved here, never at BoxRequest construction.
     rootfs = resolve_rootfs(request.spec.rootfs, Path(request.workdir) / "defender")
     argv += [rootfs.image, "sleep", "infinity"]
     return Create(argv, rootfs)
 
 
 def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
-    """§7 D2's marker for the request lane — one per WRITABLE mount source, none at all for a
-    lane that has no writable mount. A request composes its own geography, so "which tree does
-    this verdict belong to" must be answered explicitly, by `stop_and_scrub`'s rule: a tree is
-    worth a verdict exactly when the box could write it. Best-effort per tree, for the reason
-    `scrub._write_verdict` carries."""
+    """The did-not-run marker for the request lane: one per writable mount source, since a
+    tree needs a verdict exactly when the box could write it. Best-effort per tree."""
     for m in request.mounts:
         if m.writable:
             write_did_not_run(Path(m.source), reason)
@@ -270,30 +247,19 @@ def _start_boxed_request(
     try:
         _reap_stale_before_create(docker, request.name)
     except BoxFault as e:
-        # `_start_boxed`'s reason, on the request lane's own geography — with the caveat that
-        # geography makes: `_did_not_run_for_request` writes one verdict per WRITABLE mount,
-        # and the retired run-cycle lane composed every mount `writable=False`. So on that
-        # lane — the one caller that reused a name, and therefore the one this arm was added
-        # for — this wrote NOTHING. That is `stop_and_scrub`'s rule holding, not
-        # an omission (a tree the box could not write needs no verdict about what it wrote),
-        # but it means the §7 D2 cover the sibling arm gets is not cover this lane gets.
+        # As in `_start_boxed`. A lane with no writable mount gets no marker.
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex
     create = _render_argv(request, shared_mounts(docker), start_token)
     try:
-        # `_start_boxed`'s preflight, on this lane's geography (a marker per writable mount).
         require_image(docker, create.rootfs)
     except BoxFault as e:
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
     created = _call(docker, create.argv)
     if created.returncode != 0:
-        # `_start_boxed`'s reason, verbatim: create-then-start means a non-zero rc can still
-        # leave a `created` container, and this lane's names are no more revisited than that
-        # one's (`defender-drain-{uuid4}` per invocation). The name-conflict guard matters MORE
-        # here: the run-cycle caller REUSES its name, so a create that lost the race to a
-        # concurrent batch of the same run id is exactly the create that must not reap.
+        # As in `_start_boxed`: reap a leftover `created` container only if it is ours.
         _did_not_run_for_request(
             request, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
@@ -307,14 +273,8 @@ def _start_boxed_request(
             _check_mount_sentinel(m, docker, request.name)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
-        # Unconditional (this box IS ours — create succeeded) but best-effort: a reap that
-        # raises here must not take the markers below down with it, nor replace the startup
-        # fault `e` with "could not invoke docker".
+        # The box is ours; best-effort reap, then mark (sentinels were already planted).
         _reap_on_fault(docker, request.name)
-        # Both fault arms mark, as `_start_boxed` does. The host has already planted sentinels
-        # into these trees by the time a mount probe or the alias probe fails; without the
-        # marker the tree has no verdict at all, which `tree_verified` cannot tell apart from
-        # a tree nobody has judged yet.
         _did_not_run_for_request(
             request, f"box startup faulted before the reap scan could run: {e}"
         )
@@ -326,9 +286,8 @@ def _start_boxed_request(
 
 
 def _probe_cwd_for_request(request: BoxRequest) -> Path:
-    """Where M2's probe acts inside this lane's box: the first WRITABLE mount's target, or the
-    box's own `/tmp` tmpfs when the lane has none. The ban is a syscall filter, not a path
-    policy, so the observation is equally valid in either."""
+    """Where the alias-ban probe acts: the first writable mount's target, else `/tmp`. The ban
+    is a syscall filter, so either location is valid."""
     for m in request.mounts:
         if m.writable:
             return Path(m.target)
@@ -336,10 +295,9 @@ def _probe_cwd_for_request(request: BoxRequest) -> Path:
 
 
 def _opt_out_or_raise(fault: BoxFault) -> None:
-    """M9: the ONE loud host lane. Without the env var a startup fault aborts; with it, the
-    caller degrades to `unboxed_executor` after a greppable warning that carries the swallowed
-    fault verbatim (O4's remedy — a missing-image build command included — must still reach
-    the operator under the opt-out, phase F)."""
+    """Without `DEFENDER_ALLOW_UNSANDBOXED=1` a startup fault aborts; with it, the caller
+    degrades to `unboxed_executor` after a warning carrying the fault verbatim (so remedies
+    such as the image build command still reach the operator)."""
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
     _logger.warning(
@@ -350,9 +308,8 @@ def _opt_out_or_raise(fault: BoxFault) -> None:
 
 
 def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
-    """R8: the unboxed opt-out is a bare HOST subprocess, so it inherits the host env (minus
-    provider keys) as `run_common.run_env` does — NOT the box's key-allowlisted,
-    container-shaped `_render_env`, which carries no HOME and a `_BOX_PATH` the host lacks."""
+    """Env for the unboxed opt-out: the host env minus provider keys, like
+    `run_common.run_env`, not the container-shaped `_render_env` (no HOME, box-only PATH)."""
     from defender.runtime import providers
 
     env = dict(os.environ)
@@ -362,14 +319,12 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     defender_dir = Path(request.workdir) / "defender"
     env["DEFENDER_DIR"] = str(defender_dir)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
-    # PREPENDED like PATH above, not assigned: a bare host subprocess keeps whatever
-    # PYTHONPATH the operator's shell set (the whole point of "inherits the host env").
+    # Prepended, keeping the operator's PYTHONPATH.
     inherited = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
         f"{request.workdir}{os.pathsep}{inherited}" if inherited else str(request.workdir)
     )
-    # JF3: this is a HOST lane — it never carries the in-box mark, whatever the operator's
-    # shell or the request's own env named.
+    # A host lane never carries the in-box mark.
     env.pop("DEFENDER_BOX", None)
     return env
 
@@ -378,17 +333,13 @@ def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
 ) -> BoxExecutor:
-    """Start the run's box. `tenant_agent` (#1106 M6) is the run's RESOLVED tenant `agent/`
-    half, bound read-only at `TENANT_AGENT_TARGET`; it is the only tenant data a box holds.
-    Illegal with a `BoxRequest`, which carries its own geography."""
+    """Start the run's box. `tenant_agent` is the resolved tenant `agent/` half, bound
+    read-only at `TENANT_AGENT_TARGET`; illegal with a `BoxRequest`, which carries its own
+    mounts."""
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
-        # An explicit `spec=` beside a BoxRequest names two geographies. Tested with
-        # `is not None` rather than against DEFAULT_SPEC: the default is env-resolved, so a
-        # value comparison would fire spuriously whenever DEFENDER_BOX_RUNTIME is set. The env
-        # is NOT read on this path — `BoxRequest.spec`'s factory owns the lever, and reading it
-        # here would let a typo'd value raise ValueError out of a call that never uses `spec`,
-        # escaping both `_opt_out_or_raise` and core/faults.py's SYSTEMIC_FAULTS.
+        # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
+        # read on this path, so a typo'd DEFENDER_BOX_RUNTIME cannot raise here.
         if spec is not None:
             raise TypeError(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
@@ -413,14 +364,11 @@ def start_box(
     run_dir = run_dir_or_request
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
-    # The runtime knob: the dataclass anchors the default (runsc), ONE env var is its external
-    # lever, resolved here for the run_dir overload as `BoxRequest.spec`'s factory does for the
-    # request one. runc is the weaker isolation tier, so it is reached only by an operator
-    # explicitly setting DEFENDER_BOX_RUNTIME=runc — never by fallback.
+    # Default runtime is runsc; runc (weaker isolation) only when the operator sets
+    # DEFENDER_BOX_RUNTIME=runc, never by fallback.
     if spec is None:
-        # lint-default: ok — the env lever IS this default's single source. The signature
-        # cannot carry it: `spec=` must stay distinguishable from unset for the BoxRequest
-        # overload's ambiguity check above.
+        # lint-default: ok — the env lever is this default's single source; `spec=` must stay
+        # distinguishable from unset for the BoxRequest ambiguity check.
         spec = BoxSpec.from_env(os.environ)
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker, tenant_agent=tenant_agent)
@@ -450,32 +398,21 @@ def stop_and_scrub(
 ) -> None:
     """Reap a boxed run: tear the box down, then walk the tree it could write.
 
-    Both writable lanes call it. The retired read-only lane did not, correctly: all of its
-    mounts were read-only, so it had no tree to walk. Call it from a `finally`, with `in_flight` saying
-    whether an exception is already propagating. Three rules, and their ordering is the point:
+    Call it from a `finally`, with `in_flight` saying whether an exception is already
+    propagating.
 
-    - **The scrub runs only once the box is provably dead.** "No live writer" is the scrub's
-      entire justification, so a swallowed teardown fault leaves that unproven and the walk is
-      SKIPPED rather than raced.
-    - **An in-flight exception outranks a teardown fault**, which would otherwise replace the
-      more informative signal (implicit chaining keeps it on `__context__`). Outranked is not
-      unrecorded: a suppressed fault means BOTH a possibly-leaked container and an unwalked
-      tree, so it is logged rather than dropped.
-    - **A taint outranks everything.** `RunTainted` wins over the work's own failure — the
-      crash path's tree is the one most likely to hold what the box planted, and the one a
-      human then opens by hand. That falls out of not catching it.
-
-    `stop_box` and `scrub_tree` are required, not defaulted: each lane anchors its own defaults
-    in its own signature. `scrub_tree` rather than `scrub`, which this module re-exports.
+    - The scrub runs only once the box is provably dead; after a teardown fault it is skipped
+      rather than raced against a live writer.
+    - An in-flight exception outranks a teardown fault, which is logged rather than raised.
+    - `RunTainted` outranks everything, including the work's own failure: a crashed run's
+      tree is the one most likely to hold what the box planted.
     """
     box_down = False
     try:
         stop_box(box)
         box_down = True
     except BoxFault as e:
-        # §7 D2: the scan cannot run (the box is not provably dead), on BOTH teardown-fault
-        # arms — with nothing in flight the fault still propagates, but the tree is just as
-        # unscanned, so the marker is written before the branch below decides what to do next.
+        # The scan cannot run either way, so mark before deciding whether to raise.
         write_did_not_run(tree, f"teardown faulted before the reap scan could run: {e}")
         if not in_flight:
             raise
@@ -485,11 +422,8 @@ def stop_and_scrub(
         )
     if box_down:
         scrub_tree(tree)
-        # Unpredictable staged names mean no later write ever replaces a crash-orphaned one by
-        # name, so without a sweep they accumulate forever. Strictly AFTER the walk: sweeping
-        # first would delete entries the scan exists to report. A tainted tree never reaches
-        # this line — `RunTainted` propagates out of `scrub_tree` — so quarantine still gets
-        # the tree exactly as the box left it.
+        # Crash-orphaned staged files are never overwritten by name, so sweep them. Only after
+        # the walk (which must see them); a tainted tree never gets here.
         swept = sweep_staged(tree)
         if swept:
             _logger.info(

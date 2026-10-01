@@ -325,10 +325,11 @@ def test_the_sync_run_carries_exactly_the_pinned_uv_mount_and_the_other_runs_car
 
 
 # ---- d16 -------------------------------------------------------------------------------------
-def test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it():
-    """`pyproject.toml` declares an optional-dependency extra `box` whose only entry is
-    `duckdb`, and `uv.lock` provides that extra (its `defender` package lists
-    `optional-dependencies.box = [duckdb]` and `provides-extras` names `box`), so
+def test_the_box_extra_is_exactly_duckdb_and_pytz_and_the_lock_provides_it():
+    """`pyproject.toml` declares an optional-dependency extra `box` whose entries are `duckdb`
+    and `pytz` (duckdb imports it, undeclared, to hand back a zoned timestamp — #1126), and
+    `uv.lock` provides that extra (its `defender` package lists
+    `optional-dependencies.box = [duckdb, pytz]` and `provides-extras` names `box`), so
     `--locked` resolves it instead of erroring.
 
     # rejected: `--extra runtime` (byte-for-byte the host venv): ships anthropic/openai/mcp/
@@ -337,12 +338,12 @@ def test_the_box_extra_is_exactly_duckdb_and_the_lock_provides_it():
     extras = pyproject["project"]["optional-dependencies"]
     assert "box" in extras, sorted(extras)
     names = [re.split(r"[<>=!~;\[ ]", entry, maxsplit=1)[0].strip().lower() for entry in extras["box"]]
-    assert names == ["duckdb"], extras["box"]
+    assert names == ["duckdb", "pytz"], extras["box"]
 
     lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
     defender = [p for p in lock["package"] if p["name"] == "defender"]
     assert len(defender) == 1
     box_extra = defender[0].get("optional-dependencies", {}).get("box")
     assert box_extra is not None, "the lock has no `box` extra — relock (G23)"
-    assert [d["name"] for d in box_extra] == ["duckdb"], box_extra
+    assert [d["name"] for d in box_extra] == ["duckdb", "pytz"], box_extra
     assert "box" in defender[0]["metadata"]["provides-extras"], defender[0]["metadata"]

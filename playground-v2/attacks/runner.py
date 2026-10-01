@@ -15,14 +15,6 @@ Usage:
 A run writes attacks/runs/<run_id>/meta.json — start/end timestamps,
 resolved parameters, per-step exit codes — as an investigation-context
 hint, not a hard query window.
-
-Reproducing a specific investigation post-mortem is the audit log's job:
-the soc-agent's `audit_tool_calls.py` PostToolUse hook records each
-tool_input + tool_response pair under runs/<session>/tool_audit.jsonl,
-which is the durable record of what the agent saw. Historical query
-reproducibility for arbitrary later replays relies on Elastic ILM
-retention. Per-iteration PRNG seeding is kept only for dispatch
-debugging stability.
 """
 from __future__ import annotations
 
@@ -221,27 +213,19 @@ def run_scenario(
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
     target_host = overrides.get("target") or scenario["target_host"]
-    # `--source` moves the scenario-level dispatch host. A per-step `source_host`
-    # still wins (mirrors `--user` vs per-step `source_user`), so a multi-source
-    # scenario keeps its own routing; a single-host scenario is relocated wholesale.
-    # This is the knob a LOCAL scenario retargets on: its commands run ON the source
-    # and never read ${target}, so moving the target alone changes only the record.
+    # A per-step `source_host` still wins over `--source`. A local scenario retargets
+    # via `--source`: its commands run on the source and never read ${target}.
     source_host_resolved = overrides.get("source") or scenario.get("source_host")
 
     run_id = f"{scenario['id']}-{seed}-{uuid.uuid4().hex[:8]}"
-    # Where the run's record lands. Injected so a caller driving `run_scenario` as a
-    # library — the golden-set generator's tests do — can point it at a scratch dir
-    # without reaching into this module's globals. The CLI never passes it.
+    # Injectable so library callers (and tests) can use a scratch dir.
     run_dir = (runs_dir if runs_dir is not None else RUNS_DIR) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     pre_run: dict[str, Any] = {"cr_mode": cr_mode}
 
-    # Resolve the chaos profile *before* anything is posted anywhere: a
-    # misspelt profile, a guard refusal or an unreachable stack fails here,
-    # with no synthetic CR left open in change-mgmt for a run that never
-    # fired. Planning reads the stack but writes nothing; the push itself
-    # happens only after the CR (below).
+    # Plan chaos before posting anything, so a bad profile or unreachable
+    # stack fails without leaving a synthetic CR open. Planning writes nothing.
     chaos_plan: dict[str, Any] | None = None
     ctl_mod: Any = None
     if chaos and chaos != "none" and not dry_run:
@@ -268,15 +252,12 @@ def run_scenario(
                 )
             print(f"posted synthetic CR id={body['id']} hosts={body['hosts']} mode={cr_mode}")
 
-    # The push happens only *after* a successful CR post — a CR failure
-    # above already raised, so it can never leak a live fault with no
-    # revert (issue #401, O2).
+    # Push only after a successful CR post, so a CR failure cannot leak a
+    # live fault with no revert.
     active_chaos: dict[str, Any] | None = None
     if chaos and chaos != "none":
         if dry_run:
-            # --dry-run's contract is "print dispatches without running" —
-            # activating a real fault here would mutate the live stack under
-            # a flag documented as a no-op preview.
+            # --dry-run must not mutate the live stack.
             print(f"DRY-RUN: would activate chaos profile {chaos!r} (seed={seed}), revert after")
             pre_run["chaos"] = {"profile": chaos, "seed": seed, "dry_run": True}
         else:
@@ -302,8 +283,7 @@ def run_scenario(
             delay_s_between = float(step.get("delay_s_between", 0))
 
             for iteration in range(repeats):
-                # Per-iteration PRNG is available to downstream fixture-capture
-                # uses even if the current cmd doesn't reference it.
+                # Seeded per iteration for dispatch stability; unused by current cmds.
                 _ = random.Random(seed_for(scenario["id"], seed, step_index, iteration))
                 ctx = {
                     "host": target_host,
@@ -343,11 +323,8 @@ def run_scenario(
         run_failed = True
         raise
     finally:
-        # The fault never outlives the run — normal exit, abort, or any
-        # exception — unless the operator explicitly asked to keep it. The
-        # run's record is written *after* the revert so it carries the
-        # outcome: a meta.json that says "clean" while the fault is still
-        # live would be the wrong ground truth for the scorer.
+        # The fault never outlives the run unless --keep-chaos. meta.json is
+        # written after the revert so it records the outcome.
         revert_exc: Exception | None = None
         if active_chaos is not None and not keep_chaos:
             try:
@@ -360,11 +337,8 @@ def run_scenario(
         finished_at = now_iso()
         _write_meta(run_dir, scenario, seed, overrides, started_at, finished_at, step_log, pre_run, aborted=aborted)
         if revert_exc is not None:
-            # When a real failure (a step abort, a Ctrl-C) is already
-            # propagating, the revert failure is reported rather than raised,
-            # so the original reason the run stopped survives. On a clean
-            # run there is nothing to mask: a fault left live on the stack
-            # *is* the failure, and the run exits non-zero for it.
+            # Don't mask an in-flight failure; on a clean run a fault left
+            # live is itself the failure.
             if not run_failed:
                 raise revert_exc
             print(
@@ -427,9 +401,8 @@ def cmd_run(
     run_scenario_fn: Any = run_scenario,
     load_catalog_fn: Any = load_catalog,
 ) -> int:
-    # Injection seams, same shape as run_scenario's `post_cr=`/`exec_fn=`:
-    # fakes enter through the entry point's parameters, never by
-    # reassigning module attributes.
+    # Injection seams for tests, like run_scenario's `post_cr=`/`exec_fn=`.
+
     catalog = load_catalog_fn()
     if args.scenario not in catalog:
         print(f"unknown scenario: {args.scenario}", file=sys.stderr)

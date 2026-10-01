@@ -2,20 +2,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _env
 from defender._io import read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize import _mirror_write
+from defender.scripts.visualize._page_failed import VisualizeFailed
 from defender.scripts.visualize.visualize_data import (
     build_transcript,
     gather_cost_by_model,
@@ -56,32 +60,37 @@ from defender.scripts.visualize.visualize_runtime import (
 )
 
 
-# `RUNTIME_FILENAME` was a re-binding of the owner's `RUNTIME_HTML` (#1077 D7).
-
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
-#: The override for where run pages are mirrored (#1084 D4). Read at call time, so a test's
-#: `setenv` reaches a module it already imported.
+#: The override for where run pages are mirrored. Read at call time so a test's `setenv`
+#: reaches an already-imported module.
 MIRROR_DIR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 MIRROR_DIR_NAME = "run-visualizations"
 _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
+_logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from defender._run_handle import Run
+
+#: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
+CopyOutcome = Literal["copied", "skipped", "failed"]
+
 
 class MirrorRootRefused(Exception):
-    """Under pytest, the mirror root was about to resolve to a real checkout (#1084 O3).
+    """Under pytest, the mirror root was about to resolve to a real checkout.
 
-    The conftest gives every test the override; a test that reaches the default anyway has
-    bypassed it, and would write into the operator's real folder. Refusing is the detector."""
+    The conftest sets the override for every test, so reaching the default means a test
+    bypassed it and would write into the operator's real folder."""
 
 
 def mirror_root(start: Path | None = None) -> Path:
     """Where run pages are mirrored: `<main checkout>/run-visualizations/`.
 
-    Order: the `MIRROR_DIR_ENV` override; else the MAIN checkout reached from `start` (the
-    folder holding `defender/`, by default this package's), so a worktree's render lands in the
-    one folder the operator opens (#1084 D3); else `start` itself. Found by reading `.git`
-    rather than running git, which as root in a user-owned repo depends on `safe.directory`
-    and on inherited `GIT_DIR`.
+    Order: the `MIRROR_DIR_ENV` override; else the main checkout reached from `start` (by
+    default this package's checkout), so a worktree's render lands in the one folder the
+    operator opens; else `start` itself. Found by reading `.git` rather than running git, which
+    as root in a user-owned repo depends on `safe.directory` and inherited `GIT_DIR`.
     """
     override = os.environ.get(MIRROR_DIR_ENV)
     if override:
@@ -112,17 +121,17 @@ def _main_checkout(start: Path) -> Path:
         if not (main / "defender").is_dir():
             raise ValueError(f"{main} (from {dot_git}) holds no defender/")
     except (OSError, ValueError) as exc:
-        sys.stderr.write(f"[visualize_run] warning: mirroring under {start}: {exc}\n")
+        _logger.warning("mirroring under %s: %s", start, exc)
         return start
     return main
 
 
 def _mirror(page: bytes, dest: Path, root: Path) -> None:
-    """Write the mirror copy as the owner of the folder holding the mirror root (#1084 D5).
+    """Write the mirror copy as the owner of the folder holding the mirror root.
 
-    Root writing into a user's folder is the one case that drops: the copy runs as that user,
-    so no link they planted can take it anywhere they could not write themselves. Everyone
-    else, and root in a root-owned checkout, writes in-process with the same code."""
+    Only root writing into a user's folder drops privileges: the copy then runs as that user,
+    so a link they planted cannot take it anywhere they could not write. Otherwise it writes
+    in-process."""
     try:
         owner = os.lstat(root.parent)
     except FileNotFoundError:
@@ -137,32 +146,73 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
     )
     if proc.returncode != 0:
         raise OSError(
-            f"mirror write as uid {owner.st_uid} failed for {dest} (exit {proc.returncode}): "
+            f"mirror write as uid {owner.st_uid} failed (exit {proc.returncode}): "
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_and_mirror(run_dir: Path, *, update_ticket: bool = False) -> list[Path]:
-    """Render the run's page, and refuse a directory that is not a run.
+def render_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+    """This run's page, generated and returned — nothing is written, and nothing here knows
+    where the page goes: the post-run step saves it as the run's record (#1110).
+    `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
 
-    The store resolve is a PRECONDITION, not a data dependency: nothing on the page reads
-    the session store. It is here because a run dir relocated by an allowlist copy arrives
-    without its pointer, and rendering one anyway hands the operator a page that looks
-    complete for a run whose own record could not be found. Fail before writing, so no page
-    is left behind for a reader to trust.
+    The store resolve is a precondition, not a data dependency: nothing on the page reads the
+    session store, but a run dir copied without its store pointer would otherwise render a
+    complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    src = RunPaths(run_dir).runtime_html
-    src.write_text(render_runtime_page(run_dir, update_ticket=update_ticket), encoding="utf-8")
-    if not src.is_file():
-        return []
-    root = mirror_root()
-    dest = RunPaths(root / run_dir.name).runtime_html
-    _mirror(src.read_bytes(), dest, root)
-    return [dest]
+    return render_runtime_page(run_dir, update_ticket=update_ticket)
 
 
+def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
+    """The post-run step: render the run's page, save it as the run's `runtime_html` record
+    through `run` — so whatever backend the handle sits on receives it like every other record —
+    then hand it to the dev-only copy, and answer what the copy did (#1110).
+
+    A failed render and a refused record save are each `VisualizeFailed`, saying which, with
+    the cause chained: the caller's single "no record" signal. The copy never raises.
+    """
+    try:
+        page = render_page(run.run_dir, update_ticket=update_ticket)
+    except Exception as e:
+        raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
+    record = run.observability.runtime_html
+    try:
+        record.write(page)
+    except Exception as e:
+        raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
+    _logger.info("saved the run page as %s", record.path)
+    return mirror_page(page, run.run_dir.name)
+
+
+def mirror_page(page: str, run_id: str) -> CopyOutcome:
+    """The dev-only copy, whole: whether to copy, where, the write, and what to say about it.
+
+    Copies the page to `<mirror root>/<run_id>/runtime.html`, written as the mirror folder's
+    owner (#1084), only on a `dev` deployment (#1110) — the rule lives here, beside the write, so
+    no caller can reach the copy without it. Best-effort, and never raises: everything after the
+    deployment check sits in one `try`. A skipped copy is logged at INFO; a failed one at
+    WARNING, naming the destination when one resolved and the error's reason.
+    """
+    deployment = _env.deployment()
+    if deployment != "dev":
+        _logger.info("page not copied: this deployment counts as %r, and only %s=dev copies",
+                     deployment, _env.DEPLOYMENT_ENV)
+        return "skipped"
+    dest: Path | None = None
+    try:
+        root = mirror_root()
+        dest = RunPaths(root / run_id).runtime_html
+        _mirror(page.encode("utf-8"), dest, root)
+    except Exception as e:
+        # The reason alone: an OSError's `str()` repeats the path the message already names.
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
+        where = f" to {dest}" if dest is not None else ""
+        _logger.warning("page not copied%s: %s: %s", where, type(e).__name__, reason)
+        return "failed"
+    _logger.info("page copied to %s", dest)
+    return "copied"
 
 
 def render_header(case_id: str, byline: str, stats_html: str = "") -> str:
@@ -192,17 +242,11 @@ _HEALTH_ICON = {"good": "✓", "warn": "⚠", "bad": "✗"}
 def _gate_badge_html(report: ReportRead) -> str:
     """The review gate's outcome, beside the disposition it produced.
 
-    Read from report.md's own frontmatter — the gate WRITES `outcome`/`cause`/`failure_kind`
-    there — rather than re-derived from the review records, so the headline cannot disagree
-    with the file the learning loop and the judge both read. A `forced-inconclusive` says the
-    headline disposition is the gate's and not the investigator's; § Review gate carries the
-    rest.
+    Read from report.md's frontmatter (the gate writes `outcome`/`cause`/`failure_kind` there),
+    so the headline agrees with what the learning loop and judge read.
 
-    THE OUTCOME ALONE IS NOT THE BADGE. The gate's BYPASS arm writes `outcome: stands` too —
-    `stands` means "committed unchanged", not "a review agreed" — so keying only on it paints
-    a green "the review held" badge on every `inconclusive` close, contradicting § Review gate
-    below. The CAUSE tells the two apart, read from its owner rather than spelled here (see
-    `visualize_runtime.close_vocabulary`).
+    The outcome alone is not enough: the bypass arm also writes `outcome: stands` ("committed
+    unchanged"), so the cause distinguishes a bypass from a review that held.
     """
     outcome = str(report.frontmatter.get("outcome", "") or "")
     if not outcome:
@@ -226,9 +270,7 @@ def render_runtime_headline(
     leads: list,
 ) -> str:
     disposition = report.disposition_or_unknown
-    # `close_tool.render_report` renders the frontmatter from typed arguments and does NOT
-    # write `confidence`. Defaulting it to "?" would put a permanently-empty `confidence: ?`
-    # on every current run, beside the gate badge that actually says something.
+    # `close_tool.render_report` does not write `confidence`, so show it only when present.
     confidence = report.frontmatter.get("confidence")
     conf_html = (
         f'<span class="an-conf">confidence: {esc(str(confidence))}</span>' if confidence else ""
@@ -273,9 +315,7 @@ def render_runtime_metrics(
     totals: dict,
     health: dict,
 ) -> str:
-    # The comprehension IS the collapse: `phase_order` is a render list that may name one
-    # bucket twice, and a dict keeps first-insertion order with one entry per key — which is
-    # exactly the order and the key set the bar wants (#956).
+    # The dict collapses repeated phase names into one bucket, in first-appearance order.
     cost_bar = _phase_bar(
         {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
         lambda v: f"${v:.3f}",
@@ -320,9 +360,7 @@ def _phase_bar(values: dict[str, float], fmt) -> str:
     if total <= 0:
         return '<div class="empty">(no per-phase attribution)</div>'
     segs: list[str] = []
-    # One segment per BUCKET, so the dict itself is the order — `total` sums the dict, and a
-    # name drawn once per appearance in a render list would make the widths sum past 100% and
-    # spill out of the bar. Walking `values` is that collapse, not a second copy of it.
+    # One segment per bucket (the dict's keys), so widths sum to 100%.
     for ph, v in values.items():
         v = v or 0.0
         if v <= 0:
@@ -387,10 +425,8 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
 
 
 def _render_policy_denials_section(run_dir: Path) -> str:
-    """A denial is durable on disk (`RunPaths(...).policy_denials`) and unrelated to every other
-    record kind this page filters on — folding it into an existing filtered stream is exactly
-    how a denial goes silently unrendered. Its own section inside the document element, never
-    an HTML comment, so it survives `_visible_html`-shaped scraping as well as human eyes."""
+    """Policy denials in their own section: folding them into another filtered stream is how
+    they go unrendered. A real section, not an HTML comment, so scrapers see it too."""
     from defender.runtime import observe
 
     path = RunPaths(run_dir).policy_denials
@@ -467,12 +503,9 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
     raw_phases = normalize_phase_names(split_investigation_phases(run_dir))
-    # TWO lists, and they are not the same list (#956). `phase_order` is the RENDER order —
-    # one entry per `##` header, and it may name one bucket twice (`## GATHER` twice with no
-    # `## PLAN` between normalizes to the same `GATHER (loop N)`); the phase TAGGER needs it
-    # whole, because it matches the Nth occurrence of a verb positionally. `phase_keys` is the
-    # BUCKET set every per-phase dict below is keyed on — walk the render list against one of
-    # those dicts and a repeat is billed once per appearance.
+    # Two different lists. `phase_order` is the render order (one entry per `##` header, possibly
+    # naming one bucket twice), which the tagger needs whole since it matches occurrences
+    # positionally. `phase_keys` is the bucket set every per-phase dict is keyed on.
     phase_order = [p["name"] for p in raw_phases if p["name"] != "preamble"]
     phase_keys = list(dict.fromkeys(phase_order))
     tags = tag_events_by_phase(events, phase_order)
@@ -482,23 +515,19 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     gather_by_phase, gather_total = gather_cost_by_phase(
         run_dir, events, tags, phase_order, main_total, result_total, messages
     )
-    # `phase_keys`, not `phase_order`: every number here lives in a dict keyed on the name, so
-    # a repeated name is one bucket visited twice and the `+=` would bill its gather cost once
-    # per visit.
+    # `phase_keys`: iterating `phase_order` would add a repeated bucket's gather cost twice.
     for ph in phase_keys:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
-    # The review's spend is totalled but deliberately NOT attributed to a phase: the
-    # investigator is never "in" the gate, so a per-phase share would put its cost inside a
-    # bar that says where the agent was (`visualize_runtime.render_review_gate`).
+    # Review spend is totalled but not attributed to a phase: the investigator is never in the
+    # gate.
     review_by_lens = review_cost_by_lens(run_dir, messages)
     review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
     )
-    # Buckets again, and here it is worse than a double-add: the second visit reads
-    # `duration_sec` back out of the entry the first one just wrote, so the shift compounds.
+    # Buckets again: a second visit would re-read the entry just written and compound the shift.
     for ph in phase_keys:
         d = wall_times.get(ph) or {"start": None, "end": None, "duration_sec": 0.0}
         base = d.get("duration_sec", 0.0) or 0.0
@@ -506,8 +535,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
         d["duration_sec"] = base - moved + g_wall_to.get(ph, 0.0)
         wall_times[ph] = d
 
-    # `transcript_phase_map`, not `msg_phase_map`: this reader walks the WIRE LOG, whose ids
-    # are a different space from the trace coords `msg_phase_map` keys on.
+    # `transcript_phase_map`: the transcript walks wire-log ids, not trace coords.
     entries = build_transcript(
         messages, transcript_phase_map(events, tags, messages), phase_order)
     tools = tool_usage(events, messages)
@@ -522,9 +550,8 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     ):
         for model, cost in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + cost
-    # `result_total` is the fallback for a run with no phases to attribute against, and covers
-    # the MAIN SESSION alone (`observe.write_trace` hydrates only that one). The subagent terms
-    # are added on top either way: they are calls this run made, and this is the run's total.
+    # `result_total` (main session only) is the fallback when there are no phases; subagent
+    # and review costs are added either way.
     totals = {
         "cost": (main_total + gather_total if phase_order else result_total) + review_total,
         "review_cost": review_total,
@@ -543,9 +570,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
-    # The review rides as a NAMED term inside the total, the way gather does on a phase's own
-    # line: folded silently it would be a number an operator cannot separate from the
-    # investigation's, and left out entirely the total would understate the run.
+    # The review is a named term inside the total, so an operator can separate it.
     review_note = (
         f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
         if totals["review_cost"] else ""
@@ -590,6 +615,13 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
+    through the same step `run.py` takes, with every line stamped with the run and the tenant
+    its provenance names. Exits 1 when the record was not saved, or when a `dev` copy failed —
+    refreshing that copy is often why an operator re-renders."""
+    from defender import _log
+    from defender._run_handle import Run
+
     args = argv[1:]
     update_ticket = "--update-ticket" in args
     args = [a for a in args if a != "--update-ticket"]
@@ -600,11 +632,14 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    mirrored = render_and_mirror(run_dir, update_ticket=update_ticket)
-    print(f"wrote {RunPaths(run_dir).runtime_html}")
-    for dest in mirrored:
-        print(f"mirrored {dest}")
-    return 0
+    run = Run.at(run_dir)
+    with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
+        try:
+            copy = publish_page(run, update_ticket=update_ticket)
+        except VisualizeFailed:
+            _logger.error("the re-render failed", exc_info=True)
+            return 1
+    return 1 if copy == "failed" else 0
 
 
 if __name__ == "__main__":

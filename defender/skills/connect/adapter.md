@@ -167,7 +167,9 @@ adapter's shape:
    The verb's returned JSON **is** the table — there is no wrapper envelope
    to reach through. A top-level object yields one row whose columns are its
    keys (so `unnest(hits)` for an `{index, total, returned, truncated,
-   hits}` payload); a top-level array yields one row per element.
+   hits}` payload); a top-level array yields one row per element. A payload
+   whose rows are positional arrays behind a list of column names is queried
+   with `--rows <path> --names <path>`, which makes those rows the table.
    `DESCRIBE data` names the columns a given payload actually has. This
    downloads before it reduces, so it's the fallback, not the goal — reach
    for it only when the source genuinely can't aggregate. When a source

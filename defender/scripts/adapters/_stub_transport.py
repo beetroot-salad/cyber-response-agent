@@ -1,5 +1,4 @@
-"""Shared transport for the v2 stub adapters (cmdb, identity, change-mgmt,
-threat-intel, ticket).
+"""Shared transport for the stub adapters (cmdb, identity, change-mgmt, threat-intel, ticket).
 
 All five stubs are auth-less FastAPI services on the compose network, reached by
 shelling out to `docker --context <the system's own context> exec <bastion> curl ...` — the same
@@ -7,7 +6,7 @@ transport elastic_adapter.py uses for Kibana detection-rule installs. Host-state
 a different shape (docker exec → command output, no HTTP) and keeps its own transport
 in host_state_adapter.py.
 
-Two rules the whole family obeys:
+Two rules the family obeys:
 
   - **A transport RAISES, it never exits.** `SystemExit` is a `BaseException`, so it
     unwinds straight out of `agent.iter()` and takes the run with it, writing no row
@@ -19,8 +18,7 @@ Two rules the whole family obeys:
     inherits the driver's `os.environ`, provider keys included, so every child is handed
     the run's scrubbed env explicitly.
 
-House conventions (transport, auth posture, config keys, exit codes) are in
-`README.md` in this directory.
+House conventions (auth posture, config keys, exit codes) are in `README.md` here.
 """
 
 from __future__ import annotations
@@ -301,10 +299,8 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
         cmd = ["docker", "--context", context, "exec", *secret_flags, container, "curl",
                *flags, *args]
     try:
-        # utf-8 and LOSSY: the far side is vendor data (indexed log lines), so a stray
-        # non-UTF-8 byte must cost one character, not raise a UnicodeDecodeError that sails
-        # past the guards below (it is a ValueError) and out of the adapter.
-        # `timeout` is MANDATORY on every fork: it is the only kill left, there being no
+        # Lossy utf-8: vendor data may carry stray bytes, and a `UnicodeDecodeError` (a
+        # `ValueError`) would escape the guards below. `timeout` is mandatory: there is no
         # outer wall-clock budget.
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10,
                               encoding="utf-8", errors="replace",
@@ -341,9 +337,8 @@ def http_get(
     Raises `TransportFault` (infra) on docker/unreachable/5xx and `UpstreamFault` (a query
     error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
 
-    `system` is REQUIRED, not defaulted: it keys the confinement allowlist
-    (`confine_read_endpoint`), and every system funnels through this one function — a
-    caller that forgot to name itself would silently confine against the wrong allowlist.
+    `system` is required: it keys the confinement allowlist, and a default would let a caller
+    confine against the wrong one.
     """
     qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
@@ -361,10 +356,8 @@ def http_get_obj(
     ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
     params: dict | None = None,
 ) -> dict[str, Any]:
-    """`http_get` for endpoints whose contract is a JSON *object*. Narrows the
-    `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing, and
-    fails fast on a non-object rather than crashing later on `list.get`. List endpoints
-    keep raw `http_get` + their own `isinstance(payload, list)` guard."""
+    """`http_get` for endpoints whose contract is a JSON object: narrows the type and fails
+    fast on anything else. List endpoints use `http_get` with their own guard."""
     payload = http_get(ctx, config, path, system=system, params=params)
     if not isinstance(payload, dict):
         raise TransportFault(
@@ -376,18 +369,12 @@ def http_get_obj(
 def _raise_on_transport_failure(
     ctx: VerbContext, bastion: str, rc: int, stderr: str, system: str,
 ) -> None:
-    """curl never completed a request → transport-level failure. `TransportFault` (exit 2) so
-    the queries row and the circuit breaker both see a down system, not a query error. No-op
-    when curl exited clean. Covers both a missing/stopped bastion (`docker exec` fails before
-    curl runs) and curl's own failures.
+    """Raise `TransportFault` (exit 2) when curl did not exit cleanly, so the queries row and
+    the circuit breaker see a down system. Covers a missing/stopped bastion and curl's own
+    failures.
 
-    THE RETURN CODE ALONE DECIDES, and `stdout` is deliberately not a parameter: because
-    `docker_exec_curl` appends `-w "\\n%{http_code}"`, curl writes a status line on EVERY exit,
-    so stdout is `"\\n000"` — never empty — when no request completed. Any guard conditioned on
-    empty stdout is unsatisfiable, and lets a DNS failure / refused connection / `--max-time`
-    timeout parse as HTTP 0, match neither arm of `_raise_on_http_error`, and return `{}` from
-    `_request` as a SUCCESS — an outage reaching the lead as "the system holds nothing", with
-    exit 0 counting nothing towards the breaker."""
+    Decided by the return code alone: `-w "\\n%{http_code}"` makes stdout `"\\n000"` even when
+    no request completed, so an empty-stdout check would let an outage return `{}` as success."""
     if rc == 0:
         return
     hint = stderr.strip() or "no stderr"
@@ -400,19 +387,13 @@ def _raise_on_transport_failure(
 
 
 def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str, int]:
-    """Split curl's body/status and parse the HTTP status to an int. A malformed (no status),
-    non-numeric, or `000` response is a `TransportFault`: curl never completed a request, so
-    there is no upstream verdict to file as a query error. Returns (body_text, code).
-
-    `000` is curl's own "no response" status, and is checked separately from the rc rather
-    than folded into it: the two are independent readings of the same fault, and a curl that
-    reported `000` while exiting 0 would otherwise parse to `0`, match neither arm of
-    `_raise_on_http_error`, and be filed as a system that answered."""
+    """Split curl's body/status and parse the status; returns (body_text, code). A missing,
+    non-numeric or `000` status is a `TransportFault`: no request completed, so there is no
+    upstream verdict. `000` is checked independently of rc, since curl can report it while
+    exiting 0."""
     body_text, status = split_status(stdout)
     if not status:
-        # Reached only with rc == 0 (`_raise_on_transport_failure` owns every non-zero exit):
-        # curl claims success while emitting no `-w` status line. Show the bytes it did emit —
-        # the shape of that stdout is the whole diagnosis.
+        # Only reachable with rc == 0; show the raw output, which is the diagnosis.
         raise TransportFault(
             f"malformed curl response from {url}: "
             f"stdout={stdout!r} stderr={stderr.strip()!r}"
@@ -430,10 +411,9 @@ def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str
 
 
 def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
-    """Map a >=400 HTTP status onto the fault taxonomy: 5xx → `TransportFault` (the system is
-    down), 4xx → `UpstreamFault` carrying the vendor's OWN `detail` verbatim. That detail is
-    the row's payload_digest and the sole input to the pitfalls-curation lane, so a generic
-    message here silently dries that lane up. No-op on a success code."""
+    """Map a >=400 status onto the fault taxonomy: 5xx → `TransportFault` (system down), 4xx →
+    `UpstreamFault` carrying the vendor's own `detail` verbatim — it becomes the row's
+    `payload_digest` and the sole input to pitfalls curation, so it must not be generic."""
     if code >= 500:
         raise TransportFault(f"upstream {url} returned HTTP {code}: {body_text}")
     if code >= 400:
@@ -450,9 +430,7 @@ def _request(
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None = None,
 ) -> dict | list:
-    # Target-fidelity confinement, BEFORE any transport is attempted. Every HTTP stub system
-    # funnels through this one function, so wiring the read-endpoint allowlist here rather
-    # than in each adapter is what makes the seam cover all of them.
+    # Confinement before any transport; every HTTP stub funnels through here.
     guard_outbound(ctx, system, url, method=method)
 
     bastion = config["BASTION_HOST"]
@@ -476,8 +454,7 @@ def _request(
 def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) -> dict[str, Any]:
     """Standard health-check: GET <URL_BASE>/health and RETURN the payload.
 
-    Returns data rather than printing: prose on stdout would leave the queries table
-    recording an empty payload for the one call whose point is to say the system is up."""
+    Returns data rather than printing, so the queries table records a payload."""
     payload = http_get_obj(ctx, config, "/health", system=system_label)
     return {"system": system_label, "connected": True, **payload}
 
@@ -498,10 +475,8 @@ def docker_exec_raw(
     """
     cmd = ["docker", "--context", docker_context(ctx, system), "exec", bastion, *argv]
     try:
-        # utf-8 and LOSSY: this runs arbitrary host verbs (`ps`, `ls`, file reads) inside the
-        # bastion, so stdout carries filenames and process cmdlines — a strict decode would turn
-        # one odd byte into a UnicodeDecodeError that escapes every guard downstream (a
-        # ValueError is neither a rc check nor a fault) and takes the run with it.
+        # Lossy utf-8: filenames and cmdlines may carry odd bytes, and a decode error would
+        # escape every guard downstream.
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
             encoding="utf-8", errors="replace", env=_child_env(ctx),
@@ -526,10 +501,9 @@ def docker_inspect_raw(
 ) -> tuple[int, str, str]:
     """Run `docker --context <system's context> inspect [--format <fmt>] <target>`.
 
-    Daemon-level container/image inspection — distinct from docker_exec_raw,
-    which runs a command *inside* a container. Exposed for host_state_adapter.py's
-    container-inspect verb (Falco alerts carry a runtime container id, not a
-    host name). Returns (rc, stdout, stderr).
+    Daemon-level inspection, unlike `docker_exec_raw`. For host_state_adapter.py's
+    container-inspect verb (Falco alerts carry a container id, not a host name). Returns
+    (rc, stdout, stderr).
     """
     cmd = ["docker", "--context", docker_context(ctx, system), "inspect"]
     if fmt is not None:

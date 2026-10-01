@@ -47,6 +47,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -368,11 +369,13 @@ class Recorder:
         self.preflight_calls.append(model)
         return 0
 
-    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Path:
+    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
+        """Records the call and answers what `main` reads off the builder's handle (#1110:
+        the builder answers the run's `Run`): its `run_dir`."""
         self.order.append("materialize")
         self.materialize_calls.append({"alert": alert, "run_id": run_id, **kw})
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
-        return self.run_dir_at
+        return SimpleNamespace(run_dir=self.run_dir_at)
 
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")

@@ -1,26 +1,13 @@
-"""The shared ticket answer-key screen — one protocol, two consumers.
+"""The ticket answer-key screen: withholding the case a reader is itself working on.
 
-Gather (``runtime/query_tool.py``) and the benign judge
-(the retired pipeline judge's closed-ticket tool) both read the ticket store, and both must
-withhold the case they are themselves working on. The *protocol* is identical across the two:
-the same envelope-shape checks, the same ``(payload, exit_code, detail)`` return contract, and
-the same split between a policy withhold (a BUSINESS refusal, which never feeds the circuit
-breaker) and a malformed envelope (an INFRA fault, which does). Only the *predicate* differs:
+This holds the protocol: envelope-shape checks, the ``(payload, exit_code, detail)`` contract,
+and the split between a policy withhold (a business refusal, which never feeds the circuit
+breaker) and a malformed envelope (an infra fault, which does). The per-consumer predicate is
+injected by the caller. Gather (``runtime/query_tool.py``) excludes its own case by record
+identity and keeps every other lifecycle state: open and in-progress siblings are correlation
+evidence, so it must not grow a recency filter.
 
-  - gather excludes its own case by RECORD IDENTITY and keeps every other lifecycle state —
-    open and in-progress siblings are correlation evidence it is entitled to read;
-  - the judge additionally keeps only genuinely-closed records, withholds a record that merely
-    NAMES the case under judgment, and withholds any record not provably written BEFORE the
-    case opened — for the judge, the case's own ticket is the answer key it is scoring against,
-    and so is anything written about the case while it was live. Gather has no recency arm and
-    must not grow one: it reads in-flight siblings deliberately.
-
-Holding the protocol here means an envelope change — a renamed ``tickets``/``key``, a different
-malformed classification — is made ONCE, rather than in two places that must be kept in step.
-The per-consumer predicate is injected by the caller.
-
-This module is deliberately a LEAF: it imports nothing from ``query_tool`` or the judge, so
-either side can depend on it without a cycle.
+A leaf module (imports nothing from its consumers), so any consumer can depend on it.
 """
 from __future__ import annotations
 
@@ -34,30 +21,22 @@ TICKET_SYSTEM = "ticket"
 TICKET_GET = "get-ticket"
 TICKET_LIST = "list-tickets"
 
-#: A malformed store envelope is an INFRA fault: the store answered a shape it does not
-#: document, which is a broken data source rather than a mistake the model can correct. It
-#: carries the adapter infra code (2) — matching ``query_tool.DEFAULT_FAULT_EXIT`` and
-#: ``ConfigFault``/``TransportFault`` — so it contributes to the ``ticket`` circuit breaker and
-#: a persistently broken store trips it instead of being paid for on every call.
+#: A malformed store envelope is an infra fault (a broken data source, not a model mistake).
+#: It uses the adapter infra code, like ``query_tool.DEFAULT_FAULT_EXIT``, so a persistently
+#: broken store trips the ``ticket`` circuit breaker.
 MALFORMED_EXIT = 2
 
-#: A policy withhold is a BUSINESS refusal, never infra: the store answered correctly and this
-#: boundary chose not to pass the answer on. Two load-bearing properties, both pinned by tests.
-#: It must stay OUTSIDE ``circuit_breaker.INFRA_EXIT_CODES``, so a run that legitimately brushes
-#: its own case never trips the ticket breaker for the rest of the run. And it is DISTINCT from
-#: the adapter's generic business code (1, carried by a 404 or a non-closed refusal), so a
-#: reader of ``executed_queries`` can tell a withheld self-read from a ticket that simply is not
-#: there — without parsing the free-text detail.
+#: A policy withhold is a business refusal: the store answered and this boundary withheld it.
+#: Must stay outside ``circuit_breaker.INFRA_EXIT_CODES`` (brushing one's own case must not trip
+#: the breaker), and distinct from the generic business code 1 (e.g. a 404), so
+#: ``executed_queries`` readers can tell a withheld self-read from a missing ticket.
 POLICY_REFUSAL_EXIT = 3
 
 def self_case_key(deps: AgentDeps) -> str:
-    """The key of the case this leg is working on — THE definition, shared by both consumers.
+    """The key of the case this leg is working on, shared by every consumer.
 
-    The identity is ``deps.run_id``, carried explicitly on deps, and is deliberately NOT
-    re-derived from ``run_dir.name``. The two coincide today only because ``AgentDeps._for_run``
-    seeds ``run_id=run_dir.name``; pinning both screens to the deps field means a later
-    decoupling of run-dir naming from the run id cannot silently split gather's self-exclusion
-    from the judge's.
+    ``deps.run_id``, not ``run_dir.name``: they coincide today only because
+    ``AgentDeps._for_run`` seeds one from the other.
     """
     return deps.run_id
 
@@ -92,16 +71,11 @@ def screen_get(
 def _screen_one_ticket(
     ticket: dict[str, Any], *, is_released: Callable[[Any], bool],
 ) -> dict[str, Any]:
-    """#767 D4's per-ticket step: a ticket a person has not yet released serves NO comments;
-    a released one is served whole. The question is asked of the ticket's lifecycle state
-    alone — never of a comment's `author`, which is whatever the posting client chose to
-    send and so cannot tell an agent's note from a person's. Every other field — including a
-    legacy `resolution` (§7 R9) — is left untouched, and the envelope carries no marker
-    anywhere (`d4_no_marker`): a screen filters silently.
+    """An unreleased ticket serves no comments; a released one is served whole.
 
-    `comments` is emptied whatever its shape when the ticket is unreleased: a non-list value
-    is still text the store handed back, and the only reading that serves nothing is to
-    serve nothing. A ticket carrying no `comments` key at all is left as it is.
+    Decided by lifecycle state only, never a comment's `author` (client-controlled, so it
+    cannot tell an agent's note from a person's). Other fields are untouched and no marker is
+    added. `comments` is emptied whatever its shape; a ticket without the key is unchanged.
     """
     if "comments" not in ticket or is_released(ticket):
         return ticket
@@ -109,18 +83,16 @@ def _screen_one_ticket(
 
 
 def screen_release_get(payload: Any, *, is_released: Callable[[Any], bool]) -> Any:
-    """D4's step for `get-ticket`, applied AFTER the own-case exclusion has already run and
-    answered `0` (`d4_screen_after_own_case`). `payload` here is a single ticket object."""
+    """The release screen for `get-ticket`, applied after the own-case exclusion answered `0`.
+    `payload` is a single ticket object."""
     if not isinstance(payload, dict):
         return payload
     return _screen_one_ticket(payload, is_released=is_released)
 
 
 def screen_release_list(payload: Any, *, is_released: Callable[[Any], bool]) -> Any:
-    """D4's step for `list-tickets`, applied AFTER the own-case exclusion. `total` is left as
-    the own-case screen restated it — D4 never removes a ticket from the listing, only empties
-    a surviving unreleased ticket's `comments` (N5: an unreleased or undecidable record stays
-    visible for correlation)."""
+    """The release screen for `list-tickets`, applied after the own-case exclusion. Removes no
+    tickets (unreleased records stay visible for correlation), so `total` is unchanged."""
     if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
         return payload
     tickets = [
@@ -137,16 +109,11 @@ def screen_list(
 ) -> tuple[Any, int, str]:
     """Screen a ticket listing per item → ``(payload, exit_code, detail)``.
 
-    The store's list endpoint answers with a JSON OBJECT envelope — ``{"total", "tickets"}`` —
-    never a bare array. ``transport.http_get`` is typed ``dict | list`` because it also serves
-    endpoints that genuinely ARE arrays, so the object shape is a CONTRACT this screen enforces
-    rather than one the type system supplies. Anything else is malformed: reading a bare array
-    as the ticket list would invent a shape the store does not document, on the answer-key path.
+    The envelope must be the documented ``{"total", "tickets"}`` object; anything else (e.g. a
+    bare array, which the transport's ``dict | list`` type allows) is malformed.
 
-    Every surviving item is a dict the caller's ``keep`` predicate admitted — a non-dict item is
-    dropped as unreadable rather than passed through — and ``total`` is restated to what the
-    envelope now actually carries, so the count can never advertise records the screen removed.
-    Duplicates survive: this is a screen, not a dedup.
+    Non-dict items are dropped, ``keep`` decides the rest, and ``total`` is restated so it
+    never counts removed records. Duplicates survive.
     """
     if not (isinstance(payload, dict) and isinstance(payload.get("tickets"), list)):
         return None, MALFORMED_EXIT, (

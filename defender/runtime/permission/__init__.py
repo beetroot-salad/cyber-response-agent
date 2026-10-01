@@ -58,14 +58,10 @@ __all__ = [
 ]
 
 
-#: The two policy COMPILERS, re-exported lazily from `..agent_definition`.
-#:
-#: "What policy does this role compile to?" is a permission question, and this package is what a
-#: caller asking it reaches for; but the compilers take an `AgentDefinition`, and
-#: `agent_definition` imports `AgentPolicy` and `require_anchor_root` from HERE. An eager
-#: re-export would close that cycle at import time, so the lookup is deferred to first use — by
-#: which point both modules are built. Kept to the two compilers deliberately: this is an alias
-#: for the policy question, not a second front door to the agent registry.
+#: The two policy compilers, re-exported lazily from `..agent_definition`: that module imports
+#: from here, so an eager re-export would be an import cycle. Only the compilers; this is not a
+#: second front door to the agent registry.
+
 _COMPILERS = ("compile_policy", "compile_policy_for")
 
 

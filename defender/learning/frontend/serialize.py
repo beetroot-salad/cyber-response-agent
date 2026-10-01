@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import math
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -22,30 +21,14 @@ if __name__ == "__main__":
 
 from defender._clock import z_seconds
 from defender._corpus import iter_lessons
-from defender._io import use_utf8_stdio
+from defender._io import json_safe, use_utf8_stdio
 
 
 def _json_safe(obj):
-    if isinstance(obj, dict):
-        # KEYS too: YAML types a bare `2026-01-01:` as a `datetime.date` and `!!binary` as
-        # `bytes`, either of which json.dumps rejects — so one such key in one lesson's
-        # frontmatter would abort the whole build instead of degrading that lesson.
-        return {(k if isinstance(k, str) else str(_json_safe(k))): _json_safe(v)
-                for k, v in obj.items()}
-    if isinstance(obj, (set, frozenset)):
-        return [_json_safe(v) for v in sorted(obj, key=str)]
-    if isinstance(obj, (list, tuple)):
-        return [_json_safe(v) for v in obj]
-    if isinstance(obj, (_dt.date, _dt.datetime)):
-        return obj.isoformat()
-    if isinstance(obj, float) and not math.isfinite(obj):
-        # `json.dumps` ACCEPTS these and emits bare `NaN`/`Infinity`, which is not JSON — a
-        # YAML `.nan` in one lesson's frontmatter would poison `lessons.json` for every strict
-        # reader. Same degrade-this-lesson rule as the exotic types above.
-        return None
-    if obj is None or isinstance(obj, (str, bool, int, float)):
-        return obj
-    return str(obj)
+    # `null` for a non-finite float: `lessons.json` is data a page computes over, and bare
+    # `NaN` from one lesson's YAML `.nan` would poison it for every strict reader. The rest —
+    # dates and `!!binary` as keys or values, sets — is the shared rule.
+    return json_safe(obj, non_finite="null")
 
 
 def _normalize(
@@ -81,11 +64,9 @@ class GroupSpec(TypedDict):
     label: str
     dir: str
     blurb: str
-    #: Has this corpus lost its PRODUCER while its files remain? A reader cannot tell that
-    #: from one nothing has written to lately, and "the loop's current output" is what this
-    #: page claims. Per group, not inferred from a lesson's `status: stale` — staleness is
-    #: one lesson's property, retirement is the channel's. `retired_note` says why, beside
-    #: the badge; a retired group without one renders a badge nobody can act on.
+    #: Has this corpus lost its producer while its files remain? Not inferable from the files.
+    #: Per group (retirement is the channel's property, staleness a lesson's); `retired_note`
+    #: says why, beside the badge.
     retired: bool
     retired_note: str
     title_keys: list[str]
@@ -141,11 +122,8 @@ GROUPS: dict[str, GroupSpec] = {
         "desc_key": "relevance_criteria",
         "fields": [
             {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
-            # The display label for an environment lesson's own `entities` frontmatter key
-            # (the retired environment-observation validator's own `entities` selectors), not the
-            # `Entities` dataclass — same word, unrelated domain. Renaming it would change a
-            # user-visible chip label and a corpus schema key. The suppression marker must sit
-            # on the REFERENCING line: lint_stale_refs reads it off the matched line only.
+            # The label for the lessons' `entities` frontmatter key, unrelated to the retired
+            # `Entities` dataclass. The suppression must sit on the referencing line itself.
             {"label": "Entities", "key": "entities", "kind": "chips"},  # lint-stale-ref: ok — display label, not the retired dataclass
             {"label": "Recorded", "key": "recorded_at", "kind": "text"},
         ],

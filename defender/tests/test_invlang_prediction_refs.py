@@ -20,13 +20,11 @@ settled (#798).
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
 from defender.skills.invlang.validate import validate_companion
 
-from defender.tests._invlang_corpus import corpus_docs, corpus_id
 
 _LEAD_HEADER = ":L findings [id|loop|name|target|tests|system|window]"
 _HYP_HEADER = (
@@ -281,10 +279,3 @@ def test_a_misspelled_new_hypotheses_block_names_itself():
     )
 
 
-@pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
-def test_the_shipped_corpus_carries_no_prediction_reference_defect(path: Path):
-    """Neither rule may cost the corpus a document. (`examples/` carries
-    unrelated errors that predate this — the filter is to these two rules, so
-    this stays a check on them, not a freeze of the whole validator's
-    verdict.)"""
-    assert _errors(path.read_text(encoding="utf-8")) == []

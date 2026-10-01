@@ -13,11 +13,9 @@ PROMPT_PATH = HERE / "forward.md"
 def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     """The cited case's transcript and its recorded disposition.
 
-    A run dir missing either file, or a `source_refs.yaml` with no disposition, raises
-    `VerdictError` — the same class an unreadable verifier reply raises — so the drain's
-    per-pair handler gives a row whose case cannot be read the same ending as one whose
-    verdict cannot be read (retry once, then BAD), instead of a process exit escaping the
-    fan-out and leaving the row stuck forever."""
+    A missing file or disposition raises `VerdictError`, like an unreadable verifier reply, so
+    the drain gives it the same retry-once-then-BAD ending rather than letting an exit escape
+    the fan-out and leave the row stuck."""
     run_dir = runs_dir / run_id
     paths = RunPaths(run_dir)
     investigation = paths.investigation
@@ -39,12 +37,7 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
 
 
 def expected_disposition(direction: str, recorded: str) -> str:
-    # NO RUNTIME TYPE GUARD HERE. A family row carries no resolved
-    # `(direction, recorded-disposition)` pair at all, and J12 keeps it out of the forward
-    # check UPSTREAM, at `checks.skips_forward_check` — which is the seam that decides which
-    # rows reach this function. Re-asserting the signature's own types inside a function whose
-    # one caller passes them from a `-> tuple[str, str]` reader defends against a call no code
-    # makes, and puts the property in a second place where it can disagree with the first.
+    # No family-row guard here: `checks.skips_forward_check` keeps family rows out upstream.
     if direction == "benign":
         return "benign"
     return recorded

@@ -34,34 +34,17 @@ REQUEST_TIMEOUT_SEC = 30
 class OutboundBody:
     """A request body that has already been past the run's clock.
 
-    THE TYPE IS THE PROOF, and it exists because bounding a window was a thing an author had
-    to remember. Two lanes close an open window — `_bounded_end` where the bound is a
-    parameter, `bounded_esql` where it lives inside the ES|QL the model wrote — and both used
-    to hand a plain `dict` to `_http_json`. Nothing connected the two facts, so a third search
-    verb added later reached Elasticsearch unbounded by simply not calling either, and an
-    unbounded read of a live agent stream sorted `desc` under a doc cap returns "the newest
-    documents right now": the one answer a branched run may not have, and the exact payload
-    `as_of` was threaded through the ctx to remove.
+    The wire (`_http_json`) accepts only this type, and both minting functions (`_search_body`,
+    `_esql_body`) take `ctx` and consult the clock, so a new search verb cannot reach
+    Elasticsearch with an open window by forgetting a call. An unbounded `desc` read of a live
+    stream returns the newest documents right now, which a branched run must not see. Hand
+    minting is still possible, just not accidental. Memoised base-tier hits bypass the adapter
+    entirely, so this says nothing about them.
 
-    A lint could ask whether the clamp was called. A type makes the question unaskable: the
-    wire takes `OutboundBody` and nothing else, and both functions that mint one take `ctx` and
-    consult the clock on the way, so the bound cannot be dropped at a CALL SITE — the place it
-    was droppable. Minting one by hand is still possible, because Python has no private
-    constructor; what it is not is accidental. That is the whole of what this buys and all it
-    claims. It says nothing about the tiers ABOVE the adapter: a memoised base-tier hit is
-    served without the adapter running at all, so the clock is not consulted there and this
-    type does not reach it.
+    Immutable, so the minted body is the body sent.
 
-    Immutable, so the body a caller minted is the body that goes out — a payload edited
-    between the mint and the wire would leave the type asserting something no longer true.
-
-    HAND-WRITTEN RATHER THAN A `@dataclass`, which is the shape this would otherwise be. The
-    scaffold rules import every adapter BY PATH, under a module name that is not registered in
-    `sys.modules`; `dataclass` resolves a `ClassVar`/`InitVar` annotation by looking its class's
-    module up there, and this file is `from __future__ import annotations`, so every annotation
-    is a string and that lookup runs. It returns `None` and the decorator raises
-    `AttributeError` at IMPORT — which the rules layer reports as "adapter for system 'elastic'
-    failed to import", a message naming nothing that is actually wrong with the adapter.
+    Hand-written rather than a `@dataclass`: adapters are imported by path under a module name
+    not in `sys.modules`, and `dataclass` resolving string annotations there raises at import.
     """
 
     payload: dict
@@ -146,7 +129,7 @@ def _http_json(
     ctx, method, url, config, headers=None, body: OutboundBody | None = None, timeout=None,
 ):
     """The one door to Elasticsearch. `body` is typed rather than a bare dict for the reason
-    `OutboundBody` gives: this is the frame a forgotten window would have escaped through."""
+    `OutboundBody` gives."""
     guard_outbound(ctx, SYSTEM, url, method=method)
     container = _container_for(ctx, url, config)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
@@ -193,13 +176,11 @@ DEFAULT_SORT = SORT_NEWEST_FIRST
 
 
 def resolve_sort(sort: str) -> str:
-    """THE membership test for this adapter's sort vocabulary, so no caller re-derives what a
-    value in `SORT_ORDERS` means.
+    """The membership test for this adapter's sort vocabulary.
 
-    Because results are capped, the order decides WHICH end of the window comes back — `desc`
-    (the default) the newest matching docs, `asc` the oldest. Deliberately not pagination:
-    those are the only two ends a bounded window has, and reaching a middle slice is the
-    window's job, not a cursor's.
+    Results are capped, so the order picks which end of the window comes back: `desc` (default)
+    the newest, `asc` the oldest. Not pagination — a middle slice is reached by narrowing the
+    window.
     """
     if sort not in SORT_ORDERS:
         raise UpstreamFault(
@@ -213,18 +194,11 @@ def resolve_sort(sort: str) -> str:
 def _bound_set(bound) -> bool:
     """Does this window bound say anything?
 
-    THE ONE PREDICATE, because two frames decide about the same value and a disagreement
-    between them is invisible. `_bounded_end` asks "did the caller leave the end open, so the
-    run's clock should close it"; the body builder below asks "is there a bound to emit". Those
-    have to be the same question, and they were not: `is not None` there against truthiness
-    here let `end=""` be *present* to the filler and *absent* to the builder, so a branched
-    run's unbounded search reached Elasticsearch with no range filter at all — the live tail,
-    which is the exact payload `as_of` was threaded through the ctx to remove.
-
-    FALSY IS OMITTED is the adapter's own established reading of a bound-shaped param —
-    `_search_verb` resolves `index or config[index_key]`, so `index=""` addresses the
-    configured default exactly as an absent one does — and a model spelling "no upper bound"
-    as `""` passes `validate_params`, which only type-checks.
+    Shared by `_bounded_end` ("is the end open?") and the body builder ("is there a bound to
+    emit?"); if they disagreed, `end=""` could be treated as present by one and absent by the
+    other and a branched run would search with no range filter. Falsy means omitted, as
+    elsewhere in this adapter (`index=""` means the default), and `validate_params` only
+    type-checks, so `""` does arrive.
     """
     return bool(bound)
 
@@ -258,10 +232,8 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
 ) -> OutboundBody:
     """The search body, with the window's open end closed at the run's clock.
 
-    THE CLOCK IS CONSULTED HERE, not at the call site, because here is the only place a search
-    body is built and `OutboundBody` is the only thing the wire accepts — so the two facts
-    cannot drift apart. `_bounded_end` still decides WHAT the bound is (and leaves a present
-    one alone); this decides only that it is asked.
+    The clock is consulted here, where every search body is built, rather than at call sites.
+    `_bounded_end` decides what the bound is.
     """
     return OutboundBody(_build_search_body(
         query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort))
@@ -293,10 +265,8 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
-    # `world_id` rides through so a BRANCHED run's staged read is confined rather than
-    # refused. A world view is named outside every configured pattern on purpose, so reach
-    # alone cannot admit it; passing the world declares the two names it may carry, and no
-    # sibling's. `None` on every ordinary run, which is the whole of the behaviour there.
+    # `world_id` lets a branched run's staged world view (named outside every configured
+    # pattern) be confined rather than refused. `None` on ordinary runs.
     resolved = confine_index(
         resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]),
         world_id=getattr(ctx, "world_id", None),
@@ -314,45 +284,30 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
 def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     """The window's upper bound, closed at the run's own clock when the caller left it open.
 
-    `_build_search_body` emits NO range filter at all when both bounds are falsy, and this
-    index is a live agent stream sorted `desc` under a 20-doc cap — so an unbounded search
-    returns "the newest documents right now". That is the elastic twin of the host-state
-    adapter's wall-clock `captured_at`: a served payload that is not a function of the question
-    asked, and the reason an episode replayed a week later reads a different corpus.
+    Without it an unbounded search of this live stream (sorted `desc`, 20-doc cap) returns the
+    newest documents right now, so a replayed episode would read a different corpus. "Open" is
+    `_bound_set`'s answer.
 
-    "OPEN" IS `_bound_set`'s ANSWER, not a second reading of it — see that predicate for the
-    `end=""` hole a private one left.
+    A present `end` is never touched: it is a scenario-timeline value, often far from the wall
+    clock, and the caller has already bounded the query. The start stays open because the past
+    does not change.
 
-    A PRESENT `end` is never touched. It is a scenario-timeline value the model chose — the
-    corpus routinely puts it months from the wall clock — so clamping it to `as_of` would
-    truncate the alert's own window in service of a determinism the caller had already bought
-    by bounding the query.
-
-    THE START IS LEFT OPEN on purpose. An absent lower bound means "from the beginning of the
-    index", and the past does not change; only the open END admits documents that did not exist
-    when the branch point was written.
-
-    A NEW LOCAL rather than rebinding `end`, so the parameter keeps meaning what the caller
-    passed — and, downstream, so `params` is never perturbed: the estate seam reads
-    `prepared != params` to decide whether STAGING moved a call, and a window filled here would
-    make an unstaged call look staged, widening the world declaration and writing an
-    `asked_params` column whose whole meaning is "staging moved it".
+    Returns a new value rather than editing `params`: the estate seam compares
+    `prepared != params` to detect staging, and a filled window would make an unstaged call
+    look staged.
     """
     at = getattr(ctx, "as_of", None)
     return end if _bound_set(end) or at is None else _clock.z_seconds(at)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:
-    """The model-facing result shape of `query` / `alerts` — named rather than inlined because
-    it is the contract a lead reads and a payload on disk keeps, not an assembly detail."""
+    """The model-facing result shape of `query` / `alerts` — the contract a lead reads and the
+    payload on disk keeps."""
     return {
         "index": index,
         "total": total,
         "returned": len(docs),
-        # WHICH end of the window these docs came from: `truncated` says a slice was taken,
-        # and without the order a later reader of the payload on disk cannot tell whether the
-        # 20 it holds are the window's first or its last. Echoed, not re-resolved —
-        # `_build_search_body` already ran the one membership test, before the request.
+        # Which end of the window a truncated result came from; echoed, already validated.
         "sort": sort,
         "truncated": truncated,
         "hits": docs,
@@ -427,15 +382,12 @@ def alerts(
 def esql_payload(query: str, resp: dict) -> dict:
     """The `esql` verb's payload, shaped from the raw ES|QL response.
 
-    `values` is left AS THE WIRE SENT IT: rows are bare arrays, cell `i` binding to
-    `columns[i]`. Do not re-zip them into per-row dicts — that restates every field name on
-    every row, and on the payload class gather reads most it roughly doubles what is recorded
-    to disk. The binding is not lost, it is DERIVED at read time from `columns`, which the
-    wire states once. `sql.py`'s ES|QL hint and `defender-sql.md`'s idiom both document this
-    positional form.
+    `values` stays as the wire sent it: bare row arrays, cell `i` bound to `columns[i]`.
+    Re-zipping into dicts would roughly double what gather records to disk; `defender-sql`
+    queries the rows by name under `--rows values --names columns`, which `defender-sql.md`
+    teaches.
 
-    Pure, and separate from the verb, so `evals/oracle_golden/controls.py` can produce the
-    same shape through the same code, and so the shape is testable without an HTTP seam.
+    Pure and separate from the verb so `evals/oracle_golden/controls.py` can share it.
     """
     values = resp.get("values", [])
     return {
@@ -447,41 +399,19 @@ def esql_payload(query: str, resp: dict) -> dict:
 
 
 def bounded_esql(ctx: VerbContext, query: str) -> str:
-    """`query` with the run's own clock as an upper bound, when the run has one.
+    """`query` with the run's clock as an upper bound, when the run has one.
 
-    THE `query`/`alerts` FILL, for the verb whose window is not a parameter. `_bounded_end`
-    closes an open upper bound where the bound is an argument; here it lives inside the
-    ES|QL the model wrote, so the bound is added as its own pipe stage instead.
+    The ES|QL counterpart of `_bounded_end`, where the window lives inside the model's query.
+    The bound is appended as an independent pipe stage right after the source command, never by
+    editing the model's predicate, so it can only narrow the row set (as in
+    `evals/oracle_golden/controls.add_esql_window`). The source command is found by ES|QL's own
+    separator, not by newline: splicing after a one-line pipeline's `LIMIT` would filter one
+    arbitrary row.
 
-    APPENDED, NEVER EDITED, and that distinction is the whole safety argument. This does not
-    read, parse or rewrite the predicate the model authored — it splices an independent
-    command in after the source, so it can only NARROW the row set and can never widen one.
-    That is `evals/oracle_golden/controls.add_esql_window`'s property and its reasoning, on
-    the same `split_first_command`; a rewrite that had to understand the existing `WHERE`
-    could half-apply, which is what the surrounding module refuses everywhere.
-
-    AFTER THE SOURCE COMMAND, found by ES|QL's own separator rather than by newline: a query
-    may write its whole pipeline on one line, and splicing after the first LINE would put the
-    clause after a `LIMIT` — taking one arbitrary row and only then filtering it, which is not
-    a narrower row set but an empty one.
-
-    `@timestamp` is safe to name ONLY WHERE THE SOURCE COMMAND IS `FROM`, and that is checked
-    rather than assumed. A data stream requires the field, but `esql` applies no index
-    confinement, so the model is free to open with `ROW` (literal rows) or `SHOW` (cluster
-    metadata) — neither has an `@timestamp` column, and bounding one does not narrow its rows,
-    it turns a query the source run answered into `Unknown column [@timestamp]`. That lands as
-    an `UpstreamFault` in the SIBLING and not in its base, which is the base-vs-sibling
-    contamination this whole seam exists to exclude, arriving from the clock added to prevent a
-    different one. A blank query is left alone for the same reason: splicing into one yields a
-    query opening with a bare pipe, so a refusal the source run got as "empty query" comes back
-    as a parse error naming a clause the model never wrote. `opens_with_from` answers both,
-    beside `split_first_command`, because a second spelling of "does this open with FROM" is
-    the drift `esql_text` exists to prevent.
-
-    `lte`, matching `_build_search_body`'s spelling for the parameter path, so a document
-    written exactly at the branch point is inside both windows rather than inside one.
-
-    An UNBRANCHED run has no clock and gets its query back untouched.
+    Only applied when the source command is `FROM` (`opens_with_from`): `ROW` or `SHOW` have no
+    `@timestamp`, and a blank query would become a bare pipe — either way the sibling would get
+    an error its base did not. `lte` matches `_build_search_body`, so a document at the branch
+    point is inside both windows. Unbranched runs get the query back untouched.
     """
     at = getattr(ctx, "as_of", None)
     if at is None or not opens_with_from(query):
@@ -491,11 +421,8 @@ def bounded_esql(ctx: VerbContext, query: str) -> str:
 
 
 def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
-    """The ES|QL request body, with the run's clock spliced in as its own pipe stage.
-
-    The ES|QL twin of `_search_body`, and here for the same reason: the mint is what the wire
-    takes, so the bound rides every request rather than every call site remembering it.
-    """
+    """The ES|QL request body, with the run's clock spliced in (the counterpart of
+    `_search_body`)."""
     return OutboundBody({"query": bounded_esql(ctx, query)})
 
 
@@ -503,12 +430,9 @@ def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    # THE BOUND RIDES THE WIRE, NOT THE EVIDENCE. `esql_payload` echoes the query into the
-    # payload, so a bounded form handed to it would put a clause the model never wrote into
-    # the record every reader treats as what this lead asked — and `stagers/elastic.restore`
-    # repairs the corpus identity in that echo, not an inserted stage. Sending the bounded
-    # form and echoing the asked one keeps the harness's bound out of the run's own account of
-    # itself, and keeps a branched payload byte-comparable with the capture it came from.
+    # The bounded query is sent, but the payload echoes the query as asked: the harness's bound
+    # stays out of the run's record, and branched payloads stay byte-comparable with the
+    # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")
     return esql_payload(query, resp)
