@@ -180,7 +180,7 @@ def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
     other: anything else is caught by `_served`'s `except Exception` and re-filed as a FAULT
     row through `_record_beside`, which the ledger then refuses as well and the registry logs.
     The at-limit control below shows the same adapter IS entered for a call it can record."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     ctx = run_ctx(tmp_path)
     host = chain(depth - 1)
@@ -205,7 +205,7 @@ def test_a_served_call_at_the_limit_records_both_of_its_rows(tmp_path):
     """The positive control on the same address: at the limit the same call reaches the estate
     adapter once, is served, and leaves its two readable rows — the family's `base` recording
     and the world's own `passthrough` row — each carrying the params whole."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     ctx = run_ctx(tmp_path)
     host = chain(LIMIT - 1)

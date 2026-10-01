@@ -20,7 +20,7 @@ The design (issue #1127, as amended after the review of PR #1139):
   `write_family` therefore dumps with no aliases, so a document holding one object twice still
   round-trips through `load_family`.
 
-Every manifest arm goes through `load_family(path)` over YAML text — the anchor cases only exist
+Every manifest arm goes through `load(path)` over YAML text — the anchor cases only exist
 in the text. The alias bomb is loaded in a CHILD PROCESS under a timeout: a loader that expands
 it does not return, and a hang must fail the arm, not the run.
 
@@ -44,6 +44,7 @@ import pytest
 import yaml
 
 from defender import _yaml
+from defender._episode_handle import Episode
 from defender.runtime.branch._family import FamilyError, load_family, parse_family, write_family
 from defender.tests import _triplet_947 as T
 from defender.tests.test_1127_params_nesting_limit import LIMIT, dict_chain, list_chain, raised
@@ -86,6 +87,12 @@ def family_text(params_yaml: str) -> str:
     doc = T.family_doc()
     doc["discriminator"]["envelope"]["params"] = _PLACEHOLDER
     return spliced(doc, {_PLACEHOLDER: params_yaml})
+
+
+def load(path: Path):
+    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`)."""
+    with Episode.open(path.parent) as episode:
+        return load_family(episode.view())
 
 
 def write_manifest(tmp_path: Path, text: str) -> Path:
@@ -138,7 +145,7 @@ def test_an_envelope_at_or_under_the_limit_loads_whole(tmp_path, depth):
     the ones authored — whole, not cut."""
     params = envelope_params(depth)
 
-    family = load_family(manifest(tmp_path, json.dumps(params)))
+    family = load(manifest(tmp_path, json.dumps(params)))
 
     assert family.discriminator["envelope"]["params"] == params
 
@@ -154,7 +161,7 @@ def test_an_envelope_past_the_limit_refuses_the_whole_family(tmp_path, depth, ch
     path = manifest(tmp_path, json.dumps(envelope_params(depth, chain)))
 
     with pytest.raises(FamilyError) as refused:
-        load_family(path)
+        load(path)
 
     assert _names_the_limit(str(refused.value)), \
         f"the refusal does not name the limit: {refused.value}"
@@ -166,7 +173,7 @@ def test_an_envelope_too_deep_for_the_yaml_parser_is_still_a_family_error(tmp_pa
     Green today (`_yaml.safe_load` translates it); the loader swap must keep it."""
     path = manifest(tmp_path, "[" * 3000 + '"x"' + "]" * 3000)
 
-    err = raised(lambda: load_family(path))
+    err = raised(lambda: load(path))
 
     assert isinstance(err, FamilyError), \
         f"refused with {type(err).__name__}, not FamilyError: {str(err)[:200]}"
@@ -310,11 +317,13 @@ from pathlib import Path
 
 import yaml
 
+from defender._episode_handle import Episode
 from defender.runtime.branch._family import FamilyError, load_family
 
 start = time.monotonic()
 try:
-    load_family(Path(sys.argv[1]))
+    with Episode.open(Path(sys.argv[1]).parent) as episode:
+        load_family(episode.view())
     outcome, yaml_cause = "loaded", False
 except FamilyError as e:
     outcome, yaml_cause = "FamilyError", isinstance(e.__cause__, yaml.YAMLError)
@@ -402,7 +411,7 @@ def test_an_alias_outside_the_envelope_is_refused_at_load(tmp_path, where):
     assert yaml.safe_load(text)["discriminator"] == T.family_doc()["discriminator"], \
         "the splice touched the discriminator, so this arm is not outside the envelope"
 
-    assert_refused_at_load(raised(lambda: load_family(write_manifest(tmp_path, text))),
+    assert_refused_at_load(raised(lambda: load(write_manifest(tmp_path, text))),
                            f"an alias {where}")
 
 
@@ -413,7 +422,7 @@ def test_the_same_document_written_longhand_loads(tmp_path, where):
     text = json.dumps(yaml.safe_load(_OUTSIDE_THE_ENVELOPE[where]()))
     assert _anchors_and_aliases(text) == []
 
-    family = load_family(write_manifest(tmp_path, text))
+    family = load(write_manifest(tmp_path, text))
 
     assert family.episode_id == T.EPISODE_ID
 
@@ -431,7 +440,7 @@ def test_a_cyclic_envelope_built_by_a_yaml_anchor_is_refused_at_load(tmp_path):
     params = _envelope_params_on_disk(path)
     assert params["k"][0] is params, "the spliced anchor did not load as a cycle"
 
-    assert_refused_at_load(raised(lambda: load_family(path)), "a cyclic anchor")
+    assert_refused_at_load(raised(lambda: load(path)), "a cyclic anchor")
 
 
 _REUSED = ('{"query": ' + json.dumps(_query())
@@ -448,7 +457,7 @@ def test_an_envelope_that_reuses_a_yaml_anchor_is_refused_at_load(tmp_path):
     assert params["a"] is params["b"], "the spliced anchor was not reused"
     assert params == _LONGHAND
 
-    assert_refused_at_load(raised(lambda: load_family(path)), "a reused anchor")
+    assert_refused_at_load(raised(lambda: load(path)), "a reused anchor")
 
 
 def test_the_same_envelope_written_longhand_loads_whole(tmp_path):
@@ -457,7 +466,7 @@ def test_the_same_envelope_written_longhand_loads_whole(tmp_path):
     path = manifest(tmp_path, json.dumps(_LONGHAND))
     assert _anchors_and_aliases(path.read_text(encoding="utf-8")) == []
 
-    family = load_family(path)
+    family = load(path)
 
     assert family.discriminator["envelope"]["params"] == _LONGHAND
 
@@ -475,13 +484,14 @@ def test_write_family_writes_a_shared_object_longhand_and_it_loads_back(tmp_path
     episode_dir = tmp_path / "episodes" / T.EPISODE_ID
     episode_dir.parent.mkdir(parents=True)
 
-    path = write_family(episode_dir, doc)
+    with Episode.create(episode_dir) as episode:
+        path = write_family(episode, doc)
 
     text = path.read_text(encoding="utf-8")
     assert _anchors_and_aliases(text) == [], \
         "write_family wrote YAML anchors/aliases, which the manifest loader refuses"
     assert yaml.safe_load(text) == doc
-    assert load_family(path) == parse_family(doc)
+    assert load(path) == parse_family(doc)
 
 
 # ── C at the questioner: an aliased reply is malformed YAML ────────────────────────────────
