@@ -42,10 +42,9 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender import _yaml  # noqa: E402
 from defender.evals.oracle_golden import controls as CONTROLS  # noqa: E402
 from defender.evals.oracle_golden.score import (  # noqa: E402
     DERIVED_KINDS, forbidden_values, is_derived, required_values,
@@ -87,7 +86,7 @@ def check_case(case_dir: Path, by_id: dict[str, dict],
     if problems:
         return problems          # nothing below can run without these
 
-    manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
     problems += check_identity(case_dir, manifest)
     problems += check_environment(case_dir)
 
@@ -115,7 +114,7 @@ def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int],
     """
     if not path.is_file():
         return {}
-    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc = _yaml.safe_load(path.read_text(encoding="utf-8"))
     if doc is None:
         return {}
     if not isinstance(doc, dict):
@@ -401,7 +400,7 @@ def check_environment(case_dir: Path) -> list[str]:
     lever-ups, how controls were built, what `window_live: false` means.
     """
     name = case_dir.name
-    notes = yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8")) or {}
+    notes = _yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8")) or {}
     problems = []
     if not notes.get("capture_environment"):
         problems.append(f"{name}: environment.yaml has no capture_environment")
@@ -452,7 +451,7 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
     detected.
     """
     problems = []
-    ledger = (yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
+    ledger = (_yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
               if ledger_path.is_file() else {})
     entries = {(e["case"], e["tag"]): e for e in (ledger or {}).get("entries") or []}
     if len(entries) != len((ledger or {}).get("entries") or []):
@@ -484,8 +483,6 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
             f"ledger names {key[0]}/{key[1]} but that score file is absent, and the entry "
             f"carries no `retired:` reason — a held-out result is never removed without one")
     return problems
-
-
 
 
 # completeness
@@ -569,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
     by_id, cases = {}, []
     for case_dir in case_dirs:
         manifest_path = case_dir / "manifest.yaml"
-        manifest = (yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        manifest = (_yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
                     if manifest_path.is_file() else {})
         by_id[case_dir.name] = manifest
         cases.append((case_dir, manifest))

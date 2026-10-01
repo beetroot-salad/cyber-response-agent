@@ -44,6 +44,7 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
+from defender.scripts.gather_tools.record_query import ParamsTooDeep, _json_safe_params
 
 #: The base world's role: the control every other world is compared against. Exactly one world
 #: claims it.
@@ -498,6 +499,13 @@ def parse_family(
     discriminator = doc.get("discriminator")
     if not isinstance(discriminator, dict) or not discriminator:
         raise FamilyError("the manifest's discriminator must be a non-empty mapping")
+    envelope = discriminator.get("envelope")
+    # The envelope is a model-authored call the review runs before any ledger could refuse it.
+    if isinstance(envelope, dict):
+        try:
+            _json_safe_params(envelope.get("params"), field="discriminator.envelope.params")
+        except ParamsTooDeep as too_deep:
+            raise FamilyError(f"the manifest's {too_deep}") from too_deep
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"))
     # The document's own record first: only the authoring call, which has no record yet, relies
@@ -563,7 +571,7 @@ def write_family(episode: Episode, doc: dict) -> Path:
     """
     manifest = episode.family
     manifest.write(
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
+        _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return manifest.path
 
 

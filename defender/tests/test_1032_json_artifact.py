@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 import json
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -66,6 +67,25 @@ def test_the_depth_scan_is_exact_on_valid_json_and_blind_to_brackets_inside_stri
     }
     for text, depth in cases.items():
         assert json_nesting_depth(text) == depth, f"{text!r}: {json_nesting_depth(text)}"
+
+
+def test_the_depth_scan_is_linear_on_an_unclosed_run_of_escaped_quotes():
+    """#1127 review: the scan reads model text (a tool call's raw arguments) and every
+    box-written row, so its cost must not depend on what the text holds. A string that opens
+    and never closes, followed by escaped quotes, made the old string pattern back up and
+    restart at every later quote — 40 KB took seconds, 80 KB half a minute — on the event loop
+    every lead shares. Linear, the same text is a few milliseconds; the bound leaves room for a
+    loaded box and none for the quadratic scan."""
+    text = '{"query": "' + '\\"' * 20_000
+
+    start = time.monotonic()
+    depth = json_nesting_depth(text)
+    row = parse_jsonl_row(text)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1.0, f"the scan took {elapsed:.2f}s on {len(text)} characters"
+    assert depth == 1, "an unclosed string hides the brackets after it, as the decoder would"
+    assert row is None
 
 
 def test_the_bound_admits_the_limit_and_refuses_one_past_it():

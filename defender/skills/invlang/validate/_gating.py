@@ -8,7 +8,8 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-import yaml
+
+from defender import _yaml
 
 from defender import _clock
 from defender._model import model
@@ -723,7 +724,7 @@ def ceiling_test_block(receipts: Sequence[CeilingReceipt]) -> str:
         if r.cap is not None:
             row["cap"] = r.cap
         rows.append(row)
-    return yaml.safe_dump(
+    return _yaml.safe_dump(
         {"ceiling_test": rows},
         allow_unicode=True, default_flow_style=False, sort_keys=False, width=10**9,
     )

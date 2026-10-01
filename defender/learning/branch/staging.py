@@ -343,7 +343,7 @@ def record_staged(episode: Episode, row: Mapping[str, Any]) -> dict:
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
     whole list would open a window where the record is shorter than the cluster.
     """
-    entry = yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
+    entry = _yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
     # The durable append: the record and its entry in the episode dir are synced before this
     # returns (the episode dir's own entry was synced when `Episode.create` made it).
     episode.staged.append_durable(entry)
@@ -500,8 +500,9 @@ def merge_review(episode: Episode, key: str, block: dict) -> None:
 
     Read through the episode's view and replaced through its handle. An absent record starts
     empty, and one that does not parse as a mapping is replaced (as it always was). A REFUSED
-    record — a link, hard link or other non-plain entry at the name, or undecodable bytes — is
-    `StagingRefused` and is left exactly as it is: replacing it would drop whatever it holds.
+    record — a link, hard link or other non-plain entry at the name, undecodable bytes, or a
+    document holding a YAML alias (#1127) — is `StagingRefused` and is left exactly as it is:
+    replacing it would drop whatever it holds.
     """
     rec = episode.view().read(LAYOUT.review)
     if rec.text is None and not rec.absent:
@@ -512,6 +513,13 @@ def merge_review(episode: Episode, key: str, block: dict) -> None:
     if rec.text is not None:
         try:
             loaded = _yaml.safe_load(rec.text)
+        except _yaml.AliasRefused as refused:
+            # A document, refused for its aliases (the pre-#1127 writer wrote them): replacing
+            # it would drop every other block it holds, as for any refused record.
+            raise StagingRefused(
+                f"{LAYOUT.review} is refused ({refused}); the {key!r} block was not merged, "
+                "since replacing a record this code cannot read drops whatever it holds"
+            ) from refused
         except yaml.YAMLError:
             loaded = None
         if isinstance(loaded, dict):
@@ -522,7 +530,7 @@ def merge_review(episode: Episode, key: str, block: dict) -> None:
     else:
         doc[key] = dict(block)
     episode.review.write(
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
+        _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
 
 
 def sweep_glob(episode_token: str) -> str:

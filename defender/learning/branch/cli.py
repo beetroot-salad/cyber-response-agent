@@ -81,6 +81,7 @@ from defender.runtime.branch._family import (
     parse_family,
     runnable_worlds,
 )
+from defender import _yaml
 
 _logger = logging.getLogger(__name__)
 
@@ -1318,11 +1319,10 @@ def write_questioner_samples(episode: Episode, samples: Any) -> Path:
     handling of repeated keys. Overwritten wholesale on a re-entered episode; a retried
     `Step.QUESTIONER` may therefore pair these samples with a world from an earlier attempt.
     """
-    import yaml
 
     doc = dict(samples)
     record = episode.samples
-    record.write(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
+    record.write(_yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
                                 default_flow_style=False))
     return record.path
 
