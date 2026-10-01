@@ -370,8 +370,9 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     assert (defender_dir / "learning" / "judge").is_dir(), (
         "the positive control failed: there is no learning/judge/ package on disk for the gate "
         "to scan, so a clean result below says nothing about the shipped appender")
-    real = {f.fingerprint for f in gate._scan(defender_dir)
-            if f.fingerprint.startswith("learning/judge/")}
+    # Rooted AT the package, not at `defender/` and filtered: a finding is decided per file, and
+    # the wider root only walked the rest of the tree (and its `.venv`) to throw it away.
+    real = {f.fingerprint for f in gate._scan(defender_dir / "learning" / "judge")}
     assert not real, f"the judge's own appender trips the write lint: {sorted(real)}"
 
 

@@ -416,6 +416,11 @@ def normalize(text: str, *, run_dir: Path, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
+def no_orient_shims(argv: list[str], env: dict[str, str]) -> None:
+    """`drive`'s default ORIENT shim runner: every shim-backed section is absent."""
+    return None
+
+
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
     """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
 
@@ -436,7 +441,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, defender_dir: Path | None = None,
-        tenant: Any = None, grants: Any = None):
+        tenant: Any = None, grants: Any = None, orient_shim: Any = None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -524,7 +529,15 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     what every scenario before #1003 drove; a scenario about the run-start check over a
     DEPLOYMENT's own catalog (a planted template whose `verb:` disagrees with the shipped
     table) hands in a planted mirror of the tree instead. The same tree feeds the box's env,
-    so a bash turn in such a scenario runs against the tree the run was told it is in."""
+    so a bash turn in such a scenario runs against the tree the run was told it is in.
+
+    `orient_shim` is ORIENT's shim runner (`orient.ShimRunner`): the three read-only
+    subprocesses behind message 0's lessons and corpus-vocabulary sections. Omitted, it is
+    `no_orient_shims` — those sections are absent, the fail-safe shape a failed shim already
+    has, and no scenario here is about them. Real, they were over a third of the whole unit
+    suite's CPU (three interpreters per drive, ~0.7s of a ~0.95s replay) and made every replay
+    depend on the checked-in lessons corpus. A scenario about those sections passes
+    `orient._shim`."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
     main_built = BuiltModel(FunctionModel(main), None)
@@ -580,5 +593,6 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=tree, make_model=make_model, tenant=run_tenant, **seams,
+            defender_dir=tree, make_model=make_model, tenant=run_tenant,
+            orient_shim=orient_shim if orient_shim is not None else no_orient_shims, **seams,
         ))

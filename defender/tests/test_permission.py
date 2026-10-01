@@ -742,6 +742,46 @@ def test_gather_keeps_local_computation():
         assert _bash(cmd, _gather()).allow, cmd
 
 
+_PAYLOAD_PIPE = "cat /run/gather_raw/l-001/0.json | defender-sql"
+
+
+@pytest.mark.parametrize("flags", [
+    "--rows values --names columns",
+    "--names columns --rows values",
+    "--rows tables[0].rows --names tables[0].columns",
+    "--rows=tables[0].rows --names=tables[0].columns",
+    "--rows=values --names columns",
+    # The gate admits `--rows` alone: both-or-neither is the TOOL's check (its exit 1 names the
+    # missing flag and routes the call to the pitfalls curator as a lesson).
+    "--rows values",
+])
+def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
+    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and
+    `--names` are `defender-sql`'s shim flags, each in the `--flag VALUE` and `--flag=VALUE`
+    spellings, and a bracketed PATH is one value token. Before the flags existed on the gate,
+    every one of these was refused (C11) and the refusal pointed at the `query` tool."""
+    for cmd in (f"{_PAYLOAD_PIPE} {flags} 'SELECT count(*) AS n FROM data'",
+                f"{_PAYLOAD_PIPE} 'SELECT count(*) AS n FROM data' {flags}"):
+        decision = _bash(cmd, _gather())
+        assert decision.allow, (cmd, decision.reason)
+
+
+@pytest.mark.parametrize("flag", [
+    "--bogus x", "--bogus", "--rowz values", "--rows-file values", "--row values",
+    "--name columns", "-r values", "--format csv",
+])
+def test_gather_admits_nothing_else_new_on_defender_sql(flag):
+    """#1138 O7's other half — the gate admits `--rows`/`--names` and NOTHING else new: an
+    unknown flag, a near-miss spelling, a prefix of either, a short option. The paired control
+    is the same pipe carrying only the declaration, which the gate admits — so each refusal is
+    about the extra flag, not about the pipe, the payload or the declaration."""
+    declared = f"{_PAYLOAD_PIPE} --rows values --names columns 'SELECT 1'"
+    assert _bash(declared, _gather()).allow
+    extra = f"{_PAYLOAD_PIPE} --rows values --names columns {flag} 'SELECT 1'"
+    assert not _bash(extra, _gather()).allow, extra
+    assert not _bash(f"{_PAYLOAD_PIPE} {flag} 'SELECT 1'", _gather()).allow, flag
+
+
 def test_gather_sql_aggregation_is_now_tool_then_bash():
     # #611 FLIP of the sanctioned aggregation pipe (#379). It used to be ONE command whose adapter
     # stage the harness captured (`adapter … | defender-sql …`). It is now TWO steps: `query(…)`

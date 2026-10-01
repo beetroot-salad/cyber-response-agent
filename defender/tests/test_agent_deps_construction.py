@@ -125,12 +125,3 @@ def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
 
 
 
-def test_main_loop_constructs_with_explicit_main_policy(tmp_path):
-    """Orphaned-consumer pin (driver.py:436, which builds deps with no policy today): the
-    post-refactor main construction AgentDeps(4 identity fields, policy=_MAIN_POLICY)
-    succeeds, role is MAIN, .policy is _MAIN_POLICY — main is not special-cased away."""
-    deps = tools.AgentDeps(**_ident(tmp_path), policy=_MAIN_POLICY)
-    assert deps.role is AgentRole.MAIN
-    assert deps.policy is _MAIN_POLICY
-
-

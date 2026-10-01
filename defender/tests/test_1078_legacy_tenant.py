@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1077 as S
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
@@ -77,7 +78,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str):
     _base, src = H.tenant_source(root, T_ID, row=False)
     ep = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, ep)
-    world = H.run_py().resume_world(manifest, label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(Episode.open(manifest.parent), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     return src, ep, world
 
 
@@ -309,7 +310,7 @@ def test_the_tenant_records_created_at_is_read_by_nobody(tenant_root):
     readers = []
     for py in S.DEFENDER.rglob("*.py"):
         rel = py.relative_to(S.DEFENDER).as_posix()
-        if rel.startswith("tests/") or rel == f"{S.TENANT_MODULE}.py":
+        if rel.startswith(("tests/", ".venv/")) or rel == f"{S.TENANT_MODULE}.py":
             continue
         if "created_at" in py.read_text(encoding="utf-8", errors="replace") and "tenant" in rel:
             readers.append(rel)
@@ -706,10 +707,10 @@ def test_the_base_role_sibling_of_a_family(tenant_root, tmp_path):
     src, ep, _world_a = _sibling_world(tmp_path, tenant_root, "a")
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role
-        world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+        world = H.run_py().resume_world(Episode.open(ep), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
         run = Path(_materialize(src / "alert.json", world.run_id, world=world))
         tokens[label] = _stamp(run)["world_id"]
-    expected = {label: H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS).world_id
+    expected = {label: H.run_py().resume_world(Episode.open(ep), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS).world_id
                for label in ("a", "b")}
     assert tokens == expected, (
         "the base-role sibling is still a forked sibling and gets the episode-qualified token, "
@@ -742,7 +743,8 @@ def test_the_family_record_carries_the_familys_base_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     family = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert family["base_world_id"] == tenant_record.base_world_id, (
@@ -759,7 +761,8 @@ def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     agreed = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))["agreed"]
     assert agreed["tenant_id"] == FAMILY_TENANT, (
@@ -779,7 +782,8 @@ def test_family_stamps_agreed_dict_is_all_slots_bound_minus_world_id(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", report["reason"]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     agreed = stamp["agreed"]
@@ -797,7 +801,8 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
                       tenant_id="tenant-one" if i == 0 else "tenant-two",
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "incomplete", report["reason"]
     assert "tenant" in report["reason"], (
         f"a family spanning tenants is a fault, added to `_member_faults`: {report['reason']}")
@@ -814,7 +819,8 @@ def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
             fields["tenant_id"] = FAMILY_TENANT
         S.plant_stamp(d, **fields, world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "incomplete", report["reason"]
     reason = report["reason"]
     named_fault = (
@@ -836,7 +842,8 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
     (dirs[2] / "provenance.json").unlink()      # not yet stamped
 
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     reason = report["reason"]
     counted = (
         f"the comparison must record how many siblings it skipped, so an unstamped sibling "
@@ -867,7 +874,8 @@ def test_verify_family_still_compares_only_commit_scope_and_model(tmp_path):
     for d in dirs:
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
-    report = S.branch_cli().verify_family(ep, dirs, source=T.provenance_record())
+    with Episode.open(ep) as episode:
+        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
     assert report["outcome"] == "accepted", (
         f"siblings differ on world_id BY DESIGN; if it reached the comparison every family "
         f"would be incomplete: {report['reason']}")

@@ -19,7 +19,8 @@ The shapes are the ones a gather_raw payload actually comes in, from the corpus 
 that motivated the tool:
 
     {index, total, returned, truncated, hits}   -> unnest(hits) yields a STRUCT
-    {columns, values, row_count}  (ES|QL)       -> unnest(values) yields a POSITIONAL array
+    {columns, values, row_count}  (ES|QL)       -> declared: `--rows values --names columns`
+                                                   makes each name a column (#1138)
     flat object                                 -> one row, its keys are the columns
     bare array                                  -> one row per element
     empty / not JSON                            -> input error (exit 2), NOT an empty result
@@ -83,6 +84,17 @@ def _sql(
 
 def _rows(payload: str, query: str) -> list:
     proc = _sql(payload, query)
+    assert proc.returncode == EXIT_OK, f"defender-sql failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+#: The declaration an ES|QL payload is queried under (#1138): rows at `values`, names at `columns`.
+_ESQL_DECLARED = ("--rows", "values", "--names", "columns")
+
+
+def _declared(payload: str, query: str, declaration: tuple[str, ...] = _ESQL_DECLARED) -> list:
+    """`cat <payload.json> | defender-sql --rows … --names … '<query>'` — the declared form."""
+    proc = run_sql_py(*declaration, query, stdin=payload)
     assert proc.returncode == EXIT_OK, f"defender-sql failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
@@ -158,39 +170,37 @@ def test_esql_shape_on_the_real_tracked_payload(esql):
     """`{columns, values, row_count}` — driven off the checked-in payload a lead was really
     handed, not a hand-written imitation. Bound to the adapter by
     `test_the_adapter_emits_the_shape_this_fixture_has`, which is what makes "a change to the
-    ES|QL adapter's output shape breaks this" true rather than hopeful."""
+    ES|QL adapter's output shape breaks this" true rather than hopeful.
+
+    Declared (#1138 O1), the rows ARE the table: one row per row, one column per name, in the
+    names' order. Unflagged the payload is one object and so one row (#1138 O6: unchanged) —
+    the envelope's own `row_count` is still readable that way."""
     assert set(json.loads(esql)) >= {"columns", "row_count", "values"}, "the real fixture changed shape"
+    assert _declared(esql, "SELECT count(*) AS n FROM data") == [{"n": 3}]
+    assert [(r["column_name"], r["column_type"]) for r in _declared(esql, "DESCRIBE data")] == [
+        ("failed", "BIGINT"), ("source.ip", "VARCHAR")]
     assert _rows(esql, "SELECT row_count FROM data") == [{"row_count": 3}]
-    assert _rows(esql, "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data)") \
-        == [{"n": 3}]
 
 
-def test_esql_values_are_positional_json_not_a_struct(esql):
-    """The trap: `unnest(values)` yields a POSITIONAL `JSON[]`, not the named struct
-    `unnest(hits)` yields, so `v.<field>` — the idiom that is right one shape over — is a
-    Binder Error here. The positional spelling is the paired positive control, and the
-    `::BIGINT` cast is why the doc insists on it: `->>'$'` is TEXT, so `'412' < '9'` is true
-    lexically and false numerically."""
+def test_esql_rows_are_queried_by_name_once_declared(esql):
+    """The trap the positional recipe lived in: `unnest(values)` yields a POSITIONAL `JSON[]`,
+    so the struct spelling `v."source.ip"` is a Binder Error — still, unflagged — and the only
+    way through was `v[N]->>'$'` plus a cast, because `->>'$'` is TEXT and `'412' < '9'` is true
+    lexically. Declared, the column is addressed by its name and `failed` is a number the
+    payload sent as a number: no position, no arrow, no cast (#1138 O1)."""
     struct_idiom = _sql(
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
     )
-    # A refusal is the contract; duckdb's own wording of WHY (`not a struct` today) is not,
-    # and the paired positive control below is what proves the failure is the idiom's.
+    # A refusal is the contract; duckdb's own wording of WHY (`not a struct` today) is not.
     assert_query_error(struct_idiom, "the struct spelling was not refused")
+    assert "--rows values --names columns" in struct_idiom.stderr, struct_idiom.stderr
 
-    assert _rows(
-        esql,
-        "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) "
-        "WHERE v[2]->>'$' = '203.0.113.7'",
-    ) == [{"n": 1}]
-    assert _rows(
-        esql,
-        "SELECT sum((v[1]->>'$')::BIGINT) AS failed FROM (SELECT unnest(values) v FROM data)",
-    ) == [{"failed": 424}]
-    lexical = "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE {} < {}"
-    assert _rows(esql, lexical.format("v[1]->>'$'", "'9'")) == [{"n": 2}]
-    assert _rows(esql, lexical.format("(v[1]->>'$')::BIGINT", "9")) == [{"n": 1}]
+    assert _declared(esql, 'SELECT count(*) AS n FROM data WHERE "source.ip" = \'203.0.113.7\'') \
+        == [{"n": 1}]
+    assert _declared(esql, "SELECT sum(failed) AS failed FROM data") == [{"failed": 424}]
+    # Numeric, not lexical: only 3 is below 9 (as text, '412' is too).
+    assert _declared(esql, "SELECT count(*) AS n FROM data WHERE failed < 9") == [{"n": 1}]
 
 
 def test_flat_object_is_one_row():
@@ -228,17 +238,11 @@ def test_truncation_probe_is_shape_specific_not_universal(shape, esql):
 # ------------------------------------------- O2: a wrong-shape query is told the real shape
 
 
-def _positions(payload_doc: dict) -> str:
-    """The positional map the ES|QL hint must print for THIS payload, from its own `columns`."""
-    return "Positions: " + ", ".join(
-        f"{i + 1}={c['name']}" for i, c in enumerate(payload_doc["columns"])
-    )
-
-
-#: The two clauses of a hint that are DERIVED from the payload in hand. "The other payload's
-#: names are absent" is asserted of these, not of the idiom prose around them.
-_POSITIONS_CLAUSE = re.compile(r"Positions: .*?\.(?=\s)")
+#: The clause of a hint that is DERIVED from the payload in hand. "The other payload's names
+#: are absent" is asserted of it, not of the idiom prose around it.
 _COLUMNS_CLAUSE = re.compile(r"columns \[[^\]]*\]")
+#: The declaration the unflagged note hands back (#1138 O6), as flag values.
+_DECLARATION = re.compile(r"--rows (\S+) --names (\S+)")
 
 
 def _clause(hint: str, pattern: re.Pattern[str]) -> str:
@@ -247,73 +251,60 @@ def _clause(hint: str, pattern: re.Pattern[str]) -> str:
     return found.group(0)
 
 
-def test_query_error_on_esql_shape_hint_gives_the_positional_map(esql):
-    """Struct access on ES|QL `values` fails, and the hint names the EXACT position of each
-    field FOR THIS payload — grounded in the fixture's own `columns`, not a generic table.
+def _declaration(proc: subprocess.CompletedProcess) -> tuple[str, ...]:
+    """The `--rows X --names Y` the tool printed, as argv — taken OUT of stderr so the test runs
+    exactly what the lead would copy."""
+    found = _DECLARATION.search(proc.stderr)
+    assert found, f"no declaration on stderr: {proc.stderr!r}"
+    return ("--rows", found.group(1), "--names", found.group(2))
 
-    The runnable form is taken OUT of the hint text and executed, so the hint cannot hand
-    back a recipe that does not run: `<value>` is the only thing substituted."""
+
+def test_query_error_on_esql_shape_names_the_declaration_that_binds_it(esql):
+    """Struct access on ES|QL `values` fails, and the tool's answer is no longer a positional
+    map with a `->>'$'` form (#1138 O6/O9): it names the declaration that makes the rows a table,
+    for THIS payload — and that declaration, taken out of stderr and run, answers."""
     payload_doc = json.loads(esql)
     proc = _sql(
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
     )
     assert proc.returncode == EXIT_QUERY_ERROR
-    hint = _hint(proc)
-    assert "POSITIONAL JSON array" in hint
-    assert _positions(payload_doc) in hint
+    assert _declaration(proc) == _ESQL_DECLARED
+    # The query holds no arrow, so any `->>` on stderr is the tool's own text. Read off the
+    # whole of stderr rather than a `hint:` section: on a positional payload the tool names the
+    # declaration, and need not print the shape hint at all (#1138 review, R1).
+    assert "Positions:" not in proc.stderr
+    assert "->>" not in proc.stderr, f"stderr still teaches the positional recipe: {proc.stderr!r}"
+    assert "flat/array" not in proc.stderr, "a positional payload was handed the flat idiom"
 
-    form = "v[2]->>'$' = '<value>'"
-    assert form in hint
-    runnable = _fill(form, {"<value>": str(payload_doc["values"][0][1])})
-    assert _rows(
-        esql,
-        f"SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) WHERE {runnable}",
-    ) == [{"n": 1}]
+    value = payload_doc["values"][0][1]
+    assert _declared(esql, f'SELECT count(*) AS n FROM data WHERE "source.ip" = \'{value}\'',
+                     _declaration(proc)) == [{"n": 1}]
 
 
-def test_the_esql_positional_map_is_derived_from_each_payloads_own_columns():
-    """The test above reads ONE payload, so a hint holding a memorized `1=failed, 2=source.ip`
-    would satisfy it while being a lie about every other ES|QL payload a lead is handed. This
-    is a different payload — three columns, none of them the fixture's — and the map has to
-    follow it, with the fixture's own positions nowhere in sight."""
+def test_the_declaration_the_note_names_is_derived_from_each_payloads_own_keys():
+    """The test above reads ONE payload, so a note holding a memorized `--rows values --names
+    columns` would satisfy it while being a lie about every other positional payload a lead is
+    handed. This is a Splunk-shaped one — `fields` and `rows`, three columns, none of them the
+    fixture's — and the declaration has to follow it, with ES|QL's keys nowhere in it."""
     payload_doc = {
-        "columns": [{"name": "host.name", "type": "keyword"},
-                    {"name": "bytes", "type": "long"},
-                    {"name": "user", "type": "keyword"}],
-        "values": [["web-1", 4096, "alice"], ["db-1", 512, "bob"]],
-        "row_count": 2,
+        "fields": ["host.name", "bytes", "user"],
+        "rows": [["web-1", 4096, "alice"], ["db-1", 512, "bob"]],
+        "count": 2,
     }
     payload = json.dumps(payload_doc)
-    proc = _sql(
-        payload,
-        'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."host.name" = \'x\'',
-    )
+    proc = _sql(payload, "SELECT nope FROM data")
     assert proc.returncode == EXIT_QUERY_ERROR
-    hint = _hint(proc)
-    assert "POSITIONAL JSON array" in hint
-    positions = _clause(hint, _POSITIONS_CLAUSE)
-    assert positions == _positions(payload_doc) + ".", (
-        "the positional map did not follow this payload's own `columns`"
+    declaration = _declaration(proc)
+    assert declaration == ("--rows", "rows", "--names", "fields"), (
+        "the declaration did not follow this payload's own keys"
     )
-    for fixture_column in ("failed", "source.ip"):
-        assert fixture_column not in positions, (
-            "the hint carried the tracked fixture's columns into an unrelated payload — it is "
-            "a memorized constant, not a map of the payload in hand"
-        )
 
-    # And the map is TRUE of this payload: position 2 is `bytes`, so the hint's own filter
-    # form at position 2 selects on the byte count and nothing else.
-    assert _rows(
-        payload,
-        "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) "
-        "WHERE v[2]->>'$' = '4096'",
-    ) == [{"n": 1}]
-    assert _rows(
-        payload,
-        "SELECT v[3]->>'$' AS who FROM (SELECT unnest(values) v FROM data) "
-        "WHERE v[1]->>'$' = 'db-1'",
-    ) == [{"who": "bob"}]
+    # And the declaration is TRUE of this payload: run as printed, `bytes` is the number column.
+    assert _declared(payload, "SELECT user FROM data WHERE bytes = 512", declaration) \
+        == [{"user": "bob"}]
+    assert _declared(payload, 'SELECT "host.name" FROM data WHERE bytes > 1000', declaration) \
+        == [{"host.name": "web-1"}]
 
 
 def test_query_error_on_hits_shape_hint_points_at_the_struct():
@@ -588,10 +579,26 @@ def test_empty_payload_is_an_error_not_an_empty_result(payload):
 def test_the_doc_teaches_the_exit_codes_the_tests_pin(doc):
     """The exit codes in `_defender_sql` are literals BECAUSE they are what the doc teaches;
     the spawn tests hold the tool to them, and this holds the doc to them, so neither the
-    tool nor the sentence can renumber alone."""
-    taught = re.search(r"`(\d)` = query error.*?`(\d)` = the payload never arrived", doc, re.S)
-    assert taught, "the doc no longer teaches the exit codes"
-    assert tuple(map(int, taught.groups())) == (EXIT_QUERY_ERROR, EXIT_INPUT_ERROR)
+    tool nor the sentence can renumber alone.
+
+    #1138's exit table moved one thing: a wrong `--rows`/`--names` declaration is a `1`, the
+    lead's mistake to fix like a query error (and a lesson for the pitfalls curator), while `2`
+    stays the payload that never arrived or is not JSON. So the paragraph's `1` must name the
+    declaration beside the query error, and its `2` the payload — read clause by clause, the
+    digits pinned and the prose around them free."""
+    paragraph = next((p for p in re.split(r"\n\s*\n", doc)
+                      if "exit code" in p.lower() and re.search(r"`\d+`\s*=", p)), None)
+    assert paragraph, "the doc no longer has an exit-code paragraph"
+    marks = list(re.finditer(r"`(\d+)`\s*=\s*", paragraph))
+    clauses = {
+        int(m.group(1)): paragraph[m.end():marks[i + 1].start() if i + 1 < len(marks) else None]
+        for i, m in enumerate(marks)
+    }
+    assert set(clauses) == {EXIT_QUERY_ERROR, EXIT_INPUT_ERROR}, clauses
+    assert "query error" in clauses[EXIT_QUERY_ERROR], clauses
+    assert "--rows" in clauses[EXIT_QUERY_ERROR] or "--names" in clauses[EXIT_QUERY_ERROR], (
+        f"the doc's `1` does not cover a wrong declaration: {clauses[EXIT_QUERY_ERROR]!r}")
+    assert "payload" in clauses[EXIT_INPUT_ERROR], clauses
 
 
 def test_markdown_payload_is_an_input_error():
@@ -640,8 +647,8 @@ def test_the_adapter_emits_the_shape_this_fixture_has(esql):
     # `columns[i]`, so a transpose, a row reversal or a partial re-zip all fail here.
     assert payload["values"] == raw["values"], "the adapter re-shaped rows the wire had sent"
     assert all(isinstance(row, list) for row in payload["values"]), (
-        "rows arrived as dicts — the re-zip is back, and `defender-sql.md` plus sql.py's "
-        "ES|QL hint now teach an idiom that cannot run"
+        "rows arrived as dicts — the re-zip is back, and the declaration `defender-sql.md` "
+        "and sql.py's note teach (`--rows values`) now names a list that is not positional rows"
     )
     assert payload["columns"] == raw["columns"]
     assert payload["row_count"] == len(raw["values"]) == 3
@@ -657,11 +664,14 @@ def test_the_adapter_emits_the_shape_this_fixture_has(esql):
 # ------------------------------------------ O5: every unnest a lead is shown names a live shape
 
 
-#: The two keys `unnest` can be pointed at, one per payload shape that HAS rows to unnest:
-#: `hits` (search-hits) and `values` (ES|QL). No adapter emits any other list to unnest, and
-#: no adapter emits a wrapper — so `unnest(result.hits)`, the recipe of a code path that is
-#: gone, is not a spelling to hunt for but simply not one of these two.
-_LIVE_SHAPES = {"hits", "values"}
+#: The one key `unnest` can be pointed at on a lead-facing surface: `hits`, the search-hits
+#: shape's rows. ES|QL's `values` left the list with #1138 — positional rows are DECLARED
+#: (`--rows values --names columns`), never unnested — and no adapter emits a wrapper, so
+#: `unnest(result.hits)`, the recipe of a code path that is gone, and `unnest(values)`, the
+#: recipe #1138 retired, are not spellings to hunt for but simply not this one. (A declared
+#: list column is taught as `list_contains(...)`, or `unnest` named bare: an `unnest(<column>)`
+#: on these surfaces is outside the whitelist.)
+_LIVE_SHAPES = {"hits"}
 
 #: Case-insensitive with optional space before the paren: SQL keywords are, and the recipes a
 #: curator records are LLM-written, which uppercases them as often as not.
@@ -698,7 +708,7 @@ def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
     dead = {name: args - _LIVE_SHAPES for name, args in seen.items() if args - _LIVE_SHAPES}
     assert not dead, f"a lead-facing surface unnests something no adapter emits: {dead}"
     # Paired control: the census really covered the surfaces that teach the idioms, and between
-    # them they teach both live shapes — a zero above cannot come from reading nothing.
+    # them they teach the live shape — a zero above cannot come from reading nothing.
     teaching = {name for name, args in seen.items() if args}
     assert {
         "scripts/gather_tools/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
@@ -786,66 +796,78 @@ def _sql_fences(text: str) -> list[str]:
     return [tok.content for tok in fences if _SQL_INFO.match(tok.info.strip())]
 
 
-def test_the_docs_esql_example_is_literal_and_runs(doc, esql):
-    """`defender-sql.md`'s ES|QL example, asserted present as a LITERAL and then executed —
-    the same string, unedited — against the real fixture. Bound to the string rather than
-    parsed out of the fence, so an edit to the doc's recipe must come here and be re-run
-    rather than quietly redefining what is tested."""
-    example = "SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)"
-    assert example in doc, "the doc's ES|QL example changed"
+#: A `<field>`-style placeholder — a template for the lead to fill, not a query to run.
+_PLACEHOLDER = re.compile(r"<[A-Za-z_][\w .-]*>")
+_QUOTED_NAME = re.compile(r'"([^"]+)"')
+#: The tracked fixture's names, as the declaration makes them columns.
+_FIXTURE_NAMES = {"failed", "source.ip"}
+#: #1138 O1's witness filter: a dotted name compared as text AND a number compared as a number.
+_O1_FILTER = re.compile(r'"source\.ip"\s*=\s*\'203\.0\.113\.7\'\s+AND\s+failed\s*>\s*9\b', re.I)
+_POSITIONAL_RECIPE = re.compile(r"v\s*\[\s*\d+\s*\]\s*->>")
 
-    # Present is not enough: a doc that ALSO teaches the struct spelling teaches a Binder
-    # Error, and a lead who reaches the wrong recipe first has still lost the turn. `values`
-    # rows are positional arrays, so no concrete field may ever be spelled after `v.`.
-    struct_access = _STRUCT_ACCESS_ON_V.search(doc)
-    assert struct_access is None, (
-        f"the doc teaches struct access on an ES|QL row ({struct_access.group(0)!r}) — "
-        "`unnest(values)` yields a POSITIONAL array and this raises a Binder Error"
-    )
-    # And the placeholder form it DOES name is named as a failure, not offered as a recipe:
-    # every `v.<field>` in the doc sits next to the word that rules it out.
-    assert "v.<field>" in doc
-    assert re.search(r"`v\.<field>`\s*fails", doc), (
-        "the doc mentions `v.<field>` without saying it fails"
-    )
-    # The copyable fences are the positional form only — no fence hands back struct access.
-    fences = _sql_fences(doc)
-    assert example.strip() in [f.strip() for f in fences], "the ES|QL example left the fences"
+
+def _declared_fences(doc: str) -> list[str]:
+    """The doc's copyable SQL written for the DECLARED ES|QL table: an sql fence that names
+    only the tracked fixture's columns (double-quoted, as a dotted name must be), holds no
+    placeholder to fill and no `unnest`. A fence for another table (a list column, a JSON
+    column) names a column the fixture does not have and is not one of these."""
+    fences = []
+    for fence in _sql_fences(doc):
+        quoted = set(_QUOTED_NAME.findall(fence))
+        if (quoted and quoted <= _FIXTURE_NAMES and not _PLACEHOLDER.search(fence)
+                and "unnest" not in fence.lower()):
+            fences.append(fence.strip())
+    return fences
+
+
+def _typed_oracle(payload_doc: dict, query: str) -> list[dict]:
+    """What `query` answers over the fixture's rows in a table typed BY HAND the way #1138's
+    rule types them — `failed` BIGINT (every cell a JSON integer), `source.ip` VARCHAR (every
+    cell a string) — computed in-process, independently of the tool."""
+    duckdb = pytest.importorskip("duckdb")
+    con = duckdb.connect(":memory:")
+    con.execute('CREATE TABLE data ("failed" BIGINT, "source.ip" VARCHAR)')
+    con.executemany("INSERT INTO data VALUES (?, ?)", payload_doc["values"])
+    cursor = con.execute(query)
+    names = [d[0] for d in cursor.description]
+    return [dict(zip(names, record, strict=True)) for record in cursor.fetchall()]
+
+
+def test_the_docs_declared_examples_run_and_answer_what_a_typed_table_answers(doc, esql):
+    """`defender-sql.md`'s copyable SQL for positional rows is written against the DECLARED
+    table (#1138 O9): each such fence, run as written under `--rows values --names columns` over
+    the real fixture, exits 0 and answers exactly what the same SQL answers over a table typed
+    by hand from the fixture's JSON values — so the doc cannot teach a query that runs but
+    answers wrong (a lexical comparison, a text sum). One of them is O1's witness, the dotted
+    name compared as text AND the count compared as a number, and it selects the 412 row."""
+    for flag in (r"--rows[ =]values", r"--names[ =]columns"):
+        assert re.search(flag, doc), "the doc does not show the declaration ES|QL is queried under"
+    fences = _declared_fences(doc)
+    assert fences, "the doc has no runnable SQL fence for the declared ES|QL table"
+    payload_doc = json.loads(esql)
     for fence in fences:
+        answer = _declared(esql, fence)
+        assert answer == _typed_oracle(payload_doc, fence), f"the doc's fence answers wrong: {fence!r}"
+
+    witness = [f for f in fences if _O1_FILTER.search(f)]
+    assert witness, "no doc fence filters `\"source.ip\" = '203.0.113.7' AND failed > 9`"
+    for fence in witness:
+        answer = _declared(esql, fence)
+        assert len(answer) == 1, (fence, answer)
+        assert 412 in answer[0].values(), (fence, answer)
+
+
+def test_the_doc_no_longer_teaches_the_positional_recipe(doc):
+    """The recipe the declaration replaced is gone from the doc (#1138 O9): no `v[N]->>'$'`, no
+    `unnest(values)`, no `::BIGINT` over an unpacked position — a number the payload sent as a
+    number needs no cast once declared — and no copyable fence reaches into a `values` row.
+    The arrow-precedence rule stays (it is about JSON columns and JSON sources, not positions)."""
+    assert not _POSITIONAL_RECIPE.search(doc), "the doc still teaches `v[N]->>`"
+    assert not re.search(r"unnest\s*\(\s*values\s*\)", doc, re.I), "the doc still unnests `values`"
+    assert "(v[3]->>'$')::BIGINT" not in doc, "the doc still teaches the positional cast"
+    for fence in _sql_fences(doc):
         assert _STRUCT_ACCESS_ON_V.search(fence) is None, f"a copyable fence cannot run: {fence!r}"
-
-    rows = _rows(esql, example)
-    # One unaliased column per row, so the KEY is duckdb's generated name for the expression
-    # (`(v[2] ->> '$')` today) and is not part of this contract across a `duckdb>=1.5,<2`
-    # bump. The values are: position 2 is `source.ip`, in the fixture's own row order.
-    assert [list(row.values()) for row in rows] == [
-        ["203.0.113.7"], ["198.51.100.22"], ["203.0.113.40"],
-    ]
-
-
-def test_the_docs_bigint_cast_rule_is_literal_and_runs(doc, esql):
-    """The doc's cast rule, the same way: the literal `(v[3]->>'$')::BIGINT` must be in the
-    file and must PARSE AND RUN as written (position 3 is past this fixture's two columns, so
-    it yields NULL rather than an error — the cast itself is what is under test). The same
-    cast at a position the fixture has gives the real number, and the uncast comparison gives
-    the wrong one, which is the claim the rule exists to make — executed, because a rule the
-    doc states and a doc that quietly retracts it are told apart by what runs, not by prose."""
-    rule = "(v[3]->>'$')::BIGINT"
-    assert rule in doc, "the doc's ::BIGINT cast rule changed"
-    assert "returns **TEXT**" in doc, "the doc no longer says what `->>'$'` hands back"
-    assert "lexical" in doc.lower(), "the doc dropped WHY the cast is required"
-
-    unnested = "FROM (SELECT unnest(values) v FROM data)"
-    assert _rows(esql, f"SELECT {rule} AS n {unnested}") == [{"n": None}] * 3
-
-    at_real_position = rule.replace("v[3]", "v[1]")
-    assert _rows(esql, f"SELECT {at_real_position} AS failed {unnested}") == [
-        {"failed": 412}, {"failed": 9}, {"failed": 3},
-    ]
-    assert _rows(esql, f"SELECT count(*) AS n {unnested} WHERE {at_real_position} < 9") \
-        == [{"n": 1}]
-    assert _rows(esql, f"SELECT count(*) AS n {unnested} WHERE v[1]->>'$' < '9'") \
-        == [{"n": 2}], "the uncast comparison is supposed to be lexical — that is the point"
+    assert "binds more loosely than" in doc, "the doc dropped WHY `->>` needs parentheses"
 
 
 def test_the_docs_hits_idiom_is_literal_and_runs(doc):
@@ -875,3 +897,130 @@ def test_the_docs_hits_idiom_is_literal_and_runs(doc):
         "h.<field>": "h.user", "h.<other>": "h.host", "<value>": "web-1",
     })
     assert _rows(_HITS, runnable) == [{"user": "alice"}, {"user": "bob"}]
+
+
+# ---- `->>` binds more loosely than the operators before it ---------------------------------------
+# `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `((v[1]->>'$') = 'x' AND v[2]) ->> '$' = 'y'`,
+# and `'x' = v[1]->>'$'` as `('x' = v[1]) ->> '$'`: the arrow takes everything written before it as
+# its JSON. duckdb then answers `Failed to cast value to numerical: "<value>"` (often a timestamp,
+# so it read as a time problem) or a silent, wrong count. The hint's own filter form broke the
+# moment a lead added a second condition; 10 calls in the gather runs surveyed by
+# experiments/sql-time-contract (step 0) were lost to it.
+
+_UNNESTED_VALUES = "FROM (SELECT unnest(values) v FROM data)"
+#: An ES|QL keyword column holding digits (a Windows event code): the value-first form is silently
+#: wrong here, where on the fixture's numeric column it happens to be right.
+_KEYWORD = json.dumps({
+    "columns": [{"name": "event.code", "type": "keyword"}, {"name": "n", "type": "long"}],
+    "values": [["4625", 1], ["4624", 2]], "row_count": 2,
+})
+
+
+def test_a_declared_filter_survives_a_second_condition(esql):
+    """The positional hint's filter form broke the moment a lead added a second condition
+    (#1132). Declared (#1138), a filter is plain SQL over named columns: joined by AND, OR and
+    NOT it runs and selects, with no arrow left to misbind."""
+    count = "SELECT count(*) AS n FROM data WHERE "
+    ip = "\"source.ip\" = '{}'"
+    assert _declared(esql, count + f"{ip.format('203.0.113.7')} AND failed = 412") == [{"n": 1}]
+    assert _declared(esql, count + f"{ip.format('203.0.113.7')} OR {ip.format('198.51.100.22')}") \
+        == [{"n": 2}]
+    assert _declared(esql, count + f"NOT {ip.format('203.0.113.7')}") == [{"n": 2}]
+    assert _declared(esql, count + f"NOT {ip.format('203.0.113.7')} AND failed > 5") == [{"n": 1}]
+
+
+def test_a_misbound_arrow_is_refused_with_its_cause_and_a_fix_that_names_no_position(esql):
+    """duckdb would name only the symptom (`Failed to cast value to numerical`). The tool refuses
+    first and names the cause and the fix — whose example is now a generic JSON column,
+    `(col->>'$')`, not a `v[N]` position (#1138 O9) — and, the payload being positional rows,
+    the declaration that makes the arrow unnecessary (O6). The same query parenthesised runs
+    and selects: `_arrow_refusal` is #1132's backstop and stays."""
+    unwrapped = "v[1]->>'$' = '412' AND v[2]->>'$' = '203.0.113.7'"
+    proc = _sql(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {unwrapped}")
+    assert_query_error(proc, "the unparenthesised AND was not refused")
+    assert "binds more loosely than" in proc.stderr, proc.stderr
+    assert "Parenthesise every `->>`" in proc.stderr, proc.stderr
+    # The refusal prints the tool's own text and hint, never an echo of the query.
+    assert "->>'$'" in proc.stderr, proc.stderr
+    assert not re.search(r"v\[\d+\]", proc.stderr), f"the fix still names a position: {proc.stderr!r}"
+    assert "--rows values --names columns" in proc.stderr, proc.stderr
+    wrapped = "(v[1]->>'$') = '412' AND (v[2]->>'$') = '203.0.113.7'"
+    assert _rows(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {wrapped}") == [{"n": 1}]
+
+
+@pytest.mark.parametrize(("payload", "where", "truth"), [
+    ("esql", "v[2]->>'$' = '203.0.113.7' AND v[1]->>'$' = '412'", 1),
+    ("esql", "v[2]->>'$' = '203.0.113.7' OR v[1]->>'$' = '3'", 2),
+    ("esql", "row_count = 3 AND v[1]->>'$' = '412'", 1),
+    ("esql", "NOT v[1]->>'$' = '412'", 2),
+    ("keyword", "'4625' = v[1]->>'$'", 1),
+    ("keyword", "'4625' <> v[1]->>'$'", 1),
+])
+def test_a_misbound_arrow_that_would_answer_a_silent_wrong_count_is_refused(
+        esql, payload, where, truth):
+    """These do not error in duckdb: they answer a confident, wrong count. Refused, not run; the
+    same filter with every arrow parenthesised gives the truth."""
+    data = esql if payload == "esql" else _KEYWORD
+    assert_query_error(_sql(data, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {where}"),
+                       "a misbound arrow ran")
+    wrapped = re.sub(r"(v\[\d\]->>'\$')", r"(\1)", where)
+    assert _rows(data, f"SELECT count(*) AS n {_UNNESTED_VALUES}, data WHERE {wrapped}") \
+        == [{"n": truth}]
+
+
+@pytest.mark.parametrize("statement", [
+    "CREATE TEMP TABLE r AS SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) "
+    "WHERE v[2]->>'$' = '203.0.113.7' AND v[1]->>'$' = '412'; SELECT * FROM r",
+    "PIVOT (SELECT v[1]->>'$' = '412' AND v[2]->>'$' = 'x' AS k FROM (SELECT unnest(values) v "
+    "FROM data)) ON k USING count(*)",
+])
+def test_an_arrow_the_parse_cannot_show_is_refused(esql, statement):
+    """duckdb describes only SELECT statements; anything else holding an arrow cannot be checked,
+    so it is refused rather than run unchecked."""
+    proc = _sql(esql, statement)
+    assert_query_error(proc, "an unchecked statement with an arrow ran")
+    assert "single SELECT" in proc.stderr, proc.stderr
+
+
+def test_a_syntax_error_near_an_arrow_gets_duckdbs_own_message(esql):
+    """A query duckdb cannot parse has no tree to check either; its own parser error, which names
+    the spot, is what the lead needs — not the uncheckable-statement refusal."""
+    proc = _sql(esql, 'SELECT data->>"$.[\\"@timestamp\\"]" FROM data')
+    assert_query_error(proc, "a syntax error was not reported")
+    assert "syntax error" in proc.stderr, proc.stderr
+    assert "single SELECT" not in proc.stderr, proc.stderr
+
+
+def test_a_json_arrow_on_a_json_source_is_not_refused(esql):
+    """The refusal keys on the arrow's SOURCE. The doc's projection, a single-condition filter
+    with the arrow first, IN, an arrow chained on an arrow, a CAST — the escape the refusal names
+    for an expression meant as the JSON — and statements with no arrow at all run."""
+    for query in (f"SELECT v[2]->>'$' AS ip {_UNNESTED_VALUES}",
+                  f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE v[2]->>'$' = '203.0.113.7'",
+                  f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE v[2]->>'$' IN ('203.0.113.7')",
+                  f"SELECT count(*) AS n {_UNNESTED_VALUES}, data "
+                  "WHERE v[2]->>'$' = '203.0.113.7' AND row_count = 3",
+                  f"SELECT CAST('{{\"a\": ' || (v[1]->>'$') || '}}' AS JSON)->>'a' AS a {_UNNESTED_VALUES}",
+                  "SELECT to_json(columns[1])->>'name' AS c FROM data",
+                  "SELECT to_json(columns[1])->>'$'->>'name' AS c FROM data",
+                  """SELECT j->>'a' AS a FROM (SELECT '{"a": 1}'::JSON AS j)""",
+                  """SELECT '{"a": 1}'->>'a' AS a""",
+                  """SELECT (SELECT '{"a": 1}'::JSON)->>'a' AS a""",
+                  """SELECT CASE WHEN true THEN '{"a": 1}'::JSON END->>'a' AS a""",
+                  """SELECT coalesce(NULL, '{"a": 1}'::JSON)->>'a' AS a""",
+                  """SELECT '{"a": {"b": 1}}'::JSON->'a'->>'b' AS b""",
+                  "DESCRIBE data",
+                  "SUMMARIZE data"):
+        proc = _sql(esql, query)
+        assert proc.returncode == EXIT_OK, (query, proc.stderr)
+
+
+def test_an_operator_expression_meant_as_the_json_is_refused_and_its_cast_runs(esql):
+    """The parse keeps no parentheses, so `('{' || x || '}')->>'a'` reads exactly like a misbound
+    `'{' || x || '}'->>'a'`; it is refused, and the CAST the refusal names runs."""
+    concat = "'{\"a\": ' || (v[1]->>'$') || '}'"
+    proc = _sql(esql, f"SELECT ({concat})->>'a' AS a {_UNNESTED_VALUES}")
+    assert_query_error(proc, "an operator expression as an arrow's source ran")
+    assert "CAST(<expression> AS JSON)" in proc.stderr, proc.stderr
+    assert _rows(esql, f"SELECT CAST({concat} AS JSON)->>'a' AS a {_UNNESTED_VALUES}") == [
+        {"a": "412"}, {"a": "9"}, {"a": "3"}]

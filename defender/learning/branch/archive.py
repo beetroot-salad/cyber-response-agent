@@ -37,8 +37,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender._io import Bound, entry_present, guarded_mkdir, write_guarded
-from defender._episode_paths import LAYOUT, EpisodePaths, WorldPaths
+from defender._episode_handle import Episode
+from defender._io import Bound, entry_present
+from defender._episode_paths import LAYOUT, WorldPaths
 from defender._run_paths import (
     RunPaths,
     artifact_dir,
@@ -156,9 +157,9 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
     raise `ArchiveRefused`. `present` is the single-file destinations that have a source this
     time."""
     # The episode dir is reachable from a sibling box's rw bind, and `copy2` opens the
-    # destination for writing, following a link planted there. `guarded_mkdir` only judges
-    # directory components, so each leaf is checked here. `plain_file`, not `artifact_file`,
-    # so a hard link is refused too.
+    # destination for writing, following a link planted there. The world folder's `ensure`
+    # only judges directory components, so each leaf is checked here. `plain_file`, not
+    # `artifact_file`, so a hard link is refused too.
     #
     # Every single-file name is judged, not only those with a source. A plain file left at a
     # name whose source is now absent (a re-archive) would be read as this run's own, so it is
@@ -189,8 +190,9 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
             "would write this world's archived artifact wherever it points")
 
 
-def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, Path]:
-    """Archive each world's run dir into `episode_dir/worlds/<label>/`; return what was written.
+def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Path]:
+    """Archive each world's run dir into the episode's `worlds/<label>/`; return what was
+    written.
 
     `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
     archives only its clean siblings, so the set is not derived from the manifest.
@@ -198,15 +200,16 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
     Each world is screened, then copied. Worlds go in sorted order so a partial failure always
     leaves the same prefix.
     """
-    episode_dir = Path(episode_dir)
-    episode = EpisodePaths(episode_dir)
     archived: dict[str, Path] = {}
     for world in sorted(run_dirs):
         run_dir = Path(run_dirs[world])
-        dest = episode.world(world)
+        # The label passes the handle's minting check; the copy lane's own paths are the
+        # world's, under the episode dir the handle holds.
+        handle = episode.world(world)
+        dest = WorldPaths(episode.dir, LAYOUT.world(world))
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
-        guarded_mkdir(world_dir, base=episode_dir)
+        handle.dir.ensure()
         _screen_destinations(world, dest, run_dir, {to for _s, to in sources})
         for source, target in sources:
             shutil.copy2(  # lint-tree-read-follows-link: ok — every source screened in `_screened_sources`
@@ -230,8 +233,8 @@ def archive_episode(episode_dir: Path, run_dirs: dict[str, Path]) -> dict[str, P
             _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
-        # The pointer last, as text, through the guarded seam.
-        write_guarded(dest.run_dir_pointer, f"{run_dir}\n")
+        # The pointer last, as text, through the episode handle.
+        handle.run_dir_pointer.write(f"{run_dir}\n")
         archived[world] = world_dir
     return archived
 

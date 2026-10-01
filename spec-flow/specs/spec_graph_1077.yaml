@@ -2213,11 +2213,15 @@ demands:
     binds:
       - "branch_cli"
       - "interacts(branch_cli->episode_dir)"
-    discharged_by: test_the_priming_locks_raw_exclusive_open_is_not_converted_to_a_guarded_write
+    discharged_by: test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_nothing
     seed_docstring: >-
       The priming lock's low-level exclusive `os.open` is preserved exactly and is not converted
       to a guarded write by the name move.
     note: >-
+      SUPERSEDED by #1133 O4.5 (rev 2, S4): the priming claim is now the episode handle's
+      exclusive `priming_lock.create` on the rooted core — still exclusive, never a guarded
+      write — so the raw `os.open` this first pinned is gone by design. Its #1077 test was
+      deleted; the pointer names the #1133 row that pins the claim's exclusivity now.
       NEGATIVE. Flagged fact F11: `served/.priming` is a RAW `os.open(O_CREAT|O_EXCL|O_WRONLY,
       0o600)` today, and the security dive's universal (2) is scoped to NEW seams. POSITIVE
       CONTROL: d19 — the tenant record, a NEW seam, DOES go through `write_guarded`.

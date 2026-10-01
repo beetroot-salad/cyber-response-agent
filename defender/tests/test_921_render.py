@@ -27,6 +27,7 @@ import json
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 
 
@@ -398,7 +399,8 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
         json.dumps({"lesson_name": "L1"}) + "\n", encoding="utf-8")
     (run_dir / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
 
-    archived = archive.archive_episode(ep, {"b": run_dir})
+    with Episode.open(ep) as episode:
+        archived = archive.archive_episode(episode, {"b": run_dir})
     world = archived["b"]
     assert (world / "gather_summaries" / "l-001.md").is_file()
     assert (world / "lessons_loaded.jsonl").is_file()
@@ -447,7 +449,8 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     outside.write_text("bytes no world wrote\n", encoding="utf-8")
     (summaries / "l-002.md").symlink_to(outside)
 
-    archived = archive.archive_episode(ep, {"b": run_dir})
+    with Episode.open(ep) as episode:
+        archived = archive.archive_episode(episode, {"b": run_dir})
     world = archived["b"]
     kept = world / "gather_summaries" / "l-001.md"
     assert kept.is_file(), "one refused entry cost the world its whole directory"

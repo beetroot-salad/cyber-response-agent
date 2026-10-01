@@ -44,6 +44,7 @@ off that text before anything is served. Fakes enter through the constructor's o
 """
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -58,6 +59,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
+from defender._episode_handle import Episode  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.applier import WorldApplier  # noqa: E402
@@ -67,7 +69,6 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
     WorldRegistry,
 )
-from defender._episode_paths import BASE_FILENAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     APPLIER_DECISIONS,
     BASE,
@@ -197,18 +198,28 @@ CALLS_LOG = "adapter-calls.jsonl"
 AS_OF = datetime(2026, 5, 25, 15, 30, 45, tzinfo=UTC)
 
 
+#: A world ledger's place in an episode, `<episode>/served/<world id>.jsonl`, relative to a
+#: test's tmp dir: a `Ledger` is built only by `Ledger.for_world(episode, world_id)` (#1133 rev
+#: 2), so the file every test here reads back is where that puts it.
+SERVED_FILE = Path("ep", "served", "w.jsonl")
+
+
 def fresh_ledger(path: Path) -> Ledger:
-    """A `Ledger` over `path`, beside the primed capture #947 made REQUIRED.
+    """A `Ledger` over `path` (`<episode>/served/<world id>.jsonl`), beside the primed capture
+    #947 made REQUIRED.
 
     EMPTY, deliberately. Nothing in this file is about the capture; what `base_path` has to be
     here is a FILE, which is `Ledger.__post_init__`'s ordering guarantee that the episode was
     primed before any sibling opened a ledger over it. Empty, every key MISSES it and falls
     through to the live `base` recording — which is exactly the tier the family arms below were
-    written against, so their subject is unchanged."""
-    base = path.parent / BASE_FILENAME
-    base.parent.mkdir(parents=True, exist_ok=True)
-    base.touch()
-    return Ledger(path, base_path=base)
+    written against, so their subject is unchanged. The episode stays held for as long as the
+    ledger that writes through it."""
+    episode = Episode.create(path.parent.parent)
+    with contextlib.suppress(FileExistsError):
+        episode.served_base.create("")
+    ledger = Ledger.for_world(episode, path.stem)
+    assert ledger.path == path, (ledger.path, path)
+    return ledger
 
 
 @dataclass(frozen=True)
@@ -347,7 +358,7 @@ def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path)
     class agreement (a `GrantError`, not a soft denial) and a wrapper that lost a verb name
     would answer UNDECLARED. Whole-grant rather than per-system spot checks, because the
     property is "no system is left out of the estate"."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
 
     refused = [
         (system, verb, reg.decide(system, verb).outcome)
@@ -366,7 +377,7 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     silent-scenario-deletion hazard the ledger exists to make visible: it would be a response
     with no row. Pinned as `__wrapped__ is real`, so the wrapper is proven to be over THIS
     body rather than merely to be some other callable."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     bare = []
@@ -387,7 +398,7 @@ def test_the_wrapper_carries_the_decoration_the_seam_reads(tmp_path):
     the engine/body-param pair is how the query tool decides a payload's shape — the elastic
     `esql`/`query`/`alerts` verbs are the ones carrying non-default values, so they are the
     ones a `functools.wraps` regression would silently blank."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     drifted = []
@@ -414,7 +425,7 @@ def test_the_wrapper_keeps_the_keyword_only_signature_the_boundary_introspects(t
     They are one number: what a model is SHOWN and what the boundary ACCEPTS both come from
     `model_facing_params`, so a wrapper whose signature read differently would publish a
     surface the seam then refuses."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
     drifted = []
@@ -435,7 +446,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
     `declared_params`) and model-facing NOTHING, so a wrapper that flattened the two reads into
     one would open a param whose only effect is to silently narrow a lead's read to closed
     tickets."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl")
+    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     served = reg.verbs("ticket")["list-tickets"]
 
     assert "require_closed" in declared_params(served)
@@ -485,7 +496,7 @@ def test_build_agent_core_accepts_a_world_registry(logger, tmp_path):
     The positive arm of the pair: without it, a check that refused EVERYTHING would satisfy
     the negative one, and the sibling run would have no way to query at all."""
     reg = world_registry(
-        REAL_ADAPTERS, _gather_grant(), tmp_path / "served.jsonl",
+        REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE,
         world=World("w1", touches=("elastic",)),
     )
 
@@ -503,7 +514,7 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
     `passthrough` is a DECISION here, not an absence — this world touches nothing, so the
     applier honestly reports that it changed nothing. A response with no row is the failure
     the table exists to make visible, so the row's presence is the assertion."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
@@ -540,7 +551,7 @@ def test_every_decision_in_the_vocabulary_serves_and_is_recorded(tmp_path, decis
     The vocabulary is closed at the ledger, so this is the whole of what an applier may say;
     running all of them keeps the refusal below meaning "outside the vocabulary" rather than
     "anything the shipped applier does not happen to emit"."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path,
@@ -563,7 +574,7 @@ def test_an_invented_decision_refuses_before_the_payload_is_returned(tmp_path):
     return. The adapter's own call still happened (the base row is there): the refusal is at
     the RECORD, which is where the vocabulary lives, and pinning that keeps the failure
     attributable rather than looking like a query that never ran."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path,
@@ -586,7 +597,7 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
     The registry deliberately does not re-check the decision it just received — the same rule
     in two places is a rule with a copy that can drift, and the copy that drifts is the one
     that stops refusing. This arm is what makes that delegation safe to rely on."""
-    ledger = fresh_ledger(tmp_path / "served.jsonl")
+    ledger = fresh_ledger(tmp_path / SERVED_FILE)
     call = ServedCall(
         system="cmdb", verb="get-host", params={"host": "canary-1"},
         payload_text="{}", source="invented", world_id="w1",
@@ -595,7 +606,7 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
     with pytest.raises(LedgerError, match="invented"):
         ledger.record(call)
 
-    assert served_rows(tmp_path / "served.jsonl") == []
+    assert served_rows(tmp_path / SERVED_FILE) == []
 
 
 @pytest.mark.parametrize(("source", "world_id"), [(BASE, "w1"), (PASSTHROUGH, None)])
@@ -607,14 +618,14 @@ def test_the_two_tiers_have_to_agree(tmp_path, source, world_id):
     AS the estate, while each sibling's own row still reads `passthrough`. A world-tier row
     with no owner is the mirror: a difference nobody can attribute, which a comparison then
     counts against whichever sibling it happens to read next."""
-    ledger = fresh_ledger(tmp_path / "served.jsonl")
+    ledger = fresh_ledger(tmp_path / SERVED_FILE)
 
     with pytest.raises(LedgerError, match="FAMILY tier"):
         ledger.record(ServedCall(
             system="cmdb", verb="get-host", params={"host": "canary-1"},
             payload_text="{}", source=source, world_id=world_id))
 
-    assert served_rows(tmp_path / "served.jsonl") == []
+    assert served_rows(tmp_path / SERVED_FILE) == []
 
 
 def test_an_estate_fault_still_leaves_a_row(tmp_path):
@@ -633,7 +644,7 @@ def test_an_estate_fault_still_leaves_a_row(tmp_path):
         'def get_host(ctx: VerbContext, *, host: str) -> dict:\n'
         '    raise RuntimeError("cmdb is down")')
     (adapters / "cmdb_adapter.py").write_text(down, encoding="utf-8")
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     reg = world_registry(adapters, FAKE_GRANT, ledger_path, world=World("w1"))
 
     with pytest.raises(RuntimeError, match="cmdb is down"):
@@ -660,7 +671,7 @@ def test_a_refusal_out_of_prepare_still_leaves_a_row(tmp_path):
     ASKED, not prepared: the retarget is precisely what failed, so there is no prepared form to
     name. And no `base` row rides along, because nothing reached the adapter — which is what
     separates this from the fault arm, where the call ran and the estate broke."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
                          world=World("w1", touches=("elastic",)))
@@ -701,7 +712,7 @@ def test_prepare_files_a_capability_refusal_apart_from_an_environment_outage(
     raised: BaseException = (
         StagingError("this query names two corpora") if error == "staging"
         else RuntimeError("config file not found: knowledge/.../config.env"))
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
                          world=World("w1", touches=("elastic",)),
@@ -728,7 +739,7 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
 
     Observed failing by: no row, a row with the wrong source/params/world, a row for the
     listing, or a row for the granted decision."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     asked = {"host": "web-01"}
@@ -767,7 +778,7 @@ def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_ra
     (adapters / "elastic_adapter.py").write_text(
         _RECORDING_ADAPTER + "\nraise ImportError('the elastic client is not installed')\n",
         encoding="utf-8")
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     reg = world_registry(adapters, FAKE_GRANT, ledger_path, world=World("w1"))
 
     with pytest.raises(ImportError, match="not installed"):
@@ -787,7 +798,7 @@ def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):
     that freedom as theirs. Handing out the live memo means an edit anywhere reaches every later
     lookup INCLUDING `decide`'s, which is the route the grant is checked through: a verb swapped
     in a returned table would then be admitted under the real one's class."""
-    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl")
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE)
     served = reg.verbs("cmdb")["get-host"]
 
     reg.verbs("cmdb")["get-host"] = "not a verb at all"
@@ -807,16 +818,16 @@ def test_a_world_whose_touches_cannot_be_read_is_refused_at_construction(tmp_pat
     it is not an `AdapterFault` and the query tool files it as exit 2: an INFRA code, which the
     circuit breaker counts as the estate being down for this sibling and up for its base."""
     with pytest.raises(EstateError, match="touches"):
-        world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+        world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE,
                        world=World("w1", touches))
 
-    assert not (tmp_path / "served.jsonl").exists(), "a refused world must not have written a row"
+    assert not (tmp_path / SERVED_FILE).exists(), "a refused world must not have written a row"
 
 
 @pytest.mark.parametrize("touches", ["elastc", ("elastc",), ("elastic", "elastc")])
 def test_a_world_cannot_declare_a_system_outside_the_serving_grant(tmp_path, touches):
     """Unknown touch names are refused instead of silently routing all calls to passthrough."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
 
     with pytest.raises(EstateError, match="elastc"):
         world_registry(
@@ -837,7 +848,7 @@ def test_a_patch_for_a_system_the_world_does_not_touch_is_refused(tmp_path):
     authored together, so the mismatch is caught where both are in hand."""
     with pytest.raises(EstateError, match="cmdb"):
         world_registry(
-            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE,
             world=World("w1", touches=("elastic",)),
             applier=WorldApplier(patches={"cmdb": {"canary-1": {"owner": "worldA"}}}))
 
@@ -854,7 +865,7 @@ def test_a_patch_for_a_staged_system_is_refused_too(tmp_path):
     for is not there."""
     with pytest.raises(EstateError, match="elastic"):
         world_registry(
-            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE,
             world=World("w1", touches=("elastic",)),
             applier=WorldApplier(patches={"elastic": {"canary-1": {"owner": "worldA"}}}))
 
@@ -880,13 +891,13 @@ def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_pa
     note = [{"author": "analyst", "body": "the same binary was benign last quarter"}]
     with pytest.raises(EstateError, match="comments"):
         world_registry(
-            adapters, grant, tmp_path / "served.jsonl",
+            adapters, grant, tmp_path / SERVED_FILE,
             world=World("w1", touches=("ticket",)),
             applier=WorldApplier(patches={"ticket": {"SOC-9": {"comments": note}}}))
-    assert not (tmp_path / "served.jsonl").exists(), "a refused world must not have written a row"
+    assert not (tmp_path / SERVED_FILE).exists(), "a refused world must not have written a row"
 
     world_registry(
-        adapters, grant, tmp_path / "served.jsonl",
+        adapters, grant, tmp_path / SERVED_FILE,
         world=World("w1", touches=("ticket",)),
         applier=WorldApplier(
             patches={"ticket": {"SOC-9": {"comments": note, "status": released}}}))
@@ -904,12 +915,12 @@ def test_a_world_a_stager_cannot_name_is_refused_at_construction(tmp_path, world
     once. Only for a system the world DECLARES, which the last case pins."""
     with pytest.raises(EstateError, match="elastic"):
         world_registry(
-            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE,
             world=World(world_id, touches=("elastic",)))
 
     # A world that stages nothing never names a corpus, so the same id is servable.
     world_registry(
-        fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served2.jsonl",
+        fake_estate(tmp_path), FAKE_GRANT, tmp_path / "ep2" / "served" / "w.jsonl",
         world=World(world_id, touches=("cmdb",)))
 
 
@@ -926,8 +937,9 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
     capture.parent.mkdir(parents=True, exist_ok=True)
     capture.touch()
 
-    with pytest.raises(LedgerError, match="family's own capture"):
-        Ledger.for_world(episode_root, "base")
+    with Episode.open(episode_root) as episode, \
+            pytest.raises(LedgerError, match="family's own capture"):
+        Ledger.for_world(episode, "base")
 
     assert capture.read_text(encoding="utf-8") == ""
 
@@ -941,7 +953,7 @@ def test_the_same_key_twice_is_one_adapter_call_and_one_payload(tmp_path):
     would measure the estate's drift and call it the world's difference. The recording is what
     buys determinism back without snapshot-restore, and the adapter's own call log is what
     proves it — the payload's call ordinal would differ on a second live call."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
@@ -965,7 +977,7 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     than as the estate having moved between two queries. The base row (`world_id=None`) is
     written once; each world still records its own served row, because what the applier decided
     is per world."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
     a = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
@@ -991,7 +1003,7 @@ def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_pa
     `record` and the other in `_absorb`, this process served the second payload while any
     process rebuilding from the file served the first: two answers to one question with both
     rows reading honestly, which is exactly the invariance the family tier exists to buy."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ledger = fresh_ledger(ledger_path)
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
                 source=BASE, world_id=None)
@@ -1011,7 +1023,7 @@ def test_a_ledger_reopened_from_disk_replays_the_family_recording(tmp_path):
     The memo is loaded in `__post_init__`, so a sibling started minutes later (or after a
     crash) inherits the family's answer. Without this arm the tier would only hold within one
     process, which is not where siblings live."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     first = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -1030,7 +1042,7 @@ def test_two_spellings_of_one_question_are_one_key(tmp_path):
     `request_key` sorts, the way `record_query._request_key` does and for the same reason: two
     spellings of one question would otherwise split one memo into two, and the pair would see
     the estate twice at two different moments."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
@@ -1055,7 +1067,7 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     taken from the params AS PREPARED, and staging is exactly the act of changing them. A key
     taken before `prepare` would collapse the two worlds onto one recording and hand world B
     world A's documents — the contamination `view_name`'s per-world alias exists to prevent."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| STATS COUNT(*)"
@@ -1089,7 +1101,7 @@ def test_a_staged_call_reaches_the_adapter_already_retargeted(tmp_path):
     filtering, aggregation and sorting over it, so the result is correct by construction. That
     only holds if the retarget survives all the way into the call — asserted against what the
     adapter body RECORDED, not against what the seam returned."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path,
@@ -1122,7 +1134,7 @@ def test_a_retargeted_call_declares_its_world_to_the_adapter(tmp_path):
     needed it."""
     ctx = run_ctx(tmp_path)
     reg = world_registry(
-        fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+        fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE,
         world=World("w1", touches=("elastic", "cmdb")),
     )
 
@@ -1147,7 +1159,7 @@ def test_the_familys_base_recording_carries_no_worlds_identity(tmp_path):
 
     The world row beside it is checked too: both tiers carry the asked identity, so a
     comparison across them is reading the evidence rather than the harness."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     body = "FROM logs-system.auth-*\n| STATS COUNT(*)"
     reg = world_registry(adapters, FAKE_GRANT, ledger_path,
@@ -1178,7 +1190,7 @@ def test_a_ledger_write_failure_does_not_displace_the_refusal_it_records(tmp_pat
     it as `DEFAULT_FAULT_EXIT` — an infra code. Two of those trip the breaker for the system
     and five abort the run, in the SIBLING and not in its base, which is the "up for one, down
     for the other" contamination the usage class exists to prevent."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
                          world=World("a", touches=("elastic",)))
@@ -1203,7 +1215,7 @@ def test_a_system_the_world_does_not_touch_is_never_staged(tmp_path):
     never patched, and a difference observed there is corrupt by construction rather than
     something to explain. The negative arm of the staging test above — same system, same
     query, only `touches` differs."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     body = "FROM logs-nginx.access-*\n| LIMIT 5"
     reg = world_registry(
@@ -1356,7 +1368,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
 
     Refused at CONSTRUCTION rather than at the write: by the time a payload is being recorded
     the world has already served, and a check there would have to be repeated at every writer."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
 
     class BaseWorld:
         world_id = None
@@ -1378,7 +1390,7 @@ def test_a_sibling_never_replays_another_worlds_patch_as_the_estate(tmp_path):
     answered", and every sibling replays it rather than re-asking a live system. A patching
     world serves first here; the sibling that follows must still read the ESTATE's `owner`, not
     the first world's, even though the two share one ledger."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
 
@@ -1412,7 +1424,7 @@ def test_a_base_world_stages_nothing(tmp_path):
     changes nothing, and silent scenario INJECTION the moment it does, because every sibling
     replays that slot as the estate while its own row honestly reports `passthrough`. Keying
     them apart makes that unreachable instead of merely unlikely."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
 
@@ -1451,7 +1463,7 @@ def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
     The memo key must NOT be the asked form, and this pins both halves: pair on what was asked,
     memoize on what ran. Keyed the other way, B replays A's answer — read off A's staged
     corpus — which is contamination rather than merely a re-read."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     ledger = fresh_ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
@@ -1479,7 +1491,7 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     The column is written only when it says something. Echoing `params` onto every row would
     make the two identities look like one thing, which is the confusion the pair exists to
     prevent."""
-    ledger_path = tmp_path / "served.jsonl"
+    ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = WorldRegistry(
         read_roster(adapters), FAKE_GRANT, world=World("A", ("cmdb",)), ledger=fresh_ledger(ledger_path), as_of=AS_OF)

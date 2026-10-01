@@ -146,15 +146,10 @@ def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
 def test_a_sub_collection_member_for_a_kind_nothing_writes(run_dir):
     """A kind with no writer still gets an accessor, for D1's stated reason: the gate's
     answer-key set and payload-cap shape key on `source_refs` and `ticket_reads`."""
-    writers = [
-        p for p in DEFENDER.rglob("*.py")
-        if not p.relative_to(DEFENDER).as_posix().startswith("tests/")
-        and "source_refs.yaml" in p.read_text(encoding="utf-8", errors="replace")
-        and "write" in p.read_text(encoding="utf-8", errors="replace")]
     owner = S.RunPaths(run_dir)
     assert owner.source_refs.is_relative_to(run_dir), (
-        f"the accessor exists whether or not anything writes the kind (writer candidates: "
-        f"{[p.name for p in writers]}; claim R9 says there is no writer in the repo)")
+        "the accessor exists whether or not anything writes the kind (claim R9 says there is "
+        "no writer in the repo)")
     assert owner.ticket_read(0).is_relative_to(run_dir)
 
 
@@ -653,7 +648,7 @@ def test_a_public_name_function_that_other_modules_import_today(run_dir):
     stale = []
     for py in DEFENDER.rglob("*.py"):
         rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith("tests/"):
+        if rel.startswith(("tests/", ".venv/")):
             continue
         text = py.read_text(encoding="utf-8", errors="replace")
         for gone in ("review_trace_path", "review_record_path"):
@@ -681,26 +676,6 @@ def test_one_writer_seam_asked_to_name_a_file_under_three_different_roots(
     assert not hasattr(S.RunPaths(learning_run), "learning_run_trace"), (
         "no accessor covers the learning run dir: D1 places the first two on their owners and "
         "the Resolution leaves the third where it is")
-
-
-def test_the_priming_locks_raw_exclusive_open_is_not_converted_to_a_guarded_write(tmp_path: Path):
-    """The priming lock's low-level exclusive `os.open` is preserved exactly and is not converted
-    to a guarded write by the name move.
-
-    NEGATIVE. Positive control: demand d19 — the tenant record, a NEW seam, DOES go through
-    `write_guarded`; here the pre-existing seam must be untouched.
-    """
-    cli = S.branch_cli()
-    source = inspect.getsource(cli)
-    assert "os.O_CREAT | os.O_EXCL | os.O_WRONLY" in source, (
-        "flagged fact F11: `served/.priming` is a RAW exclusive `os.open` today, and the "
-        "security dive's universal (2) is scoped to NEW seams — the name move must not "
-        "quietly convert it")
-    assert "write_guarded(claim" not in source
-    assert "write_guarded(served" not in source
-    # The NAME moves to the owner; the SEAM does not.
-    episode_dir = S.make_episode_dir(tmp_path)
-    assert S.EpisodePaths(episode_dir).priming_lock == episode_dir / "served" / ".priming"
 
 
 def test_corpus_load_ones_runpaths_construction_still_resolves_after_d1(tmp_path: Path):

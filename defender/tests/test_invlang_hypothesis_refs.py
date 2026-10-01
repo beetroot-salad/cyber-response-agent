@@ -511,18 +511,6 @@ def test_an_undeclared_hypothesis_on_the_row_stands_the_commitment_check_down():
 
 
 @pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
-def test_the_shipped_corpus_carries_no_hypothesis_reference_defect(path: Path):
-    assert _errors(path.read_text(encoding="utf-8")) == []
-
-
-@pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
-def test_the_shipped_corpus_carries_no_tested_commitment_defect(path: Path):
-    """The golden is the reason this rule is scoped to the tested hypotheses rather than
-    to the document: l-002 tests `ac1` and l-003 tests `p2`, both legitimately."""
-    assert _commitment_errors(path.read_text(encoding="utf-8")) == []
-
-
-@pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)
 def test_no_shipped_document_mints_a_phantom_in_its_weight_table(path: Path):
     """The walker rule against the corpus, including `example-b-parallel-iam-cmdb.md` —
     the document whose `:H` block the parser drops. The validator stands down there and

@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 
 
+from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
 
 
@@ -83,7 +84,8 @@ def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
     ep = W.episode(tmp_path, root=root)
     samples = W.samples_document()
 
-    cli.write_questioner_samples(ep, samples)
+    with Episode.open(ep) as episode:
+        cli.write_questioner_samples(episode, samples)
 
     assert (ep / W.SAMPLES_NAME).is_file(), (
         "`Step.QUESTIONER` wrote no samples.yaml into the episode")
@@ -251,8 +253,9 @@ def test_the_writer_pins_one_document_per_pattern_rather_than_relying_on_last_ke
     second = {"host": {"name": "web-2"}}
 
     try:
-        cli.write_questioner_samples(ep, [(W.EVENTS_PATTERN, first),
-                                          (W.EVENTS_PATTERN, second)])
+        with Episode.open(ep) as episode:
+            cli.write_questioner_samples(episode, [(W.EVENTS_PATTERN, first),
+                                                    (W.EVENTS_PATTERN, second)])
     except W.refusals():
         return                       # a refusal is an equally good answer: one document or none
     doc = W.read_yaml(ep / W.SAMPLES_NAME)
@@ -654,9 +657,10 @@ def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
     ep = W.episode(tmp_path, root=root)
     first = {W.EVENTS_PATTERN: {"host": {"name": "FIRST-ATTEMPT"}}}
     second = {W.EVENTS_PATTERN: {"host": {"name": "SECOND-ATTEMPT"}}}
-    cli.write_questioner_samples(ep, first)
+    with Episode.open(ep) as episode:
+        cli.write_questioner_samples(episode, first)
 
-    cli.write_questioner_samples(ep, second)
+        cli.write_questioner_samples(episode, second)
 
     assert W.read_yaml(ep / W.SAMPLES_NAME) == second, (
         "a re-entered `Step.QUESTIONER` did not overwrite — H3 chose overwrite-and-re-derive, "
@@ -704,30 +708,36 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
     W.write_yaml(ep / W.JUDGE_NAME, {"worlds": [{"world": "b", "bucket": "ATTEMPT-1-JUDGE"}]})
     primed: list[tuple] = []
 
-    def prime(source, base):
+    def prime(source, episode):
         """The primer through `prepare_episode`'s own `prime=` injection seam — its docstring
-        calls it "an INJECTION SEAM rather than a module lookup" for exactly this caller."""
-        primed.append((source, base))
-        base.write_text("", encoding="utf-8")
+        calls it "an INJECTION SEAM rather than a module lookup" for exactly this caller.
+        Rev 2 (#1133): the seam is handed the `Episode`, not the primed base's path."""
+        primed.append((source, episode))
+        # Overwrites the base the killed attempt left, as this fake always has: the test is
+        # about adoption, not about the primer's own exclusive create.
+        (episode.dir / "served" / "base.jsonl").write_text("", encoding="utf-8")
         return capture.PrimeReport(primed=1)
 
-    adopted = cli.prepare_episode(W.EPISODE_ID, src, tenant=W.current_tenant(), prime=prime)
+    # `prepare_episode` now returns an `Episode` context manager, not a bare path (#1133 rev 2).
+    with cli.prepare_episode(
+            W.EPISODE_ID, src, tenant=W.current_tenant(), prime=prime) as adopted:
+        assert adopted.dir == ep, (
+            f"prepare_episode returned {adopted.dir!r} rather than adopting {ep} — a "
+            "re-entered attempt on a killed episode is refused, which is the alternative H3 "
+            "rejected by name")
+        assert len(primed) == 1, f"the primer ran {len(primed)} times on the adopted episode"
+        assert W.read_yaml(ep / W.SAMPLES_NAME) == first, (
+            "the adopt destroyed attempt 1's samples")
+        assert W.read_yaml(ep / W.REVIEW_NAME)["episode"]["outcome"] == "ATTEMPT-1-REVIEW"
+        assert W.read_yaml(ep / W.JUDGE_NAME)["worlds"][0]["bucket"] == "ATTEMPT-1-JUDGE"
 
-    assert adopted == ep, (
-        f"prepare_episode returned {adopted!r} rather than adopting {ep} — a re-entered attempt "
-        "on a killed episode is refused, which is the alternative H3 rejected by name")
-    assert len(primed) == 1, f"the primer ran {len(primed)} times on the adopted episode"
-    assert W.read_yaml(ep / W.SAMPLES_NAME) == first, "the adopt destroyed attempt 1's samples"
-    assert W.read_yaml(ep / W.REVIEW_NAME)["episode"]["outcome"] == "ATTEMPT-1-REVIEW"
-    assert W.read_yaml(ep / W.JUDGE_NAME)["worlds"][0]["bucket"] == "ATTEMPT-1-JUDGE"
+        second = {W.EVENTS_PATTERN: {"host": {"name": "SECOND-ATTEMPT"}}}
+        cli.write_questioner_samples(adopted, second)
 
-    second = {W.EVENTS_PATTERN: {"host": {"name": "SECOND-ATTEMPT"}}}
-    cli.write_questioner_samples(adopted, second)
-
-    assert W.read_yaml(adopted / W.SAMPLES_NAME) == second, (
-        "the second attempt's samples did not win through the ADOPTED dir — H3 chose "
-        "overwrite-and-re-derive, and a merge or a refusal has changed the decision")
-    assert "FIRST-ATTEMPT" not in (adopted / W.SAMPLES_NAME).read_text(encoding="utf-8")
+        assert W.read_yaml(adopted.dir / W.SAMPLES_NAME) == second, (
+            "the second attempt's samples did not win through the ADOPTED dir — H3 chose "
+            "overwrite-and-re-derive, and a merge or a refusal has changed the decision")
+        assert "FIRST-ATTEMPT" not in (adopted.dir / W.SAMPLES_NAME).read_text(encoding="utf-8")
 
 
 def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
@@ -755,11 +765,12 @@ def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
             reachable_by_capture=True,
             capture_replays=[W.replay_entry("stale", differs=True)]))})
 
-    record = review.review(family_mod.parse_family(doc), episode_dir=ep,
-                           adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
-                           door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                           settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
-                           runs_base=ep.parent / "runs-base")
+    with Episode.open(ep) as episode:
+        record = review.review(family_mod.parse_family(doc), episode=episode,
+                               adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
+                               door=W.FakeDoor(), invoke=W.FakeAgent("same"),
+                               settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+                               runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]
     assert "stale" not in json.dumps(block), (

@@ -209,21 +209,8 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
 # A fault AFTER the commit landed must not delete what the commit captured
 
 
-def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_lessons(
-    tmp_path: Path,
-):
-    """The corpus restore exists so a failed commit does not leave edits that wedge the next
-    tick. But the commit primitive reads HEAD after committing, so a `GitError` can arrive
-    with the lessons already in history — and an unconditional restore then deletes exactly
-    the files that commit captured. `git status` shows deletions, the next tick's
-    cleanliness gate aborts, and the channel wedges: the precise failure the restore was
-    written to prevent, caused by the restore.
-
-    #773 M5 moves the findings channel's own commit off `cfg.commit_fn` (never called by
-    this lane — FK-1) onto `shared.commit_corpus_paths`, which is not a seam this module's
-    `cfg_for` overrides; the "commit landed, then a later git read fails, and the restore
-    must not delete what already landed" property is instead pinned for the new flow at
-    `tests/test_773_commit_list.py::test_git_status_call_the_check_steps_paths_are_derived_from_fails_773`
-    and `tests/test_773_verdict_pass.py::test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773`
-    (both drive `_git_read`-wrapped post-commit steps through a real `.git`-directory
-    failure). Left here as a pointer rather than deleted outright."""
+# The "commit landed, then a later git read fails, and the restore must not delete what already
+# landed" property moved with #773 M5 (the findings channel commits through
+# `shared.commit_corpus_paths`, which `cfg_for` does not override). It is pinned for that flow at
+# `test_773_commit_list.py::test_git_status_call_the_check_steps_paths_are_derived_from_fails_773`
+# and `test_773_verdict_pass.py::test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773`.

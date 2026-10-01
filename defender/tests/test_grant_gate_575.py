@@ -997,21 +997,26 @@ def test_i1_policy_show_prints_grants_and_never_a_misleading_empty_scope(env):
     "ls {run}",
 ])
 @pytest.mark.parametrize("which", ["main", "gather"])
-def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env, which, cmd):
+def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env, which, cmd, capsys):
     """i2 (differential): over a corpus of (agent, command), `defender-policy explain` reports the
     SAME verdict AND the same matched-grant / deny-reason as `decide_bash`. The CLI is a second
     CONSUMER of the gate, never a second implementation — an audit tool that models the gate
     separately is worse than none: it certifies a policy nobody runs."""
+    from defender.scripts import policy_cli
+
     c = cmd.format(run=env.run, dfn=env.dfn)
     # #1106 M2: gather's grant is built from a named tenant under an injected root — the CLI
-    # holds no process-level grant to fall back to. The root is `$DEFENDER_DATA_ROOT` (#1120),
-    # which the subprocess inherits; the tenant is the committed fixture placed there, whose
-    # grants `env.gather` was compiled from.
+    # holds no process-level grant to fall back to. The root is `$DEFENDER_DATA_ROOT` (#1120);
+    # the tenant is the committed fixture placed there, whose grants `env.gather` was compiled
+    # from.
     tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
-    p = _cli("explain", which, c, "--run-dir", str(env.run), "--defender-dir", str(env.dfn),
-             *tenant, "--json")
-    assert p.returncode == 0, p.stderr
-    got = json.loads(p.stdout)
+    # The CLI's `main` in-process: the differential is about what `explain` decides, and a
+    # fresh interpreter per (agent, command) pair only re-paid the import. i1 drives the shim.
+    rc = policy_cli.main(["explain", which, c, "--run-dir", str(env.run),
+                          "--defender-dir", str(env.dfn), *tenant, "--json"])
+    out = capsys.readouterr()
+    assert rc == 0, out.err
+    got = json.loads(out.out)
     d = _bash(env, c, which)
     assert got["allow"] == d.allow, c
     if d.allow:

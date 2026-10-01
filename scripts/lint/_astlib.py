@@ -207,6 +207,9 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
     "defender._run_handle.Run",
+    # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
+    # owner-derived like `EpisodePaths(ep).<record>`.
+    "defender._episode_handle.Episode",
     "defender._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.

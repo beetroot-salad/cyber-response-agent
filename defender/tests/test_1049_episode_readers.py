@@ -28,6 +28,8 @@ from pathlib import Path, PurePosixPath
 import pytest
 import yaml
 
+from defender._episode_handle import Episode
+from defender._episode_paths import EpisodePaths
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _record_1049 as R
@@ -451,7 +453,7 @@ def test_1049_an_archived_documents_refusal_names_the_document_not_the_root(tmp_
 def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(tmp_path):
     """read_grade over a judge.yaml with a wrong-typed field, a non-string key, a row without
     its world or an entry naming no lane raises JudgeRefused 'judge.yaml is not a family grade
-    record: <bad>' — the name, not _judge_yaml_path(episode_dir) — and <bad> carries no root
+    record: <bad>' — the name, not the record's full path under the episode dir — and <bad> carries no root
     (c-14: episode_dir IS a field of EpisodeGrade, and still names nothing in <bad>). Positive
     control: the sound record reads back with that field set to the episode dir.
     """
@@ -528,7 +530,9 @@ def test_1049_read_staged_says_staged_yaml_and_answers_none_when_absent(tmp_path
         assert "staged.yaml" in sentence, (arm, sentence)
         _root_free(sentence, ep)
     record.unlink()
-    staging.record_staged(ep, {"name": "wv-one", "kind": "index"})
+    # `record_staged` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
+    with Episode.open(ep) as episode:
+        staging.record_staged(episode, {"name": "wv-one", "kind": "index"})
     assert [r["name"] for r in staging.read_staged(bound)] == ["wv-one"]
 
 
@@ -541,7 +545,8 @@ def test_1049_read_stage_timings_is_root_free_on_the_alias_arm_and_none_when_abs
     ep = _episode(tmp_path)
     timing = R.mod("learning.branch.timing")
     bound = R.bind(ep)
-    record = timing.timing_path(ep)
+    # `timing.timing_path` is deleted (#1133 rev 2); the record's path is `EpisodePaths(ep).timing`.
+    record = EpisodePaths(ep).timing
     assert timing.read_stage_timings(bound) is None, "absent must be None, not []"
     R.plant_link(record, ep / "family.yaml")
     with pytest.raises(ValueError, match="timing.json") as caught:
@@ -557,8 +562,11 @@ def test_1049_read_stage_timings_is_root_free_on_the_alias_arm_and_none_when_abs
     R.write_bytes(record, '{"steps": []}')
     assert timing.read_stage_timings(bound) == []
     record.unlink()
-    row = timing.StageClock(ep).record("questioner", started_at="2026-01-01T00:00:00+00:00",
-                                       ended_at="2026-01-01T00:00:05+00:00")
+    # `StageClock` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
+    with Episode.open(ep) as episode:
+        row = timing.StageClock(episode).record(
+            "questioner", started_at="2026-01-01T00:00:00+00:00",
+            ended_at="2026-01-01T00:00:05+00:00")
     assert timing.read_stage_timings(bound) == [row]
 
 
@@ -688,7 +696,9 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
     assert 'l-001' in shown.leads
 
     door = T.FakeDoor()
-    assert staging.teardown(ep, door=door) == []
+    # `teardown` now takes the `Episode` handle and drops `review_path=` (#1133 rev 2).
+    with Episode.open(ep) as episode:
+        assert staging.teardown(episode, door=door) == []
     assert staging.sweep(ep, episode_token=TOKEN, door=door) == []
 
     record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow())

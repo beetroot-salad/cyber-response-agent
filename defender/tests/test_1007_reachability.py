@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
 
 
@@ -51,12 +52,14 @@ def run_review(ep: Path, family, *, adapters=None, door=None, invoke=None):
     review = W.mod("learning.branch.review")
     # #1078 D4: `review()`'s `runs_base` is a required keyword; a harmless never-created
     # sibling dir, since these tests are about the reachability facts, not which base threads.
-    return review.review(
-        family, episode_dir=ep,
-        adapters=adapters if adapters is not None else W.FakeAdapters(),
-        door=door if door is not None else W.FakeDoor(),
-        invoke=invoke if invoke is not None else W.FakeAgent("same"),
-        settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
+    # `review.review` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
+    with Episode.open(ep) as episode:
+        return review.review(
+            family, episode=episode,
+            adapters=adapters if adapters is not None else W.FakeAdapters(),
+            door=door if door is not None else W.FakeDoor(),
+            invoke=invoke if invoke is not None else W.FakeAgent("same"),
+            settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
 
 
 def block_of(record: dict, label: str = "b") -> dict:

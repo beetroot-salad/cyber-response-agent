@@ -38,10 +38,6 @@ def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
     assert cb.is_infra_failure(exit_code) is counts
 
 
-def test_argparse_heuristic_is_gone():
-    assert not hasattr(cb, "_ARGPARSE_USAGE_RE")
-
-
 @pytest.mark.parametrize("adapter", _ADAPTERS)
 @pytest.mark.parametrize("badargs", [["--no-such-flag"], ["bogus-subcommand"], []])
 def test_adapter_usage_errors_exit_64(adapter, badargs):

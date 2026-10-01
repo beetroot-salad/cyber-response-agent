@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 
 
@@ -200,7 +201,9 @@ def _three_sites(tmp_path, value):
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
     S.plant_sidecar(run_dir, truncated_by=value)
-    S.mod("learning.branch.archive").archive_episode(ep, {"b": run_dir})
+    # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
+    with Episode.open(ep) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, {"b": run_dir})
     archived = json.loads((ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8"))
 
     graded_ep = S.cut_short_episode(tmp_path / "graded")

@@ -27,6 +27,7 @@ import pytest
 
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._episode_handle import Episode  # noqa: E402
 
 TENANT = H.VALID_ID
 
@@ -49,7 +50,7 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
     episode_dir = episodes_root / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(manifest, "b", settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(Episode.open(manifest.parent), "b", settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run(
         src / "alert.json", world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
         world=world).run_dir

@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T
 from defender.tests import _triplet_947 as P
 from defender.tests._data_root_1078 import DATA_ROOT_ENV, current_data_root
@@ -80,7 +81,8 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     ep.mkdir()
     root = current_data_root()
     spawn = SpawnRecorder()
-    exits = cli.start_family(ep, ["b", "c"], spawn=spawn, tenant_id="acme")
+    with Episode.open(ep) as episode:
+        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.launches) == 2
     for launch in spawn.launches:
@@ -100,8 +102,9 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
     ep = tmp_path / "episode"
     ep.mkdir()
     spawn = SpawnRecorder()
-    with pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
-        cli.start_family(ep, ["b"], spawn=spawn, tenant_id=tenant_id)
+    with Episode.open(ep) as episode, \
+            pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
+        cli.start_family(episode, ["b"], spawn=spawn, tenant_id=tenant_id)
     assert not isinstance(caught.value, TypeError), (
         f"start_family does not take the episode's tenant yet: {caught.value!r}")
     assert "tenant" in str(caught.value).lower(), caught.value
@@ -350,7 +353,8 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
             alert_path=src / "alert.json", run_dir=src, run_id=src.name,
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=T.run_tenant(tenant, grants=grants),
-            world=run.resume_world(ep / "family.yaml", "b", settings=lambda t=tenant: t.settings),
+            world=run.resume_world(Episode.open(ep), "b", settings=lambda t=tenant: t.settings),
+            episode=Episode.open(ep),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)

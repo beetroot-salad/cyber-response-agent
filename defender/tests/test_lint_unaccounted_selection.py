@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from defender.tests._by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_unaccounted_selection")
@@ -191,6 +193,7 @@ def test_arm2_marker_must_sit_inside_the_flagged_span(tmp_path):
     assert _GATE._scan(tree) == []
 
 
+@pytest.mark.gate
 def test_the_real_tree_is_clean_and_the_baseline_is_empty():
     """The fold actually landed: no production reader under `defender/` bypasses
     `scan_fences`, so the shipped baseline holds nothing to inherit."""

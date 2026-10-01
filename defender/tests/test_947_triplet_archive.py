@@ -44,6 +44,7 @@ import json
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root
@@ -81,7 +82,8 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
-    _archive().archive_episode(ep, dirs)
+    with Episode.open(ep) as episode:
+        _archive().archive_episode(episode, dirs)
     for w in T.WORLDS:
         world = ep / "worlds" / w
         for name in ("report.md", "investigation.md", "executed_queries.jsonl", "gather_raw",
@@ -101,8 +103,8 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     (run_dir / "report.md").unlink()
     (run_dir / "report.md").symlink_to(secret)
-    with pytest.raises(T.refusals()):
-        _archive().archive_episode(ep, {"b": run_dir})
+    with Episode.open(ep) as episode, pytest.raises(T.refusals()):
+        _archive().archive_episode(episode, {"b": run_dir})
     assert not (ep / "worlds" / "b" / "report.md").exists()
     src_text = (T.DEFENDER / "learning" / "branch" / "archive.py").read_text(encoding="utf-8")
     assert "stage_tables" in src_text
@@ -118,7 +120,8 @@ def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b", scrub_ran=True)
     assert not (run_dir / "scrub-verdict.json").exists()
-    _archive().archive_episode(ep, {"b": run_dir})
+    with Episode.open(ep) as episode:
+        _archive().archive_episode(episode, {"b": run_dir})
     copied = json.loads((ep / "worlds" / "b" / "scrub_verdict.json").read_text(encoding="utf-8"))
     assert copied["ran"] is True
 
@@ -129,7 +132,8 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
-    _archive().archive_episode(ep, dirs)
+    with Episode.open(ep) as episode:
+        _archive().archive_episode(episode, dirs)
     pointer = ep / "worlds" / "b" / "run_dir"
     assert not pointer.is_symlink()
     before = _episode().verdicts(ep)
@@ -149,7 +153,8 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
-    _archive().archive_episode(ep, dirs)
+    with Episode.open(ep) as episode:
+        _archive().archive_episode(episode, dirs)
     T.base_capture(ep, [T.captured_row(key="k1")])
     (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
@@ -404,8 +409,9 @@ def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_pat
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     spawn = T.FakeSpawn()
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
-    T.mod("learning.branch.cli").start_family(
-        ep, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
+    with Episode.open(ep) as episode:
+        T.mod("learning.branch.cli").start_family(
+            episode, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
     assert spawn.launches, "no sibling was started"
     for launch in spawn.launches:
         assert launch["env"].get("DEFENDER_RUNS_BASE") == str(base), (

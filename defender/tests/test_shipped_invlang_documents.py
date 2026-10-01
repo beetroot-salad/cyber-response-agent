@@ -9,10 +9,12 @@ errors, in a document `defender/SKILL.md` tells the agent to LOAD as a worked ex
 validator reads.
 
 Nothing noticed, because the corpus rules that existed asked narrower questions.
-`test_invlang_prediction_refs` and `test_invlang_hypothesis_refs` parametrize over the same
-`corpus_docs()` list and check reference integrity over WHAT SURVIVED PARSING — a document
+`test_invlang_prediction_refs` and `test_invlang_hypothesis_refs` parametrized over the same
+`corpus_docs()` list and checked reference integrity over WHAT SURVIVED PARSING — a document
 whose `:H` block was dropped entirely has no dangling references left to find. This asks the
-question those cannot: does the document parse at all, and would the write gate take it.
+question those cannot: does the document parse at all, and would the write gate take it. (Their
+corpus sweeps are gone: each asserted that a keyword-filtered slice of `validate_companion` was
+empty, which the write-gate demand below implies.)
 
 `docs/decisions/defender-invlang-enforcement-ramp.md` credited two guards for exactly this
 — `test_skill_worked_examples_all_pass` and `test_skill_example_a_accumulates_clean` — and

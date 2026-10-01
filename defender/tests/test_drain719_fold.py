@@ -16,6 +16,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
@@ -84,6 +86,7 @@ def module_level_defs(path: Path) -> set[str]:
 # O3 — one drain body
 
 
+@pytest.mark.gate
 def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path: Path):
     """O3's necessary half. The five names the curator/lessons pair owns exclusively leave the
     duplicate-helper baseline, taking it from 18 entries to 13 (C17/G14/C30). Four go because

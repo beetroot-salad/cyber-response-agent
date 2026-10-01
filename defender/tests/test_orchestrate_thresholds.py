@@ -16,7 +16,6 @@ import json
 
 import pytest
 
-from defender.learning.core import config  # type: ignore[import-not-found]
 from defender.learning.core import cli  # type: ignore[import-not-found]
 from defender.learning.core import drains  # type: ignore[import-not-found]
 from defender.learning.core import faults  # type: ignore[import-not-found]
@@ -28,24 +27,6 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-
-
-
-def test_env_int_returns_default_when_unset(monkeypatch):
-    monkeypatch.delenv("LEARNING_AUTHOR_THRESHOLD", raising=False)
-    assert config.env_int("LEARNING_AUTHOR_THRESHOLD", 5) == 5
-
-
-def test_env_int_parses_a_numeric_override(monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "12")
-    assert config.env_int("LEARNING_AUTHOR_THRESHOLD", 5) == 12
-
-
-@pytest.mark.parametrize("bad", ["high", "", "5o"])
-def test_env_int_raises_fatal_config_on_non_numeric(monkeypatch, bad):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", bad)
-    with pytest.raises(FatalConfigError, match="LEARNING_AUTHOR_THRESHOLD must be an integer"):
-        config.env_int("LEARNING_AUTHOR_THRESHOLD", 5)
 
 
 

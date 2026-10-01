@@ -9,10 +9,11 @@ Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own 
 never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
 through the same injected `io=` seam as every read.
 
-Writes go through the existing guarded seams (`_io.write_guarded` in `create`/`replace`/
-`append` mode, or `_io.locked_for_rewrite`), anchored by `guarded_mkdir` on the record's trust
-root: the run dir, or the runs base for the three sidecars. The session db is opened through
-`session_store.open_store`. The two model-authored documents are validated against
+Every read and write goes through the rooted seam (`_io.rooted_read`, `rooted_mkdir`,
+`rooted_write`, `rooted_locked_for_rewrite`): the record's trust root, whose spelling is
+followed, and its name relative to that root, which never is (#1111). The trust root is the run
+dir; the runs base for the three sidecars; `SessionPaths(runs_base).trust_root` for the session
+db. The session db itself is opened through `session_store.open_store`. The two model-authored documents are validated against
 `_artifact_schema` at every write, so no writer bypasses the schema.
 """
 from __future__ import annotations
@@ -21,14 +22,14 @@ import dataclasses
 import hashlib
 import json
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _run_paths, _tenant
 from defender._run_id import refuse_bad_run_id
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
 
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
@@ -137,52 +138,61 @@ class RecordHandle:
     def path(self) -> Path:
         return self._resolve()
 
+    def _address(self) -> tuple[Path, PurePosixPath]:
+        """The record's trust root and its name relative to it. The owner builds the path
+        first, so its refusals (a malformed component, `_confine`) fire before any I/O."""
+        p = self.path
+        root = self._root()
+        return root, PurePosixPath(p.relative_to(root).as_posix())
+
     def read(self) -> str | None:
-        text, _reason = self._io.read_guarded(self.path)
+        root, name = self._address()
+        text, _reason = self._io.rooted_read(root, name)
         return text
 
-    def _mkdir(self, p: Path) -> None:
-        self._io.guarded_mkdir(p.parent, base=self._root())
+    def _mkdir(self, root: Path, name: PurePosixPath) -> None:
+        self._io.rooted_mkdir(root, name.parent)
 
     def _do_write(self, text: str | bytes) -> None:
-        p = self.path
+        root, name = self._address()
         schema_name = _SCHEMA_GATED_MEMBERS.get(self._member)
         if schema_name is not None:
-            current, _reason = self._io.read_guarded(p)
+            current, _reason = self._io.rooted_read(root, name)
             proposed = text.decode("utf-8") if isinstance(text, bytes) else text
             reason = _artifact_schema.validate_artifact(schema_name, proposed, current)
             if reason is not None:
                 raise ValueError(f"run.{self._group}.{self._member}: {reason}")
-        self._mkdir(p)
+        self._mkdir(root, name)
         if self._member in _WRITE_ONCE_MEMBERS:
             # Stays a `FileExistsError` (an `OSError`) so callers' OSError arms still catch it.
             try:
-                self._io.write_guarded(p, text, mode="create")
+                self._io.rooted_write(root, name, text, mode="create")
             except FileExistsError as taken:
                 raise FileExistsError(
-                    f"{p} already exists — run.{self._group}.{self._member} is write-once") \
-                    from taken
+                    f"{root / name} already exists — run.{self._group}.{self._member} is "
+                    "write-once") from taken
             return
-        self._io.write_guarded(p, text, mode="replace")
+        self._io.rooted_write(root, name, text, mode="replace")
 
     def _do_append(self, rows: list[dict]) -> None:
         if not rows:
             return
-        p = self.path
-        self._mkdir(p)
+        root, name = self._address()
+        # Outside the `try`: a refused holding folder raises even for observability.
+        self._mkdir(root, name)
         # One guarded append for the batch; a plain `open("a")` would follow a planted link.
         text = "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — the rows are handed whole to the guarded append seam, not to a line loop over an open handle  # noqa: E501
         try:
-            self._io.write_guarded(p, text, mode="append")
+            self._io.rooted_write(root, name, text, mode="append")
         except OSError:
             if self._group != "observability" or self._on_partial_failure is None:
                 raise
             self._on_partial_failure(f"{self._member}: append failed")
 
     def _do_update(self, patch: dict) -> None:
-        p = self.path
-        self._mkdir(p)
-        with self._io.locked_for_rewrite(p) as f:
+        root, name = self._address()
+        self._mkdir(root, name)
+        with self._io.rooted_locked_for_rewrite(root, name) as f:
             f.seek(0)
             raw = f.read()
             try:
@@ -297,6 +307,8 @@ class Run:
             def trust_root() -> Path:
                 if name in _SIDECAR_MEMBERS:
                     return self._runs_base_for(group, name)
+                if name == "session_db":
+                    return SessionPaths(self._runs_base_for(group, name)).trust_root
                 return self.run_dir
 
             session_args = (args[0], self.runs_base) if name == "session_db" and args else None
@@ -352,10 +364,11 @@ class Run:
         faults: list[str] = []
         # Reads go through `io`, which refuses planted aliases (e.g. a symlinked `alert.json`
         # would make `alert_ref` hash bytes outside the run).
-        prov = self._provenance(owner, faults)
+        prov = self._provenance(faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
-        disposition, review_outcome = self._report_fields(owner)
-        alert_bytes, _reason = self._io.read_bytes_guarded(owner.alert)
+        disposition, review_outcome = self._report_fields()
+        alert_bytes, _reason = self._io.rooted_read(
+            self.run_dir, RUN_LAYOUT.alert, binary=True)
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
             world_id=prov.world_id if prov is not None else None,
@@ -373,10 +386,8 @@ class Run:
             faults=tuple(faults),
         )
 
-    def _provenance(
-        self, owner: RunPaths, faults: list[str],
-    ) -> _provenance.RunProvenance | None:
-        raw, _reason = self._io.read_guarded(owner.provenance)
+    def _provenance(self, faults: list[str]) -> _provenance.RunProvenance | None:
+        raw, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.provenance)
         if raw is None:
             return None
         try:
@@ -400,7 +411,8 @@ class Run:
         from defender.runtime import run_end as run_end_mod
 
         assert self.runs_base is not None
-        sidecar_text, _reason = self._io.read_guarded(owner.run_end_sidecar(self.runs_base))
+        sidecar_text, _reason = self._io.rooted_read(
+            self.runs_base, owner.run_end_sidecar(self.runs_base).name)
         if sidecar_text is None:
             return None
         try:
@@ -414,8 +426,8 @@ class Run:
             return None
         return rec.truncated_by
 
-    def _report_fields(self, owner: RunPaths) -> tuple[str | None, str | None]:
-        report_text, _reason = self._io.read_guarded(owner.report)
+    def _report_fields(self) -> tuple[str | None, str | None]:
+        report_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.report)
         if report_text is None:
             return None, None
         read = _report.parse_report_text(report_text)
@@ -447,16 +459,17 @@ _ARCHIVED_WORLD_NAMES: dict[str, str] = {
 
 
 class _ArchivedRecordHandle:
-    def __init__(self, path: Path, *, io: Any) -> None:
-        self._path = path
+    def __init__(self, world_dir: Path, name: str, *, io: Any) -> None:
+        self._world_dir = world_dir
+        self._name = name
         self._io = io
 
     @property
     def path(self) -> Path:
-        return self._path
+        return self._world_dir / self._name
 
     def read(self) -> str | None:
-        text, _reason = self._io.read_guarded(self._path)
+        text, _reason = self._io.rooted_read(self._world_dir, self._name)
         return text
 
 
@@ -479,4 +492,4 @@ class ArchivedWorld:
     def __getattr__(self, name: str) -> Any:
         if name not in _ARCHIVED_WORLD_NAMES:
             raise AttributeError(name)
-        return _ArchivedRecordHandle(self.world_dir / _ARCHIVED_WORLD_NAMES[name], io=self._io)
+        return _ArchivedRecordHandle(self.world_dir, _ARCHIVED_WORLD_NAMES[name], io=self._io)

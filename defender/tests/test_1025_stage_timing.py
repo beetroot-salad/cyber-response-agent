@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
 
 from defender._clock import now_iso, parse_iso_utc
@@ -92,8 +93,20 @@ def _raw_rows(episode_dir) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))["steps"]
 
 
+def _open(episode_dir: Path) -> Episode:
+    """Open (and deliberately never close) an `Episode` handle for a `StageClock` under test.
+
+    `StageClock` now takes the handle, not the dir (#1133 rev 2), and every caller here chains
+    `.record(...)` well past this call's own return, or holds `clock` across many further
+    statements in the same test — so the handle must outlive whichever function opens it. Each
+    caller works over its own fresh `tmp_path`-scoped episode dir, so nothing beyond the test
+    process's fd table holds it.
+    """
+    return Episode.open(episode_dir).__enter__()
+
+
 def _clock(episode_dir):
-    return _timing().StageClock(episode_dir)
+    return _timing().StageClock(_open(episode_dir))
 
 
 def _clocked(rows: list[dict], *, before: str, after: str) -> list[tuple[Any, Any]]:
@@ -286,7 +299,7 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     assert [s.value for s in _steps_mod().Step] == EXPECTED_STEPS, (
         "the enum's member order is not launch order, or STEPS is not derived from it")
 
-    clock = timing.StageClock(episode_dir)
+    clock = timing.StageClock(_open(episode_dir))
     first = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
                          ended_at="2026-01-01T00:00:05+00:00")
     second = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
@@ -319,7 +332,7 @@ def test_1025_the_reader_returns_record_order_not_step_order(tmp_path):
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    clock = timing.StageClock(episode_dir)
+    clock = timing.StageClock(_open(episode_dir))
     later = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
                          ended_at="2026-01-01T00:01:30+00:00")
     earlier = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
@@ -362,7 +375,7 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     record = EpisodePaths(episode_dir).timing
-    clock = timing.StageClock(episode_dir)
+    clock = timing.StageClock(_open(episode_dir))
     first = clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
     before_text = record.read_text(encoding="utf-8")
     before_inode = os.stat(record).st_ino
@@ -428,7 +441,7 @@ def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     record = EpisodePaths(episode_dir).timing
-    clock = timing.StageClock(episode_dir)
+    clock = timing.StageClock(_open(episode_dir))
 
     with pytest.raises(ValueError, match="questionner"):
         clock.record("questionner", started_at=now_iso(), ended_at=now_iso())
@@ -549,7 +562,7 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     record = EpisodePaths(episode_dir).timing
-    clock = timing.StageClock(episode_dir)
+    clock = timing.StageClock(_open(episode_dir))
     clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
     clock.record("staging", started_at=now_iso(), ended_at=now_iso())
 

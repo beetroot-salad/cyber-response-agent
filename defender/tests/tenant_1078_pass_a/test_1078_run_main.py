@@ -27,12 +27,15 @@ import pytest
 from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._episode_handle import Episode  # noqa: E402
 
 #: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
 #: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
+# `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
+# ledger's writes.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world"]
+                      "model_override", "box", "tenant", "world", "episode"]
 
 
 # ======================================================================================
@@ -289,7 +292,7 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
     src, manifest = _sibling(tmp_path, data_root, "acme")
     H.plant_row(data_root, "victim")
     world_run_id = H.run_py().resume_world(
-        manifest, "a", settings=lambda: H.T1106.PLAYGROUND_SETTINGS).run_id
+        Episode.open(manifest.parent), "a", settings=lambda: H.T1106.PLAYGROUND_SETTINGS).run_id
     got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant"].id == "acme"
