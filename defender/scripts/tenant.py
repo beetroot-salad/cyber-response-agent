@@ -55,13 +55,15 @@ if __name__ == "__main__":
     # no bytecode cache lands beside the modules it imports (a refused `scaffold` leaves every
     # tree as it found it). Only when run: an importer's interpreter is not this command's.
     sys.dont_write_bytecode = True
-    # This checkout first: the command judges a tenant against the code it runs, never against
-    # another tree an exported `DEFENDER_DIR` or an editable install points at.
-    if (_root := str(_REPO_ROOT)) not in sys.path:
-        sys.path.insert(0, _root)
+    # This checkout first — first, not merely present: `defender` is a namespace tree, so each
+    # module comes from the first path entry holding it. The command judges a tenant against
+    # the code it runs, never against another checkout that a `PYTHONPATH` entry or an
+    # editable install points at.
+    _root = str(_REPO_ROOT)
+    sys.path[:] = [_root, *(entry for entry in sys.path if entry != _root)]
 
 from defender import _git, _tenant, _tenant_census  # noqa: E402
-from defender._io import guarded_mkdir, write_guarded  # noqa: E402
+from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
 from defender._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.runtime import run_tenant  # noqa: E402
 from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
@@ -175,14 +177,15 @@ def _report(findings: list[str]) -> int:
 
 
 def _tenant_id_committed(folder: Path) -> str | None:
-    """For a folder that is a git work tree: `None` when HEAD commits its `agent/.tenant-id` as
-    it stands — hashed as `git add` would store it, the repo's line-ending rules applied, so a
-    CRLF checkout of an LF commit matches — else the finding — the file untracked, staged only, or changed since
-    the commit, or git unable to answer (absent, refusing the repo, any error), which fails
-    closed. A plain folder has no repo to ask and is exempt. The read ignores an exported
-    `GIT_DIR`, and a `.git` that git does not read as a repository rooted at the folder (git
-    would answer from an enclosing repo) fails closed too: the answer is the folder's own
-    repository's or none."""
+    """For a folder that is a git work tree: `None` when HEAD commits its `agent/.tenant-id`
+    as it stands — byte for byte, except that a CRLF checkout of an LF commit (`core.autocrlf`,
+    an `eol=crlf` attribute) matches — else the finding: the file untracked, staged only, or
+    changed since the commit, or git unable to answer (absent, refusing the repo, any error),
+    which fails closed. HEAD's blob is read raw, so git runs no filter or configured command
+    over either side. A plain folder has no repo to ask and is exempt. The read ignores an
+    exported `GIT_DIR`, and a `.git` that git does not read as a repository rooted at the
+    folder (git would answer from an enclosing repo) fails closed too: the answer is the
+    folder's own repository's or none."""
     rel = TENANT_ID_FILE.as_posix()
     if not os.path.lexists(folder / ".git") or not os.path.lexists(folder / rel):
         return None
@@ -193,15 +196,19 @@ def _tenant_id_committed(folder: Path) -> str | None:
             return (f"{_CANNOT_VERIFY}: {folder / '.git'} is not a repository of its own — "
                     f"git reads {top}'s instead")
         listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env)
-        working = _git.git(["hash-object", "--", rel], cwd=folder, env=env)
+        committed = _git.git_blob_bytes(folder, listed.split()[2], env=env) if listed else None
     except FileNotFoundError as absent:
         return f"{_CANNOT_VERIFY}: git is not available on PATH ({absent})"
     except _git.GitError as failed:
         return f"{_CANNOT_VERIFY}: git could not read {folder}'s repository: {failed.stderr}"
-    if not listed:
+    if committed is None:
         return (f"{folder / rel} is not committed: the tenant repo's HEAD does not hold it — "
                 "commit it, so every clone names its tenant")
-    if listed.split()[2] != working:
+    try:
+        working = read_plain_bytes(folder / rel)
+    except OSError as unreadable:
+        return f"{_CANNOT_VERIFY}: {folder / rel} could not be read: {unreadable}"
+    if committed not in (working, working.replace(b"\r\n", b"\n")):
         return (f"{folder / rel} differs from what the tenant repo's HEAD commits — the clone "
                 "is another tenant's, or the file was edited by hand; restore it or commit it")
     return None

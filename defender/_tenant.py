@@ -249,7 +249,8 @@ def ensure_runs_base_record(
 # ==========================================================================================
 
 class _TenantLayout:
-    """The tenant's layout below its folder `dir` — the ONE place it is spelled (D1). Joins
+    """The tenant's layout below its folder `dir` — the ONE place it is spelled (D1); inside
+    the knowledge folder, the halves' and `.tenant-id`'s names are `_tenants`' constants. Joins
     only: it reads nothing and guards nothing. `Tenant` reads its paths here (an accepted
     tenant was guarded once, at acceptance); the pre-acceptance sites reach it through
     `_TenantPaths`, which guards first."""
@@ -296,8 +297,9 @@ class _TenantLayout:
 
 class _TenantPaths(_TenantLayout):
     """The tenant's layout under a data root, guarded (M4). Private: the sites that need a
-    tenant's locations before (or without) accepting it — `create_tenant`, `require_tenant`,
-    `tenant_of_run_dir`, setup's row probe — use it; everything after acceptance reads
+    tenant's locations before (or without) accepting it — acceptance itself (`accept_tenant`,
+    setup's `accept_placed_knowledge`), `create_tenant`, `require_tenant`, `tenant_of_run_dir`
+    — use it; everything after acceptance reads
     `Tenant`. Constructing one creates nothing, and carries the two guards every such site
     must meet first: the data root is absolute (J03), and the tenant's folder is not inside
     the running checkout's box-mounted `defender/` (O11a)."""
@@ -307,7 +309,7 @@ class _TenantPaths(_TenantLayout):
         self.tenant_id = TenantId(tenant_id)
         root = Path(root)
         _refuse_unusable_data_root(root)
-        _refuse_inside_defender_tree(_resolve_or_refuse(root) / self.tenant_id, root)
+        _refuse_inside_defender_tree(_resolve_or_refuse(root / self.tenant_id), root)
         super().__init__(root / self.tenant_id)
 
 
@@ -323,7 +325,8 @@ def _refuse_inside_defender_tree(resolved: Path, root: Path) -> None:
     """O11a: a tenant folder may not land inside THIS checkout's box-mounted `defender/` tree
     (comparison against `PATHS.defender_dir` specifically — not any directory named
     'defender', so another checkout's own `defender/` tree is untouched, N13). `resolved` is
-    already resolved: the root's own resolution, plus at most the tenant's id."""
+    already resolved: the root's, or the tenant folder's (a linked `<T>` judged by where it
+    leads)."""
     defender_dir = _resolve_or_refuse(_paths.PATHS.defender_dir)
     if resolved.is_relative_to(defender_dir):
         raise TenantRefused(
@@ -333,13 +336,15 @@ def _refuse_inside_defender_tree(resolved: Path, root: Path) -> None:
 
 def _resolve_or_refuse(path: Path) -> Path:
     """`path` with every link resolved, or `TenantRefused` naming it — the ONE translation of a
-    failed resolution (an unreadable component, or a link loop: Python 3.11 raises
-    `RuntimeError` for a loop, not `OSError`). Acceptance resolves only what an operator or a
-    caller hands it (the data root, `defender_dir`, the box-mounted trees, a run dir); below
-    the root it walks no-follow and resolves nothing."""
+    failed resolution (an unreadable component, a link loop — Python 3.11 raises
+    `RuntimeError` for one, not `OSError` — or a NUL in a caller's path). What is resolved:
+    what an operator or a caller hands in (the data root, `defender_dir`, the box-mounted
+    trees, a run dir), and two names below the root that are judged by where they lead — the
+    tenant's folder (O11a, before acceptance) and its `runs/` (step 7). The knowledge folder
+    is never resolved: acceptance walks it no-follow."""
     try:
         return Path(path).resolve()
-    except (OSError, RuntimeError) as unresolvable:
+    except (OSError, RuntimeError, ValueError) as unresolvable:
         raise TenantRefused(f"{path} could not be resolved: {unresolvable}") from unresolvable
 
 
@@ -437,8 +442,9 @@ def accept_tenant(
          half's real path is the data root's resolution joined below it (steps 3-5 saw no
          link there), against each tree's resolution.
 
-    Reads only, and below the data root follows no link: the folder is walked through
-    `_io.bind`'s no-follow reader. Any read a check cannot complete — an `OSError`, or a link
+    Reads only. The knowledge folder is walked through `_io.bind`'s no-follow reader, from the
+    data root down, so no link below the root is followed there; the row is read by its path
+    (no-follow at the file itself), and step 7 judges `runs/` by where it leads. Any read a check cannot complete — an `OSError`, or a link
     loop where a path given to it is resolved — is the refusal, naming the path and the
     reason."""
     tenant_id = TenantId(raw_id)
@@ -468,16 +474,17 @@ def _accept_knowledge(
     paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path],
 ) -> None:
     """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
-    Below the data root nothing is followed and nothing resolved: the walk opens `<T>` and
+    The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
     `knowledge` no-follow off the root's handle, so a linked `<T>` or `knowledge` is refused,
-    and the settings half's real path is then the root's own resolution joined below it."""
+    and the settings half's real path is then the root's own resolution joined below it.
+    Both relative names come from the layout (`_TenantLayout`), never spelled here."""
     root = paths.dir.parent
-    knowledge_name = f"{paths.tenant_id}/knowledge"
+    knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
         _check_knowledge(bound.under(knowledge_name), paths.knowledge,
                          tenant_id=paths.tenant_id)
-    settings_real = _resolve_or_refuse(root) / paths.tenant_id / "knowledge" / SETTINGS_HALF
+    settings_real = _resolve_or_refuse(root) / paths.settings.relative_to(root)
     for mounted in (Path(defender_dir), paths.runs, *(Path(m) for m in box_mounted)):
         if settings_real.is_relative_to(_resolve_or_refuse(mounted)):
             raise TenantRefused(

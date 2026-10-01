@@ -143,6 +143,19 @@ def git_show_file_bytes(cwd: Path, rev: str, path: str) -> bytes | None:
     return proc.stdout
 
 
+def git_blob_bytes(cwd: Path, sha: str, *, env: Mapping[str, str] | None = None) -> bytes:
+    """The raw bytes of the blob `sha` (`cat-file blob`): no filter, no line-ending
+    conversion and no configured command applied. `GitError` when git cannot answer."""
+    proc = subprocess.run(  # noqa: S603 — fixed argv
+        ["git", "cat-file", "blob", sha], cwd=cwd, capture_output=True, check=False,
+        env=None if env is None else dict(env),
+    )
+    if proc.returncode != 0:
+        raise GitError(["cat-file", "blob", sha], proc.returncode,
+                       proc.stderr.decode("utf-8", "replace"))
+    return proc.stdout
+
+
 def git_rev_list_count(
     cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD"
 ) -> int:

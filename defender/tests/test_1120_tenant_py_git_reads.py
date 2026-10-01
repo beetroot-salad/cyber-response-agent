@@ -12,6 +12,8 @@ on PR #1157).
     operator's default) holds `.tenant-id` as CRLF over an LF commit: that IS what HEAD
     commits, so check is clean — the working file is hashed as git would store it, not as raw
     bytes (code review on PR #1157).
+  * HEAD's blob is read raw, so a clean filter configured for `.tenant-id` neither runs nor
+    makes a hand-edited id match (claims adversary, second pass).
 """
 from __future__ import annotations
 
@@ -75,3 +77,19 @@ def test_check_folder_accepts_a_crlf_checkout_of_an_lf_commit(tmp_path: Path) ->
 
     tenant_id_file.write_bytes(f"{H.OTHER}\r\n".encode())
     H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
+
+
+def test_a_configured_clean_filter_neither_runs_nor_masks_an_edited_id(tmp_path: Path) -> None:
+    """A clone whose own config routes `agent/.tenant-id` through a clean filter that prints
+    the committed id (and touches a marker), with the working id edited by hand to another
+    tenant's: check reports the file as differing, and the filter never ran."""
+    knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
+    marker = tmp_path / "filter-ran"
+    H.git(knowledge, "config", "filter.mask.clean", f"sh -c 'touch {marker}; printf \"{H.TID}\\n\"'")
+    (knowledge / ".git" / "info").mkdir(exist_ok=True)
+    (knowledge / ".git" / "info" / "attributes").write_text(
+        f"{H.TENANT_ID_FILE.as_posix()} filter=mask\n", encoding="utf-8")
+    tenant_id_file = knowledge / H.TENANT_ID_FILE
+    tenant_id_file.write_text(f"{H.OTHER}\n", encoding="utf-8")
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
+    assert not marker.exists(), "check ran the clone's configured clean filter"

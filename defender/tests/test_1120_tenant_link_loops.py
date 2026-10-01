@@ -10,6 +10,8 @@ now walks below the root no-follow and resolves only what it is handed, through 
   * `tenant.py check --folder` over a looped folder exits 1 with `[tenant.py] …`, and the
     census lint's call (`check_knowledge_folder`) refuses it rather than raising.
   * A link on the way to a required settings file is named as a link.
+  * Before acceptance, a tenant folder that is a link into the running checkout's `defender/`
+    is refused by the layout's O11a guard, which judges `<T>` by where it leads.
   * Step 7 counts the tenant's own `runs/`: a `<T>/runs` linked onto `knowledge/` would put the
     host-only settings half inside the runs base, which a box mounts.
 """
@@ -18,7 +20,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from defender import _tenant
+from defender import _paths, _tenant
 from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
@@ -87,3 +89,19 @@ def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: P
     text = H.accept_refusal(_tenant, root)
     assert "reached through a link" in text, text
     assert str(systems / "case-history" / "mapping.yaml") in text, text
+
+
+def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(
+        tmp_path: Path) -> None:
+    """`<root>/<T> -> <the checkout's defender/>`: the pre-acceptance layout (what
+    `create_tenant`, `require_tenant` and `tenant_of_run_dir` build) refuses it as inside the
+    checkout. Control: the same id under a real folder is built."""
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / H.TID).symlink_to(_paths.PATHS.defender_dir, target_is_directory=True)
+    refused = H.refusal(_tenant, _tenant._TenantPaths, root, H.TID)
+    assert "inside the checkout's defender/ tree" in str(refused), refused
+
+    (root / H.TID).unlink()
+    (root / H.TID).mkdir()
+    assert _tenant._TenantPaths(root, H.TID).dir == root / H.TID
