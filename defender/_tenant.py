@@ -569,7 +569,9 @@ _TENANT_ID_FILE_MAX = 128
 def read_tenant_id_file(path: Path) -> TenantId:
     """The id an `agent/.tenant-id` holds: exactly an id plus at most one LF or CRLF, read
     bounded, as UTF-8. Anything else — a BOM, a space, a second line, an empty file, a
-    non-file, an oversize file — is `TenantRefused` naming the file. @owns .tenant-id"""
+    non-file, an oversize file — is `TenantRefused` naming the file.
+
+    @owns tenant-id — the `agent/.tenant-id` file's content, read here and nowhere else."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:

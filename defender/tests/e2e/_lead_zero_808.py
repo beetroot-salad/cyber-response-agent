@@ -511,9 +511,10 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     whose `verb:` disagrees with the shipped table) can drive the run-start check while every
     scenario before it keeps driving this checkout.
 
-    `tenant` / `grants` (#1106) are the run's `TenantDir` and `RunGrants` — where its
-    `lead-zero.yaml` and table come from now that neither lives in the tree. Passed through to
-    `drive` only when supplied; omitted, the run is the committed playground tenant's.
+    `tenant` / `grants` (#1106) are the run's accepted `Tenant` (#1120) and `RunGrants` — where
+    its `lead-zero.yaml` and table come from now that neither lives in the tree. Passed through
+    to `drive` only when supplied; omitted, the run is the fixture tenant's, set up under the
+    test's data root.
 
     MAIN's default script makes TWO requests (a read, then a text turn) because `d23`'s
     observable lives at the second one; the gather model answers item 3's dispatch with the
