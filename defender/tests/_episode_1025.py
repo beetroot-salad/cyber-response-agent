@@ -53,7 +53,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-import yaml
+
+from defender import _yaml
 
 from defender._episode_handle import Episode as _EpisodeHandle
 from defender._episode_paths import EpisodePaths
@@ -98,7 +99,6 @@ ENVELOPE_FAILED = "ES|QL query failed (HTTP 400): Found 3 problems\nline 2:9: Un
 @dataclass(frozen=True)
 class _Sample:
     """The fixture's declared figures — the expected side of every count assertion."""
-
     findings: int = 13            # 5 + 5 + 3
     defender_enqueued: int = 4    # prior_fake_key_precedent's four subject: defender rows
     defender_withheld: int = 4    # no_remote_session's four, withheld reachability_unmeasured
@@ -143,7 +143,7 @@ def write_judge(episode_dir: Path, doc: dict[str, Any], *, check: bool = True) -
     `sort_keys=False` through the guarded replace lane — and read back through `read_grade`
     so a document the reader refuses fails here, not in the page."""
     path = Path(episode_dir) / "judge.yaml"
-    write_guarded(path, yaml.safe_dump(doc, sort_keys=False), mode="replace")
+    write_guarded(path, _yaml.safe_dump(doc, sort_keys=False), mode="replace")
     if check:
         record = J.sym("learning.judge", "read_grade")(episode_dir)
         assert record is not None, "fixture bug: judge.yaml did not read back as a grade"
@@ -189,7 +189,7 @@ def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str,
     draw_dir = Path(episode_dir) / "worlds" / label / "judge"
     draw_dir.mkdir(parents=True, exist_ok=True)
     path = draw_dir / f"{draw}.yaml"
-    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    path.write_text(_yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     if check:
         # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
         # draw dir path directly.
@@ -370,7 +370,7 @@ def write_samples(episode_dir: Path, doc: dict[str, Any] | None = None) -> Path:
         "logs-falco.alerts-*": {"falco.rule": "Adding ssh keys to authorized_keys"},
     }
     path = Path(episode_dir) / "samples.yaml"
-    path.write_text(yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -644,7 +644,6 @@ def sample_manifest(**over: Any) -> dict[str, Any]:
 @dataclass
 class Episode:
     """A built episode and the handles a scenario reaches for."""
-
     dir: Path
     tmp_path: Path
 
@@ -1004,7 +1003,6 @@ class _Builder(HTMLParser):
 @dataclass
 class Page:
     """`learning.html`, parsed: the bytes, the id map, the hrefs and the text."""
-
     raw: str
     root: Node
     by_id: dict[str, Node]

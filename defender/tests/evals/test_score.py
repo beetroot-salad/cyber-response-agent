@@ -28,7 +28,7 @@ from datetime import date, datetime
 import pytest
 import yaml
 
-from defender._yaml import safe_load_typed_and_spelled
+from defender._yaml import AliasRefused, safe_load_typed_and_spelled
 from defender.evals.oracle_golden import judge, score
 
 # fixtures
@@ -1004,13 +1004,13 @@ def test_the_cli_reports_a_refused_clause_as_a_line_and_exits_1(tmp_path, capsys
 # the rest of the case file is the TYPED document it always was
 
 def test_a_merge_key_in_the_manifest_still_arms_the_clause(tmp_path):
-    """A manifest sharing its `expectation:` through `<<: *anchor`. The manifest is read
-    by `safe_load`, which performs the merge; a reader that re-typed the whole document
-    would have left a literal `<<` key and an unarmed clause (review of the first cut)."""
+    """A manifest merging into its `expectation:` through `<<:`. The manifest is read by
+    `safe_load`, which performs the merge; a reader that re-typed the whole document would
+    have left a literal `<<` key and an unarmed clause (review of the first cut). Merged from
+    an inline mapping: a merge through an alias is refused at the parse (#1127)."""
     d = _case(tmp_path, kind="spec-probe")
     _manifest_text(d, kind="spec-probe", body=(
-        f"_common: &common\n  must_not_emit: ['{_INSTANT}']\n"
-        f"expectation:\n  <<: *common\n  no_suppression: all\n"))
+        f"expectation:\n  <<: {{must_not_emit: ['{_INSTANT}']}}\n  no_suppression: all\n"))
     copied = _projection_text(d, f"'@timestamp': {_INSTANT}")
     assert _score(d, copied, _scripted())["mechanical"]["forbidden_emitted"] == [_INSTANT]
     assert _dry(d, copied) == 1
@@ -1081,29 +1081,29 @@ def test_a_repeated_events_key_is_scanned_where_the_judge_reads_it(tmp_path):
 
 
 def test_events_arriving_through_a_merge_key_are_scanned(tmp_path):
-    """A row whose `events` comes in through `<<: *anchor`. YAML merges it, so the judge
-    would be shown those events; a walk looking `events` up by name never saw them and the
-    leak check was unarmed for the row (the review's finding). One reading, so they are
-    the same events."""
+    """A row whose `events` comes in through `<<:`. YAML merges it, so the judge would be
+    shown those events; a walk looking `events` up by name never saw them and the leak check
+    was unarmed for the row (the review's finding). One reading, so they are the same events.
+    Merged from an inline mapping: a merge through an alias is refused at the parse (#1127)."""
     d = _case(tmp_path, kind="mutation",
               extra_manifest={"expectation": {"must_not_emit": ["root"]}})
     proj = _write_text(d, "projections/a.yaml", (
-        "_d: &d {events: [{user.name: root}]}\n"
-        "projections:\n  - lead_id: l-001\n    <<: *d\n"))
+        "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n"))
     assert _score(d, proj, _scripted())["mechanical"]["forbidden_emitted"] == ["root"]
 
 
-def test_a_self_containing_anchor_in_the_events_is_scanned_and_terminates(tmp_path):
-    """`events: &e [{self: *e}]` is legal YAML and loads as a cyclic object in both
-    readings. The fourth cut's walker had no visited set and never returned — `--dry-run`
-    hung before printing a line (the review's finding). The leak beside the cycle is
-    still found."""
+def test_a_self_containing_anchor_in_the_events_is_refused_at_the_parse(tmp_path):
+    """`events: &e [{self: *e}]` is legal YAML and loads as a cyclic object. The fourth cut's
+    walker had no visited set and never returned — `--dry-run` hung before printing a line
+    (the review's finding). Since #1127 no YAML the tree reads may reuse a node by alias, so
+    the projection is refused at the parse, as malformed YAML, before any walker sees it."""
     d = _case(tmp_path, kind="mutation",
               extra_manifest={"expectation": {"must_not_emit": ["root"]}})
     proj = _write_text(d, "projections/a.yaml", (
         "projections:\n  - lead_id: l-001\n    events: &e\n"
         "      - user.name: root\n        self: *e\n"))
-    assert _mechanical(d, proj)["mechanical"]["forbidden_emitted"] == ["root"]
+    with pytest.raises(AliasRefused):
+        _mechanical(d, proj)
 
 
 @pytest.mark.parametrize("text", ["null\n", "~\n", "0\n", "false\n", "just words\n"])

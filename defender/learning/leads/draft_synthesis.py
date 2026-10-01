@@ -8,11 +8,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _yaml
 from defender._io import guarded_mkdir, write_atomic
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_DIR
@@ -42,7 +41,7 @@ _DIGEST_LEN = 12
 
 def _structured_call(verb_name: str, params: dict) -> str:
     doc = {"verb": verb_name, "params": dict(params or {})}
-    return yaml.safe_dump(
+    return _yaml.safe_dump(
         doc, sort_keys=False, allow_unicode=True, default_flow_style=False
     ).strip()
 
@@ -100,7 +99,7 @@ def _draft_frontmatter(
         doc["engine"] = engine
     doc["params"] = params
     doc["covers"] = covers
-    return yaml.safe_dump(
+    return _yaml.safe_dump(
         doc, sort_keys=False, allow_unicode=True, default_flow_style=None
     ).strip()
 

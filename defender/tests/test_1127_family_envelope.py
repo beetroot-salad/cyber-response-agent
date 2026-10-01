@@ -12,7 +12,7 @@ The design (issue #1127, as amended after the review of PR #1139):
 * M4 — `parse_family` refuses a discriminator whose `envelope.params` nest past
   `PARAMS_NESTING_LIMIT` (32, the map counted), with a `FamilyError` naming it. In
   `parse_family`, so the questioner's in-memory authoring path is refused too.
-* C — aliases are refused AT LOAD: `defender._yaml.safe_load_tree(text)` raises a
+* C — aliases are refused AT LOAD: `defender._yaml.safe_load(text)` (every reader there) raises a
   `yaml.YAMLError` subclass on any alias, and it is the loader behind `_family._read_document`
   (so `load_family` raises `FamilyError`, chained from that `YAMLError`, for an alias ANYWHERE
   in the manifest, not only in the envelope) and behind the questioner's reply parser (so an
@@ -26,7 +26,7 @@ it does not return, and a hang must fail the arm, not the run.
 
 Against 7ae2c429 (limit 99, aliases honoured, before the amendment) the depth-33 arms, every
 alias refusal, the alias-bomb arms (the envelope one killed at its timeout), `write_family`'s
-no-alias pin and every `safe_load_tree` arm were RED; the depth-31/32 controls, the longhand
+no-alias pin and every alias-refusing loader arm were RED; the depth-31/32 controls, the longhand
 controls, the unparseably-deep manifest and the round trip's own equality GREEN.
 """
 from __future__ import annotations
@@ -203,13 +203,6 @@ def test_the_in_memory_parse_refuses_too_not_only_the_file_reader(tmp_path):
 # ── C: the loader refuses aliases ──────────────────────────────────────────────────────────
 
 
-def safe_load_tree() -> Callable[[str], Any]:
-    """`defender._yaml.safe_load_tree`, resolved per arm so a missing name fails the arm."""
-    load = getattr(_yaml, "safe_load_tree", None)
-    assert callable(load), "defender._yaml.safe_load_tree does not exist"
-    return load
-
-
 _ALIASED = {
     "reused-mapping": "a: &h {host: x, tags: [p, q]}\nb: *h\n",
     "reused-scalar": "hosts: [&h web-1, *h]\n",
@@ -217,54 +210,79 @@ _ALIASED = {
     "merge-key": "base: &b {x: 1}\nderived:\n  <<: *b\n  y: 2\n",
 }
 
+#: Every reader of a YAML document the tree has: the load, the node tree, and the typed and
+#: spelled reading. None of them may hand out a shared or cyclic value.
+_READERS: dict[str, Callable[[str], Any]] = {
+    "safe_load": _yaml.safe_load,
+    "compose": _yaml.compose,
+    "typed-and-spelled": _yaml.safe_load_typed_and_spelled,
+}
 
+
+@pytest.mark.parametrize("reader", list(_READERS))
 @pytest.mark.parametrize("text", list(_ALIASED.values()), ids=list(_ALIASED))
-def test_safe_load_tree_refuses_any_alias_as_a_yaml_error(text):
-    """C: an alias — of a mapping, of a scalar, one that makes a cycle, or one a merge key
-    spends — is refused with a `yaml.YAMLError` subclass, the class every caller already
-    catches for malformed YAML. PyYAML's own safe loader accepts each of them."""
+def test_every_yaml_reader_refuses_any_alias_as_a_yaml_error(text, reader):
+    """C, made the default (#1127 review): an alias — of a mapping, of a scalar, one that makes
+    a cycle, or one a merge key spends — is refused by EVERY reader in `defender._yaml`, with
+    the `AliasRefused` `yaml.YAMLError` every caller already catches for malformed YAML. No
+    reader opts in, so no reader can be left out. PyYAML's own safe loader accepts each."""
     assert _has_alias(text), "the fixture carries no alias"
     assert yaml.safe_load(text) is not None
 
-    load = safe_load_tree()
-    err = raised(lambda: load(text))
+    err = raised(lambda: _READERS[reader](text))
 
-    assert isinstance(err, yaml.YAMLError), \
-        f"an aliased document was not refused as a YAMLError: {type(err).__name__} {err}"
+    assert isinstance(err, _yaml.AliasRefused), \
+        f"{reader} did not refuse an aliased document: {type(err).__name__} {err}"
 
 
 _PLAIN = {
     "empty": "",
     "scalars": "a: 1\nb: [x, y, {c: true, d: null, e: 1.5}]\nwhen: 2026-07-25T07:48:37Z\n"
                "mode: 0755\nflag: yes\nq: '*not-an-alias'\n",
+    "inline-merge": "base:\n  <<: {x: 1}\n  y: 2\n",
     "family-json": json.dumps(T.family_doc()),
     "family-block": yaml.safe_dump(T.family_doc(), sort_keys=False),
 }
 
 
 @pytest.mark.parametrize("text", list(_PLAIN.values()), ids=list(_PLAIN))
-def test_safe_load_tree_reads_an_alias_free_document_exactly_as_safe_load_does(text):
-    """The paired control: without an alias, `safe_load_tree` is `_yaml.safe_load` — same
-    document, same typed scalars (timestamps, octals, `yes`), and a quoted `*` is text."""
+def test_an_alias_free_document_reads_exactly_as_pyyamls_safe_loader_reads_it(text):
+    """The paired control: without an alias, `_yaml.safe_load` is PyYAML's safe loader — same
+    document, same typed scalars (timestamps, octals, `yes`), a quoted `*` is text, and a merge
+    of an inline mapping (no alias) still merges."""
     assert _anchors_and_aliases(text) == []
 
-    assert safe_load_tree()(text) == _yaml.safe_load(text)
+    assert _yaml.safe_load(text) == yaml.safe_load(text)
 
 
 @pytest.mark.parametrize("text", ["a: [1, 2\n", "a: b: c\n", "[" * 3000 + "]" * 3000],
                          ids=["unclosed", "bad-mapping", "too-deep-to-compose"])
-def test_safe_load_tree_refuses_what_safe_load_refuses_as_a_yaml_error(text):
+def test_malformed_yaml_is_a_yaml_error_never_an_interpreter_error(text):
     """Malformed text, including text nested past the composer's recursion, is a `YAMLError`
-    from `safe_load_tree` exactly as from `_yaml.safe_load` — never a `RecursionError` a
-    caller's `except yaml.YAMLError` would miss."""
-    with pytest.raises(yaml.YAMLError):
-        _yaml.safe_load(text)
-
-    load = safe_load_tree()
-    err = raised(lambda: load(text))
+    from `_yaml.safe_load` — never a `RecursionError` a caller's `except yaml.YAMLError` would
+    miss."""
+    err = raised(lambda: _yaml.safe_load(text))
 
     assert isinstance(err, yaml.YAMLError), \
         f"refused with {type(err).__name__}, not a YAMLError"
+
+
+def test_the_yaml_writer_writes_a_shared_value_in_full_and_refuses_a_cycle():
+    """The writer's half: `_yaml.safe_dump` writes a value held twice out in full, so what the
+    tree writes the tree can read back; PyYAML's own dumper writes `&id001`/`*id001` for it. A
+    value that holds itself cannot be written in full, and is `AliasRefused`, not a
+    `RecursionError`."""
+    shared = {"host": "web-1", "tags": ["p", "q"]}
+    doc = {"a": shared, "b": shared, "c": [shared]}
+    assert _has_alias(yaml.safe_dump(doc)), "the fixture shares no object, so this tests nothing"
+
+    text = _yaml.safe_dump(doc, sort_keys=False)
+
+    assert _anchors_and_aliases(text) == []
+    assert _yaml.safe_load(text) == doc
+    cyclic: list[Any] = []
+    cyclic.append(cyclic)
+    assert isinstance(raised(lambda: _yaml.safe_dump(cyclic)), _yaml.AliasRefused)
 
 
 def _bomb_members(levels: int = 9, fan_out: int = 10) -> str:
@@ -548,6 +566,34 @@ def test_a_questioner_reply_carrying_a_yaml_alias_is_refused_naming_call_1(tmp_p
     assert "call 1" in str(err)
     assert isinstance(err.__cause__, yaml.YAMLError), \
         f"refused, but not as malformed YAML (cause: {type(err.__cause__).__name__})"
+    assert agent.calls == 1, "seat calls were paid against a refused family"
+
+
+def _cyclic_envelope_doc() -> dict:
+    doc = T.family_doc()
+    loop: dict[str, Any] = {"query": _query()}
+    loop["self"] = loop
+    doc["discriminator"]["envelope"]["params"] = loop
+    return doc
+
+
+@pytest.mark.parametrize("build", [_shared_envelope_doc, _cyclic_envelope_doc],
+                         ids=["shared", "cyclic"])
+def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tmp_path, build):
+    """#1127 review: a driver that hands back an already-parsed reply skipped the loader, so
+    the family's "no shared or cyclic values" rule held only for text replies — and a cycle
+    reached `parse_family` and the manifest writer. A parsed reply is held to the loader's rule:
+    one holding a value twice, or inside itself, is the same `BranchError` naming call 1,
+    chained from `AliasRefused`, and no seat call is paid against it. (The control, a parsed
+    reply that is a tree, is every launcher test whose fake questioner hands back dicts.)"""
+    agent = T.FakeAgent(build(), T.world_doc("b"), T.world_doc("c"))
+
+    err = raised(lambda: _author(tmp_path, agent))
+
+    assert isinstance(err, T.sym("runtime.branch", "BranchError")), \
+        f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
+    assert "call 1" in str(err)
+    assert isinstance(err.__cause__, _yaml.AliasRefused)
     assert agent.calls == 1, "seat calls were paid against a refused family"
 
 

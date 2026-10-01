@@ -240,12 +240,19 @@ def _capture_sections(*, leads: Any, alert: Any, frontier: str,
 def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
     """One model reply as a mapping.
 
-    A dict (already parsed by the driver) is taken as-is; text is parsed as YAML. Anything else
-    is a refusal naming the call, so a missing document never composes into a family that reads
-    as merely incomplete.
+    Text is parsed as YAML, which refuses aliases. A dict (already parsed by the driver) is
+    held to the same rule: one whose parts are shared or cyclic is refused, as an alias would
+    have been, so the family is a tree whichever way the reply arrived. Anything else is a
+    refusal naming the call, so a missing document never composes into a family that reads as
+    merely incomplete.
     """
     doc: Any = reply
-    if isinstance(reply, str):
+    if isinstance(reply, dict):
+        try:
+            _yaml.refuse_shared(reply)
+        except yaml.YAMLError as e:
+            raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
+    elif isinstance(reply, str):
         # Exactly one document, bare or in one code fence (the judge's rule too). A reply with
         # two candidate documents is refused rather than guessed at. The launcher turns
         # `BranchError` into `LauncherRefused`.
@@ -255,7 +262,7 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
             raise BranchError(
                 f"{what}: the questioner's reply is not one bare document: {shape}") from shape
         try:
-            doc = _yaml.safe_load_tree(text)
+            doc = _yaml.safe_load(text)
         except yaml.YAMLError as e:
             raise BranchError(f"{what}: the questioner's reply is not a YAML document: {e}") from e
     if not isinstance(doc, dict):

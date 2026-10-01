@@ -40,6 +40,7 @@ from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402
 from defender.learning.judge import render as render_mod  # noqa: E402
 from defender.learning.judge import run as run_mod  # noqa: E402
+from defender import _yaml
 
 _logger = logging.getLogger(__name__)
 
@@ -305,12 +306,11 @@ def _run_world_draws(
             completed += 1
             for finding in doc["findings"]:
                 spread[finding["bucket"]] += 1
-        import yaml
 
         documents[n] = doc
         # Not contained: a link planted at this sink refuses the pass. The draw file is what
         # the enqueue reads back, so an aliased one is not an observability fault.
-        world.draw(n).write(yaml.safe_dump(doc, sort_keys=False))
+        world.draw(n).write(_yaml.safe_dump(doc, sort_keys=False))
     return completed, dict(spread), documents, malformed
 
 
@@ -676,13 +676,11 @@ _GRADE_ADAPTER: TypeAdapter[EpisodeGrade] = TypeAdapter(EpisodeGrade)
 
 
 def _write_judge_yaml(episode: Episode, record: EpisodeGrade) -> None:
-    import yaml
-
     doc = _GRADE_ADAPTER.dump_python(record, mode="json", exclude=set(_DERIVED))
     # The stamp is present or absent, never null.
     if doc["not_graded"] is None:
         del doc["not_graded"]
-    episode.judge.write(yaml.safe_dump(doc, sort_keys=False))
+    episode.judge.write(_yaml.safe_dump(doc, sort_keys=False))
 
 
 __all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade"]

@@ -120,6 +120,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
 #: so a fixture that has to plant a recorded key mints it the way the recorder does rather than
 #: hand-writing a `json.dumps` that matches only by luck of dict order.
 from defender.learning.branch.ledger import request_key  # noqa: E402
+from defender import _yaml
 
 #: The family's holding system. `elastic` and not a state system, because the amended M8
 #: fixture must carry a `staged`-served row on H and `staged` is reachable only for the sole
@@ -238,7 +239,6 @@ def review_record(episode_dir: Path, *, outcome: str = "accepted",
     sentence is absent from the file entirely. `decision` beside it is `Step.REVIEW`'s and
     survives untouched.
     """
-    import yaml
 
     ep = Path(episode_dir)
     doc = {
@@ -252,7 +252,7 @@ def review_record(episode_dir: Path, *, outcome: str = "accepted",
         "worlds": worlds if worlds is not None else {},
     }
     path = ep / "review.yaml"
-    path.write_text(yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -371,9 +371,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,
 
 def judge_record(episode_dir: Path) -> dict:
     """`episodes/<id>/judge.yaml`, parsed — the family record."""
-    import yaml
-
-    return yaml.safe_load(
+    return _yaml.safe_load(
         (Path(episode_dir) / "judge.yaml").read_text(encoding="utf-8")) or {}
 
 
@@ -427,9 +425,8 @@ def draw_files(episode_dir: Path, world_label: str) -> list[Path]:
 
 
 def draw_doc(episode_dir: Path, world_label: str, draw: int) -> dict:
-    import yaml
 
-    return yaml.safe_load(
+    return _yaml.safe_load(
         (Path(episode_dir) / "worlds" / world_label / "judge" / f"{draw}.yaml").read_text(
             encoding="utf-8")) or {}
 
@@ -493,14 +490,13 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
     reply to be recovered, and the tests that pin it build the text themselves
     (`tests/test_1018_reply_document.py`).
     """
-    import yaml
 
     if malformed == "not-a-mapping":
-        return yaml.safe_dump(["gradable", "no findings"])
+        return _yaml.safe_dump(["gradable", "no findings"])
     if malformed == "lookalike-bucket":
         doc = dict(doc)
         doc["findings"] = [dict(finding_doc(), bucket="Lead-Set")]
-    return yaml.safe_dump(doc, sort_keys=True)
+    return _yaml.safe_dump(doc, sort_keys=True)
 
 
 # --------------------------------------------------------------------------------------

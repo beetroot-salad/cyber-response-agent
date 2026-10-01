@@ -618,13 +618,12 @@ _DUPLICATE_SPELLINGS = {
     # while the mapping is CONSTRUCTED, so before flattening the two `get-host` keys sit in
     # different nodes and neither looks repeated — while `safe_load` merges them and keeps the
     # explicit one. Same silent collapse as every spelling above, reached the one way a reader
-    # of the composed tree cannot see without asking for the merge to be applied.
+    # of the composed tree cannot see without asking for the merge to be applied. Merged from an
+    # inline mapping: an alias is refused outright (#1127), a merge without one is not.
     "merge-key-shadowed": (
         "dispositions:\n"
-        "  change-mgmt: &d\n"
-        "    get-host: {roles: [gather]}\n"
         "  cmdb:\n"
-        "    <<: *d\n"
+        "    <<: {get-host: {roles: [gather]}}\n"
         "    get-host: {roles: [judge]}\n"
     ),
 }

@@ -139,8 +139,8 @@ PARAMS_NESTING_LIMIT = 32
 
 
 class ParamsTooDeep(Exception):
-    """@owns the too-deep sentence — `field` nests past `PARAMS_NESTING_LIMIT`; nothing was
-    stored. Every refusal of a too-deep call says it in these words, naming the field.
+    """`field` nests past `PARAMS_NESTING_LIMIT`; nothing was stored. Every refusal of a
+    too-deep call says it in this sentence, naming the field.
 
     An `Exception`, not a `ValueError`: `ServedCall` cleans its params as it is built, and
     pydantic would wrap a `ValueError` raised there into its own `ValidationError` (`_model`)."""

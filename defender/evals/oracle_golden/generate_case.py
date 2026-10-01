@@ -53,7 +53,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import yaml
+
+from defender import _yaml
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -87,7 +88,7 @@ def _run(cmd: list[str | Path], *, timeout: int, label: str) -> str:
 
 
 def scenario_entry(scenario: str, catalog_path: Path) -> dict:
-    catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
+    catalog = _yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
     entries = catalog.get("scenarios") or catalog.get("attacks") or []
     for entry in entries:
         if entry.get("id") == scenario:

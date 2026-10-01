@@ -281,9 +281,9 @@ demands:
   - {id: fork10, kind: negative, form: test, discharged_by: test_report_body_zero_width_and_combining_mark_density,
      binds: ["decide_write", "report_body_size.domain.distinguished[over-bound]", "report_md"]}
      # §7 Fork 10 (rides F1, residual-risk doc) -> byte basis. seed: a zero-width/combining-mark-dense body UNDER the 8,192 B byte bound commits (density is a residual the volume-only guard does not close); the same density pushed OVER the byte bound denies. Collapses onto F1's byte basis.
-  - {id: fork12, kind: behavior, form: test, discharged_by: test_report_frontmatter_yaml_alias_amplification_under_byte_bound,
+  - {id: fork12, kind: behavior, form: test, discharged_by: test_report_frontmatter_using_a_yaml_alias_is_denied_however_small,
      binds: ["decide_write", "report_frontmatter_size.domain", "report_md"]}
-     # §7 Fork 12 (rides F2 -> RAW span) -> Decision(True). seed: frontmatter using YAML anchors/aliases whose RAW between-fence text is <= 512 B commits, even though the re-serialized parsed mapping expands past 512 B — F2 measures the RAW span, so alias expansion is invisible. The fixture re-probes that the two spans genuinely diverge, so the rejected re-serialized-span horn would deny it and the test would catch it.
+     # #1127 SUPERSEDES the Decision(True) below: no YAML the tree reads may reuse a node by alias, so an aliased frontmatter fails the parse and the gate fails CLOSED, under the byte bound; the raw-span basis (F2) is unchanged. Was: §7 Fork 12 (rides F2 -> RAW span) -> Decision(True). seed: frontmatter using YAML anchors/aliases whose RAW between-fence text is <= 512 B commits, even though the re-serialized parsed mapping expands past 512 B — F2 measures the RAW span, so alias expansion is invisible. The fixture re-probes that the two spans genuinely diverge, so the rejected re-serialized-span horn would deny it and the test would catch it.
 
 # ===========================================================================
 # STRUCTURE — the address space

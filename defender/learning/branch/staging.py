@@ -343,7 +343,7 @@ def record_staged(episode: Episode, row: Mapping[str, Any]) -> dict:
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
     whole list would open a window where the record is shorter than the cluster.
     """
-    entry = yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
+    entry = _yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
     # The durable append: the record and its entry in the episode dir are synced before this
     # returns (the episode dir's own entry was synced when `Episode.create` made it).
     episode.staged.append_durable(entry)
@@ -522,7 +522,7 @@ def merge_review(episode: Episode, key: str, block: dict) -> None:
     else:
         doc[key] = dict(block)
     episode.review.write(
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
+        _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
 
 
 def sweep_glob(episode_token: str) -> str:

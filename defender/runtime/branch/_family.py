@@ -558,7 +558,7 @@ def _read_document(view: Bound) -> object:
     produces a `Family`."""
     text = _read_manifest(view)
     try:
-        return _yaml.safe_load_tree(text)
+        return _yaml.safe_load(text)
     except yaml.YAMLError as bad:
         raise FamilyError(f"the manifest ({LAYOUT.family}) could not be read: {bad}") from bad
 
@@ -571,14 +571,8 @@ def write_family(episode: Episode, doc: dict) -> Path:
     """
     manifest = episode.family
     manifest.write(
-        yaml.dump(doc, Dumper=_TreeDumper, sort_keys=False, allow_unicode=True,
-                  default_flow_style=False))
+        _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return manifest.path
-
-
-class _TreeDumper(yaml.SafeDumper):
-    def ignore_aliases(self, data: Any) -> bool:
-        return True
 
 
 def manifest_digest(view: Bound) -> str:

@@ -20,7 +20,7 @@ from datetime import date
 import pytest
 import yaml
 
-from defender._yaml import safe_load, safe_load_typed_and_spelled
+from defender._yaml import AliasRefused, safe_load, safe_load_typed_and_spelled
 
 
 def spelled(text: str):
@@ -146,7 +146,7 @@ def test_a_bare_scalar_document_is_typed_in_both_readings(text):
 @pytest.mark.parametrize("text", [
     "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
     "1: x\n'1': y",
-    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
+    "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n",
     "",
 ])
 def test_the_typed_half_is_exactly_safe_load(text):
@@ -157,8 +157,8 @@ def test_the_typed_half_is_exactly_safe_load(text):
 
 
 def _shape(value, seen=None):
-    """A document's shape with the leaves erased: containers, keys, lengths, and where an
-    alias points back. Two readings of one tree must have the same one."""
+    """A document's shape with the leaves erased: containers, keys, lengths, and any value
+    reached twice. Two readings of one tree must have the same one."""
     seen = {} if seen is None else seen
     if isinstance(value, dict):
         if id(value) in seen:
@@ -176,18 +176,14 @@ def _shape(value, seen=None):
 @pytest.mark.parametrize("text", [
     "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
     "1: x\n'1': y\n2026-07-25: z\ntrue: w",
-    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
-    "a: &c [root]\nb: *c",
-    "a: &x {b: *x, c: leaf}",
-    "events: &e\n  - user.name: root\n    self: *e\n",
+    "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n",
     "projections:\n  - lead_id: l-001\n    events: [{n: 1}]\n    events: [{n: 2}]\n",
     "a: [1, [2, {3: 4}], {}, []]",
 ])
 def test_both_readings_have_exactly_one_shape(text):
     """One parse: the two readings can differ only in what a VALUE scalar became — never in
-    which containers hold which keys, how many pairs survive, or where an alias points. A
-    repeated `events:` collapses to the same LAST list in both; a self-containing anchor is
-    the same cycle in both."""
+    which containers hold which keys or how many pairs survive. A repeated `events:` collapses
+    to the same LAST list in both, and an inline merge lands the same keys in both."""
     readings = safe_load_typed_and_spelled(text)
     assert _shape(readings.spelled) == _shape(readings.typed) == _shape(safe_load(text))
 
@@ -207,23 +203,26 @@ def test_a_merge_key_merges_as_safe_load_does():
     """Tag resolution is untouched, so `<<:` is still the merge tag and the merged mapping's
     keys land in the row — the first cut dropped the resolvers and left a literal `<<` key;
     the second cut's tree walk looked the key up by name and never saw merged events."""
-    text = "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n"
+    text = "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n"
     assert spelled(text)["projections"] == safe_load(text)["projections"] == [
         {"lead_id": "l-001", "events": [{"user.name": "root"}]}]
 
 
-def test_an_alias_resolves_to_the_same_object_as_safe_load_gives():
-    doc = spelled("a: &c [root]\nb: *c")
-    assert doc == {"a": ["root"], "b": ["root"]}
-    assert doc["a"] is doc["b"]
-
-
-def test_a_self_containing_anchor_loads_as_safe_load_does():
-    """`a: &x {b: *x}` composes into a cyclic graph; `safe_load` builds the recursive
-    structure and so does this."""
-    doc = spelled("a: &x {b: *x, c: leaf}")
-    assert doc["a"]["c"] == "leaf"
-    assert doc["a"]["b"] is doc["a"]
+@pytest.mark.parametrize("text", [
+    "a: &c [root]\nb: *c",
+    "a: &x {b: *x, c: leaf}",
+    "events: &e\n  - user.name: root\n    self: *e\n",
+    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
+], ids=["reused", "self-containing", "self-containing-list", "merged-by-alias"])
+def test_an_alias_is_refused_by_both_readings_as_by_safe_load(text):
+    """#1127: no YAML the tree reads may share or contain itself — an alias of a few hundred
+    bytes can stand for billions of values to whatever walks the result, and a self-containing
+    anchor crashes the first recursive walker. Refused by `safe_load` and by the typed and
+    spelled reading alike, with the `YAMLError` every caller already handles."""
+    with pytest.raises(AliasRefused):
+        safe_load(text)
+    with pytest.raises(AliasRefused):
+        safe_load_typed_and_spelled(text)
 
 
 def test_an_empty_document_is_none():
