@@ -25,6 +25,7 @@ import pytest
 
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
+from defender.tests._data_root_1078 import current_data_root
 
 TOKEN_B = T.world_token("b")
 
@@ -199,7 +200,7 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     unset still reaches the curation lane, so the sibling's silence is a refusal rather than a
     channel that never carries anything."""
     base, src = T.runs_base(tmp_path)
-    tenant_id = T.mod("_tenant").tenant_of_run_dir(src)
+    tenant_id = T.mod("_tenant").tenant_of_run_dir(current_data_root(), src)
     seen: list[str] = []
     _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p: None, preflight=T.no_preflight,
@@ -332,8 +333,7 @@ def test_a_sibling_resumes_a_pre_1106_manifest_through_its_requested_tenant(tmp_
     del doc["configured_patterns"]
     ep = T.episode(tmp_path, doc=doc)
     lifecycle = _Recorder([])
-    rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
-                      "--tenants-root", str(T1106.TENANTS_ROOT)],
+    rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
                      lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
     assert rc == 0
     assert lifecycle.kwargs["world"].family.configured_patterns == T.CONFIGURED
@@ -356,8 +356,7 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
     _tenant.ensure_runs_base_record(other, "acme")
     lifecycle = _Recorder([])
     with pytest.raises(SystemExit) as refused:
-        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
-                     "--tenants-root", str(T1106.TENANTS_ROOT)],
+        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
                     lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
     text = str(refused.value)
     assert "'acme'" in text, text

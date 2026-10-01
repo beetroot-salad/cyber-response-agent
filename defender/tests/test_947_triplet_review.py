@@ -91,7 +91,8 @@ def test_947_review_verb_context_is_host_side_over_the_episode_dir(tmp_path, mon
     # `runs_base_for(T)` — never read off the (retired) `DEFENDER_RUNS_BASE` knob, whose stale
     # configured value `configured_layout` still exports here. Composed under the data root
     # `d9_tenant` was created in, before `configured_layout` points the process at its own.
-    runs_base = T.sym("_tenant", "runs_base_for")(d9_tenant)
+    runs_base = T.sym("_tenant", "runs_base_for")(T.current_tenant())
+    assert runs_base.parent.name == d9_tenant, runs_base
     base, _src, root = T.configured_layout(tmp_path, monkeypatch)
     ep = T.episode(tmp_path, root=root)
     ctx = _review().verb_context(ep, _tenants1106.PLAYGROUND_SETTINGS, runs_base=runs_base)
@@ -251,13 +252,7 @@ def test_947_contradicting_world_is_rejected_before_any_sibling_starts(tmp_path,
                   live_tree=T.source_capture(),
                   questioner=T.FakeAgent(
                       T.family_doc(worlds=[T.base_world(), patched]), patched))
-    import os
-    from pathlib import Path
-
-    from defender import _tenant
-
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant.TenantPaths(
-        Path(os.environ["DEFENDER_DATA_ROOT"]), "acme"))
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
     assert rc != 0
     assert spawn.launches == [], "a sibling started for a rejected episode"
     doc = T.review_doc(ep)
