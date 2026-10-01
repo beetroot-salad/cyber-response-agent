@@ -267,6 +267,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         _post_comment(run_dir, deps, config, case_id, payload, word, ctx)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
+        _clear_receipt(run_dir)
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived

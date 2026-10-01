@@ -21,8 +21,10 @@ _os`, `from os import environ as e`, `os.path.os.environ`):
   * `os.getenv`;
   * `env_str`, `env_int`, `env_bool` and `env_choice` (the platform's typed accessors);
   * on any expression ending in `.env` (`ctx.env`, `deps.ctx.env`), on a name bound from one
-    (`env = ctx.env`), and on a copy of either (`dict(ctx.env)`, `{**ctx.env}`): `.get(...)` and
-    the other mapping reads, a subscript, an `in` test, and iteration.
+    (`env = ctx.env`, annotated, or walrus), and on a direct copy of either (`dict(ctx.env)`, a
+    lone `{**ctx.env}`): `.get(...)` and the other mapping reads, a subscript, an `in` test, and
+    iteration. Not followed: tuple-unpacked bindings, `.copy()`, `list(...)`/`sorted(...)`,
+    `|`, `getattr(ctx, "env")`, a `{**env, ...}` with extra keys.
 Reads at module scope are flagged too. The ONE exemption is a module-level `def main`: a command
 line entry point is the process boundary where an environment belongs. A nested or method `main`
 is flagged.
@@ -111,6 +113,8 @@ class _Reads(ast.NodeVisitor):
             return False
         if isinstance(node, ast.Attribute):
             return node.attr == "env"
+        if isinstance(node, ast.NamedExpr):
+            return self._is_env(node.value)
         if isinstance(node, ast.Name):
             return any(node.id in names for names in self._bound)
         if isinstance(node, ast.Call):
@@ -135,6 +139,16 @@ class _Reads(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         if self._is_env(node.value):
             self._bound[-1].update(t.id for t in node.targets if isinstance(t, ast.Name))
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if self._is_env(node.value) and isinstance(node.target, ast.Name):
+            self._bound[-1].add(node.target.id)
+        self.generic_visit(node)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        if self._is_env(node.value):
+            self._bound[-1].add(node.target.id)
         self.generic_visit(node)
 
     # -- the lookups -----------------------------------------------------------------------

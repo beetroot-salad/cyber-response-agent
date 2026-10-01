@@ -209,8 +209,9 @@ def _check_access_method(report: Report, entries: dict[str, str], prefix: str) -
 
 def _check_reference(report: Report, key: str, val: str) -> bool:
     """One `*_SECRET_REF` key: spelled all-uppercase, non-blank, name-shaped. Whether it is a
-    reference worth looking up in `secrets.env`. Names the key only — what a malformed reference
-    holds may be the secret itself."""
+    reference worth looking up in `secrets.env`. Names the key only when the value is not
+    name-shaped — such a value may be the secret itself. A name-shaped value is reported as a
+    name; shape cannot tell an alphanumeric secret from one."""
     if key != key.upper():
         report.add(FAIL, f"config.env: {key} is a mis-spelled reference — spell it {key.upper()}")
     elif is_blank(val):
@@ -256,8 +257,8 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
     both required, no default); that no key holds a secret inline; and that every
     `<KEY>_SECRET_REF` is spelled all-uppercase, holds a name-shaped, non-blank value, and names an
     entry of `secrets.env` that exists and is non-blank. The report names keys and entry NAMES,
-    never a value from either file — and never the string a malformed reference holds, which may
-    be the secret itself."""
+    never a value from either file, and never the string a reference holds when that string is
+    not name-shaped (it may be the secret itself). A name-shaped value is reported as a name."""
     path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
         report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")

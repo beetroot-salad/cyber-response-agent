@@ -12,6 +12,7 @@ from typing import Any
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
+from defender.runtime.tenant_settings import read_regular_bytes
 
 
 #: The mapping's path inside a tenant's `settings/` folder (#1106). Every reader is HANDED the
@@ -82,6 +83,8 @@ def _freeze(value: Any) -> Any:
         return MappingProxyType({k: _freeze(v) for k, v in value.items()})
     if isinstance(value, list):
         return tuple(_freeze(v) for v in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(v) for v in value)
     return value
 
 
@@ -91,6 +94,8 @@ def _thaw(value: Any) -> Any:
         return {k: _thaw(v) for k, v in value.items()}
     if isinstance(value, tuple):
         return [_thaw(v) for v in value]
+    if isinstance(value, frozenset):
+        return {_thaw(v) for v in value}
     return value
 
 
@@ -129,7 +134,7 @@ def load_case_mapping(settings: Path) -> CaseMapping:
     and none reads the file."""
     path = _mapping_path(settings)
     try:
-        raw = path.read_bytes()
+        raw = read_regular_bytes(path)
     except OSError as e:
         raise CaseTicketError(f"case-history mapping not readable: {path}: {e.strerror}") from e
     import yaml

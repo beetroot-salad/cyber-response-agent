@@ -21,6 +21,7 @@ This module is outside `bash_exec`'s per-exec import closure (#1096) and must st
 from __future__ import annotations
 
 import dataclasses
+import errno
 import logging
 import os
 import re
@@ -74,7 +75,7 @@ def parse_env(text: str) -> dict[str, str]:
         line; a leading byte-order mark is not part of the first key; CRLF leaves no `\\r`.
     """
     out: dict[str, str] = {}
-    for line in text.removeprefix("\ufeff").splitlines():
+    for line in text.removeprefix("\ufeff").split("\n"):
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line or re.match(r"export\s", line):
             continue
@@ -86,12 +87,25 @@ def parse_env(text: str) -> dict[str, str]:
     return out
 
 
+def read_regular_bytes(path: Path) -> bytes:
+    """The bytes of a regular file, opened without blocking: a FIFO or device planted at a
+    settings path is an `OSError` here, never a read that waits forever."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            return fh.read()
+    finally:
+        os.close(fd)
+
+
 def read_env_file(path: Path) -> dict[str, str]:
     """`parse_env` over the file at `path`, or `ConfigFault`: a missing file is "this tenant's
     settings do not configure this system", and one that cannot be read or is not UTF-8 text is
     that system down — never an `OSError` or `UnicodeDecodeError` out of resolve."""
     try:
-        raw = path.read_bytes()
+        raw = read_regular_bytes(path)
     except FileNotFoundError:
         raise ConfigFault(f"config file not found: {path} — {NOT_CONFIGURED}") from None
     except OSError as e:
@@ -241,7 +255,7 @@ def elastic_view(systems: Mapping[str, SystemConfig | ConfigFault]) -> ElasticSe
         return ConfigFault(
             f"elastic config is missing or blank: {', '.join(bad)} — the Elastic part is "
             "all-or-nothing over these keys")
-    if entry["ELASTIC_TRANSPORT"].strip() != DOCKER_EXEC:
+    if entry["ELASTIC_TRANSPORT"] != DOCKER_EXEC:
         return ConfigFault(
             f"ELASTIC_TRANSPORT={entry['ELASTIC_TRANSPORT']!r} names an access method that is "
             f"not implemented — only {DOCKER_EXEC!r} is")
@@ -254,13 +268,14 @@ def elastic_view(systems: Mapping[str, SystemConfig | ConfigFault]) -> ElasticSe
 
 #: What a `*_SECRET_REF` value must look like to be the NAME of a `secrets.env` entry: letters,
 #: digits and underscore, not starting with a digit. A value of any other shape is a secret pasted
-#: where a reference belongs (the connect validator FAILs it, naming only the key).
+#: where a reference belongs (the connect validator FAILs it, naming only the key). Shape cannot
+#: tell a name from an alphanumeric secret, so a value that IS name-shaped is taken as a name.
 _SECRET_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def is_secret_name(value: str) -> bool:
     """Whether `value` is shaped like the name of a `secrets.env` entry."""
-    return _SECRET_NAME.match(value) is not None
+    return _SECRET_NAME.fullmatch(value) is not None
 
 
 def declared_secrets(systems: Mapping[str, SystemConfig | ConfigFault]) -> dict[str, tuple[str, ...]]:

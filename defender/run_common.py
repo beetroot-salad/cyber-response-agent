@@ -264,10 +264,11 @@ def _stamp(
 
 
 def provider_scrubbed_environ() -> dict[str, str]:
-    """The process's environment as a copy, with every provider API key removed — the base of
+    """The process's environment as a copy, with every registered provider's API-key variable removed — the base of
     every host child's environment (`run_env` adds a run's variables on top; the branch
     launcher's write door, which has no run yet, takes it as is). The ONE scrub, so no host
-    child is handed a model credential by a caller that forgot to drop it."""
+    child is handed a registered provider's key by a caller that forgot to drop it (other
+    credential variables are not this scrub's to know)."""
     from defender.runtime import providers
 
     env = dict(os.environ)

@@ -184,7 +184,7 @@ def load_config(
             f"{', '.join(f'{prefix}_{k}' for k in missing)}"
         )
     timeout = cfg.get("TIMEOUT_SEC")
-    if timeout is not None and not (timeout.isascii() and timeout.isdigit() and int(timeout) > 0):
+    if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
         raise ConfigFault(
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
     return cfg
@@ -222,7 +222,7 @@ def _destination_owner(ctx: VerbContext, container: str, url: str) -> str:
 def _scrubbed(text: str, secrets: Sequence[str]) -> str:
     """`text` with every placed secret value replaced by `SECRET_MARKER`. Literal values only:
     an encoded or cut echo is a known limit."""
-    for value in secrets:
+    for value in sorted(secrets, key=len, reverse=True):
         if value:
             text = text.replace(value, SECRET_MARKER)
     return text

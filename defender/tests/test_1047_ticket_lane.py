@@ -424,7 +424,7 @@ def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(
     assert bad.get("ok") is False, f"a failed note call was recorded as a success: {bad!r}"
 
 
-def test_an_unconfigured_ticket_lane_calls_nothing_and_says_why_in_the_receipt(tmp_path):
+def test_an_unconfigured_ticket_lane_stays_silent_for_every_exit_class(tmp_path):
     """An operator with no case-history configuration makes NO call for any exit class,
     `aborted` included, and (#1107 O6) a run that reached the config says so in an `error`
     receipt naming no store: configuring no ticket system is no longer silent on the run page.

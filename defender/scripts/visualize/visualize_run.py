@@ -433,7 +433,7 @@ def render_ticket_line(run_dir: Path) -> str:
     if text is not None:
         try:
             receipt = json.loads(text)
-        except ValueError:
+        except (ValueError, RecursionError):
             receipt = None
     well_formed = (
         isinstance(receipt, dict)

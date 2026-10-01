@@ -243,7 +243,7 @@ def check_configured_patterns(
             "this deployment configures no corpus pattern — a world is a difference on the "
             "corpora the deployment configures, so with none there is nothing any world could "
             "stage and no overlay key the manifest could admit. Name the corpus patterns in "
-            "the elastic adapter's config (or in the environment) before branching")  # lint-shippable: ok — the per-vendor config the reader beside this one loads  # noqa: E501
+            "the elastic adapter's config before branching")  # lint-shippable: ok — the per-vendor config the reader beside this one loads  # noqa: E501
     probe = "probe"
     stems: dict[str, str] = {}
     for position, pattern in enumerate(patterns):
