@@ -52,8 +52,12 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from defender._tenant import Tenant
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -291,13 +295,15 @@ def investigate(
     """One defender investigation — the LLM cost floor, and the envelope source.
 
     `run.py` refuses to reuse a run dir, so a retry takes the next free suffix and the
-    failed attempt's transcript survives. `tenant_id` is checked before anything is spent;
-    the child `run.py` is handed it as `--tenant`.
+    failed attempt's transcript survives. The tenant is accepted before anything is spent;
+    the child `run.py` is handed its id as `--tenant`, inherits `DEFENDER_DATA_ROOT`, and
+    re-accepts it.
     """
     from defender import _tenant
 
-    tenant = _tenant.request_tenant(tenant_id)
-    env_base = _tenant.runs_base_for(tenant)
+    accepted = _accept(tenant_id)
+    tenant = accepted.id
+    env_base = _tenant.runs_base_for(accepted)
     candidate, attempt = run_id, 1
     while (env_base / candidate).exists():
         attempt += 1
@@ -404,6 +410,16 @@ def _assemble(run_dir: Path, story: Path, controls_yaml: Path, case_dir: Path) -
         f"(wanted: {run_dir}, {story}, {controls_yaml} -> {case_dir})")
 
 
+def _accept(tenant_id: object) -> Tenant:
+    """The request's tenant, accepted under `DEFENDER_DATA_ROOT` (`_tenant.accept_tenant`, the
+    acceptance every entry point shares), or its `TenantRefused`."""
+    from defender import _tenant
+    from defender._paths import PATHS
+
+    return _tenant.accept_tenant(
+        _tenant.resolve_data_root(), tenant_id, defender_dir=PATHS.defender_dir)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse, then refuse before the stack is touched: with no assemble step, a recruitment
     run would produce nothing usable. Argument validation still runs, `--tenant` first.
@@ -412,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     from defender import _tenant
 
     try:
-        _tenant.request_tenant(ns.tenant)
+        _accept(ns.tenant)
     except _tenant.TenantRefused as refused:
         print(f"[generate_case] {refused}", file=sys.stderr)
         return 2

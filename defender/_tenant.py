@@ -1,23 +1,32 @@
-"""Tenants: the tenant id, a tenant's row under the data root, and the runs-base record.
+"""Tenants: the tenant id, the one acceptance of a tenant, its row, and the runs-base record.
 
 Every run names its tenant on the request; there is no default. `TenantId` is the one check
-of an id. A tenant exists once its row `<data root>/<T>/tenant.json` does (`create_tenant`,
-`require_tenant`); `TenantPaths` spells its layout, and `resolve_data_root` reads the required
-`DEFENDER_DATA_ROOT`. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
+of an id. A tenant's tree is `<data root>/<T>/`: its row `tenant.json` (`create_tenant`,
+`require_tenant`), its runs, sessions, episodes and learning state, and `knowledge/` — the
+settings and agent halves the operator placed there (`_tenants`). `accept_tenant` is the ONE
+function that accepts a tenant, and the only constructor of `Tenant`, the value every entry
+point hands inward; `resolve_data_root` reads the required `DEFENDER_DATA_ROOT`, once per entry
+point. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
 (`ensure_runs_base_record`): created once, never overwritten, and a run for another tenant is
 refused rather than stamped.
 
 Both files are created through `write_guarded(mode="create")`, so a reader sees them absent or
-complete. Every refusal is a `TenantRefused` naming the refused value, which entry points catch
-and print verbatim; a corrupt record refuses the run rather than reading as `None`.
-`refuse_colliding_run_id` keeps run ids off the record's filename.
+complete. Every refusal is a `TenantRefused` naming the refused value (escaped and bounded),
+which entry points catch and print verbatim; a corrupt record refuses the run rather than
+reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
+
+Acceptance is a point-in-time check: a `Tenant` says the tree passed when it was accepted, not
+that it still does.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
+import stat
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -28,6 +37,13 @@ from pydantic_core import core_schema
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
+from defender._tenants import (
+    AGENT_HALF,
+    REQUIRED_SETTINGS,
+    SETTINGS_HALF,
+    TENANT_ID_FILE,
+    TOP_LEVEL_ALLOWED,
+)
 
 _R = TypeVar("_R")
 
@@ -51,6 +67,17 @@ _LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 #: O3's grammar, matched with `re.fullmatch` (a `$`-anchored `re.match` would accept a trailing
 #: newline — settled by the user).
 _GRAMMAR = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+#: How much of a refused value a message carries (N16): enough to recognise it, never a
+#: megabyte of attacker-chosen bytes.
+_SHOWN_LIMIT = 120
+
+
+def _shown(value: object) -> str:
+    """`value` as a refusal names it: escaped (repr-style, so no control character reaches a
+    terminal or a log raw) and bounded."""
+    text = repr(value)
+    return text if len(text) <= _SHOWN_LIMIT else f"{text[:_SHOWN_LIMIT]}… ({len(text)} chars)"
 
 
 class TenantRefused(Exception):
@@ -81,7 +108,7 @@ class TenantId(str):
             return raw
         if not isinstance(raw, str) or not _GRAMMAR.fullmatch(raw):
             raise TenantRefused(
-                f"{raw!r} is not a valid tenant id (must match {_GRAMMAR.pattern!r})")
+                f"{_shown(raw)} is not a valid tenant id (must match {_GRAMMAR.pattern!r})")
         return super().__new__(cls, raw)
 
     @classmethod
@@ -217,25 +244,26 @@ def ensure_runs_base_record(
 
 
 # ==========================================================================================
-# The tenant's own folder and layout (D1, O11a).
+# The tenant's layout before acceptance (M4): the private owner the pre-acceptance sites use.
 # ==========================================================================================
 
-class TenantPaths:
-    """The tenant's layout under a data root — the ONE place it is spelled (D1). A path owner:
-    constructing it creates nothing."""
+class _TenantPaths:
+    """The tenant's layout under a data root — the ONE place it is spelled (D1). Private: the
+    sites that need a tenant's locations before (or without) accepting it — `create_tenant`,
+    `require_tenant`, `tenant_of_run_dir`, setup's row probe — use it; everything after
+    acceptance reads `Tenant`, which composes from it. Constructing one creates nothing, and
+    carries the two guards every such site must meet first: the data root is absolute (J03),
+    and the tenant's folder is not inside the running checkout's box-mounted `defender/`
+    (O11a)."""
 
     def __init__(self, root: Path | str, tenant_id: str) -> None:
         #: The id, parsed: a plain string handed in is checked here (a `TenantId` passes as-is).
         self.tenant_id = TenantId(tenant_id)
         root = Path(root)
-        if not root.is_absolute():
-            raise TenantRefused(f"data root {str(root)!r} must be an absolute path")
-        _refuse_inside_defender_tree(root, self.tenant_id)
+        _refuse_unusable_data_root(root)
+        _refuse_inside_defender_tree(root / self.tenant_id, root)
         self.dir = root / self.tenant_id
 
-    #: Computed as properties, not `__init__`-set attributes, so `dir(TenantPaths)` lists them
-    #: for the #1077 owner-derived-join lint (`_astlib._OWNER_CLASS_ORIGINS`,
-    #: `lint_run_records._accessor_names`) exactly as `RunPaths`/`EpisodePaths` do.
     @property
     def row(self) -> Path:
         return self.dir / ROW_NAME
@@ -245,6 +273,10 @@ class TenantPaths:
         return self.dir / "runs"
 
     @property
+    def sessions(self) -> Path:
+        return self.dir / "sessions"
+
+    @property
     def episodes(self) -> Path:
         return self.dir / "episodes"
 
@@ -252,17 +284,327 @@ class TenantPaths:
     def learning(self) -> Path:
         return self.dir / "learning"
 
+    @property
+    def worktrees(self) -> Path:
+        return self.learning / "worktrees"
 
-def _refuse_inside_defender_tree(root: Path, tenant_id: TenantId) -> None:
+    @property
+    def knowledge(self) -> Path:
+        return self.dir / "knowledge"
+
+    @property
+    def settings(self) -> Path:
+        return self.knowledge / SETTINGS_HALF
+
+    @property
+    def agent(self) -> Path:
+        return self.knowledge / AGENT_HALF
+
+
+def _refuse_unusable_data_root(root: Path) -> None:
+    """J03 and O11a on the data root itself, before anything under it is named: it must be
+    absolute, and it may not lie inside the running checkout's `defender/` tree."""
+    if not root.is_absolute():
+        raise TenantRefused(f"data root {str(root)!r} must be an absolute path")
+    _refuse_inside_defender_tree(root, root)
+
+
+def _refuse_inside_defender_tree(candidate: Path, root: Path) -> None:
     """O11a: a tenant folder may not land inside THIS checkout's box-mounted `defender/` tree
     (comparison against `PATHS.defender_dir` specifically — not any directory named
     'defender', so another checkout's own `defender/` tree is untouched, N13)."""
     defender_dir = _paths.PATHS.defender_dir.resolve()
-    candidate = (root / tenant_id).resolve()
-    if candidate == defender_dir or defender_dir in candidate.parents:
+    resolved = candidate.resolve()
+    if resolved == defender_dir or defender_dir in resolved.parents:
         raise TenantRefused(
-            f"{root / tenant_id} is inside the checkout's defender/ tree ({defender_dir}) — "
-            "a tenant folder must live outside the box-mounted checkout")
+            f"{candidate} (data root {root}) is inside the checkout's defender/ tree "
+            f"({defender_dir}) — a tenant folder must live outside the box-mounted checkout")
+
+
+# ==========================================================================================
+# The accepted tenant (D1).
+# ==========================================================================================
+
+#: The token only `accept_tenant` holds: `Tenant` refuses construction without it, so a value
+#: of that type is one acceptance passed (N10). A copy or a pickle of an accepted tenant does
+#: not run `__init__` and is allowed.
+_ACCEPTED = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class Tenant:
+    """One accepted tenant: its id, the data root it was accepted under, and its row — built
+    ONLY by `accept_tenant`, and frozen. Its other members are its layout, as paths.
+
+    A point-in-time value (M3): it says the tree passed acceptance when it was built."""
+
+    id: TenantId
+    data_root: Path
+    row: TenantRow
+    _token: dataclasses.InitVar[object]
+
+    def __post_init__(self, _token: object) -> None:
+        if _token is not _ACCEPTED:
+            raise TenantRefused(
+                "a Tenant is built only by accept_tenant — accept the tenant instead")
+
+    @property
+    def _layout(self) -> _TenantPaths:
+        return _TenantPaths(self.data_root, self.id)
+
+    @property
+    def dir(self) -> Path:
+        return self.data_root / self.id
+
+    @property
+    def row_path(self) -> Path:
+        """The row FILE's path; `row` is the row itself."""
+        return self._layout.row
+
+    @property
+    def runs(self) -> Path:
+        return self._layout.runs
+
+    @property
+    def sessions(self) -> Path:
+        return self._layout.sessions
+
+    @property
+    def episodes(self) -> Path:
+        return self._layout.episodes
+
+    @property
+    def learning(self) -> Path:
+        return self._layout.learning
+
+    @property
+    def worktrees(self) -> Path:
+        return self._layout.worktrees
+
+    @property
+    def knowledge(self) -> Path:
+        return self._layout.knowledge
+
+    @property
+    def settings(self) -> Path:
+        return self._layout.settings
+
+    @property
+    def agent(self) -> Path:
+        return self._layout.agent
+
+
+def accept_tenant(
+    data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
+) -> Tenant:
+    """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
+    only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
+    FIRST check that fails, in this order:
+
+      1. the id grammar (`TenantId`), before anything under the root is named;
+      2. the root is absolute and outside the running checkout's `defender/` (the layout
+         class's guards), then the row (`require_tenant`);
+      3. `knowledge/` is a real, unlinked directory at `<T>/knowledge`, holding nothing at its
+         top level outside `_tenants.TOP_LEVEL_ALLOWED`;
+      4. its `settings/` and `agent/` halves, and `REQUIRED_SETTINGS`;
+      5. no link and no special file inside either half (`knowledge/.git` is never walked: a
+         local clone's objects are hard links);
+      6. `agent/.tenant-id` holds this id;
+      7. `settings/` lies outside `defender_dir` and every `box_mounted` tree — the settings
+         half is host-only.
+
+    Reads only; any `OSError` a read meets is the refusal, naming the path and the errno."""
+    tenant_id = TenantId(raw_id)
+    paths = _TenantPaths(data_root, tenant_id)
+    row = _read_row(paths)
+    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
+    return Tenant(id=tenant_id, data_root=Path(data_root), row=row, _token=_ACCEPTED)
+
+
+def accept_placed_knowledge(
+    data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
+) -> tuple[Path, bool]:
+    """Setup's half of acceptance, for a tenant whose row may not exist yet: every check
+    `accept_tenant` makes except that the row must exist — a row that IS there must still read
+    as this tenant's. Returns `(the settings folder, whether the row exists)`, or refuses as
+    `accept_tenant` would. Reads only."""
+    tenant_id = TenantId(raw_id)
+    paths = _TenantPaths(data_root, tenant_id)
+    has_row = os.path.lexists(paths.row)
+    if has_row:
+        _read_row(paths)
+    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
+    return paths.settings, has_row
+
+
+def _accept_knowledge(
+    paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path],
+) -> None:
+    """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded."""
+    _knowledge_is_real(paths)
+    check_knowledge_folder(paths.knowledge, tenant_id=paths.tenant_id)
+    settings = paths.settings
+    try:
+        settings_real = settings.resolve()
+    except OSError as unreadable:
+        raise TenantRefused(f"{settings} could not be resolved: {unreadable}") from unreadable
+    for mounted in (Path(defender_dir), *(Path(m) for m in box_mounted)):
+        if settings_real.is_relative_to(mounted.resolve()):
+            raise TenantRefused(
+                f"tenant {paths.tenant_id!r}'s settings {settings} are inside {mounted}, which "
+                "a box mounts — the settings half is host-only; keep the data root outside "
+                "the code tree and the runs base")
+
+
+def _knowledge_is_real(paths: _TenantPaths) -> None:
+    """Step 3's first half: `<T>/knowledge` exists, is no link, and is a directory that
+    resolves to exactly `<root>/<T>/knowledge` (catching `<root>/<T>` itself linked
+    elsewhere). Absent, it is the operator's to place, so the refusal says how."""
+    knowledge = paths.knowledge
+    try:
+        if not os.path.lexists(knowledge):
+            raise TenantRefused(
+                f"tenant {paths.tenant_id!r} has no knowledge folder: {knowledge} does not "
+                f"exist — clone the tenant repo into it on the host, then run "
+                f"tenant.py setup {paths.tenant_id}")
+        expected = paths.dir.parent.resolve() / paths.tenant_id / "knowledge"
+        if knowledge.is_symlink() or not knowledge.is_dir() or knowledge.resolve() != expected:
+            raise TenantRefused(
+                f"tenant {paths.tenant_id!r}'s knowledge folder {knowledge} must be a real "
+                f"directory at {expected}, never a link or a file; it resolves to "
+                f"{knowledge.resolve()}")
+    except OSError as unreadable:
+        raise TenantRefused(f"{knowledge} could not be checked: {unreadable}") from unreadable
+
+
+def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
+    """The folder rules — everything about a knowledge folder that needs no data root: its top
+    level holds only `TOP_LEVEL_ALLOWED`; its `settings/` and `agent/` halves are real
+    directories inside it; `REQUIRED_SETTINGS` are files; neither half holds a link or a
+    special file; and `agent/.tenant-id` reads as `tenant_id`. With `tenant_id` None (a tenant
+    repo checked on its own, `tenant.py check --folder`, CI's census lint) the file may be
+    absent, and is held only to the id grammar when present. Raises `TenantRefused` naming the
+    path at the first rule that fails. Reads only, and opens nothing but `.tenant-id`."""
+    folder = Path(folder)
+    try:
+        folder_real = folder.resolve()
+        stray = sorted(p.name for p in folder.iterdir() if p.name not in TOP_LEVEL_ALLOWED)
+    except OSError as unreadable:
+        raise TenantRefused(f"{folder} could not be listed: {unreadable}") from unreadable
+    if stray:
+        raise TenantRefused(
+            f"{folder / stray[0]} is not allowed at the top of a tenant's knowledge folder — "
+            f"it may hold only {sorted(TOP_LEVEL_ALLOWED)}; keep anything else (an .env, "
+            "secrets) out of the data root")
+    halves = [_half(folder, folder_real, name) for name in (SETTINGS_HALF, AGENT_HALF)]
+    for rel in REQUIRED_SETTINGS:
+        path = halves[0] / rel
+        if not path.exists():
+            raise TenantRefused(f"a required settings file is missing: {path}")
+        if not path.is_file():
+            raise TenantRefused(f"a required settings file must be a regular file: {path}")
+    for half in halves:
+        _refuse_links_and_special_files(half)
+    tenant_id_file = folder / TENANT_ID_FILE
+    if tenant_id is None and not os.path.lexists(tenant_id_file):
+        return
+    claimed = read_tenant_id_file(tenant_id_file)
+    if tenant_id is not None and claimed != tenant_id:
+        raise TenantRefused(
+            f"{tenant_id_file} names tenant {claimed!r}, not {tenant_id!r} — this knowledge "
+            "folder is another tenant's")
+
+
+def _half(folder: Path, folder_real: Path, name: str) -> Path:
+    half = folder / name
+    try:
+        if not os.path.lexists(half):
+            raise TenantRefused(f"the knowledge folder has no {name}/ half: {half} is missing")
+        if half.is_symlink() or not half.is_dir() or half.resolve() != folder_real / name:
+            raise TenantRefused(
+                f"the knowledge folder's {name}/ half must be a real directory at {half}; it "
+                f"resolves to {half.resolve()}")
+    except OSError as unreadable:
+        raise TenantRefused(f"{half} could not be checked: {unreadable}") from unreadable
+    return half
+
+
+def _refuse_links_and_special_files(half: Path) -> None:
+    """Refuse any symlink, hard-linked file, FIFO, socket or device inside one half, judged by
+    `lstat` and never opened (a FIFO opened for reading would block). A directory the walk
+    cannot list is refused too, since skipping it would hide what is below it."""
+    # rejected: filesystem-portable hard-link detection — `st_nlink > 1` is the rule (N11).
+
+    def unreadable(error: OSError) -> None:
+        raise TenantRefused(f"{error.filename} could not be checked for links: {error}")
+
+    for current, dirnames, filenames in os.walk(half, onerror=unreadable, followlinks=False):
+        for name in (*dirnames, *filenames):
+            entry = Path(current) / name
+            try:
+                st = entry.lstat()
+            except OSError as error:
+                raise TenantRefused(f"{entry} could not be checked: {error}") from error
+            if stat.S_ISLNK(st.st_mode):
+                raise TenantRefused(
+                    f"{entry} is a link (to {os.readlink(entry)}) — a tenant's knowledge holds "
+                    "no links: a link can hand this tenant another's settings or knowledge")
+            if stat.S_ISDIR(st.st_mode):
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                raise TenantRefused(
+                    f"{entry} is not a regular file or directory — a tenant's knowledge holds "
+                    "no FIFOs, sockets or devices")
+            if st.st_nlink > 1:
+                raise TenantRefused(
+                    f"{entry} is a hard link ({st.st_nlink} names for one file) — its bytes "
+                    "may be another tenant's")
+
+
+#: The most a `.tenant-id` may hold: a 63-character id and a CRLF fit many times over, and an
+#: oversize file is refused unread past this.
+_TENANT_ID_FILE_MAX = 128
+
+
+def read_tenant_id_file(path: Path) -> TenantId:
+    """The id an `agent/.tenant-id` holds: exactly an id plus at most one LF or CRLF, read
+    bounded, as UTF-8. Anything else — a BOM, a space, a second line, an empty file, a
+    non-file, an oversize file — is `TenantRefused` naming the file. @owns .tenant-id"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise TenantRefused(
+            f"{path} is missing — a tenant's knowledge folder names its tenant there") from None
+    except OSError as unreadable:
+        raise TenantRefused(f"{path} could not be read: {unreadable}") from unreadable
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise TenantRefused(f"{path} must be a regular file holding the tenant id")
+        data = os.read(fd, _TENANT_ID_FILE_MAX + 1)
+    except OSError as unreadable:
+        raise TenantRefused(f"{path} could not be read: {unreadable}") from unreadable
+    finally:
+        os.close(fd)
+    if len(data) > _TENANT_ID_FILE_MAX:
+        raise TenantRefused(
+            f"{path} is larger than {_TENANT_ID_FILE_MAX} bytes — it holds only a tenant id")
+    for ending in (b"\r\n", b"\n"):
+        if data.endswith(ending):
+            data = data[: -len(ending)]
+            break
+    try:
+        text = data.decode("utf-8")
+        return TenantId(text)
+    except (UnicodeDecodeError, TenantRefused):
+        raise TenantRefused(
+            f"{path} must hold exactly a tenant id and at most one line ending; it holds "
+            f"{_shown(data)}") from None
+
+
+def tenant_id_file_text(tenant_id: TenantId) -> str:
+    """What `agent/.tenant-id` holds for `tenant_id`, as `read_tenant_id_file` reads it back:
+    the id and one newline."""
+    return f"{TenantId(tenant_id)}\n"
 
 
 # ==========================================================================================
@@ -279,7 +621,7 @@ def create_tenant(root: Path, tenant_id: TenantId, *, io: Any = _real_io) -> Ten
     component below `root` at mkdir time, closing an O11a-vs-write-time symlink swap; the row
     itself is created through the complete-or-absent lane (J16/J63), never overwritten (O2,
     D1)."""
-    paths = TenantPaths(root, tenant_id)
+    paths = _TenantPaths(root, tenant_id)
     root = Path(root)
     refuse_foreign_data_root(root, paths.tenant_id)
     try:
@@ -301,16 +643,15 @@ def create_tenant(root: Path, tenant_id: TenantId, *, io: Any = _real_io) -> Ten
 
 def refuse_foreign_data_root(root: Path, tenant_id: TenantId) -> None:
     """O10: a tenant is created only into a FRESH data root — one whose only entry, if any, is
-    this tenant's own folder, containing nothing that is not its own row or (once the row
-    exists) whatever setup made since. §7 J08/J09 (human, RECORD MEANS THE TENANT): a
-    `<root>/<tenant_id>/` folder with NO record is an unfinished setup, completed by a re-run —
-    so while the row is absent, anything else inside the own folder is foreign too; once the
-    row exists, the folder's other contents (runs/, sessions/) are the tenant's own business and
-    never re-checked. Any OTHER entry at `root`, or any other id's folder however it is shaped,
-    is always foreign. The row's OWN name is exempt from the inner scan either way (J60: an
-    alias planted there is the guarded write's refusal to make, never this one's). Refuses,
-    naming what it found; called both by `create_tenant` and, directly, by setup — so a
-    caller that skips `create_tenant` on an idempotent re-run still meets this check."""
+    this tenant's own folder. While that folder has NO row it is an unfinished setup, and
+    anything in it the setup protocol did not sanction is foreign too: the protocol sanctions
+    exactly the NAME `knowledge` (the operator places the tenant's knowledge there before
+    setup, MF1 — what it is, acceptance judges) and the row's own name (J60: an alias planted
+    there is the guarded write's refusal to make, never this one's). Once the row exists the
+    folder's other contents (runs/, sessions/) are the tenant's own business and never
+    re-checked. Any OTHER entry at `root`, or any other id's folder however it is shaped, is
+    always foreign. Refuses, naming what it found; called both by `create_tenant` and,
+    directly, by setup — so a caller that skips `create_tenant` on a re-run still meets it."""
     tenant_id = TenantId(tenant_id)  # before anything under `root` is named with it
     if not root.is_dir():
         return
@@ -322,8 +663,9 @@ def refuse_foreign_data_root(root: Path, tenant_id: TenantId) -> None:
             "into a fresh data root")
     own = root / tenant_id
     if own.is_dir() and not (own / ROW_NAME).exists():
+        sanctioned = {ROW_NAME, "knowledge"}
         inside = [f"{tenant_id}/{name}" for name in sorted(p.name for p in own.iterdir())
-                 if name != ROW_NAME]
+                  if name not in sanctioned]
         if inside:
             raise TenantRefused(
                 f"the data root is not empty: {root} holds {inside} — a tenant is created only "
@@ -335,7 +677,10 @@ def require_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
     undecodable byte, a missing or non-string field), a directory or dangling link at the row's
     name (folded as corrupt/absent, §7 J22), or a row naming another tenant. Every refusal
     names the row's path."""
-    paths = TenantPaths(root, tenant_id)
+    return _read_row(_TenantPaths(root, tenant_id))
+
+
+def _read_row(paths: _TenantPaths) -> TenantRow:
     text, reason = _real_io.read_guarded(paths.row)
     if text is None:
         raise TenantRefused(f"{paths.row}: {reason}")
@@ -353,7 +698,8 @@ def resolve_data_root() -> Path:
     """The one path from `DEFENDER_DATA_ROOT` to an absolute, symlink-resolved root. No
     default: an unset or empty value is refused, naming the variable (settled by the user).
     Carries O13's widened learning-state-overlap refusal (moved here by fork J24: it must run
-    wherever the data root resolves, siblings included)."""
+    wherever the data root resolves, siblings included). Called ONCE, by an entry point; the
+    root is handed inward from there."""
     raw = os.environ.get(_DATA_ROOT_ENV, "")
     if not raw:
         raise TenantRefused(f"{_DATA_ROOT_ENV} is not set — there is no default data root")
@@ -376,31 +722,23 @@ def _refuse_widened_learning_state_overlap(data_root: Path) -> None:
             "state and tenant data must not share a tree")
 
 
-def request_tenant(raw: object) -> TenantId:
-    """The tenant a request names, or the refusal: `raw` parsed as a `TenantId`, the data root
-    resolved, and the tenant's row required. The ONE check every entry point runs on its
-    `--tenant` (run.py, held_out, generate_case), so none can accept a tenant another refuses."""
-    tenant_id = TenantId(raw)
-    require_tenant(resolve_data_root(), tenant_id)
-    return tenant_id
+def runs_base_for(tenant: Tenant) -> Path:
+    """The accepted tenant's runs base, `<root>/<tenant>/runs`."""
+    return tenant.runs
 
 
-def runs_base_for(tenant_id: TenantId) -> Path:
-    """`TenantPaths(resolve_data_root(), tenant_id).runs` — `<root>/<tenant>/runs`."""
-    return TenantPaths(resolve_data_root(), tenant_id).runs
-
-
-def tenant_of_run_dir(run_dir: Path) -> TenantId:
+def tenant_of_run_dir(data_root: Path, run_dir: Path) -> TenantId:
     """The tenant a run dir belongs to, learned from its source's HOST-ONLY runs-base record
     (never a stamp a box can write): the record at `run_dir.parent`, refused unless
-    `run_dir.parent` is exactly the CURRENT `runs_base_for(record.tenant_id)` — a run dir left
+    `run_dir.parent` is exactly that tenant's runs base under `data_root` — a run dir left
     over from before its tenant's current data root, or under an unrelated tree, is refused
-    rather than silently trusted."""
+    rather than silently trusted. The data root is guarded before the record is read."""
+    data_root = Path(data_root)
+    _refuse_unusable_data_root(data_root)
     run_dir = Path(run_dir)
     runs_base = run_dir.parent
     record = read_tenant(runs_base)
-    data_root = resolve_data_root()
-    expected = TenantPaths(data_root, record.tenant_id).runs
+    expected = _TenantPaths(data_root, record.tenant_id).runs
     if runs_base.resolve() != expected.resolve():
         raise TenantRefused(
             f"{runs_base} does not match the current runs base for tenant "
@@ -408,4 +746,3 @@ def tenant_of_run_dir(run_dir: Path) -> TenantId:
             "tenant's own tree")
     require_tenant(data_root, record.tenant_id)
     return record.tenant_id
-

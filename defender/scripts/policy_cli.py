@@ -6,7 +6,7 @@ Two subcommands:
     defender-policy explain <agent> '<command>' --run-dir <dir> [--defender-dir <tree>] [--json]
 
 Gather's verb grant belongs to a run and is projected from one tenant's table, so `gather` also
-takes `--tenant <id>` (and `--tenants-root <dir>`, default `<checkout>/knowledge/tenants`): the
+takes `--tenant <id>`, accepted under `$DEFENDER_DATA_ROOT` exactly as a run accepts it: the
 policy shown is the one a run for that tenant would compile.
 
 `<agent>` is a role name.
@@ -79,22 +79,22 @@ def _policy(
     )
 
 
-def _definition(
-    role: AgentRole, defender_dir: Path, tenants_root: Path | None, tenant: str | None,
-) -> AgentDefinition:
+def _definition(role: AgentRole, defender_dir: Path, tenant: str | None) -> AgentDefinition:
     """The role's definition as a run would bind it. Gather's grant is the named tenant's,
-    resolved the way a run does (and refused, like a run, when gather could query nothing);
-    other roles carry their own grant."""
+    accepted and resolved the way a run does (and refused, like a run, when gather could query
+    nothing); other roles carry their own grant."""
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
-    from defender._tenants import entry_tenant_args
+    from defender import _tenant
     from defender.runtime import run_tenant as run_tenant_mod
     from defender.runtime.driver import gather_def_for
 
     try:
+        if tenant is None:
+            raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
         run = run_tenant_mod.resolve_tenant(
-            *entry_tenant_args(defender_dir, tenants_root, tenant), defender_dir=defender_dir,
+            _tenant.resolve_data_root(), tenant, defender_dir=defender_dir,
             dispatches_lead_zero=False)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"defender-policy: {refusal}")
@@ -218,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     role = _role_for(args.agent)
-    defn = _definition(role, args.defender_dir, args.tenants_root, args.tenant)
+    defn = _definition(role, args.defender_dir, args.tenant)
     policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
     if args.cmd == "show":
         return _show(policy, args.agent, args.run_dir, args.defender_dir)

@@ -90,14 +90,21 @@ def _load_mapping(settings_dir: Path) -> dict[str, Any]:
     try:
         data = safe_load(raw.decode("utf-8"))
     except UnicodeDecodeError as e:
-        raise CaseTicketError(f"case-history mapping is not UTF-8: {e}") from e
+        raise CaseTicketError(f"case-history mapping {path} is not UTF-8: {e}") from e
     except yaml.YAMLError as e:
-        raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
+        raise CaseTicketError(f"case-history mapping {path} is not valid YAML: {e}") from e
     if not isinstance(data, dict):
         raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
     _check_lifecycle(data)
     _MAPPING_CACHE[path] = (raw, data)
     return copy.deepcopy(data)
+
+
+def check_mapping(settings_dir: Path) -> None:
+    """The tenant's case-history mapping parses and keeps its lifecycle invariant, or
+    `CaseTicketError` naming it — `tenant.py setup`'s settings-parse rule, since no run reads
+    the mapping before its post-run ticket write."""
+    _load_mapping(settings_dir)
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:

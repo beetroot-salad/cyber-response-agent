@@ -1,11 +1,12 @@
 """One run's tenant, resolved once at the entry point and handed inward as one value.
 
-The tenant's folder, grants and item 3's dispatch identity come from operator-editable files.
-Resolving them once, before the box and any model call, means every later frame sees the same
-values instead of re-reading files that may have changed.
+The accepted tenant (`_tenant.accept_tenant`), its grants and item 3's dispatch identity come
+from operator-editable files. Resolving them once, before the box and any model call, means
+every later frame sees the same values instead of re-reading files that may have changed.
 
-`resolve_run_tenant` holds the run-start refusals, each naming the file an operator edits; the
-caller decides how to report them.
+`resolve_run_tenant` is run start's readiness function: it holds the run-start refusals, each
+naming the file an operator edits. `tenant.py setup` calls the same function, so a tenant setup
+passes is one a run can start with.
 """
 from __future__ import annotations
 
@@ -15,10 +16,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender._corpus import QueryTemplate, iter_query_templates, query_catalog_dir
-from defender._tenant import TenantId, TenantRefused
-from defender._tenants import TenantDir
+from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
-from defender.runtime.verb_grant import VerbGrant
+from defender.runtime.verb_grant import GrantError, VerbGrant
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch
@@ -34,28 +34,37 @@ def table_pointer(tenant_id: str) -> str:
 
 
 @dataclasses.dataclass(frozen=True)
+class RunReadiness:
+    """What run start's readiness function establishes about a tenant's settings: its grants,
+    and item 3's dispatch identity (`None` for a run that dispatches no lead zero)."""
+
+    grants: RunGrants
+    correlation: CorrelationDispatch | None
+
+
+@dataclasses.dataclass(frozen=True)
 class RunTenant:
-    """One run's tenant: its folder, its grants, and item 3's dispatch identity.
+    """One run's tenant: the accepted `Tenant`, its grants, and item 3's dispatch identity.
 
     `correlation` is `None` for a run that dispatches no lead zero (a resumed sibling),
     otherwise the checked `CorrelationDispatch`, whose `system` is `None` when the table
     withholds the lead."""
 
-    dir: TenantDir
+    tenant: Tenant
     grants: RunGrants
     correlation: CorrelationDispatch | None
 
     @property
     def tenant_id(self) -> TenantId:
-        return self.dir.tenant_id
+        return self.tenant.id
 
     @property
     def settings(self) -> Path:
-        return self.dir.settings
+        return self.tenant.settings
 
     @property
     def agent(self) -> Path:
-        return self.dir.agent
+        return self.tenant.agent
 
     @property
     def table_pointer(self) -> str:
@@ -74,13 +83,16 @@ def correlation_dispatch(
     """Item 3's dispatch identity for one tenant: its `lead-zero.yaml` id, resolved against
     `templates` and checked for agreement with `grant`, its table's correlation grant.
     Raises `LeadZeroConfigError`, `CorrelationDispatchError` or `GrantError`, each naming the
-    file."""
+    file an operator edits — `lead-zero.yaml` — whichever of the three disagrees."""
     from defender.runtime import lead_zero as lead_zero_mod
     from defender.runtime.lead_zero_config import lead_zero_config_path, load_correlation_template
 
-    return lead_zero_mod.resolve_correlation_dispatch(
-        load_correlation_template(lead_zero_config_path(settings)), templates, grant,
-    )
+    config = lead_zero_config_path(settings)
+    template_id = load_correlation_template(config)
+    try:
+        return lead_zero_mod.resolve_correlation_dispatch(template_id, templates, grant)
+    except (lead_zero_mod.CorrelationDispatchError, GrantError) as disagreement:
+        raise type(disagreement)(f"{config}: {disagreement}") from disagreement
 
 
 def refusals() -> tuple[type[Exception], ...]:
@@ -89,58 +101,69 @@ def refusals() -> tuple[type[Exception], ...]:
     from defender.runtime.lead_zero import CorrelationDispatchError
     from defender.runtime.lead_zero_config import LeadZeroConfigError
     from defender.runtime.verb_dispositions import DispositionError
-    from defender.runtime.verb_grant import GrantError
 
     return (DispositionError, LeadZeroConfigError, CorrelationDispatchError, GrantError)
 
 
 def resolve_tenant(
-    tenants_root: Path, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
+    data_root: Path, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
     box_mounted: tuple[Path, ...] = (),
 ) -> RunTenant:
-    """`tenant_id` under `tenants_root`, checked whole, or `TenantRefused`. @owns tenant acceptance
+    """`tenant_id` under `data_root`, accepted and ready to run, or `TenantRefused`.
 
-    Every entry point accepts a tenant through here, so none accepts one another refuses:
-      * the folder and id rules (`_tenants.tenant_dir`);
-      * the folder is not inside a tree a box mounts (`defender_dir`, plus `box_mounted`,
-        e.g. the runs base): the settings half is host-only;
-      * the content rules (`resolve_run_tenant`)."""
-    from defender._tenants import tenant_dir
+    The acceptance is `_tenant.accept_tenant` (the one frame every entry point shares; the
+    settings half outside `defender_dir` and every `box_mounted` tree, e.g. the runs base),
+    then run start's readiness function over the accepted tenant's settings."""
+    tenant = accept_tenant(
+        data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
+    return run_tenant_for(
+        tenant, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
 
-    folder = tenant_dir(tenants_root, tenant_id)
-    for mounted in (Path(defender_dir), *box_mounted):
-        if folder.settings.is_relative_to(Path(mounted).resolve()):
-            raise TenantRefused(
-                f"tenant {tenant_id!r}'s folder {folder.settings.parent} is inside {mounted}, "
-                "which a box mounts — the settings half is host-only; keep the tenants root "
-                "outside the code tree and the runs base")
+
+def run_tenant_for(
+    tenant: Tenant, *, defender_dir: Path, dispatches_lead_zero: bool,
+) -> RunTenant:
+    """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal."""
+    ready = resolve_run_tenant_or_refuse(
+        tenant.settings, tenant_id=tenant.id, defender_dir=defender_dir,
+        dispatches_lead_zero=dispatches_lead_zero)
+    return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation)
+
+
+def resolve_run_tenant_or_refuse(
+    settings: Path, *, tenant_id: TenantId, defender_dir: Path, dispatches_lead_zero: bool,
+) -> RunReadiness:
+    """`resolve_run_tenant`, its refusal re-raised as the one tenant refusal: `TenantRefused`
+    naming the tenant and carrying the readiness function's own message verbatim."""
     try:
         return resolve_run_tenant(
-            folder, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
+            settings, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
     except refusals() as refusal:
         raise TenantRefused(f"tenant {tenant_id!r}: {refusal}") from refusal
 
 
 def resolve_run_tenant(
-    tenant: TenantDir, *, defender_dir: Path, dispatches_lead_zero: bool,
-) -> RunTenant:
-    """Load `tenant`'s grants and check them, before the run dir, the box and any model call.
+    settings: Path, *, defender_dir: Path, dispatches_lead_zero: bool,
+) -> RunReadiness:
+    """Run start's readiness function: load a tenant's grants from its `settings` folder and
+    check them, before the run dir, the box and any model call. `tenant.py setup` calls it too.
 
     Refused (one of `refusals()`): a table that does not load; one under which gather can
     query nothing (`require_gather_query` — a `health-check` grant alone reaches no data); and,
     when `dispatches_lead_zero`, a lead-zero config the catalog or the table disagrees with.
     `dispatches_lead_zero` is False for a resumed sibling: it dispatches no turn-0 lead, so a
     template demoted since the source run must not refuse it."""
-    grants = run_grants(tenant.settings)
+    grants = run_grants(settings)
     require_gather_query(grants)
     correlation = (
-        correlation_dispatch(tenant.settings, catalog_templates(defender_dir), grants.correlation)
+        correlation_dispatch(settings, catalog_templates(defender_dir), grants.correlation)
         if dispatches_lead_zero else None
     )
-    return RunTenant(dir=tenant, grants=grants, correlation=correlation)
+    return RunReadiness(grants=grants, correlation=correlation)
 
 
 __all__ = [
+    "RunReadiness",
     "RunTenant",
     "TenantRefused",
     "resolve_tenant",
@@ -148,5 +171,7 @@ __all__ = [
     "correlation_dispatch",
     "refusals",
     "resolve_run_tenant",
+    "resolve_run_tenant_or_refuse",
+    "run_tenant_for",
     "table_pointer",
 ]

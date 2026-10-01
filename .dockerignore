@@ -23,6 +23,9 @@
 # Tenant data (#1106): each tenant's settings and knowledge are deployment data, mounted into
 # the runtime container at run time and never baked into an image.
 knowledge/
+# The devcontainer's data root (#1120): every tenant's row, settings, knowledge and runs live
+# under /workspace/.defender-data, which is this repo root's .defender-data — inside the context.
+.defender-data
 
 # Transient / large local state — never needed to build the agent
 defender/learning/runs

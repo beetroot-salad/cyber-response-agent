@@ -194,10 +194,11 @@ def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
 
 def main(argv: list[str]) -> int:
     """#1078 D4/C27/N9: exactly one of a positional runs dir or `--tenant` is required — never
-    both, never neither — and the two branches are strictly separate. `--tenant` resolves
-    `runs_base_for(T)` (grammar, then `require_tenant`, each refusal surfaced verbatim); the
-    positional branch never touches `DEFENDER_DATA_ROOT` at all (§7 J50) — it scores exactly
-    the directory it is given. `--help` resolves neither."""
+    both, never neither — and the two branches are strictly separate. `--tenant` accepts the
+    tenant under `DEFENDER_DATA_ROOT` (`_tenant.accept_tenant`, the acceptance every entry point
+    shares, its refusal surfaced verbatim) and scores its runs base; the positional branch
+    never touches `DEFENDER_DATA_ROOT` at all (§7 J50) — it scores exactly the directory it is
+    given. `--help` resolves neither."""
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("runs_dir", nargs="?", default=None,
@@ -212,12 +213,15 @@ def main(argv: list[str]) -> int:
     if ns.tenant is not None:
         from defender import _tenant
 
+        from defender._paths import PATHS
+
         try:
-            tenant_id = _tenant.request_tenant(ns.tenant)
+            tenant = _tenant.accept_tenant(
+                _tenant.resolve_data_root(), ns.tenant, defender_dir=PATHS.defender_dir)
         except _tenant.TenantRefused as refused:
             print(f"[held_out] {refused}", file=sys.stderr)
             return 2
-        runs_dir = _tenant.runs_base_for(tenant_id)
+        runs_dir = _tenant.runs_base_for(tenant)
     else:
         runs_dir = Path(ns.runs_dir)
     if not runs_dir.is_dir():

@@ -231,7 +231,9 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
 def main() -> None:
     import argparse
 
-    from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
+    from defender import _tenant
+    from defender._paths import PATHS
+    from defender._tenants import add_tenant_arguments
 
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     ap.add_argument("system")
@@ -244,11 +246,14 @@ def main() -> None:
     print(f"validate_scaffold: {system}\n")
     report = Report()
     verbs = check_registry(report, defender, system)
-    # An unresolvable tenant only warns: the config check is advisory.
-
+    # A tenant acceptance refuses only warns: the config check is advisory. The tenant is the
+    # one under `$DEFENDER_DATA_ROOT`, never a folder found through `$DEFENDER_DIR`.
     try:
-        settings_dir = entry_tenant(defender, args.tenants_root, args.tenant).settings
-    except TenantDirError as refusal:
+        if args.tenant is None:
+            raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
+        settings_dir = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), args.tenant, defender_dir=PATHS.defender_dir).settings
+    except _tenant.TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")
     else:

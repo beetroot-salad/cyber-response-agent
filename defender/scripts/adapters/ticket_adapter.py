@@ -35,7 +35,9 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._paths import process_defender_dir
-from defender._tenants import TenantDirError, add_tenant_arguments, entry_tenant
+from defender import _tenant
+from defender._paths import PATHS
+from defender._tenants import add_tenant_arguments
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import AdapterFault, TransportFault, UpstreamFault
@@ -185,10 +187,19 @@ def build_parser():
 def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
     """The CLI's own VerbContext: as a process, it uses the ambient `os.environ` (right for a
     subprocess caller; the in-process driver passes the run's scrubbed env instead).
-    `settings_dir` is the tenant folder `main` resolved from its arguments."""
+    `settings_dir` is the settings half of the tenant `main` accepted."""
     run_dir = Path(os.environ.get("DEFENDER_RUN_DIR", Path.cwd()))
     return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ),
                        settings_dir=Path(settings_dir))
+
+
+def _accepted_settings(tenant_id: str | None) -> Path:
+    """The `--tenant`'s settings half, accepted under `$DEFENDER_DATA_ROOT` as a run accepts it
+    — never a folder found through `$DEFENDER_DIR` or the checkout."""
+    if tenant_id is None:
+        raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
+    return _tenant.accept_tenant(
+        _tenant.resolve_data_root(), tenant_id, defender_dir=PATHS.defender_dir).settings
 
 
 def main():
@@ -196,8 +207,8 @@ def main():
     args = parser.parse_args()
     defender_dir = process_defender_dir()
     try:
-        settings_dir = entry_tenant(defender_dir, args.tenants_root, args.tenant).settings
-    except TenantDirError as refusal:
+        settings_dir = _accepted_settings(args.tenant)
+    except _tenant.TenantRefused as refusal:
         print(f"error: {refusal}", file=sys.stderr)
         sys.exit(2)
     ctx = _cli_context(defender_dir, settings_dir)
