@@ -41,8 +41,13 @@ from pathlib import Path
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
-_VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+_VENV = _DEFENDER_DIR / ".venv"
+_VENV_PY = _VENV / "bin" / "python3"
+# Re-exec only from OUTSIDE the checkout's venv: an interpreter already running in it (by any
+# of its names, `python` or `python3`) is the venv, and a setup that re-execs itself spawns a
+# process DC2 says it never spawns.
+if (__name__ == "__main__" and _VENV_PY.is_file()
+        and Path(sys.prefix).resolve() != _VENV.resolve()):
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 # An operator command writes nothing it does not name, the checkout it runs from included: no

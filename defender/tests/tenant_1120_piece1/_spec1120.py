@@ -577,6 +577,11 @@ def tmp_checkout(dest: Path) -> Path:
     shutil.copytree(DEFENDER, dest / "defender", ignore=_CHECKOUT_IGNORE, symlinks=True)
     shutil.copytree(KNOWLEDGE_ROOT, dest / "knowledge", symlinks=True)
     git(dest, "init", "-q", "-b", "main")
+    # No background maintenance: a newer git's auto-maintenance after the commit repacks the
+    # loose objects in a detached process, racing every before/after census of this tree
+    # (phase E, PR #1157: CI's git packed them under a refused scaffold's census).
+    git(dest, "config", "maintenance.auto", "false")
+    git(dest, "config", "gc.auto", "0")
     git(dest, "add", "-A")
     git(dest, "commit", "-q", "-m", "checkout")
     return dest
