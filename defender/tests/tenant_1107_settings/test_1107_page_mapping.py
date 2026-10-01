@@ -3,7 +3,7 @@
 TWO SURFACES, ONE SLICE. The page half drives the REAL renderer: `run_common.visualize`, the
 `visualize` seam `run.main` keeps at its production default, handed run.py's own `--update-ticket`
 as an argument (PG-2a, coined keyword `update_ticket=` — `S.render_page`), and the standalone
-`visualize_run.render_and_mirror`, which is handed no flag. The observable is the rendered HTML: a
+`visualize_run.publish_page`, which is handed no flag. The observable is the rendered HTML: a
 marker in a planted receipt either reaches `runtime.html` or it does not, and "no ticket line" is
 the page being byte-equal to the page of the same run dir with no receipt at all (the base page is
 deterministic across renders and carries no ticket text — measured before writing).
@@ -48,6 +48,7 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender._run_handle import Run as _Run
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 #: The ticket system's gather grant — the table the screen tests' tenant carries, so the replayed
@@ -195,7 +196,7 @@ def test_o6_run_page_renders_receipt(tmp_path):
 
     run_dir = _seeded_run(tmp_path, "r-o6")
     # The page with no receipt and no flag — the standalone renderer, handed nothing.
-    visualize_run.render_and_mirror(run_dir)
+    visualize_run.publish_page(_Run.at(run_dir))
     bare = S.page_html(run_dir)
     assert _header(run_dir) in bare, "the standalone page did not render"
     assert "commented" not in bare, "the bare page already says 'commented'; pick another probe"
@@ -324,10 +325,10 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
     assert S.receipt(run_dir) is not None, "the flagged run left no receipt"
     flagged = S.page_html(run_dir)
     # The standalone render of the SAME dir, receipt still present: handed no flag.
-    visualize_run.render_and_mirror(run_dir)
+    visualize_run.publish_page(_Run.at(run_dir))
     standalone = S.page_html(run_dir)
     S.receipt_path(run_dir).unlink()
-    visualize_run.render_and_mirror(run_dir)
+    visualize_run.publish_page(_Run.at(run_dir))
     no_receipt = S.page_html(run_dir)
     assert _header(run_dir) in no_receipt, "the receipt-less page did not render"
     assert "SOC-FLAG-PG-1107" in flagged, "with --update-ticket the receipt's key is not shown"
@@ -361,7 +362,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
         for needle in needles:
             assert needle not in page, f"{label}: without --update-ticket {needle!r} rendered"
         at_name.unlink()
-        visualize_run.render_and_mirror(run_dir)
+        visualize_run.publish_page(_Run.at(run_dir))
         assert page == S.page_html(run_dir), (
             f"{label}: without --update-ticket the page is not the receipt-less page")
 
@@ -405,12 +406,12 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 
     # The same dir without the receipt, standalone: the page run.py rendered is exactly that.
     S.receipt_path(run_dir).unlink()
-    visualize_run.render_and_mirror(run_dir)
+    visualize_run.publish_page(_Run.at(run_dir))
     assert page == S.page_html(run_dir), "the page run.py rendered carries a ticket line"
 
     # Positive control, same planted run dir: handed run.py's flag as true, the line renders.
     _write_receipt(run_dir, forged)
-    run_common.visualize(run_dir, update_ticket=True)
+    run_common.visualize(_Run.at(run_dir), update_ticket=True)
     flagged = S.page_html(run_dir)
     assert "SOC-FORGED-BOX-1107" in flagged, (
         "handed the flag, the renderer still shows no ticket line — the absence above proves "
@@ -636,7 +637,7 @@ def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
                 alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
-                world=kw["world"],
+                world=kw["world"], episode=kw["episode"],
                 investigate=lambda **ikw: investigated.append(ikw) or {
                     "output": "spec1107", "requests": 0, "truncated_by": None})
 

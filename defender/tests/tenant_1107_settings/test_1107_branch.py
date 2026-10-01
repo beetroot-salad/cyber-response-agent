@@ -37,6 +37,7 @@ from defender.learning.branch.estate import registry
 from defender.runtime import run_tenant
 from defender.runtime.providers import api_key_vars
 from defender.scripts.adapters import confinement, elastic_adapter
+from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
 from defender.tests.e2e import _lead_zero_808 as LZ
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -665,7 +666,7 @@ def test_s60_launch_one_env_is_passthrough(tmp_path, data_root, monkeypatch):
 
     quiet_ep = T.episode(tmp_path / "quiet", root=tmp_path / "quiet" / "episodes")
     quiet = T.FakeSpawn()
-    cli.start_family(quiet_ep, ["b"], spawn=quiet, tenant_id=TID, tenants_root=root)
+    cli.start_family(Episode.open(quiet_ep), ["b"], spawn=quiet, tenant_id=TID, tenants_root=root)
     quiet_environ = dict(os.environ)
 
     exported = {"CMDB_URL_BASE": "http://gr7-env-cmdb.invalid:1",
@@ -674,7 +675,7 @@ def test_s60_launch_one_env_is_passthrough(tmp_path, data_root, monkeypatch):
         monkeypatch.setenv(key, value)
     loud_ep = T.episode(tmp_path / "loud", root=tmp_path / "loud" / "episodes")
     loud = T.FakeSpawn()
-    cli.start_family(loud_ep, ["b"], spawn=loud, tenant_id=TID, tenants_root=root)
+    cli.start_family(Episode.open(loud_ep), ["b"], spawn=loud, tenant_id=TID, tenants_root=root)
     loud_environ = dict(os.environ)
 
     assert len(quiet.launches) == 1, (quiet.launches, loud.launches)

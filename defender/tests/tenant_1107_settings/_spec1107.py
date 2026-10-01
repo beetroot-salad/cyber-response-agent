@@ -365,9 +365,10 @@ def review_run(family: Any, episode_dir: Path, record: Any, *, adapters: Any, do
                invoke: Any, runs_base: Path) -> dict:
     """`review.review` over one episode, handed the episode tenant's record under the coined
     `tenant=` keyword (RECORD_FIELD), where the settings folder went (`settings_dir=`)."""
-    return mod("learning.branch.review").review(
-        family, episode_dir=Path(episode_dir), adapters=adapters, door=door, invoke=invoke,
-        runs_base=Path(runs_base), **{RECORD_FIELD: record})
+    with mod("_episode_handle").Episode.open(Path(episode_dir)) as episode:
+        return mod("learning.branch.review").review(
+            family, episode=episode, adapters=adapters, door=door, invoke=invoke,
+            runs_base=Path(runs_base), **{RECORD_FIELD: record})
 
 
 def launch_branch(src: Path, tenants_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
@@ -621,13 +622,13 @@ class RunRecorder:
         self.order.append("preflight")
         return 0
 
-    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Path:
+    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
         self.order.append("materialize")
         run_dir = self.run_dir_at
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "alert.json").write_bytes(Path(alert).read_bytes())
         seed_session_store(run_dir)
-        return run_dir
+        return mod("_run_handle").Run.at(run_dir)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
@@ -722,7 +723,7 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
     """Render the page the way run.py does after teardown — `run_common.visualize`, the default
     `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
     coined keyword `update_ticket=`), and return the page's HTML."""
-    mod("run_common").visualize(Path(run_dir), update_ticket=update_ticket)
+    mod("run_common").visualize(mod("_run_handle").Run.at(Path(run_dir)), update_ticket=update_ticket)
     return page_html(run_dir)
 
 
