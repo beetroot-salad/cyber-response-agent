@@ -26,6 +26,7 @@ adapter allowlist.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import tempfile
@@ -34,10 +35,11 @@ from defender._model import model
 from pathlib import Path
 from typing import Annotated, Any
 
-import yaml
+
+from defender import _yaml
 from pydantic import SkipValidation
 
-from defender._io import read_jsonl_rows, read_jsonl_rows_report, write_guarded
+from defender._io import read_jsonl_rows, read_jsonl_rows_report
 from defender.run_common import DEFENDER_DIR, run_env
 from defender.runtime.branch._family import (
     BASE_ROLE,
@@ -55,7 +57,7 @@ from .estate.applier import WorldApplier
 from .estate.lookups import apply_patches
 from .estate.registry import refuse_a_foreign_world_view
 from .estate.stagers.dispatch import STAGERS
-from defender._episode_paths import EpisodePaths
+from defender._episode_handle import Episode
 
 from .ledger import (
     BASE,
@@ -110,28 +112,18 @@ class ScratchLedger(Ledger):
         yield from read_jsonl_rows(self.base_path)
 
 
-def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
-                   root: Path | None = None) -> ScratchLedger:
+def scratch_ledger(scratch: Episode, *, world_label: str = "review") -> ScratchLedger:
     """A ledger for the replay: this world's own rows over a base file that holds nothing.
 
-    Lives outside the episode (`root`, or a fresh temp dir), because the episode's `served/` is
-    the family's recording and the replay is not part of it. The temp dir is named after the
-    episode so a leaked one is diagnosable.
+    `scratch` is the review's own scratch episode, outside the episode under review, because
+    that episode's `served/` is the family's recording and the replay is not part of it. One
+    scratch serves every world of a review: each world gets its own file over the one base.
     """
-    episode_dir = Path(episode_dir)
-    if root is None:
-        root = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
-    scratch = EpisodePaths(root)
-    served = scratch.served
-    served.mkdir(  # lint-unguarded-tree-write: ok — a fresh host-made scratch tree under the system temp dir, never a box mount and never the episode's own served/  # noqa: E501
-        parents=True, exist_ok=True)
-    base = scratch.served_base
-    if not base.exists():
-        # Created empty: `Ledger.__post_init__` refuses a missing base, and that refusal should
-        # keep meaning what it means for a real run.
-        base.write_text(  # lint-unguarded-tree-write: ok — the same fresh host-made scratch tree as the mkdir above; no box mounts it and no model can plant a component in it  # noqa: E501
-            "", encoding="utf-8")
-    book = ScratchLedger(path=scratch.served_world(world_label), base_path=base)
+    # Created empty (once; a later world finds it): `Ledger.__post_init__` refuses a missing
+    # base, and that refusal should keep meaning what it means for a real run.
+    with contextlib.suppress(FileExistsError):
+        scratch.served_base.create("")
+    book = ScratchLedger.for_world(scratch, world_label)
     if any(book.base_rows()):
         # A base holding rows (the episode's capture, or a reused scratch tree) would answer every
         # captured key from the recording and the review would agree with itself.
@@ -200,7 +192,15 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
     if world is not None:
         refuse_a_foreign_world_view(world, system, verb, params, ctx)
     context = ctx
-    book = ledger if ledger is not None else scratch_ledger(episode_dir)
+    if ledger is None:
+        # A replay of its own: a scratch episode for this one call, removed with it.
+        with tempfile.TemporaryDirectory(
+                prefix=f"defender-review-{Path(episode_dir).name}-") as tmp, \
+                Episode.create(Path(tmp) / "scratch") as scratch:
+            return replay_one(call, episode_dir=episode_dir, adapters=adapters, world=world,
+                              applier=applier, ledger=scratch_ledger(scratch), ctx=ctx,
+                              captured=captured)
+    book = ledger
     prepared = dict(params) if world is None else applier.prepare(
         system, verb, dict(params), world, context)
     asked = dict(params) if prepared != params else None
@@ -228,7 +228,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
 # ---------------------------------------------------------------------------------------
 
 
-def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # noqa: PLR0913 — the review's injected estate plus the episode's tenant folder and runs base
+def review(family: Family, *, episode: Episode, adapters: Any, door: Any,  # noqa: PLR0913 — the review's injected estate plus the episode's tenant folder and runs base
            invoke: Any, settings_dir: Path, runs_base: Path, write: Any = None) -> dict:
     """Replay the capture through every world, judge each, and write `review.yaml`.
 
@@ -241,36 +241,34 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # no
     tests can observe the single write. `settings_dir` is the episode tenant's `settings/`
     folder, carried by the replay's verb context.
     """
-    write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
-    episode_dir = Path(episode_dir)
+    write = write if write is not None else episode.review.write  # lint-default: ok — DI seam owning its own default
+    episode_dir = episode.dir
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
     context = verb_context(episode_dir, settings_dir, runs_base=runs_base)
     token = episode_token_for(family.episode_id)
     drifted = frozenset(_capture_drift(rows))
-    scratch = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
+    # The temp dir is named after the episode so a leaked one is diagnosable.
+    scratch_root = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))
     try:
-        worlds: dict[str, dict] = {}
-        control: list[str] = []
-        deps = _Deps(adapters=adapters, door=door, invoke=invoke, ctx=context,
-                     scratch=scratch, token=token, drifted=drifted, captured_rows=rows,
-                     base_memo={})
-        for world in _control_first(family):
-            result = _review_world(
-                world, family=family, episode_dir=episode_dir, rows=rows, control=control,
-                deps=deps)
-            if world.role == BASE_ROLE:
-                control = list(result["consistency"]["control_mismatch_keys"])
-            worlds[world.world_id] = result
+        with Episode.create(scratch_root / "scratch") as scratch:
+            worlds: dict[str, dict] = {}
+            control: list[str] = []
+            deps = _Deps(adapters=adapters, door=door, invoke=invoke, ctx=context,
+                         scratch=scratch, token=token, drifted=drifted, captured_rows=rows,
+                         base_memo={})
+            for world in _control_first(family):
+                result = _review_world(
+                    world, family=family, episode_dir=episode_dir, rows=rows, control=control,
+                    deps=deps)
+                if world.role == BASE_ROLE:
+                    control = list(result["consistency"]["control_mismatch_keys"])
+                worlds[world.world_id] = result
     finally:
         # The scratch rows are review reads, not run evidence; left behind they would look like
         # an episode's `served/` somewhere no reader expects one.
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(scratch_root, ignore_errors=True)
     record = _record(family, worlds=worlds, unreadable=unreadable)
-    # `write_guarded`, not `write_atomic` (the same lane): `write_atomic` marks queue-file
-    # rewriters for a census, and a review record is not a queue.
-    write(
-        EpisodePaths(episode_dir).review,
-        yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
+    write(_yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
 
 
@@ -282,7 +280,8 @@ class _Deps:
     door: Any
     invoke: Any
     ctx: Any
-    scratch: Path
+    #: The review's one scratch `Episode`, every world's replay ledger in it.
+    scratch: Any
     token: str
     #: The keys the capture itself answers two ways — episode-wide, so derived once.
     drifted: frozenset[str]
@@ -316,7 +315,7 @@ def _review_world(world: World, *, family: Family, episode_dir: Path, rows: Sequ
     # No `patches=`: `WorldApplier.patch_table` reads the world's own overlay, so a table passed
     # here would be an unconsulted second copy. The sibling path (`run.py`) builds it bare too.
     applier = WorldApplier()
-    ledger = scratch_ledger(episode_dir, world_label=world.world_id, root=deps.scratch)
+    ledger = scratch_ledger(deps.scratch, world_label=world.world_id)
     is_control = world.role == BASE_ROLE
 
     def replay(call: tuple[str, str, dict], captured: str | None = None) -> Replay:

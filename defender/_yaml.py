@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping, MutableSequence, MutableSet
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -27,8 +27,8 @@ def duplicate_key_paths(text: str) -> tuple[str, ...]:
         return ()
 
     found: list[str] = []
-    # Iterative with an identity-keyed visited set: documents can be deeply nested, and a
-    # self-referencing anchor (`a: &x {b: *x}`) composes into a cyclic node graph.
+    # Iterative: documents can be deeply nested. `compose` refuses aliases, so the node graph is
+    # a tree; the visited set is a guard, not a requirement.
     stack: list[tuple[Any, str]] = [(root, "")]
     seen_nodes: set[int] = set()
     # One constructor for the whole walk, keeping PyYAML's memo table across keys.
@@ -101,9 +101,83 @@ def _resolved_key(key_node: Any, constructor: Any) -> Any:
     return value
 
 
+class AliasRefused(yaml.YAMLError):
+    """A document reused a node by alias, or a value shares a part. Every YAML document the
+    tree reads must be a tree."""
+
+
+class _TreeLoader(yaml.SafeLoader):
+    """The safe loader, refusing any alias (a `<<` merge included) the moment it meets one.
+
+    Loading an alias is cheap — the library shares the node rather than copying it — so the
+    cost lands later, on whatever walks the result as a tree: a few hundred bytes of aliases
+    stand for billions of values to an encoder, a comparison or a cleaner, and an alias can
+    close a cycle that crashes the first recursive walker. Refused before anything is built."""
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.AliasEvent):
+            event = self.peek_event()
+            raise AliasRefused(
+                f"line {event.start_mark.line + 1}: the document reuses a node by alias "
+                f"(*{event.anchor}); write the value out in full")
+        return super().compose_node(parent, index)
+
+
 def safe_load(text: str) -> Any:
+    """`text` as a tree of plain values, or a `YAMLError` — every YAML read in the tree.
+
+    Safe tags only, and no aliases (`AliasRefused`): every caller, and everything that walks
+    the result, may assume no value is shared or cyclic. Interpreter errors a load can raise
+    arrive as `YAMLError` too (`_construction_errors_as_yaml_errors`)."""
     with _construction_errors_as_yaml_errors():
-        return yaml.safe_load(text)
+        return yaml.load(text, Loader=_TreeLoader)  # noqa: S506 — a SafeLoader subclass
+
+
+class _TreeDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def safe_dump(data: Any, **kwargs: Any) -> str:
+    """`yaml.safe_dump` that never writes an alias — every YAML write in the tree.
+
+    PyYAML's dumper writes `&id001`/`*id001` whenever a value holds one object twice, the
+    ordinary result of composing a document in Python, and `safe_load` refuses those. Here a
+    shared value is written out in full each time. A cyclic value cannot be written at all: it
+    is `AliasRefused`, not a `RecursionError`."""
+    try:
+        return yaml.dump(data, Dumper=_TreeDumper, **kwargs)
+    except RecursionError as e:
+        raise AliasRefused("the value holds itself (or nests too deep to write)") from e
+
+
+def refuse_shared(value: Any) -> None:
+    """Refuse, as `AliasRefused`, a value whose parts are shared or cyclic — what `safe_load`
+    would have refused as an alias — for a document that arrives already parsed.
+
+    Iterative and identity-keyed, so a cycle or a deep value ends the walk rather than the
+    stack. Only mutable containers count: a shared string, number or tuple is the same value
+    wherever it appears."""
+    seen: set[int] = set()
+    stack: list[Any] = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Mapping):
+            children: Iterable[Any] = node.values()
+        elif isinstance(node, (list, tuple, set, frozenset)):
+            children = node
+        else:
+            continue
+        # Only a mutable container can be shared in a way that matters: Python hands back the
+        # one empty tuple wherever one appears. An immutable one is still walked, so a list
+        # reached twice through it is found.
+        if isinstance(node, (MutableMapping, MutableSequence, MutableSet)):
+            if id(node) in seen:
+                raise AliasRefused(
+                    "the document holds one value in two places (or inside itself); write each "
+                    "value out in full")
+            seen.add(id(node))
+        stack.extend(children)
 
 
 class Readings(NamedTuple):
@@ -121,18 +195,18 @@ def safe_load_typed_and_spelled(text: str) -> Readings:
     becomes `493`, `yes` becomes `True`), so text-containment checks must scan the spelling or
     their result depends on whether the model quoted a value.
 
-    `spelled` has the same shape as `typed` (containers, keys, aliases, cycles) and differs
+    `spelled` has the same shape as `typed` (containers and keys; `compose` refuses aliases, so
+    there are no shared or cyclic parts) and differs
     only where a scalar is a value (a mapping's value or a sequence's item): there it is the
     source text, with nulls as their spelling (`~` is `"~"`, empty is `""`). Keys stay typed,
     since text keys would merge `1:` with `'1':`; a bare scalar document stays typed too. One
     tree guarantees the checked values are the values of the structure shown, and building
     the typed half first means whatever `safe_load` refuses is refused here.
 
-    Edges: `!!omap`/`!!pairs`/`!!set` members stay typed, and a scalar aliased from a mapping
-    key is constructed once, as the key.
+    Edges: `!!omap`/`!!pairs`/`!!set` members stay typed.
     """
     with _construction_errors_as_yaml_errors():
-        # This module's `compose`, which pins the safe loader.
+        # This module's `compose`, which pins `safe_load`'s loader.
         root = compose(text)
         if root is None:
             return Readings(None, None)
@@ -185,13 +259,14 @@ def _construction_errors_as_yaml_errors() -> Iterator[None]:
 
 
 def compose(text: str) -> Any:
-    """`text`'s node tree under the safe loader — the last representation where repeated keys
-    still exist.
+    """`text`'s node tree under `safe_load`'s loader — the last representation where repeated
+    keys still exist.
 
-    `SafeLoader` explicitly (`yaml.compose` defaults to the full `Loader`): untrusted text only
-    ever meets the safe loader. Raises what `yaml.compose` raises, `RecursionError` included.
+    The tree loader explicitly (`yaml.compose` defaults to the full `Loader`): untrusted text
+    only ever meets the safe loader, and an alias is `AliasRefused` here as in `safe_load`.
+    Raises what `yaml.compose` raises, `RecursionError` included.
     """
-    return yaml.compose(text, Loader=yaml.SafeLoader)
+    return yaml.compose(text, Loader=_TreeLoader)
 
 
 def reject_unread_keys(

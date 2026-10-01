@@ -20,12 +20,13 @@ from typing import Any
 
 import yaml
 
-from defender._io import bind, guarded_mkdir, read_guarded, read_jsonl_rows_report, write_guarded
-from defender._run_paths import artifact_dir, artifact_file
+from defender._io import (
+    ENTRY_FILE, Bound, bind, guarded_mkdir, read_jsonl_rows_report, write_guarded)
+from defender._run_paths import artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
-from defender._episode_paths import LAYOUT, EpisodePaths
+from defender._episode_paths import LAYOUT
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,
     learning_state_root,
@@ -334,27 +335,19 @@ class DrawsSkipReport:
     skipped: int = 0
 
 
-def draws_on_disk_report(draw_dir: Path) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
+def draws_on_disk_report(
+    view: Bound, label: str,
+) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
     """`draws_on_disk` plus what it skipped, classified."""
     report = DrawsSkipReport()
-    # `artifact_dir`, not `is_dir()`: a planted link would queue another tree's draws as ours.
-    if not artifact_dir(draw_dir):
-        return {}, report
+    # Walked no-follow from the episode root: a link at `worlds/`, `worlds/<label>` or `judge/`
+    # lists nothing, so another tree's draws are never queued as ours.
+    bound = view.under(LAYOUT.world(label).draws)
+    listed = bound.entries().entries or {}
     out: dict[int, dict[str, Any]] = {}
-    for path in draw_dir.glob("*.yaml"):
-        # `isdigit()` alone admits superscripts and non-ASCII digits, which `int()` rejects.
-        if not (path.stem.isascii() and path.stem.isdigit()):
-            report.unreadable += 1
-            continue
-        # Canonical spelling only: `01.yaml` and `1.yaml` would collapse onto one key over an
-        # unordered glob, making `finding_id` (the idempotency key) nondeterministic.
-        if path.stem != str(int(path.stem)):
-            report.skipped += 1
-            continue
-        # Screened leaf read: a linked, hard-linked or undecodable entry counts as unreadable.
-        text, _refusal = read_guarded(path)
+    for name in sorted(n for n in listed if n.endswith(".yaml")):
+        text = _draw_text(bound, name, listed[name], report)
         if text is None:
-            report.unreadable += 1
             continue
         try:
             # `_yaml.safe_load` converts a deep-nesting `RecursionError` into a handled class.
@@ -363,19 +356,40 @@ def draws_on_disk_report(draw_dir: Path) -> tuple[dict[int, dict[str, Any]], Dra
             report.unreadable += 1
             continue
         if isinstance(doc, dict):
-            out[int(path.stem)] = doc
+            out[int(Path(name).stem)] = doc
         else:
             report.unreadable += 1
     return dict(sorted(out.items())), report
 
 
-def draws_on_disk(draw_dir: Path) -> dict[int, dict[str, Any]]:
-    """Every draw document in `draw_dir`, keyed by draw index, in numeric order.
+def _draw_text(bound: Bound, name: str, kind: str, report: DrawsSkipReport) -> str | None:
+    """One listed `<n>.yaml`'s text, or `None` with the reason counted on `report`."""
+    stem = Path(name).stem
+    # `isdigit()` alone admits superscripts and non-ASCII digits, which `int()` rejects.
+    if not (stem.isascii() and stem.isdigit()):
+        report.unreadable += 1
+        return None
+    # Canonical spelling only: `01.yaml` and `1.yaml` would collapse onto one key over an
+    # unordered listing, making `finding_id` (the idempotency key) nondeterministic.
+    if stem != str(int(stem)):
+        report.skipped += 1
+        return None
+    # A link, directory or other non-file entry is unreadable, judged without following it;
+    # the no-follow read then refuses a hard link and undecodable bytes.
+    text = bound.read(name).text if kind == ENTRY_FILE else None
+    if text is None:
+        report.unreadable += 1
+    return text
+
+
+def draws_on_disk(view: Bound, label: str) -> dict[int, dict[str, Any]]:
+    """Every draw document of world `label` (`worlds/<label>/judge/`) under the episode root
+    `view` reads, keyed by draw index, in numeric order.
 
     The one reader of `worlds/<X>/judge/<n>.yaml`, shared with the episode page so both join
     the same rows. Used when the caller did not just produce the draws; one that did passes them
     as `drawn=` so no file this pass did not write is picked up."""
-    return draws_on_disk_report(draw_dir)[0]
+    return draws_on_disk_report(view, label)[0]
 
 
 def enqueue(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
@@ -555,6 +569,17 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of
     A blocked defender lane (`discard`/`corpus-contradiction`) does not stop the world lane,
     whose findings are about the instrument, not the defender."""
     episode_dir = Path(episode_dir)
+    # One root handle for the pass's reads: the alert, and any draws read back from disk.
+    with bind(episode_dir) as view:
+        return _enqueue_report(view, episode_dir, grade, queue_dir=queue_dir, drawn=drawn,
+                               family_drawn=family_drawn)
+
+
+def _enqueue_report(  # noqa: C901, PLR0912, PLR0915 — see `enqueue_report`
+    view: Bound, episode_dir: Path, grade: Any, *, queue_dir: Path | None,
+    drawn: dict[str, dict[int, dict[str, Any]]] | None,
+    family_drawn: dict[int, dict[str, Any]] | None,
+) -> EnqueueReport:
     verdict_word = grade["verdict_word"] if isinstance(grade, dict) else grade.verdict_word
     world_rows = grade["worlds"] if isinstance(grade, dict) else grade.worlds
     # Deduped: a box-writable `judge.yaml` can name a world on two rows, which would file every
@@ -567,8 +592,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of
     run_id = episode_dir.name
     # The one rule for which world's alert is the episode's, shared with the orchestration so
     # the rule key and the sibling union agree.
-    with bind(episode_dir) as bound:
-        alert_rule_key = derive_alert_rule_key(episode_alert(bound, graded_labels))
+    alert_rule_key = derive_alert_rule_key(episode_alert(view, graded_labels))
     defender_blocked = defender_lane_blocked(verdict_word)
 
     defender_rows: list[dict[str, Any]] = []
@@ -594,7 +618,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of
     # never shadows it in the channel's written order. `is None`, not truthiness: an empty map
     # means this pass produced no family draw, and must not fall back to leftovers on disk.
     family_documents = (
-        draws_on_disk(EpisodePaths(episode_dir).world("family").draws)
+        draws_on_disk(view, "family")
         if family_drawn is None else family_drawn)
     for draw, draw_doc in family_documents.items():
         findings = draw_doc.get("findings") or []
@@ -618,7 +642,7 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of
         # Only `drawn is None` falls back to disk: an empty or label-less map means this pass
         # produced no draw, and an earlier attempt's leftovers must not be queued as its own.
         documents = (drawn.get(label) or {}) if drawn is not None else draws_on_disk(
-            EpisodePaths(episode_dir).world(label).draws)
+            view, label)
         for draw, draw_doc in documents.items():
             findings = draw_doc.get("findings") or []
             for index, finding in enumerate(findings):

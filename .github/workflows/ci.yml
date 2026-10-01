@@ -757,6 +757,14 @@ jobs:
       - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py
 
+      # Every YAML read and write goes through defender/_yaml.py (#1127): its readers refuse
+      # aliases (a few hundred bytes of them stand for billions of values to whatever walks the
+      # result, and one can close a cycle) and its writer never emits one. A raw PyYAML load
+      # accepts aliases again; a raw dump writes the `&id001` the readers refuse. The baseline
+      # ships EMPTY.
+      - name: Raw-YAML gate (one YAML reader and writer, #1127 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_raw_yaml.py
+
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
       # interpreters of report.md's disposition each looked fine alone; they disagreed only

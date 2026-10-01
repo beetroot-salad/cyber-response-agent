@@ -39,9 +39,9 @@ import yaml
 
 from defender import _yaml
 from defender._clock import now_iso
+from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
-from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import artifact_file
+from defender._io import Bound, bind
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
 from defender.scripts.adapters.elastic_adapter import (
@@ -98,6 +98,11 @@ class StagingRefused(Exception):
     from an infrastructure fault. Every guard is a pre-flight check on the name, run before a
     connection is opened, so a caller meeting this knows nothing was half-created.
     """
+
+
+class TeardownUnrecorded(StagingRefused):
+    """A teardown failure the review record could not take (the record is refused): the names
+    left live are in this message and nowhere else."""
 
 
 # ---------------------------------------------------------------------------------------
@@ -330,25 +335,18 @@ def read_staged(bound: Bound) -> list[dict] | None:
     return list(rows)
 
 
-def record_staged(episode_dir: Path, row: Mapping[str, Any]) -> dict:
-    """Append one row to `staged.yaml`, flushed and fsynced before returning.
+def record_staged(episode: Episode, row: Mapping[str, Any]) -> dict:
+    """Append one row to `staged.yaml`, on disk before returning.
 
     This file is the only record that a cluster write was about to happen, so a row still in a
     userspace buffer when the launcher is killed is a live name nothing on disk names: teardown
     would miss it and the next sweep would refuse the episode. Append-only — rewriting the
     whole list would open a window where the record is shorter than the cluster.
     """
-    path = staged_path(episode_dir)
-    # The episode dir is box-writable, so its components are judged rather than followed: a
-    # symlinked `episodes/<id>/` would put the record where teardown won't look.
-    guarded_mkdir(path.parent, base=path.parent.parent)
-    entry = yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
-    # `open_guarded` rather than `write_guarded(mode="append")`, because the append lane does
-    # not fsync. Both apply the same alias refusal.
-    with open_guarded(path, "a") as handle:
-        handle.write(entry)
-        handle.flush()
-        os.fsync(handle.fileno())
+    entry = _yaml.safe_dump([dict(row)], sort_keys=True, default_flow_style=False)
+    # The durable append: the record and its entry in the episode dir are synced before this
+    # returns (the episode dir's own entry was synced when `Episode.create` made it).
+    episode.staged.append_durable(entry)
     return dict(row)
 
 
@@ -409,7 +407,7 @@ def _plan_world(world: World, *, token: str,
     return plans
 
 
-def stage_world(world: World, *, episode_dir: Path, episode_token: str,
+def stage_world(world: World, *, episode: Episode, episode_token: str,
                 configured_patterns: Sequence[str], door: Any) -> list[dict]:
     """Create this world's corpus on the cluster, recording every name before it exists.
 
@@ -430,10 +428,10 @@ def stage_world(world: World, *, episode_dir: Path, episode_token: str,
                        configured_patterns=configured_patterns, door=door)
     rows: list[dict] = []
     for plan in plans:
-        rows.append(record_staged(episode_dir, _row(
+        rows.append(record_staged(episode, _row(
             world=token, name=plan.inject, kind=KIND_INDEX, derived_from=plan.pattern)))
         door.create_index(plan.inject, docs=plan.docs)
-        rows.append(record_staged(episode_dir, _row(
+        rows.append(record_staged(episode, _row(
             world=token, name=plan.view, kind=KIND_ALIAS, derived_from=plan.pattern)))
         over = [*door.resolve(plan.pattern), plan.inject]
         # The exclusion applies to the base only; the injection index is exempt.
@@ -447,17 +445,17 @@ def stage_world(world: World, *, episode_dir: Path, episode_token: str,
 # ---------------------------------------------------------------------------------------
 
 
-def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -> list[str]:
+def teardown(episode: Episode, *, door: Any) -> list[str]:
     """Remove exactly the names `staged.yaml` records, newest first, verifying each is gone.
 
     Newest first because the record is in dependency order (index before the alias spanning
     it), so no alias is ever left over a deleted member. Only recorded names are touched —
     teardown never lists or globs. A delete that returns but leaves the name present is the
     failure that matters (the next episode reusing the token finds a live alias), so every
-    failure is written into the review record and then raised.
+    failure is written into the review record (or, when that record is refused, carried in the
+    raised failure) and then raised.
     """
-    with bind(Path(episode_dir)) as bound:
-        rows = read_staged(bound) or []
+    rows = read_staged(episode.view()) or []
     failures: list[dict] = []
     for row in reversed(rows):
         name = str(row.get("name") or "")
@@ -471,41 +469,58 @@ def teardown(episode_dir: Path, *, door: Any, review_path: Path | None = None) -
         except Exception as bad:  # noqa: BLE001 — every fault is collected and raised below
             failures.append({"name": name, "detail": f"{type(bad).__name__}: {bad}"})
     if failures:
-        _record_teardown_failure(failures, review_path)
-        raise StagingRefused(
-            "teardown did not verify every staged name gone: "
-            + "; ".join(f"{f['name']} ({f['detail']})" for f in failures))
+        unrecorded = _record_teardown_failure(failures, episode)
+        message = ("teardown did not verify every staged name gone: "
+                   + "; ".join(f"{f['name']} ({f['detail']})" for f in failures) + unrecorded)
+        raise TeardownUnrecorded(message) if unrecorded else StagingRefused(message)
     return [str(r.get("name")) for r in rows]
 
 
-def _record_teardown_failure(failures: list[dict], review_path: Path | None) -> None:
-    """Put the failure in the review record before raising it.
+def _record_teardown_failure(failures: list[dict], episode: Episode) -> str:
+    """Put the failure in the review record before raising it; `""`, or — when the record is
+    refused — the sentence the raised failure carries instead, so the names are never lost.
 
     The names are still live on the cluster and the review's reader is who has to remove them.
     Merged rather than rewritten, because the review step has already written its verdicts.
     """
-    if review_path is None:
-        return
-    merge_review(Path(review_path), "teardown",
-                 {"ok": False, "failures": failures,
-                  "names": [f["name"] for f in failures], "at": now_iso()})
+    try:
+        merge_review(episode, "teardown",
+                     {"ok": False, "failures": failures,
+                      "names": [f["name"] for f in failures], "at": now_iso()})
+    except StagingRefused as unmerged:
+        return f" — and the review record was not updated with them ({unmerged})"
+    return ""
 
 
-def merge_review(path: Path, key: str, block: dict) -> None:
+def merge_review(episode: Episode, key: str, block: dict) -> None:
     """Merge one block into the review record, leaving everything else it holds.
 
     The single merger for `review.yaml` outside the review itself, shared by teardown and
     `cli._record_episode_outcome` so both write the file with one serialisation.
 
-    `artifact_file`, not `is_file()`: the episode dir is box-writable, and `is_file()` follows a
-    link planted at the name, merging into and overwriting whatever it points at.
+    Read through the episode's view and replaced through its handle. An absent record starts
+    empty, and one that does not parse as a mapping is replaced (as it always was). A REFUSED
+    record — a link, hard link or other non-plain entry at the name, undecodable bytes, or a
+    document holding a YAML alias (#1127) — is `StagingRefused` and is left exactly as it is:
+    replacing it would drop whatever it holds.
     """
-    path = Path(path)
+    rec = episode.view().read(LAYOUT.review)
+    if rec.text is None and not rec.absent:
+        raise StagingRefused(
+            f"{LAYOUT.review} is refused ({rec.reason}); the {key!r} block was not merged, "
+            "since replacing a record this code cannot read drops whatever it holds")
     doc: dict[str, Any] = {}
-    if artifact_file(path):
+    if rec.text is not None:
         try:
-            loaded = _yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
+            loaded = _yaml.safe_load(rec.text)
+        except _yaml.AliasRefused as refused:
+            # A document, refused for its aliases (the pre-#1127 writer wrote them): replacing
+            # it would drop every other block it holds, as for any refused record.
+            raise StagingRefused(
+                f"{LAYOUT.review} is refused ({refused}); the {key!r} block was not merged, "
+                "since replacing a record this code cannot read drops whatever it holds"
+            ) from refused
+        except yaml.YAMLError:
             loaded = None
         if isinstance(loaded, dict):
             doc = loaded
@@ -514,11 +529,8 @@ def merge_review(path: Path, key: str, block: dict) -> None:
         held.update(block)
     else:
         doc[key] = dict(block)
-    guarded_mkdir(path.parent, base=path.parent.parent)
-    write_guarded(
-        path,
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False),
-        encoding="utf-8")
+    episode.review.write(
+        _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
 
 
 def sweep_glob(episode_token: str) -> str:
@@ -849,6 +861,7 @@ __all__ = [
     "KIND_ALIAS",
     "KIND_INDEX",
     "StagingRefused",
+    "TeardownUnrecorded",
     "check_configured_patterns",
     "check_exclusion_predicate",
     "default_door",

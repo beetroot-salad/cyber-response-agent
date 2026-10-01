@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _session_store_705 as SS
 from defender.tests import _spec1077 as S
 
@@ -408,15 +409,17 @@ def test_a_fork_or_archive_of_a_still_running_source_is_supported(tmp_path: Path
 
     episode_dir = T.episode(tmp_path, episode_id=f"{S.EPISODE_ID}-running")
     family = S.EpisodePaths(episode_dir).family
-    S.mod("runtime.branch._family").write_family(episode_dir, {
-        "episode_id": f"{S.EPISODE_ID}-running", "source_run_dir": str(source),
-        "source_run_id": source.name, "branch_message_id": 3, "fences_at": 3})
+    with Episode.open(episode_dir) as episode:
+        S.mod("runtime.branch._family").write_family(episode, {
+            "episode_id": f"{S.EPISODE_ID}-running", "source_run_dir": str(source),
+            "source_run_id": source.name, "branch_message_id": 3, "fences_at": 3})
     assert family.is_file(), (
         "declaring a fork from a still-running source must not be a refusal — what the archive "
         "captures is whatever exists at call time, consistent with O5's 'readable mid-run'")
 
     sibling = T.sibling_run_dir(base, "a")
-    S.mod("learning.branch.archive").archive_episode(episode_dir, {"a": sibling})
+    with Episode.open(episode_dir) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, {"a": sibling})
     world = S.EpisodePaths(episode_dir).world_dir("a")
     assert world.is_dir(), "archiving a world from a sibling still in progress was refused"
 

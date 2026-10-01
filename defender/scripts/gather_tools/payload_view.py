@@ -506,7 +506,7 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
         f"[record_query] full payload: {abs_payload}",
         "→ compute every value over the full payload on disk; the reducers read STDIN — pipe "
         "the file in, don't pass it as an operand, e.g.:\n"
-        f"  cat {abs_payload} | defender-sql 'SELECT count(*) FROM data'",
+        f"  cat {abs_payload} | defender-sql 'DESCRIBE data'",
     ]
 
 

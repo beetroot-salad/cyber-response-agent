@@ -1,0 +1,4 @@
+{
+  "//": "lint_raw_yaml baseline — PyYAML load/dump calls under defender/ that bypass defender/_yaml.py, whose readers refuse aliases and whose writer never emits one (#1127). Fingerprint is file:function:kind (load|dump; no line number), file relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships EMPTY — every site was moved onto _yaml when the gate landed, so an entry in it is a regression someone chose. Regenerate: python scripts/lint/lint_raw_yaml.py --update-baseline.",
+  "entries": {}
+}

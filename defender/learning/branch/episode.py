@@ -29,14 +29,12 @@ import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import Bound, bind, read_jsonl_rows
-from defender._run_paths import artifact_file
+from defender._io import Bound, bind
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
-from defender._episode_paths import LAYOUT, EpisodePaths
+from defender._episode_paths import LAYOUT
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
-    Ledger,
-    base_file,
+    LedgerError,
     correlation_key_of,
 )
 from defender.runtime.branch._family import (
@@ -76,13 +74,28 @@ def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
     """The episode's recorded outcome and its reason, or `(None, "")` when none is recorded.
 
     An absent or unparseable record is not an outcome: it is an episode the launcher has not
-    written yet, and must not gate the readers. Only a recorded `incomplete` refuses.
+    written yet, and must not gate the readers. Only a recorded `incomplete` refuses. A refused
+    record (a link, a non-plain entry, undecodable bytes, a YAML alias) is not "none recorded":
+    it may be hiding one, so it refuses.
     """
-    text = bound.read(LAYOUT.review).text
+    rec = bound.read(LAYOUT.review)
+    if rec.text is None and not rec.absent:
+        raise EpisodeError(
+            f"the review record ({LAYOUT.review}) is refused ({rec.reason}) — it is where an "
+            f"{INCOMPLETE!r} outcome is recorded, so whether this episode is comparable cannot "
+            "be read")
+    text = rec.text
     if text is None:
         return None, ""
     try:
         record = _yaml.safe_load(text)
+    except _yaml.AliasRefused as refused:
+        # A document, refused for its aliases (the pre-#1127 writer wrote them), may record an
+        # `incomplete` outcome: refused like any refused record, never read as none.
+        raise EpisodeError(
+            f"the review record ({LAYOUT.review}) is refused ({refused}) — it is where an "
+            f"{INCOMPLETE!r} outcome is recorded, so whether this episode is comparable cannot "
+            "be read") from refused
     except yaml.YAMLError:
         return None, ""
     if not isinstance(record, dict):
@@ -215,14 +228,12 @@ def _canonical(row: dict) -> str | None:
     return canonical(text)
 
 
-def _answers(path: Path) -> dict[str, str]:
-    """One ledger file as `{pair key: canonical answer}`, first row winning (as the ledger's
-    own memo does).
+def _answers(rows: list[dict]) -> dict[str, str]:
+    """One ledger file's rows as `{pair key: canonical answer}`, first row winning (as the
+    ledger's own memo does).
     """
-    if not artifact_file(path):
-        return {}
     out: dict[str, str] = {}
-    for row in read_jsonl_rows(path):
+    for row in rows:
         key, answer = _pair_key(row), _canonical(row)
         if key is None or answer is None:
             continue
@@ -288,17 +299,30 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
     Every archived world gets an entry, the control included; an empty entry means the world
     served nothing.
     """
-    episode_dir = Path(episode_dir)
-    with bind(episode_dir) as bound:
-        _refuse_incomplete(bound)
-        labels = _archived_labels(bound)
+    # One bind for the pass: every read below is a no-follow walk off the same held folder.
+    with bind(Path(episode_dir)) as bound:
+        return _delta_o(bound, invoke)
+
+
+def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
+    _refuse_incomplete(bound)
+    labels = _archived_labels(bound)
     if not labels:
         return {}
-    family = load_family(EpisodePaths(episode_dir).family)
+    family = load_family(bound)
     token = episode_token_for(family.episode_id)
     control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
 
-    base = _answers(base_file(episode_dir))
+    base_rows, _malformed, base_rec = bound.read_jsonl(LAYOUT.served_base)
+    if base_rec.text is None:
+        # The ordering guarantee: a world only serves once the base is primed, so a family
+        # with archived worlds and no base read the live estate for every key.
+        raise LedgerError(
+            f"no primed base at {LAYOUT.served_base} "
+            f"({'absent' if base_rec.absent else base_rec.reason}) — the family's capture is "
+            "written once, before any sibling forks, and a world serving without it reads the "
+            "live estate for every key while every row it writes still reads correctly")
+    base = _answers(base_rows)
     served: dict[str, dict[str, str]] = {}
     for label in labels:
         if label not in {w.world_id for w in family.worlds}:
@@ -306,8 +330,15 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
                 f"the archive holds a world {label!r} the manifest does not declare "
                 f"({[w.world_id for w in family.worlds]}) — its axis is what a difference is "
                 "classified against, so there is nothing to classify it with")
-        served[label] = _answers(
-            Ledger.for_world(episode_dir, world_token_for(token, label)).path)
+        name = LAYOUT.served_world(world_token_for(token, label))
+        rows, _malformed, rec = bound.read_jsonl(name)
+        if rec.text is None and not rec.absent:
+            # Absent is a world that served nothing; refused is not, and reading it as nothing
+            # would report every key as unshared.
+            raise EpisodeError(
+                f"world {label!r}'s served file ({name}) is refused ({rec.reason}) — what it "
+                "served cannot be read, so its answers cannot be compared")
+        served[label] = _answers(rows)
 
     drift = set()
     if control is not None:

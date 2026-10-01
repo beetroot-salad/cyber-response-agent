@@ -31,10 +31,9 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender import _yaml  # noqa: E402
 from defender._model import model  # noqa: E402
 from defender.evals.oracle_golden import judge, score  # noqa: E402
 
@@ -87,7 +86,7 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     out: list[tuple[Path, str, str, dict]] = []
     for name in case_names:
         case_dir = CASES_DIR / name
-        expected = yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
+        expected = _yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
         leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
         for lead_id, spec in (expected.get("leads") or {}).items():
             if lead_id not in leads:
@@ -218,10 +217,10 @@ def verdict_set(case_names: tuple[str, ...],
         labels_path = score.labels_path(case_dir, model, effort)
         if not (proj_path.is_file() and labels_path.is_file()):
             continue
-        manifest = yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+        manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
         if manifest.get("defective") or score.is_derived(manifest.get("kind")):
             continue
-        proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+        proj = _yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
         preds, _ = score.load_predictions(proj)
         labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})
         for lead_id, label in sorted(labels.items()):

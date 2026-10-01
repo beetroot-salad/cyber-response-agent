@@ -49,7 +49,7 @@ from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
 # The estate seam's own fixtures for a `WorldRegistry` — the clock, the world token and the
 # primed ledger its constructor demands — imported rather than re-spelled, so the registry
 # here is built the way `run.py:288` builds it.
-from defender.tests.test_920_estate_seam import AS_OF, World, fresh_ledger  # noqa: E402
+from defender.tests.test_920_estate_seam import AS_OF, SERVED_FILE, World, fresh_ledger  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 #: A grant that reaches the one system the fixtures declare, with the one verb they declare —
@@ -377,12 +377,12 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
         WorldRegistry(read_roster(missing), DENY_ALL, world=World("w1"),
-                      ledger=fresh_ledger(tmp_path / "missing" / "served.jsonl"), as_of=AS_OF)
+                      ledger=fresh_ledger(tmp_path / "missing" / SERVED_FILE), as_of=AS_OF)
     assert str(missing) in str(exc.value)
 
     adapters = _adapters(tmp_path, "elastic")
     world = WorldRegistry(read_roster(adapters), DENY_ALL, world=World("w1"),
-                          ledger=fresh_ledger(tmp_path / "real" / "served.jsonl"), as_of=AS_OF)
+                          ledger=fresh_ledger(tmp_path / "real" / SERVED_FILE), as_of=AS_OF)
     assert world.systems() == ("elastic",)
     shutil.rmtree(adapters)
     assert world.systems() == ("elastic",), "the subclass re-reads the roster from the disk"

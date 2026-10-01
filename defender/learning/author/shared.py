@@ -9,7 +9,8 @@ from pathlib import Path
 from uuid import uuid4
 from typing import Any
 
-import yaml
+
+from defender import _yaml
 
 from defender import _flock, _git
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -366,7 +367,7 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
         corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}", on_skip=skipped.append
     ):
         kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}
-        rendered = yaml.safe_dump(
+        rendered = _yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )
         slug = " ".join(lesson.path.stem.split())

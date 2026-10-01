@@ -12,6 +12,7 @@ import re
 import secrets
 import stat
 import sys
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
 from typing import Any, Literal, overload
@@ -249,9 +250,6 @@ class EntriesRead(_Read):
     def has_file(self, entry: str) -> bool:
         return (self.entries or {}).get(entry) == ENTRY_FILE
 
-    def has_dir(self, entry: str) -> bool:
-        return (self.entries or {}).get(entry) == ENTRY_DIR
-
 
 # -- the core: reaching a file below a trust root (#1111) -----------------------------------
 #
@@ -273,6 +271,12 @@ class EntriesRead(_Read):
 # Reads fold every refusal into a reason with no path in it (`_read_reason`).
 
 _NOT_PLAIN = "refusing to write through a non-plain or aliased entry"
+
+class NotPlainEntry(OSError):  # noqa: N818 — named for what it reports, like `FileExistsError`'s siblings
+    """The core's refusal of a link, hard link or other non-plain entry AT a name (left in place
+    for the reap scan): ELOOP, or EMLINK for a hard link, carrying the `write_guarded_alias`
+    mark. A linked or non-directory FOLDER on the way is a plain `OSError` / `NotADirectoryError`
+    instead, so a caller that contains this refusal contains nothing else."""
 _LINKED_FOLDER = "refusing to create through a symlinked path component"
 _NOT_A_FOLDER = "path component is not a directory"
 
@@ -312,9 +316,11 @@ def _descend(
         for component in folders:
             where = where / component
             step = _step(os_, fd, component, where, create=create)
-            if fd != start_fd:
-                os_.close(fd)
-            fd = step
+            # Hand over before closing: an interrupt between the two can leak `left`, but the
+            # `finally` never closes it a second time (a number another open may now hold).
+            left, fd = fd, step
+            if left != start_fd:
+                os_.close(left)
         yield fd
     finally:
         if fd != start_fd:
@@ -353,9 +359,9 @@ def _open_refusal(e: OSError, where: Path) -> OSError:
     reader-less FIFO, a socket) and EISDIR (a directory) are the unmarked non-plain row; any
     other errno is the open's own failure, unmarked."""
     if e.errno == errno.ELOOP:
-        return _mark_alias(OSError(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=True)
+        return _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=True)
     if e.errno in (errno.ENXIO, errno.EISDIR):
-        return _mark_alias(OSError(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=False)
+        return _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=False)
     return _mark_alias(e, is_alias=False)
 
 
@@ -413,19 +419,40 @@ def _entry_kind(entry: Any) -> str:
 
 
 class _Handle:
-    """The directory descriptor shared by a `bind` and its `under` derivations, closed once:
-    by `Bound.close()` or, if unscoped, on collection."""
+    """A held directory descriptor — a `bind`'s root, shared with its `under` derivations, or a
+    `Held`'s, shared with its views — closed once: by its owner or, if unscoped, on collection.
 
-    __slots__ = ("_os", "fd")
+    Every read and write off it works from a private `dup` taken under the handle's lock
+    (`dup()`), and `close()` takes the same lock. So a caller after the close gets `EBADF` and
+    touches nothing, and one already running keeps its own descriptor, never a number the
+    process has since reused (the sibling's `Ledger.record` runs on worker threads that can
+    outlive a cancelled task)."""
+
+    __slots__ = ("_lock", "_os", "fd")
 
     def __init__(self, os_: Any, fd: int | None) -> None:
         self._os = os_
         self.fd = fd
+        self._lock = threading.Lock()
+
+    @contextlib.contextmanager
+    def dup(self, where: object = None) -> Iterator[int]:
+        """A private duplicate of the held descriptor for one operation, closed after it."""
+        with self._lock:
+            if self.fd is None:
+                raise OSError(errno.EBADF, os.strerror(errno.EBADF),
+                              None if where is None else str(where))
+            fd = self._os.dup(self.fd)
+        try:
+            yield fd
+        finally:
+            self._os.close(fd)
 
     def close(self) -> None:
-        if self.fd is not None:
-            fd, self.fd = self.fd, None
-            self._os.close(fd)
+        with self._lock:
+            if self.fd is not None:
+                fd, self.fd = self.fd, None
+                self._os.close(fd)
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):
@@ -475,13 +502,11 @@ class Bound:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if self._error is not None:
             return RecordRead(name=spelling, text=None, absent=False, reason=self._error)
-        if self._handle.fd is None:  # closed
-            return RecordRead(name=spelling, text=None, absent=False,
-                              reason=os.strerror(errno.EBADF))
         where = PurePath(*self._prefix, *parts)
         try:
-            with _descend(self._os, self._handle.fd, self._prefix + parts[:-1],
-                          Path(".")) as dir_fd:
+            # A closed root is the dup's `EBADF`, answered as a refusal like any other.
+            with self._handle.dup() as root_fd, _descend(
+                    self._os, root_fd, self._prefix + parts[:-1], Path(".")) as dir_fd:
                 text = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=False,
                                   errors=errors)
         except FileNotFoundError:
@@ -506,10 +531,12 @@ class Bound:
             return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
         if self._error is not None:
             return EntriesRead(name=spelling, entries=None, absent=False, reason=self._error)
-        if self._handle.fd is None:
+        try:
+            with self._handle.dup() as root_fd:
+                kind, payload = self._directory_fd(root_fd)
+        except OSError as e:  # the root closed: the dup's `EBADF`
             return EntriesRead(name=spelling, entries=None, absent=False,
-                               reason=os.strerror(errno.EBADF))
-        kind, payload = self._directory_fd(self._handle.fd)
+                               reason=(e.strerror or str(e)))
         if kind != "leaf":
             return EntriesRead(name=spelling, entries=None, absent=kind == "absent",
                                reason=None if kind == "absent" else str(payload))
@@ -577,18 +604,24 @@ def use_utf8_stdio() -> None:
 #: artifact and far short of the stack budget.
 JSON_NESTING_LIMIT = 100
 
-_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
-_JSON_BRACKET = re.compile(r"[\[\]{}]")
+#: A string literal or a bracket. A string with no closing quote runs to the end of the text:
+#: the match can never fail, so the scan never backs up and restarts at a later quote, which on
+#: an unclosed run of escaped quotes made the scan quadratic in the text's length.
+_JSON_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"?|[\[\]{}]')
 
 
 def json_nesting_depth(text: str) -> int:
     """The deepest container nesting in ``text``, judged without decoding it.
 
-    Exact for valid JSON (string literals are dropped first); invalid JSON is refused by the
-    decoder anyway. Regex-driven so large payloads cost one pass over their brackets."""
+    Exact for valid JSON (brackets inside string literals are not counted); invalid JSON is
+    refused by the decoder anyway. One pass, linear in the text's length whatever it holds, so
+    it is safe on model- or box-written text of any size."""
     depth = deepest = 0
-    for bracket in _JSON_BRACKET.finditer(_JSON_STRING.sub("", text)):
-        if bracket.group() in "[{":
+    for token in _JSON_TOKEN.finditer(text):
+        bracket = text[token.start()]
+        if bracket == '"':
+            continue
+        if bracket in "[{":
             depth += 1
             deepest = max(deepest, depth)
         elif depth:
@@ -654,8 +687,13 @@ def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
     return rows, unreadable
 
 
+class JsonTooDeep(ValueError):
+    """`json_safe(..., deeper="refuse")` met a container past `max_depth`."""
+
+
 def json_safe(value: Any, *, non_finite: Literal["text", "null"],
-              max_depth: int | None = None, naive_is_utc: bool = False) -> Any:
+              max_depth: int | None = None, deeper: Literal["repr", "refuse"] = "repr",
+              naive_is_utc: bool = False) -> Any:
     """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
     booleans and null are left as the encoder would write them.
 
@@ -668,10 +706,17 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
     A non-finite float goes the way the caller says: `"text"` keeps it, spelled as the
     Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a
     reader diagnosing; `"null"` makes it missing, for a reader computing over the field.
-    `max_depth` cuts a deeper value to its repr, for a caller handed arbitrary objects."""
+    `max_depth` bounds the walk. By default a deeper value is cut to its repr, for a caller
+    handed arbitrary objects (a log). `deeper="refuse"` instead raises `JsonTooDeep` at the
+    first container that would sit deeper than `max_depth` levels, for a caller whose data must
+    be stored whole or not at all. Either way the walk never recurses past `max_depth`, so a
+    cyclic value ends too."""
     if non_finite not in ("text", "null"):
         raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
-    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth, naive_is_utc)
+    if deeper not in ("repr", "refuse"):
+        raise ValueError(f"deeper must be 'repr' or 'refuse', not {deeper!r}")
+    rules = _JsonRules(non_finite, sys.maxsize if max_depth is None else max_depth,
+                       deeper == "refuse", naive_is_utc)
     return _json_safe_walk(value, rules, 0)
 
 
@@ -679,6 +724,7 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
 class _JsonRules:
     non_finite: str
     max_depth: int
+    refuse_deeper: bool
     naive_is_utc: bool
 
 
@@ -690,7 +736,11 @@ def _json_safe_walk(v: Any, rules: _JsonRules, depth: int) -> Any:
             return v
         return None if rules.non_finite == "null" else _non_finite_text(v)
     if depth >= rules.max_depth:
-        return repr(v)
+        if not rules.refuse_deeper:
+            return repr(v)
+        # Only a container adds a level; a date at the limit is still one text value.
+        if isinstance(v, (Mapping, list, tuple, set, frozenset)):
+            raise JsonTooDeep(f"a value nests deeper than {rules.max_depth} levels")
     if isinstance(v, Mapping):
         return {_json_key(k, rules): _json_safe_walk(x, rules, depth + 1) for k, x in v.items()}
     if isinstance(v, (list, tuple, set, frozenset)):
@@ -883,8 +933,8 @@ def _refuse_unless_plain_stat(st: os.stat_result, where: object) -> None:
         # a hard link, ELOOP otherwise; both are plain `OSError`, so the type stays uniform.
         refusal_errno = errno.EMLINK if is_hardlink else errno.ELOOP
         raise _mark_alias(
-            OSError(refusal_errno, "refusing to write through a non-plain or aliased entry",
-                     str(where)),
+            NotPlainEntry(refusal_errno, "refusing to write through a non-plain or aliased entry",
+                          str(where)),
             is_alias=is_alias,
         )
 
@@ -981,14 +1031,20 @@ def write_guarded(
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
 
 
-def _write_all(fd: int, text: str | bytes, *, os_: Any = os) -> None:
-    """Write `text` to a fresh descriptor and close it (text or bytes to match)."""
-    if isinstance(text, (bytes, bytearray)):
-        with os_.fdopen(fd, "wb") as fb:
-            fb.write(text)
-    else:
-        with os_.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
+def _write_all(fd: int, text: str | bytes, *, os_: Any = os, sync: bool = False) -> None:
+    """Write `text` (UTF-8 for a `str`) to a fresh descriptor this call now owns, and close it —
+    on every exit, `fdopen` failing included. `sync` flushes and `fsync`s it before the close,
+    for a record whose bytes must be on disk when the call returns."""
+    try:
+        fb = os_.fdopen(fd, "wb")
+    except BaseException:
+        os_.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
+        raise
+    with fb:
+        fb.write(text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8"))
+        if sync:
+            fb.flush()
+            os_.fsync(fd)
 
 
 def open_guarded(path: Path, mode: str = "a"):
@@ -1116,27 +1172,77 @@ def rooted_mkdir(root: Path, folder_name: str | PurePath, *, os_: Any = os) -> N
 
 def rooted_write(
     root: Path, name: str | PurePath, text: str | bytes, *, mode: str,
-    stage_name: Callable[[str], str] = staged_leaf,
+    durable: bool = False, stage_name: Callable[[str], str] = staged_leaf,
     open_unnamed: Callable[[int], int] = open_unnamed_at, os_: Any = os,
 ) -> None:
     """:func:`write_guarded`'s `create` / `replace` / `append`, for `name` under `root`. The
     folders are walked, never made (:func:`rooted_mkdir` makes them): a missing one, or a
-    missing root, is `FileNotFoundError`. `stage_name` and `open_unnamed` are the leaf-name and
-    unnamed-open seams."""
+    missing root, is `FileNotFoundError`. `durable` (append only) flushes and `fsync`s the leaf
+    before closing it, then the folder holding it, for a record whose rows must be on disk when
+    the call returns.
+    `stage_name` and `open_unnamed` are the leaf-name and unnamed-open seams."""
     _spelling, parts = _parse_name(name)
+    _check_write(text, mode, durable)
+    with _rooted(os_, root, parts[:-1]) as dir_fd:
+        _write_at(os_, dir_fd, parts[-1], Path(root, *parts), text, mode=mode, durable=durable,
+                  stage_name=stage_name, open_unnamed=open_unnamed)
+
+
+def _check_write(text: object, mode: str, durable: bool) -> None:
+    """A write's arguments, judged before any I/O: `text` is `str` or `bytes` (an iterable
+    would be spent by the create lane's first attempt), `mode` one of `_ROOTED_MODES`, and
+    `durable` only with `append`."""
+    if not isinstance(text, (str, bytes)):
+        raise TypeError(f"text must be str or bytes, not {type(text).__name__}")
     if mode not in _ROOTED_MODES:
         raise ValueError(f"unknown rooted_write mode: {mode!r}")
-    leaf = parts[-1]
-    where = Path(root, *parts)
-    with _rooted(os_, root, parts[:-1]) as dir_fd:
-        if mode == "create":
-            _create_at(os_, dir_fd, leaf, where, text, open_unnamed)
-        elif mode == "replace":
-            _replace_at(os_, dir_fd, leaf, where, text, stage_name)
-        else:
-            _leaf_present(os_, dir_fd, leaf, where)
-            fd = _open_leaf(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
-            _write_all(fd, text, os_=os_)
+    if durable and mode != "append":
+        raise ValueError(f"durable applies to the append mode only, not {mode!r}")
+
+
+def _write_at(  # noqa: PLR0913 — `rooted_write`'s whole call, carried to the folder it resolved
+    os_: Any, dir_fd: int, leaf: str, where: Path, text: str | bytes, *, mode: str,
+    durable: bool = False, stage_name: Callable[[str], str] = staged_leaf,
+    open_unnamed: Callable[[int], int] = open_unnamed_at,
+) -> None:
+    """One `create` / `replace` / `append` of `leaf` in the folder `dir_fd` holds. `durable`
+    (append only) fsyncs the leaf, then that folder, so the record and its entry are both on
+    disk when the call returns."""
+    if mode == "create":
+        _create_at(os_, dir_fd, leaf, where, text, open_unnamed)
+    elif mode == "replace":
+        _replace_at(os_, dir_fd, leaf, where, text, stage_name)
+    else:
+        _leaf_present(os_, dir_fd, leaf, where)
+        fd = _open_leaf(os_, dir_fd, leaf, os.O_WRONLY | os.O_CREAT | os.O_APPEND, where)
+        _write_all(fd, text, os_=os_, sync=durable)
+        if durable:
+            _fsync_folder(os_, dir_fd)
+
+
+def _fsync_folder(os_: Any, dir_fd: int) -> None:
+    """`fsync` the folder `dir_fd` holds, through `.` reopened `O_RDONLY|O_DIRECTORY` off it:
+    an `O_PATH` handle cannot be synced (`EBADF`)."""
+    fd = os_.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=dir_fd)  # lint-text-io: ok — os.open of a DIRECTORY handle, no text mode
+    try:
+        os_.fsync(fd)
+    finally:
+        os_.close(fd)
+
+
+def _unlink_at(os_: Any, dir_fd: int, leaf: str, where: Path) -> bool:
+    """Remove the plain file `leaf` in the folder `dir_fd` holds: `True` when one was removed,
+    `False` when nothing is there. The entry is judged by a no-follow stat before the unlink: a
+    link, a hard link or any other non-plain entry is the core's refusal and is left in place
+    for the reap scan. The stat and the unlink are two steps, so an entry swapped between them
+    is removed as found."""
+    if not _leaf_present(os_, dir_fd, leaf, where):
+        return False
+    try:
+        os_.unlink(leaf, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _create_at(
@@ -1212,6 +1318,114 @@ def rooted_locked_for_rewrite(
     with opener as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         yield f
+
+
+# The held root (#1133): an `Episode`'s one open handle on its episode dir. Every verb works
+# `*at` off it, so the dir is resolved once, at the door, and never again by name.
+
+
+class Held:
+    """A folder held open by descriptor (:func:`hold`, :func:`hold_new`), and the rooted verbs
+    relative to it. Nothing below the held folder is followed; the folder itself is never
+    re-resolved, so a rename carries the handle with it and a removal fails every write.
+
+    Each verb works off a private `dup` of the root (`_Handle.dup`, which its views share): a
+    verb after `close` is `OSError(EBADF)` and touches nothing. Reads are the view's: this
+    handle writes."""
+
+    def __init__(self, os_: Any, fd: int, where: Path) -> None:
+        self._os = os_
+        self._root = _Handle(os_, fd)
+        self._where = Path(where)
+
+    # -- lifetime -------------------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release the root. Idempotent; the views then answer `Bad file descriptor`."""
+        self._root.close()
+
+    def __enter__(self) -> Held:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _dup(self) -> contextlib.AbstractContextManager[int]:
+        return self._root.dup(self._where)
+
+    def view(self) -> Bound:
+        """A reader over this same handle. It owns nothing: closing it is a no-op, and once this
+        root is closed it answers `Bad file descriptor`."""
+        return Bound(self._os, self._root)
+
+    # -- the verbs ------------------------------------------------------------------------------
+
+    def write(self, name: str | PurePath, text: str | bytes, *, mode: str,
+              durable: bool = False) -> None:
+        """:func:`rooted_write`'s modes, in one walk off the held root that makes each missing
+        holding folder (no link followed) and writes the leaf in the last one. A durable write
+        makes no folder: a missing one is `FileNotFoundError`."""
+        _check_write(text, mode, durable)
+        _spelling, parts = _parse_name(name)
+        # A durable write makes no folder: every folder its record's entry depends on already
+        # exists, so the chain it syncs is the whole chain.
+        with self._dup() as root_fd, _descend(
+                self._os, root_fd, parts[:-1], self._where, create=not durable) as dir_fd:
+            _write_at(self._os, dir_fd, parts[-1], Path(self._where, *parts), text,
+                      mode=mode, durable=durable)
+
+    def mkdir(self, folder: str | PurePath) -> None:
+        """Make each missing folder of `folder` below the held root, never through a link."""
+        folders = () if str(folder) in ("", ".") else _parse_name(folder)[1]
+        with self._dup() as root_fd, _descend(
+                self._os, root_fd, folders, self._where, create=True):
+            pass
+
+    def unlink(self, name: str | PurePath) -> bool:
+        """Remove the plain file at `name` below the held root (`_unlink_at`); `False` when it
+        or a holding folder is absent."""
+        _spelling, parts = _parse_name(name)
+        with self._dup() as root_fd:
+            try:
+                with _descend(self._os, root_fd, parts[:-1], self._where) as dir_fd:
+                    return _unlink_at(self._os, dir_fd, parts[-1], Path(self._where, *parts))
+            except FileNotFoundError:
+                return False
+
+
+def hold(root: Path, *, os_: Any = os) -> Held:
+    """Hold `root` open, following its spelling (the operator's, as :func:`bind`'s). A missing
+    root is `FileNotFoundError`, a non-directory `NotADirectoryError`."""
+    if _O_PATH is None:  # pragma: no cover — no CI box lacks it
+        raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
+    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root))
+
+
+def hold_new(parent: Path, name: str, *, os_: Any = os) -> Held:
+    """Make (or adopt) the folder `name` in `parent` and hold it. `parent` is made if missing,
+    following its spelling; `name` is judged off `parent`'s handle and never followed (a link,
+    file or FIFO there is the core's folder refusal). The held descriptor is the one that
+    judged it. `parent` is then fsynced, so the new folder's entry is durable."""
+    if _O_PATH is None:  # pragma: no cover — no CI box lacks it
+        raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
+    if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
+        raise ValueError(f"{name!r}: {_NOT_A_NAME}")
+    parent = Path(parent)
+    try:
+        parent_fd = os_.open(parent, _ROOT_FLAGS)
+    except FileNotFoundError:
+        os_.makedirs(parent, exist_ok=True)
+        parent_fd = os_.open(parent, _ROOT_FLAGS)
+    try:
+        fd = _step(os_, parent_fd, name, parent / name, create=True)
+        try:
+            _fsync_folder(os_, parent_fd)
+        except BaseException:
+            os_.close(fd)
+            raise
+    finally:
+        os_.close(parent_fd)
+    return Held(os_, fd, parent / name)
 
 
 #: The staged-name marker, matched loosely (not the exact `<name>.staged-<16 hex>` shape) so

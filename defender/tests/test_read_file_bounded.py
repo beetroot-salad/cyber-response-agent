@@ -99,6 +99,21 @@ def test_overflow_hint_gather_pipes_into_defender_sql_without_the_write_sink(tmp
     assert _admits(pol, _hinted_command(hint), run)
 
 
+@pytest.mark.parametrize("policy_of", [_main_policy, _gather_policy], ids=["main", "gather"])
+def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path, policy_of) -> None:
+    """#1138 O8: the reduction the hint hands over has to be right whatever the payload's shape.
+    `SELECT count(*) FROM data` is not — every object payload is ONE row of `data`, so it
+    answers 1 over an ES|QL result and over a search-hits envelope alike (C4), with exit 0.
+    `DESCRIBE data` is right on every shape: it names the columns the next query needs. The
+    command stays one the caller's own gate runs."""
+    run = tmp_path / "run"
+    pol = policy_of(tmp_path)
+    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
+    assert "DESCRIBE data" in hint, hint
+    assert "count(*)" not in hint, f"the hint offers a whole-payload count: {hint!r}"
+    assert _admits(pol, _hinted_command(hint), run)
+
+
 
 
 def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:

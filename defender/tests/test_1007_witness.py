@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 
+from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
 from defender.tests import test_1007_ladder as L
 from defender.runtime.verbs import read_roster
@@ -58,12 +59,16 @@ def serve_one_call(ep: Path, family, world_id: str, *, answers=None, tmp_path: P
     world = family_mod.resume_world_from(family, world_id, ep)
     served = ep / "served"
     served.mkdir(parents=True, exist_ok=True)
-    path = served / f"{W.world_token(world_id)}.jsonl"
-    ledger = ledger_mod.Ledger(path, base_path=served / "base.jsonl")
-    reg = registry.WorldRegistry(read_roster(adapters_dir), grant, world=world, ledger=ledger,
-                                 as_of=family.as_of)
-    reg.verbs("elastic")["query"](ctx, native_query="event.action:ssh_login", index=index)
-    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    token = W.world_token(world_id)
+    path = served / f"{token}.jsonl"
+    # `Ledger` is built only through `for_world` on a real `Episode` now (#1133 rev 2 / O4.8.1).
+    with Episode.open(ep) as episode:
+        ledger = ledger_mod.Ledger.for_world(episode, token)
+        reg = registry.WorldRegistry(read_roster(adapters_dir), grant, world=world, ledger=ledger,
+                                     as_of=family.as_of)
+        reg.verbs("elastic")["query"](ctx, native_query="event.action:ssh_login", index=index)
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line]
     return rows, ctx
 
 
@@ -374,19 +379,24 @@ def test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write
         W.world_doc("c", ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": "i2"}]))),
     ])
     review = W.mod("learning.branch.review")
-    writer = W.RecordingReader(guarded.write_guarded)
+    # `write=` now takes just `text` (#1133 rev 2: the seam is the episode's own `review`
+    # record, which already names its own path) — this fake supplies the path itself, so the
+    # call it records is still a real `write_guarded` call over `review.yaml`.
+    review_path = ep / W.REVIEW_NAME
+    writer = W.RecordingReader(lambda text: guarded.write_guarded(review_path, text))
 
     # `write=` IS PART OF THE CONTRACT, not a convenience: `review()` gives its record write no
     # injection seam today, so "how many times was review.yaml written" is unobservable without
     # one — and the project forbids reaching around it with `monkeypatch.setattr`. A missing
     # seam is pinned as a demand rather than worked around (schema.md, `kind: seam`).
-    record = review.review(family, episode_dir=ep, adapters=W.FakeAdapters(),
-                           door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                           write=writer, settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
+    with Episode.open(ep) as episode:
+        record = review.review(family, episode=episode, adapters=W.FakeAdapters(),
+                               door=W.FakeDoor(), invoke=W.FakeAgent("same"),
+                               write=writer, settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+                               runs_base=ep.parent / "runs-base")
 
-    review_writes = [c for c in writer.calls if str(c[0][0]).endswith(W.REVIEW_NAME)]
-    assert len(review_writes) == 1, (
-        f"review.yaml was written {len(review_writes)} times over three worlds")
+    assert len(writer.calls) == 1, (
+        f"review.yaml was written {len(writer.calls)} times over three worlds")
     for label in ("b", "c"):
         assert "reachability" in record["worlds"][label]
 

@@ -16,13 +16,16 @@ such read records a `base` row in the world's own file, so counting them sizes t
 
 from __future__ import annotations
 
-from defender._model import model
 from pathlib import Path
 
-from defender._io import append_jsonl, load_json_artifact, read_text_soft
+from defender._model import model
+from defender._episode_handle import Episode
+from defender._episode_paths import LAYOUT
+from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
+from defender.scripts.gather_tools.record_query import ParamsTooDeep
 
-from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
+from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
 
 
 @model(frozen=True)
@@ -48,23 +51,26 @@ class PrimeReport:
         return self.duplicates + self.failed + self.sentinels + self.unreadable
 
 
-def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
-    """Write `base_path` from `source_run_dir`'s capture. Once, before any sibling exists.
+def prime_base(source_run_dir: Path, episode: Episode, *,
+               allow_empty: bool = False) -> PrimeReport:
+    """Write `episode`'s primed base from `source_run_dir`'s capture. Once, before any sibling
+    exists.
 
     The whole capture, not a slice at the branch point. The run dir's evidence is truncated
     because it is what the model may read; the base ledger is what the estate answers from, and
     a post-branch row is only reached if a sibling independently re-asks that question. Slicing
     would cost determinism on exactly those keys.
+
+    A capture with no replayable row is refused unless `allow_empty`, which writes an empty
+    base and reports `primed=0` (the launcher's primer, which warns).
     """
-    # Refuse a second prime: `append_jsonl` appends, and `_absorb` is first-row-wins, so the
-    # earlier source's answers would silently stay the estate while `PrimeReport` reported a
-    # clean prime. Retrying a partly-failed episode makes this a common path.
-    if base_path.exists() or base_path.is_symlink():
-        raise LedgerError(
-            f"{base_path} already holds a primed base — a family's capture is written once, "
-            "before any sibling forks, and priming over it merges two runs' estates under "
-            "first-row-wins with nothing in the table to tell them apart. Name a fresh "
-            "episode id, or remove the episode directory to re-prime it")
+    base = episode.served_base
+    # Already primed: refused before the capture is read. Any entry at the name counts, of any
+    # kind, and nothing is read from it. A check before the act, sound because the launcher
+    # primes under its exclusive claim; the create below still enforces it for any caller. A
+    # `served/` that is absent or refused goes on, and the create judges it.
+    if LAYOUT.served_base.name in (episode.view().under(LAYOUT.served).entries().entries or {}):
+        raise _already_primed(episode)
     # Through `lead_repository`, the single read surface for the queries table, so this reader
     # cannot disagree with others (e.g. about a string `"0"` exit code).
     rows, table_unreadable = load_queries_report(Path(source_run_dir))
@@ -84,7 +90,7 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
             continue
         seen.add(call.key)
         out.append(call.row())
-    if not out:
+    if not out and not allow_empty:
         # `branch.validate` already refuses a source with nothing captured, so an empty prime
         # means every row was skipped. Continuing would silently send every key live.
         #
@@ -96,14 +102,28 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
             "nothing in the record to say so. The counts name which rule skipped them: "
             "`failed` is a non-zero exit, `sentinels` never reached a system, `unreadable` is "
             "a payload this episode could not read back")
-    # No mkdir: `append_jsonl` creates the parent.
-    append_jsonl(  # lint-unguarded-tree-write: ok — the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs rather than one of them, so it is not bound into any box  # noqa: E501
-        base_path, out)
+    # Written whole by one exclusive create: a reader sees no base or all of it, and a second
+    # prime (a retried episode, a racing primer) is refused. `_absorb` is first-row-wins, so
+    # priming over a base would silently keep the earlier source's answers as the estate while
+    # `PrimeReport` reported a clean prime. A link or any non-plain entry at the name is the
+    # core's leaf refusal, the same case; a linked folder on the way is its own refusal.
+    try:
+        base.create("".join(served_line(row) for row in out))
+    except (FileExistsError, NotPlainEntry) as taken:
+        raise _already_primed(episode) from taken
     # Named fields, not `**counts`: a field mismatch would raise after the base file is
     # written, leaving the episode id permanently unusable.
     return PrimeReport(
         primed=len(out), duplicates=counts["duplicates"], failed=counts["failed"],
         sentinels=counts["sentinels"], unreadable=counts["unreadable"])
+
+
+def _already_primed(episode: Episode) -> LedgerError:
+    return LedgerError(
+        f"{episode.served_base.path} already holds a primed base — a family's capture is written once, before any "
+        "sibling forks, and priming over it merges two runs' estates under first-row-wins with "
+        "nothing in the table to tell them apart. Name a fresh episode id, or remove the "
+        "episode directory to re-prime it")
 
 
 def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
@@ -141,10 +161,17 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
     if not system or not verb:
         counts["unreadable"] += 1
         return None
-    return ServedCall(
-        system=system, verb=verb, params=row.params,
-        payload_text=canonical, source=CAPTURED, world_id=None,
-    )
+    try:
+        return ServedCall(
+            system=system, verb=verb, params=row.params,
+            payload_text=canonical, source=CAPTURED, world_id=None,
+        )
+    except ParamsTooDeep:
+        # A row its own table can read but no ledger row can carry: written before the limit,
+        # or planted. Lost evidence like any other unreadable row; one such row must not make
+        # the whole branch point unprimeable.
+        counts["unreadable"] += 1
+        return None
 
 
 def _canonical_payload(text: str) -> str | None:
