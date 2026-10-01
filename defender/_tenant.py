@@ -11,8 +11,9 @@ point. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
 refused rather than stamped.
 
 Both files are created through `write_guarded(mode="create")`, so a reader sees them absent or
-complete. Every refusal is a `TenantRefused` naming the refused value (escaped and bounded),
-which entry points catch and print verbatim; a corrupt record refuses the run rather than
+complete. Every refusal is a `TenantRefused` naming the refused value — an id, or the
+content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path, operator-set, as it
+is — which entry points catch and print verbatim; a corrupt record refuses the run rather than
 reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
 
 Acceptance is a point-in-time check: a `Tenant` says the tree passed when it was accepted, not
@@ -732,7 +733,7 @@ def runs_base_for(tenant: Tenant) -> Path:
 def tenant_of_run_dir(data_root: Path, run_dir: Path) -> TenantId:
     """The tenant a run dir belongs to, learned from its source's HOST-ONLY runs-base record
     (never a stamp a box can write): the record at `run_dir.parent`, refused unless
-    `run_dir.parent` is exactly that tenant's runs base under `data_root` — a run dir left
+    `run_dir.parent` resolves to that tenant's runs base under `data_root` — a run dir left
     over from before its tenant's current data root, or under an unrelated tree, is refused
     rather than silently trusted. The data root is guarded before the record is read."""
     data_root = Path(data_root)

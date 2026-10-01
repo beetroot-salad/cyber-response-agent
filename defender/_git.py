@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The variables that decide WHICH repository git acts on whatever `cwd=` says: an exported
 #: `GIT_DIR` points every call at that repository (J-PO1, executed).
-_REPO_LOCATING_ENV = (
+REPO_LOCATING_ENV = (
     "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
 )
@@ -19,7 +19,7 @@ def env_for_cwd() -> dict[str, str]:
     """This process's environment without the variables that would override `cwd=`, for a
     call that must act on the repository at its `cwd` and nowhere else (a tenant's own repo,
     never the product checkout an operator's shell may have exported)."""
-    return {k: v for k, v in os.environ.items() if k not in _REPO_LOCATING_ENV}
+    return {k: v for k, v in os.environ.items() if k not in REPO_LOCATING_ENV}
 
 
 class GitError(RuntimeError):

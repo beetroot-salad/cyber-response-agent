@@ -573,7 +573,7 @@ def start_family(  # noqa: PLR0913 — the family's arms plus the tenant every a
     runs = sibling_runs_base(episode_dir)
     guarded_mkdir(runs, base=episode_dir)
     # Minted with the episode's tenant, or read back and refused when it names another
-    # (`TenantRefused`, a ValueError) — before any sibling started.
+    # (`TenantRefused`) — before any sibling started.
     _tenant.ensure_runs_base_record(runs, tenant_id)
     labels = list(world_labels)
     if not labels:

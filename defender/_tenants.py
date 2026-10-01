@@ -31,9 +31,10 @@ SETTINGS_HALF = "settings"
 AGENT_HALF = "agent"
 
 #: Every name a knowledge folder may hold at its top level: the two halves, the tenant repo's
-#: own git and CI files, a README, and `archive/` (outside both halves, never mounted). Anything
-#: else — an operator's `.env` or `secrets/` — is refused, so it never sits unwalked in the data
-#: root. `.tenant-id` lives inside `agent/`.
+#: own git and CI files, a README, and `archive/` (outside both halves, never mounted). Any
+#: other top-level name — an operator's `.env` or `secrets/` — is refused. Only the two halves
+#: are walked for links and special files; what sits under `.git`, `.github` and `archive/` is
+#: the tenant repo's and is never read or mounted. `.tenant-id` lives inside `agent/`.
 TOP_LEVEL_ALLOWED: frozenset[str] = frozenset({
     SETTINGS_HALF, AGENT_HALF, ".github", ".git", "archive", "README.md", ".gitignore",
     ".gitattributes",
