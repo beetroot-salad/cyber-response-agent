@@ -604,18 +604,24 @@ def use_utf8_stdio() -> None:
 #: artifact and far short of the stack budget.
 JSON_NESTING_LIMIT = 100
 
-_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
-_JSON_BRACKET = re.compile(r"[\[\]{}]")
+#: A string literal or a bracket. A string with no closing quote runs to the end of the text:
+#: the match can never fail, so the scan never backs up and restarts at a later quote, which on
+#: an unclosed run of escaped quotes made the scan quadratic in the text's length.
+_JSON_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"?|[\[\]{}]')
 
 
 def json_nesting_depth(text: str) -> int:
     """The deepest container nesting in ``text``, judged without decoding it.
 
-    Exact for valid JSON (string literals are dropped first); invalid JSON is refused by the
-    decoder anyway. Regex-driven so large payloads cost one pass over their brackets."""
+    Exact for valid JSON (brackets inside string literals are not counted); invalid JSON is
+    refused by the decoder anyway. One pass, linear in the text's length whatever it holds, so
+    it is safe on model- or box-written text of any size."""
     depth = deepest = 0
-    for bracket in _JSON_BRACKET.finditer(_JSON_STRING.sub("", text)):
-        if bracket.group() in "[{":
+    for token in _JSON_TOKEN.finditer(text):
+        bracket = text[token.start()]
+        if bracket == '"':
+            continue
+        if bracket in "[{":
             depth += 1
             deepest = max(deepest, depth)
         elif depth:
