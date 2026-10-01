@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 
 #: The host's own forced close, as `_close_a_run_cut_short` writes it — `unresolved`, `stands`,
@@ -421,7 +422,8 @@ def test_old_archive_predating_the_feature_has_no_sidecar_ever(tmp_path):
     old = {w: S.sibling_run_dir(base, w) for w in ("b", "c")}
     for run_dir in old.values():
         assert not S.sidecar_path(run_dir).exists(), "the fixture wrote a sidecar"
-    S.mod("learning.branch.archive").archive_episode(ep, old)
+    with Episode.open(ep) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, old)
     for label in ("b", "c"):
         assert not (ep / "worlds" / label / S.run_end_name()).exists(), (
             f"{label}: the archive invented a record for a run that recorded nothing")
@@ -441,7 +443,8 @@ def test_missing_run_end_covers_every_re_run_path_not_only_archive_time(tmp_path
     first = S.graded(ep)["b"]
     second = S.graded(ep)["b"]
     assert first == second, "the second grading pass over one archive answered differently"
-    S.mod("learning.branch.archive").archive_episode(ep, {"b": S.sibling_run_dir(base, "b")})
+    with Episode.open(ep) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, {"b": S.sibling_run_dir(base, "b")})
     assert S.graded(ep)["b"].get("cut_short") is None, (
         "re-archiving a world whose run recorded nothing produced a cut_short key")
 

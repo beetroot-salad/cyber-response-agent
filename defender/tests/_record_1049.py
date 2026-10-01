@@ -142,7 +142,8 @@ FORBIDDEN_OS_NAMES = frozenset({
 class RecordingOs:
     """Every call the primitive makes through `bind(..., os_=)`: delegated to the real `os`
     and recorded — `opens` as `(path, flags, dir_fd, fd-or-exception)`, `fstats` and `closes`
-    as the fd, `fdopens` as `(fd, file)`, and `asked` as every OTHER attribute the walk touched
+    as the fd, `fdopens` as `(fd, file)`, `dups` as `(fd, copy)` (a read walks off a private
+    copy of the root's handle, #1133), and `asked` as every OTHER attribute the walk touched
     (so a `lstat`/`stat`/`path.exists` reaches the test as a name, not a silent success)."""
 
     def __init__(self) -> None:
@@ -150,6 +151,7 @@ class RecordingOs:
         self.fstats: list[int] = []
         self.closes: list[int] = []
         self.fdopens: list[tuple[int, Any]] = []
+        self.dups: list[tuple[int, int]] = []
         self.asked: list[str] = []
 
     def open(self, path: Any, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
@@ -168,6 +170,11 @@ class RecordingOs:
     def close(self, fd: int) -> None:
         self.closes.append(fd)
         os.close(fd)
+
+    def dup(self, fd: int) -> int:
+        copy = os.dup(fd)
+        self.dups.append((fd, copy))
+        return copy
 
     def fdopen(self, fd: int, *a: Any, **kw: Any) -> Any:
         fh = os.fdopen(fd, *a, **kw)

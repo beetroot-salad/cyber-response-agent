@@ -33,6 +33,7 @@ already owns, for exploits this code does not contain.)
 """
 from __future__ import annotations
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 from defender.tests._spec791 import (
     SpecTail,
@@ -149,11 +150,12 @@ def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp
     archive = S.mod("learning.branch.archive")
 
     S.plant_sidecar(run_dir, truncated_by="aborted")
-    archive.archive_episode(ep, {"b": run_dir})
-    assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
+    with Episode.open(ep) as episode:
+        archive.archive_episode(episode, {"b": run_dir})
+        assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
 
-    S.sidecar_path(run_dir).unlink()
-    archive.archive_episode(ep, {"b": run_dir})
+        S.sidecar_path(run_dir).unlink()
+        archive.archive_episode(episode, {"b": run_dir})
     assert not (ep / "worlds" / "b" / S.run_end_name()).exists(), (
         "a stale run-end record survived a re-archive whose run has none")
     assert S.graded(S.cut_short_episode(tmp_path / "control"))["b"].get("cut_short") is None

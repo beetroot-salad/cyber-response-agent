@@ -55,7 +55,9 @@ from typing import Any
 
 import yaml
 
-from defender._io import write_guarded
+from defender._episode_handle import Episode as _EpisodeHandle
+from defender._episode_paths import EpisodePaths
+from defender._io import bind, write_guarded
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 
@@ -189,7 +191,10 @@ def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str,
     path = draw_dir / f"{draw}.yaml"
     path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     if check:
-        on_disk = J.sym("learning.judge.enqueue", "draws_on_disk")(draw_dir)
+        # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
+        # draw dir path directly.
+        with bind(Path(episode_dir)) as ep_view:
+            on_disk = J.sym("learning.judge.enqueue", "draws_on_disk")(ep_view, label)
         assert int(draw) in on_disk, f"fixture bug: draw {draw} did not read back"
     return path
 
@@ -322,7 +327,7 @@ def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = N
     through the guarded replace lane, read back through `read_stage_timings` unless the
     scenario wants a record the reader refuses (`check=False`, or `raw=`)."""
     timing = J.mod("learning.branch.timing")
-    path = timing.timing_path(Path(episode_dir))
+    path = EpisodePaths(Path(episode_dir)).timing
     if raw is not None:
         plant_raw(path, raw)
         return path
@@ -374,13 +379,15 @@ def stage_names(episode_dir: Path, labels: tuple[str, ...] = (WITHHELD_WORLD, GR
     alias row per world, in the shape the launcher appends."""
     staging = J.mod("learning.branch.staging")
     rows = []
-    for label in labels:
-        token = T.world_token(label)
-        for kind, name in (("index", f"wv-{token}-logs-system.auth-.inject"),
-                           ("alias", f"wv-{token}-logs-system.auth-")):
-            rows.append(staging.record_staged(
-                Path(episode_dir), {"world": token, "name": name, "kind": kind,
-                                    "derived_from": "logs-system.auth-*"}))
+    # `record_staged` now takes the `Episode` handle (#1133 rev 2), not the episode dir path.
+    with _EpisodeHandle.open(Path(episode_dir)) as episode:
+        for label in labels:
+            token = T.world_token(label)
+            for kind, name in (("index", f"wv-{token}-logs-system.auth-.inject"),
+                               ("alias", f"wv-{token}-logs-system.auth-")):
+                rows.append(staging.record_staged(
+                    episode, {"world": token, "name": name, "kind": kind,
+                              "derived_from": "logs-system.auth-*"}))
     return rows
 
 

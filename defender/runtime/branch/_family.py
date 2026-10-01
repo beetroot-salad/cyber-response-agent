@@ -28,8 +28,9 @@ from typing import Any
 import yaml
 
 from defender import _yaml
-from defender._episode_paths import EpisodePaths
-from defender._io import guarded_mkdir, read_guarded, write_guarded
+from defender._episode_handle import Episode
+from defender._episode_paths import LAYOUT
+from defender._io import Bound
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
     RUN_ID_ALLOWED,
@@ -532,47 +533,46 @@ def runnable_worlds(family: Family) -> list[World]:
 
 
 def load_family(
-    path: Path, *, captured_patterns: tuple[str, ...] = (),
+    view: Bound, *, captured_patterns: tuple[str, ...] = (),
     configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
 ) -> Family:
-    """Read and validate the manifest at `path`."""
-    return parse_family(_read_document(Path(path)), captured_patterns=captured_patterns,
+    """Read and validate the manifest of the episode `view` is bound at."""
+    return parse_family(_read_document(view), captured_patterns=captured_patterns,
                         configured_patterns=configured_patterns)
 
 
-def _read_document(path: Path) -> object:
+def _read_manifest(view: Bound) -> str:
+    """The manifest's text, read through the view: nothing below the episode dir is followed,
+    so a planted link is never read or certified. An absent or refused manifest is
+    `FamilyError`, naming the record (a view holds no path)."""
+    rec = view.read(LAYOUT.family)
+    if rec.text is None:
+        raise FamilyError(f"the manifest ({LAYOUT.family}) could not be read: "
+                          f"{'absent' if rec.absent else rec.reason}")
+    return rec.text
+
+
+def _read_document(view: Bound) -> object:
     """The manifest deserialized but not yet narrowed; typed `object` so only `parse_family`
     produces a `Family`."""
-    # Guarded: the episode dir is reachable from a sibling box's rw bind, so the manifest may be
-    # a planted link. `read_guarded` checks the open descriptor, leaving no check-then-act window.
-    text, refusal = read_guarded(path)
-    if text is None:
-        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
+    text = _read_manifest(view)
     try:
         return _yaml.safe_load_tree(text)
     except yaml.YAMLError as bad:
-        raise FamilyError(f"the manifest at {path} could not be read: {bad}") from bad
+        raise FamilyError(f"the manifest ({LAYOUT.family}) could not be read: {bad}") from bad
 
 
-def write_family(episode_dir: Path, doc: dict) -> Path:
-    """Render the manifest into `episode_dir` through a structured dumper, never by hand.
+def write_family(episode: Episode, doc: dict) -> Path:
+    """Render the manifest into `episode` through a structured dumper, never by hand.
 
     Scalars are model-authored; an f-string writer would let one carrying `episode_id: hijacked`
     on a second line inject a key.
     """
-    episode_dir = Path(episode_dir)
-    # The episode dir is its own trust root: its parent is the host-controlled episodes root,
-    # and everything below it is reachable from a sibling box's rw bind.
-    guarded_mkdir(episode_dir, base=episode_dir.parent)
-    manifest = EpisodePaths(episode_dir).family
-    # Guarded: a link planted at the manifest's name would send the family's contract out of the
-    # episode.
-    # No aliases: the reader refuses them, so a value the doc shares is written out each time.
-    write_guarded(
-        manifest,
+    manifest = episode.family
+    manifest.write(
         yaml.dump(doc, Dumper=_TreeDumper, sort_keys=False, allow_unicode=True,
                   default_flow_style=False))
-    return manifest
+    return manifest.path
 
 
 class _TreeDumper(yaml.SafeDumper):
@@ -580,25 +580,22 @@ class _TreeDumper(yaml.SafeDumper):
         return True
 
 
-def manifest_digest(path: Path) -> str:
+def manifest_digest(view: Bound) -> str:
     """The manifest's content digest, recorded in the review and re-checked on resume.
 
-    Uses the same guarded read as `_read_document`, so a planted link is never certified.
+    Uses the same read as `_read_document`, so a planted link is never certified.
     """
-    text, refusal = read_guarded(Path(path))
-    if text is None:
-        raise FamilyError(f"the manifest at {path} could not be read: {refusal}")
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_read_manifest(view).encode("utf-8")).hexdigest()
 
 
-def check_manifest_digest(path: Path, recorded: str) -> None:
+def check_manifest_digest(view: Bound, recorded: str) -> None:
     """Refuse a manifest whose bytes changed since the review recorded them."""
-    actual = manifest_digest(path)
+    actual = manifest_digest(view)
     if actual != recorded:
         raise FamilyError(
-            f"the manifest at {path} has a digest of {actual[:12]} but the review recorded "
-            f"{str(recorded)[:12]} — a manifest edited between review and run is not the "
-            "document the review accepted")
+            f"the manifest ({LAYOUT.family}) has a digest of {actual[:12]} but the review "
+            f"recorded {str(recorded)[:12]} — a manifest edited between review and run is not "
+            "the document the review accepted")
 
 
 # ---------------------------------------------------------------------------------------

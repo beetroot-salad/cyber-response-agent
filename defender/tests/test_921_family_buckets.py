@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 
 
@@ -411,14 +412,16 @@ def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_pat
     `lead-set`.
     """
     ledger_mod = J.mod("learning.branch.ledger")
-    ep = J.accepted_episode(tmp_path)
-    fresh = ledger_mod.Ledger.for_world(ep, "newborn")
-    assert not fresh.path.exists(), "the scenario started with the file already there"
+    ep_dir = J.accepted_episode(tmp_path)
+    with Episode.open(ep_dir) as episode:
+        fresh = ledger_mod.Ledger.for_world(episode, "newborn")
+        assert not fresh.path.exists(), "the scenario started with the file already there"
 
-    returned = fresh.declare()
-    assert returned is fresh, "declare did not hand back the ledger the caller must write through"
-    assert fresh.path.is_file(), "a world that served nothing left no ledger"
-    assert fresh.path.read_text(encoding="utf-8") == "", "declare wrote a row"
+        returned = fresh.declare()
+        assert returned is fresh, (
+            "declare did not hand back the ledger the caller must write through")
+        assert fresh.path.is_file(), "a world that served nothing left no ledger"
+        assert fresh.path.read_text(encoding="utf-8") == "", "declare wrote a row"
 
 
 def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
@@ -430,13 +433,14 @@ def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
     is the very fact `declare` exists to make trustworthy.
     """
     ledger_mod = J.mod("learning.branch.ledger")
-    ep = J.accepted_episode(tmp_path)
-    led = ledger_mod.Ledger.for_world(ep, "already_writing").declare()
-    led.path.write_text('{"source": "staged"}\n', encoding="utf-8")
+    ep_dir = J.accepted_episode(tmp_path)
+    with Episode.open(ep_dir) as episode:
+        led = ledger_mod.Ledger.for_world(episode, "already_writing").declare()
+        led.path.write_text('{"source": "staged"}\n', encoding="utf-8")
 
-    led.declare()
-    assert led.path.read_text(encoding="utf-8") == '{"source": "staged"}\n', (
-        "a second declare truncated rows a concurrent writer had already appended")
+        led.declare()
+        assert led.path.read_text(encoding="utf-8") == '{"source": "staged"}\n', (
+            "a second declare truncated rows a concurrent writer had already appended")
 
 
 def test_921_an_empty_ledger_reports_served_nothing_on_the_record(tmp_path):

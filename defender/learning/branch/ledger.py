@@ -20,9 +20,10 @@ import threading
 from collections.abc import Mapping
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from defender._io import append_jsonl, read_jsonl_rows
+from defender._io import read_jsonl_rows
+from defender._episode_handle import AppendRecord, Episode
 from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import (
@@ -182,7 +183,7 @@ class ServedCall:
             self.params if self.asked_params is None else self.asked_params)
 
     def row(self) -> dict:
-        # `_json_safe_params` because `append_jsonl` dumps with stdlib defaults: otherwise a
+        # `_json_safe_params` because the appenders dump with stdlib `json.dumps` defaults: otherwise a
         # param reaches the file as `Infinity`/`NaN` or raises `TypeError` mid-serve.
         row = {
             "system": self.system, "verb": self.verb,
@@ -203,6 +204,14 @@ class ServedCall:
         return row
 
 
+def served_line(row: dict) -> str:
+    """One served-call row (`ServedCall.row()`) as its JSONL line: the one spelling of a
+    served-file line, for the primer's base and each world's own file.
+
+    @owns served-call line"""
+    return json.dumps(row) + "\n"  # lint-jsonl-io: ok — one row, handed whole to the episode's create or append
+
+
 @model
 class Ledger:
     """The append-only record of one world's served calls, and the family's shared base.
@@ -211,7 +220,7 @@ class Ledger:
     read-only for the run; `path` is this world's own rows, with exactly one writer. Rows off a
     world's staged set are therefore byte-identical across siblings.
 
-    One writer per file matters because siblings run in parallel and `append_jsonl` writes a
+    One writer per file matters because siblings run in parallel and an append writes a
     large row in several `write()` calls; two processes appending would tear lines that
     `read_jsonl_rows` silently drops. It also removes any check-then-act race for captured keys.
 
@@ -223,25 +232,25 @@ class Ledger:
     base_path: Path
 
     @classmethod
-    def for_world(cls, episode_dir: Path, world_id: str) -> Ledger:
-        """This world's ledger under `episode_dir`, over the family's primed base.
+    def for_world(cls, episode: Episode, world_id: str) -> Self:
+        """This world's ledger in `episode`, over the family's primed base.
 
-        Deriving the path from the world id makes "two worlds never share a file" structural.
+        Deriving the file from the world id makes "two worlds never share a file" structural.
 
-        The id is validated as a single filename component (nothing upstream refuses `../base`).
-        That check does not stop the bare id `base` from naming the capture; `__post_init__`
-        refuses that collision on the resulting paths.
+        The id passes the episode's minting check (a single, case-stable filename component:
+        nothing upstream refuses `../base`), as a `LedgerError`. That check does not stop the
+        bare id `base` from naming the capture; `__post_init__` refuses that collision.
         """
-        if not isinstance(world_id, str) or not world_id:
+        try:
+            served = episode.served_world(world_id)
+        except ValueError as e:
             raise LedgerError(
-                f"a world needs a non-empty string id to name its ledger, got {world_id!r}")
-        if world_id != Path(world_id).name or world_id in (".", ".."):
-            raise LedgerError(
-                f"world id {world_id!r} is not a single filename component — a world's rows are "
+                f"world id {world_id!r} cannot name a world's ledger ({e}) — a world's rows are "
                 "a file beside the family's base, and an id carrying a separator would write "
-                "outside the episode or onto the capture its siblings replay")
-        base = base_file(episode_dir)
-        return cls(path=base.parent / f"{world_id}.jsonl", base_path=base)
+                "outside the episode or onto the capture its siblings replay") from None
+        ledger = cls(path=served.path, base_path=episode.served_base.path)
+        ledger._served = served
+        return ledger
 
     def declare(self) -> Ledger:
         """Create this world's ledger empty if it is not there yet, and return the ledger.
@@ -253,14 +262,23 @@ class Ledger:
         Called only by the sibling building its registry; `for_world` is also used by readers,
         and creating the file there would mint the artifact being read.
 
-        Opens in append mode: `record` may already be appending from a parallel gather lead.
+        An empty append: `record` may already be appending from a parallel gather lead.
         """
-        self.path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount, exactly as `record`'s own append below  # noqa: E501
-        with self.path.open("a", encoding="utf-8"):  # lint-unguarded-tree-write: ok — same tree and same rationale as `record`; opened in append so a concurrent writer's rows survive  # noqa: E501
-            pass
+        self._append("")
         return self
 
+    def _append(self, text: str) -> None:
+        """Append to this world's file through the episode's `served_world` record, the one
+        write lane. A ledger not built by `for_world` has none and writes nothing."""
+        if self._served is None:
+            raise LedgerError(
+                f"{self.path}: a ledger writes only through its episode — build it with "
+                "`Ledger.for_world(episode, world_id)`")
+        self._served.append(text)
+
     def __post_init__(self) -> None:
+        #: This world's `served_world` record, the ledger's one write lane; set by `for_world`.
+        self._served: AppendRecord | None = None
         #: Family tier only, keyed by request key: `base_payload` never reads a world's own
         #: rows, so memoizing them would only hold every served payload in memory.
         self._memo: dict[str, str] = {}
@@ -359,8 +377,7 @@ class Ledger:
                 f"{PARAMS_NESTING_LIMIT} levels") from too_deep
         key = call.key
         with self._lock:
-            append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
-                self.path, [row])
+            self._append(served_line(row))
             if call.world_id is None:
                 # First row wins, as in `_absorb`, so a repeated question answers the same way
                 # for the rest of the run.

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 
+from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 
 
@@ -342,7 +343,8 @@ def test_the_review_record_and_the_provenance_stamp_are_unchanged_for_a_cut_shor
     (run_dir / "review_record.1.json").write_text(json.dumps(record), encoding="utf-8")
     provenance_bytes = (run_dir / "provenance.json").read_bytes()
 
-    S.mod("learning.branch.archive").archive_episode(ep, {"b": run_dir})
+    with Episode.open(ep) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, {"b": run_dir})
     assert json.loads((run_dir / "review_record.1.json").read_text(encoding="utf-8")) == record
     assert (run_dir / "provenance.json").read_bytes() == provenance_bytes
     assert (ep / "worlds" / "b" / "provenance.json").read_bytes() == provenance_bytes

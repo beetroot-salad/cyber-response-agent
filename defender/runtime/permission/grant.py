@@ -54,7 +54,7 @@ _SHIM_FLAGS: dict[str, tuple[str, ...]] = {
         "--frontier", "--hyp", "--json", "--max-hypotheses-per-lead", "--min-support",
         "--parent-class", "--parent-type", "--quiet", "--rel", "--signature", "--top-k",
     ),
-    "defender-sql": (),
+    "defender-sql": ("--rows", "--names"),
 }
 
 PROGRAMS: dict[str, Extractor] = {

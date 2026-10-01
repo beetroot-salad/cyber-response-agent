@@ -465,7 +465,11 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     assert steps[2][2] == fds[1], [(o[0], o[2], o[3]) for o in steps]
     root_opens = [o for o in rec.opens if o[2] is None]
     if root_opens:
-        assert steps[0][2] == root_opens[-1][3], "the first component was not opened from the root's handle"
+        # The root's handle, or the private copy of it the read takes (#1133), which is closed.
+        root_fd = root_opens[-1][3]
+        copies = [copy for fd, copy in rec.dups if fd == root_fd]
+        assert steps[0][2] in (root_fd, *copies), "the first component was not opened from the root's handle"
+        assert all(copy in rec.closes for copy in copies), (rec.dups, rec.closes)
     assert sorted(rec.fstats) == sorted(fds), (rec.fstats, fds)
     assert rec.all_closed(), (rec.opens, rec.closes, rec.fdopens)
     assert not (set(rec.asked) & R.FORBIDDEN_OS_NAMES), rec.asked

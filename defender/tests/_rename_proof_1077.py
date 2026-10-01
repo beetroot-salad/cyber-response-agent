@@ -16,6 +16,7 @@ import json
 import sys
 from pathlib import Path
 
+from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._io import bind
 from defender._run_paths import RunPaths
@@ -41,7 +42,9 @@ def main(root: Path) -> int:
     from defender.learning.branch.archive import archive_episode
 
     episode_dir.mkdir(parents=True)
-    archived = archive_episode(episode_dir, {"b": run_dir})
+    # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
+    with Episode.open(episode_dir) as episode:
+        archived = archive_episode(episode, {"b": run_dir})
     assert set(archived) == {"b"}, archived
 
     world = EpisodePaths(episode_dir).world("b")
