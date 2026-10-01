@@ -62,9 +62,9 @@ if __name__ == "__main__":
 
 from defender import _git, _tenant, _tenant_census  # noqa: E402
 from defender._io import guarded_mkdir, write_guarded  # noqa: E402
-from defender._tenants import TENANT_ID_FILE, template_dir  # noqa: E402
+from defender._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.runtime import run_tenant  # noqa: E402
-from defender.runtime.verb_dispositions import DispositionError  # noqa: E402
+from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.scripts.case_history import case_ticket  # noqa: E402
 
 #: The words `check` fails closed with when git cannot say whether `.tenant-id` is committed.
@@ -146,7 +146,7 @@ def _findings(knowledge: Path) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
     settings files load, the grant census both ways and the lead-zero agreement against the
     running checkout, and the committed `.tenant-id`."""
-    settings = knowledge / "settings"
+    settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
     try:
         _settings_files_parse(settings)
@@ -157,7 +157,7 @@ def _findings(knowledge: Path) -> list[str]:
     except _tenant_census.CensusUnavailable as blind:
         findings.append(f"the grant census could not be taken: {blind}")
     else:
-        table = settings / "verb-grants.yaml"
+        table = dispositions_path(settings)
         try:
             findings += _tenant_census.table_findings(settings, census).lines(table)
         except DispositionError as unloadable:

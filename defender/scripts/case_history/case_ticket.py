@@ -79,7 +79,10 @@ def _load_mapping(settings_dir: Path) -> dict[str, Any]:
     path = _mapping_path(settings_dir)
     if not path.is_file():
         raise CaseTicketError(f"case-history mapping not found: {path}")
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError as e:
+        raise CaseTicketError(f"case-history mapping {path} could not be read: {e}") from e
     cached = _MAPPING_CACHE.get(path)
     if cached is not None and cached[0] == raw:
         return copy.deepcopy(cached[1])

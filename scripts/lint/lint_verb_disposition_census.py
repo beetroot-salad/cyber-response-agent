@@ -38,7 +38,7 @@ from defender._tenant_census import (  # noqa: E402
     table_findings,
     take_census,
 )
-from defender._tenants import template_dir  # noqa: E402
+from defender._tenants import SETTINGS_HALF, template_dir  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,
     dispositions_path,
@@ -84,7 +84,7 @@ def main(argv: list[str]) -> int:
                   f"{refusal}", file=sys.stderr)
             worst = 2
             continue
-        settings = folder / "settings"
+        settings = folder / SETTINGS_HALF
         try:
             findings = table_findings(settings, census)
         except DispositionError as e:

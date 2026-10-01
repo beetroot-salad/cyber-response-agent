@@ -20,7 +20,7 @@ from defender.learning.leads.declared_systems import declared_systems_over, read
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime import lead_zero as lead_zero_mod
 from defender.runtime.lead_zero._spec import correlation_grant
-from defender.runtime.lead_zero_config import LeadZeroConfigError
+from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
 from defender.runtime.run_tenant import catalog_templates, correlation_dispatch
 from defender.runtime.verb_dispositions import (
     CensusGaps,
@@ -131,7 +131,7 @@ def _lead_zero_fault(settings: Path, rows: tuple, catalog: list[QueryTemplate]) 
     except (LeadZeroConfigError, lead_zero_mod.CorrelationDispatchError, GrantError) as e:
         return str(e)
     if not any(t.id == template_id and is_established(t) for t in catalog):
-        return (f"{settings / 'lead-zero.yaml'}: correlation_template {template_id!r} names no "
+        return (f"{lead_zero_config_path(settings)}: correlation_template {template_id!r} names no "
                 "established template in the catalog (the table withholds the lead, so no run "
                 "consults it yet)")
     return None
