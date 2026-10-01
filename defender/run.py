@@ -51,7 +51,7 @@ from defender._run_handle import Run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
-from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
+from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
@@ -474,26 +474,27 @@ def _materialize_run(
     return run
 
 
-def _accept_request_tenant(ns: argparse.Namespace) -> _tenant.Tenant:
+def _accept_request_tenant(
+    ns: argparse.Namespace, *, box_mounted: tuple[Path, ...],
+) -> _tenant.Tenant:
     """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
     names it with `--tenant`, a sibling included: it comes from the request (for a platform,
     the acting user's authentication context), never from a record or a stamp, and there is no
     default. The data root is resolved here, once, and accepted under through
     `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
     tenant is also checked against its source's record once the manifest is resolved
-    (`_sibling_tenant_agrees`). A fork's runs base sits inside its episode, which the
-    tenant's settings must not."""
+    (`_sibling_tenant_agrees`). `box_mounted` is what the run's box mounts besides the
+    checkout — a sibling's runs base, inside its held episode — and the tenant's settings must
+    sit under none of it."""
     try:
         if ns.tenant is None:
             raise _tenant.TenantRefused(
                 "--tenant is required: every run names its tenant, a sibling included, and "
                 "there is no default")
         tenant_id = _tenant.TenantId(ns.tenant)
-        mounted = (() if ns.resume is None
-                   else (EpisodePaths(ns.resume.resolve().parent).runs,))
         return _tenant.accept_tenant(
             _tenant.resolve_data_root(), tenant_id, defender_dir=DEFENDER_DIR,
-            box_mounted=mounted)
+            box_mounted=box_mounted)
     except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
@@ -536,9 +537,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
-    # The tenant, from the request, accepted under the data root before anything is spent;
-    # nothing below resolves the root or a tenant path again.
-    accepted = _accept_request_tenant(ns)
     # A sibling's door: the episode it resumes, held for the whole run. The handle serves the
     # manifest read and the world ledger's writes; nothing below reopens the episode by name.
     episode_dir = _resume_episode_dir(ns)
@@ -548,6 +546,11 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     except OSError as missing:
         sys.exit(f"[run.py] --resume {ns.resume}: its episode dir cannot be held ({missing})")
     with door as episode:
+        # The tenant, from the request, accepted under the data root before anything is spent;
+        # nothing below resolves the root or a tenant path again. A sibling's runs base is its
+        # episode's, which the box mounts and the tenant's settings must not sit under.
+        accepted = _accept_request_tenant(
+            ns, box_mounted=() if episode is None else (episode.runs.path,))
         # One readiness check, shared by the old-manifest judge and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
             accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.resume is None))

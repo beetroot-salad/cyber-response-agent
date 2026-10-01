@@ -49,8 +49,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import os
 import re
 import shutil
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -437,6 +439,18 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
+def _default_tenant() -> Any:
+    """The tenant a replay that names none runs as: the committed fixture, set up under the
+    test's own data root (#1120 H2). A module-scoped drive runs before the autouse
+    function-scoped `data_root` fixture has set `DEFENDER_DATA_ROOT`; it gets the fixture set
+    up under a private temporary data root of its own, never a host one."""
+    from defender.tests import _data_root_1078
+
+    if os.environ.get(_data_root_1078.DATA_ROOT_ENV):
+        return _tenants1106.fixture_tenant()
+    return _data_root_1078.set_up_tenant(Path(tempfile.mkdtemp(prefix="replay-data-root-")))
+
+
 def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
@@ -586,7 +600,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
     run_tenant = _tenants1106.run_tenant(
-        tenant if tenant is not None else _tenants1106.fixture_tenant(),
+        tenant if tenant is not None else _default_tenant(),
         grants=grants, defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )

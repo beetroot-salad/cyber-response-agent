@@ -32,6 +32,7 @@ from typing import Any
 import pytest
 
 from defender import _tenant, _tenants
+from defender._episode_handle import Episode
 from defender import run as run_py
 from defender.evals import held_out
 from defender.evals.oracle_golden import generate_case
@@ -544,7 +545,9 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 
     assert "tenants_root" not in inspect.signature(branch_cli.start_family).parameters
     spawn = T.FakeSpawn()
-    branch_cli.start_family(episode, ["a"], spawn=spawn, tenant_id=_tenant.TenantId(H.TID))
+    # #1133 (merged into this branch, PR #1157): start_family takes the held Episode.
+    with Episode.open(episode) as held:
+        branch_cli.start_family(held, ["a"], spawn=spawn, tenant_id=_tenant.TenantId(H.TID))
     assert len(spawn.launches) == 1, spawn.launches
     child_argv, child_env = spawn.launches[0]["argv"], spawn.launches[0]["env"]
     assert child_env.get(H.DATA_ROOT_ENV) == str(data_root), (

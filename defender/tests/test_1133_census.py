@@ -763,9 +763,10 @@ _O5_EXEMPT_PREFIX = ("source", "run_dir")
 #: O5's named parameters.
 _O5_NAMED = frozenset({"path", "manifest", "draw_dir", "world_dir"})
 #: Path-typed parameters named for a root outside every episode tree: the sibling runs base,
-#: the tenant's settings, the tenants root, the lessons folder, the judge queue, the defender
-#: checkout, a git work tree. None is below an episode dir.
-OUTSIDE_EPISODE = frozenset({"runs_base", "settings_dir", "tenants_root", "lessons_dir",
+#: the tenant's settings, the data root (#1120; the episodes root is refused inside it), the
+#: lessons folder, the judge queue, the defender checkout, a git work tree. None is below an
+#: episode dir.
+OUTSIDE_EPISODE = frozenset({"runs_base", "settings_dir", "data_root", "lessons_dir",
                              "queue_dir", "defender_dir", "cwd"})
 #: Concrete, I/O-capable path types (a `PurePath` is a relative name, not a path to open).
 _PATH_TYPES = frozenset({"Path", "PosixPath", "PathLike", "StrPath"})
@@ -1111,7 +1112,7 @@ class Holder:
 
 def exempt(episode_dir: Path, episodes_root: Path, source_run_dir: Path, source: Path,
            run_dir: Path, run_dirs: list[Path], runs_base: Path, settings_dir: Path,
-           tenants_root: Path, lessons_dir: Path, queue_dir: Path | None, defender_dir: Path,
+           data_root: Path, lessons_dir: Path, queue_dir: Path | None, defender_dir: Path,
            cwd: Path): ...
 def fine(manifest: dict[str, Any], world_dir: "Bound", name: str | PurePath,
          rel: PurePosixPath, present: set[Path], prime: Callable[[Path], None],

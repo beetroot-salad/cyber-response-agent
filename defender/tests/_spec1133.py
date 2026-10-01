@@ -69,7 +69,7 @@ Entry points, with the signatures the suite calls (D3', rev 3):
   ``cli._prime_once(episode, episode_id, source_run_dir, prime)`` (the claim, driven directly
   for R2's folder row: ``prepare_episode`` has no ``io=`` seam);
   ``cli._teardown_without_masking(episode, door, *, aborting)``;
-* ``cli.start_family(episode, labels, *, spawn=, tenant_id=, tenants_root=)``;
+* ``cli.start_family(episode, labels, *, spawn=, tenant_id=)``;
   ``cli.verify_family(episode, run_dirs, *, source=)``;
   ``archive.archive_episode(episode, run_dirs)``;
 * ``staging.record_staged(episode, row)``; ``staging.merge_review(episode, key, block)`` (a
