@@ -1,0 +1,128 @@
+# The verb-disposition table — who may call what, in this deployment.
+#
+# READ defender/runtime/verb_dispositions.py before editing. The short version:
+#
+#   * This file is AUTHORED. It is never generated from what is on disk, because deriving it
+#     would mean dropping an adapter file into the tree grants that adapter access.
+#   * It must be TOTAL over the systems that exist. Every (system, verb) an adapter declares
+#     needs a row here — including `health-check`. A verb with no row fails CI
+#     (scripts/lint/lint_verb_disposition_census.py), which is the whole point: before #995 a
+#     newly connected system was silently unreachable, and the refusal it produced looked
+#     like a typo rather than a missing permission.
+#   * `roles:` names GRANT HOLDERS: `gather` (the only role that holds one, since #922 retired
+#     the judge) and `lead-zero-correlation` — the turn-zero correlation lead, a gather
+#     subagent the harness dispatches before MAIN's first turn under gather's policy and a
+#     NARROWER grant. It is the one holder that is not a role. Three loader refusals keep that
+#     narrowing true: a pair only it holds (it may never reach past gather), rows for it on a
+#     second system (it is dispatched against exactly one), and a SECOND query verb (no model
+#     chose to spend this lead, and whether its index is confined depends on which verb it
+#     holds). Withhold its query pair and the lead is skipped, and ORIENT says why; the run
+#     goes on.
+#   * `roles: []` means granted to nobody. That is a legal decision and requires `reason:`.
+#     Absence from this file is NOT that decision — it is an unfinished job, and the gate
+#     says so.
+#   * `health-check` carries the one joint rule, and it WARNS rather than fails: a system
+#     gather can query but not health-check leaves `/connect`'s test step and the runtime's
+#     nothing-to-try paths with nothing to probe it with. Withholding the whole system from
+#     gather is fine; granting it a verb without a health-check prints a warning on every
+#     load. Not a CI gate on purpose — this file is per-deployment, and the operator editing
+#     their own copy is the only one who can author the mistake and never runs our CI.
+#
+# ADDING A SYSTEM: `/connect` scaffolds the adapter and the skill; then a human adds its rows
+# here. That edit is deliberate and is the one shared-file edit onboarding requires — the
+# allowlist is a security property, not an accident of bookkeeping.
+#
+# There is no verb-class field: every row grants READ. A write grant needs a schema change in
+# verb_dispositions.py and the review that comes with it.
+
+dispositions:
+
+  change-mgmt:
+    active-changes: {roles: [gather]}
+    get-change: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-changes: {roles: [gather]}
+
+  cmdb:
+    get-host: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-hosts: {roles: [gather]}
+    # Declared by the adapter, exercised by no query template and no run in the history the
+    # c18 census was drawn from (#632). Note `identity.list-roles` IS granted — the two are
+    # different systems' verbs that happen to share a name, which is why every row here is
+    # keyed by the pair and never by the verb alone.
+    list-roles:
+      roles: []
+      reason: "in the registry, exercised by no template and no run (c18/#632)"
+
+  elastic:
+    # The two pairs the turn-zero correlation lead holds (#999). This table's authority over
+    # that lead is GRANT OR WITHHOLD, never relocate: the pair it grants must be the one the
+    # template named in `lead-zero.yaml` binds (its front matter's `verb:`, under the system
+    # it is filed under), and the run refuses at start if the two disagree (#1003). Moving
+    # the lead to another backend is that config line plus this holder's rows — not one
+    # without the other. The loader's one-query-verb rule is what keeps a one-word edit here from
+    # widening it; withholding the pair (`roles: [gather]`) skips the lead instead. It used
+    # to be a `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could
+    # withdraw.
+    alerts: {roles: [gather, lead-zero-correlation]}
+    esql: {roles: [gather]}
+    health-check: {roles: [gather, lead-zero-correlation]}
+    query: {roles: [gather]}
+
+  host-state:
+    authorized-keys: {roles: [gather]}
+    container-inspect: {roles: [gather]}
+    fim-checksum: {roles: [gather]}
+    health-check: {roles: [gather]}
+    package-list: {roles: [gather]}
+    passwd: {roles: [gather]}
+    proc-tree: {roles: [gather]}
+
+  identity:
+    can-access: {roles: [gather]}
+    get-user: {roles: [gather]}
+    health-check: {roles: [gather]}
+    list-roles: {roles: [gather]}
+    list-users: {roles: [gather]}
+    list-authorized-hosts:
+      roles: []
+      reason: "in the registry, exercised by no template and no run (c18/#632)"
+
+  tacit-knowledge:
+    health-check: {roles: [gather]}
+    # Read, like every row in this file, and here that class is the whole provenance argument
+    # rather than a default: the registry's safety case is that every entry traces to a human
+    # commit, so no run-path verb may write it (#983).
+    lookup: {roles: [gather]}
+
+  threat-intel:
+    health-check: {roles: [gather]}
+    list-indicators: {roles: [gather]}
+    lookup: {roles: [gather]}
+
+  ticket:
+    health-check: {roles: [gather]}
+    # Held by gather alone since #922. It was the one pair two roles held — the benign judge
+    # read the closed-ticket store to score — and that leg went with the old pipeline.
+    list-tickets: {roles: [gather]}
+    # The judge's closed-ticket surface, retired with the judge (#922) rather than deleted:
+    # the rows stay so the file still records that these verbs exist and are granted to
+    # nobody on purpose, which is what `case-opened-at` below established as this file's way
+    # of spelling an examined no. They were withheld from gather deliberately and still are —
+    # an investigation that could read how past cases were closed would be grading itself
+    # against the answer — so a future re-grant is a decision, not a restoration.
+    get-ticket:
+      roles: []
+      reason: "the benign judge was the only grantee; its closed-ticket leg retired with the old pipeline (#922). Still withheld from gather: reading how past cases closed would let an investigation grade itself against the answer"
+    key-pattern:
+      roles: []
+      reason: "screened get-ticket's key before the store was reached; ungranted with get-ticket itself (#922)"
+    # Ungranted by OMISSION before #995 — it appeared in no grant and in no "granted to
+    # nobody" note either, so nothing recorded whether that was a decision. Recorded now as
+    # one: no template and no run exercises it. The original reason also said the judge reads
+    # open-time via `get-ticket`; that judge is gone (#922) and `get-ticket` is ungranted too,
+    # so the omission now rests on the first half alone.
+    case-opened-at:
+      roles: []
+      reason: "no template and no run exercises it"
