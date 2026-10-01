@@ -610,6 +610,12 @@ class QueryCapture(AbstractCapability[Any]):
     async def _execute(self, ctx, args, handler):  # noqa: ANN001
         """The call itself. Raises `GatherDeadEnd` for a guard's stop; `wrap_tool_execute` owns
         the door."""
+        # Validation refuses a model's too-deep call before it gets here. A call that skipped
+        # validation (lead zero issues host-built calls straight to this hook) is held to the
+        # same rule, loudly and first: host-built params are shallow by construction, and past
+        # here the grant check, the breaker and every row assume params a row can carry.
+        if call_args_too_deep(args):
+            raise ParamsTooDeep(field="the call's arguments")
         deps = ctx.deps
         system = as_str(args.get("system"))
         verb = as_str(args.get("verb"))
