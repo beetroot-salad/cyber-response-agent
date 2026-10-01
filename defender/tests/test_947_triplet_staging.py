@@ -24,6 +24,7 @@ import json
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
 
 TOKEN = T.world_token("b")
@@ -45,9 +46,16 @@ def _world(**kw):
 
 
 def _stage(episode_dir, *, door, world=None, patterns=T.CONFIGURED):
-    return _staging().stage_world(
-        world if world is not None else _world(), episode_dir=episode_dir,
-        episode_token=T.EPISODE_TOKEN, configured_patterns=patterns, door=door)
+    # `stage_world` and `teardown` take the `Episode` handle, not the dir (#1133 rev 2).
+    with Episode.open(episode_dir) as episode:
+        return _staging().stage_world(
+            world if world is not None else _world(), episode=episode,
+            episode_token=T.EPISODE_TOKEN, configured_patterns=patterns, door=door)
+
+
+def _teardown(episode_dir, *, door):
+    with Episode.open(episode_dir) as episode:
+        return _staging().teardown(episode, door=door)
 
 
 # ---------------------------------------------------------------------------------------
@@ -163,8 +171,7 @@ def test_947_staging_record_is_append_only_across_worlds(tmp_path):
     first = T.staged_rows(ep)
     other = T.mod("runtime.branch._family").parse_world(
         T.world_doc("c", ov=T.overlay(elastic=T.elastic_overlay(inject=[{"_id": "i2"}]))))
-    _staging().stage_world(other, episode_dir=ep, episode_token=T.EPISODE_TOKEN,
-                           configured_patterns=T.CONFIGURED, door=door)
+    _stage(ep, door=door, world=other)
     after = T.staged_rows(ep)
     assert after[:len(first)] == first
     assert len(after) > len(first)
@@ -178,7 +185,7 @@ def test_947_an_unparseable_staging_record_refuses(tmp_path):
     ep = T.episode(tmp_path)
     (ep / "staged.yaml").write_text("- {world: b, name: [unclosed\n", encoding="utf-8")
     with pytest.raises(T.refusals()) as bad:
-        _staging().teardown(ep, door=T.FakeDoor())
+        _teardown(ep, door=T.FakeDoor())
     assert "staged.yaml" in str(bad.value)
 
 
@@ -454,7 +461,7 @@ def test_947_teardown_deletes_exactly_the_recorded_names_newest_first(tmp_path):
     door = T.FakeDoor(existing=(VIEW, INJECT, "logs-000001", f"wv-{T.world_token('c')}-logs-"))
     _stage(ep, door=door)
     recorded = [r["name"] for r in T.staged_rows(ep)]
-    _staging().teardown(ep, door=door)
+    _teardown(ep, door=door)
     assert door.deleted() == list(reversed(recorded))
     assert "logs-000001" in door.names
     assert f"wv-{T.world_token('c')}-logs-" in door.names
@@ -473,7 +480,7 @@ def test_947_teardown_verifies_each_name_is_gone(tmp_path):
 
     sticky = Sticky(existing=(VIEW, INJECT))
     with pytest.raises(T.refusals()) as bad:
-        _staging().teardown(ep, door=sticky)
+        _teardown(ep, door=sticky)
     assert VIEW in str(bad.value) or INJECT in str(bad.value)
     assert [c.op for c in sticky.calls].count("exists") >= 1
 
@@ -486,7 +493,7 @@ def test_947_a_teardown_failure_is_recorded_in_the_review_and_not_swallowed(tmp_
     _stage(ep, door=door)
     failing = T.FakeDoor(existing=(VIEW, INJECT), fault=T.Fault(fail_on=(INJECT,)))
     with pytest.raises(T.refusals()):
-        _staging().teardown(ep, door=failing, review_path=ep / "review.yaml")
+        _teardown(ep, door=failing)
     assert INJECT in json.dumps(T.review_doc(ep))
 
 
@@ -506,7 +513,7 @@ def test_947_a_planted_alias_at_the_staging_record_is_refused_by_teardown_and_sw
     record.rename(aside)
     record.symlink_to(aside)
     with pytest.raises(_refused(), match="staged.yaml"):
-        _staging().teardown(ep, door=door)
+        _teardown(ep, door=door)
     with pytest.raises(_refused(), match="staged.yaml"):
         _staging().sweep(ep, episode_token=T.EPISODE_TOKEN, door=door)
     assert VIEW in door.names, "a refusal must not delete blind"
@@ -514,7 +521,7 @@ def test_947_a_planted_alias_at_the_staging_record_is_refused_by_teardown_and_sw
 
     record.unlink()
     aside.rename(record)
-    _staging().teardown(ep, door=door)
+    _teardown(ep, door=door)
     assert VIEW not in door.names
     assert INJECT not in door.names
 

@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root
@@ -112,7 +113,7 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
     ep = episodes / T.EPISODE_ID
     if not (ep / "family.yaml").exists():
         T.episode(episodes.parent, doc=T.family_doc(source_run_dir=str(src)), root=episodes)
-    world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(Episode.open(ep), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
     run_dir = H.run_common().materialize_run(
         src / "alert.json", world.run_id, tenant_id=TID, world=world).run_dir
     return ep, Path(run_dir), world
@@ -565,8 +566,9 @@ def test_d2_launcher_no_runs_base_export(tmp_path, monkeypatch):
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     ep = T.episode(tmp_path)
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["a", "b", "c"], spawn=spawn, tenant_id=H.VALID_ID,
-                                tenants_root=H.T1106.TENANTS_ROOT)
+    with Episode.open(ep) as episode:
+        H.branch_cli().start_family(episode, ["a", "b", "c"], spawn=spawn, tenant_id=H.VALID_ID,
+                                    tenants_root=H.T1106.TENANTS_ROOT)
     assert len(spawn.launches) == 3, "not every sibling was started"
     for launch in spawn.launches:
         assert T.RUNS_BASE_ENV not in launch["env"], (
@@ -577,8 +579,9 @@ def test_d2_launcher_no_runs_base_export(tmp_path, monkeypatch):
     stale = tmp_path / "stale-operator-runs"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(stale))
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["b"], spawn=spawn, tenant_id=H.VALID_ID,
-                                tenants_root=H.T1106.TENANTS_ROOT)
+    with Episode.open(ep) as episode:
+        H.branch_cli().start_family(episode, ["b"], spawn=spawn, tenant_id=H.VALID_ID,
+                                    tenants_root=H.T1106.TENANTS_ROOT)
     assert [la["env"].get(T.RUNS_BASE_ENV) for la in spawn.launches] == [str(stale)]
 
 
@@ -594,8 +597,9 @@ def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     ep = T.episode(tmp_path)
     spawn = T.FakeSpawn()
-    H.branch_cli().start_family(ep, ["a", "b"], spawn=spawn, tenant_id=d9_tenant,
-                                tenants_root=H.T1106.TENANTS_ROOT)
+    with Episode.open(ep) as episode:
+        H.branch_cli().start_family(episode, ["a", "b"], spawn=spawn, tenant_id=d9_tenant,
+                                    tenants_root=H.T1106.TENANTS_ROOT)
     assert spawn.launches
     assert all(T.RUNS_BASE_ENV not in la["env"] for la in spawn.launches)
 

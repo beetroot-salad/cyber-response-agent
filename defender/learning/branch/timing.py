@@ -5,7 +5,7 @@ one entry per step the launcher completed, in completion order. The launcher is 
 that sees every step boundary, so it holds the episode's one `StageClock`. Entries are written
 after each step, so an aborted episode records exactly the steps that finished.
 
-The whole document is replaced through `write_guarded` after every step rather than appended
+The whole document is replaced through the episode handle's `timing.write` after every step rather than appended
 to, so a reader sees either the previous whole or the new whole. The reader therefore tolerates
 nothing: a document not in the record's shape was put there by someone else, and it raises.
 
@@ -26,19 +26,15 @@ import contextlib
 import json
 import logging
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._episode_paths import LAYOUT, EpisodePaths
-from defender._io import Bound, write_guarded
+from defender._episode_handle import Episode
+from defender._episode_paths import LAYOUT
+from defender._io import Bound
 from defender.learning.branch.steps import STEPS, Step
 
 _logger = logging.getLogger(__name__)
-
-
-def timing_path(episode_dir: Path) -> Path:
-    return EpisodePaths(episode_dir).timing
 
 
 class StageClock:
@@ -48,16 +44,17 @@ class StageClock:
     so nothing on disk can make it write a row it did not see finish.
     """
 
-    def __init__(self, episode_dir: Path) -> None:
-        self.path = timing_path(episode_dir)
+    def __init__(self, episode: Episode) -> None:
+        self._record = episode.timing
+        self.path = self._record.path
         self._rows: list[dict[str, Any]] = []
 
     def record(self, step: str, *, started_at: str, ended_at: str) -> dict[str, Any]:
         """Add one completed step and rewrite the record; returns the entry written.
 
         A `step` outside `steps.STEPS` is refused before anything is written. The write goes
-        through `write_guarded(mode="replace")` so an alias planted at the record's name (the
-        episode dir is writable by a sibling's box) is refused rather than written through.
+        through the episode handle (a replace that follows nothing below the episode dir), so an
+        alias planted at the record's name is refused rather than written through.
 
         The step is kept before the write is tried: it finished regardless of whether the disk
         took the document, and dropping it on a failed write would leave a gap in every later
@@ -71,7 +68,7 @@ class StageClock:
         # one read back.
         row = {"step": str(step), "started_at": started_at, "ended_at": ended_at}
         self._rows.append(row)
-        write_guarded(self.path, _record_text(self._rows))
+        self._record.write(_record_text(self._rows))
         return row
 
     @contextlib.contextmanager

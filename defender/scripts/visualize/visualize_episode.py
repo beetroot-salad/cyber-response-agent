@@ -26,7 +26,8 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])
     sys.path.insert(0, _root)
 
 from defender._clock import parse_iso_utc
-from defender._io import Bound, bind, write_guarded
+from defender._episode_handle import Episode
+from defender._io import Bound, bind
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
@@ -698,7 +699,7 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
         n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = (_load_draws(ep, bound, label)
+        ep.draws[label] = (_load_draws(bound, label)
                            if label == _FAMILY_LABEL or ep.entries[label].nameable
                            else ({}, DrawsSkipReport()))
     for w in ep.entries.values():
@@ -718,13 +719,10 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     return ep
 
 
-def _load_draws(ep: _Episode, bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
-    """The draws under `worlds/<label>/judge/` via the enqueue's path-taking reader, reached
-    only when the bind's listing says the draw directory is real (never a link)."""
-    world = bound.under(LAYOUT.world(label).dir).entries()
-    if not world.has_dir(WORLD_LEAVES.draws.name):
-        return {}, DrawsSkipReport()
-    return draws_on_disk_report(EpisodePaths(ep.dir).world(label).draws)
+def _load_draws(bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
+    """The draws under `worlds/<label>/judge/`, through the enqueue's reader over this pass's
+    root handle (a link anywhere on the way lists nothing)."""
+    return draws_on_disk_report(bound, label)
 
 
 def _duration(value: Any) -> float | None:
@@ -1234,14 +1232,20 @@ def _encode_page(html_text: str) -> bytes:
     return html_text.replace("\x00", "�").encode("utf-8", errors="replace")
 
 
-def _write_page(episode_dir: Path, html_text: str) -> Path:
-    page_path = EpisodePaths(Path(episode_dir)).learning_html
-    write_guarded(page_path, _encode_page(html_text), mode="replace")
-    return page_path
+def _write_page(episode: Episode, html_text: str) -> Path:
+    page = episode.learning_html
+    page.write(_encode_page(html_text))
+    return page.path
 
 
 def render_episode(episode_dir: Path) -> Path:
-    return _write_page(episode_dir, build_page(episode_dir))
+    """Render `episode_dir`'s page into it. A missing episode is `JudgeRefused`, never made."""
+    try:
+        episode = Episode.open(Path(episode_dir))
+    except FileNotFoundError as missing:
+        raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
+    with episode:
+        return _write_page(episode, build_page(episode_dir))
 
 
 def build_page(episode_dir: Path) -> str:
@@ -2312,7 +2316,8 @@ def main(argv: list[str]) -> int:
         print(" ".join(str(bad).split()), file=sys.stderr)
         return 1
     try:
-        page_path = _write_page(episode_dir, _render_document(ep))
+        with Episode.open(episode_dir) as episode:
+            page_path = _write_page(episode, _render_document(ep))
     except OSError as bad:
         print(str(bad), file=sys.stderr)
         return 1

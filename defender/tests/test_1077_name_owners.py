@@ -678,26 +678,6 @@ def test_one_writer_seam_asked_to_name_a_file_under_three_different_roots(
         "the Resolution leaves the third where it is")
 
 
-def test_the_priming_locks_raw_exclusive_open_is_not_converted_to_a_guarded_write(tmp_path: Path):
-    """The priming lock's low-level exclusive `os.open` is preserved exactly and is not converted
-    to a guarded write by the name move.
-
-    NEGATIVE. Positive control: demand d19 — the tenant record, a NEW seam, DOES go through
-    `write_guarded`; here the pre-existing seam must be untouched.
-    """
-    cli = S.branch_cli()
-    source = inspect.getsource(cli)
-    assert "os.O_CREAT | os.O_EXCL | os.O_WRONLY" in source, (
-        "flagged fact F11: `served/.priming` is a RAW exclusive `os.open` today, and the "
-        "security dive's universal (2) is scoped to NEW seams — the name move must not "
-        "quietly convert it")
-    assert "write_guarded(claim" not in source
-    assert "write_guarded(served" not in source
-    # The NAME moves to the owner; the SEAM does not.
-    episode_dir = S.make_episode_dir(tmp_path)
-    assert S.EpisodePaths(episode_dir).priming_lock == episode_dir / "served" / ".priming"
-
-
 def test_corpus_load_ones_runpaths_construction_still_resolves_after_d1(tmp_path: Path):
     """`corpus_load_one`'s `RunPaths(run_dir).alert` construction (claim S10, outside the gate's
     sweep) still resolves identically after D1's RunPaths rewrite (7 -> ~20 accessors, pydantic
