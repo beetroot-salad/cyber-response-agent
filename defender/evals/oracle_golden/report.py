@@ -41,13 +41,12 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import yaml
-
 GOLDEN_DIR = Path(__file__).resolve().parent
 
 # Runnable as a script from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender import _yaml  # noqa: E402
 from defender.evals.oracle_golden import stats as STATS  # noqa: E402 — after the bootstrap
 
 #: Fewest independent units before an interval is published. At n=1 Wilson spans
@@ -79,7 +78,7 @@ def load_golden_cases(cases_dir: Path) -> list[dict]:
         manifest_path = case_dir / "manifest.yaml"
         if not manifest_path.is_file():
             continue
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         scores = {}
         for score_path in sorted((case_dir / "scores").glob("*.json")):
             scores[score_path.stem] = json.loads(score_path.read_text(encoding="utf-8"))

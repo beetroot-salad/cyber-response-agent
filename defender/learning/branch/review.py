@@ -35,7 +35,8 @@ from defender._model import model
 from pathlib import Path
 from typing import Annotated, Any
 
-import yaml
+
+from defender import _yaml
 from pydantic import SkipValidation
 
 from defender._io import read_jsonl_rows, read_jsonl_rows_report
@@ -267,7 +268,7 @@ def review(family: Family, *, episode: Episode, adapters: Any, door: Any,  # noq
         # an episode's `served/` somewhere no reader expects one.
         shutil.rmtree(scratch_root, ignore_errors=True)
     record = _record(family, worlds=worlds, unreadable=unreadable)
-    write(yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
+    write(_yaml.safe_dump(record, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return record
 
 

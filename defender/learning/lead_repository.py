@@ -9,7 +9,8 @@ from defender._model import model
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
-import yaml
+
+from defender import _yaml
 from pydantic import SkipValidation
 
 from defender._io import (
@@ -490,7 +491,7 @@ def refuse_non_artifacts(refused: list[Path]):
 
 
 def render_actor_view_yaml(run_dir: Path) -> str:
-    return yaml.safe_dump(actor_view(run_dir), sort_keys=False)
+    return _yaml.safe_dump(actor_view(run_dir), sort_keys=False)
 
 
 def project_leads(
@@ -538,7 +539,7 @@ def render_joined_yaml(run_dir: Path) -> str:
         query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
     )
     doc = {"case_id": run_dir.name, "alert_ref": RUN_LAYOUT.alert.name, "leads": leads}
-    return yaml.safe_dump(doc, sort_keys=False)
+    return _yaml.safe_dump(doc, sort_keys=False)
 
 
 

@@ -300,11 +300,11 @@ def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
     `attack.window` for a catalog scenario, `operation.window` for a hand-run one. `None`
     when absent; guessing would silently define the baseline.
     """
-    import yaml  # local: keeps the pure window helpers importable without pyyaml
+    from defender import _yaml  # local: keeps the pure window helpers importable without pyyaml
     manifest_path = case_dir / "manifest.yaml"
     if not manifest_path.is_file():
         return None
-    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     for block in ("attack", "operation"):
         window = (manifest.get(block) or {}).get("window")
         if isinstance(window, list) and len(window) == 2:

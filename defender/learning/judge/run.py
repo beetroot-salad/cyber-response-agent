@@ -40,6 +40,7 @@ from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 from defender.runtime.agent_definition import AgentDefinition
 from defender.runtime.agent_role import AgentRole
+from defender import _yaml
 
 #: The judge's refusal text, carried on its compiled policy. Only the bash gate reads it, which
 #: this tool-less role never invokes, so it surfaces to operators rather than to a draw.
@@ -572,7 +573,6 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
     world's overlay, the review record and every mechanical row.
 
     The reply is entirely `subject: world` and may name no `world`."""
-    import yaml
 
     task = (
         # The shared role prompt is written for the per-world call; its one-world framing and
@@ -610,7 +610,7 @@ def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
     )
     sections = {
         "manifest": _render_family_manifest(manifest),
-        "review": yaml.safe_dump(review, sort_keys=False) if review else
+        "review": _yaml.safe_dump(review, sort_keys=False) if review else
                  f"no {LAYOUT.review} is recorded for this episode\n",
         "mechanical": _render_family_mechanical_rows(grade),
     }

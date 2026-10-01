@@ -67,6 +67,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender import _yaml
 from defender.tests import _tenants1106
 from defender.tests._judge_921 import (  # noqa: F401 — re-exported: the judge-side builders
     ALERT_ID,
@@ -199,28 +200,25 @@ def applier_decisions() -> tuple[str, str, str]:
 
 
 def write_yaml(path: Path, doc: Any) -> Path:
-    import yaml
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    path.write_text(_yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
 
 
 def read_yaml(path: Path) -> Any:
-    import yaml
 
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def read_yaml_record(bound: Any, name: str) -> Any:
     """`read_yaml`'s twin in the `reader=` seam's shape — `(bound, name)`, never a path (#1049
     d-21, RF-R2): the record's text comes off the bound primitive and is parsed; an absent
     record is `None`, the seam's typed absent answer; a refused one is a fixture fault here."""
-    import yaml
 
     read = bound.read(name)
     assert read.refusal is None, f"fixture fault: {read.refusal}"
-    return None if read.absent else yaml.safe_load(read.text)
+    return None if read.absent else _yaml.safe_load(read.text)
 
 
 #: One real corpus document, the shape `stagers/elastic.py::source_pattern` keys a sample by.
@@ -426,9 +424,7 @@ def reply_document(*, findings: list[dict] | None = None, outcome: str = "gradab
 
 def reply_text(**kw: Any) -> str:
     """A judge reply as the TEXT a model seam hands back — the shape `validate_reply` parses."""
-    import yaml
-
-    return yaml.safe_dump(reply_document(**kw), sort_keys=False, allow_unicode=True)
+    return _yaml.safe_dump(reply_document(**kw), sort_keys=False, allow_unicode=True)
 
 
 class FakeJudge(FakeAgent):
@@ -445,7 +441,6 @@ class FakeJudge(FakeAgent):
     """
 
     def __call__(self, prompt: str, **kw: Any) -> Any:
-        import yaml
 
         if len(self.replies) == 1:
             reply = self.replies[0]
@@ -457,9 +452,9 @@ class FakeJudge(FakeAgent):
                 raise RuntimeError("the judge provider degraded mid-fan-out")
             if self.fault.hits(str(kw.get("agent_id", ""))):
                 raise RuntimeError(f"the judge provider refused {kw.get('agent_id')!r}")
-            return reply if isinstance(reply, str) else yaml.safe_dump(reply, sort_keys=False)
+            return reply if isinstance(reply, str) else _yaml.safe_dump(reply, sort_keys=False)
         reply = super().__call__(prompt, **kw)
-        return reply if isinstance(reply, str) else yaml.safe_dump(reply, sort_keys=False)
+        return reply if isinstance(reply, str) else _yaml.safe_dump(reply, sort_keys=False)
 
     def prompt_for(self, agent_id: str) -> str:
         """The one prompt handed to the call with this agent id — `AssertionError` if the call
@@ -781,7 +776,6 @@ def questioner_lesson(paths: Any, name: str = "q-lesson", *, body: str = "Ask th
     what M8's selector reads: a lesson is shown at call 1 when its pattern is one this
     episode's capture named, or its holding system is the discriminator's.
     """
-    import yaml
 
     corpus = Path(paths.lessons_questioner_dir)
     corpus.mkdir(parents=True, exist_ok=True)
@@ -790,7 +784,7 @@ def questioner_lesson(paths: Any, name: str = "q-lesson", *, body: str = "Ask th
     meta.update(frontmatter)
     path = corpus / f"{name}.md"
     path.write_text(
-        "---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body + "\n",
+        "---\n" + _yaml.safe_dump(meta, sort_keys=False) + "---\n" + body + "\n",
         encoding="utf-8")
     return path
 
