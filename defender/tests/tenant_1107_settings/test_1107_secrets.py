@@ -108,7 +108,8 @@ def _test_adapter(seen: list[Any], declared: str) -> Any:
     def get_host(ctx: Any, *, host: str) -> dict:
         seen.append(ctx)
         rc, stdout, stderr = transport.docker_exec_curl(
-            ctx, BASTION, f"http://cmdb-o4:8080/hosts/{host}", **{S.SECRETS_KW: (declared,)})
+            ctx, BASTION, f"http://cmdb-o4:8080/hosts/{host}", system="cmdb",
+            **{S.SECRETS_KW: (declared,)})
         if rc != 0:
             raise TransportFault(f"docker exec failed (rc={rc}): {stderr.strip()}")
         body, status = transport.split_status(stdout)
@@ -132,7 +133,7 @@ def _undeclared_asker(seen: list[Any], name: str) -> Any:
 
     def list_hosts(ctx: Any, *, role: str | None = None) -> dict:
         seen.append(ctx)
-        transport.docker_exec_curl(ctx, BASTION, "http://cmdb-o4:8080/hosts",
+        transport.docker_exec_curl(ctx, BASTION, "http://cmdb-o4:8080/hosts", system="cmdb",
                                    **{S.SECRETS_KW: (name,)})
         return {"hosts": []}
 
@@ -384,9 +385,11 @@ def test_o4_secret_single_child(tmp_path):
     env_before = dict(ctx.env)
 
     transport.docker_exec_curl(ctx, "bastion-one", "http://cmdb-one:8080/hosts/web-1",
-                               **{S.SECRETS_KW: ("X_TOKEN",)})
-    transport.docker_exec_curl(ctx, "bastion-one", "http://cmdb-one:8080/hosts/web-2")
-    transport.docker_exec_raw(ctx, "web-1", ["ps", "-ef"])  # host-state's lane: another system
+                               system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
+    transport.docker_exec_curl(ctx, "bastion-one", "http://cmdb-one:8080/hosts/web-2",
+                               system="cmdb")
+    transport.docker_exec_raw(ctx, "web-1", ["ps", "-ef"],  # host-state's lane: another system
+                              system="host-state")
 
     calls = shim.calls()
     assert len(calls) == 3, [c["argv"] for c in calls]
@@ -418,7 +421,7 @@ def test_s7_nf8_transport_names_the_child_variable(tmp_path):
     url = "http://cmdb-nf8:8080/hosts/web-1"
 
     # 1) One secret: ctx.env passed through untouched, plus the value under SOME new variable.
-    transport.docker_exec_curl(ctx, "b", url, **{S.SECRETS_KW: ("X_TOKEN",)})
+    transport.docker_exec_curl(ctx, "b", url, system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
     child = shim.calls()[-1]["env"]
     for k, v in base_env.items():
         assert child.get(k) == v, f"ctx.env's {k} was not passed through untouched"
@@ -429,21 +432,22 @@ def test_s7_nf8_transport_names_the_child_variable(tmp_path):
     # 2) An operator value already under the transport's chosen name: the child sees the secret.
     clash_env = {**base_env, **{k: "operator-value" for k in chosen}}
     clash_ctx = S.verb_context(record, tmp_path / "run", clash_env)
-    transport.docker_exec_curl(clash_ctx, "b", url, **{S.SECRETS_KW: ("X_TOKEN",)})
+    transport.docker_exec_curl(clash_ctx, "b", url, system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
     child = shim.calls()[-1]["env"]
     assert vals["X_TOKEN"] in child.values(), (
         "with ctx.env already carrying the transport's chosen name, the child lost the secret")
 
     # 3) Declared names docker or the loader would interpret set nothing of that name.
     for name in ("DOCKER_HOST", "PATH", "LD_PRELOAD"):
-        transport.docker_exec_curl(ctx, "b", url, **{S.SECRETS_KW: (name,)})
+        transport.docker_exec_curl(ctx, "b", url, system="cmdb", **{S.SECRETS_KW: (name,)})
         child = shim.calls()[-1]["env"]
         assert child.get(name) == base_env.get(name), (
             f"the declared name {name} became a child variable: {child.get(name)!r}")
         assert vals[name] in child.values(), f"{name}'s value was not delivered under another name"
 
     # 4) Two secrets, one child: each under its own variable, neither value on argv.
-    transport.docker_exec_curl(ctx, "b", url, **{S.SECRETS_KW: ("X_TOKEN", "Y_TOKEN")})
+    transport.docker_exec_curl(ctx, "b", url, system="cmdb",
+                               **{S.SECRETS_KW: ("X_TOKEN", "Y_TOKEN")})
     child = shim.calls()[-1]["env"]
     names_x = {k for k, v in child.items() if v == vals["X_TOKEN"]}
     names_y = {k for k, v in child.items() if v == vals["Y_TOKEN"]}
@@ -500,7 +504,7 @@ def test_s7_mf5_reflected_secret_scrubbed(tmp_path, monkeypatch, caplog):
     ctx = S.verb_context(S.record_on(run.ctxs[0]), run.run_dir, run.shim.env())
     run.shim.respond(S.answer(error, "500"))
     _rc, out, err = transport.docker_exec_curl(ctx, BASTION, "http://cmdb-o4:8080/x",
-                                               **{S.SECRETS_KW: ("X_TOKEN",)})
+                                               system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
     assert value not in out, "the transport returned the value"
     assert value not in err, "the transport returned the value"
     markers = set(_MARKED.findall(out)) | set(_MARKED.findall(err))
@@ -554,7 +558,7 @@ def test_transport_error_output_carries_request_headers(tmp_path, monkeypatch, c
                          (S.container_not_running(), "is not running")):
         run.shim.respond(answer)
         _rc, out, err = transport.docker_exec_curl(ctx, BASTION, "http://cmdb-o4:8080/x",
-                                                   **{S.SECRETS_KW: ("X_TOKEN",)})
+                                                   system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
         assert kept in out + err, f"the tooling's own diagnostic was lost: {out!r} {err!r}"
         assert value not in out, f"the transport returned the value: {out!r}"
         assert value not in err, f"the transport returned the value: {err!r}"
@@ -592,7 +596,7 @@ def test_secret_needed_from_a_lane_other_than_the_query_tool(tmp_path, monkeypat
                end: str | None = None, limit: int = 20, index: str | None = None,
                sort: str = "desc") -> dict:
             transport.docker_exec_curl(ctx, "es-lz", "https://es-lz:9200/_search",
-                                       **{S.SECRETS_KW: ("ES_TOKEN",)})
+                                       system="elastic", **{S.SECRETS_KW: ("ES_TOKEN",)})
             return inner(ctx, native_query=native_query, start=start, end=end, limit=limit,
                          index=index, sort=sort)
         return fn
@@ -625,7 +629,7 @@ def test_secret_needed_from_a_lane_other_than_the_query_tool(tmp_path, monkeypat
     def request(config: Any, method: str, path: str, body: Any = None, **_kw: Any) -> tuple:
         _rc, stdout, _err = transport.docker_exec_curl(
             wctx, "bastion-wr", f"http://case-history-wr:8080{path}", method=method, body=body,
-            **{S.SECRETS_KW: ("CH_TOKEN",)})
+            system="case-history", **{S.SECRETS_KW: ("CH_TOKEN",)})
         text, status = transport.split_status(stdout)
         return (status or None), text
 
@@ -669,7 +673,7 @@ def test_secret_needed_from_a_lane_other_than_the_query_tool(tmp_path, monkeypat
     def secret_query(ctx: Any, **params: Any) -> dict:
         review_ctxs.append(ctx)
         transport.docker_exec_curl(ctx, S.es_container("rl"), "http://localhost:9200/_search",
-                                   **{S.SECRETS_KW: ("ELASTIC_TOKEN",)})
+                                   system="elastic", **{S.SECRETS_KW: ("ELASTIC_TOKEN",)})
         return {"hits": [{"host": {"name": "web-1"}}]}
 
     read_side = branch_seams.adapter_seam(episode_dir, rrecord, runs_base=runs_base)
@@ -821,7 +825,7 @@ def test_s7_mf1_declared_set_is_tenant_wide(tmp_path):
 
     # A cmdb-shaped call (cmdb's bastion and URL) asking for the ticket system's name.
     transport.docker_exec_curl(ctx, "bastion-mf1", "http://cmdb-mf1:8080/hosts/web-1",
-                               **{S.SECRETS_KW: ("TICKET_TOKEN",)})
+                               system="cmdb", **{S.SECRETS_KW: ("TICKET_TOKEN",)})
     assert ticket_value in _values_seen(shim), "a name another system declares was refused"
     assert record.secrets.get("TICKET_TOKEN") == ticket_value
     # Control: threat-intel IS down for its own calls ...

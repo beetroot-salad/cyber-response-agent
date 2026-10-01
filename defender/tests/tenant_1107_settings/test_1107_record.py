@@ -164,7 +164,7 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
     sctx = _ctx(rec, tmp_path, shim.env({"PATH": os.environ.get("PATH", "")}))
     transport.docker_exec_curl(sctx, "bastion-d0", "http://cmdb-d0:8080/health",
-                               **{S.SECRETS_KW: ("X_TOKEN",)})
+                               system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
     calls = shim.calls()
     assert len(calls) == 1, calls
     assert "d0-planted-secret" in calls[0]["env"].values(), "the secret did not reach the child"

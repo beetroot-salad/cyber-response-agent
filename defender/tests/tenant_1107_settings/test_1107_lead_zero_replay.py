@@ -182,8 +182,8 @@ def test_s7_nf20_lead_zero_note_names_no_host_path(tmp_path):
     link_none, folder_none, given_none = _linked_root(tmp_path, "nf20none")
     shutil.rmtree(S.config_path(folder_none, "elastic").parent)
     link_bad, folder_bad, given_bad = _linked_root(tmp_path, "nf20bad")
-    # The folder stays and its config.env goes: the fault that stands for it names the file
-    # (CX5: load_config's "config file not found: <path>").
+    # The folder stays and its config.env goes: the fault that stands for it names the file —
+    # by the settings pointer since #1156's review, never by its host path.
     S.config_path(folder_bad, "elastic").unlink()
 
     for arm, link, given, cause in (("none", link_none, given_none, S.NO_ELASTIC),
@@ -193,12 +193,14 @@ def test_s7_nf20_lead_zero_note_names_no_host_path(tmp_path):
         record = run_tenant.resolve_tenant(link, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                            dispatches_lead_zero=True)
         if arm == "bad":
-            # The channel could carry the path: the record's Elastic fault names it.
+            # The record's Elastic fault names the file, by the pointer and not the host path.
             fault_text = str(record.elastic)
             assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
-            assert str(resolved) in fault_text or str(given) in fault_text, (
-                f"the elastic fault names no settings path, so nothing here could leak: "
-                f"{fault_text!r}")
+            assert S.settings_pointer() in fault_text, (
+                f"the elastic fault does not name the file by the settings pointer: {fault_text!r}")
+            for spelling in (str(resolved), str(given)):
+                assert spelling not in fault_text, (
+                    f"the elastic fault names the host settings path: {fault_text!r}")
 
         res = LZ.run(tmp_path / f"lz-{arm}", run_id=f"nf20-{arm}",
                      alert=LZ.alert_doc(signal_index=None), tenant=S.tenant_folder_of(link))

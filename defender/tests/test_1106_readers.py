@@ -87,8 +87,9 @@ def test_the_elastic_adapter_loads_the_injected_tenants_config(injected, tmp_pat
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
-    """Absent stays the loud per-call `ConfigFault` (D3) — and it names the INJECTED tenant's
-    path, not the checkout's copy it could have fallen back to (which does hold one)."""
+    """Absent stays the loud per-call `ConfigFault` (D3), naming the file by the settings
+    pointer — never a host path (#1156's review) — while the checkout's copy it could have
+    fallen back to does hold one: the fault itself is the proof there was no fallback."""
     faults = T.mod("scripts.adapters.faults")
     transport = T.mod("scripts.adapters._stub_transport")
     root = tmp_path / "injected-root"
@@ -96,7 +97,8 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     settings = T.tenants().tenant_dir(root, T.PLAYGROUND_ID).settings
     with pytest.raises(faults.ConfigFault) as caught:
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
-    assert str(settings / "systems" / "cmdb" / "config.env") in str(caught.value)
+    assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
+    assert str(settings) not in str(caught.value)
     # Control: the checkout's playground does carry a cmdb config, so the refusal above is
     # the absence of a fallback, not the absence of a file anywhere.
     assert (T.PLAYGROUND_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
@@ -127,13 +129,15 @@ def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
 
 def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
     """No `$DEFENDER_DIR`, no `__file__` fallback: the mapping the folder does not hold is a
-    `CaseTicketError` naming the injected path — while the checkout's copy sits right there."""
+    `CaseTicketError` naming it by the settings pointer — while the checkout's copy sits right
+    there."""
     case_ticket = T.mod("scripts.case_history.case_ticket")
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(case_ticket.CaseTicketError) as caught:
         case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
-    assert str(settings / "systems" / "case-history" / "mapping.yaml") in str(caught.value)
+    assert "the tenant's settings/systems/case-history/mapping.yaml" in str(caught.value)
+    assert str(settings) not in str(caught.value)
     assert (T.PLAYGROUND_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
 
 
