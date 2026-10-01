@@ -10,6 +10,7 @@ now walks below the root no-follow and resolves only what it is handed, through 
   * `tenant.py check --folder` over a looped folder exits 1 with `[tenant.py] …`, and the
     census lint's call (`check_knowledge_folder`) refuses it rather than raising.
   * A link on the way to a required settings file is named as a link.
+  * A NUL in a caller-handed path is a refusal, not a `ValueError`.
   * Before acceptance, a tenant folder that is a link into the running checkout's `defender/`
     is refused by the layout's O11a guard, which judges `<T>` by where it leads.
   * Step 7 counts the tenant's own `runs/`: a `<T>/runs` linked onto `knowledge/` would put the
@@ -105,3 +106,12 @@ def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(
     (root / H.TID).unlink()
     (root / H.TID).mkdir()
     assert _tenant._TenantPaths(root, H.TID).dir == root / H.TID
+
+
+def test_a_nul_in_a_mounted_tree_path_is_a_refusal(tmp_path: Path) -> None:
+    """A caller-handed path with a NUL cannot be resolved (`ValueError`, not `OSError`): it is
+    the refusal naming the path, never an escaping `ValueError`."""
+    root = tmp_path / "data"
+    H.adopted(root)
+    text = H.accept_refusal(_tenant, root, box_mounted=(Path("/tmp/a\0b"),))
+    assert "could not be resolved" in text, text
