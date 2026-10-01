@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -71,6 +72,10 @@ from defender._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noq
 from defender.runtime import run_tenant  # noqa: E402
 from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.scripts.case_history import case_ticket  # noqa: E402
+
+#: How long one git call of `check`'s committed read may take: each is a local lookup of one
+#: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
+_COMMITTED_READ_TIMEOUT = 15
 
 #: The words `check` fails closed with when git cannot say whether `.tenant-id` is committed.
 _CANNOT_VERIFY = "cannot verify .tenant-id is committed"
@@ -188,18 +193,24 @@ def _tenant_id_committed(folder: Path) -> str | None:
     over either side. A plain folder has no repo to ask and is exempt. The read ignores an
     exported `GIT_DIR`, and a `.git` that git does not read as a repository rooted at the
     folder (git would answer from an enclosing repo) fails closed too: the answer is the
-    folder's own repository's or none."""
+    folder's own repository's or none. Replace objects are ignored (a `refs/replace` entry
+    could stand an edited blob in for the committed one, and a clone does not carry it), and
+    each git call is bounded: a `.git` holding a FIFO fails closed rather than hanging."""
     rel = TENANT_ID_FILE.as_posix()
     if not os.path.lexists(folder / ".git") or not os.path.lexists(folder / rel):
         return None
-    env = _git.env_for_cwd()
+    env = {**_git.env_for_cwd(), "GIT_NO_REPLACE_OBJECTS": "1"}
+    bound = _COMMITTED_READ_TIMEOUT
     try:
-        top = _git.git(["rev-parse", "--show-toplevel"], cwd=folder, env=env)
+        top = _git.git(["rev-parse", "--show-toplevel"], cwd=folder, env=env, timeout=bound)
         if Path(top).resolve() != folder.resolve():
             return (f"{_CANNOT_VERIFY}: {folder / '.git'} is not a repository of its own — "
                     f"git reads {top}'s instead")
-        listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env)
-        committed = _git.git_blob_bytes(folder, listed.split()[2], env=env) if listed else None
+        listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env, timeout=bound)
+        committed = (_git.git_blob_bytes(folder, listed.split()[2], env=env, timeout=bound)
+                     if listed else None)
+    except subprocess.TimeoutExpired:
+        return f"{_CANNOT_VERIFY}: git did not answer within {bound}s over {folder / '.git'}"
     except FileNotFoundError as absent:
         return f"{_CANNOT_VERIFY}: git is not available on PATH ({absent})"
     except _git.GitError as failed:

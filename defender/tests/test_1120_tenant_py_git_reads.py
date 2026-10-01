@@ -14,10 +14,14 @@ on PR #1157).
     bytes (code review on PR #1157).
   * HEAD's blob is read raw, so a clean filter configured for `.tenant-id` neither runs nor
     makes a hand-edited id match (claims adversary, second pass).
+  * Replace objects are ignored, and a git call that blocks (a FIFO at `.git/HEAD`) fails
+    closed within a bound instead of hanging `check` (code review, max).
 """
 from __future__ import annotations
 
+import os
 import shutil
+import time
 from pathlib import Path
 
 from defender.scripts import tenant as tenant_py
@@ -93,3 +97,30 @@ def test_a_configured_clean_filter_neither_runs_nor_masks_an_edited_id(tmp_path:
     tenant_id_file.write_text(f"{H.OTHER}\n", encoding="utf-8")
     H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
     assert not marker.exists(), "check ran the clone's configured clean filter"
+
+
+def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Path) -> None:
+    """The clone's committed `.tenant-id` blob is replaced (`git replace`) by a blob holding
+    another tenant's id, and the working file is edited to match the replacement: check
+    reports the file as differing from what HEAD commits."""
+    knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
+    rel = H.TENANT_ID_FILE.as_posix()
+    committed = H.git(knowledge, "rev-parse", f"HEAD:{rel}").stdout.strip()
+    tenant_id_file = knowledge / H.TENANT_ID_FILE
+    tenant_id_file.write_text(f"{H.OTHER}\n", encoding="utf-8")
+    forged = H.git(knowledge, "hash-object", "-w", "--", rel).stdout.strip()
+    H.git(knowledge, "replace", committed, forged)
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
+
+
+def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:
+    """`.git/HEAD` swapped for a FIFO nobody writes: check exits 1 naming "cannot verify
+    .tenant-id is committed", well inside the driver's own timeout."""
+    knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
+    head = knowledge / ".git" / "HEAD"
+    head.unlink()
+    os.mkfifo(head)
+    started = time.monotonic()
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)),
+                     H.CANNOT_VERIFY_TENANT_ID)
+    assert time.monotonic() - started < 120
