@@ -45,9 +45,12 @@ _VENV = _DEFENDER_DIR / ".venv"
 _VENV_PY = _VENV / "bin" / "python3"
 # Re-exec only from OUTSIDE the checkout's venv: an interpreter already running in it (by any
 # of its names, `python` or `python3`) is the venv, and a setup that re-execs itself spawns a
-# process DC2 says it never spawns.
+# process DC2 says it never spawns. Either sign counts — the venv's prefix, or an interpreter
+# started from the venv's own `bin/` — so a venv missing its `pyvenv.cfg` (whose prefix is
+# the base install's) is exec'd at most once, never in a loop.
 if (__name__ == "__main__" and _VENV_PY.is_file()
-        and Path(sys.prefix).resolve() != _VENV.resolve()):
+        and Path(sys.prefix).resolve() != _VENV.resolve()
+        and Path(sys.executable).parent != _VENV / "bin"):
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
 if __name__ == "__main__":
