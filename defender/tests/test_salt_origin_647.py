@@ -74,19 +74,21 @@ PAYLOAD = [
 def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-647"):
     """Materialize a run dir with the REAL production builder.
 
-    The runs base is redirected into `tmp_path` through the env var the builder itself
-    resolves; everything else — the directory layout, the alert copy — is production code.
+    The data root is redirected into `tmp_path` and the tenant set up there (#1120: the
+    builder is handed the accepted `Tenant`, whose runs base it builds under); everything
+    else — the directory layout, the alert copy — is production code.
 
     Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
     `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
     run-scoped salt for a builder to originate."""
-    from defender import _tenant
+    from defender.tests._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    tenant_id = "t647"
-    _tenant.create_tenant(data_root, tenant_id)
-    return run_common.materialize_run(golden / "alert.json", run_id, tenant_id=tenant_id).run_dir
+    # The D9 tenant: the replay harness's `drive` runs the run under the fixture tenant it sets
+    # up in this same data root, and a data root holds one tenant (O10).
+    tenant = set_up_tenant(data_root)
+    return run_common.materialize_run(golden / "alert.json", run_id, tenant=tenant).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:

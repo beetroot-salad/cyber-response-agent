@@ -14,7 +14,8 @@ unchanged. Adapted only where the API changed: a real tenant id in place of the 
 `"default"` bootstrap, `ensure_runs_base_record`/`materialize_run(tenant_id=...)` in place
 of `ensure_tenant`/the `DEFENDER_RUNS_BASE`-env-routed `hosted` fixture, and a direct
 `_create_once`/`_link_tmpfile`-wrapping seam in place of the retired `io=` fault-injection
-kwarg.
+kwarg. (#1120 then hands `materialize_run` the accepted `Tenant` — `tenant=` — in place of
+the id, so the fixture tenant is set up with its knowledge folder, not a bare row.)
 
 One demand's claim itself is superseded, not merely its mechanism relocated:
 `tenant_record_write_seam` originally pinned `_io.write_guarded`/`read_guarded` as the record's
@@ -35,7 +36,9 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _spec1077 as S
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
+from defender.tests._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
 T_ID = H.VALID_ID
@@ -43,16 +46,20 @@ T_ID = H.VALID_ID
 
 @pytest.fixture
 def tenant_root(tmp_path, monkeypatch) -> Path:
-    """A data root under this test's tmp dir, holding T_ID (created through the real owner) —
-    the same fixture shape `test_1078_materialize.py` uses."""
+    """A data root under this test's tmp dir, holding T_ID set up the way an operator does
+    (#1120: the fixture tenant's knowledge placed, then the row created through the real
+    owner) — the same fixture shape `test_1078_materialize.py` uses."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, T_ID)
+    set_up_tenant(root, T_ID)
     return root
 
 
-def _materialize(alert: Path, run_id: str | None, tenant_id: str = T_ID, **kw):
-    return H.run_common().materialize_run(alert, run_id, tenant_id=tenant_id, **kw).run_dir
+def _materialize(alert: Path, run_id: str | None, **kw):
+    """`materialize_run` for T_ID, handed the `Tenant` the real `accept_tenant` returns over
+    this test's data root (#1120: the builder takes an accepted tenant, not an id)."""
+    tenant = T1106.accept(current_data_root(), T_ID)
+    return H.run_common().materialize_run(alert, run_id, tenant=tenant, **kw).run_dir
 
 
 def _record(base: Path) -> dict:
@@ -172,10 +179,13 @@ def test_nothing_is_written_beside_the_runs_base(tenant_root, tmp_path):
     """
     base = tenant_root / T_ID / "runs"
     alert = H.plant_alert(tmp_path / "in")
+    # What the tenant's folder held before the run: its row and its placed knowledge (#1120).
+    set_up = {p.name for p in (tenant_root / T_ID).iterdir()}
+    assert set_up == {H.ROW_NAME, "knowledge"}, f"precondition: the set-up tenant holds {set_up}"
     _materialize(alert, "run-placement")
     tenant_dir_entries = {p.name for p in (tenant_root / T_ID).iterdir()}
-    assert tenant_dir_entries <= {H.ROW_NAME, "runs"}, (
-        f"materialising wrote {sorted(tenant_dir_entries - {H.ROW_NAME, 'runs'})} beside the "
+    assert tenant_dir_entries <= set_up | {"runs"}, (
+        f"materialising wrote {sorted(tenant_dir_entries - set_up - {'runs'})} beside the "
         "runs base; the first draft's `<runs_base>/../tenant.json` mistake resolves to a stray "
         "record one level up from where D2 puts it")
     assert not (tenant_root / T_ID / S.TENANT_RECORD_NAME).exists()

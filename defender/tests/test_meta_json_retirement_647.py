@@ -850,16 +850,16 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     the token has a pre-existing on-disk presence there that this change neither creates nor
     removes. The run-dir var itself still crosses (its positive control), so an empty result
     here is not just an empty environment."""
-    from defender import _tenant, run_common
+    from defender import run_common
+    from defender.tests._data_root_1078 import set_up_tenant
 
     alert = tmp_path / "alert.json"
     alert.write_text("{}", encoding="utf-8")
     data_root = tmp_path / "data"
-    tenant_id = "t647b"
     os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
     try:
-        _tenant.create_tenant(data_root, tenant_id)
-        run_dir = run_common.materialize_run(alert, "env-boundary-647", tenant_id=tenant_id).run_dir
+        tenant = set_up_tenant(data_root, "t647b")
+        run_dir = run_common.materialize_run(alert, "env-boundary-647", tenant=tenant).run_dir
     finally:
         os.environ.pop("DEFENDER_DATA_ROOT", None)
 

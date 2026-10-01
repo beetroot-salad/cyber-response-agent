@@ -560,24 +560,31 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     `runs_base_for(T)` under `DEFENDER_DATA_ROOT` (the D9 tenant fixture), and the
     refusal is widened to "equal, or either contains the other" against the data root
     (O13) — so a learning state root AT the tenant's runs base, or an alias of it, is
-    refused, and a disjoint one leaves the runs base where the tenant says."""
+    refused, and a disjoint one leaves the runs base where the tenant says.
+
+    #1120: `runs_base_for` takes an accepted `Tenant`, so the refusal is met where the data
+    root is resolved (`resolve_data_root`, J24 — every entry point resolves it before a
+    tenant is accepted under it), and the runs base is the one accepted under that root."""
     from defender import _tenant
 
-    base = _tenant.runs_base_for(d9_tenant)
+    def runs_base() -> Path:
+        return _tenant.runs_base_for(T1106.accept(_tenant.resolve_data_root(), d9_tenant))
+
+    base = T1106.accept(data_root, d9_tenant).runs
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(base))
     with pytest.raises(_tenant.TenantRefused):  # the owner's one refusal class (#1078 d0)
-        _tenant.runs_base_for(d9_tenant)
+        runs_base()
 
     alias = tmp_path / "alias"
     alias.symlink_to(data_root)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
     with pytest.raises(_tenant.TenantRefused):
-        _tenant.runs_base_for(d9_tenant)
+        runs_base()
 
     learn = tmp_path / "learn"
     learn.mkdir()
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learn))
-    assert _tenant.runs_base_for(d9_tenant) == data_root.resolve() / d9_tenant / "runs"
+    assert runs_base() == data_root.resolve() / d9_tenant / "runs"
 
 
 

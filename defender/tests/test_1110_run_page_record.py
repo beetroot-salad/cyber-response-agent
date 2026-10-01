@@ -171,13 +171,15 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
     record of THIS tenant's run, saved through the handle the platform's store backend sits
     behind."""
     from defender import _tenant
+    from defender.tests._data_root_1078 import current_data_root
+    from defender.tests._tenants1106 import accept
 
     tail = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "o1"), tail, "--no-learn") == 0
 
     assert len(tail.visualized) == 1, f"the render step ran {len(tail.visualized)} times"
     (run,) = tail.visualized
-    runs_base = _tenant.runs_base_for(run.tenant_id)
+    runs_base = _tenant.runs_base_for(accept(current_data_root(), run.tenant_id))
     assert tail.run_dirs == [run.run_dir], (
         "the render step was handed a handle over a different run dir than the lifecycle's")
     assert run.runs_base == runs_base, "the handle is not bound to the configured runs base"
