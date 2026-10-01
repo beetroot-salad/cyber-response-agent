@@ -181,7 +181,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile
-          --ignore tests/e2e/test_540_box_boundary.py
+          --ignore tests/e2e/test_540_box_boundary.py -o faulthandler_timeout=90
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
       # spec-flow plugin and were dark to CI — only defender/ was collected, so a
