@@ -172,13 +172,12 @@ everything here grows post-merge.
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.
 
-`knowledge/tenants/{tenant}/settings/systems/{system}/config.env` (repo root, not
-under `defender/`) — the connected tenant's non-secret config (endpoint, timeout,
-`AUTH_TYPE`, the *names* of secret env vars). Also add a `CHANGE-ME` placeholder copy at
-`knowledge/tenant-template/settings/systems/{system}/config.env`, so a tenant copied from
-the template knows the keys.
-Track it in git when it holds no secrets; gitignore it only if it would
-encode a sensitive deployment. Secrets are always env vars.
+`settings/systems/{system}/config.env` in the connected tenant's OWN repo (deployed as
+`$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in this repo) — the tenant's non-secret
+config (endpoint, timeout, `AUTH_TYPE`, the *names* of secret env vars). Also add a
+`CHANGE-ME` placeholder copy at `knowledge/tenant-template/settings/systems/{system}/config.env`
+in this repo, so a tenant scaffolded from the template knows the keys.
+Track it in the tenant's repo when it holds no secrets. Secrets are always env vars.
 
 `defender/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
@@ -193,12 +192,14 @@ the verb does not declare as a model-bindable param is a FAIL, and so is a
 verb from the query body. Do **not** build a catalog from API docs — the
 offline lead-author mints the rest from real runs.
 
-`knowledge/tenants/*/settings/verb-grants.yaml` and
-`knowledge/tenant-template/settings/verb-grants.yaml` — **adapter path only:
-one row per verb the adapter declares, `health-check` included, in EVERY
-committed tenant's table and the template's.** The adapter is shared code, so
-every table must decide it: grant it in the tenant you are connecting,
-withhold it (`roles: []` with a reason) in the others and in the template.
+`knowledge/tenant-template/settings/verb-grants.yaml` and
+`knowledge/tenant-fixture/settings/verb-grants.yaml` in this repo, and the connected
+tenant's own `settings/verb-grants.yaml` — **adapter path only: one row per verb the
+adapter declares, `health-check` included, in every one of those tables.** The adapter is
+shared code, so every table must decide it: grant it in the tenant you are connecting,
+withhold it (`roles: []` with a reason) in the template; the fixture is the test suite's
+tenant, so grant it there as the tests need. Every other tenant's repo must decide it too
+— `tenant.py check <tenant>` reports a verb its table leaves undecided.
 This is the one shared edit a new adapter-backed system requires, and skipping it
 is why step 5 below would otherwise fail in a way that looks like a bug in
 your adapter: an ungranted system's verbs are refused, and the refusal says
@@ -210,7 +211,8 @@ Grant to `gather` the verbs an investigation should be able to call. A verb
 you are deliberately leaving unreachable gets `roles: []` **and a written
 reason** — that is a real decision and the file is where it is recorded.
 Nothing may be left out: CI (`lint_verb_disposition_census.py`) fails on a
-declared verb with no row.
+declared verb with no row in the template or the fixture, and `tenant.py check` reports one
+in a tenant's table.
 
 The allowlist is deliberate, not bookkeeping. It is authored so that
 dropping an adapter into the tree grants it nothing — a system is not
@@ -254,13 +256,16 @@ the branch and just leave the files in place for review:
 git checkout -b connect/{system}
 git add defender/scripts/adapters/{system}_adapter.py \
         defender/skills/{system}/ \
-        knowledge/tenants/{tenant}/settings/systems/{system}/config.env \
         knowledge/tenant-template/settings/systems/{system}/config.env \
-        knowledge/tenants/*/settings/verb-grants.yaml \
         knowledge/tenant-template/settings/verb-grants.yaml \
+        knowledge/tenant-fixture/settings/verb-grants.yaml \
         defender/skills/gather/queries/{system}/
 # add pyproject.toml / uv.lock only if a dependency was added
 ```
+
+The connected tenant's `config.env` and table live in ITS repo, not this one: branch and
+stage them there the same way, and run `python3 defender/scripts/tenant.py check --folder
+<that repo>` to see the census over them.
 
 **You do not merge or push.** Present a summary: files touched,
 health-check result, one line of sample output, env vars the maintainer

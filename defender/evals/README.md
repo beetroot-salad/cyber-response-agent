@@ -21,13 +21,17 @@ never the reverse.
 |---|---|---|
 | `held_out.py` | **Primary** — disposition accuracy | Does the *current* defender's disposition match ground truth on the labeled held-out alerts? This is the loop's north-star metric. |
 
-Run it by hand. Every run names its tenant, and there is no default (#1078) — set up your
-tenant once:
+Run it by hand. Every run names its tenant, and there is no default (#1078) — clone your
+tenant's knowledge repo into the data root and set the tenant up once:
 
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
+git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
 python3 defender/scripts/tenant.py setup playground
 ```
+
+Clone with a credential helper or an ssh agent (never a credential in the URL), and run setup
+once the clone has exited 0; setup adopts the placed folder and copies nothing.
 
 Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) and no run, fork or drain in flight on any checkout of the host, as the same

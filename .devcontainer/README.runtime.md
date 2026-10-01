@@ -23,18 +23,24 @@ Context is the repo root; a `.dockerignore` keeps it lean.
 # build (from the dev container via the socket, or from the host)
 docker build -f .devcontainer/Dockerfile.runtime -t defender-runtime .
 
-# hermetic replay smoke test — no key, no egress; replays run as the committed
-# `playground` tenant, so the repo's knowledge/ is mounted
+# hermetic replay smoke test — no key, no egress; replays run as the committed test
+# fixture tenant (knowledge/tenant-fixture), so the repo's knowledge/ is mounted
 docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
     defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 ```
 
-Every run names its tenant, and there is no default (#1078), so create yours once:
+Every run names its tenant, and there is no default (#1078). On the host, clone the tenant's
+repo into the data root, then set the tenant up once:
 
 ```bash
+git clone <tenant repo> "<HOST_DATA_ROOT>/playground/knowledge"
 docker run --rm --env-file .env -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
     defender-runtime python3 defender/scripts/tenant.py setup playground
 ```
+
+Clone on the HOST with a credential helper or an ssh agent (never a credential in the URL);
+the container never fetches. Run setup once the clone has exited 0 — setup adopts the placed
+folder as it is (it copies nothing and runs no git), checks it, and writes the row last.
 
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) to a MOUNTED host folder — the row it writes is what every later run is
@@ -44,17 +50,17 @@ defender; a destination already occupied makes setup refuse, naming it in the me
 setup run as root — that adoption case only.)
 
 ```bash
-# live investigation — needs the LLM key, the tenants root and the same data root
-docker run --rm --env-file .env -v "<HOST_TENANTS_ROOT>":/workspace/knowledge/tenants:ro \
+# live investigation — needs the LLM key and the same data root (the tenant's knowledge is in it)
+docker run --rm --env-file .env \
     -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
     defender-runtime python3 defender/run.py <alert.json> --tenant playground
 ```
 
-**Tenant folders are mounted, never baked (#1106).** A tenant's folder holds its settings
-(endpoints, later credentials) and its model-facing knowledge — deployment data, not code.
-The image carries none of it; `run.py` reads the tenants root at `/workspace/knowledge/tenants`
-by default (or `--tenants-root`), and `.dockerignore` keeps `knowledge/` out of the build
-context. From the dev container, `<HOST_…>` is a HOST path (see the caveat below).
+**Tenant knowledge is mounted, never baked (#1106, #1120).** A tenant's knowledge folder holds
+its settings (endpoints, later credentials) and its model-facing knowledge — deployment data,
+not code. The image carries none of it; `run.py` reads it from the tenant's folder under the
+mounted data root, `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, and `.dockerignore` keeps
+`knowledge/` and `.defender-data` out of the build context. From the dev container, `<HOST_…>` is a HOST path (see the caveat below).
 
 ## The box image (the sandbox itself)
 

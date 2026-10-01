@@ -320,7 +320,9 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
    per-run metadata record it writes under `runs/<id>/` is the ground truth.
 3. When the rule fires, project the alert to fixture shape and run
    `defender/run.py <alert.json> --tenant playground --run-id <slug> --no-learn` (every run
-   names its tenant, and there is no default — #1078; run
+   names its tenant, and there is no default — #1078;
+   clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
+   once the clone exits 0, run
    `python3 defender/scripts/tenant.py setup playground` once, from the main checkout, with
    `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
    the same user that runs defender; a destination already occupied makes setup refuse, naming

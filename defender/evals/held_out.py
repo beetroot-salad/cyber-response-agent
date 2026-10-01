@@ -8,8 +8,9 @@ convention, and reports defender disposition correctness.
 Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
 carries no labels and no pointer back to its fixture.
 
-Every run names its tenant, and there is no default (#1078): create one once with
-``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
+Every run names its tenant, and there is no default (#1078). On the host,
+clone the tenant's repo into ``$DEFENDER_DATA_ROOT/playground/knowledge``, then, once the
+clone exits 0, set it up once with ``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
 (see ``index_runs``)::
 
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\

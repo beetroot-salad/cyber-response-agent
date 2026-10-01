@@ -35,7 +35,8 @@ the split a case lands on.
 Baseline generators stay **on**: the oracle's answer is a signed diff over baseline, so
 with them off `+noise` cannot occur and `+event` is easier than production.
 
-Usage (every run names its tenant, and there is no default — #1078; create one once with
+Usage (every run names its tenant, and there is no default — #1078; on the host,
+clone the tenant's repo into `$DEFENDER_DATA_ROOT/playground/knowledge`, then set it up once with
 `python3 defender/scripts/tenant.py setup playground`):
   generate_case.py --scenario cross-tier-ssh-probe --tenant playground --target web-2 \\
       --case-id case-010-... --split held-out --activity-family data-access/T1021.004

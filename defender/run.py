@@ -6,7 +6,8 @@ The investigation is driven by the in-process PydanticAI driver
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
-Usage (every run names its tenant, and there is no default; create one once with
+Usage (every run names its tenant, and there is no default; on the host,
+clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
     `python3 defender/scripts/tenant.py setup <tenant>`):
     python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
 
