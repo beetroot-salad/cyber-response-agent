@@ -409,7 +409,9 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
     H.set_data_root(monkeypatch, None)
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
     secret_name, secret_value = "RH1107_TOKEN", "rh1107-secret-value"
-    _root, _folder, tenant = _plant(tmp_path, "rh1107", secrets={secret_name: secret_value})
+    _root, folder, tenant = _plant(tmp_path, "rh1107", secrets={secret_name: secret_value})
+    # A secret is only visible to a lookup when a system's config names it (O3).
+    S.set_key(folder, "cmdb", "CMDB_API_SECRET_REF", secret_name)
     resolved = run_tenant.resolve_run_tenant(tenant, defender_dir=S.DEFENDER,
                                              dispatches_lead_zero=True)
 

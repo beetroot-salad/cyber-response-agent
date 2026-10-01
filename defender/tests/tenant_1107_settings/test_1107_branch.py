@@ -583,7 +583,10 @@ def test_d_launcher_door_transport_seam(tmp_path, data_root, monkeypatch):
         seen.append((ctx, container, url))
         return _stub_transport.docker_exec_curl(ctx, container, url, **kw)
 
-    rc, refused = _launch(src, root, _seams(door=None, **{S.DOOR_TRANSPORT_KW: door_transport}))
+    # The role preflight stands aside: the launcher judges it before it probes the cluster, so the
+    # tripwire `_seams` installs by default would refuse the launch before the door is ever used.
+    rc, refused = _launch(src, root, _seams(
+        door=None, preflight=T.no_preflight, **{S.DOOR_TRANSPORT_KW: door_transport}))
 
     assert seen, f"the launcher's door never called the injected transport (rc={rc}, {refused!r})"
     assert len(shim.calls()) == len(seen), "a door docker call bypassed the injected transport"
