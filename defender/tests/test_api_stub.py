@@ -44,6 +44,7 @@ from defender.api.models import (  # noqa: E402
     SystemCheck,
     SystemSettings,
 )
+from defender._tenant import TenantRefused  # noqa: E402
 from defender.api.ports import (  # noqa: E402
     ApiDeps,
     Conflict,
@@ -123,7 +124,8 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("GET", "/lessons"), "/lessons", None, {"list_lessons": [LESSON]}),
     (("GET", "/systems"), "/systems", None,
      {"list_systems": [SETTINGS], "has_credentials": False}),
-    (("PUT", "/systems/{system_id}"), "/systems/tix", {"kind": "ticketing", "display_name": "T"},
+    (("PUT", "/systems/{system_id}"), "/systems/tix",
+     {"kind": "ticketing", "display_name": "T", "enabled": True},
      {"put_system": (SETTINGS, True), "has_credentials": False}),
     (("PUT", "/systems/{system_id}/credentials"), "/systems/tix/credentials",
      {"credentials": {"api_token": "x"}},
@@ -250,41 +252,66 @@ def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("path", "body", "port", "record", "location", "action"), [
+@pytest.mark.parametrize(("path", "body", "port", "record", "location"), [
     ("/investigations", {"alert_id": "al-1", "client_request_id": "r1"}, "create_investigation",
-     INV, "/investigations/inv-1", "investigation.start"),
+     INV, "/investigations/inv-1"),
     ("/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r1"},
-     "create_learning_job", JOB, "/learning-jobs/lj-1", "learning_job.start"),
+     "create_learning_job", JOB, "/learning-jobs/lj-1"),
 ])
 def test_a_create_is_a_201_with_location_only_when_the_store_created(
-    path: str, body: dict[str, str], port: str, record: Any, location: str, action: str,
+    path: str, body: dict[str, str], port: str, record: Any, location: str,
 ) -> None:
     created = Api(**{port: (record, True)})
     response = created.client.post(path, headers=AUTH, json=body)
     assert response.status_code == 201
     assert response.headers["Location"] == BASE + location
     assert response.json() == record.model_dump(mode="json")
-    assert created.actions() == [action]
-    assert created.ports.called(port) == [((A, *body.values()), {})]
+    assert created.ports.called(port) == [((A, *body.values()), {"actor": USER})]
 
     replayed = Api(**{port: (record, False)})
     response = replayed.client.post(path, headers=AUTH, json=body)
     assert response.status_code == 200
     assert "Location" not in response.headers
     assert response.json() == record.model_dump(mode="json")
-    assert replayed.actions() == [], "a replay is not a second start"
+    # The start is the store's to audit, in the create's own transaction (`ports.py`): the API
+    # writes nothing a failure after the commit could lose, or a replay could skip.
+    assert created.actions() == replayed.actions() == []
 
 
 def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
-    body = {"kind": "ticketing", "display_name": "T"}
+    body = {"kind": "ticketing", "display_name": "T", "enabled": False}
     created = Api(put_system=(SETTINGS, True), has_credentials=False)
-    response = created.client.put("/systems/tix", headers=AUTH, json=body)
+    response = created.client.put("/systems/tix", headers=AUTH, params={"x": "1"}, json=body)
     assert (response.status_code, response.headers["Location"]) == (201, BASE + "/systems/tix")
+    ((tenant, system_id, sent), kwargs), = created.ports.called("put_system")
+    assert (tenant, system_id, sent.model_dump(), kwargs) == (
+        A, "tix", {**body, "settings": {}}, {"actor": USER})
     replaced = Api(put_system=(SETTINGS, False), has_credentials=False)
     response = replaced.client.put("/systems/tix", headers=AUTH, json=body)
     assert response.status_code == 200
     assert "Location" not in response.headers
-    assert created.actions() == replaced.actions() == ["system.update"]
+    assert created.actions() == replaced.actions() == []
+
+
+def test_put_system_must_say_whether_the_system_is_enabled() -> None:
+    api = Api()
+    response = api.client.put("/systems/tix", headers=AUTH,
+                              json={"kind": "ticketing", "display_name": "T"})
+    assert response.status_code == 422
+    assert api.ports.calls == []
+
+
+@pytest.mark.parametrize(("method", "path", "port"), [
+    ("POST", "/investigations/inv-1/cancel", "cancel_investigation"),
+    ("DELETE", "/investigations/inv-1", "delete_investigation"),
+])
+def test_a_write_hands_the_store_its_actor_and_audits_nothing_itself(
+    method: str, path: str, port: str,
+) -> None:
+    api = Api(**{port: INV if port == "cancel_investigation" else None})
+    assert api.client.request(method, path, headers=AUTH).status_code < 400
+    assert api.ports.called(port) == [((A, "inv-1"), {"actor": USER})]
+    assert api.actions() == []
 
 
 # --- refusals ------------------------------------------------------------------------------
@@ -339,6 +366,14 @@ def test_an_artifact_read_redirects_to_the_signed_link_and_is_audited(key: str) 
     assert [(e.action, e.target, e.detail) for e in api.audit.events] == [("artifact.read", "inv-1", key)]
 
 
+def test_an_artifact_read_whose_link_fails_is_not_audited() -> None:
+    api = Api(get_investigation=INV, signed_url=RuntimeError("signer down"))
+    with pytest.raises(RuntimeError, match="signer down"):
+        api.client.get("/investigations/inv-1/artifacts/report.md", headers=AUTH,
+                       follow_redirects=False)
+    assert api.audit.events == []
+
+
 @pytest.mark.parametrize("key", ["runtime.html", "../other/report.md", "report.md/x"])
 def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
     api = Api(get_investigation=INV)
@@ -371,6 +406,7 @@ def test_credentials_are_written_through_and_never_echoed_or_audited() -> None:
                               json={"credentials": {"api_token": secret}})
     assert (response.status_code, response.content) == (204, b"")
     assert api.ports.called("put_credentials") == [((A, "tix", {"api_token": secret}), {})]
+    assert api.ports.called("has_credentials") == [], "an existence check, not a read"
     assert [(e.action, e.detail) for e in api.audit.events] == [("system.credentials", "fields: api_token")]
     assert secret not in repr(api.audit.events)
 
@@ -449,6 +485,19 @@ def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
                       cost_usd=0.0, created_at=NOW)
 
 
+@pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
+def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
+    with pytest.raises(ValueError, match="pattern"):
+        INV.model_validate({**INV.model_dump(), "investigation_id": bad})
+    with pytest.raises(ValueError, match="pattern"):
+        SETTINGS.model_validate({**SETTINGS.model_dump(), "system_id": bad})
+
+
+def test_a_caller_from_the_login_provider_carries_a_checked_tenant() -> None:
+    with pytest.raises(TenantRefused):
+        Principal(tenant_id="Not_A_Tenant", user_id=USER)
+
+
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
         Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
@@ -498,6 +547,24 @@ def test_every_list_pages_by_cursor_from_the_last_row_served(
     assert (second_kwargs["after"], second_kwargs["limit"]) == (first_after, 2)
 
 
+def test_a_cursor_stays_short_whatever_the_filters_and_is_accepted_back() -> None:
+    severity = "x" * 1600
+    api = Api(list_alerts=_rows_after([SUMMARY_2, SUMMARY]))
+    cursor = _cursor(api, "/alerts", {"severity": severity})
+    assert len(cursor) < 400
+    page = api.client.get("/alerts", headers=AUTH,
+                          params={"limit": 1, "severity": severity, "cursor": cursor})
+    assert page.status_code == 200, page.text
+    assert [a["alert_id"] for a in page.json()["items"]] == ["al-1"]
+
+
+def test_systems_are_served_only_for_the_rows_on_the_page() -> None:
+    api = Api(list_systems=[SETTINGS, SETTINGS_2], has_credentials=False)
+    page = api.client.get("/systems", headers=AUTH, params={"limit": 1}).json()
+    assert [s["system_id"] for s in page["items"]] == ["tix"]
+    assert api.ports.called("has_credentials") == [((A, "tix"), {})]
+
+
 def test_a_short_page_is_the_last_page() -> None:
     api = Api(list_investigations=[INV_2, INV])
     page = api.client.get("/investigations", headers=AUTH, params={"limit": 2}).json()
@@ -541,7 +608,7 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
 
 
 def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() -> None:
-    store = InMemoryStore(lambda: NOW)
+    store = InMemoryStore(lambda: NOW, InMemoryAudit())
     fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
     for n, at in enumerate(fired):
         store.add_alert(A, ALERT.model_copy(update={"alert_id": f"al-{n}", "fired_at": at}))
@@ -582,8 +649,20 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
 
 
+def test_the_demo_store_audits_its_own_writes() -> None:
+    deps = demo_deps(("t-one",), lambda: NOW)
+    client = TestClient(create_app(deps))
+    auth = {"Authorization": "Bearer t-one-analyst"}
+    created = client.post("/investigations", headers=auth,
+                          json={"alert_id": "t-one-alert-0003", "client_request_id": "r1"})
+    assert created.status_code == 201, created.text
+    events = deps.audit.events  # type: ignore[attr-defined]
+    assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
+        ("t-one", "analyst@t-one.example", "investigation.start", created.json()["investigation_id"])]
+
+
 def test_the_demo_store_keys_records_by_tenant() -> None:
-    store = InMemoryStore(lambda: NOW)
+    store = InMemoryStore(lambda: NOW, InMemoryAudit())
     store.add_alert("t-one", ALERT)
     store.add_alert("t-two", ALERT.model_copy(update={"title": "two's"}))
     one, two = store.get_alert("t-one", "al-1"), store.get_alert("t-two", "al-1")

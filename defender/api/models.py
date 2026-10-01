@@ -8,9 +8,13 @@ Vocabulary follows #1131: "investigation" in the public API ("run" stays the int
 `status` is the execution lifecycle, distinct from `disposition`, the outcome
 (`docs/platform-design.md` §2.3).
 
-Two shapes are closed at the boundary so nothing past it has to handle them: every moment is
-timezone-aware (`AwareDatetime`; a time without an offset is a 422, never a naive value compared
-against an aware one), and every record id matches `RECORD_ID_PATTERN`.
+Two shapes are closed at the boundary, in both directions, so nothing past it has to handle
+them: every moment is timezone-aware (`AwareDatetime`; a time without an offset is a 422, never a
+naive value compared against an aware one), and every record id, sent or served, matches
+`RECORD_ID_PATTERN`. On the way in a violation is the caller's 422. On the way out the record
+cannot even be built: a store that reads a row breaking its promise (`ports.py`) fails as it
+builds the record, a 500, rather than serving an id the API could not address again or put
+safely into a `Location`.
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ class _Request(BaseModel):
 class AlertSummary(BaseModel):
     """An alert as listed. The raw alert is left out of lists; `GET /alerts/{id}` carries it."""
 
-    alert_id: str
+    alert_id: RecordId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
     title: str
@@ -58,8 +62,8 @@ class Alert(AlertSummary):
 
 
 class Investigation(BaseModel):
-    investigation_id: str
-    alert_id: str
+    investigation_id: RecordId
+    alert_id: RecordId
     status: InvestigationStatus
     disposition: str | None = Field(
         default=None,
@@ -89,9 +93,9 @@ class InvestigationCreate(_Request):
 
 
 class LearningJob(BaseModel):
-    learning_job_id: str
-    investigation_id: str
-    alert_id: str
+    learning_job_id: RecordId
+    investigation_id: RecordId
+    alert_id: RecordId
     status: LearningJobStatus
     trigger: Literal["auto", "explicit"] = Field(
         description="`auto` when the investigation's completion queued it; `explicit` for a re-learn."
@@ -108,7 +112,7 @@ class LearningJobCreate(_Request):
 
 
 class Lesson(BaseModel):
-    lesson_id: str
+    lesson_id: RecordId
     title: str
     description: str
     status: str
@@ -121,7 +125,7 @@ class SystemSettings(BaseModel):
     """A connected system of the tenant's, as the systems repository stores it: a data source,
     or the ticket system alerts come from."""
 
-    system_id: str
+    system_id: RecordId
     kind: str
     display_name: str
     enabled: bool
@@ -138,7 +142,8 @@ class System(SystemSettings):
 class SystemPut(_Request):
     kind: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
-    enabled: bool = True
+    enabled: bool = Field(description="Required: a PUT replaces the whole record, so a default "
+                          "would silently re-enable a system the tenant disabled.")
     settings: dict[str, SettingValue] = Field(default_factory=dict)
 
 

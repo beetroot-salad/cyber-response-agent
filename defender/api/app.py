@@ -1,7 +1,9 @@
 """The routes: #1131's public API, each a thin translation onto a port.
 
 Every route resolves the caller through the one login dependency (`_principal`) and passes its
-tenant to the ports; no route reads a tenant from the request. The routes decide no data rule —
+tenant to the ports; no route reads a tenant from the request. A write passes the acting user
+too, and the store audits the write in its own transaction (`ports.py`); the routes audit only
+an artifact read and a credentials write, which happen outside the store. The routes decide no data rule —
 which request replays which record, what may be cancelled, deleted or learned from is the
 store's (`ports.py`). What they own is the mapping onto HTTP:
 
@@ -91,7 +93,7 @@ _ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired
 _INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id)
 _LEARNING_JOB_ORDER: Order[LearningJob, TimePosition] = newest_first(lambda j: j.created_at, lambda j: j.learning_job_id)
 _LESSON_ORDER: Order[Lesson, str] = ordered_by_id(lambda le: le.lesson_id)
-_SYSTEM_ORDER: Order[System, str] = ordered_by_id(lambda s: s.system_id)
+_SYSTEM_ORDER: Order[SystemSettings, str] = ordered_by_id(lambda s: s.system_id)
 
 
 def _filter_moment(moment: _dt.datetime | None) -> str | None:
@@ -109,12 +111,12 @@ def _not_found(what: str, record_id: str) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"no {what} {record_id!r}")
 
 
-def _created_or_replayed(response: Response, created: bool, location: str) -> None:
-    """201 and a `Location`, or the default 200. `location` is always a URL the router built,
-    so every segment in it is encoded."""
-    if created:
-        response.status_code = status.HTTP_201_CREATED
-        response.headers["Location"] = location
+def _created_at(request: Request, response: Response, route: str, **path: str) -> None:
+    """201 and a `Location` the router builds from `route`'s path. Only a creation calls it: a
+    replay answers the default 200 and needs no URL. Every path value is a `RecordId`, whose
+    grammar is URL-safe, so the router never has to encode or refuse one."""
+    response.status_code = status.HTTP_201_CREATED
+    response.headers["Location"] = str(request.url_for(route, **path))
 
 
 alerts = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -160,13 +162,11 @@ def start_investigation(
     unless an investigation of that alert is still live, which is then returned; the same
     `client_request_id` always returns the same investigation."""
     investigation, created = deps.investigations.create_investigation(
-        caller.tenant_id, body.alert_id, body.client_request_id
+        caller.tenant_id, body.alert_id, body.client_request_id, actor=caller.user_id
     )
     if created:
-        _audit(deps, caller, "investigation.start", investigation.investigation_id,
-               detail=f"alert {body.alert_id}")
-    _created_or_replayed(response, created, str(request.url_for(
-        "get_investigation", investigation_id=investigation.investigation_id)))
+        _created_at(request, response, "get_investigation",
+                    investigation_id=investigation.investigation_id)
     return investigation
 
 
@@ -194,16 +194,14 @@ def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Inves
 
 @investigations.post("/{investigation_id}/cancel")
 def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
-    investigation = deps.investigations.cancel_investigation(caller.tenant_id, investigation_id)
-    _audit(deps, caller, "investigation.cancel", investigation_id)
-    return investigation
+    return deps.investigations.cancel_investigation(
+        caller.tenant_id, investigation_id, actor=caller.user_id)
 
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
     """Hide an investigation from every read. Its records are kept: lessons cite runs."""
-    deps.investigations.delete_investigation(caller.tenant_id, investigation_id)
-    _audit(deps, caller, "investigation.delete", investigation_id)
+    deps.investigations.delete_investigation(caller.tenant_id, investigation_id, actor=caller.user_id)
 
 
 @investigations.get(
@@ -220,8 +218,8 @@ def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) ->
     investigation = get_investigation(deps, caller, investigation_id)
     if key not in investigation.artifacts:
         raise _not_found("artifact", key)
-    _audit(deps, caller, "artifact.read", investigation_id, detail=key)
     url = deps.artifact_links.signed_url(caller.tenant_id, investigation_id, key)
+    _audit(deps, caller, "artifact.read", investigation_id, detail=key)
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
@@ -235,13 +233,10 @@ def start_learning_job(
     """Learn again from an investigation. Its completion already queued one automatically;
     this adds another."""
     job, created = deps.learning_jobs.create_learning_job(
-        caller.tenant_id, body.investigation_id, body.client_request_id
+        caller.tenant_id, body.investigation_id, body.client_request_id, actor=caller.user_id
     )
     if created:
-        _audit(deps, caller, "learning_job.start", job.learning_job_id,
-               detail=f"investigation {body.investigation_id}")
-    _created_or_replayed(response, created, str(request.url_for(
-        "get_learning_job", learning_job_id=job.learning_job_id)))
+        _created_at(request, response, "get_learning_job", learning_job_id=job.learning_job_id)
     return job
 
 
@@ -296,19 +291,20 @@ def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> Syste
 def list_systems(
     deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[System]:
-    return paginate(
-        lambda after, n: [_served(deps, caller, s) for s in
-                          deps.systems.list_systems(caller.tenant_id, after=after, limit=n)],
+    page = paginate(
+        lambda after, n: deps.systems.list_systems(caller.tenant_id, after=after, limit=n),
         _SYSTEM_ORDER, list_name="systems", tenant_id=caller.tenant_id, cursor=cursor,
         limit=limit, filters={},
     )
+    # Served after the page is cut, so the secret store is asked only about rows that are sent.
+    return Page(items=[_served(deps, caller, s) for s in page.items], next_cursor=page.next_cursor)
 
 
-def _system(deps: ApiDeps, caller: Principal, system_id: str) -> System:
+def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemSettings:
     settings = deps.systems.get_system(caller.tenant_id, system_id)
     if settings is None:
         raise _not_found("system", system_id)
-    return _served(deps, caller, settings)
+    return settings
 
 
 @systems.put("/{system_id}", responses={201: {"model": System}})
@@ -316,17 +312,17 @@ def put_system(
     deps: Deps, caller: Caller, system_id: Id, body: SystemPut, request: Request, response: Response
 ) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
-    settings, created = deps.systems.put_system(caller.tenant_id, system_id, body)
-    _audit(deps, caller, "system.update", system_id)
-    # A PUT creates the resource at its own URL.
-    _created_or_replayed(response, created, str(request.url))
+    settings, created = deps.systems.put_system(caller.tenant_id, system_id, body, actor=caller.user_id)
+    if created:
+        # A PUT creates the resource at its own URL; built by the router, so no query rides along.
+        _created_at(request, response, "put_system", system_id=system_id)
     return _served(deps, caller, settings)
 
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT)
 def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
-    _system(deps, caller, system_id)
+    _settings(deps, caller, system_id)
     deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
     _audit(deps, caller, "system.credentials", system_id,
            detail="fields: " + ", ".join(sorted(body.credentials)))
@@ -335,7 +331,7 @@ def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: Credentials
 @systems.post("/{system_id}/check")
 def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
     """Test the connection and a first query."""
-    return deps.checker.check(caller.tenant_id, _system(deps, caller, system_id))
+    return deps.checker.check(caller.tenant_id, _served(deps, caller, _settings(deps, caller, system_id)))
 
 
 def _refusal(code: int) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:

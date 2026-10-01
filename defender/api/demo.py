@@ -13,7 +13,7 @@ import datetime as _dt
 from collections.abc import Callable, Sequence
 from functools import partial
 
-from defender._tenant import is_valid_tenant_id
+from defender._tenant import TenantId, is_valid_tenant_id
 
 from .fakes import (
     InMemoryAudit,
@@ -23,7 +23,7 @@ from .fakes import (
     StubSystemChecker,
     TokenAuthenticator,
 )
-from .models import Alert, Investigation, LearningJob, Lesson, SystemPut
+from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps, Principal
 
 #: The users each tenant gets; a token is `<tenant>-<role>`.
@@ -36,7 +36,7 @@ UTC_NOW: Callable[[], _dt.datetime] = partial(_dt.datetime.now, _dt.UTC)
 def demo_tokens(tenants: Sequence[str]) -> dict[str, Principal]:
     """bearer token -> caller, one per tenant and role."""
     return {
-        f"{tenant}-{role}": Principal(tenant_id=tenant, user_id=f"{role}@{tenant}.example")
+        f"{tenant}-{role}": Principal(tenant_id=TenantId(tenant), user_id=f"{role}@{tenant}.example")
         for tenant in tenants for role in DEMO_ROLES
     }
 
@@ -51,7 +51,8 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         if not is_valid_tenant_id(tenant):
             raise ValueError(f"not a tenant id: {tenant!r}")
     secrets = InMemorySecrets()
-    store = InMemoryStore(clock)
+    audit = InMemoryAudit()
+    store = InMemoryStore(clock, audit)
     now = clock()
     _seed(store, secrets, tenants[0], now)
     for n, tenant in enumerate(tenants[1:], start=9):
@@ -69,7 +70,7 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         secrets=secrets,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
-        audit=InMemoryAudit(),
+        audit=audit,
         clock=clock,
     )
 
@@ -118,7 +119,7 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
     store.add_learning_job(tenant, LearningJob(
         learning_job_id=f"{tenant}-lj-auto", investigation_id=done.investigation_id,
         alert_id=done.alert_id, status="completed", trigger="auto", stage="judge",
-        created_at=done.finished_at or now, finished_at=now - 20 * hour,
+        created_at=now if done.finished_at is None else done.finished_at, finished_at=now - 20 * hour,
     ))
     store.add_lesson(tenant, Lesson(
         lesson_id=f"{tenant}-lesson-0001", title="Check the source's login history before calling it benign",
@@ -126,11 +127,12 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
         status="live",
     ))
 
-    store.put_system(tenant, "tickets", SystemPut(
-        kind="ticketing", display_name="Security ticket queue",
+    store.add_system(tenant, SystemSettings(
+        system_id="tickets", kind="ticketing", display_name="Security ticket queue", enabled=True,
         settings={"base_url": f"https://tickets.{tenant}.example", "ready_status": "triage"},
     ))
-    store.put_system(tenant, "siem", SystemPut(
-        kind="siem", display_name="Event search", settings={"base_url": f"https://siem.{tenant}.example"},
+    store.add_system(tenant, SystemSettings(
+        system_id="siem", kind="siem", display_name="Event search", enabled=True,
+        settings={"base_url": f"https://siem.{tenant}.example"},
     ))
     secrets.put_credentials(tenant, "tickets", {"api_token": "demo-secret"})

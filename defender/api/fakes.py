@@ -8,6 +8,9 @@ the ports; re-deriving them here in Python is how a second, subtly different cop
 gets written. So a demo client that double-submits gets two investigations, and nothing here is
 a reference for how the platform behaves.
 
+What they do keep is the ports' shape: a write records its own audit event, into the audit log
+the store is built with, as the real store does in the write's transaction.
+
 Every record is keyed by `(tenant_id, id)`, so one tenant's record can never displace
 another's, and every read iterates a snapshot, so a concurrent write cannot fail it.
 """
@@ -30,7 +33,16 @@ from .models import (
     SystemPut,
     SystemSettings,
 )
-from .ports import AuditEvent, NotFound, Principal, TimePosition, Unauthenticated, UnknownReference
+from .ports import (
+    AuditAction,
+    AuditEvent,
+    AuditLog,
+    NotFound,
+    Principal,
+    TimePosition,
+    Unauthenticated,
+    UnknownReference,
+)
 
 T = TypeVar("T")
 
@@ -71,8 +83,9 @@ class InMemoryStore:
     """The alerts, investigations, learning jobs, lessons and systems repositories, seeded by
     `demo.py` through the `add_*` methods (which are not part of any port)."""
 
-    def __init__(self, clock: Callable[[], _dt.datetime]) -> None:
+    def __init__(self, clock: Callable[[], _dt.datetime], audit: AuditLog) -> None:
         self._clock = clock
+        self._audit = audit
         self._ids = itertools.count(1)
         self._alerts: _Table[Alert] = _Table()
         self._investigations: _Table[Investigation] = _Table()
@@ -83,6 +96,11 @@ class InMemoryStore:
 
     def _mint(self, prefix: str) -> str:
         return f"{prefix}-{next(self._ids):06d}"
+
+    def _audited(self, tenant_id: str, actor: str, action: AuditAction, target: str,
+                 detail: str = "") -> None:
+        self._audit.record(AuditEvent(tenant_id=tenant_id, user_id=actor, action=action,
+                                      target=target, at=self._clock(), detail=detail))
 
     # --- seeding ------------------------------------------------------------------------
 
@@ -101,6 +119,10 @@ class InMemoryStore:
     def add_lesson(self, tenant_id: str, lesson: Lesson) -> Lesson:
         self._lessons[(tenant_id, lesson.lesson_id)] = lesson
         return lesson
+
+    def add_system(self, tenant_id: str, settings: SystemSettings) -> SystemSettings:
+        self._systems[(tenant_id, settings.system_id)] = settings
+        return settings
 
     # --- AlertsRepository ---------------------------------------------------------------
 
@@ -129,7 +151,7 @@ class InMemoryStore:
     # --- InvestigationsRepository -------------------------------------------------------
 
     def create_investigation(
-        self, tenant_id: str, alert_id: str, client_request_id: str
+        self, tenant_id: str, alert_id: str, client_request_id: str, *, actor: str
     ) -> tuple[Investigation, bool]:
         if self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
@@ -137,6 +159,8 @@ class InMemoryStore:
             investigation_id=self._mint("inv"), alert_id=alert_id, status="queued",
             cost_usd=0.0, created_at=self._clock(),
         )
+        self._audited(tenant_id, actor, "investigation.start", investigation.investigation_id,
+                      detail=f"alert {alert_id}")
         return self.add_investigation(tenant_id, investigation), True
 
     def list_investigations(
@@ -160,20 +184,24 @@ class InMemoryStore:
             raise NotFound(f"no investigation {investigation_id!r}")
         return investigation
 
-    def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
+    def cancel_investigation(
+        self, tenant_id: str, investigation_id: str, *, actor: str
+    ) -> Investigation:
         aborted = self._existing(tenant_id, investigation_id).model_copy(
             update={"status": "aborted", "finished_at": self._clock()}
         )
+        self._audited(tenant_id, actor, "investigation.cancel", investigation_id)
         return self.add_investigation(tenant_id, aborted)
 
-    def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
+    def delete_investigation(self, tenant_id: str, investigation_id: str, *, actor: str) -> None:
         self._existing(tenant_id, investigation_id)
+        self._audited(tenant_id, actor, "investigation.delete", investigation_id)
         self._deleted.add((tenant_id, investigation_id))
 
     # --- LearningJobsRepository ---------------------------------------------------------
 
     def create_learning_job(
-        self, tenant_id: str, investigation_id: str, client_request_id: str
+        self, tenant_id: str, investigation_id: str, client_request_id: str, *, actor: str
     ) -> tuple[LearningJob, bool]:
         investigation = self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
@@ -183,6 +211,8 @@ class InMemoryStore:
             alert_id=investigation.alert_id, status="queued", trigger="explicit",
             created_at=self._clock(),
         )
+        self._audited(tenant_id, actor, "learning_job.start", job.learning_job_id,
+                      detail=f"investigation {investigation_id}")
         return self.add_learning_job(tenant_id, job), True
 
     def list_learning_jobs(
@@ -214,11 +244,11 @@ class InMemoryStore:
         return self._systems.get((tenant_id, system_id))
 
     def put_system(
-        self, tenant_id: str, system_id: str, body: SystemPut
+        self, tenant_id: str, system_id: str, body: SystemPut, *, actor: str
     ) -> tuple[SystemSettings, bool]:
         created = (tenant_id, system_id) not in self._systems
-        settings = SystemSettings(system_id=system_id, **body.model_dump())
-        self._systems[(tenant_id, system_id)] = settings
+        settings = self.add_system(tenant_id, SystemSettings(system_id=system_id, **body.model_dump()))
+        self._audited(tenant_id, actor, "system.update", system_id)
         return settings, created
 
 

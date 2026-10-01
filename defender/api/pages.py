@@ -2,8 +2,10 @@
 
 A list answers `Page[T]`: at most `limit` items and a `next_cursor`, `null` on the last page. A
 client pages by sending the same query again with `cursor=<next_cursor>`. The cursor is opaque:
-base64url JSON naming the list it came from, the tenant that asked, the filters it was issued
-for, and the position of the last item served. A cursor that does not decode, or that names
+base64url JSON naming the list it came from, the tenant that asked, a digest of the filters it was
+issued for, and the position of the last item served. The filters go in as a digest, not their
+values, so a cursor's size never depends on the query: whatever filter a list accepts, the cursor
+it issues fits the cursor parameter it is sent back in. A cursor that does not decode, or that names
 another list, another tenant or other filters, is a 422 — never a silently different page. It is
 not signed: it cannot widen what a caller reads, since the tenant comes from the login and the
 store filters by it whatever the cursor says.
@@ -20,6 +22,8 @@ from __future__ import annotations
 import base64
 import binascii
 import datetime as _dt
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Generic, Literal, TypeVar
 
@@ -41,7 +45,7 @@ class _CursorBody(BaseModel, extra="forbid"):
     v: Literal[1]
     of: str
     tenant: str
-    filters: dict[str, str | None]
+    filters: str
     at: AwareDatetime | None
     id: str
 
@@ -76,6 +80,11 @@ def _refused(reason: str) -> HTTPException:
     return HTTPException(422, f"invalid cursor: {reason}")
 
 
+def _filters_digest(filters: Mapping[str, str | None]) -> str:
+    canonical = json.dumps(dict(filters), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _encode_cursor(body: _CursorBody) -> str:
     return base64.urlsafe_b64encode(body.model_dump_json().encode("utf-8")).decode("ascii").rstrip("=")
 
@@ -101,13 +110,14 @@ def paginate(
     """One page of `fetch(after, n)`, which answers up to `n` items strictly after `after` in
     the list's order. The cursor is checked before the store is asked anything."""
     after: P | None = None
+    filters_digest = _filters_digest(filters)
     if cursor is not None:
         body = _decode_cursor(cursor)
         if body.of != list_name:
             raise _refused(f"issued for {body.of}, not {list_name}")
         if body.tenant != tenant_id:
             raise _refused("issued to another tenant")
-        if body.filters != dict(filters):
+        if body.filters != filters_digest:
             raise _refused("the filters changed; send the query the cursor came from")
         after = order.load(body)
         if after is None:
@@ -118,6 +128,6 @@ def paginate(
     if len(rows) > limit:
         at, ident = order.dump(order.position(items[-1]))
         next_cursor = _encode_cursor(_CursorBody(
-            v=1, of=list_name, tenant=tenant_id, filters=dict(filters), at=at, id=ident,
+            v=1, of=list_name, tenant=tenant_id, filters=filters_digest, at=at, id=ident,
         ))
     return Page(items=items, next_cursor=next_cursor)

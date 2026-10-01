@@ -10,6 +10,20 @@ contract, and they are the STORE's to enforce — with constraints and one trans
 not in the routes. The API only maps what a method answers onto HTTP. The rules' own tests
 belong with the store's implementation (#1082), run against these ports; the API's tests
 (`tests/test_api_stub.py`) script the answers and check the mapping.
+
+What the API relies on is written here too, as the store's promise, never assumed:
+
+- **Every record answered fits the wire models' types** (`models.py`): its ids match
+  `RECORD_ID_PATTERN`, its moments carry an offset, and a disposition is stored already
+  normalized. The store checks this when it writes, so a read never meets a row it cannot serve;
+  a row that breaks it is the store's bug, and fails as the store builds the record — a 500.
+- **A list answers fewer than `limit` rows only when no more follow.** The route asks for
+  `limit + 1` and reads a short answer as the end of the list (`pages.py`).
+- **A write records its own audit event, in its own transaction.** Each write method takes the
+  acting user (`actor`) and inserts the event with the record, so a write is audited exactly when
+  it commits, and a retry that replays it neither repeats nor loses it
+  (`docs/platform-design.md` §2.10). The API's own `AuditLog` is only for what happens outside
+  the store.
 """
 
 from __future__ import annotations
@@ -22,6 +36,7 @@ from typing import Literal, Protocol
 from pydantic import AwareDatetime
 
 from defender._model import model
+from defender._tenant import TenantId
 
 from .models import (
     Alert,
@@ -44,9 +59,10 @@ TimePosition = tuple[_dt.datetime, str]
 @model(frozen=True)
 class Principal:
     """Who is calling. The tenant scopes every read and write; the user id reaches only the
-    audit log (#1131 "Tenancy")."""
+    audit log (#1131 "Tenancy"). The tenant is checked against its grammar here, where the login
+    provider's answer becomes a caller, so no port ever sees an unchecked one."""
 
-    tenant_id: str
+    tenant_id: TenantId
     user_id: str
 
 
@@ -83,7 +99,9 @@ class AlertsRepository(Protocol):
         after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
-        """Up to `limit` alerts strictly after `after`, newest first by `(fired_at, alert_id)`."""
+        """Up to `limit` alerts strictly after `after`, newest first by `(fired_at, alert_id)`.
+        The window is `fired_after <= fired_at < fired_before`, so adjacent windows meet without
+        a gap or an overlap."""
         ...
 
     def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None: ...
@@ -91,20 +109,21 @@ class AlertsRepository(Protocol):
 
 class InvestigationsRepository(Protocol):
     def create_investigation(
-        self, tenant_id: str, alert_id: str, client_request_id: str
+        self, tenant_id: str, alert_id: str, client_request_id: str, *, actor: str
     ) -> tuple[Investigation, bool]:
         """Start an investigation of `alert_id`, or return the one that answers this request.
 
         Returns `(investigation, created)`. The store's rules (§4.1):
 
-        - `client_request_id` is bound, per `(tenant_id, alert_id)`, to whatever this call
-          returns — a created investigation or an existing live one — so the same request
-          always answers the same investigation, `created=False` on every replay, whatever
+        - `client_request_id` is unique per `(tenant_id, alert_id)` and bound only to the
+          investigation it created: a repeat answers that one, `created=False`, whatever
           happened to it since.
         - At most one live (`queued`/`running`) investigation per alert: when one exists it is
-          returned, `created=False`. A terminal prior never blocks; a new one is a rerun.
-        - The check and the write are one transaction: concurrent calls with one request id
-          create at most one investigation.
+          returned, `created=False`, and the request id is not bound to it — a repeat after it
+          ended starts a rerun. A terminal prior never blocks; a new one is a rerun.
+        - The check, the write and its `investigation.start` audit event are one transaction:
+          concurrent calls with one request id create at most one investigation, and only a
+          creation is audited.
 
         Raises `UnknownReference` for an alert this tenant does not have.
         """
@@ -114,34 +133,39 @@ class InvestigationsRepository(Protocol):
         self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         """Up to `limit` strictly after `after`, newest first by `(created_at,
-        investigation_id)`; deleted investigations are left out."""
+        investigation_id)`; deleted investigations are left out, and never make a page short."""
         ...
 
     def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
         """`None` for a deleted investigation too."""
         ...
 
-    def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
-        """Stop a live investigation. `NotFound`, or `Conflict` if it already ended."""
+    def cancel_investigation(
+        self, tenant_id: str, investigation_id: str, *, actor: str
+    ) -> Investigation:
+        """Stop a live investigation, audited `investigation.cancel` with the write. `NotFound`,
+        or `Conflict` if it already ended."""
         ...
 
-    def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
-        """Soft delete: hidden from every read, kept because lessons cite it. `NotFound`, or
-        `Conflict` while it is live."""
+    def delete_investigation(self, tenant_id: str, investigation_id: str, *, actor: str) -> None:
+        """Soft delete: hidden from every read, kept because lessons cite it; audited
+        `investigation.delete` with the write. `NotFound`, or `Conflict` while it is live."""
         ...
 
 
 class LearningJobsRepository(Protocol):
     def create_learning_job(
-        self, tenant_id: str, investigation_id: str, client_request_id: str
+        self, tenant_id: str, investigation_id: str, client_request_id: str, *, actor: str
     ) -> tuple[LearningJob, bool]:
         """Queue an explicit re-learn of an investigation.
 
-        Returns `(job, created)`. The store's rules (§2.5, §2.6): a `client_request_id` already
-        used by this tenant answers its job, `created=False`, checked before anything else;
-        explicit re-learns are otherwise unlimited. `UnknownReference` for an investigation
-        this tenant does not have; `Conflict` for one that cannot be learned from — the design
-        names `unparseable`.
+        Returns `(job, created)`. The store's rules (§2.5, §2.6): `client_request_id` is unique
+        per `(tenant_id, investigation_id)`, so a repeat answers the job it created,
+        `created=False`, checked before anything else — and the same id sent for another
+        investigation is another request. Explicit re-learns are otherwise unlimited. A creation
+        is audited `learning_job.start` in the same transaction. `UnknownReference` for an
+        investigation this tenant does not have; `Conflict` for one that cannot be learned
+        from — the design names `unparseable`.
         """
         ...
 
@@ -174,9 +198,10 @@ class SystemsRepository(Protocol):
     def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None: ...
 
     def put_system(
-        self, tenant_id: str, system_id: str, body: SystemPut
+        self, tenant_id: str, system_id: str, body: SystemPut, *, actor: str
     ) -> tuple[SystemSettings, bool]:
-        """Create or replace a system's settings. Returns `(settings, created)`."""
+        """Create or replace a system's settings, audited `system.update` with the write.
+        Returns `(settings, created)`."""
         ...
 
 
@@ -226,6 +251,11 @@ class AuditEvent:
 
 
 class AuditLog(Protocol):
+    """The API's own audit, for the two actions that happen outside the store's transactions:
+    an artifact read (recorded once the signed link is issued) and a credentials write to the
+    secret store (a `PUT` that repeats safely, so a retry records it again). Every other action is
+    audited by the store write that performs it."""
+
     def record(self, event: AuditEvent) -> None: ...
 
 
