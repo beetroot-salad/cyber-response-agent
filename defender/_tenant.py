@@ -438,9 +438,10 @@ def accept_tenant(
          local clone's objects are hard links);
       6. `agent/.tenant-id` holds this id;
       7. `settings/` lies outside `defender_dir`, the tenant's own `runs/` and every
-         `box_mounted` tree — the settings half is host-only. A path comparison: the settings
-         half's real path is the data root's resolution joined below it (steps 3-5 saw no
-         link there), against each tree's resolution.
+         `box_mounted` tree — the settings half is host-only — and none of those trees lies
+         inside either half, where a run's writes would become the tenant's knowledge. A path
+         comparison: the halves' real paths are the data root's resolution joined below it
+         (steps 3-5 saw no link there), against each tree's resolution.
 
     Reads only. The knowledge folder is walked through `_io.bind`'s no-follow reader, from the
     data root down, so no link below the root is followed there; the row is read by its path
@@ -484,13 +485,21 @@ def _accept_knowledge(
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
         _check_knowledge(bound.under(knowledge_name), paths.knowledge,
                          tenant_id=paths.tenant_id)
-    settings_real = _resolve_or_refuse(root) / paths.settings.relative_to(root)
+    root_real = _resolve_or_refuse(root)
+    settings_real = root_real / paths.settings.relative_to(root)
+    halves_real = (settings_real, root_real / paths.agent.relative_to(root))
     for mounted in (Path(defender_dir), paths.runs, *(Path(m) for m in box_mounted)):
-        if settings_real.is_relative_to(_resolve_or_refuse(mounted)):
+        mounted_real = _resolve_or_refuse(mounted)
+        if settings_real.is_relative_to(mounted_real):
             raise TenantRefused(
                 f"tenant {paths.tenant_id!r}'s settings {paths.settings} are inside {mounted}, "
                 "which a box mounts — the settings half is host-only; keep the data root "
                 "outside the code tree and the runs base")
+        if any(mounted_real.is_relative_to(half) for half in halves_real):
+            raise TenantRefused(
+                f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
+                f"knowledge folder {paths.knowledge} — a run's writes would land in its "
+                "settings or agent half; keep the runs base and every mounted tree outside it")
 
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
