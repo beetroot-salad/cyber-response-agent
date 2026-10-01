@@ -9,8 +9,8 @@ that is the point — the tests are the spec the code is written against.
 The surface this suite pins
 ---------------------------
 `defender/runtime/verbs.py`
-    `VerbContext(defender_dir, run_dir, env, settings_dir)` — what the harness hands a verb: the RUN's tree
-    (never an import-time constant) and the RUN's scrubbed env (never `os.environ`).
+    `VerbContext(defender_dir, run_dir, env, tenant)` — what the harness hands a verb: the RUN's tree
+    (never an import-time constant), the RUN's scrubbed env (never `os.environ`) and its tenant record.
     `declared_params(fn)` — a verb's param surface = the keyword-only params of its annotated
     signature. This is the ONE reader of a verb's signature; the tool's validator uses it.
     `ModuleVerbRegistry(read_roster(adapters_dir))` — the production registry: `systems()` + `verbs(system)`,
@@ -70,6 +70,7 @@ from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.scripts.adapters import ticket_adapter  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
 from defender.tests.e2e import _replay_harness  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -586,10 +587,8 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
     assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
 
-    ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={},
-                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
-    ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={},
-                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+    ctx_a = _tenants1106.verb_context(a, tmp_path / "run", {})
+    ctx_b = _tenants1106.verb_context(b, tmp_path / "run", {})
     fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
     fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
 
@@ -983,8 +982,8 @@ def test_transports_raise_never_exit():
     cannot reach them — and ticket_cli serves both the CLI and the VERBS surface from one
     implementation, so a sys.exit in a command body kills the in-process run.
 
-    The surviving CLI entry point (`main`, and the `__main__` guard) may still exit: that is a
-    process, not a transport."""
+    An entry point (`main`, and a `__main__` guard) may still exit: that is a process, not a
+    transport (none is left among the adapters since #1107 deleted the ticket CLI)."""
     offenders: list[str] = []
     for path, tree in _adapter_sources():
         owner = _enclosing_functions(tree)
@@ -1148,27 +1147,21 @@ def test_provider_key_scrub_positive_control(tmp_path):
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
     """verb_resolves_config_from_deps_tree — a verb resolves its config from the RUN's
-    settings folder (the ctx), not an import-time module constant: a run handed tenant A's
-    settings reads `<A settings>/systems/{system}/config.env` (#1106: the folder is the run's
-    tenant's `settings/` half, handed in on `VerbContext.settings_dir`)."""
-    def _tree(root: Path, url: str) -> Path:
-        d = root / "systems" / "elastic"
-        d.mkdir(parents=True)
-        (d / "config.env").write_text(
-            f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n",
-            encoding="utf-8",
-        )
-        return root
-
-    a = _tree(tmp_path / "a", "http://tree-a:9200")
-    b = _tree(tmp_path / "b", "http://tree-b:9200")
+    record (the ctx), not an import-time module constant: a run handed tenant A's record reads
+    `<A settings>/systems/{system}/config.env` as it was when the run began (#1107: the record
+    is the run's tenant's settings, resolved once and handed in on `VerbContext.tenant`)."""
+    def _ctx_over(root: Path, tenant_id: str, url: str | None) -> VerbContext:
+        configs = {} if url is None else {"elastic": (
+            f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n"
+            "ELASTIC_TRANSPORT=docker-exec\nELASTIC_DOCKER_CONTEXT=ctx-elastic\n")}
+        S1107.plant(root, tenant_id, configs=configs)
+        return _tenants1106.verb_context(
+            DEFENDER, tmp_path / "run", {}, tenant=S1107.resolve(root, tenant_id))
 
     cfg_a = _stub_transport.load_config(
-        VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, settings_dir=a),
-        "elastic", "ELASTIC")
+        _ctx_over(tmp_path / "a", "t", "http://tree-a:9200"), "elastic", "ELASTIC")
     cfg_b = _stub_transport.load_config(
-        VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, settings_dir=b),
-        "elastic", "ELASTIC")
+        _ctx_over(tmp_path / "b", "t", "http://tree-b:9200"), "elastic", "ELASTIC")
 
     assert cfg_a["URL_BASE"] == "http://tree-a:9200"
     assert cfg_b["URL_BASE"] == "http://tree-b:9200", \
@@ -1176,10 +1169,7 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 
     with pytest.raises(ConfigFault):
         _stub_transport.load_config(
-            VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
-                        settings_dir=tmp_path / "nowhere"),
-            "elastic", "ELASTIC",
-        )
+            _ctx_over(tmp_path / "nowhere", "t", None), "elastic", "ELASTIC")
 
 
 
@@ -1396,22 +1386,18 @@ def test_record_query_module_survives_its_cli():
 
 
 def test_ticket_cli_dual_surface_survives():
-    """ticket_cli_dual_surface_survives — ticket_cli keeps its argparse CLI over the SAME
-    implementation as its VERBS entry: its two remaining subprocess callers, ticket_seeds and
-    verify_forward/forward, still work, and the `--require-closed` flag still parses for them.
-    (#672 moved the benign judge's closed-ticket read off this CLI onto two typed in-process
-    tools, so the judge is no longer a subprocess consumer — but the CLI + its flag survive for
-    the two that remain, d14.)"""
+    """ticket_cli_dual_surface_survives — ticket_adapter's VERBS entry is its one surface: the
+    argparse CLI it once shared the implementation with went when #1107 retired its last
+    subprocess callers' reason to exist (the settings are the run's record, handed in on the
+    verb context, and a process has no record to be handed). `list-tickets` and `get-ticket`
+    keep the `--require-closed` guard as verb parameters."""
     verbs = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs("ticket")
     assert {"list-tickets", "get-ticket"} <= set(verbs)
+    for verb in ("list-tickets", "get-ticket"):
+        assert "require_closed" in declared_params(verbs[verb]), verb
 
-    parser = ticket_adapter.build_parser()
-    assert parser.parse_args(["list-tickets", "--status", "closed"]).status == "closed"
-    assert parser.parse_args(["get-ticket", "SOC-1042"]).key == "SOC-1042"
-    assert parser.parse_args(["get-ticket", "SOC-1042", "--require-closed"]).require_closed is True
-    assert parser.parse_args(["list-tickets", "--require-closed"]).require_closed is True
-
-
+    for gone in ("build_parser", "main", "_cli_context"):
+        assert not hasattr(ticket_adapter, gone), f"ticket_adapter.{gone} outlived its CLI"
 
 
 def test_e2e_replay_harness_has_an_injected_verb_seam(tmp_path):

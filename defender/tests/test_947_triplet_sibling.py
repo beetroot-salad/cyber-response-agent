@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from typing import Any
 
 import pytest
 
@@ -103,7 +104,7 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
-                     visualize=lambda p: None, preflight=T.no_preflight)
+                     visualize=lambda p, **kw: None, preflight=T.no_preflight)
     assert rc == 0
     assert order == ["lifecycle"]
 
@@ -116,7 +117,7 @@ def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
     rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec,
-                     visualize=lambda p: None, preflight=T.no_preflight)
+                     visualize=lambda p, **kw: None, preflight=T.no_preflight)
     run_dir = rec.kwargs["run_dir"]
     assert rc == 0
     assert (run_dir / "report.md").is_file()
@@ -131,7 +132,7 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     before = sorted(p.name for p in base.iterdir())
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml", world="zzz"),
-                    lifecycle=_Recorder([]), visualize=lambda p: None,
+                    lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
                     preflight=T.no_preflight)
     assert "zzz" in str(bad.value)
     assert sorted(p.name for p in base.iterdir()) == before
@@ -146,7 +147,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     assert _run().parse_args(_resume_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
         _run().main([*_resume_argv(manifest), "--update-ticket"],
-                    lifecycle=_Recorder([]), visualize=lambda p: None,
+                    lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
                     preflight=T.no_preflight)
     assert "--update-ticket" in str(bad.value)
 
@@ -165,16 +166,19 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
     class Writer:
         def __init__(self):
             self.calls: list[str] = []
+            self.tenants: list[Any] = []
 
-        def open_case_ticket(self, run_dir, **_kw):
+        def open_case_ticket(self, run_dir, *, tenant, defender_dir, env):
             self.calls.append("open")
+            self.tenants.append(tenant)
 
-        def record_case_ticket(self, run_dir, **_kw):
+        def record_case_ticket(self, run_dir, *, tenant, defender_dir, env, **_kw):
             self.calls.append("record")
+            self.tenants.append(tenant)
 
     writer = Writer()
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                visualize=lambda p: None, preflight=T.no_preflight, ticket_writer=writer)
+                visualize=lambda p, **kw: None, preflight=T.no_preflight, ticket_writer=writer)
     assert writer.calls == []
 
 
@@ -187,7 +191,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     seen: list[str] = []
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=T.no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
@@ -202,7 +206,7 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     tenant_id = T.mod("_tenant").tenant_of_run_dir(src)
     seen: list[str] = []
     _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
-                visualize=lambda p: None, preflight=T.no_preflight,
+                visualize=lambda p, **kw: None, preflight=T.no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen, "an ordinary run reached no curation lane"
 
@@ -239,7 +243,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.playground_run_tenant(),
         world=_run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
         investigate=lambda **kw: seen.update(kw) or {},
     )
     registry = seen["verbs"]
@@ -265,7 +269,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.playground_run_tenant(),
         world=_run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
 
@@ -276,16 +280,16 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     constraint the resume path adds is enforced on the resume path only."""
     base, src = T.runs_base(tmp_path)
     seen: dict = {}
-    grants = T1106.playground_grants()
+    tenant = T1106.playground_run_tenant()
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_run_tenant(grants=grants),
+        tenant=tenant,
         world=None, investigate=lambda **kw: seen.update(kw) or {})
     registry = seen["verbs"]
     assert type(registry).__name__ == "ModuleVerbRegistry"
     # #1106 M4: the run's OWN tenant's gather grant, handed in — no process-level grant.
-    assert registry.grant == grants.gather
+    assert registry.grant == tenant.grants.gather
 
 
 def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
@@ -295,7 +299,7 @@ def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
     assert world.episode_dir == ep
     assert world.ledger_path == ep / "served" / f"{TOKEN_B}.jsonl"
 
@@ -319,7 +323,7 @@ def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_p
     with pytest.raises(_family.FamilyError, match="logs"):
         _family.load_family(ep / "family.yaml")
     world = _run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
     assert world.family.configured_patterns == T.CONFIGURED
 
 
@@ -334,7 +338,7 @@ def test_a_sibling_resumes_a_pre_1106_manifest_through_its_requested_tenant(tmp_
     lifecycle = _Recorder([])
     rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
                       "--tenants-root", str(T1106.TENANTS_ROOT)],
-                     lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
+                     lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
     assert rc == 0
     assert lifecycle.kwargs["world"].family.configured_patterns == T.CONFIGURED
     assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
@@ -358,7 +362,7 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
     with pytest.raises(SystemExit) as refused:
         _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn",
                      "--tenants-root", str(T1106.TENANTS_ROOT)],
-                    lifecycle=lifecycle, visualize=lambda p: None, preflight=T.no_preflight)
+                    lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
     text = str(refused.value)
     assert "'acme'" in text, text
     assert repr(T1106.PLAYGROUND_ID) in text, text
@@ -373,7 +377,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
     assert world.token == TOKEN_B
     assert confinement.world_view(T.EVENTS_PATTERN, world.token).startswith(f"wv-{TOKEN_B}-")
     assert world.ledger_path.name == f"{TOKEN_B}.jsonl"
@@ -387,7 +391,7 @@ def test_947_world_applier_compares_the_same_world_token_the_other_three_sites_u
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS)
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant)
     applier = applier_mod.WorldApplier()
     prepared = applier.prepare("elastic", "query", {"index": T.EVENTS_PATTERN}, world, None)
     assert prepared["index"] == f"wv-{TOKEN_B}-logs-"
@@ -407,7 +411,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rec = _Recorder(order)
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m: order.append("preflight") or 0,
                 materialize=lambda *a, **kw: order.append("materialize") or
                 T.sibling_run_dir(base, "b", stamp=False))
@@ -427,7 +431,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     _run()._run_investigation_lifecycle(
         run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
-        ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
+        ep / "family.yaml", "b", tenant=T1106.playground_run_tenant),
         tenant=T1106.playground_run_tenant(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),
@@ -442,7 +446,7 @@ def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=T.no_preflight)
     stamp = rec.kwargs["run_dir"] / "provenance.json"
     assert stamp.is_file()
@@ -455,7 +459,7 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p: None,
+    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=T.no_preflight)
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
     assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
@@ -473,5 +477,5 @@ def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                    visualize=lambda p: None, preflight=T.no_preflight)
+                    visualize=lambda p, **kw: None, preflight=T.no_preflight)
     assert "alert" in str(bad.value)

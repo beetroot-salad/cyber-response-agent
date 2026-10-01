@@ -4,7 +4,8 @@ The four settings kinds had eight-odd readers, and each found its file for itsel
 `ctx.defender_dir`, from `PATHS.defender_dir`, from `$DEFENDER_DIR`, from `__file__`. After
 #1106 none of them finds anything. The run's tenant settings folder is resolved once at the
 process entry point (`tenant_dir(tenants_root, run.tenant_id).settings`) and HANDED to every
-reader — on the verb context (`VerbContext.settings_dir`, a required field) or as an argument.
+reader — on the verb context (`VerbContext.tenant`, a required field, whose `settings` is that
+folder) or as an argument.
 
 HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a tenants root in `tmp_path` —
 OUTSIDE the checkout — and carries the SAME id as the checkout's committed tenant
@@ -25,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _tenants1106 as T
+from defender.tests.tenant_1107_settings import _spec1107 as S
 
 MARK = "injected"
 
@@ -34,7 +36,7 @@ def injected(tmp_path) -> Path:
     """The injected tenant's settings folder: `<tmp root>/playground/settings`, every value
     carrying `MARK`, the mapping's released status and reporter distinct from the checkout's."""
     root = tmp_path / "injected-root"
-    T.plant_tenant(
+    S.plant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
         lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
         released_status="resolved-by-a-person", reporter="injected-reporter",
@@ -42,6 +44,12 @@ def injected(tmp_path) -> Path:
     td = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
     return td.settings
+
+
+def _record(settings: Path):
+    """The run record of the tenant whose `settings/` is `settings` (#1107), through the resolver."""
+    return T.run_tenant(T.tenants().TenantDir(
+        tenant_id=settings.parent.name, settings=settings, agent=settings.parent / "agent"))
 
 
 def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
@@ -98,21 +106,22 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
     case_ticket = T.mod("scripts.case_history.case_ticket")
-    predicate = case_ticket.release_predicate(injected)
+    predicate = case_ticket.release_predicate(_record(injected).ticket_mapping)
     assert predicate.released_status == "resolved-by-a-person"
     assert predicate.is_released({"status": "resolved-by-a-person"}) is True
     assert predicate.is_released({"status": "closed"}) is False
-    assert case_ticket.release_predicate(T.PLAYGROUND_SETTINGS).released_status != \
-        predicate.released_status
+    assert case_ticket.release_predicate(_record(T.PLAYGROUND_SETTINGS).ticket_mapping
+                                         ).released_status != predicate.released_status
 
 
 def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
     case_ticket = T.mod("scripts.case_history.case_ticket")
     alert = {"rule": {"id": "r-1", "description": "d"}, "timestamp": "2026-09-26T00:00:00Z"}
-    payload = case_ticket.alert_to_open_payload(alert, "case-1", settings_dir=injected)
+    payload = case_ticket.alert_to_open_payload(
+        alert, "case-1", mapping=_record(injected).ticket_mapping)
     assert payload["reporter"] == "injected-reporter"
     checkout = case_ticket.alert_to_open_payload(
-        alert, "case-1", settings_dir=T.PLAYGROUND_SETTINGS)
+        alert, "case-1", mapping=_record(T.PLAYGROUND_SETTINGS).ticket_mapping)
     assert checkout["reporter"] != payload["reporter"]
 
 
@@ -123,7 +132,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(case_ticket.CaseTicketError) as caught:
-        case_ticket.release_predicate(settings)
+        case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
     assert str(settings / "systems" / "case-history" / "mapping.yaml") in str(caught.value)
     assert (T.PLAYGROUND_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
 
@@ -131,7 +140,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         injected, tmp_path):
     """The `--update-ticket` lane (O2 names the ticket writer): the REAL writer, over a
-    recording request seam, is handed the run's settings folder — and both the store it
+    recording request seam, is handed the run's record — and both the store it
     addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
     injected tenant's."""
     writer = T.mod("scripts.case_history.ticket_writer")
@@ -142,18 +151,19 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         encoding="utf-8")
     sent: list[tuple] = []
 
-    def request(config, method, path, body=None, *, settings_dir):
-        sent.append((dict(config), method, path, body, settings_dir))
+    def request(config, method, path, body=None, *, ctx):
+        sent.append((dict(config), method, path, body, ctx))
         return "201", "{}"
 
     writer.open_case_ticket(
-        run_dir, deps=writer.TicketWriterDeps(request=request), settings_dir=injected)
+        run_dir, deps=writer.TicketWriterDeps(request=request), tenant=_record(injected),
+        defender_dir=T.DEFENDER, env={})
     assert len(sent) == 1, sent
-    config, method, path, body, settings_dir = sent[0]
+    config, method, path, body, ctx = sent[0]
     assert (method, path) == ("POST", "/tickets")
-    # The transport's verb context is built over the SAME tenant folder the config came from,
+    # The transport's verb context carries the SAME tenant record the config came from,
     # handed to the request as an argument rather than carried inside the config dict.
-    assert settings_dir == injected
+    assert ctx.tenant.settings == injected
     assert config["URL_BASE"] == f"http://case-history-{MARK}:8080"
     assert body["reporter"] == "injected-reporter"
 
@@ -178,9 +188,9 @@ def test_the_table_is_read_from_the_injected_tenant(injected):
 
 def test_the_configured_patterns_are_the_injected_tenants(injected):
     stager = T.mod("learning.branch.estate.stagers.elastic")
-    patterns = stager.configured_patterns(injected)
+    patterns = stager.configured_patterns(_record(injected).elastic)
     assert tuple(patterns) == (f"{MARK}-events-*", f"{MARK}-alerts-*")
-    assert tuple(stager.configured_patterns(T.PLAYGROUND_SETTINGS)) != tuple(patterns)
+    assert tuple(stager.configured_patterns(_record(T.PLAYGROUND_SETTINGS).elastic)) != tuple(patterns)
 
 
 def test_the_staging_write_door_addresses_the_injected_tenants_cluster(injected, tmp_path):

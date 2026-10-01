@@ -46,7 +46,7 @@ record are the two comment kinds, told apart by their body (`S.TicketCall.is_not
   `unresolved` off a payload that does not exist.
 * **F-L (auto)** — a failed note call never breaks the run, and its outcome is written into
   `ticket_write.json` either way.
-* **F-R (auto)** — an unconfigured lane stays silent for every exit class, aborted included: an
+* **F-R (auto)** — an unconfigured lane calls nothing for every exit class, aborted included: an
   operator with no ticket config has already opted out, and inventing a side channel for one
   arm would override that choice.
 * **F-A reading B (human, §7 round 2)** — the leave-open arms DEFER to a genuine model close.
@@ -424,19 +424,28 @@ def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(
     assert bad.get("ok") is False, f"a failed note call was recorded as a success: {bad!r}"
 
 
-def test_an_unconfigured_ticket_lane_stays_silent_for_every_exit_class(tmp_path):
-    """An operator with no case-history configuration gets today's silence for EVERY exit
-    class, `aborted` included: no call, no receipt, no side channel (fork F-R, auto).
+def test_an_unconfigured_ticket_lane_calls_nothing_and_says_why_in_the_receipt(tmp_path):
+    """An operator with no case-history configuration makes NO call for any exit class,
+    `aborted` included, and (#1107 O6) a run that reached the config says so in an `error`
+    receipt naming no store: configuring no ticket system is no longer silent on the run page.
+    The two no-verdict exits stay silent — their no-verdict check runs BEFORE the config is
+    read, so those runs write no receipt whatever their tenant says (#1047).
 
-    Configuring no ticket system is already an opt-out; inventing a channel for one arm would
-    override that choice. Positive control: the same run and exit class with a configured lane
-    makes its call."""
+    Positive control: the same run and exit class with a configured lane makes its call."""
+    no_verdict = ("budget", "store")
     for exit_class in (*S.vocabulary(), None):
         run_dir = S.closed_run_dir(tmp_path / f"unconfigured-{exit_class}")
         fake = S.record_ticket(run_dir, ticket=S.FakeTicketSystem(configured=False),
                               truncated_by=exit_class)
         assert fake.calls == [], f"{exit_class}: an unconfigured lane called out anyway"
-        assert S.receipt(run_dir) is None, f"{exit_class}: an unconfigured lane wrote a receipt"
+        got = S.receipt(run_dir)
+        if exit_class in no_verdict:
+            assert got is None, f"{exit_class}: a no-verdict exit wrote a receipt: {got!r}"
+            continue
+        assert got is not None, f"{exit_class}: an unconfigured lane left no receipt"
+        assert got.get("ok") is False, got
+        assert got.get("status") == "error", got
+        assert got.get("url") is None, f"{exit_class}: the receipt names a store: {got!r}"
     configured = S.record_ticket(
         S.closed_run_dir(tmp_path / "configured", report=False), truncated_by="aborted")
     assert len(configured.notes) == 1, (

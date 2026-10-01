@@ -55,9 +55,10 @@ from defender.tests._spec767 import (
     require,
     shipped_mapping_doc,
     ticket,
+    current_mapping,
+    current_record,
     current_settings,
     use_mapping,
-    writer_deps,
 )
 
 STANDALONE_FENCE = re.compile(r"(?m)^---\s*$")
@@ -83,7 +84,7 @@ def _render_comment(rec):
         case_ticket, "case_record_to_comment",
         "D3 replaces case_record_to_close with case_record_to_comment",
     )
-    return fn(rec, settings_dir=current_settings())
+    return fn(rec, mapping=current_mapping())
 
 
 # =======================================================================================
@@ -184,7 +185,7 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
 
     hostile = {"rule": {"id": RELEASED_STATUS, "description": RELEASED_STATUS},
                "timestamp": RELEASED_STATUS}
-    payload = case_ticket.alert_to_open_payload(hostile, "case-1", settings_dir=current_settings())
+    payload = case_ticket.alert_to_open_payload(hostile, "case-1", mapping=current_mapping())
 
     assert payload["status"] == OPEN_STATUS, "an alert field moved the open's status"
     assert payload["labels"] == [f"sig:{RELEASED_STATUS}", f"evt:{RELEASED_STATUS}"]
@@ -193,7 +194,7 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
     # assertion above is not green merely because the label set is empty.
     ordinary = case_ticket.alert_to_open_payload(
         {"rule": {"id": "5710", "description": "sshd"}, "timestamp": "2026-05-07T07:15:01Z"},
-        "case-2", settings_dir=current_settings(),
+        "case-2", mapping=current_mapping(),
     )
     assert ordinary["labels"] == ["sig:5710", "evt:2026-05-07T07:15:01Z"]
     assert ordinary["status"] == OPEN_STATUS
@@ -315,20 +316,20 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
     ):
         use_mapping(monkeypatch, root, mapping_doc(open_labels=labels) if isinstance(labels, tuple)
                     else mapping_doc(extra_open={"labels": labels}))
-        loaded = case_ticket._load_mapping(current_settings())
+        loaded = case_ticket.load_case_mapping(current_settings())
         assert loaded["open"]["labels"], f"{why}: the loader refused a label template"
         payload = case_ticket.alert_to_open_payload(
             {"rule": {"id": RELEASED_STATUS, "description": RELEASED_STATUS},
-             "timestamp": RELEASED_STATUS}, "c", settings_dir=current_settings(),
+             "timestamp": RELEASED_STATUS}, "c", mapping=current_mapping(),
         )
         assert payload["status"] == OPEN_STATUS, f"{why}: an alert moved the open's status"
-        assert case_ticket.is_released(payload, settings_dir=current_settings()) is False, (
+        assert case_ticket.is_released(payload, mapping=current_mapping()) is False, (
             f"{why}: the open payload reads as released"
         )
 
     use_mapping(monkeypatch, root, mapping_doc(open_status=RELEASED_STATUS))
     with pytest.raises(case_ticket.CaseTicketError) as refusal:
-        case_ticket.release_predicate(current_settings())
+        case_ticket.release_predicate(current_mapping())
     assert RELEASED_STATUS in str(refusal.value), (
         "the loader refused an open/released collision without naming the status"
     )
@@ -351,7 +352,7 @@ def test_767_an_unsafe_open_status_is_refused_where_the_case_is_opened(
     ):
         use_mapping(monkeypatch, root, doc)
         with pytest.raises(case_ticket.CaseTicketError):
-            case_ticket.alert_to_open_payload(alert, "c", settings_dir=current_settings())
+            case_ticket.alert_to_open_payload(alert, "c", mapping=current_mapping())
         run_dir = make_run(tmp_path, name=f"run-{why[:4]}", alert=alert)
         store = FakeStore()
         open_ticket(run_dir, store)
@@ -384,11 +385,11 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
         shipped.pop(dead, None)
 
     use_mapping(monkeypatch, root, shipped)
-    loaded = case_ticket._load_mapping(current_settings())
+    loaded = case_ticket.load_case_mapping(current_settings())
     assert loaded["open"]["labels"], "the shipped mapping was refused"
-    assert case_ticket.release_predicate(current_settings()).is_released(
+    assert case_ticket.release_predicate(current_mapping()).is_released(
         case_ticket.alert_to_open_payload(
-            {"rule": {"id": "5710"}}, "c", settings_dir=current_settings())
+            {"rule": {"id": "5710"}}, "c", mapping=current_mapping())
     ) is False, "the shipped mapping opens a case already released"
 
     run_dir = make_run(tmp_path)
@@ -802,13 +803,13 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     hostile_alert = {"rule": {"id": "{summary}", "description": "{case_id}"},
                      "timestamp": "{signature}"}
     open_payload = case_ticket.alert_to_open_payload(
-        hostile_alert, "case-1", settings_dir=current_settings())
+        hostile_alert, "case-1", mapping=current_mapping())
     assert open_payload["labels"] == ["sig:{summary}", "evt:{signature}"], (
         "a substituted alert value was re-interpreted as a template (FK53)"
     )
     assert open_payload["summary"] == "{case_id}"
     assert open_payload["status"] == OPEN_STATUS
-    assert case_ticket.is_released(open_payload, settings_dir=current_settings()) is False
+    assert case_ticket.is_released(open_payload, mapping=current_mapping()) is False
 
 
 # =======================================================================================
@@ -862,8 +863,9 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     """p_o7_beats_o4 — the doc's own precedence, made observable: an unreachable store loses
     the record, and the run does not fail. The comment never lands, the receipt says so, and
     the writer returns normally. A store that is unreachable because its CONFIG is absent is
-    the same branch, one step earlier: the writer exits before the POST and writes no receipt
-    describing a write that never happened (c14 — every branch is WARN-and-return).
+    the same branch, one step earlier: the writer exits before the POST and its `error` receipt
+    names no store (`url` null) and describes no write that happened (#1107 — every branch is
+    WARN, receipt and return).
 
     Its complementary condition is the reachable store on the same address: the record lands
     and the receipt says `ok: true` — so "the run survived" is not green merely because
@@ -877,12 +879,13 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
 
     unconfigured = make_run(tmp_path, name="run-unconfigured")
     no_config = FakeStore()
-    fn = require(ticket_writer, "record_case_ticket", "D2's rename")
-    assert fn(unconfigured, writer_deps(no_config, config=None),
-              settings_dir=current_settings()) is None
+    assert record(unconfigured, no_config, config=None) is None
     assert no_config.calls == [], "a run with no case-history config still reached the store"
-    assert not (unconfigured / "ticket_write.json").exists(), (
-        "a run that never reached the store wrote a receipt describing a write"
+    assert receipt(unconfigured)["ok"] is False, (
+        "a run that never reached the store was receipted as a success"
+    )
+    assert receipt(unconfigured)["url"] is None, (
+        "the receipt names a store the run had no config for"
     )
 
     kept = make_run(tmp_path, name="run-reachable")
@@ -978,22 +981,25 @@ def test_767_every_mapping_fault_refuses_with_a_receipt(tmp_path, monkeypatch, c
         f"{why}: the fault escaped to the catch-all instead of being refused: {err!r}")
 
 
-def test_767_the_mapping_is_parsed_once_per_edit(tmp_path, monkeypatch):
+def test_767_the_mapping_is_parsed_once_per_run(tmp_path, monkeypatch):
     """The read screen asks the mapping on every ticket query and the writer three times per
-    record, so the file is READ each time — an operator edit lands on the next call, which is
-    what "screened at call time" promises — but PARSED only when its bytes change. Pinned by
-    driving the loader across an edit: the new bytes are honoured, and the value handed out
-    is a copy, so a caller mutating it cannot poison the next."""
+    record, so the mapping is parsed ONCE, when the run's record is resolved, and every reader
+    is handed that result (#1107): an edit to the file mid-run changes nothing the record
+    serves — only a record resolved after the edit carries it — and the value a reader edits is
+    its own copy, so a caller mutating it cannot poison the next."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc(comment_author="first"))
-    first = case_ticket._load_mapping(current_settings())
+    resolved = current_record()
+    first = resolved.ticket_mapping.plain()
     assert first["comment"]["author"] == "first"
     first["comment"]["author"] = "mutated"
-    assert case_ticket._load_mapping(current_settings())["comment"]["author"] == "first", (
-        "a caller's mutation reached the next caller — the loader hands out its cache")
+    assert resolved.ticket_mapping["comment"]["author"] == "first", (
+        "a caller's mutation reached the next caller — the record hands out its own data")
     use_mapping(monkeypatch, root, mapping_doc(comment_author="second"))
-    assert case_ticket._load_mapping(current_settings())["comment"]["author"] == "second", (
-        "an edit to the mapping was not honoured on the next call")
+    assert resolved.ticket_mapping["comment"]["author"] == "first", (
+        "an edit to the mapping file reached a record resolved before it")
+    assert current_mapping()["comment"]["author"] == "second", (
+        "a record resolved after the edit does not carry it")
 
 
 def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeypatch, capsys):
@@ -1008,7 +1014,7 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
     use_mapping(monkeypatch, root, "just a string, not a mapping\n")
 
     with pytest.raises(case_ticket.CaseTicketError) as refusal:
-        case_ticket._load_mapping(current_settings())
+        case_ticket.load_case_mapping(current_settings())
     assert "not a mapping" in str(refusal.value)
     assert "released" not in str(refusal.value), (
         "a section-level refusal ran first — the pre-existing dict check must reach it before "
@@ -1053,7 +1059,7 @@ def test_767_mapping_carries_comment_and_released_and_no_close_lane(tmp_path, mo
         comment_author="top-level",
         close_section={"status": "closed", "author": "stale", "comment": "stale body"},
     ))
-    assert case_ticket._load_mapping(current_settings())["close"], "a stale close: section was refused, not inert"
+    assert case_ticket.load_case_mapping(current_settings())["close"], "a stale close: section was refused, not inert"
     run_dir = make_run(tmp_path)
     store = FakeStore()
     record(run_dir, store)
@@ -1064,7 +1070,7 @@ def test_767_mapping_carries_comment_and_released_and_no_close_lane(tmp_path, mo
 
 def test_767_record_case_ticket_is_the_writer_seam(tmp_path, monkeypatch):
     """d2_writer_seam — `close_case_ticket` becomes `record_case_ticket`, keeps the
-    `TicketWriterDeps{load_config, request}` injection seam (g16: there is no third), and
+    `TicketWriterDeps{request}` injection seam (g16: there is no third), and
     takes the ticket KEY as a parameter so the platform change is a call-site edit rather
     than a re-design (§7 R8/FK04 — this spec is scoped to the playground identity
     `case_id = run_dir.name`, and the platform key's provenance is deferred and unowned).
@@ -1148,7 +1154,7 @@ def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{cause}//{narrative}"))
     run_dir = make_run(tmp_path, cause=HOST_CAUSE, body="the model's own notes")
 
-    rec = case_ticket.read_case_record(run_dir, settings_dir=current_settings())
+    rec = case_ticket.read_case_record(run_dir, mapping=current_mapping())
     assert rec.cause == HOST_CAUSE
     assert rec.narrative == "the model's own notes"
     assert not hasattr(rec, "reason"), (

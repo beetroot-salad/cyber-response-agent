@@ -360,11 +360,12 @@ class FakeTransport:
             self, ctx: Any, container: str, url: str, *, method: str = "GET",
                  headers: dict | None = None, body: dict | None = None,
                  timeout_sec: int = 10, insecure: bool = False,
-                 auth: str | None = None) -> tuple[int, str, str]:
+                 auth: str | None = None, system: str | None = None,
+                 secrets: tuple[str, ...] = ()) -> tuple[int, str, str]:
         self.calls.append({
             "ctx": ctx, "container": container, "url": url, "method": method,
             "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec,
-            "insecure": insecure, "auth": auth,
+            "insecure": insecure, "auth": auth, "system": system, "secrets": secrets,
         })
         if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
             raise FakeDoor._transport_fault(f"docker exec failed: {url}")

@@ -310,6 +310,7 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     bad byte costs one character, not the run. One pipe up from where record_query used to."""
     from defender.scripts.adapters import _stub_transport as transport
     from defender.runtime.verbs import VerbContext
+    from defender.tests.tenant_1107_settings import _spec1107 as S
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -317,12 +318,11 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     docker.write_text("#!/bin/sh\nprintf '{\"host\": \"caf\\351-01\"}'\n")
     docker.chmod(0o755)
 
-    env = {
-        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
-        "SOC_PLAYGROUND_DOCKER_CONTEXT": "test-ctx",
-    }
+    env = {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
+    folder = S.plant(tmp_path / "tenants")
+    S.set_key(folder, "host-state", "HOST_STATE_DOCKER_CONTEXT", "test-ctx")
     ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env,
-                      settings_dir=tmp_path / "settings")
+                      tenant=S.resolve(tmp_path / "tenants"))
 
     rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])
 

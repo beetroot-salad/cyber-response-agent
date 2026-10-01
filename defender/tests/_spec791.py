@@ -323,10 +323,11 @@ class SpecTail:
         #: no-argument shape: a `record_calls` entry missing `truncated_by` (or holding `None`
         #: for a tail built with `truncated_by=` set) means the wiring, not the lane, is dead.
         self.record_calls: list[dict[str, Any]] = []
-        #: The settings folder each ticket leg was handed (#1106: the writer no longer finds
-        #: its mapping and store config itself — `run.py` hands it the run's tenant folder).
-        #: Kept apart from `record_calls` so that list stays the exit-class record it was.
-        self.ticket_settings: list[Any] = []
+        #: The run's record each ticket leg was handed (#1107: the writer no longer finds its
+        #: mapping and store config itself — `run.py` hands it the record, the code tree and the
+        #: run's env). Kept apart from `record_calls` so that list stays the exit-class record it
+        #: was.
+        self.ticket_tenants: list[Any] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
@@ -340,15 +341,17 @@ class SpecTail:
         return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by,
                 "closed_before_cut": self._closed_before_cut}
 
-    def visualize(self, run_dir: Path) -> None:
+    def visualize(self, run_dir: Path, *, update_ticket: bool = False) -> None:
         self._note("visualize", run_dir)
 
-    def open_case_ticket(self, run_dir: Path, *, settings_dir: Any = None) -> None:
-        self.ticket_settings.append(settings_dir)
+    def open_case_ticket(self, run_dir: Path, *, tenant: Any, defender_dir: Path,
+                         env: Any) -> None:
+        self.ticket_tenants.append(tenant)
         self._note("open_case_ticket", run_dir)
 
-    def record_case_ticket(self, run_dir: Path, **kw: Any) -> None:
-        self.ticket_settings.append(kw.pop("settings_dir", None))
+    def record_case_ticket(self, run_dir: Path, *, tenant: Any, defender_dir: Path, env: Any,
+                           **kw: Any) -> None:
+        self.ticket_tenants.append(tenant)
         # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
         # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
         # branching (which `test_1047_ticket_lane.py` drives against the real

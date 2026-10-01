@@ -289,7 +289,7 @@ def run_ctx(tmp_path: Path) -> VerbContext:
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={},
-                       settings_dir=tmp_path / "settings")
+                       tenant=T1106.playground_run_tenant())
 
 
 def adapter_calls(ctx: VerbContext, verb: str | None = None) -> list[dict]:
@@ -323,7 +323,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
-        as_of=AS_OF, settings_dir=T1106.PLAYGROUND_SETTINGS,
+        as_of=AS_OF, tenant=T1106.playground_run_tenant(),
     )
 
 
@@ -870,7 +870,7 @@ def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_pa
     patch carrying `status: <released>` builds, because a released case IS served whole."""
     from defender.scripts.case_history import case_ticket
 
-    released = case_ticket.release_predicate(T1106.PLAYGROUND_SETTINGS).released_status
+    released = case_ticket.release_predicate(T1106.playground_run_tenant().ticket_mapping).released_status
     # The recording adapter body declared under the ticket system's name, so the grant can
     # name it: which verbs it carries is beside the point here — the refusal is about the
     # PATCH TABLE, decided before any call is served.

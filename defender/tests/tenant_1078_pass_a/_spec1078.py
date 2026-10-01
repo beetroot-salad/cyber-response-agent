@@ -378,7 +378,7 @@ class Recorder:
         self.order.append("lifecycle")
         return {"output": "spec1078", "requests": 0, "truncated_by": None}
 
-    def visualize(self, run_dir: Path) -> None:
+    def visualize(self, run_dir: Path, **_kw: Any) -> None:
         self.order.append("visualize")
 
     def enqueue(self, *_a: Any, **_kw: Any) -> bool:
@@ -396,19 +396,21 @@ class Recorder:
         return any(s in self.order for s in ("preflight", "materialize", "lifecycle"))
 
 
-def tenants_root_beside_data_root() -> Path:
+def tenants_root_beside_data_root(*, source: Path = T1106.PLAYGROUND) -> Path:
     """#1106's tenants root for this test: a sibling of its data root (never inside it — O10
     refuses a stray entry there), holding a settings folder for every tenant whose row the data
-    root holds, each a copy of the committed `playground`'s. A run resolves its tenant's
-    settings under the tenants root once the row is accepted, so a scenario about the row, the
-    record or the request reaches the same frame it did before #1106 put settings per tenant."""
+    root holds, each a copy of `source` (default: the committed `playground`). A run resolves
+    its tenant's settings under the tenants root once the row is accepted, so a scenario about
+    the row, the record or the request reaches the same frame it did before #1106 put settings
+    per tenant. The copy never carries a `settings/secrets.env` (#1107: the on-disk secrets of
+    a tree are not a fixture's to inherit)."""
     root = Path(os.environ[DATA_ROOT_ENV])
     tenants = root.parent / f"{root.name}-tenants"
     rows = sorted(root.glob("*/tenant.json")) if root.is_dir() else []
     for row in rows:
         folder = tenants / row.parent.name
         if not folder.exists():
-            shutil.copytree(T1106.PLAYGROUND, folder)
+            shutil.copytree(source, folder, ignore=shutil.ignore_patterns("secrets.env"))
     return tenants
 
 

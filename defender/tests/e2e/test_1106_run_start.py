@@ -58,17 +58,25 @@ class StartBoxRecorder:
 
 
 class TicketWriterRecorder:
-    """`main`'s `ticket_writer` seam (a module-shaped object): records what each leg is handed."""
+    """`main`'s `ticket_writer` seam (a module-shaped object): records what each leg is handed —
+    the run's record, the code tree and the run's env (#1107) with the rest of its arguments."""
 
     def __init__(self) -> None:
         self.opened: list[tuple[tuple, dict]] = []
         self.recorded: list[tuple[tuple, dict]] = []
+        self.tenants: list[Any] = []
 
-    def open_case_ticket(self, *args: Any, **kwargs: Any) -> None:
-        self.opened.append((args, kwargs))
+    def open_case_ticket(self, *args: Any, tenant: Any, defender_dir: Any, env: Any,
+                         **kwargs: Any) -> None:
+        self.tenants.append(tenant)
+        self.opened.append((args, {"tenant": tenant, "defender_dir": defender_dir,
+                                   "env": env, **kwargs}))
 
-    def record_case_ticket(self, *args: Any, **kwargs: Any) -> None:
-        self.recorded.append((args, kwargs))
+    def record_case_ticket(self, *args: Any, tenant: Any, defender_dir: Any, env: Any,
+                           **kwargs: Any) -> None:
+        self.tenants.append(tenant)
+        self.recorded.append((args, {"tenant": tenant, "defender_dir": defender_dir,
+                                     "env": env, **kwargs}))
 
 
 @pytest.fixture
@@ -129,7 +137,7 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
             "--tenants-root", str(world["root"]), "--no-learn", *extra]
     text = ""
     try:
-        rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p: None,
+        rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
                          preflight=lambda m: 0)
     except _StartBoxReached:
         pytest.fail(f"start_box was reached for a tenant that must be refused: {start.calls}")
@@ -271,7 +279,7 @@ def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world,
         _run().main(
             [str(world["alert"]), "--tenant", "acme", "--tenants-root", str(world["root"]),
              "--no-learn"],
-            lifecycle=_lifecycle(start), visualize=lambda p: None, preflight=lambda m: 0)
+            lifecycle=_lifecycle(start), visualize=lambda p, **kw: None, preflight=lambda m: 0)
     assert len(start.calls) == 1, start.calls
     _args, kwargs = start.calls[0]
     assert Path(kwargs["tenant_agent"]) == (world["root"] / "acme" / "agent").resolve()
@@ -327,7 +335,7 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
         rc = run.main(
             [str(world["alert"]), "--tenant", tenant_id, "--tenants-root", str(root),
              "--no-learn", "--update-ticket"],
-            lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p: None,
+            lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
             preflight=lambda m: 0, ticket_writer=writer)
         assert rc == 0, capsys.readouterr().err
         own_settings = root / tenant_id / "settings"
@@ -364,5 +372,5 @@ def test_the_default_tenants_root_is_the_checkouts_when_none_is_given(world, cap
     with pytest.raises(_StartBoxReached):
         _run().main([str(world["alert"]), "--tenant", T.PLAYGROUND_ID, "--no-learn"],
                     lifecycle=_lifecycle(start),
-                    visualize=lambda p: None, preflight=lambda m: 0)
+                    visualize=lambda p, **kw: None, preflight=lambda m: 0)
     assert Path(start.calls[0][1]["tenant_agent"]) == T.PLAYGROUND_AGENT.resolve()

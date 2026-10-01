@@ -285,7 +285,7 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
     src, manifest = _sibling(tmp_path, data_root, "acme")
     H.plant_row(data_root, "victim")
     world_run_id = H.run_py().resume_world(
-        manifest, "a", settings=lambda: H.T1106.PLAYGROUND_SETTINGS).run_id
+        manifest, "a", tenant=H.T1106.playground_run_tenant).run_id
     got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant_id"] == "acme"

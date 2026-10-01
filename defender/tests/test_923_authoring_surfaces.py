@@ -39,7 +39,7 @@ import pytest
 
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.skills.invlang.validate import validate_companion
-from defender.tests._tenants1106 import PLAYGROUND_SETTINGS
+from defender.tests._tenants1106 import playground_run_tenant
 from defender.tests._spec923 import (
     DEFENDER,
     GAP_MEMBER,
@@ -470,8 +470,8 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
     assert marker not in str(record["reviewed_disposition"])
 
     payload = case_ticket.case_record_to_comment(
-        case_ticket.read_case_record(run_dir, settings_dir=PLAYGROUND_SETTINGS),
-        settings_dir=PLAYGROUND_SETTINGS)
+        case_ticket.read_case_record(run_dir, mapping=playground_run_tenant().ticket_mapping),
+        mapping=playground_run_tenant().ticket_mapping)
     assert payload["body"].split(" — ", 1)[0] in DISPOSITION_ENUM, (
         "the outbound comment's disposition head is not a member of the closed enum"
     )

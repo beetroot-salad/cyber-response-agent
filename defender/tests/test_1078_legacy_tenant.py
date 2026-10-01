@@ -70,7 +70,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str):
     _base, src = H.tenant_source(root, T_ID, row=False)
     ep = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, ep)
-    world = H.run_py().resume_world(manifest, label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(manifest, label, tenant=H.T1106.playground_run_tenant)
     return src, ep, world
 
 
@@ -696,10 +696,10 @@ def test_the_base_role_sibling_of_a_family(tenant_root, tmp_path):
     src, ep, _world_a = _sibling_world(tmp_path, tenant_root, "a")
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role
-        world = H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+        world = H.run_py().resume_world(ep / "family.yaml", label, tenant=H.T1106.playground_run_tenant)
         run = Path(_materialize(src / "alert.json", world.run_id, world=world))
         tokens[label] = _stamp(run)["world_id"]
-    expected = {label: H.run_py().resume_world(ep / "family.yaml", label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS).world_id
+    expected = {label: H.run_py().resume_world(ep / "family.yaml", label, tenant=H.T1106.playground_run_tenant).world_id
                for label in ("a", "b")}
     assert tokens == expected, (
         "the base-role sibling is still a forked sibling and gets the episode-qualified token, "

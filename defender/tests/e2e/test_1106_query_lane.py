@@ -1,14 +1,14 @@
-"""#1106 — inside a run, gather works on the RUN's tenant: its verbs are handed the run's settings
-folder, and what it is told it may reach is its tenant's grant (O2 gather's `query`, O3).
+"""#1106 — inside a run, gather works on the RUN's tenant: its verbs are handed the run's tenant
+record, and what it is told it may reach is its tenant's grant (O2 gather's `query`, O3).
 
 Driven end to end through the REAL `driver.run_investigation` on the replay harness, with the
-run's `TenantDir` and `RunGrants` handed in as the driver's two new inputs (#1106 M4: nothing
-reads a table at import, so the run carries them). Two lanes are observed on what the fakes
+run's `TenantDir` handed in as the driver's new input (#1106 M4: nothing reads a table at
+import, so the run carries its tenant; its grants are that tenant's own table, #1107). Two lanes are observed on what the fakes
 RECEIVED:
 
   * the `query` lane — the verb context the query tool builds for a model-dispatched call
-    carries the run's tenant `settings_dir` (M3), so an adapter's `load_config` reads THAT
-    tenant's `config.env`; never the checkout's committed copy;
+    carries the run's tenant record (M3), so an adapter's `load_config` reads THAT
+    tenant's `config.env` values; never the checkout's committed copy;
   * the dispatch prompt — gather's descriptor index ("Systems of record") and its template
     index are narrowed to the run's gather grant, which is a consumer of the process-level
     grant before #1106 (`driver._dispatch_catalogs` read `GATHER_DEF.verb_grant`). Tenant A
@@ -27,6 +27,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests import _tenants1106 as T  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -45,12 +46,12 @@ DONE = Turn(text="Summary: measured the lead.")
 
 def _tenant(tmp_path: Path, table: str, marker: str):
     root = tmp_path / f"root-{marker}"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker)
-    tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
-    return tenant, T.run_grants(tenant.settings)
+    T.plant_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker,
+                   configs=S.config_texts(marker))
+    return T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
 
 
-def _run(tmp_path: Path, *, tenant, grants, verbs, system: str, gather_turns: list[Turn],
+def _run(tmp_path: Path, *, tenant, verbs, system: str, gather_turns: list[Turn],
          run_id: str) -> tuple[Path, ReplayFn]:
     run_dir = materialize(tmp_path / run_id, GOLDEN_AB3)
     main = ReplayFn([
@@ -62,7 +63,7 @@ def _run(tmp_path: Path, *, tenant, grants, verbs, system: str, gather_turns: li
     ])
     gather = ReplayFn(gather_turns)
     drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs,
-          tenant=tenant, grants=grants)
+          tenant=tenant)
     return run_dir, gather
 
 
@@ -81,15 +82,15 @@ def _systems_of_record(prompt: str) -> str:
     return rest[: min(ends)] if ends else rest
 
 
-def test_a_query_verb_is_handed_the_runs_tenant_settings_folder(tmp_path):
-    tenant, grants = _tenant(tmp_path, T.TABLE_A, "lane")
+def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
+    tenant = _tenant(tmp_path, T.TABLE_A, "lane")
     rec = VerbRecorder()
 
     def get_host(ctx, *, host: str = "web-1") -> dict:
         rec.record("get-host", ctx, {"host": host})
         return {"host": host}
 
-    _run(tmp_path, tenant=tenant, grants=grants, system="cmdb",
+    _run(tmp_path, tenant=tenant, system="cmdb",
          verbs=FakeVerbs({"cmdb": {"get-host": get_host}}), run_id="q1106-lane",
          gather_turns=[
              Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
@@ -97,8 +98,8 @@ def test_a_query_verb_is_handed_the_runs_tenant_settings_folder(tmp_path):
              DONE,
          ])
     call = rec.only()
-    assert Path(call.ctx.settings_dir).resolve() == tenant.settings
-    assert Path(call.ctx.settings_dir).resolve() != T.PLAYGROUND_SETTINGS.resolve()
+    assert Path(call.ctx.tenant.settings).resolve() == tenant.settings
+    assert Path(call.ctx.tenant.settings).resolve() != T.PLAYGROUND_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
     transport = T.mod("scripts.adapters._stub_transport")
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
@@ -111,7 +112,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     model-visible channels (the gather model's tool result, the queries table's failure digest)
     must name the folder, not locate it. The control is the lane test above: the same verb,
     configured, answers."""
-    tenant, grants = _tenant(tmp_path, T.TABLE_A, "fault")
+    tenant = _tenant(tmp_path, T.TABLE_A, "fault")
     (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
     transport = T.mod("scripts.adapters._stub_transport")
 
@@ -119,7 +120,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
         return transport.load_config(ctx, "cmdb", "CMDB")
 
     run_dir, gather = _run(
-        tmp_path, tenant=tenant, grants=grants, system="cmdb",
+        tmp_path, tenant=tenant, system="cmdb",
         verbs=FakeVerbs({"cmdb": {"get-host": get_host}}), run_id="q1106-fault",
         gather_turns=[
             Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
@@ -141,9 +142,9 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
 def test_the_gather_dispatch_advertises_exactly_the_runs_tenants_systems(
         tmp_path, own, system, reached, withheld):
     table = {"A": T.TABLE_A, "B": T.TABLE_B}[own]
-    tenant, grants = _tenant(tmp_path, table, f"idx{own.lower()}")
+    tenant = _tenant(tmp_path, table, f"idx{own.lower()}")
     verbs = FakeVerbs({system: {"health-check": lambda ctx: {"ok": True}}})
-    _run_dir, gather = _run(tmp_path, tenant=tenant, grants=grants, verbs=verbs, system=system,
+    _run_dir, gather = _run(tmp_path, tenant=tenant, verbs=verbs, system=system,
                             gather_turns=[DONE], run_id=f"q1106-idx{own.lower()}")
     prompt = _lead_prompt(gather)
     catalog = _systems_of_record(prompt)
@@ -165,21 +166,20 @@ def test_lead_zero_item1_reads_the_runs_tenant_alerts_index_and_hands_its_verbs_
     `signal_index` (#808 R4) — and "configured" is the RUN's tenant's `config.env` (O2), not
     the checkout's. The injected tenant carries the committed tenant's id and a distinct
     alerts index; the shell fetch's `index` (the inbound payload) must be that value, and every
-    lead-0 verb call must be handed that tenant's settings folder. The control: the same
+    lead-0 verb call must be handed that tenant's record. The control: the same
     scenario's checkout value is a different string."""
     from defender.tests.e2e import _lead_zero_808 as LZ
 
     root = tmp_path / "root-lz"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=T.config_texts(
+    T.plant_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=S.config_texts(
         "lz", events_index="lz-tenant-events-*", alerts_index="lz-tenant-alerts-*"))
     tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
-    grants = T.run_grants(tenant.settings)
     assert LZ.ALERTS_INDEX != "lz-tenant-alerts-*", "the fixture no longer discriminates"
 
     res = LZ.run(tmp_path / "run", run_id="lz1106-tenant", alert=LZ.alert_doc(signal_index=None),
                  answer=LZ.answer_hits([LZ.hit(ts="2026-05-25T15:22:00.000Z")]),
-                 tenant=tenant, grants=grants)
+                 tenant=tenant)
     assert res.shell_call.params["index"] == "lz-tenant-alerts-*", res.shell_call.params
     assert res.rec.calls, "lead-0 issued no backend call"
     for call in res.rec.calls:
-        assert Path(call.ctx.settings_dir).resolve() == tenant.settings, (call.verb, call.ctx)
+        assert Path(call.ctx.tenant.settings).resolve() == tenant.settings, (call.verb, call.ctx)

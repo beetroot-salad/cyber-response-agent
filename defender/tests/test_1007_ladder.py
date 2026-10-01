@@ -679,7 +679,7 @@ def test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejec
 
     review.review(family_mod.parse_family(doc), episode_dir=ep, adapters=adapters,
                   door=W.FakeDoor(), invoke=W.FakeAgent("contradiction"),
-                  settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
+                  tenant=_tenants1106.playground_run_tenant(), runs_base=ep.parent / "runs-base")
 
     block = W.review_doc(ep)["worlds"]["b"]["reachability"]
     for key in ("capture_replays", "capture_addressed", "reachable_by_capture"):

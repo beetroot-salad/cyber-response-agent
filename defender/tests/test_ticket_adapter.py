@@ -1,6 +1,6 @@
 """ticket_adapter read-only adapter — the `--require-closed` scoped-read guard (#338).
 
-Since #611 ticket_adapter is a VERBS registry (with the one surviving CLI). The guard's seam is now
+Since #611 ticket_adapter is a VERBS registry (its one CLI went with #1107). The guard's seam is now
 the verb functions `get_ticket(ctx, key=…, require_closed=…)` and `list_tickets(ctx, status=…,
 require_closed=…)` (the old `cmd_get_ticket(args, config)` / `cmd_list_tickets` wrappers are
 gone). The refusal of a non-closed ticket now RAISES `UpstreamFault` (a query error the capture
@@ -8,8 +8,7 @@ layer maps to exit 1) instead of `SystemExit(1)` — the #338 answer-key guard i
 substance: the benign judge's closed-only read cannot reach the in-flight (open) ticket even by
 key. The verbs RETURN the payload (the capture layer serializes it); they no longer print.
 
-Transport is stubbed, so no docker/network. The CLI↔VERBS dual surface itself is pinned by
-`tests/e2e/test_query_tool_611.py::test_ticket_cli_dual_surface_survives`.
+Transport is stubbed, so no docker/network.
 """
 from __future__ import annotations
 
@@ -22,6 +21,8 @@ from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters import ticket_adapter
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.tests import _tenants1106 as T1106
+from defender.tests.tenant_1107_settings import _spec1107 as S1107
 
 #: Captured before the autouse `_stub_config` fixture swaps it out, so the config tests
 #: below can drive the REAL loader against a config file in the throwaway tree.
@@ -30,11 +31,10 @@ _REAL_LOAD_CONFIG = transport.load_config
 
 @pytest.fixture
 def ctx(tmp_path):
-    """A VerbContext over a throwaway tree and a throwaway settings folder (#1106: the run's
-    tenant `settings/`, handed in); the transport is stubbed, so its config is never loaded
-    for real (each test stubs `_config` via `load_config`)."""
-    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
-                       settings_dir=tmp_path / "settings")
+    """A VerbContext over a throwaway tree carrying the committed playground tenant's record
+    (#1107: the run's tenant, handed in); the transport is stubbed, so its config is never
+    loaded for real (each test stubs `_config` via `load_config`)."""
+    return T1106.verb_context(tmp_path / "defender", tmp_path / "run", {})
 
 
 @pytest.fixture(autouse=True)
@@ -108,45 +108,48 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
 # the key grammar as REQUIRED environment config (#684)
 
 
-def _write_config(ctx, **values) -> None:
-    d = ctx.settings_dir / "systems" / "ticket"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "config.env").write_text(
-        "\n".join(f'{k}="{v}"' for k, v in values.items()) + "\n", encoding="utf-8",
-    )
-
-
 _BASE_CONFIG = {
     "TICKET_URL_BASE": "http://x",
     "TICKET_BASTION_HOST": "web-1",
     "TICKET_TIMEOUT_SEC": "10",
+    "TICKET_TRANSPORT": S1107.DOCKER_EXEC,
+    "TICKET_DOCKER_CONTEXT": "ctx-ticket",
 }
+
+
+def _config_ctx(tmp_path, *, env=None, **values) -> VerbContext:
+    """A VerbContext whose record is resolved from a tenant planted with `values` as the ticket
+    system's whole `config.env`."""
+    text = "\n".join(f'{k}="{v}"' for k, v in values.items()) + "\n"
+    S1107.plant(tmp_path / "tenants", "t", configs={"ticket": text})
+    record = S1107.resolve(tmp_path / "tenants", "t")
+    return T1106.verb_context(tmp_path / "defender", tmp_path / "run", env or {}, tenant=record)
 
 
 @pytest.fixture
 def real_config(monkeypatch):
     """Undo the autouse stub: these tests are ABOUT config loading, so they drive the real
-    loader against a config file written into the throwaway settings folder."""
+    loader against a tenant record resolved from a config file planted in a throwaway tenant."""
     monkeypatch.setattr(transport, "load_config", _REAL_LOAD_CONFIG)  # lint-monkeypatch: ok — restores the real function the autouse fixture stubs (this file's established pattern)
 
 
-def test_key_pattern_verb_serves_the_configured_grammar(ctx, real_config):
+def test_key_pattern_verb_serves_the_configured_grammar(tmp_path, real_config):
     """The store's key grammar is an ENVIRONMENT fact, declared in its own config and served
     as a verb — so every consumer reaches it through the one registry seam, and swapping the
     environment for a tracker with another key vocabulary is a config edit, not a code
     change. The judge's closed-ticket screen (#672 Fork A) is the consumer."""
-    _write_config(ctx, **_BASE_CONFIG, TICKET_KEY_PATTERN="SOC-[0-9]+")
+    ctx = _config_ctx(tmp_path, **_BASE_CONFIG, TICKET_KEY_PATTERN="SOC-[0-9]+")
     assert ticket_adapter.key_pattern(ctx) == "SOC-[0-9]+"
     assert ticket_adapter.VERBS["key-pattern"] is ticket_adapter.key_pattern
 
 
-def test_key_pattern_is_required_config_and_absence_takes_the_system_down(ctx, real_config):
+def test_key_pattern_is_required_config_and_absence_takes_the_system_down(tmp_path, real_config):
     """KEY_PATTERN is REQUIRED, on the same rule as URL_BASE: absent means the system is down
     — a ConfigFault (infra, exit 2) — never a silent built-in default. Because it is required
     at `_config`, the absence fails the WHOLE ticket surface closed, not just the screen that
     reads it: a consumer cannot get a store read out of an environment that has not said what
     its keys look like, and the fault names the missing key so the fix is obvious."""
-    _write_config(ctx, **_BASE_CONFIG)  # no TICKET_KEY_PATTERN
+    ctx = _config_ctx(tmp_path, **_BASE_CONFIG)  # no TICKET_KEY_PATTERN
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
         ticket_adapter.key_pattern(ctx)
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
@@ -154,14 +157,13 @@ def test_key_pattern_is_required_config_and_absence_takes_the_system_down(ctx, r
     assert ConfigFault("x").exit_code == 2, "a missing environment fact is infra, not agent-fixable"
 
 
-def test_run_env_overrides_the_declared_grammar(ctx, real_config):
-    """The RUN's env overrides the file for the key grammar exactly as it does for every other
-    config value (the ops-convenience lane load_config already documents) — so a CI run or a
-    per-run override can point at a different store's vocabulary without editing the tree."""
-    _write_config(ctx, **_BASE_CONFIG, TICKET_KEY_PATTERN="SOC-[0-9]+")
-    over = VerbContext(defender_dir=ctx.defender_dir, run_dir=ctx.run_dir,
-                       env={"TICKET_KEY_PATTERN": "CASE-[0-9]+"}, settings_dir=ctx.settings_dir)
-    assert ticket_adapter.key_pattern(over) == "CASE-[0-9]+"
+def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
+    """The RUN's env overrides nothing in the record (#1107): the key grammar is the one the
+    tenant's config declared when the run began, so a variable of the same name in the run's env
+    — or the process's — cannot point the screen at another store's vocabulary."""
+    over = _config_ctx(tmp_path, env={"TICKET_KEY_PATTERN": "CASE-[0-9]+"}, **_BASE_CONFIG,
+                       TICKET_KEY_PATTERN="SOC-[0-9]+")
+    assert ticket_adapter.key_pattern(over) == "SOC-[0-9]+"
 
 
 # the key/filter encoding symmetry (#684 follow-up)

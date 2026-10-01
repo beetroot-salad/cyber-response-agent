@@ -580,11 +580,12 @@ def test_no_accessor_names_a_file_nothing_reads():
     passes the very accessor #647 deleted. `provenance` (#976) has exactly one real reader —
     `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it.
 
-    Two accessors (#1077 D1) name a file whose READER this census structurally cannot see,
-    and each says which: the box sentinel is read back INSIDE the box (`docker exec cat`,
-    `runtime/box/_lifecycle._probe_sentinel`), and the ticket receipt is the operator's
-    (#767: the host's record of the case comment it posted, read by a person)."""
-    read_outside_the_census = {"box_sentinel", "ticket_write"}
+    One accessor (#1077 D1) names a file whose READER this census structurally cannot see: the
+    box sentinel is read back INSIDE the box (`docker exec cat`,
+    `runtime/box/_lifecycle._probe_sentinel`). The ticket receipt (#767) was the other — the
+    operator's record of the case comment the host posted, read by a person — until #1107 gave
+    the run page a reader of it, which this census sees."""
+    read_outside_the_census = {"box_sentinel"}
     consumers = [
         h.split(":", 1)[0]
         for h in live_hits(repo_grep(r"RunPaths\(", "*.py"),
@@ -806,14 +807,16 @@ def test_the_three_predecessor_codebase_docs_are_archived_rather_than_corrected(
 
 
 
-def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
-    tmp_path, monkeypatch
-):
+def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(tmp_path):
     """The run-dir env var survives the removal of the only mechanism that ever turned it into
-    a salt. The bash tool's subprocess environment still exports it, and its live reader still
-    resolves it across that boundary: the ticket adapter, building its verb context from the
-    ambient environment. (The hooks' run-dir resolver was the second reader until #667 — it
-    served hook subprocesses, which no longer exist; the adapter reads the var directly.)"""
+    a salt. The bash tool's subprocess environment still exports it, and a child forked with
+    that environment still resolves it across the boundary. (The hooks' run-dir resolver was a
+    reader until #667 — it served hook subprocesses, which no longer exist — and the ticket
+    adapter's CLI was the other until #1107 deleted it: nothing in the adapter builds a verb
+    context from the ambient environment any more, the run's context is handed in.)"""
+    import subprocess
+    import sys
+
     from defender import run_common
     from defender.scripts.adapters import ticket_adapter
 
@@ -822,13 +825,12 @@ def test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader(
     env = run_common.run_env(DEFENDER, run_dir)
     assert env["DEFENDER_RUN_DIR"] == str(run_dir)
 
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    # #1106: the CLI is handed its tenant's settings folder (parsed from `--tenant`).
-    from defender.tests import _tenants1106
-
-    assert ticket_adapter._cli_context(
-        DEFENDER, _tenants1106.PLAYGROUND_SETTINGS).run_dir == run_dir
+    child = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ['DEFENDER_RUN_DIR'])"],
+        env=env, capture_output=True, text=True, check=True)
+    assert child.stdout.strip() == str(run_dir)
+    assert not hasattr(ticket_adapter, "_cli_context"), (
+        "the ticket adapter builds a context from the ambient environment again")
 
 
 def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):

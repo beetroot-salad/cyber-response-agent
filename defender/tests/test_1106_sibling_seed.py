@@ -24,6 +24,7 @@ import pytest
 
 from defender.tests import _tenants1106 as T
 from defender.tests import _triplet_947 as P
+from defender.tests.tenant_1107_settings import _spec1107 as S
 
 
 @pytest.fixture(autouse=True)
@@ -151,7 +152,7 @@ def _launch(tmp_path: Path, *, stamp_tenant: str | None, root: Path,
 def _episode_tenant(root: Path) -> Path:
     """A complete tenant whose elastic patterns are the fixture's configured pair, so the
     stager's namespace checks accept the family's overlays."""
-    return T.plant_tenant(root, "acme", configs=T.config_texts(
+    return T.plant_tenant(root, "acme", configs=S.config_texts(
         "acme", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
 
 
@@ -198,10 +199,10 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     as `configured_patterns` — the set every sibling, the registry's own-view test and the
     judge re-read. The episode still runs (the positive control: siblings start)."""
     stager = T.mod("learning.branch.estate.stagers.elastic")
-    assert tuple(stager.configured_patterns(T.PLAYGROUND_SETTINGS)) != TENANT_PATTERNS, \
+    assert tuple(stager.configured_patterns(T.playground_run_tenant().elastic)) != TENANT_PATTERNS, \
         "the fixture no longer discriminates from the checkout's copy"
     root = tmp_path / "tenants"
-    T.plant_tenant(root, "acme", configs=T.config_texts(
+    T.plant_tenant(root, "acme", configs=S.config_texts(
         "acme", events_index=TENANT_PATTERNS[0], alerts_index=TENANT_PATTERNS[1]))
     door = P.FakeDoor()
     outcome, spawn = _launch(tmp_path, stamp_tenant="acme", root=root, door=door)
@@ -224,7 +225,7 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
     `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant` (the two agree)."""
     root = tmp_path / "tenants"
     _episode_tenant(root)
-    T.plant_tenant(root, "bravo", configs=T.config_texts(
+    T.plant_tenant(root, "bravo", configs=S.config_texts(
         "bravo", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
     outcome, spawn = _launch(tmp_path, stamp_tenant="bravo", record_tenant="acme", root=root)
     text = f"{outcome} {capsys.readouterr().err}"
@@ -246,7 +247,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
         "  cmdb:\n"
         "    get-host: {roles: [], reason: \"withheld in this fixture\"}\n"
         "    health-check: {roles: [gather]}\n"),
-        configs=T.config_texts("acme", events_index=P.EVENTS_PATTERN,
+        configs=S.config_texts("acme", events_index=P.EVENTS_PATTERN,
                                alerts_index=P.ALERTS_PATTERN))
     questioner = P.FakeAgent(P.family_doc(), P.world_doc("b"), P.world_doc("c"))
     base, src = P.runs_base(tmp_path, tenant_id="acme")
@@ -286,10 +287,11 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     """The review replays through `seams.adapter_seam(episode, tenant)` when no adapters are
     injected: its registry must hold the EPISODE tenant's gather grant (a pair the family's
     siblings cannot reach must not be reachable by the review either), point its refusals at
-    that tenant's table (by name, not host path), and carry that tenant's settings on its verb context. Tenant B's
+    that tenant's table (by name, not host path), and carry that tenant's record on its verb context. Tenant B's
     table differs from the checkout playground's, pair by pair."""
     seams = T.mod("learning.branch.seams")
-    b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B, marker="bravo")
+    b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B, marker="bravo",
+                       configs=S.config_texts("bravo"))
     tenant = T.tenants().tenant_dir(tmp_path / "tenants", "bravo")
     ep = P.episode(tmp_path)
     side = seams.adapter_seam(ep, T.run_tenant(tenant), runs_base=tmp_path / "runs")
@@ -303,7 +305,7 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     assert table_pointer("bravo") in (denied.refusal or ""), denied.refusal
     assert str(b) not in (denied.refusal or ""), denied.refusal
     assert str(tenant.settings) not in (denied.refusal or ""), denied.refusal
-    assert Path(side.ctx.settings_dir) == tenant.settings
+    assert Path(side.ctx.tenant.settings) == tenant.settings
     transport = T.mod("scripts.adapters._stub_transport")
     assert transport.load_config(side.ctx, "identity", "IDENTITY")["URL_BASE"] == \
         "http://identity-bravo:8080"
@@ -330,21 +332,23 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
     root = tmp_path / "tenants"
     # The fixture world touches elastic, and a world may only touch a system its grant serves,
     # so both tables reach elastic; they still differ on cmdb and identity.
-    T.plant_tenant(root, "acme", table=T.TABLE_A)
-    T.plant_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER)
+    T.plant_tenant(root, "acme", table=T.TABLE_A, configs=S.config_texts("acme"))
+    T.plant_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER,
+                   configs=S.config_texts("bravo"))
     elastic = {("elastic", "health-check"), ("elastic", "query")}
     expected = {"acme": (T.GATHER_PAIRS_A, ("cmdb", "get-host"), ("identity", "get-user")),
                 "bravo": (T.GATHER_PAIRS_B | elastic, ("identity", "get-user"),
                           ("cmdb", "get-host"))}
     for tenant_id, (pairs, own_pair, other_pair) in expected.items():
         tenant = T.tenants().tenant_dir(root, tenant_id)
-        grants = T.run_grants(tenant.settings)
+        record = T.run_tenant(tenant)
+        grants = record.grants
         seen: dict = {}
         run._drive_investigation(
             alert_path=src / "alert.json", run_dir=src, run_id=src.name,
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
-            tenant=T.run_tenant(tenant, grants=grants),
-            world=run.resume_world(ep / "family.yaml", "b", settings=lambda t=tenant: t.settings),
+            tenant=record,
+            world=run.resume_world(ep / "family.yaml", "b", tenant=lambda r=record: r),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)
