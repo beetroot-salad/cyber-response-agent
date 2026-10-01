@@ -35,7 +35,7 @@ import argparse
 import os
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Hand-rolled rather than `scripts/_venv.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
@@ -219,8 +219,10 @@ def _tenant_id_committed(folder: Path) -> str | None:
 # ==========================================================================================
 
 def scaffold(tenant_id: str, target: Path) -> int:
-    """Start a tenant repo in the empty directory `target`: the template's files (never its
-    `examples/`), `agent/.tenant-id`, and one commit on branch `main`. Needs no data root.
+    """Start a tenant repo in the empty directory `target`: the template's files as the
+    running checkout's HEAD commits them (never its `examples/`, never an untracked or locally
+    edited file), `agent/.tenant-id`, and one commit on branch `main` holding exactly those
+    files, whatever the operator's ignore rules say. Needs no data root.
     Refused before any write for a bad id, a target that is not an empty directory outside
     the running checkout, or a git that is absent or has no commit identity; a failure after
     the first write leaves `target` empty again."""
@@ -235,12 +237,18 @@ def scaffold(tenant_id: str, target: Path) -> int:
         _say(refusal)
         return 1
     try:
-        _copy_template(target)
+        written = _copy_template(target)
         write_guarded(target / TENANT_ID_FILE, _tenant.tenant_id_file_text(tid), mode="create")
+        written.append(TENANT_ID_FILE.as_posix())
         env = _git.env_for_cwd()
-        for args in (["init", "-q", "-b", "main"], ["add", "-A"],
-                     ["commit", "-q", "-m", f"tenant {tid}: scaffolded from the template"]):
-            _git.git(args, cwd=target, env=env)
+        _git.git(["init", "-q", "-b", "main"], cwd=target, env=env)
+        _git.git(["add", "--force", "--", *written], cwd=target, env=env)
+        staged = set(_git.git(["ls-files", "-z"], cwd=target, env=env).split("\0")) - {""}
+        if staged != set(written):
+            raise OSError(f"git staged {sorted(staged ^ set(written))} differently from what "
+                          "scaffold wrote")
+        _git.git(["commit", "-q", "-m", f"tenant {tid}: scaffolded from the template"],
+                 cwd=target, env=env)
     except (OSError, _git.GitError) as failed:
         _empty(target)
         _say(f"scaffolding {target} failed and was undone: {failed}")
@@ -260,12 +268,16 @@ def _target_refusal(target: Path) -> str | None:
 
 
 def _git_preflight(target: Path) -> str | None:
-    """git is there and can commit as someone, asked before anything is written."""
+    """git is there and can commit as someone, asked before anything is written. The identity
+    is asked as the repository scaffold is about to create will see it: `GIT_DIR` names its
+    `.git` (not yet there, and not created by asking), so an `includeIf "gitdir:…"` rule
+    matches as it will for the commit, and an enclosing repo's identity is not borrowed."""
     env = _git.env_for_cwd()
+    future = {**env, "GIT_DIR": str(target / ".git")}
     try:
         _git.git(["--version"], cwd=target, env=env)
         for ident in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            _git.git(["var", ident], cwd=target, env=env)
+            _git.git(["var", ident], cwd=target, env=future)
     except FileNotFoundError as absent:
         return f"scaffold needs git, and git is not available on PATH ({absent})"
     except _git.GitError as failed:
@@ -274,14 +286,27 @@ def _git_preflight(target: Path) -> str | None:
     return None
 
 
-def _copy_template(target: Path) -> None:
-    template = template_dir(_REPO_ROOT)
-    for source in sorted(template.rglob("*")):
-        rel = source.relative_to(template)
-        if "examples" in rel.parts or not source.is_file():
+def _copy_template(target: Path) -> list[str]:
+    """Write the template's files into `target` as the running checkout's HEAD commits them —
+    read from git, never from the disk, so an untracked file beside them (a `.DS_Store`, a
+    stray `.env`) or a local edit is never carried into a tenant's repo. Returns the relative
+    paths written."""
+    template = template_dir(_REPO_ROOT).relative_to(_REPO_ROOT).as_posix()
+    env = _git.env_for_cwd()
+    listing = _git.git(["ls-tree", "-r", "-z", "HEAD", "--", template], cwd=_REPO_ROOT, env=env)
+    if not listing:
+        raise OSError(f"the checkout's HEAD commits no {template}/ to scaffold from")
+    written: list[str] = []
+    for entry in sorted(filter(None, listing.split("\0"))):
+        meta, path = entry.split("\t", 1)
+        mode, kind, sha = meta.split()
+        rel = PurePosixPath(path).relative_to(template)
+        if "examples" in rel.parts or kind != "blob" or mode not in ("100644", "100755"):
             continue
         guarded_mkdir((target / rel).parent, base=target)
-        write_guarded(target / rel, source.read_bytes(), mode="create")
+        write_guarded(target / rel, _git.git_blob_bytes(_REPO_ROOT, sha, env=env), mode="create")
+        written.append(rel.as_posix())
+    return written
 
 
 def _empty(target: Path) -> None:
