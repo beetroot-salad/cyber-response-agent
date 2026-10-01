@@ -69,3 +69,15 @@ def test_a_torn_review_still_reads_as_no_outcome(tmp_path):
     ep = _episode(tmp_path, TORN_REVIEW)
 
     assert episode_mod._recorded_outcome(ep.view()) == (None, "")
+
+
+def test_a_parsed_value_holding_one_immutable_value_twice_is_a_tree():
+    """#1127 second review: only a mutable container can be shared or cyclic in a way that
+    matters. Python hands back the one empty tuple (and may reuse other immutables) wherever
+    one appears, so an identity check on them refused a harmless reply."""
+    from defender._yaml import AliasRefused, refuse_shared
+
+    refuse_shared({"a": (), "b": (), "c": frozenset(), "d": frozenset()})
+    shared: list = []
+    with pytest.raises(AliasRefused):
+        refuse_shared({"a": shared, "b": shared})

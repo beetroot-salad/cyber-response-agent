@@ -146,10 +146,13 @@ class ParamsTooDeep(Exception):
     pydantic would wrap a `ValueError` raised there into its own `ValidationError` (`_model`)."""
 
     def __init__(self, field: str = "params") -> None:
+        # The field alone is the argument, so a copy or a pickle rebuilds the same error.
+        super().__init__(field)
         self.field = field
-        super().__init__(
-            f"{field} nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a stored call "
-            "can carry")
+
+    def __str__(self) -> str:
+        return (f"{self.field} nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a "
+                "stored call can carry")
 
 
 def _json_safe_params(value: Any, *, field: str = "params") -> Any:

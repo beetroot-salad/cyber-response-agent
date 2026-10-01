@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping, MutableSequence, MutableSet
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -156,8 +156,8 @@ def refuse_shared(value: Any) -> None:
     would have refused as an alias — for a document that arrives already parsed.
 
     Iterative and identity-keyed, so a cycle or a deep value ends the walk rather than the
-    stack. Only containers count: a shared string or number is written out in full and walks
-    as a leaf."""
+    stack. Only mutable containers count: a shared string, number or tuple is the same value
+    wherever it appears."""
     seen: set[int] = set()
     stack: list[Any] = [value]
     while stack:
@@ -168,11 +168,15 @@ def refuse_shared(value: Any) -> None:
             children = node
         else:
             continue
-        if id(node) in seen:
-            raise AliasRefused(
-                "the document holds one value in two places (or inside itself); write each "
-                "value out in full")
-        seen.add(id(node))
+        # Only a mutable container can be shared in a way that matters: Python hands back the
+        # one empty tuple wherever one appears. An immutable one is still walked, so a list
+        # reached twice through it is found.
+        if isinstance(node, (MutableMapping, MutableSequence, MutableSet)):
+            if id(node) in seen:
+                raise AliasRefused(
+                    "the document holds one value in two places (or inside itself); write each "
+                    "value out in full")
+            seen.add(id(node))
         stack.extend(children)
 
 

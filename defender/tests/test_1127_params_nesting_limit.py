@@ -517,3 +517,16 @@ def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(t
     assert _sidecar(run_dir, 1).read_text(encoding="utf-8") == '["second"]'
     assert all(parse_jsonl_row(line) is not None for line in _lines(run_dir)), \
         "the table holds a line its own reader skips"
+
+
+def test_the_refusal_survives_a_copy_and_a_pickle_unchanged():
+    """#1127 second review: the error's arguments were its formatted sentence, so a copy or a
+    pickle rebuilt it with that sentence as the field, and the sentence came out twice."""
+    import copy
+    import pickle
+
+    err = rq.ParamsTooDeep("asked_params")
+
+    for clone in (copy.copy(err), pickle.loads(pickle.dumps(err))):
+        assert str(clone) == str(err)
+        assert clone.field == "asked_params"
