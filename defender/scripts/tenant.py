@@ -271,6 +271,13 @@ def scaffold(tenant_id: str, target: Path) -> int:
 
 
 def _target_refusal(target: Path) -> str | None:
+    try:
+        return _target_fault(target)
+    except OSError as unusable:
+        return f"{target} could not be checked as a scaffold target: {unusable}"
+
+
+def _target_fault(target: Path) -> str | None:
     if not target.is_dir() or target.is_symlink():
         return f"{target} is not a directory — scaffold into an empty directory"
     if any(target.iterdir()):
@@ -294,6 +301,8 @@ def _git_preflight(target: Path) -> str | None:
             _git.git(["var", ident], cwd=target, env=future)
     except FileNotFoundError as absent:
         return f"scaffold needs git, and git is not available on PATH ({absent})"
+    except OSError as unusable:
+        return f"git could not be run in {target}: {unusable}"
     except _git.GitError as failed:
         return (f"git has no commit identity to commit the new tenant repo with — set "
                 f"user.name and user.email: {failed.stderr}")

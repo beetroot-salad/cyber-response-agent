@@ -728,9 +728,19 @@ def refuse_foreign_data_root(root: Path, tenant_id: TenantId) -> None:
     there is the guarded write's refusal to make, never this one's). Once the row exists the
     folder's other contents (runs/, sessions/) are the tenant's own business and never
     re-checked. Any OTHER entry at `root`, or any other id's folder however it is shaped, is
-    always foreign. Refuses, naming what it found; called both by `create_tenant` and,
-    directly, by setup — so a caller that skips `create_tenant` on a re-run still meets it."""
+    always foreign. Refuses, naming what it found — or, when the root or the tenant's folder
+    cannot be read, naming that; called both by `create_tenant` and, directly, by setup — so a
+    caller that skips `create_tenant` on a re-run still meets it."""
     tenant_id = TenantId(tenant_id)  # before anything under `root` is named with it
+    try:
+        _refuse_foreign_entries(root, tenant_id)
+    except OSError as unreadable:
+        raise TenantRefused(
+            f"the data root {root} could not be checked for other tenants: {unreadable}",
+        ) from unreadable
+
+
+def _refuse_foreign_entries(root: Path, tenant_id: TenantId) -> None:
     if not root.is_dir():
         return
     entries = sorted(p.name for p in root.iterdir())
