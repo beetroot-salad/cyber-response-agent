@@ -29,7 +29,8 @@ from defender.hooks.budget_enforcer import (
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_grant import VerbGrant
-from defender.runtime.verbs import VerbContext, VerbRegistry
+from defender.runtime.tenant_settings import elastic_problem
+from defender.runtime.verbs import VerbRegistry, redact_settings_path
 from ._agreement import CorrelationDispatch
 from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_REQUEST_LIMIT, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
 from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
@@ -121,11 +122,9 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
 
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
     *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
-    capture: Any, env: dict, limits: dict, settings_dir: Path,
+    capture: Any, env: dict, limits: dict, tenant: Any,
 ) -> tuple[str, str]:
-    from defender.scripts.adapters.elastic_adapter import load_config
-
-    deps = _build_deps(run_dir, defender_dir, run_id, L0, settings_dir)
+    deps = _build_deps(run_dir, defender_dir, run_id, L0, tenant)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
@@ -147,13 +146,13 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     alert_id = alert.get("alert_id")
     signal_index = alert.get("signal_index")
     if not isinstance(signal_index, str) or not signal_index.strip():
-        try:
-            cfg = load_config(VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env,
-                                          settings_dir=settings_dir))
-            signal_index = cfg["ELASTIC_ALERTS_INDEX"]
-        except Exception:  # noqa: BLE001 — degrade the whole item, never the run
-            return (_unavailable("could not resolve this alert's signal_index"),
-                    STATUS_FAILED)
+        # The alert names no index, so the tenant's alerts index is the fallback: read off the
+        # run's record, as of the run's start (#1107), by an EXPLICIT branch per state of the
+        # corpus-engine part — not an exception caught by a broad `except`.
+        problem = elastic_problem(tenant.elastic)  # lint-shippable: ok — the record's field name (#1107)
+        if problem is not None:
+            return (_unavailable(redact_settings_path(problem, tenant.settings)), STATUS_FAILED)
+        signal_index = tenant.elastic.alerts_index  # lint-shippable: ok — the record's field name (#1107)
 
     ancestor_events = alert.get("ancestor_events") or []
     if not isinstance(ancestor_events, list):
@@ -403,7 +402,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     budget_started_monotonic: float = 0.0, catalog: str | None,
-    dispatch: CorrelationDispatch, settings_dir: Path,
+    dispatch: CorrelationDispatch, tenant: Any,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
     shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
@@ -415,8 +414,8 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from it and not from `_spec`'s constants, so the frame that checked the template against
     the table and the frame that dispatches on the result are one derivation.
 
-    `settings_dir` is the run's tenant folder (#1106), carried onto the lead's deps so every
-    verb it dispatches reads that tenant's config."""
+    `tenant` is the run's record (#1107), carried onto the lead's deps so every verb it
+    dispatches reads that tenant's settings."""
     from ..agent_definition import bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import build_gather_agent, gather_def_for
@@ -490,7 +489,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     # time from its own start rather than the run's true remaining budget.
     gdeps = replace(
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
-        settings_dir=settings_dir,
+        tenant=tenant,
     )
 
     request = GatherRequest(L3, dispatch_system, goal, tuple(what_to_summarize))

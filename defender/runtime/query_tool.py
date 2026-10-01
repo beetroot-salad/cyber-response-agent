@@ -7,7 +7,6 @@ import json
 import logging
 from collections.abc import Mapping
 from typing import Any
-from pathlib import Path
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
@@ -178,33 +177,34 @@ def _self_ticket_reject_reason(
     return None
 
 
-def _release_predicate(settings_dir: Path) -> Any:
-    """#767 D4's release predicate, built fresh per call (`d_each_query_screened_at_call_time`
-    — no snapshot, no cache). §7 R1's read-side extension (FK20): a predicate-construction
+def _release_predicate(tenant: Any) -> Any:
+    """#767 D4's release predicate, built per call from the run's record (#1107 O2: the mapping
+    is the one resolved when the run began, so an edit to the file mid-run changes nothing —
+    the screen is "as of the run's start", not re-read). §7 R1's read-side extension (FK20): a predicate-construction
     failure DEGRADES rather than raising into the model's turn or refusing the whole gather
     call (N5) — every ticket reads as unreleased, so no comment is served, which is the
     fail-closed direction for a screen that must never serve agent text by accident.
 
-    ANY failure degrades, not only the mapper's own typed refusal: the mapping is a file, and
-    a file can be unreadable (permissions, a non-UTF-8 byte) in ways the mapper never
-    classifies. Letting such a raise escape would refuse the whole ticket query as an infra
-    fault and charge the `ticket` breaker for a config defect — the opposite of degrading.
-    Degrading is right; degrading SILENTLY is not, so the one warning in the log names the cause:
-    without it a broken mapping looks, from every gather turn, like a store with no comments."""
+    ANY failure degrades, not only the mapper's own typed refusal: a record with no mapping
+    (a role built without a tenant) or a mapping the loader kept as its error would otherwise
+    refuse the whole ticket query as an infra fault and charge the `ticket` breaker for a config
+    defect — the opposite of degrading. Degrading is right; degrading SILENTLY is not, so the one
+    warning in the log names the cause: without it a broken mapping looks, from every gather
+    turn, like a store with no comments."""
     from defender.scripts.case_history import case_ticket
 
     try:
-        return case_ticket.release_predicate(settings_dir).is_released
+        return case_ticket.release_predicate(tenant.ticket_mapping).is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
         _logger.warning(
-            f"ticket release predicate unavailable ({e!r}); serving no "
+            f"ticket release predicate unavailable ({e}); serving no "
             "ticket comments this call",
         )
         return lambda _ticket: False
 
 
 def _screen_ticket_payload(
-    self_key: str, system: str, verb: str, payload: Any, *, settings_dir: Path,
+    self_key: str, system: str, verb: str, payload: Any, *, tenant: Any,
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion, then #767 D4's per-ticket release step, before
     capture and model display.
@@ -218,8 +218,8 @@ def _screen_ticket_payload(
     when it answered a served payload (``code == 0``) — a malformed envelope stays malformed,
     never patched into something the release step could act on.
 
-    `settings_dir` is the run's tenant folder (#1106): the released status is THAT tenant's
-    mapping's, read per call.
+    `tenant` is the run's record (#1107): the released status is THAT tenant's mapping's, as of
+    the run's start.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
@@ -236,7 +236,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_get(payload, is_released=_release_predicate(settings_dir)), 0, ""
+        return screen_release_get(payload, is_released=_release_predicate(tenant)), 0, ""
 
     if verb == TICKET_LIST:
         payload, code, detail = screen_list(
@@ -247,7 +247,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_list(payload, is_released=_release_predicate(settings_dir)), 0, ""
+        return screen_release_list(payload, is_released=_release_predicate(tenant)), 0, ""
 
     return payload, 0, ""
 
@@ -272,15 +272,12 @@ def _model_visible(deps: Any, detail: str) -> str:
     frame, so an adapter — ours, or one `/connect` adds — cannot put a host path in front of the
     model by how it words a `ConfigFault`."""
     text = redact_model_visible(detail)
-    settings = getattr(deps, "settings_dir", None)
-    if settings is None:
+    tenant = getattr(deps, "tenant", None)
+    if tenant is None:
         return text
-    from .verbs import SETTINGS_POINTER
+    from .verbs import redact_settings_path
 
-    for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
-        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
-            spelling, SETTINGS_POINTER.rstrip("/"))
-    return text
+    return redact_settings_path(text, tenant.settings)
 
 
 class QueryCapture(AbstractCapability[Any]):
@@ -843,7 +840,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             payload = await handler(args)
             payload, exit_code, detail = _screen_ticket_payload(
-                self_key, system, verb, payload, settings_dir=deps.settings_dir,
+                self_key, system, verb, payload, tenant=deps.tenant,
             )
         except CONTROL_FLOW_EXCEPTIONS:
             raise
@@ -1294,7 +1291,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
-            settings_dir=deps.settings_dir,
+            tenant=deps.tenant,
         )
         return await asyncio.to_thread(fn, vctx, **params)
 

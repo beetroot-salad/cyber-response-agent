@@ -38,9 +38,10 @@ data-source outage, not a query problem (see gather SKILL §3.5 validity check).
 
 The run's tenant's `systems/identity/config.env` (host-only, in the tenant's
 `settings/` folder — not readable from the box) declares
-`IDENTITY_URL_BASE`, `IDENTITY_BASTION_HOST`, `IDENTITY_TIMEOUT_SEC`.
-All three can be overridden by environment variables of the same
-names for ops convenience.
+`IDENTITY_URL_BASE`, `IDENTITY_BASTION_HOST`, `IDENTITY_TIMEOUT_SEC`, and how it
+is reached: `IDENTITY_TRANSPORT=docker-exec` and `IDENTITY_DOCKER_CONTEXT=<docker
+context>` (neither has a default). An exported variable no longer overrides a
+`config.env` key; the run reads the file as it was when the run began.
 
 ## Exit codes
 

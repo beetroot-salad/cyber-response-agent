@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import field
 from defender._model import model
-from pathlib import Path
 from typing import Any
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
@@ -70,7 +69,7 @@ def unappliable(world: Any, patches: Mapping) -> list[str]:
 _TICKET_SYSTEM = "ticket"
 
 
-def unservable(patches: Mapping, settings_dir: Path | None) -> list[str]:
+def unservable(patches: Mapping, mapping: Any | None) -> list[str]:
     """The `ticket` patches whose difference the read screen would empty before the sibling
     ever saw it.
 
@@ -84,8 +83,10 @@ def unservable(patches: Mapping, settings_dir: Path | None) -> list[str]:
     that the case is one a person has reviewed (`status: <released>`), which is also what a
     world putting words in a prior case's comments means.
 
-    The released status is the operator mapping's (`case_ticket.release_predicate`); a mapping
-    that cannot say what it is refuses every such patch, since nothing could be served."""
+    The released status is the operator mapping's (`case_ticket.release_predicate`), taken from
+    the record's `ticket_mapping` handed in as `mapping` (#1107) — never from the file; a mapping
+    that cannot say what it is (or no mapping at all) refuses every such patch, since nothing
+    could be served."""
     table = patches.get(_TICKET_SYSTEM)
     if not isinstance(table, Mapping):
         return []
@@ -97,11 +98,11 @@ def unservable(patches: Mapping, settings_dir: Path | None) -> list[str]:
         return []
     from defender.scripts.case_history import case_ticket
 
-    if settings_dir is None:
-        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant settings folder "
+    if mapping is None:
+        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant record "
                 "was handed in to say which status releases them" for entity in with_comments]
     try:
-        released = case_ticket.release_predicate(settings_dir).released_status
+        released = case_ticket.release_predicate(mapping).released_status
     except case_ticket.CaseTicketError as e:
         return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but the case-history mapping "
                 f"cannot say which status releases them ({e})" for entity in with_comments]

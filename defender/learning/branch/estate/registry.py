@@ -25,7 +25,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass, replace
 from defender._model import model
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from defender.runtime.verbs import DENIED, TABLE_POINTER, ModuleVerbRegistry, VerbDecision
@@ -146,13 +145,14 @@ def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
     The MANIFEST's record first — the set the launcher judged this family's overlays against,
     which every production world (`ResumeWorld`) carries on its family — and only for a world
     with no such record (one assembled without a manifest, or a manifest written before the
-    field) the patterns the serving context's tenant folder configures. A frame with neither has
+    field) the patterns the serving context's tenant record configures. A frame with neither has
     no tenant to consult and admits no view as this world's own: the refusal, fail-closed."""
     recorded = tuple(getattr(getattr(world, "family", None), "configured_patterns", ()) or ())
     if recorded:
         return recorded
-    settings_dir = getattr(ctx, "settings_dir", None)
-    return tuple(stager.configured_patterns(settings_dir)) if settings_dir is not None else ()
+    tenant = getattr(ctx, "tenant", None)
+    elastic = getattr(tenant, "elastic", None)  # lint-shippable: ok — the record's field name (#1107)
+    return tuple(stager.configured_patterns(elastic)) if tenant is not None else ()  # lint-shippable: ok — the record's field name (#1107)
 
 
 def refuse_a_foreign_world_view(
@@ -317,12 +317,12 @@ class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
 
     def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
-                 applier: Any = None, settings_dir: Path | None = None,
+                 applier: Any = None, tenant: Any = None,
                  grant_home: str = TABLE_POINTER):
-        # `settings_dir` is the episode tenant's folder (#1106), which the ticket-comment check
-        # below reads the released status from; `None` (a registry no run built) can release
-        # nothing, so such a world's comment patch is refused rather than judged against some
-        # other tenant's mapping.
+        # `tenant` is the episode tenant's record (#1107), whose `ticket_mapping` the
+        # ticket-comment check below reads the released status from; `None` (a registry no run
+        # built) can release nothing, so such a world's comment patch is refused rather than
+        # judged against some other tenant's mapping.
         super().__init__(roster, grant, grant_home=grant_home)
         # THE CLOCK FIRST, and read ONCE here rather than per call. A `TypeError` or an
         # `AttributeError` raised deep inside `served` is not an `AdapterFault`, so the query
@@ -404,7 +404,8 @@ class WorldRegistry(ModuleVerbRegistry):
                     f"can never apply — `touches` is {declared!r} and a staged system is served "
                     "from its corpus rather than patched, so the overlay would be silently "
                     "dropped while every row still read honestly")
-            unservable = applier_module.unservable(patches, settings_dir)
+            unservable = applier_module.unservable(
+                patches, None if tenant is None else tenant.ticket_mapping)
             if unservable:
                 raise EstateError(
                     f"world {world_id!r} carries a difference the read screen would empty "

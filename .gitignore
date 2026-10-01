@@ -43,6 +43,9 @@ logs/
 
 # Environment files with secrets
 .env
+# A tenant's secrets (#1107): the file every `*_SECRET_REF` names an entry of. Host-only, never
+# committed, wherever the tenants root sits.
+**/settings/secrets.env
 *.env.bak
 *.key
 *.pem

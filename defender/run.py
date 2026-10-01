@@ -316,7 +316,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             world=world, ledger=Ledger.for_world(
                 world.episode_dir, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
-            settings_dir=tenant.settings, grant_home=tenant.table_pointer,
+            tenant=tenant, grant_home=tenant.table_pointer,
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),
@@ -469,7 +469,7 @@ def _announce_provenance(run_dir: Path) -> None:
     _logger.info(f"commit={rec.commit[:12]}{mark}{detail}")
 
 
-def resume_world(manifest: Path, world_label: str, *, settings: Callable[[], Path]) -> Any:
+def resume_world(manifest: Path, world_label: str, *, tenant: Callable[[], Any]) -> Any:
     """The world this process IS, from the manifest — judged against the episode tenant's
     configured corpus patterns only where the manifest does not record them.
 
@@ -481,9 +481,10 @@ def resume_world(manifest: Path, world_label: str, *, settings: Callable[[], Pat
 
     A manifest written before #1106 carries no `configured_patterns`, and its overlays were
     judged against the checkout's corpus config when it was authored. That config now lives in
-    the tenant's `settings/`, so for such a manifest — and only for one — the loader asks
-    `settings` for the sibling's own tenant folder (the record the launcher seeded its runs base
-    with, naming the source's tenant). A manifest that records its set is judged by the record, and no tenant is looked up.
+    the tenant's record, so for such a manifest — and only for one — the loader asks `tenant` for
+    the sibling's own `RunTenant` (resolved from the record the launcher seeded its runs base
+    with, naming the source's tenant) and takes its corpus patterns from the record's corpus-engine
+    view. A manifest that records its set is judged by the manifest, and no tenant is looked up.
     """
     from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the one stager import this path needs: the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
@@ -491,7 +492,7 @@ def resume_world(manifest: Path, world_label: str, *, settings: Callable[[], Pat
     manifest = Path(manifest)
     return _family.resume_world_from(
         _family.load_family(
-            manifest, configured_patterns=lambda: configured_patterns(settings())),
+            manifest, configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
         world_label, manifest.parent)
 
 
@@ -515,7 +516,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     return alert
 
 
-def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> Any:
+def _resume_target(ns: argparse.Namespace, *, tenant: Callable[[], Any]) -> Any:
     """The world this process is, or `None` for an ordinary run — and the sibling's two refusals.
 
     BOTH BEFORE ANYTHING IS SPENT, which is the whole reason this sits ahead of the preflight
@@ -538,7 +539,7 @@ def _resume_target(ns: argparse.Namespace, *, settings: Callable[[], Path]) -> A
         # RESOLVED AT ENTRY (§7 J42): `resume_world`'s episode dir is the manifest's own PARENT,
         # so a relative or symlinked `--resume` path made every path built from it relative or
         # symlinked too — the sibling's `EpisodePaths(world.episode_dir).runs` among them.
-        return resume_world(ns.resume.resolve(), ns.world, settings=settings)
+        return resume_world(ns.resume.resolve(), ns.world, tenant=tenant)
     except FamilyError as refusal:
         sys.exit(f"[run.py] {refusal}")
 
@@ -590,7 +591,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
-    visualize: Callable[[Path], None] = _run.visualize,
+    visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
@@ -629,7 +630,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     tenant_of = functools.cache(lambda: _resolve_run_tenant(
         tenants_root, tenant_id, runs_base=runs_base, defender_dir=DEFENDER_DIR,
         dispatches_lead_zero=ns.resume is None))
-    world = _resume_target(ns, settings=lambda: tenant_of().settings)
+    world = _resume_target(ns, tenant=tenant_of)
     _sibling_tenant_agrees(world, tenant_id)
 
     # THE CASE INPUT IS RESOLVED AND SCREENED BEFORE ANYTHING IS SPENT, and before the
@@ -669,7 +670,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # process resolved once above and hands inward as one value.
     with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
         if ns.update_ticket:
-            ticket_writer.open_case_ticket(run_dir, settings_dir=tenant.settings)
+            ticket_writer.open_case_ticket(
+                run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                env=_run.run_env(DEFENDER_DIR, run_dir))
 
         _logger.info(f"run_dir={run_dir} model={model}")
         _announce_provenance(run_dir)
@@ -720,7 +723,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             # summary, exactly as `enqueue_curation` below takes the exit class. Nothing on disk
             # is an input: a failed or stale sidecar cannot split the record between two sources.
             ticket_writer.record_case_ticket(
-                run_dir, settings_dir=tenant.settings, truncated_by=summary.get("truncated_by"),
+                run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                env=_run.run_env(DEFENDER_DIR, run_dir), truncated_by=summary.get("truncated_by"),
                 closed_before_cut=summary.get("closed_before_cut") is True)
 
         # A SIBLING FORCES THE NO-LEARN BRANCH, and that is a POSITIVE refusal rather than an
@@ -736,7 +740,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             _logger.info("enqueued for catalog curation")
 
         try:
-            visualize(run_dir)
+            visualize(run_dir, update_ticket=ns.update_ticket)
         except _run.VisualizeFailed as e:
             _logger.warning(f"{e}")
         return 0

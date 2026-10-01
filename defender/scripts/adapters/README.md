@@ -28,22 +28,26 @@ second one.
   payload as a dict (the query tool renders it), never prints; usage errors
   come from the `faults.py` taxonomy (bad params → exit 64). The contract
   lives here.
-- **Transport — `docker --context soc-playground exec <bastion> curl …`.**
+- **Transport — `docker --context <context> exec <bastion> curl …`.**
   The systems are services on the playground compose network, reached by
-  shelling out through the bastion named in `BASTION_HOST`, not by direct
+  shelling out through the bastion named in `BASTION_HOST`, over the docker
+  context each system's own `config.env` names (`<PREFIX>_TRANSPORT=docker-exec`
+  and `<PREFIX>_DOCKER_CONTEXT`, no default), not by direct
   HTTP from this host. `host_state_adapter.py` runs `docker exec → command
   output` (no HTTP) instead; both route through `_stub_transport`.
 - **Auth — none.** The stubs are auth-less on the compose network, so this
   tree has no `resolve_auth` / `AUTH_TYPE` layer. The connect skill's
   example carries one because a *credentialed* deployment needs it; a system
-  here that genuinely needed credentials would name its secret env vars in
-  `config.env` (names, never values) and resolve them in the adapter — but
+  here that genuinely needed credentials would name them in `config.env` with a
+  `*_SECRET_REF` key (a reference, never a value) and pass the declared name to
+  the transport, which resolves it from the tenant's `settings/secrets.env` — but
   nothing in this tree does today.
 - **Config — `URL_BASE`, `BASTION_HOST`, `TIMEOUT_SEC`** in
   the run's tenant's `settings/systems/{system}/config.env`
-  (`knowledge/tenants/<tenant>/` at the repo root; the adapter reads `ctx.settings_dir`), each key
-  prefixed with the system name (e.g. `IDENTITY_URL_BASE`). Non-secret only;
-  an env var of the same prefixed name overrides the file for CI/per-run use.
+  (`knowledge/tenants/<tenant>/` at the repo root; the adapter reads `ctx.tenant.systems`, the record
+  resolved from that folder when the run began), each key prefixed with the system
+  name (e.g. `IDENTITY_URL_BASE`) next to the two access lines above. Non-secret only.
+  An exported variable does not override a key: the run's record is the one source.
 - **Exit codes — `0` ok / `1` query rejected / `2`
   unreachable-or-misconfigured / `64` bad invocation.** The circuit breaker
   counts only genuine `2`s as infra failures, so keep agent-side mistakes

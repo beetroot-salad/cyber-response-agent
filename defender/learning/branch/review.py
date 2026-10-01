@@ -174,12 +174,12 @@ def scratch_ledger(episode_dir: Path, *, world_label: str = "review",
     return book
 
 
-def verb_context(episode_dir: Path, settings_dir: Path, *, runs_base: Path) -> VerbContext:
+def verb_context(episode_dir: Path, tenant: Any, *, runs_base: Path) -> VerbContext:
     """The host-side context the replay's adapter calls run under.
 
-    `settings_dir` is the EPISODE's tenant's `settings/` folder (#1106) — the source run's
-    tenant, resolved by the launcher from the source's runs-base record and handed down; the
-    replay reads that tenant's adapter config and nothing it finds for itself.
+    `tenant` is the EPISODE's tenant record (#1107) — the source run's tenant, resolved by the
+    launcher from the source's runs-base record and handed down; the replay's adapters read that
+    record's systems, corpus-engine view and secrets and nothing they find for themselves.
 
     `run_dir` is the EPISODE dir rather than any run dir, and `capture` is `None`: the replay
     writes no `executed_queries.jsonl` row anywhere, because a review is not a run and a row
@@ -197,8 +197,7 @@ def verb_context(episode_dir: Path, settings_dir: Path, *, runs_base: Path) -> V
     env = run_env(DEFENDER_DIR, episode_dir)
     env["DEFENDER_RUNS_BASE"] = str(runs_base)
     return VerbContext(
-        defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None,
-        settings_dir=Path(settings_dir))
+        defender_dir=DEFENDER_DIR, run_dir=episode_dir, env=env, capture=None, tenant=tenant)
 
 
 @model(frozen=True)
@@ -286,7 +285,7 @@ def replay_one(call: tuple[str, str, dict], *, episode_dir: Path, adapters: Any,
 
 
 def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # noqa: PLR0913 — the review's injected estate plus the episode's tenant folder and runs base
-           invoke: Any, settings_dir: Path, runs_base: Path, write: Any = None) -> dict:
+           invoke: Any, tenant: Any, runs_base: Path, write: Any = None) -> dict:
     """Replay the capture through every world, judge each, and write `review.yaml`.
 
     THE CONTROL FIRST, always: the rest of the pass is defined against its result, and computing
@@ -303,13 +302,13 @@ def review(family: Family, *, episode_dir: Path, adapters: Any, door: Any,  # no
     own wrapper otherwise, so "review.yaml is written exactly once per pass" is observable
     without reaching around it with `monkeypatch.setattr`.
 
-    `settings_dir` is the episode's tenant's `settings/` folder (#1106): the replay's verb
-    context carries it, so every staged read and restore resolves that tenant's config.
+    `tenant` is the episode's tenant record (#1107): the replay's verb context carries it, so
+    every staged read and restore resolves that tenant's config.
     """
     write = write if write is not None else write_guarded  # lint-default: ok — DI seam owning its own default
     episode_dir = Path(episode_dir)
     rows, unreadable = read_jsonl_rows_report(base_file(episode_dir))
-    context = verb_context(episode_dir, settings_dir, runs_base=runs_base)
+    context = verb_context(episode_dir, tenant, runs_base=runs_base)
     token = episode_token_for(family.episode_id)
     drifted = frozenset(_capture_drift(rows))
     scratch = Path(tempfile.mkdtemp(prefix=f"defender-review-{episode_dir.name}-"))

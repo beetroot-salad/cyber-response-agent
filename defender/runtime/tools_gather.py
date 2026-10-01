@@ -621,7 +621,7 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         lead_id=lead_id,
         budget_started_monotonic=deps.budget_started_monotonic,
         stop=stop,
-        settings_dir=deps.settings_dir,
+        tenant=deps.tenant,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
 

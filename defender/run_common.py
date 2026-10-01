@@ -263,12 +263,21 @@ def _stamp(
                       "nothing downstream can prove which code it ran")
 
 
-def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+def provider_scrubbed_environ() -> dict[str, str]:
+    """The process's environment as a copy, with every provider API key removed — the base of
+    every host child's environment (`run_env` adds a run's variables on top; the branch
+    launcher's write door, which has no run yet, takes it as is). The ONE scrub, so no host
+    child is handed a model credential by a caller that forgot to drop it."""
     from defender.runtime import providers
 
     env = dict(os.environ)
     for var in providers.api_key_vars():
         env.pop(var, None)
+    return env
+
+
+def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+    env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
@@ -293,9 +302,13 @@ class VisualizeFailed(Exception):
     as rendered — a page left over from a prior render is not proof this one succeeded."""
 
 
-def visualize(run_dir: Path) -> None:
+def visualize(run_dir: Path, *, update_ticket: bool = False) -> None:
+    """Render the run's page. `update_ticket` is `run.py`'s own `--update-ticket`, passed to the
+    renderer as an argument (#1107 O6): the page shows the case-ticket line only for a run that
+    was started with it, and learns that from here, never from a file in the run dir."""
     proc = subprocess.run(
-        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir)],
+        [sys.executable, str(VISUALIZE_SCRIPT), str(run_dir),
+         *(["--update-ticket"] if update_ticket else [])],
         capture_output=True, text=True, encoding="utf-8"
     )
     if proc.stdout.strip():

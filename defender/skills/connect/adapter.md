@@ -81,11 +81,13 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
 ```
 
 - **`VerbContext` is harness carriage, passed positionally.** It carries the
-  RUN's `defender_dir` (resolve `config.env` from HERE, never an import-time
-  constant — a worktree or an eval's tmp tree must read its own config) and
-  the RUN's scrubbed `env` (hand it to any child you fork; the driver's
-  `os.environ` holds provider keys). The model never supplies it and cannot
-  bind it.
+  RUN's tenant record (`ctx.tenant`: each system's `config.env` already read
+  into `ctx.tenant.systems`, with the secret lookup beside it — take your
+  settings from there, never from an import-time constant, a file you open or
+  the process, so a worktree or an eval's tmp tree reads its own tenant), the
+  RUN's `defender_dir`, and the RUN's scrubbed `env` (hand it whole to any
+  child you fork; the driver's own process holds provider keys). The model
+  never supplies it and cannot bind it.
 - **The keyword-only params ARE the param contract.** Everything the model
   may pass is spelled `*, name: type`. The query tool's validator reads the
   signature and rejects an unknown / missing / mistyped param with exit 64,
@@ -180,23 +182,46 @@ gather redesign removed — never the recommended shape.
 
 ## Credentials
 
-Secrets are read from **environment variables and nowhere else**. The verb
-receives the RUN's scrubbed env as `ctx.env`; the transport reads the secret
-from there by the variable *name* `config.env` declares. `config.env` holds
-non-secret config only — endpoints, timeouts, `AUTH_TYPE`, and the *names*
-of the env vars that hold secrets — never a secret value. Name a key that
-carries a secret's env-var name with an `_ENV` suffix
-(`API_TOKEN_ENV=MYSYS_API_TOKEN` — the *name* of the env var to read); a bare
-`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY` key is read as an inline secret and
-`validate_scaffold` FAILs it. Nothing in the adapter reads a secret from
-`config.env`, logs one, or returns one in a captured payload. This is the single most important property of the layer;
-keep it that way.
+Secrets are held in **the tenant's `settings/secrets.env` and nowhere else** — a
+host-only file, gitignored, that the maintainer fills in and the skill never
+reads. `config.env` holds non-secret config only — endpoints, timeouts,
+`AUTH_TYPE`, the access lines — and, for a secret, a `*_SECRET_REF` key that
+*names* an entry of `secrets.env` (`API_TOKEN_SECRET_REF=MYSYS_API_TOKEN`, with
+`MYSYS_API_TOKEN=<value>` in `secrets.env`); a bare `PASSWORD` / `TOKEN` /
+`SECRET` / `API_KEY` key is read as an inline secret and `validate_scaffold`
+FAILs it, as it does a reference whose entry is missing or blank. The adapter
+passes the declared key to the transport (`secrets=` on `docker_exec_curl`);
+the transport resolves it through the run's record, puts the value in the
+environment of that one child only, forwards it into the container by name, and
+replaces it with a marker in anything it returns. Nothing in the adapter reads a
+secret from `config.env`, logs one, or returns one in a captured payload. This is
+the single most important property of the layer; keep it that way.
 
 For a scheme beyond a bearer token / basic auth (mTLS, SigV4, OAuth
 client-credentials), implement it in the transport and note why in
-`execution.md`; keep secrets in env vars regardless. **Never** accept a
+`execution.md`; keep secrets in `secrets.env` regardless. **Never** accept a
 pasted token, password, or auth-bearing cURL — if the maintainer offers one,
-stop and remind them it belongs in an env var.
+stop and remind them it belongs in `settings/secrets.env`.
+
+### `secrets.env` format
+
+`settings/secrets.env` is `KEY=VALUE` per line. One matched pair of surrounding
+quotes is trimmed (`KEY="value"` holds `value`); a line starting `export ` is not a
+key; there are no multi-line values; a `#` line is a comment; a later duplicate
+wins. Create it host-only and gitignored, never inside a run or an episode. To
+rotate a secret, write the new file beside it and rename it over `secrets.env`
+(a rename is atomic, so a run never reads a half-written file); the lookup reads
+the file per call, so the next call sees the new value.
+
+## Access method
+
+Every system's `config.env` states how the host reaches it, in two lines that are both required and have no default: `<PREFIX>_TRANSPORT=docker-exec` and `<PREFIX>_DOCKER_CONTEXT=<the docker context the system is reached over>`. A system missing either is down (exit 2) and is never reached through a guessed docker context.
+
+`docker-exec` is the one implemented method; any other value is refused, naming it.
+`<PREFIX>` is the folder name upper-cased (`systems/host-state/` → `HOST_STATE_`).
+A tenant folder written before this change has no `systems/host-state/` folder at
+all, so each existing tenant needs a new `systems/host-state/config.env` holding
+these two lines before its host-state verbs work.
 
 ## Transport
 
@@ -211,8 +236,9 @@ does not change with it.
 Two rules the transport always obeys:
 
 - **Fork with `ctx.env`, never bare.** A child forked with no `env=`
-  inherits the driver's `os.environ`, provider keys included. Every
-  `subprocess.run` in the transport passes `env=dict(ctx.env)`.
+  inherits the driver's own process, provider keys included. Every
+  `subprocess.run` in the transport passes `env=dict(ctx.env)` — handed whole,
+  never read from: a setting is never looked up in it.
 - **Always set a `timeout=` on the fork.** The outer wall-clock budget died
   with the capture subprocess, so the transport's own `subprocess.run(...,
   timeout=…)` is the only real kill left. Map a `TimeoutExpired` to a

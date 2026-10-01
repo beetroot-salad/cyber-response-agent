@@ -5,7 +5,6 @@ import json
 import urllib.parse
 
 import sys as _sys
-from collections.abc import Mapping, Sequence
 from pathlib import Path as _Path
 
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
@@ -26,9 +25,6 @@ REQUIRED_CONFIG_KEYS = [
     "ELASTIC_EVENTS_INDEX",
     "ELASTIC_ALERTS_INDEX",
 ]
-
-DEFAULT_ES_CONTAINER = "elasticsearch"
-DEFAULT_KIBANA_CONTAINER = "kibana"
 
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
@@ -82,101 +78,58 @@ class OutboundBody:
 
 
 
-#: Where this deployment's elastic configuration lives, relative to `defender_dir`. Named once
-#: because three readers reach it, and one of them holds no `VerbContext` to derive it from.
-#: Relative to a tenant's `settings/` folder (#1106).
-CONFIG_RELPATH = ("systems", "elastic", "config.env")
-
-
-def config_path(settings_dir: _Path) -> _Path:
-    """The config file under a tenant's `settings_dir` — for a caller that has no verb context
-    (it is handed the run's folder all the same; nothing here finds one)."""
-    return _Path(settings_dir).joinpath(*CONFIG_RELPATH)
-
-
-def _config_path(ctx: VerbContext) -> _Path:
-    return config_path(ctx.settings_dir)
-
-
-def config_from(
-    path: _Path, env: Mapping[str, str], *, expected: Sequence[str] = (),
-) -> dict[str, str]:
-    """This deployment's elastic config: the file, with the environment over it.
-
-    THE ONE PARSE, and it is one because three readers had grown their own. This adapter loads
-    it for a run; #947's staging seam asks which corpus patterns are configured before any run
-    or verb context exists; its write door asks where the cluster is. All three read the same
-    file, and all three had a private copy of this loop — with a different quote rule and a
-    different env precedence in each, so the same `config.env` described three deployments and
-    the divergence was invisible until a staged corpus and the read of it addressed two
-    clusters.
-
-    An absent file is EMPTY here, not a fault: two of the three readers have something sensible
-    to do with a missing config and only `load_config` must refuse. What is required belongs to
-    the caller that requires it.
-
-    THE ENVIRONMENT OVERRIDES ANY KEY THE FILE CARRIES OR THE CALLER EXPECTS — not merely the
-    ones already present. Gated on presence it was weaker in exactly the direction nothing can
-    see: a deployment whose file is absent or trimmed had its `ELASTICSEARCH_URL` ignored while
-    a reader that DID apply it addressed the cluster the operator named. `expected` is how a
-    caller names the keys it will read, so an env value for one of them wins over silence.
-
-    ONE MATCHED PAIR of quotes is trimmed, never a character SET: `.strip('"').strip("'")` trims
-    both ends of both characters, so a value legitimately ending in a quote — a password, a URL
-    carrying one — silently loses it and the reader addresses something the operator never
-    named.
-    """
-    values: dict[str, str] = {}
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, _, val = stripped.partition("=")
-            raw = val.strip()
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
-                raw = raw[1:-1]
-            values[key.strip()] = raw
-    for key in (*values, *expected):
-        env_val = env.get(key)
-        if env_val is not None:
-            values[key] = env_val
-    return values
+PREFIX = "ELASTIC"
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
-    path = _config_path(ctx)
-    if not path.exists():
-        raise ConfigFault(
-            f"config file not found: {path} — this tenant's settings do not configure "
-            "this system"
-        )
-    config = config_from(path, ctx.env, expected=REQUIRED_CONFIG_KEYS)
-    missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
+    """This deployment's elastic config from the run's record (#1107): the keys of
+    `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
+    unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch
+    down, the run goes on. The record's `elastic` view judges the keys platform code reads; this
+    reader judges the ones IT needs, so each reports its own view (MF-7 c).
+
+    Nothing is looked up in the environment, and the file is not re-read: the values are those
+    of the run's start (O1, O2)."""
+    entry = transport.system_entry(ctx, SYSTEM)
+    transport.access_context(ctx, SYSTEM, PREFIX)
+    config = dict(entry)
+    missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
     if missing:
-        raise ConfigFault(
-            f"missing required config keys in {path}: {', '.join(missing)}"
-        )
+        path = _Path(ctx.tenant.settings) / "systems" / SYSTEM / "config.env"
+        raise ConfigFault(f"missing required config keys in {path}: {', '.join(missing)}")
     return config
 
 
+def _container(ctx: VerbContext, key: str) -> str:
+    """The container named by `key` (`ELASTIC_ES_CONTAINER` / `ELASTIC_KIBANA_CONTAINER`) in the
+    tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
+    `elasticsearch` or `kibana` would address whatever container the host happens to hold of that
+    name."""
+    value = transport.system_entry(ctx, SYSTEM).get(key)
+    if value is None or not value.strip():
+        raise ConfigFault(
+            f"{key} is not set — name the container this system is reached through in its "
+            "config.env; there is no default")
+    return value
 
 
 def _es_container(ctx: VerbContext) -> str:
-    return ctx.env.get("SOC_PLAYGROUND_ES_CONTAINER", DEFAULT_ES_CONTAINER)
+    return _container(ctx, "ELASTIC_ES_CONTAINER")
 
 
 def _kibana_container(ctx: VerbContext) -> str:
-    return ctx.env.get("SOC_PLAYGROUND_KIBANA_CONTAINER", DEFAULT_KIBANA_CONTAINER)
+    return _container(ctx, "ELASTIC_KIBANA_CONTAINER")
 
 
 def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> TransportFault:
-    context = transport.docker_context(ctx)
+    context = transport.docker_context(ctx, SYSTEM)
+    entry = transport.system_entry(ctx, SYSTEM)
+    containers = "|".join(
+        entry[k] for k in ("ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER") if k in entry)
     return TransportFault(
-        f"{target} unreachable: {exc} — the playground stack is reached via "
+        f"{target} unreachable: {exc} — the stack is reached via "
         f"`docker --context {context} exec`; confirm it is up: "
-        f"docker --context {context} ps | grep -E "
-        f"'{_es_container(ctx)}|{_kibana_container(ctx)}'"
+        f"docker --context {context} ps | grep -E '{containers}'"
     )
 
 
@@ -200,7 +153,7 @@ def _http_json(
     rc, stdout, stderr = transport.docker_exec_curl(
         ctx, container, url, method=method, headers=headers,
         body=None if body is None else body.payload,
-        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}",
+        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}", system=SYSTEM,
     )
     body_text, status_str = transport.split_status(stdout)
     try:

@@ -22,7 +22,9 @@ import logging
 from defender._model import model
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import SkipValidation
 
 from defender._io import read_jsonl_rows
 from defender._run_paths import RunPaths
@@ -107,10 +109,10 @@ class _CaptureDeps:
     lead_id: str
     box: Any = None
     budget_started_monotonic: float = 0.0
-    #: The run's tenant `settings/` folder (#1106) — what item 1's verb context hands the
-    #: adapter. `None` only for a caller with no run (a direct test of the recorder); a verb
-    #: built over it is refused by `VerbContext`.
-    settings_dir: Path | None = None
+    #: The run's tenant record (#1107) — what item 1's verb context hands the adapter. `None`
+    #: only for a caller with no run (a direct test of the recorder); a verb built over it is
+    #: refused by `VerbContext`.
+    tenant: Annotated[Any, SkipValidation] = None
 
 
 def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
@@ -153,7 +155,7 @@ async def _capture_issue(
     async def handler(_args: dict) -> Any:
         fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
         vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                           settings_dir=_settings_of(deps))
+                           tenant=_tenant_of(deps))
         result = await asyncio.to_thread(fn, vctx, **params)
         captured.append(result)
         return result
@@ -290,7 +292,7 @@ class _CallLedger:
             try:
                 fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                                   settings_dir=_settings_of(deps))
+                                   tenant=_tenant_of(deps))
                 envelope = await asyncio.to_thread(fn, vctx, **params)
                 _record_manual_row(deps, verb, params, envelope, exit_code=0)
                 return envelope, ""
@@ -317,21 +319,21 @@ class _CallLedger:
         return envelope, text
 
 
-def _settings_of(deps: Any) -> Path:
-    """The run's tenant settings folder a lead-0 verb is handed — refused, not guessed, when the
-    deps were built without one (#1106: there is no checkout copy to fall back to)."""
-    settings = getattr(deps, "settings_dir", None)
-    if settings is None:
-        raise TypeError("lead-0's verb context needs the run's tenant settings folder")
-    return Path(settings)
+def _tenant_of(deps: Any) -> Any:
+    """The run's tenant record a lead-0 verb is handed — refused, not guessed, when the deps were
+    built without one (#1106: there is no checkout copy to fall back to)."""
+    tenant = getattr(deps, "tenant", None)
+    if tenant is None:
+        raise TypeError("lead-0's verb context needs the run's tenant record")
+    return tenant
 
 
 def _build_deps(
-    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str, settings_dir: Path,
+    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str, tenant: Any,
 ) -> _CaptureDeps:
     return _CaptureDeps(
         run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,
-        settings_dir=settings_dir,
+        tenant=tenant,
     )
 
 

@@ -165,5 +165,5 @@ def adapter_seam(episode_dir: Path, tenant: Any, *, runs_base: Path) -> EpisodeA
         registry=ModuleVerbRegistry(
             read_roster(adapters_under(DEFENDER_DIR)), tenant.grants.gather,
             grant_home=tenant.table_pointer),
-        ctx=verb_context(Path(episode_dir), tenant.settings, runs_base=runs_base),
+        ctx=verb_context(Path(episode_dir), tenant, runs_base=runs_base),
     )

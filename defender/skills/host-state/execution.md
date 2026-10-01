@@ -30,8 +30,8 @@ their payload field (`ps_output`, `entries`, `keys`, `sha256`, `packages`);
 
 ## Connectivity
 
-Transport is `docker --context soc-playground exec <host> <command>`
-— same docker context as the HTTP stubs but no curl indirection. The
+Transport is `docker --context <HOST_STATE_DOCKER_CONTEXT> exec <host> <command>`
+— the docker context its own `config.env` names, but no curl indirection. The
 `<host>` is the target role container directly, not a bastion.
 
 `health-check` does not pick a host; it lists which hosts in the
@@ -39,13 +39,13 @@ known inventory are currently running under the docker context.
 
 ## Config
 
-This adapter has **no `config.env`**. The docker context name
-(`soc-playground`) is hardcoded in
-`defender/scripts/adapters/_stub_transport.py`, and the per-verb timeout
-default lives in `host_state_adapter.py`. There is nothing else to
-configure; if a knob is needed in the future (e.g. a non-default
-docker context), promote `DOCKER_CONTEXT` to an env var before adding
-a config file.
+The run's tenant's `systems/host-state/config.env` (host-only, in the
+tenant's `settings/` folder) declares exactly two lines:
+`HOST_STATE_TRANSPORT=docker-exec` and `HOST_STATE_DOCKER_CONTEXT=<docker
+context>`. Neither has a default: a tenant with no such file, or one missing
+either line, has host-state down (exit 2), like any other system. The
+per-verb timeout default lives in `host_state_adapter.py`; there is nothing
+else to configure.
 
 ## Safety
 

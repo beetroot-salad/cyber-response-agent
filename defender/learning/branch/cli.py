@@ -81,7 +81,10 @@ from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
-from defender.learning.branch.estate.stagers.elastic import configured_patterns  # noqa: E501 # lint-shippable: ok — the one import of the per-vendor stager's configured-pattern reader; the vendor knowledge stays behind it
+from defender.learning.branch.estate.stagers.elastic import (  # noqa: E501 # lint-shippable: ok — the one import of the per-vendor stager's configured-pattern reader and its config keys; the vendor knowledge stays behind it
+    PATTERN_KEYS,
+    configured_patterns,
+)
 from defender.learning.branch.ledger import Ledger, LedgerError, base_file
 from defender import _tenant
 from defender.run_common import REPO_ROOT
@@ -171,8 +174,8 @@ def episodes_root(*, tenant: Any) -> Path:
         if candidate == forbidden or forbidden in candidate.parents:
             raise LauncherRefused(
                 f"[branch] {EPISODES_BASE_ENV}={root} resolves inside {why}")
-    # A base CONTAINING the data root is refused too (#1078 d4, J44: `/tmp` for a data root of
-    # `/tmp/defender-data`) — the data root only; a base containing the checkout is not.
+    # A base CONTAINING the data root is refused too (#1078 d4, J44: a base of `/tmp` over a data
+    # root beneath it) — the data root only; a base containing the checkout is not.
     if candidate in data_root.parents:
         raise LauncherRefused(
             f"[branch] {EPISODES_BASE_ENV}={root} contains the data root {data_root} — keep "
@@ -358,7 +361,7 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     *, source_run_dir: Path, branch_message_id: int, episode_id: str, episode_dir: Path,
     door: Any, preflight: Callable[[str | None], int], model: str | None,
     continuation_prompt: str, allow_dirty: bool,
-    live_tree: Callable[[], _provenance.RunProvenance], settings_dir: Path,
+    live_tree: Callable[[], _provenance.RunProvenance], tenant: RunTenant,
 ) -> tuple[str, tuple[str, ...], dict]:
     """Everything that can refuse BEFORE the questioner is paid for, in one block.
 
@@ -386,9 +389,11 @@ def preflight_episode(  # noqa: PLR0913 — ONE BLOCK is the point (§7 FORK-8):
     and a seam by that name reads as a way to seed it.
     """
     token = _episode_token(episode_id)
-    # The EPISODE tenant's corpus patterns (#1106): `settings_dir` is the source run's tenant's
-    # folder, which `_episode_tenant` resolved from the source's runs-base record.
-    patterns = staging_mod.check_configured_patterns(configured_patterns(settings_dir))
+    # The EPISODE tenant's corpus patterns (#1107): `tenant` is the source run's tenant record,
+    # which `_episode_tenant` resolved from the source's runs-base record and `_launch` has
+    # already refused if its corpus-engine part is unusable (O9). A bare `*` is refused here, by key.
+    patterns = staging_mod.check_configured_patterns(
+        configured_patterns(tenant.elastic), labels=PATTERN_KEYS)  # lint-shippable: ok — the record's field name (#1107)
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
     # THE ANCHOR IS READ AND JUDGED BEFORE THE PAID ROLE PREFLIGHT, beside the other reads of
@@ -494,8 +499,16 @@ def _episode_tenant(source_run_dir: Path, tenants_root: Path) -> RunTenant:
     from defender.runtime import run_tenant as run_tenant_mod
 
     try:
+        # THE TREES A BOX MOUNTS, as the launcher knows them: the tenant's runs base (every run
+        # dir in it is a box's rw bind) and the configured episodes base. A tenants root inside
+        # either would hand the model every tenant's endpoints, so it is refused here at launch
+        # exactly as a run refuses one inside its runs base (#1107 MF-13).
+        runs_base = _tenant.TenantPaths(_tenant.resolve_data_root(), tenant_id).runs
+        episodes_raw = os.environ.get(EPISODES_BASE_ENV)
+        box_mounted = (runs_base, *((Path(episodes_raw),) if episodes_raw else ()))
         return run_tenant_mod.resolve_tenant(
-            tenants_root, tenant_id, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False)
+            tenants_root, tenant_id, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False,
+            box_mounted=box_mounted)
     except run_tenant_mod.TenantRefused as refusal:
         raise LauncherRefused(f"[branch] the source run's tenant: {refusal}") from refusal
 
@@ -1311,8 +1324,14 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], _provenance.RunProvenance] | None = None,
+    door_transport: Callable[..., tuple[int, str, str]] | None = None,
 ) -> int:
     """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
+
+    `door_transport` is the one injection seam of the write door this launcher builds when
+    `door` is left to it (#1107): every call the door makes goes through it, handed a context
+    carrying the episode tenant's record, so a test drives the door's real wiring (its docker
+    context, container and secrets all come from that record) over a recording transport.
 
     Every check this module owns exits with a written explanation, and the checks it delegates
     to — the source store, the branch point, the primer, the family loader, the staging guard,
@@ -1341,7 +1360,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     try:
         return _launch(argv, spawn=spawn, door=door, questioner=questioner,
                        adapters=adapters, invoke=invoke, preflight=preflight, judge=judge,
-                       lessons_dir=lessons_dir, live_tree=live_tree)
+                       lessons_dir=lessons_dir, live_tree=live_tree,
+                       door_transport=door_transport)
     except (branch.BranchError, LedgerError, EstateError, FamilyError,
             staging_mod.StagingRefused, ReviewError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -1353,8 +1373,11 @@ def _launch(  # noqa: PLR0913 — see `main`
     preflight: Callable[[str | None], int] | None, judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], _provenance.RunProvenance] | None = None,
+    door_transport: Callable[..., tuple[int, str, str]] | None = None,
 ) -> int:
+    from defender import run_common
     from defender.run import preflight_role_models
+    from defender.runtime.tenant_settings import elastic_problem
 
     ns = parse_branch_args(argv)
     # RESOLVED ONCE, HERE, and threaded inward non-`None`. Both are DI seams whose production
@@ -1369,12 +1392,25 @@ def _launch(  # noqa: PLR0913 — see `main`
     tenants_root = (ns.tenants_root if ns.tenants_root is not None
                     else default_tenants_root(REPO_ROOT))
     tenant = _episode_tenant(source, tenants_root)
+    # O9: A TENANT WITH NO USABLE CORPUS-ENGINE PART IS REFUSED HERE, naming it, before the door, the
+    # patterns, any episode dir or any spend — the record carries the part as a view, a fault or
+    # nothing (it never raised at resolve), and a launch is the one consumer that cannot go on
+    # without it. The text is the operator's own channel, so the fault keeps the path it names.
+    problem = elastic_problem(tenant.elastic)  # lint-shippable: ok — the record's field name (#1107)
+    if problem is not None:
+        raise LauncherRefused(f"[branch] tenant {tenant.tenant_id!r}: {problem}")
     # ...and the same tenant's tree under the data root (#1078 D4): the episodes root's
     # data-root refusal and the grade's runs base are handed this, never re-derive it.
     tenant_paths = _tenant.TenantPaths(_tenant.resolve_data_root(), tenant.tenant_id)
     runs_base = tenant_paths.runs
-    write_door = (staging_mod.write_door_from_env(staging_mod.host_context(tenant.settings))
-                  if door is None else door)
+    # THE DOOR'S CHILD ENVIRONMENT IS BUILT HERE, once, at the launcher's entry: the process's
+    # own with the provider keys scrubbed (run_common's one scrub), and no run's variables — no
+    # run exists yet. Handed in, so nothing under the door reads the process (NF-31).
+    write_door = (
+        staging_mod.write_door_from_env(
+            staging_mod.host_context(tenant, run_common.provider_scrubbed_environ()),
+            **({} if door_transport is None else {"transport": door_transport}))
+        if door is None else door)
     # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
     # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
     # `tmp_path` corpus and this frame is the only one that ever sees the production path.
@@ -1391,7 +1427,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         source_run_dir=source, branch_message_id=ns.branch_message_id, episode_id=episode_id,
         episode_dir=episode_dir, door=write_door, preflight=role_preflight,
         model=ns.model, continuation_prompt=ns.continuation_prompt,
-        allow_dirty=ns.allow_dirty, live_tree=live_capture, settings_dir=tenant.settings)
+        allow_dirty=ns.allow_dirty, live_tree=live_capture, tenant=tenant)
 
     # THE REMAINING SEAMS ARE ANSWERED FOR HERE, at the same boundary `door` and `preflight`
     # are resolved at, and threaded inward non-`None`. Left to their `None` defaults they
@@ -1574,7 +1610,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
     with clock.step(Step.REVIEW):
         record = review_mod.review(family, episode_dir=episode_dir, adapters=adapters,
-                                   door=door, invoke=invoke, settings_dir=tenant.settings,
+                                   door=door, invoke=invoke, tenant=tenant,
                                    runs_base=runs_base)
     if record.get("episode", {}).get("decision") == REJECTED:
         # ANY REJECTED WORLD ENDS THE EPISODE (§7 FORK-14). Not the rejected one alone: a world

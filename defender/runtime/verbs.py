@@ -13,11 +13,19 @@ from collections.abc import Callable, Mapping
 from defender._model import model
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from pydantic import SkipValidation
 
 from .verb_grant import GrantError, VerbGrant
+
+if TYPE_CHECKING:
+    from defender.runtime.run_tenant import RunTenant as _RunTenant
+else:
+    # `run_tenant` imports `verb_dispositions`, which imports this module: the real class cannot
+    # be named here at runtime. Static checking sees `RunTenant`; pydantic sees `Any` (and the
+    # field is `SkipValidation` regardless — the record is never rebuilt or copied by a context).
+    _RunTenant = Any
 
 
 class RegistryError(Exception):
@@ -80,6 +88,19 @@ SETTINGS_POINTER = "the tenant's settings/"
 TABLE_POINTER = f"{SETTINGS_POINTER}verb-grants.yaml"
 
 
+def redact_settings_path(text: str, settings: Path) -> str:
+    """`text` with the tenant's host settings folder — as given and as resolved — named by
+    `SETTINGS_POINTER` instead. THE ONE REDACTION every model- or run-dir-facing channel that can
+    carry an adapter's or the resolver's fault text goes through (the query tool's two fault
+    channels, lead-zero's "unavailable" note, the ticket writer's receipt reason): a fault worded
+    with the path it read would otherwise put the host's layout in front of the model, and the run
+    dir is the box's writable mount. @owns settings redaction"""
+    for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
+        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
+            spelling, SETTINGS_POINTER.rstrip("/"))
+    return text
+
+
 @model(frozen=True)
 class VerbContext:
 
@@ -90,12 +111,14 @@ class VerbContext:
     #: caller handed in would be swapped for a mutable snapshot on every `query` call — the
     #: same copy `RosterRead` was exempted from. The annotation stays for static checking.
     env: Annotated[Mapping[str, str], SkipValidation]
-    #: The run's tenant's `settings/` folder (#1106): where every adapter reads its system's
-    #: `config.env`. REQUIRED, with no default, so every construction site has to hand in the
-    #: RUN's folder — a default would let a site silently read some other tenant's, or the
-    #: checkout's. `defender_dir` stays the code tree; the two stopped being one place when the
-    #: settings left `defender/`.
-    settings_dir: Path
+    #: The run's tenant record (#1107): its settings folder, grants and everything resolved from
+    #: the folder once — each system's `config.env`, the corpus-engine view, the ticket mapping, the
+    #: secret lookup. Where every adapter reads its system's settings and secrets, in place of the
+    #: folder and the process environment. REQUIRED, with no default, so every construction site
+    #: has to hand in the RUN's record — a default would let a site silently read some other
+    #: tenant's, or the checkout's. `defender_dir` stays the code tree. The folder path stays
+    #: reachable as `tenant.settings`, for code that names it without reading under it.
+    tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
     #: Which branched world this call is being served for, when it is being served for one.
     #: `None` is the ordinary run and the base world alike — both read the corpus itself.
@@ -127,7 +150,7 @@ class VerbContext:
     #: inside a verb body — which the query tool files as exit 2, an INFRA code the circuit
     #: breaker reads as the estate being down for this sibling and up for its base.
     #:
-    #: Appended LAST rather than inserted. (Since #1106's required `settings_dir` every site
+    #: Appended LAST rather than inserted. (Since #1106's required `tenant` every site
     #: builds this by keyword.)
     as_of: datetime | None = None
 

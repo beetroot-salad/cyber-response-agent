@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 from pydantic import SkipValidation
 
 if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
-    pass
+    from defender.runtime.run_tenant import RunTenant as _RunTenant
+else:
+    _RunTenant = Any  # `run_tenant` sits above this module in the import graph
 
 from defender._clock import now_iso
 from defender._paths import PATHS
@@ -142,12 +144,13 @@ class AgentDeps:
     )
     roots: ResolvedRoots | None = field(kw_only=True, default=None)
     tool_config: Any = field(kw_only=True, default=None)
-    #: The run's tenant's `settings/` folder (#1106) — handed to every verb this role
-    #: dispatches (`VerbContext.settings_dir`) and to the ticket screen. Set by the run
-    #: (`run_investigation` onto MAIN's deps, carried onto each gather lead's), never derived
-    #: from `defender_dir`: the settings left the code tree. `None` for a role that dispatches no
-    #: verb; a verb built over `None` is refused by `VerbContext`'s own validation.
-    settings_dir: Path | None = field(kw_only=True, default=None)
+    #: The run's tenant record (#1107) — handed to every verb this role dispatches
+    #: (`VerbContext.tenant`) and to the ticket screen. Set by the run (`run_investigation` onto
+    #: MAIN's deps, carried onto each gather lead's), never derived from `defender_dir`: the
+    #: settings left the code tree. `None` for a role that dispatches no verb; a verb built over
+    #: `None` is refused by `VerbContext`'s own validation. `SkipValidation`: the record is a
+    #: frozen value built once at resolve, never rebuilt by a deps copy.
+    tenant: Annotated[_RunTenant | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 

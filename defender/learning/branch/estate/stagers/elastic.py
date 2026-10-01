@@ -49,7 +49,6 @@ queries is the GATHER subagent, whose deps carry no clock and whose prompt rende
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import re
 from defender._model import model
@@ -83,37 +82,33 @@ PARAM_INDEXED = ("query", "alerts")
 #: Which config key each param-indexed verb defaults its index to, mirroring
 #: `elastic_adapter.query`/`alerts`. A call that omits `index` is not indexless — it is
 #: addressing THIS, and a stager that cannot see it would have to refuse a shipped template.
-_DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}
+_DEFAULT_INDEX_ATTR = {"query": "events_index", "alerts": "alerts_index"}
 
 
 #: The two keys naming this deployment's corpus, in the order the pair is always read in.
-_PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
+PATTERN_KEYS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
 
 
-def configured_patterns(settings_dir: Path) -> tuple[str, ...]:
-    """The two corpus patterns a tenant configures, in a stable order.
-
-    `settings_dir` is that tenant's `settings/` folder (#1106), handed in by the caller — the
-    launcher resolved it from the source's runs-base record, and a serving call carries it on its verb
-    context. Nothing here finds a folder for itself.
+def configured_patterns(elastic: Any) -> tuple[str, ...]:
+    """The two corpus patterns a tenant configures, in a stable order — the record's Elastic
+    view's `events_index` and `alerts_index` (#1107), handed in by the caller.
 
     ONE reading of the pair the whole design keys on: the overlay-key gate, the staging
     namespace guard and the manifest loader all ask which patterns exist, and three independent
-    readings would let a config edit widen one and narrow another.
+    readings would let a config edit widen one and narrow another. They all come through here,
+    from the record resolved once when the run (or the launch) began — never the file as it is
+    now and never the process environment, so an exported variable cannot widen what a world may
+    stage into.
 
-    THROUGH THE READ ADAPTER'S OWN PARSE. This frame had a private copy of that loop, because
-    `load_config` needs a `VerbContext` this seam's callers do not hold — the launcher asks
-    which patterns are configured BEFORE any run dir or verb context exists. But the context was
-    the only thing that differed; the parse and the precedence were not, and the copies had
-    already drifted on both. So the parse lives in one place that takes a path and an
-    environment, and this frame supplies the two things it knows.
-    """
-    import os
+    A tenant with no usable Elastic part (`None`, or the `ConfigFault` the record carries instead
+    of a view) configures NO pattern: the empty tuple, which every caller already refuses (the
+    launcher's preflight, the foreign-view test), so a part that could not stand admits no view
+    as any world's own."""
+    from defender.runtime.tenant_settings import ElasticSettings
 
-    from defender.scripts.adapters.elastic_adapter import config_from, config_path
-
-    values = config_from(config_path(Path(settings_dir)), os.environ, expected=_PATTERN_KEYS)
-    return tuple(values[key] for key in _PATTERN_KEYS if values.get(key))
+    if not isinstance(elastic, ElasticSettings):
+        return ()
+    return tuple(p for p in (elastic.events_index, elastic.alerts_index) if p)
 
 
 def check_world_id(world_id: str) -> None:
@@ -332,10 +327,17 @@ def source_pattern(verb: str, params: dict, ctx: Any = None) -> str | None:
             return _one_source(index, f"{verb}'s index parameter", verbatim=True)
         if ctx is None:
             return None
-        from defender.scripts.adapters.elastic_adapter import load_config
+        from defender.runtime.tenant_settings import ElasticSettings, elastic_problem
+        from defender.scripts.adapters.faults import ConfigFault
 
+        elastic = ctx.tenant.elastic
+        if not isinstance(elastic, ElasticSettings):
+            # The record carries a part that could not stand as a value, never raised at resolve
+            # (O5): the call it is read for faults here, as the adapter's own would.
+            raise elastic if isinstance(elastic, ConfigFault) else ConfigFault(
+                str(elastic_problem(elastic)))
         return _one_source(
-            load_config(ctx)[_DEFAULT_INDEX_KEY[verb]], f"{verb}'s configured default index")
+            getattr(elastic, _DEFAULT_INDEX_ATTR[verb]), f"{verb}'s configured default index")
     if verb != "esql":
         return None
     body = params.get("query")

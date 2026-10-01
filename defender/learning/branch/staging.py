@@ -38,9 +38,10 @@ import urllib.parse
 from collections.abc import Iterable, Mapping, Sequence
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
+from pydantic import SkipValidation
 
 from defender import _yaml
 from defender._clock import now_iso
@@ -49,10 +50,6 @@ from defender._io import Bound, bind, guarded_mkdir, open_guarded, write_guarded
 from defender._run_paths import artifact_file
 from defender.runtime.branch._family import World, world_token_for
 from defender.scripts.adapters._stub_transport import docker_exec_curl, split_status
-from defender.scripts.adapters.elastic_adapter import (
-    config_from as elastic_config_from,
-    config_path as elastic_config_path,
-)
 from defender.scripts.adapters.confinement import (
     VIEW_NAMESPACE,
     _reach_ok,
@@ -61,6 +58,9 @@ from defender.scripts.adapters.confinement import (
     world_view,
 )
 from defender.scripts.adapters.faults import TransportFault
+
+#: The tenant system the door's transport calls are made for — which docker context they run on.
+_ELASTIC = "elastic"  # lint-shippable: ok — the record's field name (#1107)
 
 #: The suffix that turns a world's view name into the index its injected documents live in.
 #: ONE spelling, because the alias is built OVER it and the guard is applied TO it: two
@@ -210,7 +210,9 @@ def _derived_names(pattern: str, token: str) -> tuple[str, str]:
     return view, inject
 
 
-def check_configured_patterns(patterns: Sequence[str]) -> tuple[str, ...]:
+def check_configured_patterns(
+    patterns: Sequence[str], *, labels: Sequence[str] = (),
+) -> tuple[str, ...]:
     """`patterns`, or the refusal every staged world in this episode would have hit.
 
     ASKED AT STARTUP, before the questioner is paid for. A configured corpus pattern is
@@ -222,6 +224,13 @@ def check_configured_patterns(patterns: Sequence[str]) -> tuple[str, ...]:
 
     Two patterns whose view stems collide are refused for the same reason `stage_world` refuses
     two overlay keys that collide: one alias cannot serve two corpora.
+
+    `labels` names the config key each pattern came from, in the same order, so a refusal can say
+    which line of the tenant's file to fix (a pattern with no label is named as itself). A bare
+    `*` is refused FIRST and by name (#1107): it reaches every index the cluster serves, so
+    confining a world to "the configured corpus" would confine it to nothing — and it is the one
+    value a record can carry (the resolver validates presence only) that no staged name algebra
+    then notices is wider than the corpus.
     """
     # AN EMPTY TUPLE IS NOT A CONFIGURATION, and it took the happy path through every check
     # below by having nothing to iterate. `_probe_cluster` then returns early on it too, so the
@@ -237,7 +246,14 @@ def check_configured_patterns(patterns: Sequence[str]) -> tuple[str, ...]:
             "the elastic adapter's config (or in the environment) before branching")  # lint-shippable: ok — the per-vendor config the reader beside this one loads  # noqa: E501
     probe = "probe"
     stems: dict[str, str] = {}
-    for pattern in patterns:
+    for position, pattern in enumerate(patterns):
+        if pattern.strip() == "*":
+            named = labels[position] if position < len(labels) else "a configured corpus pattern"
+            raise StagingRefused(
+                f"{named} is a bare `*`, which would widen confinement to every index the "
+                "cluster serves — a world is a difference on the corpora the deployment "
+                "configures, and `*` names all of them; set it to the tenant's own corpus "
+                "pattern (a trailing wildcard such as `acme-*`)")
         _derived_names(pattern, probe)
         stem = _view_stem(pattern)
         if stem in stems:
@@ -755,7 +771,8 @@ class _Door:
         url = f"{self.base_url.rstrip('/')}{path}"
         returncode, stdout, stderr = self.transport(
             self.ctx, self.container, url, method=method, body=body,
-            timeout_sec=self.timeout_sec, insecure=self.insecure, auth=self.auth)
+            timeout_sec=self.timeout_sec, insecure=self.insecure, auth=self.auth,
+            system=_ELASTIC)
         if returncode != 0:
             raise TransportFault(
                 f"docker exec curl failed ({returncode}) for {method} {url}: {stderr.strip()}")
@@ -942,79 +959,63 @@ def write_door(*, ctx: Any = None, container: str, transport: Any = docker_exec_
                  timeout_sec=timeout_sec, insecure=insecure, auth=auth)
 
 
-#: The `config.env` keys this door reads, so an environment that names one the FILE omits still
-#: steers it. Named rather than derived from the file's contents: "which keys the door needs" is
-#: a property of the door, and deriving it from whatever the file happens to hold is what made
-#: an env override depend on the file already agreeing with it.
-_DOOR_CONFIG_KEYS = ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY")  # lint-shippable: ok — the per-vendor config keys the read adapter loads  # noqa: E501
-
-
 @model(frozen=True)
 class _HostContext:
-    """The two fields `docker_exec_curl` reads off a context, for a caller that has no run.
+    """The fields `docker_exec_curl` reads off a context, for a caller that has no run.
 
     The launcher opens this door BEFORE any episode dir, run dir or `VerbContext` exists — the
-    sweep is step one — so there is nothing to borrow. Only `env` and `defender_dir` are
-    supplied, which is all the transport touches; anything else a verb context carries would be
-    a field this frame would have to invent, and an invented run identity is worse than an
-    absent one.
+    sweep is step one — so there is nothing to borrow. Supplied are `env` (the child's
+    environment), `defender_dir` (the code tree it is rooted in) and `tenant` (the episode
+    tenant's record, where the transport finds the engine's docker context and any secret);
+    anything else a verb context carries would be a field this frame would have to invent, and
+    an invented run identity is worse than an absent one.
     """
 
     env: dict[str, str]
     defender_dir: Path
-    #: The episode tenant's `settings/` folder (#1106) — where the door reads the cluster's
-    #: address. Never looked up: the launcher resolved the tenant and hands it in.
-    settings_dir: Path
+    #: The episode tenant's record (#1107). Never looked up: the launcher resolved the tenant
+    #: and hands it in.
+    tenant: Annotated[Any, SkipValidation]
 
 
-def host_context(settings_dir: Path) -> _HostContext:
-    """The launcher's context for the door, before any run exists: the process env, the code
-    tree the transport's child env is rooted in, and the episode tenant's settings folder."""
+def host_context(tenant: Any, env: Mapping[str, str]) -> _HostContext:
+    """The launcher's context for the door, before any run exists: the door child's environment
+    (built ONCE by the launcher's entry point, provider keys scrubbed — this frame reads no
+    process state), the code tree the transport's child env is rooted in, and the episode
+    tenant's record."""
     from defender._paths import PATHS
 
-    return _HostContext(env=dict(os.environ), defender_dir=PATHS.defender_dir,
-                        settings_dir=Path(settings_dir))
+    return _HostContext(env=dict(env), defender_dir=PATHS.defender_dir, tenant=tenant)
 
 
 def write_door_from_env(ctx: Any, *, transport: Any = docker_exec_curl) -> _Door:
-    """The write door this deployment's configuration describes.
+    """The write door this tenant's record describes.
 
     ONE reading of where the cluster is, shared by the sweep, staging and teardown, so a
     deployment that moves does not move for one of the three. The URL, the container and the
-    TLS posture come from the same `config.env` the read adapter loads and are overridden by
-    the environment with the same precedence — a caller steering the deployment steers both
-    doors at once, which is what keeps the staged names and the read of them in one place.
+    TLS posture come from the record's corpus-engine view — the same view the
+    read adapter loads — and from nothing else: not the environment, not the file as it is now.
+    A tenant with no usable corpus-engine part (`tenant_settings.elastic_problem`) is refused here with the launcher's
+    own wording, though the launcher has already asked.
 
     The credential is expanded INSIDE the container, exactly as the read path does it: the
     `${…}` reaches the container's own shell, so the secret is never on this host's argv.
 
-    `ctx` carries the episode tenant's `settings_dir` (#1106) — a `VerbContext`, or the
-    launcher's `host_context(settings_dir)` before any run exists. The config is read from
-    THAT folder and nowhere else.
+    `ctx` is a `VerbContext`, or the launcher's `host_context(tenant, env)` before any run
+    exists; either carries the episode tenant's record.
     """
-    # `is not None`, never `or` (`defender/CLAUDE.md`: "Prefer `is not None` over `or`"), and
-    # here it is load-bearing rather than stylistic: `_HostContext(env={}, ...)` is the ordinary
-    # construction for a hermetic caller, and an empty-but-PRESENT env read as absent sent this
-    # door to the developer's real shell for `ELASTICSEARCH_URL` while `write_door` below was
-    # handed the caller's own empty-env ctx — the config half and the transport half addressing
-    # two different clusters, which is the failure the paragraph below says this function exists
-    # to prevent.
-    ctx_env = getattr(ctx, "env", None)
-    env: dict[str, str] = dict(os.environ if ctx_env is None else ctx_env)
-    # THE READ ADAPTER'S OWN PARSE, AND ITS OWN PRECEDENCE — one call rather than a third copy
-    # of the loop. `expected` is what makes the environment reach a key the file does not carry:
-    # a deployment whose `config.env` is absent or trimmed had its `ELASTICSEARCH_URL` ignored
-    # and staged against `https://localhost:9200` with TLS verification off, while every
-    # sibling's READ adapter queried the cluster the operator named — a family staged on one
-    # cluster and measured on another, which is invisible from either side.
-    values = elastic_config_from(
-        elastic_config_path(Path(ctx.settings_dir)), env, expected=_DOOR_CONFIG_KEYS)
+    from defender.runtime.tenant_settings import elastic_problem
+
+    elastic = ctx.tenant.elastic  # lint-shippable: ok — the record's field name (#1107)
+    problem = elastic_problem(elastic)  # lint-shippable: ok — the record's field name (#1107)
+    if problem is not None:
+        raise StagingRefused(problem)
     return write_door(
         ctx=ctx,
-        container=env.get("SOC_PLAYGROUND_ES_CONTAINER", "elasticsearch"),  # lint-shippable: ok — the container the read adapter execs into
+        container=elastic.es_container,  # lint-shippable: ok — the record's field name (#1107)
         transport=transport,
-        base_url=values.get("ELASTICSEARCH_URL", "https://localhost:9200"),  # lint-shippable: ok — the per-vendor config key
-        insecure=values.get("ELASTIC_SSL_VERIFY", "false").lower() != "true",  # lint-shippable: ok — the per-vendor config key
+        base_url=elastic.url,  # lint-shippable: ok — the record's field name (#1107)
+        insecure=elastic.ssl_verify.lower() != "true",  # lint-shippable: ok — the record's field name (#1107)
         auth="elastic:${ELASTIC_PASSWORD}")  # lint-shippable: ok — expanded inside the container, as the read path does it
 
 

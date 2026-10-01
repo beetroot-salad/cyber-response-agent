@@ -3,78 +3,49 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
 from defender._io import write_guarded
 from defender._model import model
-from defender._paths import process_defender_dir
 from defender._run_paths import RunPaths
-from defender.run_common import run_env
 from defender.runtime import run_end
-from defender.runtime.verbs import VerbContext
+from defender.runtime.run_tenant import RunTenant
+from defender.runtime.verbs import SETTINGS_POINTER, VerbContext, redact_settings_path
 from defender.scripts.case_history import case_ticket
 from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters.faults import TransportFault
+from defender.scripts.adapters.faults import AdapterFault, TransportFault
 
 _logger = logging.getLogger(__name__)
 
 SYSTEM = "case-history"
 PREFIX = "CASE_HISTORY"
 _CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
+_CONFIG_FILE = f"{SETTINGS_POINTER}systems/{SYSTEM}/config.env"
 
 
-def _verb_context(settings_dir: Path) -> VerbContext:
-    """The transport's context: the process's code tree (`process_defender_dir`, the child
-    env's PATH/PYTHONPATH root and nothing else) and the run's tenant `settings/` folder, which
-    every leg is handed by `run.py` (#1106) and never finds from the code tree."""
-    defender_dir = process_defender_dir()
-    run_dir = Path.cwd()
-    return VerbContext(
-        defender_dir=defender_dir, run_dir=run_dir, env=run_env(defender_dir, run_dir),
-        settings_dir=Path(settings_dir),
-    )
-
-
-def _load_config(settings_dir: Path) -> dict[str, str] | None:
-    """The case-history store's config from the run's tenant folder."""
-    path = transport._config_path(_verb_context(settings_dir), SYSTEM)
-    if not path.exists():
-        _logger.warning(f"config not found: {path}; skipping ticket write")
-        return None
-    raw = transport._parse_env_file(path)
-    cfg: dict[str, str] = {}
-    for key in _CONFIG_KEYS:
-        val = os.environ.get(f"{PREFIX}_{key}") or raw.get(f"{PREFIX}_{key}")
-        if val:
-            cfg[key] = val
-    missing = [k for k in _CONFIG_KEYS if not cfg.get(k)]
-    if missing:
-        _logger.warning(f"missing config keys {[f'{PREFIX}_{k}' for k in missing]} in {path}; skipping")
-        return None
-    if not cfg["TIMEOUT_SEC"].isdigit():
-        _logger.warning(f"{PREFIX}_TIMEOUT_SEC={cfg['TIMEOUT_SEC']!r} is not a non-negative "
-              f"integer in {path}; skipping")
-        return None
-    return cfg
+def _verb_context(tenant: RunTenant, defender_dir: Path, run_dir: Path,
+                  env: Mapping[str, str]) -> VerbContext:
+    """The transport's context, built wholly from what `run.py` handed this leg: the run's record
+    (its settings and the case-history entry resolved from them when the run began), the code
+    tree, the run dir and the run's environment. Nothing here finds its own location or reads the
+    process (#1107): the same record a lead-zero or query call reads is the one this writes by."""
+    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env, tenant=tenant)
 
 
 def _request(
     config: dict[str, str], method: str, path: str, body: dict | None = None,
-    *, settings_dir: Path,
+    *, ctx: VerbContext,
 ) -> tuple[str | None, str]:
-    """One call to the store. `settings_dir` is the run's tenant folder — the one `config` was
-    read from — handed in by the caller, so the transport's verb context names that tenant."""
+    """One call to the store, over the context the caller built from the run's record."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     try:
         rc, stdout, stderr = transport.docker_exec_curl(
-            _verb_context(settings_dir), bastion, url, method=method,
-            body=body, timeout_sec=timeout,
+            ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=SYSTEM,
         )
     except TransportFault as e:
         return None, f"transport error: {e.detail}"
@@ -86,25 +57,44 @@ def _request(
 
 @model(frozen=True)
 class TicketWriterDeps:
-    #: Both are handed the run's tenant `settings/` folder (#1106): `load_config` reads the
-    #: case-history store's address from it, and `request` (keyword `settings_dir`) builds the
-    #: transport's verb context over the same folder.
-    load_config: Callable[[Path], dict[str, str] | None] = _load_config
+    #: The one seam: the call to the store. The store's address is read from the run's record, not
+    #: through a seam of its own (#1107), so a test steers WHERE the writer goes by the tenant's
+    #: `config.env`, and WHAT the store answers through this.
     request: Callable[..., tuple[str | None, str]] = _request
 
 
 DEFAULT_DEPS = TicketWriterDeps()
 
 
+def _config_of(ctx: VerbContext) -> dict[str, str]:
+    """The case-history store's config from the run's record — `ConfigFault` (an `AdapterFault`)
+    when it is absent, on another access method, or missing or blank on a required key."""
+    return transport.load_config(ctx, SYSTEM, PREFIX, _CONFIG_KEYS)
+
+
+def _reason_of(fault: BaseException, tenant: RunTenant) -> str:
+    """A failure's receipt reason: the fault's own text, the host's settings folder named by the
+    pointer instead of the path, and the file the fix lives in said up front — so the text names
+    the file even for a fault (a bad timeout) whose own wording does not."""
+    text = redact_settings_path(str(fault), tenant.settings)
+    return f"{_CONFIG_FILE}: {text}"
+
+
 def open_case_ticket(
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, settings_dir: Path,
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
+    defender_dir: Path, env: Mapping[str, str],
 ) -> None:
-    """Open the case for this run. `settings_dir` is the run's tenant's folder (#1106): the
-    store's address (`case-history/config.env`) and the payload's shape (`mapping.yaml`) are
-    both that tenant's."""
+    """Open the case for this run. `tenant` is the run's record (#1107): the store's address
+    (`case-history/config.env`) and the payload's shape (`mapping.yaml`) are both that tenant's,
+    resolved once when the run began. `defender_dir` and `env` are run.py's — the code tree and
+    the run's environment — never found from the process. The open leg writes no receipt, on any
+    path: a store that cannot be reached is a warning here and an error receipt at the record."""
     try:
-        config = deps.load_config(settings_dir)
-        if config is None:
+        ctx = _verb_context(tenant, defender_dir, run_dir, env)
+        try:
+            config = _config_of(ctx)
+        except AdapterFault as e:
+            _logger.warning(f"open: {_reason_of(e, tenant)}; skipping ticket write")
             return
         alert_path = RunPaths(run_dir).alert
         if not alert_path.is_file():
@@ -112,8 +102,8 @@ def open_case_ticket(
             return
         alert = json.loads(alert_path.read_text(encoding="utf-8"))
         case_id = run_dir.name
-        payload = case_ticket.alert_to_open_payload(alert, case_id, settings_dir=settings_dir)
-        status, body = deps.request(config, "POST", "/tickets", payload, settings_dir=settings_dir)
+        payload = case_ticket.alert_to_open_payload(alert, case_id, mapping=tenant.ticket_mapping)
+        status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")
         elif status == "409":
@@ -139,7 +129,7 @@ _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 
 def _build_comment_payload(
-    run_dir: Path, case_id: str, truncated_by: str | None, settings_dir: Path,
+    run_dir: Path, case_id: str, truncated_by: str | None, mapping: case_ticket.CaseMapping | case_ticket.CaseTicketError,
 ) -> tuple[dict, str]:
     """The outbound `{author, body}` for `record_case_ticket` and its receipt word. §7 R10: an
     unreadable report takes the FIXED unreadable-branch sentence, never a second, bespoke
@@ -149,23 +139,23 @@ def _build_comment_payload(
     goes instead. Any other `CaseTicketError` (a bad mapping, a broken template) propagates
     to the caller's refusal branch — no POST, a warning and an `error` receipt (§7 R1/FAM-1)."""
     try:
-        rec = replace(case_ticket.read_case_record(run_dir, settings_dir=settings_dir),
-                      case_id=case_id)
+        rec = replace(case_ticket.read_case_record(run_dir, mapping=mapping), case_id=case_id)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return (case_ticket.escalation_comment_payload(truncated_by, settings_dir=settings_dir),
+            return (case_ticket.escalation_comment_payload(truncated_by, mapping=mapping),
                     RECEIPT_ESCALATED)
-        return case_ticket.unreadable_comment_payload(settings_dir=settings_dir), RECEIPT_COMMENTED
-    return case_ticket.case_record_to_comment(rec, settings_dir=settings_dir), RECEIPT_COMMENTED
+        return case_ticket.unreadable_comment_payload(mapping=mapping), RECEIPT_COMMENTED
+    return case_ticket.case_record_to_comment(rec, mapping=mapping), RECEIPT_COMMENTED
 
 
 def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded not re-derived
     config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
-    settings_dir: Path,
-) -> bool | None:
-    """Read the case back and answer whether a person has released it — `None` when that
-    cannot be established (the read failed, the reply is not a ticket object, or the mapping
-    cannot say what "released" is spelled).
+    ctx: VerbContext,
+) -> tuple[bool | None, str]:
+    """Read the case back and answer `(released, why_not)`: whether a person has released it —
+    `None` when that cannot be established (the read failed, the reply is not a ticket object, or
+    the mapping cannot say what "released" is spelled), with `why_not` the reason in the failing
+    check's own words (empty when it could be established).
 
     A person's close is a statement about the comments ON THE TICKET WHEN THEY CLOSED IT, so
     the writer looks before it appends and declines when the case is already released.
@@ -175,28 +165,32 @@ def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded 
     `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
     the direction that writes nothing. The released status's spelling is the mapping's, read
     through the same predicate the screen decides with (O5)."""
-    status, body = deps.request(config, "GET", f"/tickets/{quoted}", settings_dir=settings_dir)
+    status, body = deps.request(config, "GET", f"/tickets/{quoted}", ctx=ctx)
     if status is None or not status.startswith("2"):
-        _logger.warning(f"record {case_id}: could not read the case back ({status or 'transport error'}: "
-              f"{body}); not recording")
-        return None
+        why = f"could not read the case back ({status or 'transport error'}: {body})"
+        _logger.warning(f"record {case_id}: {why}; not recording")
+        return None, why
     try:
         ticket = json.loads(body)
     except json.JSONDecodeError:
-        _logger.warning(f"record {case_id}: the case read back is not JSON; not recording")
-        return None
+        why = "the case read back is not JSON"
+        _logger.warning(f"record {case_id}: {why}; not recording")
+        return None, why
     if not isinstance(ticket, dict):
-        _logger.warning(f"record {case_id}: the case read back is not a ticket object; not recording")
-        return None
+        why = "the case read back is not a ticket object"
+        _logger.warning(f"record {case_id}: {why}; not recording")
+        return None, why
     try:
-        return case_ticket.release_predicate(settings_dir).is_released(ticket)
+        return case_ticket.release_predicate(ctx.tenant.ticket_mapping).is_released(ticket), ""
     except case_ticket.CaseTicketError as e:
-        _logger.warning(f"record {case_id}: {e}; cannot tell whether the case is released; not recording")
-        return None
+        why = f"{e}; cannot tell whether the case is released"
+        _logger.warning(f"record {case_id}: {why}; not recording")
+        return None, why
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, settings_dir: Path,
+    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
+    defender_dir: Path, env: Mapping[str, str],
     key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
     """D2: the host RECORDS its investigation into the case rather than closing it — at most
@@ -227,69 +221,107 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     today's deployment keeps `case_id = run_dir.name`. Keyword-only, so a bare string in the
     second position cannot bind as `deps` and vanish into the catch-all. The key is the
     case's identity EVERYWHERE this write names it: the two paths, the receipt and the
-    rendered `{case_id}`."""
+    rendered `{case_id}`.
+
+    #1107 O6 — `tenant` is the run's record, `defender_dir` and `env` are run.py's. The #1047
+    no-verdict check runs BEFORE the config is read, so a budget- or store-cut run writes no
+    receipt whatever its tenant's config says, and every branch that writes no receipt first
+    unlinks any receipt already in the run dir (a link at that name is removed, never followed),
+    so a page never shows a ticket line this run did not write. Every other failure — no usable
+    config, a refused mapping, a store that cannot be reached or answers an error — writes an
+    `error` receipt whose `reason` is the failing check's own text with the host's settings
+    path redacted (`redact_settings_path`); `url` is null when there was no usable config to
+    name a store, and the store's address otherwise."""
+    case_id = key if key is not None else run_dir.name
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
-        config = deps.load_config(settings_dir)
-        if config is None:
-            return
-        case_id = key if key is not None else run_dir.name
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
+            _clear_receipt(run_dir)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
+            return
+        ctx = _verb_context(tenant, defender_dir, run_dir, env)
+        try:
+            config = _config_of(ctx)
+        except AdapterFault as e:
+            reason = _reason_of(e, tenant)
+            _logger.warning(f"record {case_id}: {reason}; not recording")
+            _write_receipt(run_dir, None, case_id, RECEIPT_ERROR, reason)
             return
         try:
             if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
                 payload, word = (
-                    case_ticket.escalation_comment_payload(truncated_by, settings_dir=settings_dir),
+                    case_ticket.escalation_comment_payload(
+                        truncated_by, mapping=tenant.ticket_mapping),
                     RECEIPT_ESCALATED)
             else:
                 payload, word = _build_comment_payload(
-                    run_dir, case_id, truncated_by, settings_dir)
+                    run_dir, case_id, truncated_by, tenant.ticket_mapping)
         except case_ticket.CaseTicketError as e:
             # The mapping (or a template in it) refused: no POST, but the receipt still says
             # so — a WARN, a receipt and a return on every arm that meant to call out.
-            _logger.warning(f"record {case_id}: {e}; not recording")
-            _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
+            reason = redact_settings_path(str(e), tenant.settings)
+            _logger.warning(f"record {case_id}: {reason}; not recording")
+            _write_receipt(run_dir, config, case_id, RECEIPT_ERROR, reason)
             return
-        _post_comment(run_dir, deps, config, case_id, payload, word, settings_dir)
+        _post_comment(run_dir, deps, config, case_id, payload, word, ctx)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
     run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
-    payload: dict, word: str, settings_dir: Path,
+    payload: dict, word: str, ctx: VerbContext,
 ) -> None:
     """The one write the host makes to a case: look (`_ticket_is_released`), then one
     `POST /tickets/{key}/comments`, then the receipt on every branch (fork F-L: a failed call
     never breaks the run and its outcome lands in the receipt)."""
     quoted = urllib.parse.quote(case_id, safe="")
-    released = _ticket_is_released(config, deps, case_id, quoted, settings_dir)
+    released, why_not = _ticket_is_released(config, deps, case_id, quoted, ctx)
     if released is None:
-        _write_receipt(run_dir, config, case_id, RECEIPT_ERROR)
+        _write_receipt(run_dir, config, case_id, RECEIPT_ERROR,
+                       redact_settings_path(why_not, ctx.tenant.settings))
         return
     if released:
         _logger.warning(f"record {case_id}: a person has already released this case; a new comment "
               "would go out under that release unseen — not recording")
-        _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED)
+        _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED,
+                       "a person has already released this case; no comment was added")
         return
-    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload,
-                                settings_dir=settings_dir)
+    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
     ok = status is not None and status.startswith("2")
     if not ok:
-        _logger.warning(f"record {case_id}: {status or 'transport error'}: {body}")
+        reason = f"{'HTTP ' + status if status else 'transport error'}: {body}"
+        reason = redact_settings_path(reason, ctx.tenant.settings)
+        _logger.warning(f"record {case_id}: {reason}")
     else:
+        reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
-    _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR)
+    _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
 
 
-def _write_receipt(run_dir: Path, config: dict[str, str], case_id: str, status: str) -> None:
+def _clear_receipt(run_dir: Path) -> None:
+    """Remove the run dir's receipt, if one is there, WITHOUT following a link at its name: a
+    record-step branch that writes no receipt must not leave an earlier run's (or a planted)
+    one for the page to show. `unlink` removes the link itself, never its target."""
+    try:
+        RunPaths(run_dir).ticket_write.unlink(missing_ok=True)
+    except OSError as e:
+        _logger.warning(f"could not clear the stale receipt: {e}")
+
+
+def _write_receipt(
+    run_dir: Path, config: dict[str, str] | None, case_id: str, status: str, reason: str | None,
+) -> None:
+    """@owns ticket_write receipt — `{key, status, url, ok, reason}`, the one shape the page
+    reads. `url` is null when there was no usable config to name a store; `reason` is null on a
+    success and the redacted failing text on every other status."""
     receipt = {
         "key": case_id,
         "status": status,
-        "url": f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}",
+        "url": (f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}" if config else None),
         "ok": status in _RECEIPT_OK,
+        "reason": reason,
     }
     try:
         # The run dir is the box's rw bind: the receipt goes through the alias-refusing seam

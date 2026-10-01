@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -10,7 +11,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import read_jsonl_rows
+from defender._io import read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
@@ -140,7 +141,7 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_and_mirror(run_dir: Path) -> list[Path]:
+def render_and_mirror(run_dir: Path, *, update_ticket: bool = False) -> list[Path]:
     """Render the run's page, and refuse a directory that is not a run.
 
     The store resolve is a PRECONDITION, not a data dependency: nothing on the page reads
@@ -153,7 +154,7 @@ def render_and_mirror(run_dir: Path) -> list[Path]:
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
     src = RunPaths(run_dir).runtime_html
-    src.write_text(render_runtime_page(run_dir), encoding="utf-8")
+    src.write_text(render_runtime_page(run_dir, update_ticket=update_ticket), encoding="utf-8")
     if not src.is_file():
         return []
     root = mirror_root()
@@ -410,7 +411,54 @@ def _render_policy_denials_section(run_dir: Path) -> str:
     )
 
 
-def render_runtime_page(run_dir: Path) -> str:
+RECEIPT_UNREADABLE = "receipt unreadable"
+
+
+def render_ticket_line(run_dir: Path) -> str:
+    """The page's one line about the case-ticket write (#1107 O6): the key, status and reason the
+    host's record step left in `ticket_write.json`, or nothing when it left no receipt.
+
+    The receipt lives in the run dir, which the box is root on while it runs, so it is read as
+    untrusted: only as a plain regular file (`read_guarded` — a link at that name is refused, never
+    followed, so a link to a secrets file shows none of the target), only if it is a JSON object
+    whose fields have the types the writer gives them, and every field that reaches the page is
+    escaped. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL is shown as
+    text, never as a link: nothing on the page sends the reader to an address a file named.
+    The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it wrote."""
+    path = RunPaths(run_dir).ticket_write
+    if not path.is_symlink() and not path.exists():
+        return ""
+    text, _refused = read_guarded(path)
+    receipt: object = None
+    if text is not None:
+        try:
+            receipt = json.loads(text)
+        except ValueError:
+            receipt = None
+    well_formed = (
+        isinstance(receipt, dict)
+        and isinstance(receipt.get("key"), str)
+        and isinstance(receipt.get("status"), str)
+        and isinstance(receipt.get("ok"), bool)
+        and (receipt.get("url") is None or isinstance(receipt.get("url"), str))
+        and (receipt.get("reason") is None or isinstance(receipt.get("reason"), str))
+    )
+    if not well_formed or not isinstance(receipt, dict):
+        return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
+    cls = "ticket-ok" if receipt["ok"] else "ticket-error"
+    parts = [f'ticket <code>{esc(receipt["key"])}</code>', esc(receipt["status"])]
+    if receipt.get("url"):
+        parts.append(f'<code>{esc(receipt["url"])}</code>')
+    if receipt.get("reason"):
+        parts.append(esc(receipt["reason"]))
+    return f'<p class="ticket-line {cls}">{" — ".join(parts)}</p>'
+
+
+def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+    """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
+    and read from no file in the run dir (the box can write every one of them): only a run that
+    was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
+    planted, shows nothing on a run that never meant to write a ticket."""
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
@@ -525,6 +573,7 @@ def render_runtime_page(run_dir: Path) -> str:
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
+    {render_ticket_line(run_dir) if update_ticket else ""}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
@@ -541,14 +590,17 @@ def render_runtime_page(run_dir: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: visualize_run.py <run_dir>", file=sys.stderr)
+    args = argv[1:]
+    update_ticket = "--update-ticket" in args
+    args = [a for a in args if a != "--update-ticket"]
+    if len(args) != 1:
+        print("usage: visualize_run.py <run_dir> [--update-ticket]", file=sys.stderr)
         return 64
-    run_dir = Path(argv[1]).resolve()
+    run_dir = Path(args[0]).resolve()
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    mirrored = render_and_mirror(run_dir)
+    mirrored = render_and_mirror(run_dir, update_ticket=update_ticket)
     print(f"wrote {RunPaths(run_dir).runtime_html}")
     for dest in mirrored:
         print(f"mirrored {dest}")

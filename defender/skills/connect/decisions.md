@@ -4,11 +4,12 @@ The irreversible calls behind this skill, for whoever edits it next. Each
 is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
 `adapter.md`, and `mcp.md`; this is just the *why*, kept short.
 
-- **Secrets live in the environment; the skill never handles values.**
-  `config.env` holds non-secret config and the *names* of the env vars
-  that hold secrets. The transport reads a secret only from the run's
-  scrubbed `ctx.env` by the name `config.env` declares — never from
-  `config.env` itself, never from the driver's `os.environ` — so a
+- **Secrets live in the tenant's `secrets.env`; the skill never handles values.**
+  `config.env` holds non-secret config and `*_SECRET_REF` keys that name an
+  entry of the tenant's host-only `settings/secrets.env`. The transport
+  resolves a secret only through the run's record by a name `config.env`
+  declares and hands it to the one child that needs it — never in
+  `config.env`, never in argv, never from the driver's own process — so a
   generated adapter can't improvise the credential boundary and can't leak
   a provider key into a forked child. An LLM context is not an auditable
   credential store — this is the single most important property of the layer.

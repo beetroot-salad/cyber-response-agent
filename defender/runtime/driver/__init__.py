@@ -673,7 +673,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
                 catalog=correlation_catalog, dispatch=correlation,
-                settings_dir=tenant.settings,
+                tenant=tenant,
             ))
 
     agent = build_agent(
@@ -686,9 +686,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
-        # The run's tenant folder rides on MAIN's deps so every gather lead it dispatches
-        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3.
-        settings_dir=tenant.settings,
+        # The run's tenant record rides on MAIN's deps so every gather lead it dispatches
+        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3, #1107.
+        tenant=tenant,
     )
 
     t0 = time.time()
