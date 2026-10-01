@@ -81,6 +81,14 @@ def _shown(value: object) -> str:
     return text if len(text) <= _SHOWN_LIMIT else f"{text[:_SHOWN_LIMIT]}… ({len(text)} chars)"
 
 
+def _entry_shown(folder: Path, rel: str) -> str:
+    """A path inside a knowledge folder as a refusal names it: `folder` (the operator's own
+    spelling) as it is, and `rel` — names the tenant's repo chose — escaped and bounded by
+    `_shown` when any character of it is not printable (a newline, an escape sequence, an
+    undecodable byte), so a crafted file name cannot rewrite the operator's terminal."""
+    return str(folder / rel) if rel.isprintable() else f"{folder}/{_shown(rel)}"
+
+
 class TenantRefused(Exception):
     """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
     and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
@@ -548,7 +556,8 @@ def _check_knowledge(
     stray = sorted(name for name in top.entries if name not in TOP_LEVEL_ALLOWED)
     if stray:
         raise TenantRefused(
-            f"{folder / stray[0]} is not allowed at the top of a tenant's knowledge folder — "
+            f"{_entry_shown(folder, stray[0])} is not allowed at the top of a tenant's "
+            "knowledge folder — "
             f"it may hold only {sorted(TOP_LEVEL_ALLOWED)}; keep anything else (an .env, "
             "secrets) out of the data root")
     for name in (SETTINGS_HALF, AGENT_HALF):
@@ -602,11 +611,11 @@ def _refuse_links_and_special_files(bound: _real_io.Bound, folder: Path, half: s
         current = pending.pop()
         listed = bound.under(current).entries()
         if listed.entries is None:
-            raise TenantRefused(f"{folder / current} could not be checked for links: "
+            raise TenantRefused(f"{_entry_shown(folder, current)} could not be checked for links: "
                                 f"{listed.reason or 'it vanished during the check'}")
         for name in sorted(listed.entries):
             rel = f"{current}/{name}"
-            entry = folder / rel
+            entry = _entry_shown(folder, rel)
             found = _real_io.stat_entry(bound, rel)
             if found.st is None:
                 raise TenantRefused(f"{entry} could not be checked: "
