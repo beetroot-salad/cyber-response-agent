@@ -1200,6 +1200,23 @@ demands:
         did not sanction is foreign": the one-tenant guard admits exactly the name knowledge in a
         rowless own folder (MF1 (a), human, 71-resolutions-addendum;
         d7_guard_admits_only_the_placed_knowledge_in_a_rowless_own_folder).
+  # PHASE-E MINT (human, PR #1157): J26's shape 1 contradicted accept_refuses_knowledge_not_real's
+  # tenant-dir-symlink cell; the human ruled #1120 wins.
+  - id: x1078_s7_j26_symlinked_tenant_folder
+    kind: survival
+    form: clause
+    binds: [accept_tenant, branch.cli.main, "knowledge_dir.domain.distinguished[tenant-dir-symlink]"]
+    outcome:
+      nl: >-
+        Supersedes SHAPE 1 of pass-A demand s7_j26_symlinked_tenant_folder_accepted (test
+        test_s7_j26_symlinked_tenant_folder_accepted): a launch from a source under <root>/T where
+        <root>/T itself is a symlink to a folder elsewhere getting past the launcher's checks. Under
+        #1120 the launcher accepts the source's tenant through accept_tenant, whose step 3 refuses a
+        knowledge/ that does not resolve to <root>/T/knowledge (accept_refuses_knowledge_not_real,
+        cell tenant-dir-symlink); the human ruled #1120 wins (PR #1157). The pass-A test's shape-1
+        leg now asserts that refusal (no sibling started, the refusal naming <root>/T/knowledge);
+        tenant_of_run_dir's resolved comparison over that shape, shape 2 (<root>/T/runs linked:
+        accepted) and the old-layout control stand in pass-A unchanged.
   # ======================================================================================
   # (6) §7-fold MINTS (47-dc2-delta.md "Minted demands"; MF1 and NF2 decided in 71) — the
   #     adopt path's own demands. x1078_s7_j08_rowless_own_folder, the fifth, closes block (5).
@@ -3386,6 +3403,7 @@ handoff:
   forks:
     # ---- HUMAN decisions: 15-design-corrections (H1-H3), §7 (70-resolutions: M1-M11, N9, N12, DC1, DC2), §7 addendum (71: MF1)
     - "H1 (design-refuted seam, 10-brief): fold the corrections in and continue; no kick-back to discuss-issue. resolved_by: human"
+    - "J26-vs-tenant-dir-symlink (phase E, PR #1157): pass-A's s7_j26 shape 1 (a launch under a symlinked <root>/T gets past the launcher) contradicted accept_refuses_knowledge_not_real's tenant-dir-symlink cell, while the 13d claim listed J26 as contract-unchanged. #1120 wins: the symlinked tenant folder stays refused; superseding entry x1078_s7_j26_symlinked_tenant_folder; the pass-A test's shape-1 leg asserts the refusal, its other legs unchanged. resolved_by: human"
     - "H2 (closes 20-demands F16 and brief R2): piece 1 re-homes the ~98 lab-reaching test files onto knowledge/tenant-fixture under a tmp data root through their ~10 helper chokepoints (replay harness drive first); no test-only survival of tenant_dir / default_tenants_root / entry_tenant* / --tenants-root; O3's census strict; the 58 path-only files may read the lab by path until D9 step 7. Graph: o10_tests_need_no_tenant_repo narrowed; replay_harness -> tenant_fixture edge. resolved_by: human"
     - "H3 (closes 20-demands F3 and brief R4): absorb TenantPaths fully; the four pre-acceptance sites get owners that are not Tenant (HOW decided at §7 as M4: a private layout class); J03 and O11a survive in its constructor; the pass-A demands binding TenantPaths (and J44's discharging test) are re-bound by explicit superseding entries — the 21 x1078_* clauses (20 + x1078_s7_j08_rowless_own_folder). resolved_by: human"
     - "DC1 (design change adopted at §7 by root-cause questioning; 70-resolutions; issue #1120 issuecomment-5873851696; claim DC1): setup applies only folder-intrinsic rules, never the version-relative grant-gap rule; a clean re-run is silent and writes nothing; check, tenant CI and (later) run start report the gap; drops A1's 'setup refuses a gap'. Dissolves M2 (and M1 with DC2). Graph: grant_census.access[setup] = [tables-load]; d7_setup_runs_acceptance_and_check's gap cell flips (setup exit 0, check exit 1); d7_setup_rerun_is_silent_and_writes_nothing gains the DC1 cell; setup -> tenant.check edge withdrawn. resolved_by: human REFINED by V1 (human, §7-verify, 73-resolutions-verify): setup refuses anything that would make a run refuse — the lead-zero agreement joins tables-load in setup (first run and re-run); a grant gap still passes (runs proceed with it). grant_census.access[setup] = [tables-load, lead-zero-agreement]. EXTENDED by V10 (human, 73 round 2): an all-withheld table (gather granted nothing) is setup's refusal too; grant_census.access[setup] = [tables-load, lead-zero-agreement, gather-granted]; check keeps accepting it (M6). SUPERSEDED IN FORM by V14 (human, 73 round 3): setup carries no rule list of its own — it calls run start's own readiness function (grant_census.access[setup] = [run-start-readiness]), so a table granting gather only health-check rows (92r2 #1) is setup's refusal too; the gap stays check's. STATED by V18 (human, 73 round 4): setup = run start's own readiness function + the folder rules, the settings files' parse (mapping.yaml included) among them — DC1's folder-intrinsic 'tables load' survives there for the file run start does not read."

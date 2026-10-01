@@ -335,15 +335,23 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     (base == TenantPaths(root, T).runs.resolve()), and a launch from it gets past that check; an
     old-layout base still resolves outside <root>/T/runs and is refused.
 
+    SHAPE 1's LAUNCH IS SUPERSEDED by #1120 (human, PR #1157; spec_graph_1120-piece1.yaml
+    x1078_s7_j26_symlinked_tenant_folder): the launcher accepts the source's tenant through
+    accept_tenant, which refuses a `<root>/T` linked elsewhere because its knowledge/ does not
+    resolve to `<root>/T/knowledge` (accept_refuses_knowledge_not_real). tenant_of_run_dir
+    still resolves both sides over that shape; the launch is refused with the owner's message
+    verbatim, nothing spent and nothing written. Shape 2 and the old-layout control are
+    unchanged.
+
     KNOWN LIMIT, not pinned and not fixed here: a fork of a run MATERIALIZED through a symlinked
     <root>/T/runs still fails the pre-existing C67 store check — its case pointer names the store
     beside the unresolved base, while open_source_store re-derives it beside the resolved one —
     so that shape stays unbranchable. Shape 2 below therefore builds its source at the resolved
     base, which keeps the location check the only question this test asks.
 
-    Two data roots, one per shape: `<root>/T` linked, and `<root>/T/runs` linked. Each launch
-    must get past the location check (the siblings are started)."""
-    _episodes_root(tmp_path, monkeypatch)
+    Two data roots, one per shape: `<root>/T` linked, and `<root>/T/runs` linked. Shape 2's
+    launch must get past the location check (the siblings are started)."""
+    episodes = _episodes_root(tmp_path, monkeypatch)
     # shape 1: <root>/T is a symlink to a real tenant folder elsewhere
     real_tenant = tmp_path / "real-tenant-folder"
     real_tenant.mkdir()
@@ -353,9 +361,13 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     _base, src = H.tenant_source(data_root, TID, row=False)
     assert H.tenant_of_run_dir(src) == TID
     assert H.tenant_of_run_dir(src.resolve()) == TID
+    owner = H.owner_refusal(H.accept, data_root, TID)
+    assert str(data_root / TID / "knowledge") in str(owner), owner
+    before = {data_root: H.census(data_root), real_tenant: H.census(real_tenant)}
     result, spawn, agent = _launch(src)
-    assert agent.calls > 0, f"<root>/T as a symlink was refused: {result!r}"
-    assert spawn.launches, f"<root>/T as a symlink started no sibling: {result!r}"
+    _assert_refused_writing_nothing(result, owner=owner, episodes=episodes, roots=before,
+                                    agent=agent)
+    assert not spawn.launches, f"<root>/T as a symlink started a sibling: {result!r}"
 
     # shape 2: <root>/T is real, <root>/T/runs is a symlink
     root2 = tmp_path / "data-2"
