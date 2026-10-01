@@ -16,7 +16,6 @@ from functools import partial
 from defender._tenant import TenantId, is_valid_tenant_id
 
 from .fakes import (
-    InMemoryAudit,
     InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
@@ -51,8 +50,7 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         if not is_valid_tenant_id(tenant):
             raise ValueError(f"not a tenant id: {tenant!r}")
     secrets = InMemorySecrets()
-    audit = InMemoryAudit()
-    store = InMemoryStore(clock, audit)
+    store = InMemoryStore(clock)
     now = clock()
     _seed(store, secrets, tenants[0], now)
     for n, tenant in enumerate(tenants[1:], start=9):
@@ -67,11 +65,10 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         learning_jobs=store,
         lessons=store,
         systems=store,
+        writes=store,
         secrets=secrets,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
-        audit=audit,
-        clock=clock,
     )
 
 

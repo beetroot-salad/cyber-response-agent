@@ -8,21 +8,30 @@ Vocabulary follows #1131: "investigation" in the public API ("run" stays the int
 `status` is the execution lifecycle, distinct from `disposition`, the outcome
 (`docs/platform-design.md` §2.3).
 
-Two shapes are closed at the boundary, in both directions, so nothing past it has to handle
-them: every moment is timezone-aware (`AwareDatetime`; a time without an offset is a 422, never a
-naive value compared against an aware one), and every record id, sent or served, matches
-`RECORD_ID_PATTERN`. On the way in a violation is the caller's 422. On the way out the record
-cannot even be built: a store that reads a row breaking its promise (`ports.py`) fails as it
-builds the record, a 500, rather than serving an id the API could not address again or put
-safely into a `Location`.
+Two shapes are closed by one type each, used on EVERY way data crosses the boundary — a path,
+a query, a body, a cursor (`pages.py`), and a record the store answers — so nothing past it has
+to handle them:
+
+- every moment is an `Instant`: timezone-aware (a time without an offset is refused, never a
+  naive value compared against an aware one), never a bare number (`20260928` is not read as
+  seconds since 1970), and normalized to UTC, so one instant has one spelling wherever it is
+  compared, digested or served;
+- every record id is a `RecordId`, matching `RECORD_ID_PATTERN`.
+
+On the way in a violation is the caller's 422. On the way out the record cannot even be built: a
+store that reads a row breaking its promise (`ports.py`) fails as it builds the record, a 500,
+rather than serving an id the API could not address again or put safely into a `Location`.
+(The framework does not re-check a record a route returns; the check is the record's own, at
+construction.)
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from defender._clock import as_utc
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
@@ -36,7 +45,34 @@ RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 
 #: The id a caller mints once per user action, so a retried or double-clicked create
 #: returns the record the first attempt made.
-ClientRequestId = Annotated[str, Field(min_length=1, max_length=200)]
+ClientRequestId = Annotated[str, Field(
+    min_length=1, max_length=200,
+    description="Minted once per user action. Repeating the request with it answers the record "
+                "that request created; a request answered with an investigation already live "
+                "created nothing, so repeating it is a new request.",
+)]
+
+
+def _not_a_number(value: object) -> object:
+    """Refuse a number where a moment is due: pydantic's lax datetime reads one as seconds since
+    1970, so a compact date like `20260928` would silently become a time in 1970."""
+    if isinstance(value, bool | int | float):
+        raise ValueError("a moment is an RFC 3339 date-time, not a number")
+    if isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return value
+        raise ValueError("a moment is an RFC 3339 date-time, not a number")
+    return value
+
+
+#: A moment, as every channel carries it: aware, never a bare number, and in UTC.
+Instant = Annotated[AwareDatetime, BeforeValidator(_not_a_number), AfterValidator(as_utc)]
+
+#: A credential's field name: it reaches the audit detail, so it is plain ASCII that any audit
+#: store accepts — never a NUL or a lone surrogate that would fail the audit write.
+CredentialKey = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")]
 
 
 class _Request(BaseModel):
@@ -52,9 +88,9 @@ class AlertSummary(BaseModel):
     title: str
     severity: str | None
     rule: str | None
-    fired_at: AwareDatetime = Field(description="When the vendor says the alert fired.")
-    changed_at: AwareDatetime = Field(description="When the vendor last changed the ticket.")
-    received_at: AwareDatetime = Field(description="When we pulled it; our own clock.")
+    fired_at: Instant = Field(description="When the vendor says the alert fired.")
+    changed_at: Instant = Field(description="When the vendor last changed the ticket.")
+    received_at: Instant = Field(description="When we pulled it; our own clock.")
 
 
 class Alert(AlertSummary):
@@ -71,9 +107,9 @@ class Investigation(BaseModel):
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
     cost_usd: float = Field(description="Model cost so far; final once the status is terminal.")
-    created_at: AwareDatetime
-    started_at: AwareDatetime | None = None
-    finished_at: AwareDatetime | None = None
+    created_at: Instant
+    started_at: Instant | None = None
+    finished_at: Instant | None = None
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",
@@ -102,8 +138,8 @@ class LearningJob(BaseModel):
     )
     stage: str | None = None
     status_detail: str | None = Field(default=None, description="A skip reason or error summary.")
-    created_at: AwareDatetime
-    finished_at: AwareDatetime | None = None
+    created_at: Instant
+    finished_at: Instant | None = None
 
 
 class LearningJobCreate(_Request):
@@ -140,15 +176,19 @@ class System(SystemSettings):
 
 
 class SystemPut(_Request):
+    """The whole record: a PUT replaces it, so NO field has a default — a default would silently
+    reset whatever the caller left out (re-enable a disabled system, erase its settings)."""
+
     kind: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
-    enabled: bool = Field(description="Required: a PUT replaces the whole record, so a default "
-                          "would silently re-enable a system the tenant disabled.")
-    settings: dict[str, SettingValue] = Field(default_factory=dict)
+    enabled: bool
+    settings: dict[str, SettingValue]
 
 
 class CredentialsPut(_Request):
-    credentials: dict[str, str] = Field(min_length=1)
+    """The whole credential set, replaced; no field has a default."""
+
+    credentials: dict[CredentialKey, str] = Field(min_length=1)
 
 
 class SystemCheck(BaseModel):
