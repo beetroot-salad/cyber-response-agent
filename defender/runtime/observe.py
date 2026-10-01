@@ -20,7 +20,7 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
-from defender._io import guarded_mkdir, json_safe, open_guarded, write_guarded
+from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guarded, write_guarded
 from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
@@ -36,6 +36,12 @@ POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 
 #: Denials record a bounded digest of the params, never the raw model-controlled blob.
 _DENIAL_PARAM_DIGEST_LEN = 16
+
+#: The deepest a logged message is written, the message itself counted; deeper values are cut
+#: to their repr. The record wraps its message in one level, so every line stays readable
+#: under `JSON_NESTING_LIMIT`. Only the log cuts (#1117): a call refused as too deep to store
+#: stays in the lead's history and is logged again with every later request.
+_MESSAGE_DEPTH = JSON_NESTING_LIMIT - 1
 
 
 def _params_digest(params: Any) -> str:
@@ -123,8 +129,10 @@ class RequestLogger:
             "message": message,
         }
         self.messages.append(rec)
-        disk = {**rec, "message": _trim(message, cap)} if cap > 0 else rec
-        self._write_record(disk)
+        # Cut first: the cut is a bounded walk, so no message can exhaust the stack in `_trim`
+        # or the encoder either.
+        on_disk = json_safe(message, non_finite="text", max_depth=_MESSAGE_DEPTH)
+        self._write_record({**rec, "message": _trim(on_disk, cap)})
 
     def _write_record(self, rec: dict) -> None:
         """The single write path for every wire-log record kind.

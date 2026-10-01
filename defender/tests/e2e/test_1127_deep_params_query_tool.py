@@ -454,6 +454,30 @@ def test_a_call_at_the_limit_leaves_every_wire_log_line_readable(tmp_path, form)
     assert len(read_jsonl_rows(path)) == len(lines)
 
 
+def test_a_refused_deep_call_leaves_every_later_wire_log_line_readable(tmp_path):
+    """#1127 review: a refused call stays in the lead's message history, so every later request
+    the lead logs embeds its arguments again, a few levels under the record. Refused at 150
+    levels (as a dict, the form a provider that parses arguments hands over), it made each of
+    those lines too deep for the log's reader, which skips them: pricing and the run's
+    visualisation lost the rest of the lead's requests. The log is the one record allowed to cut
+    a deep value (#1117), so it cuts where its line would pass the reader's bound — and the
+    call after the refusal, and its requests, read back whole."""
+    shape = DICT_ACCEPTED
+    assert_regime(shape)
+    r, rec = drive(tmp_path, "dict-refused-then-valid",
+                   [deep_call(shape), q("elastic", "query", VALID), DONE])
+    assert [c.verb for c in rec.calls] == ["query"], "the call after the refusal did not run"
+
+    path = RunPaths(r.run_dir).wire_log
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [line for line in lines if SENTINEL_KEY in line], \
+        "the refused call never reached the wire log, so this arm tests nothing"
+    skipped = [(json_nesting_depth(line), line[:80]) for line in lines
+               if parse_jsonl_row(line) is None]
+    assert skipped == [], \
+        f"the wire log holds lines its reader skips (reader bound {JSON_NESTING_LIMIT}): {skipped}"
+
+
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED], ids=lambda s: s.name)
 def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(tmp_path, shape):
     """C11 and the design's non-obligation: schema validation already runs before the grant
