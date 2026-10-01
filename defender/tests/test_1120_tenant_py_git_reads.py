@@ -8,6 +8,10 @@ on PR #1157).
   * A folder whose `.git` is not a repository of its own (an empty `.git` directory inside
     another repo's work tree) gets no answer from the ENCLOSING repo: check's committed read
     cannot say what the folder's own repo commits, so it fails closed (V16).
+  * A clone whose git converts line endings on checkout (`core.autocrlf=true`, a Windows
+    operator's default) holds `.tenant-id` as CRLF over an LF commit: that IS what HEAD
+    commits, so check is clean — the working file is hashed as git would store it, not as raw
+    bytes (code review on PR #1157).
 """
 from __future__ import annotations
 
@@ -49,3 +53,25 @@ def test_check_folder_fails_closed_when_its_git_is_not_its_own_repository(
 
     (sub / ".git").mkdir()
     H.assert_refused(H.check(tenant_py, None, "--folder", str(sub)), H.CANNOT_VERIFY_TENANT_ID)
+
+
+def test_check_folder_accepts_a_crlf_checkout_of_an_lf_commit(tmp_path: Path) -> None:
+    """The tenant repo commits `.tenant-id` with an LF; a clone made with
+    `core.autocrlf=true` checks it out with a CRLF (asserted first, so the test cannot pass
+    vacuously). `check --folder` exits 0. The negative control: the same clone with the id
+    edited by hand is still a finding."""
+    src = tmp_path / "src"
+    shutil.copytree(H.FIXTURE, src, symlinks=True)
+    H.write_tenant_id_file(src, H.TID, "id")
+    repo = H.repo_of(src, tmp_path / "repo")
+    knowledge = tmp_path / "root" / H.TID / "knowledge"
+    knowledge.parent.mkdir(parents=True)
+    H.git(knowledge.parent, "clone", "-q", "-c", "core.autocrlf=true", str(repo),
+          str(knowledge))
+    tenant_id_file = knowledge / H.TENANT_ID_FILE
+    assert tenant_id_file.read_bytes() == f"{H.TID}\r\n".encode(), (
+        "precondition: the clone did not check .tenant-id out with a CRLF")
+    H.assert_clean(H.check(tenant_py, None, "--folder", str(knowledge)))
+
+    tenant_id_file.write_bytes(f"{H.OTHER}\r\n".encode())
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))

@@ -49,10 +49,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import os
 import re
 import shutil
-import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -441,14 +439,9 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 
 def _default_tenant() -> Any:
     """The tenant a replay that names none runs as: the committed fixture, set up under the
-    test's own data root (#1120 H2). A module-scoped drive runs before the autouse
-    function-scoped `data_root` fixture has set `DEFENDER_DATA_ROOT`; it gets the fixture set
-    up under a private temporary data root of its own, never a host one."""
-    from defender.tests import _data_root_1078
-
-    if os.environ.get(_data_root_1078.DATA_ROOT_ENV):
-        return _tenants1106.fixture_tenant()
-    return _data_root_1078.set_up_tenant(Path(tempfile.mkdtemp(prefix="replay-data-root-")))
+    current data root (#1120 H2) — the test's own, or, for a module-scoped drive that runs
+    before it, the session's (conftest's `session_data_root`)."""
+    return _tenants1106.fixture_tenant()
 
 
 def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION SEAM

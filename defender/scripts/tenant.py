@@ -50,15 +50,15 @@ if (__name__ == "__main__" and _VENV_PY.is_file()
         and Path(sys.prefix).resolve() != _VENV.resolve()):
     os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
-# An operator command writes nothing it does not name, the checkout it runs from included: no
-# bytecode cache lands beside the modules it imports (a refused `scaffold` leaves every tree
-# as it found it).
-sys.dont_write_bytecode = True
-
-# This checkout first: the command judges a tenant against the code it runs, never against
-# another tree an exported `DEFENDER_DIR` or an editable install points at.
-if (_root := str(_REPO_ROOT)) not in sys.path:
-    sys.path.insert(0, _root)
+if __name__ == "__main__":
+    # An operator command writes nothing it does not name, the checkout it runs from included:
+    # no bytecode cache lands beside the modules it imports (a refused `scaffold` leaves every
+    # tree as it found it). Only when run: an importer's interpreter is not this command's.
+    sys.dont_write_bytecode = True
+    # This checkout first: the command judges a tenant against the code it runs, never against
+    # another tree an exported `DEFENDER_DIR` or an editable install points at.
+    if (_root := str(_REPO_ROOT)) not in sys.path:
+        sys.path.insert(0, _root)
 
 from defender import _git, _tenant, _tenant_census  # noqa: E402
 from defender._io import guarded_mkdir, write_guarded  # noqa: E402
@@ -175,8 +175,9 @@ def _report(findings: list[str]) -> int:
 
 
 def _tenant_id_committed(folder: Path) -> str | None:
-    """For a folder that is a git work tree: `None` when HEAD commits exactly the bytes of its
-    `agent/.tenant-id`, else the finding — the file untracked, staged only, or changed since
+    """For a folder that is a git work tree: `None` when HEAD commits its `agent/.tenant-id` as
+    it stands — hashed as `git add` would store it, the repo's line-ending rules applied, so a
+    CRLF checkout of an LF commit matches — else the finding — the file untracked, staged only, or changed since
     the commit, or git unable to answer (absent, refusing the repo, any error), which fails
     closed. A plain folder has no repo to ask and is exempt. The read ignores an exported
     `GIT_DIR`, and a `.git` that git does not read as a repository rooted at the folder (git
@@ -192,7 +193,7 @@ def _tenant_id_committed(folder: Path) -> str | None:
             return (f"{_CANNOT_VERIFY}: {folder / '.git'} is not a repository of its own — "
                     f"git reads {top}'s instead")
         listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env)
-        working = _git.git(["hash-object", "--no-filters", "--", rel], cwd=folder, env=env)
+        working = _git.git(["hash-object", "--", rel], cwd=folder, env=env)
     except FileNotFoundError as absent:
         return f"{_CANNOT_VERIFY}: git is not available on PATH ({absent})"
     except _git.GitError as failed:

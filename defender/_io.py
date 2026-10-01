@@ -251,6 +251,14 @@ class EntriesRead(_Read):
         return (self.entries or {}).get(entry) == ENTRY_FILE
 
 
+@dataclasses.dataclass(frozen=True)
+class StatRead(_Read):
+    """A `bind`ed reader's answer to "what stands at this name" (`stat_entry`): present (`st`
+    the entry's own `stat`, a link judged as the link), absent, or refused."""
+
+    st: os.stat_result | None
+
+
 # -- the core: reaching a file below a trust root (#1111) -----------------------------------
 #
 # Every no-follow read and write in this module past the path seams (`Bound`, and the rooted
@@ -570,6 +578,29 @@ class Bound:
         _spelling, parts = _parse_name(name)
         return Bound(self._os, self._handle, prefix=self._prefix + parts,
                      absent=self._absent, error=self._error)
+
+
+def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
+    """What stands at `name` below `bound`, judged without following it: the folders on the
+    way are walked as `Bound.read` walks them (a linked or non-directory folder is refused),
+    and the leaf is `stat`ed no-follow, so a link there answers as the link itself. Opens
+    nothing at the leaf — a FIFO cannot block it. A function beside `Bound`, not a method: the
+    reader's own surface is pinned to its readers and `close` (#1133 O3)."""
+    spelling, parts = _parse_name(name)
+    if bound._absent:
+        return StatRead(name=spelling, st=None, absent=True, reason=None)
+    if bound._error is not None:
+        return StatRead(name=spelling, st=None, absent=False, reason=bound._error)
+    os_ = bound._os
+    try:
+        with bound._handle.dup() as root_fd, _descend(
+                os_, root_fd, bound._prefix + parts[:-1], Path(".")) as dir_fd:
+            st = os_.stat(parts[-1], dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return StatRead(name=spelling, st=None, absent=True, reason=None)
+    except OSError as e:
+        return StatRead(name=spelling, st=None, absent=False, reason=_read_reason(e))
+    return StatRead(name=spelling, st=st, absent=False, reason=None)
 
 
 def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
