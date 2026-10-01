@@ -285,7 +285,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
-        _tenants1106.playground_grants().gather, catalog=None,
+        _tenants1106.fixture_grants().gather, catalog=None,
     ))
 
     assert seen == [("gather:l-005", "identity")]

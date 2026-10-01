@@ -88,7 +88,7 @@ def _read(env, path, policy, *, run_dir=None):
 
 
 def _gather(env):
-    return compile_policy_for(T1106.playground_gather_def(), run_dir=env.run, defender_dir=env.dfn)
+    return compile_policy_for(T1106.fixture_gather_def(), run_dir=env.run, defender_dir=env.dfn)
 
 
 

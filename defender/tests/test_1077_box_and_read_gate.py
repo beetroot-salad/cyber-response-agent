@@ -54,7 +54,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     from defender.runtime.agent_role import AgentRole
     from defender.tests import _tenants1106
     # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
-    defs = {role: (_tenants1106.playground_gather_def() if role is AgentRole.GATHER else defn)
+    defs = {role: (_tenants1106.fixture_gather_def() if role is AgentRole.GATHER else defn)
             for role, defn in AGENTS.items()}
     # A role that requires a per-spawn corpus (`requires_corpus`) refuses the default scope by
     # design; the enumeration hands it one so every role is reached.

@@ -129,7 +129,7 @@ def _drive(tmp_path: Path, lead_id: str = "l-001"):
     out = asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: agent, 40,
         tools_gather.GatherRequest(lead_id, "elastic", "who logged in", ("accepted vs failed",)),
-        T1106.playground_grants().gather, catalog=None,
+        T1106.fixture_grants().gather, catalog=None,
     ))
     assert agent.calls == 1, "the gather agent never ran — the observation below is vacuous"
     assert HOST_NOTE in out, "the injected sentence never reached MAIN — nothing was tested"

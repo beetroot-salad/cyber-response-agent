@@ -417,7 +417,7 @@ def test_registry_lookup_is_a_rostered_gather_verb():
         "`VERBS` is read COLD off the AST — it has to be a dict literal with literal keys"
     )
 
-    grant: VerbGrant = _tenants1106.playground_grants().gather
+    grant: VerbGrant = _tenants1106.fixture_grants().gather
     assert (SYSTEM, LOOKUP, "r") in grant.entries, (
         "the lookup is not in gather's grant, so no lead can reach it"
     )
@@ -476,7 +476,7 @@ def test_no_run_path_writes_the_registry(tmp_path):
     (run_dir / "alert.json").write_text('{"rule": {"name": "probe"}}', encoding="utf-8")
 
     forged = "entries:\n  - id: tk-forged\n"
-    gather_def = _tenants1106.playground_gather_def()
+    gather_def = _tenants1106.fixture_gather_def()
     for defn, label in ((MAIN_DEF, "main"), (gather_def, "gather")):
         policy = compile_policy_for(defn, run_dir, defender_dir=DEFENDER)
         decision = permission.decide_write(

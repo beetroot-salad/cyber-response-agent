@@ -157,7 +157,7 @@ def test_every_role_this_change_does_not_mention_carries_the_new_record(tmp_path
         if role is AgentRole.CORPUS_AUTHOR:
             continue
         if role is AgentRole.GATHER:
-            defn = T1106.playground_gather_def()  # #1106 M4: gather binds with a RUN's grant
+            defn = T1106.fixture_gather_def()  # #1106 M4: gather binds with a RUN's grant
         try:
             deps = bind(defn, rd)                           # its own generic scope
         except Exception:

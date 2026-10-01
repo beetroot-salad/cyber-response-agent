@@ -54,7 +54,7 @@ def _main_policy(tmp: Path) -> AgentPolicy:
 
 def _gather_policy(tmp: Path) -> AgentPolicy:
     return compile_policy_for(
-        _tenants1106.playground_gather_def(), run_dir=tmp / "run", defender_dir=_DEFENDER)
+        _tenants1106.fixture_gather_def(), run_dir=tmp / "run", defender_dir=_DEFENDER)
 
 
 

@@ -150,7 +150,7 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
 
     return asyncio.run(tools_gather._run_gather(
         deps, factory, ceiling, GatherRequest(LEAD, "elastic", "measure this lead", ("auth",)),
-        T1106.playground_grants().gather,
+        T1106.fixture_grants().gather,
         (lambda agent_id, reason: stamps.append((agent_id, reason))) if stamps is not None
         else None,
         catalog=None,
@@ -208,7 +208,7 @@ def test_a_bound_gather_deps_carries_no_stop_record(tmp_path):
     such deps unwinds as the exception it always was. `_run_gather` is the one place that
     makes one. The ceiling is not a deps field at all — it is the run's `UsageLimits`."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    deps = bind(T1106.playground_gather_def(), run_dir, defender_dir=DEFENDER)
+    deps = bind(T1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER)
     assert deps.stop is None
     assert not hasattr(deps, "request_limit")
 

@@ -1,25 +1,24 @@
 """#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites.
 
 The four settings kinds (each system's `config.env`, `verb-grants.yaml`, `lead-zero.yaml`,
-`systems/case-history/mapping.yaml`) leave `defender/knowledge/environment/` for
-`<tenants root>/<tenant>/settings/` at the REPO ROOT, beside an `agent/` half the box mounts
-read-only. Nothing below `defender/` holds them any more, and no reader finds the tenants root
-itself: a process entry point is handed it and passes it down (D2).
+`systems/case-history/mapping.yaml`) live in a tenant's knowledge folder under the DATA ROOT,
+`<root>/<tenant>/knowledge/settings/`, beside an `agent/` half the box mounts read-only (#1120
+D1/D2). A tenant is reached only through `_tenant.accept_tenant`; `accept` below calls it.
 
-THE SEAMS THIS MODULE REACHES — each imported at CALL time, never at collection, so a suite that
-imports this helper collects cleanly before #1106 lands and each test fails at the seam it needs
-(an `ImportError`/`AttributeError` there is a real red, not a fixture bug):
+THE SEAMS THIS MODULE REACHES — each imported at CALL time, never at collection:
 
-  * `defender._tenants` — `TenantDir` (frozen: `tenant_id`, `settings`, `agent`), `tenant_dir(
-    tenants_root, tenant_id)`, `TenantDirError(ValueError)`, `REQUIRED_SETTINGS`,
-    `default_tenants_root(repo_root)`.
+  * `defender._tenant.accept_tenant(root, id, *, defender_dir)` -> `Tenant`.
   * `defender.runtime.verb_dispositions.run_grants(settings_dir) -> RunGrants` — the per-run
     grants (`path`, `gather`, `correlation`, `correlation_system`); and
     `dispositions_path(settings_dir)`.
   * `defender.runtime.lead_zero_config.lead_zero_config_path(settings_dir)`.
   * `VerbContext(..., settings_dir=...)` — a REQUIRED field with no default.
 
-THE ORACLES ARE LITERALS. Every fixture tenant is written from data spelled here — never copied
+A test that names no tenant runs as the committed fixture (`knowledge/tenant-fixture/`), set up
+under its own tmp data root (`fixture_tenant`, #1120 H2). The `PLAYGROUND*` constants are the
+lab's PATH, kept for the path-only readers until D9 step 7; no helper here resolves it.
+
+THE ORACLES ARE LITERALS. Every PLANTED tenant is written from data spelled here — never copied
 from the checkout's `knowledge/tenants/playground/`, never from the retired
 `defender/knowledge/environment/` — so an expected value can disagree with the file under test,
 and the fixtures do not depend on where the committed copy lives.
@@ -48,6 +47,10 @@ PLAYGROUND = TENANTS_ROOT / PLAYGROUND_ID
 PLAYGROUND_SETTINGS = PLAYGROUND / "settings"
 PLAYGROUND_AGENT = PLAYGROUND / "agent"
 TEMPLATE_SETTINGS = TEMPLATE_DIR / "settings"
+#: The frozen test fixture tenant (#1120 H2): what a test runs as when it names no tenant.
+FIXTURE = REPO_ROOT / "knowledge" / "tenant-fixture"
+FIXTURE_SETTINGS = FIXTURE / "settings"
+FIXTURE_AGENT = FIXTURE / "agent"
 TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 
 #: The retired home. #1106 deletes `defender/knowledge/` whole (O9).
@@ -83,30 +86,44 @@ def run_grants(settings_dir: Path) -> Any:
     return mod("runtime.verb_dispositions").run_grants(Path(settings_dir))
 
 
-def playground_grants() -> Any:
-    """The committed playground tenant's grants — what every pre-#1106 suite meant by "the
+def fixture_tenant(tenant_id: str | None = None) -> Any:
+    """The committed fixture tenant (`knowledge/tenant-fixture/`) set up under the CURRENT
+    test's data root and accepted through the real `accept_tenant` (#1120 H2) — what every
+    replay that names no tenant runs as. The operator's steps, done by hand: the fixture
+    copied to `<root>/<id>/knowledge`, its `agent/.tenant-id` written, the row minted by the
+    real `create_tenant` (`_data_root_1078.ensure_d9_tenant`). Idempotent within one test."""
+    from defender.tests import _data_root_1078
+
+    return _data_root_1078.set_up_tenant(
+        _data_root_1078.current_data_root(),
+        tenant_id if tenant_id is not None else _data_root_1078.D9_TENANT_ID)
+
+
+def fixture_grants() -> Any:
+    """The committed fixture tenant's grants — what every pre-#1106 suite meant by "the
     shipped grant" (`GATHER_DEF.verb_grant`, `CORRELATION_GRANT`, `shipped_dispositions()`)."""
-    return run_grants(PLAYGROUND_SETTINGS)
+    return run_grants(FIXTURE_SETTINGS)
 
 
-def playground_gather_def() -> Any:
-    """`GATHER_DEF` carrying the playground tenant's gather grant.
+def fixture_gather_def() -> Any:
+    """`GATHER_DEF` carrying the fixture tenant's gather grant.
 
     After M4 the definition carries NO table-projected grant (it would be one fixed per
     process), and `compile_policy` refuses a verb-bearing tool bit over an empty grant (K4). A
     suite that binds gather therefore binds it with a RUN's grant, exactly as the driver does."""
     gather_def = mod("runtime.driver").GATHER_DEF
-    return dataclasses.replace(gather_def, verb_grant=playground_grants().gather)
+    return dataclasses.replace(gather_def, verb_grant=fixture_grants().gather)
 
 
-def playground_tenant() -> Any:
-    """The committed playground tenant, through the real resolver."""
-    return tenants().tenant_dir(TENANTS_ROOT, PLAYGROUND_ID)
+def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
+    """`tenant_id` under `root`, through the real `accept_tenant` (#1120 D1) against this
+    checkout's `defender/`."""
+    return mod("_tenant").accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER, **kw)
 
 
 def run_tenant(tenant: Any, *, grants: Any = None, defender_dir: Path | None = None,
                dispatches_lead_zero: bool = False) -> Any:
-    """The driver's `RunTenant` for `tenant` (a resolved `TenantDir`).
+    """The driver's `RunTenant` for `tenant` (an accepted `Tenant`).
 
     Its grants are the tenant's own table's unless a scenario hands others in; its lead-zero
     dispatch identity is resolved through the real check (`run_tenant.correlation_dispatch`,
@@ -124,16 +141,16 @@ def run_tenant(tenant: Any, *, grants: Any = None, defender_dir: Path | None = N
             grants.correlation)
         if dispatches_lead_zero else None
     )
-    return rt.RunTenant(dir=tenant, grants=grants, correlation=correlation)
+    return rt.RunTenant(tenant=tenant, grants=grants, correlation=correlation)
 
 
-def playground_run_tenant(**kw: Any) -> Any:
-    """The committed playground tenant as the driver takes it (`run_tenant`)."""
-    return run_tenant(playground_tenant(), **kw)
+def fixture_run_tenant(**kw: Any) -> Any:
+    """The fixture tenant, set up under this test's data root, as the driver takes it."""
+    return run_tenant(fixture_tenant(), **kw)
 
 
 def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
-                 settings_dir: Path = PLAYGROUND_SETTINGS, **kw: Any) -> Any:
+                 settings_dir: Path = FIXTURE_SETTINGS, **kw: Any) -> Any:
     """A `VerbContext` carrying `settings_dir` (the required field #1106 adds)."""
     return mod("runtime.verbs").VerbContext(
         defender_dir=Path(defender_dir), run_dir=Path(run_dir), env=env,
@@ -282,14 +299,19 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     omit: tuple[str, ...] = (),
     agent_files: dict[str, str] | None = None,
 ) -> Path:
-    """Write `root/<tenant_id>/{settings,agent}/` and return the tenant folder.
+    """Write a set-up tenant under the data root `root` (#1120 D1): its knowledge folder
+    `root/<tenant_id>/knowledge/{settings,agent}/`, the `agent/.tenant-id` naming it, and its
+    row written by hand (so one root can hold several fixture tenants — `create_tenant`'s
+    one-tenant guard is setup's, not acceptance's). Returns the KNOWLEDGE folder, so
+    `/ "settings"` and `/ "agent"` name the two halves; `accept(root, tenant_id)` accepts it.
 
     `omit` names settings-relative files NOT to write (e.g. one of `REQUIRED_FILES`), for the
-    refusal tests; the folder is otherwise complete. `agent/` always exists and holds one
-    marker file, so a mount of it is observably THIS tenant's."""
-    tenant = Path(root) / tenant_id
-    settings = tenant / "settings"
-    agent = tenant / "agent"
+    refusal tests; the folder is otherwise complete. `agent/` always holds one marker file, so
+    a mount of it is observably THIS tenant's."""
+    folder = Path(root) / tenant_id
+    knowledge = folder / "knowledge"
+    settings = knowledge / "settings"
+    agent = knowledge / "agent"
     files: dict[str, str] = {
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
@@ -309,7 +331,11 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():
         (agent / name).write_text(text, encoding="utf-8")
-    return tenant
+    (agent / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
+    (folder / "tenant.json").write_text(json.dumps(
+        {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"},
+        indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return knowledge
 
 
 #: The lead-zero id a planted census repo's folders name, and the established catalog template
@@ -344,29 +370,32 @@ def plant_census_catalog(repo: Path) -> Path:
     return q
 
 
-def plant_census_settings(repo: Path, rows: dict, *, tenant_ids: tuple[str, ...] = (PLAYGROUND_ID,),
-                          template_rows: dict | None = None) -> list[Path]:
-    """Give a planted repo (`_dispositions995.planted_tree`) the settings folders #1106's census
-    gate walks: `knowledge/tenants/<id>/settings/` for each id plus
-    `knowledge/tenant-template/settings/`, every one holding the table `rows` (as
+def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None = None,
+                          ) -> list[Path]:
+    """Give a planted repo (`_dispositions995.planted_tree`) the two knowledge folders the
+    census gate walks (#1120 C26): `knowledge/tenant-fixture/` and
+    `knowledge/tenant-template/`, each holding the table `rows` (as
     `_dispositions995.write_table` renders them — the template `template_rows` when given),
     a `lead-zero.yaml` naming `CENSUS_LEAD_ZERO_ID`, and the mapping; plus the catalog template
-    that id resolves to. Returns the table paths written, tenants first, template last.
-
-    This replaces planting ONE table at `defender/knowledge/environment/verb-grants.yaml`: the
-    gate no longer reads that path, and a repo with no tenant folder has no table to check."""
+    that id resolves to. Plain folders, as committed: no `.tenant-id`, no row. Returns the
+    table paths written, fixture first, template last."""
     from defender.tests._dispositions995 import write_table
 
     repo = Path(repo)
     plant_census_catalog(repo)
-    folders = [(repo / "knowledge" / "tenants", t, rows) for t in tenant_ids]
-    folders.append((repo / "knowledge", "tenant-template",
-                    template_rows if template_rows is not None else rows))
     written: list[Path] = []
-    for parent, tenant_id, table_rows in folders:
-        tenant = plant_tenant(parent, tenant_id, table="dispositions: {}\n", configs={},
-                              lead_zero=lead_zero_text(CENSUS_LEAD_ZERO_ID))
-        written.append(write_table(tenant / "settings" / "verb-grants.yaml", table_rows))
+    for name, table_rows in (("tenant-fixture", rows),
+                             ("tenant-template", template_rows if template_rows is not None
+                              else rows)):
+        folder = repo / "knowledge" / name
+        files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
+                 "systems/case-history/mapping.yaml": mapping_text()}
+        for rel, text in files.items():
+            (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / "settings" / rel).write_text(text, encoding="utf-8")
+        (folder / "agent").mkdir(parents=True, exist_ok=True)
+        (folder / "agent" / ".gitkeep").write_text("", encoding="utf-8")
+        written.append(write_table(folder / "settings" / "verb-grants.yaml", table_rows))
     return written
 
 
@@ -461,6 +490,9 @@ __all__ = [
     "CENSUS_QUERY_TEMPLATE",
     "CORRELATION_PAIRS_A",
     "DEFENDER",
+    "FIXTURE",
+    "FIXTURE_AGENT",
+    "FIXTURE_SETTINGS",
     "GATHER_PAIRS_A",
     "GATHER_PAIRS_B",
     "PLAYGROUND",
@@ -485,9 +517,11 @@ __all__ = [
     "paths_in",
     "plant_tenant",
     "plant_tenant_record",
-    "playground_gather_def",
-    "playground_grants",
-    "playground_tenant",
+    "accept",
+    "fixture_gather_def",
+    "fixture_grants",
+    "fixture_run_tenant",
+    "fixture_tenant",
     "plant_census_catalog",
     "plant_census_settings",
     "exposes",

@@ -378,7 +378,7 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
     defender_dir.mkdir()
     target = run_dir / "report.md"
     target.write_text("x", encoding="utf-8")
-    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=defender_dir)
+    policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=defender_dir)
 
     for blank in _NOT_SHELL_BLANKS:
         cmd = f"cat {target}{blank}"

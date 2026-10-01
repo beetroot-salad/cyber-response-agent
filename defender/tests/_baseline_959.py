@@ -73,7 +73,7 @@ def _gather_policy() -> Any:
     `__getattr__`."""
     from defender.tests import _tenants1106
 
-    return compile_policy_for(_tenants1106.playground_gather_def(), run_dir=RUN, defender_dir=DFN)
+    return compile_policy_for(_tenants1106.fixture_gather_def(), run_dir=RUN, defender_dir=DFN)
 
 
 def __getattr__(name: str) -> Any:

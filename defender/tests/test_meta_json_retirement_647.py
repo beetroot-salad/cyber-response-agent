@@ -216,7 +216,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
-        tenant=_tenants1106.playground_run_tenant(),
+        tenant=_tenants1106.fixture_run_tenant(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,

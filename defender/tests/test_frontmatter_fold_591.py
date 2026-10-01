@@ -366,7 +366,7 @@ def test_d_catalog_survival():
     hook = _hook()
     # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
     out = hook.descriptor_catalog(
-        hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.playground_grants().gather)
+        hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
     assert out is not None
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(

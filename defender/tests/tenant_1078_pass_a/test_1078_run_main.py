@@ -43,7 +43,8 @@ def _main(argv: list[str], rec: H.Recorder, **override: Any) -> tuple[Any, BaseE
     """`H.drive_main`, with one seam replaced (a failing preflight, say)."""
     seams = {**rec.seams(), **override}
     try:
-        return H.run_py().main(H.with_tenants_root(argv), **seams), None
+        H.place_knowledge_for_rows()
+        return H.run_py().main(list(argv), **seams), None
     except SystemExit as refused:
         return None, refused
 

@@ -211,7 +211,7 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     assert probed[0] == TENANT_PATTERNS[0], probed
     assert not {"logs-*", P.ALERTS_PATTERN} & set(probed), probed
     manifest = T.mod("learning.branch.cli").episode_dir_for(
-        P.EPISODE_ID, tenant=P.current_tenant_paths()) / "family.yaml"
+        P.EPISODE_ID, tenant=P.current_tenant()) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert tuple(doc["configured_patterns"]) == TENANT_PATTERNS, doc["configured_patterns"]
 

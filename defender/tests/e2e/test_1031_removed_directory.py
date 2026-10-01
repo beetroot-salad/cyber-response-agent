@@ -208,7 +208,7 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
 def _record(capture: QueryCapture, run_dir: Path, *, system: str, exit_code: int, **extra) -> dict:
     """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
     run dir, a dispatched lead id, every row column the caller decides spelled out."""
-    deps = replace(bind(_tenants1106.playground_gather_def(), run_dir, defender_dir=DEFENDER),
+    deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id=LEAD)
     row, _text = asyncio.run(capture._record(
         deps, system=system, verb="query", query_id="elastic.query", params={},

@@ -711,7 +711,7 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
         base.write_text("", encoding="utf-8")
         return capture.PrimeReport(primed=1)
 
-    adopted = cli.prepare_episode(W.EPISODE_ID, src, tenant=W.current_tenant_paths(), prime=prime)
+    adopted = cli.prepare_episode(W.EPISODE_ID, src, tenant=W.current_tenant(), prime=prime)
 
     assert adopted == ep, (
         f"prepare_episode returned {adopted!r} rather than adopting {ep} — a re-entered attempt "

@@ -108,7 +108,7 @@ def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's here).
-    gather_def = T1106.playground_gather_def()
+    gather_def = T1106.fixture_gather_def()
     policy = compile_policy_for(gather_def, run_dir)
 
     assert policy.verb_allow is gather_def.verb_grant, \
@@ -130,7 +130,7 @@ def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bas
     operator-facing audit reads."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    gather = compile_policy_for(T1106.playground_gather_def(), run_dir)
+    gather = compile_policy_for(T1106.fixture_gather_def(), run_dir)
     main = compile_policy_for(MAIN_DEF, run_dir)
 
     pairs = {(s, v) for s, v, _ in gather.verb_allow.entries}
@@ -304,7 +304,7 @@ def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query", HEALTH_CHECK)})
 
-    gather = ScopedFakeVerbs(table, T1106.playground_grants().gather)
+    gather = ScopedFakeVerbs(table, T1106.fixture_grants().gather)
     assert gather.decide("elastic", HEALTH_CHECK).outcome == GRANTED
 
     other = ScopedFakeVerbs(table, grant_of("main", ()))

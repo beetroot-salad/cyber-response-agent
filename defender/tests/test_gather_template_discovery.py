@@ -91,7 +91,7 @@ def _deps(tmp_path: Path, defender_dir: Path, *, role=None) -> tools.AgentDeps:
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.runtime.agent_definition import bind
     from defender.tests import _tenants1106 as T1106
-    return bind(role if role is not None else T1106.playground_gather_def(), run_dir,
+    return bind(role if role is not None else T1106.fixture_gather_def(), run_dir,
                 defender_dir=defender_dir)
 
 
@@ -846,7 +846,7 @@ def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_na
     from defender.tests import _tenants1106 as T1106
 
     # #1106 M4: the run's grants, projected from the committed playground tenant's table.
-    grants = T1106.playground_grants()
+    grants = T1106.fixture_grants()
     CORRELATION_GRANT, CORRELATION_SYSTEM = grants.correlation, grants.correlation_system
     CORRELATION_TEMPLATE = load_correlation_template(
         lead_zero_config_path(T1106.PLAYGROUND_SETTINGS))

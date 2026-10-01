@@ -171,7 +171,7 @@ def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
 def test_the_table_is_read_from_the_injected_tenant(injected):
     grants = T.run_grants(injected)
     assert {(s, v) for s, v, _ in grants.gather.entries} == set(T.GATHER_PAIRS_B)
-    assert {(s, v) for s, v, _ in T.playground_grants().gather.entries} != set(T.GATHER_PAIRS_B)
+    assert {(s, v) for s, v, _ in T.fixture_grants().gather.entries} != set(T.GATHER_PAIRS_B)
 
 
 # ---- branching: the stager's patterns and the write door ----------------------------------------------

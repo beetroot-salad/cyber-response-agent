@@ -235,7 +235,7 @@ def test_bind_gather_isinstance_preserved(tmp_path):
     """bind(GATHER_DEF, run_dir) returns an object for which isinstance(x, GatherDeps) is
     True and x.role is AgentRole.GATHER, so the adapter-capture narrow at tools.py:195
     stays live (the rejected bare-AgentDeps return would break it)."""
-    deps = bind(T1106.playground_gather_def(), tmp_path)
+    deps = bind(T1106.fixture_gather_def(), tmp_path)
     assert isinstance(deps, GatherDeps)
     assert deps.role is AgentRole.GATHER
 
@@ -252,7 +252,7 @@ def test_bind_gather_lead_id_channel(tmp_path):
     # `salt` left bind's signature with #875: a salt a caller can pass is a salt a caller
     # can hand to the party the frames it delimits are shown to (F-1).
     assert params == {"defn", "run_dir", "scope", "defender_dir", "box"}
-    deps = bind(T1106.playground_gather_def(), tmp_path)
+    deps = bind(T1106.fixture_gather_def(), tmp_path)
     assert isinstance(deps, GatherDeps)
     assert getattr(deps, "lead_id", None) is None
 
@@ -405,7 +405,7 @@ def test_compile_policy_emits_only_declared_grants(tmp_path):
         return {g.route for g in policy.bash_allow}
 
     main = _compile(MAIN_DEF, tmp_path)
-    gather = _compile(T1106.playground_gather_def(), tmp_path)
+    gather = _compile(T1106.fixture_gather_def(), tmp_path)
     assert _routes(main) == {Route.PLAIN}
     assert _routes(gather) == {Route.PLAIN}
     assert list(Route) == [Route.PLAIN]

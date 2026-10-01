@@ -210,7 +210,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
             make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
             verbs=verbs if verbs is not None else elastic_ok(rec),
             extra_capabilities=extra, session_id=session_id,
-            verb_grant=T1106.playground_grants().gather,
+            verb_grant=T1106.fixture_grants().gather,
         )
 
     try:
@@ -219,7 +219,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
                 deps, factory, ceiling,
                 GatherRequest(LEAD, "elastic", "measure this lead",
                               ("which hosts dev.dana reached",)),
-                T1106.playground_grants().gather,
+                T1106.fixture_grants().gather,
                 (lambda agent_id, reason: stamps.append((agent_id, reason)))
                 if stamps is not None else None,
                 catalog=None,

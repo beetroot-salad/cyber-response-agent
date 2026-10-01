@@ -288,7 +288,7 @@ def test_922_bind_is_still_the_sole_seam_for_every_registered_role(tmp_path):
         if (defn.tools.query or defn.tools.list_verbs) and not defn.verb_grant.entries:
             from defender.tests import _tenants1106
 
-            defn = dataclasses.replace(defn, verb_grant=_tenants1106.playground_grants().gather)
+            defn = dataclasses.replace(defn, verb_grant=_tenants1106.fixture_grants().gather)
         try:
             deps = bind(defn, run_dir, defender_dir=defender_dir, scope=scope)
         except (ValueError, TypeError):

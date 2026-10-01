@@ -54,7 +54,7 @@ def _archive():
 
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant_paths()
+    return T.current_tenant()
 
 
 def _episode():

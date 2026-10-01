@@ -618,23 +618,22 @@ def branchable_investigation() -> str:
 
 
 #: The tenant the fixture's SOURCE run was stamped with (#1077 stamps every run's tenant; #1106
-#: M2 seeds each sibling's runs base from it). The committed playground tenant, so a launch that
-#: resolves it against the checkout's default tenants root finds a complete tenant.
+#: M2 seeds each sibling's runs base from it). Set up from the committed fixture under the test's
+#: data root (#1120 H2), so a launch that accepts it finds a complete tenant.
 SOURCE_TENANT = "playground"
 
 
-def current_tenant_paths() -> Any:
+def current_tenant() -> Any:
     """#1078: the ONE tenant O10 permits in this test's `DEFENDER_DATA_ROOT` (whichever
-    `runs_base()`, `d9_tenant` or the like already created there), as a `_tenant.TenantPaths` —
-    for callers (`episode_dir_for`, `prepare_episode`) that need the tenant rather than its
-    runs base alone."""
-    from defender import _tenant
+    `runs_base()`, `d9_tenant` or the like already set up there), as an accepted `Tenant`
+    (#1120 D1) — for callers (`episode_dir_for`, `prepare_episode`) that need the tenant rather
+    than its runs base alone. Set up from the committed fixture when the root has none yet."""
+    from defender.tests._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     existing = sorted(p.name for p in root.iterdir()
                       if (p / "tenant.json").is_file()) if root.is_dir() else []
-    tenant_id = existing[0] if existing else SOURCE_TENANT
-    return _tenant.TenantPaths(root, tenant_id)
+    return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
@@ -655,15 +654,14 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     and the containment demands drive exactly those reads.
     """
     from defender import _tenant
+    from defender.tests._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     if tenant_id is None:
         existing = sorted(p.name for p in root.iterdir()
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
-    if not (root / tenant_id / "tenant.json").is_file():
-        _tenant.create_tenant(root, tenant_id)
-    base = _tenant.runs_base_for(tenant_id)
+    base = _tenant.runs_base_for(set_up_tenant(root, tenant_id))
     base.mkdir(parents=True, exist_ok=True)
     if not (base / "_tenant.json").is_file():
         _tenant.ensure_runs_base_record(base, tenant_id)

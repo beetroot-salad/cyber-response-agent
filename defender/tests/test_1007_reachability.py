@@ -490,7 +490,7 @@ def test_the_production_read_side_declares_the_world_and_the_confinement_needs_i
     registry = W.mod("learning.branch.estate.registry")
     token = W.world_token("b")
 
-    episode_wide = seams.adapter_seam(ep, _tenants1106.playground_run_tenant(), runs_base=tmp_path / "runs")
+    episode_wide = seams.adapter_seam(ep, _tenants1106.fixture_run_tenant(), runs_base=tmp_path / "runs")
     this_world = episode_wide.for_world(token)
 
     assert episode_wide.ctx.world_id is None, (

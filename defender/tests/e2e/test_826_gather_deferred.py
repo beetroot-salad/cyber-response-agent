@@ -156,7 +156,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
             deps, factory, 40,
-            GatherRequest(lead, "elastic", "goal", ("what",)), T1106.playground_grants().gather,
+            GatherRequest(lead, "elastic", "goal", ("what",)), T1106.fixture_grants().gather,
             lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
         ))
         assert stamped[-1] == (f"gather:{lead}", expected)
@@ -182,7 +182,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         with pytest.raises(type(exc)):
             asyncio.run(tools_gather._run_gather(
                 deps, _factory_raising(exc), 40,
-                GatherRequest(lead, "elastic", "goal", ("what",)), T1106.playground_grants().gather,
+                GatherRequest(lead, "elastic", "goal", ("what",)), T1106.fixture_grants().gather,
                 lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
             ))
         assert stamped[-1] == (f"gather:{lead}", expected), \
@@ -198,7 +198,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     before = len(stamped)
     asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: _Clean(), 40,
-        GatherRequest("l-009", "elastic", "goal", ("what",)), T1106.playground_grants().gather,
+        GatherRequest("l-009", "elastic", "goal", ("what",)), T1106.fixture_grants().gather,
         lambda agent_id, reason: stamped.append((agent_id, reason)), catalog=None,
     ))
     assert len(stamped) == before, "a gather that finished was stamped as truncated"

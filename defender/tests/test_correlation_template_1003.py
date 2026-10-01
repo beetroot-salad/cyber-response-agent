@@ -194,7 +194,7 @@ def test_the_shipped_config_names_the_template_and_the_run_start_frame_reads_it(
         "knowledge/tenants/playground/settings/lead-zero.yaml"
 
     assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
-    grants = T1106.playground_grants()
+    grants = T1106.fixture_grants()
     run_tenant = resolve_run_tenant(
         T1106.playground_tenant(), defender_dir=DEFENDER, dispatches_lead_zero=True)
     assert _correlation_dispatch_at_run_start(

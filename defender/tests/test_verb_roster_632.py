@@ -290,7 +290,7 @@ def test_gathers_committed_roster_regenerates_from_its_own_shipped_grant():
         "gather ships no generated roster — its model-facing verb prose is still authored"
 
     # #1106 M4: the shipped grant is the committed playground tenant's (GATHER_DEF holds none).
-    shipped = T1106.playground_grants().gather
+    shipped = T1106.fixture_grants().gather
     granted = {(s, v) for s, v, _ in shipped.entries}
     advertised = roster_pairs(committed.read_text(encoding="utf-8"))
     assert advertised == granted, (

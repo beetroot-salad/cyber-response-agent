@@ -304,7 +304,7 @@ def gate_env(tmp_path):
         run=run, dfn=dfn,
         main=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn),
         gather=compile_policy_for(
-            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn),
+            _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn),
     )
 
 
@@ -380,7 +380,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
         run_dir=run, model="m-741", model_override=None, defender_dir=DEFENDER,
-        tenant=_tenants1106.playground_run_tenant(),
+        tenant=_tenants1106.fixture_run_tenant(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
 

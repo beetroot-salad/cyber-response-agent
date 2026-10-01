@@ -237,7 +237,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_run_tenant(),
+        tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
         investigate=lambda **kw: seen.update(kw) or {},
@@ -263,7 +263,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_run_tenant(),
+        tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
         registry_cls=Watching, investigate=lambda **kw: {})
@@ -276,11 +276,11 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     constraint the resume path adds is enforced on the resume path only."""
     base, src = T.runs_base(tmp_path)
     seen: dict = {}
-    grants = T1106.playground_grants()
+    grants = T1106.fixture_grants()
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.playground_run_tenant(grants=grants),
+        tenant=T1106.fixture_run_tenant(grants=grants),
         world=None, investigate=lambda **kw: seen.update(kw) or {})
     registry = seen["verbs"]
     assert type(registry).__name__ == "ModuleVerbRegistry"
@@ -440,7 +440,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
         run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
         ep / "family.yaml", "b", settings=lambda: T1106.PLAYGROUND_SETTINGS),
-        tenant=T1106.playground_run_tenant(),
+        tenant=T1106.fixture_run_tenant(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),
         stop_box=lambda *a, **kw: events.append("stop"),

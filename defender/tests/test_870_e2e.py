@@ -143,7 +143,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     # tick just committed into, admits the reducer surface and refuses the paths outside the
     # corpus that prove it is still a gate. Without this arm the whole round ends at a
     # committed file nobody has shown anyone reads.
-    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=repo / "defender")
+    policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=repo / "defender")
 
     def _readable(path: Path) -> bool:
         return permission.decide_read(

@@ -126,7 +126,7 @@ def test_947_validate_world_touches_takes_the_derived_set():
     registry = T.mod("learning.branch.estate.registry")
     # #1106 M4: the gather grant is the run's tenant's (here the committed playground's), not a
     # process-level `GATHER_DEF.verb_grant`.
-    gather_grant = T1106.playground_grants().gather
+    gather_grant = T1106.fixture_grants().gather
     fam = _family()
     ov = fam.parse_overlay(T.overlay(patches={"identity": {"web-1": {"owner": "p"}}}))
     derived = fam.touches_of(ov)

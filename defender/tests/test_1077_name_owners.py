@@ -262,7 +262,7 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
         "gather's note composes `run_dir / record['payload_path']` (tools_gather.py:70); O8 "
         "names BOTH forms and requires both to be the owner's")
 
-    policy = compile_policy_for(T1106.playground_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
+    policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
     decision = permission.decide_read(
         absolute, run_dir=run_dir, defender_dir=DEFENDER, policy=policy)
     assert decision.allow, (

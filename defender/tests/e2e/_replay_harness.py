@@ -456,9 +456,10 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     needs no provider settings). `override_allow_model_requests(False)` makes any real
     provider call raise, so the run is provably hermetic.
 
-    `tenant` / `grants` (#1106) are the run's `TenantDir` and per-run `RunGrants`; omitted,
-    the committed playground tenant's, resolved through the real resolver and loader. They are
-    handed to the driver as one `RunTenant` (`_tenants1106.run_tenant`).
+    `tenant` / `grants` (#1106) are the run's accepted `Tenant` and per-run `RunGrants`;
+    omitted, the committed fixture tenant set up under this test's own data root and accepted
+    through the real `accept_tenant` (#1120 H2), and its own table. They are handed to the
+    driver as one `RunTenant` (`_tenants1106.run_tenant`).
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
@@ -563,7 +564,8 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
-    # playground tenant — resolved through the real resolver, never a hand-built value.
+    # fixture tenant set up under the test's data root (#1120 H2) — accepted through the real
+    # `accept_tenant`, never a hand-built value.
     #
     # The driver takes them as ONE value (`RunTenant`), resolved before it runs, the way
     # `run.py` resolves it before the box: item 3's dispatch identity is checked here — for a
@@ -571,7 +573,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
     run_tenant = _tenants1106.run_tenant(
-        tenant if tenant is not None else _tenants1106.playground_tenant(),
+        tenant if tenant is not None else _tenants1106.fixture_tenant(),
         grants=grants, defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )

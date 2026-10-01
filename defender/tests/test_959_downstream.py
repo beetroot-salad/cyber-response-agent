@@ -88,7 +88,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     payload.write_text("{}", encoding="utf-8")
     box = Box(result)
     deps = dataclasses.replace(
-        bind(T1106.playground_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
+        bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
     )
     return deps, box, payload
 

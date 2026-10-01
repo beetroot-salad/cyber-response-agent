@@ -503,7 +503,7 @@ def test_d3_main_gather_non_paths_defender_dir(tmp_path):
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
     probe = wtd / "lessons" / "a.md"
-    for defn in (MAIN_DEF, T1106.playground_gather_def()):
+    for defn in (MAIN_DEF, T1106.fixture_gather_def()):
         deps = bind(defn, run, defender_dir=wtd)
         assert permission.decide_read(probe, run_dir=run, defender_dir=wtd, policy=deps.policy).allow
         assert permission.decide_bash(f"cat {probe}", policy=deps.policy, run_dir=run, defender_dir=wtd).allow

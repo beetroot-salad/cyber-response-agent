@@ -106,7 +106,7 @@ def test_the_moved_table_grants_exactly_what_the_retired_one_did():
     """Conservation across the move: the playground's projection is the census transcribed in
     `_dispositions995.py` before #995 — a move that edited a row would change who may call
     what, silently, under a "rename" commit."""
-    grants = T.playground_grants()
+    grants = T.fixture_grants()
     assert {(s, v) for s, v, _ in grants.gather.entries} == set(GATHER_CENSUS)
     assert {(s, v) for s, v, _ in grants.correlation.entries} == set(CORRELATION_CENSUS)
     assert grants.correlation_system == "elastic"
@@ -237,7 +237,7 @@ def _reader_policies(run_dir: Path):
     driver = T.mod("runtime.driver")
     return {
         "main": compile_policy_for(driver.MAIN_DEF, run_dir, defender_dir=T.DEFENDER),
-        "gather": compile_policy_for(T.playground_gather_def(), run_dir, defender_dir=T.DEFENDER),
+        "gather": compile_policy_for(T.fixture_gather_def(), run_dir, defender_dir=T.DEFENDER),
     }
 
 

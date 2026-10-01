@@ -114,7 +114,7 @@ REAL_ADAPTERS = PATHS.adapters_dir
 def _gather_grant():
     """The shipped gather grant — the committed playground tenant's (#1106 M4: no grant is
     fixed per process, so it is projected from a tenant's table, lazily)."""
-    return T1106.playground_grants().gather
+    return T1106.fixture_grants().gather
 
 
 #: What the shipped grant covers today. Asserted rather than derived, so a grant that SHRINKS
@@ -451,7 +451,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
 def _built(logger, verbs):
     with override_allow_model_requests(False):
         return driver.build_agent_core(
-            T1106.playground_gather_def(), deps_type=GatherDeps, instructions="x", logger=logger,
+            T1106.fixture_gather_def(), deps_type=GatherDeps, instructions="x", logger=logger,
             agent_id="gather", verbs=verbs,
             make_model=fake_model(lambda messages, info: ModelResponse(
                 parts=[TextPart(content="ok")])),

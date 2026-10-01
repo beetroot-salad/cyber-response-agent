@@ -301,7 +301,7 @@ def test_role_flip_data_access_is_role_dependent():
         cmd, policy=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)).allow
     assert not permission.decide_bash(
         cmd, policy=compile_policy_for(
-            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn)).allow
+            _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)).allow
     assert GATHER_DEF.tools.query is True
     assert MAIN_DEF.tools.query is False
 

@@ -91,7 +91,7 @@ REAL_ADAPTERS = PATHS.adapters_dir
 def _gather_grant() -> VerbGrant:
     """The committed playground tenant's gather grant (#1106: grants are per run, projected from
     the run's tenant's table — there is no process-level `GATHER_DEF.verb_grant` any more)."""
-    return _tenants1106.playground_grants().gather
+    return _tenants1106.fixture_grants().gather
 
 #: What the fake `docker` records, under the run dir the test reads.
 DOCKER_LOG = "docker-calls.jsonl"

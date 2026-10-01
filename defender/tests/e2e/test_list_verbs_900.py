@@ -133,7 +133,7 @@ def _shipped_gather_grant():
     carries none; a run's grant is projected from its tenant's table)."""
     from defender.tests import _tenants1106 as T1106
 
-    return T1106.playground_grants().gather
+    return T1106.fixture_grants().gather
 
 
 def _grant_systems() -> tuple[str, ...]:
@@ -318,7 +318,7 @@ def _deps(tmp_path: Path):
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.tests import _tenants1106 as T1106
 
-    return bind(T1106.playground_gather_def(), run_dir)
+    return bind(T1106.fixture_gather_def(), run_dir)
 
 
 def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
