@@ -510,10 +510,11 @@ def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
     special file; and `agent/.tenant-id` reads as `tenant_id`. With `tenant_id` None (a tenant
     repo checked on its own, `tenant.py check --folder`, CI's census lint) the file may be
     absent, and is held only to the id grammar when present. Raises `TenantRefused` naming the
-    path at the first rule that fails. Reads only, and opens nothing but `.tenant-id`.
+    path at the first rule that fails. Reads only, and opens no file but `.tenant-id`.
 
-    `folder` itself is opened as spelled (the operator's own path, a link to it included);
-    nothing below it is followed."""
+    `folder` itself is opened as spelled (the operator's own path, a link to it included); the
+    walk below it follows nothing. `.tenant-id` is then opened by its path, no-follow at the
+    file itself, once the walk has seen `agent/` as a real directory."""
     folder = Path(folder)
     with _real_io.bind(folder) as bound:
         _check_knowledge(bound, folder, tenant_id=tenant_id)
@@ -554,6 +555,10 @@ def _check_knowledge(
 def _required_setting(found: _real_io.StatRead, path: Path) -> None:
     if found.absent:
         raise TenantRefused(f"a required settings file is missing: {path}")
+    if found.reason == _real_io.ALIAS_READ_REFUSAL:
+        raise TenantRefused(
+            f"a required settings file is reached through a link: {path} — a tenant's "
+            "knowledge holds no links")
     if found.st is None:
         raise TenantRefused(f"{path} could not be checked: {found.reason}")
     if not stat.S_ISREG(found.st.st_mode):

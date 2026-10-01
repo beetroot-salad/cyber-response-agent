@@ -9,8 +9,9 @@ now walks below the root no-follow and resolves only what it is handed, through 
     naming the path.
   * `tenant.py check --folder` over a looped folder exits 1 with `[tenant.py] …`, and the
     census lint's call (`check_knowledge_folder`) refuses it rather than raising.
+  * A link on the way to a required settings file is named as a link.
   * Step 7 counts the tenant's own `runs/`: a `<T>/runs` linked onto `knowledge/` would put the
-    host-only settings half inside the tree a box mounts read-write.
+    host-only settings half inside the runs base, which a box mounts.
 """
 from __future__ import annotations
 
@@ -71,3 +72,18 @@ def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Pa
     runs.unlink()
     runs.mkdir()
     assert H.accept(_tenant, root).runs == runs
+
+
+def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: Path) -> None:
+    """`settings/systems` swapped for a link to a real copy: step 4 cannot reach
+    `systems/case-history/mapping.yaml` without following it, and says the file is reached
+    through a link rather than that it could not be read."""
+    root = tmp_path / "data"
+    H.adopted(root)
+    systems = H.settings_dir(root) / "systems"
+    copy = tmp_path / "systems-copy"
+    shutil.move(str(systems), copy)
+    systems.symlink_to(copy, target_is_directory=True)
+    text = H.accept_refusal(_tenant, root)
+    assert "reached through a link" in text, text
+    assert str(systems / "case-history" / "mapping.yaml") in text, text
