@@ -12,9 +12,12 @@ import contextlib
 import os
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender._io import Held, hold
+
+if TYPE_CHECKING:
+    from defender.learning.core.config import LoopPaths
 
 
 def _absolute(path: Path | str) -> Path:
@@ -125,3 +128,15 @@ class DrainTrees:
         # instead of dropping it (`close()` would hand the stack `None` and cut the chain).
         # Nothing is suppressed.
         self._stack.__exit__(exc_type, exc, tb)
+
+
+def open_drain_trees(wt_paths: LoopPaths, label: str) -> DrainTrees:  # noqa: V103 — no production caller until #1134 steps 5-6 (each lane's work step opens it); pinned by tests/test_1134_mount_list.py
+    """The held roots of a `label` drain batch's writable mounts: :meth:`DrainTrees.open` over
+    exactly `wt_paths.drain_writable_trees(label)` (the drain working copy's paths), the list
+    `_drain_box_request` mounts read-write, so the held roots are the box's rw mounts (#1134
+    O4). Nothing is derived here: an unknown label holds nothing.
+
+    The mounts must be absolute (`ValueError` before anything is held otherwise), so a
+    `wt_paths` with a relative `repo_root` is refused, never joined to the cwd. Use it as a
+    context manager inside the lane's work step."""
+    return DrainTrees.open(wt_paths.drain_writable_trees(label))

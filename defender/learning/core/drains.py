@@ -13,7 +13,9 @@ from typing import Any
 from collections.abc import Callable
 
 from defender.learning.core.config import (
+    AUTHOR_DRAIN_LABEL,
     DEFAULT_PATHS,
+    LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     QueueChannel,
     author_max_attempts,
@@ -350,7 +352,7 @@ def _drain_lead_author_markers(
     # `case_id`: this queue's live writer (`enqueue_case_for_curation`) mints the filename
     # from the case, so that is what an unreadable row's dead letter is keyed on.
     claims = claim_markers(
-        qdir, identity_key="case_id", label="lead_author_drain", noun="lead-author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        qdir, identity_key="case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
     )
     served: list[ServedMarker] = []
     for claim in claims:
@@ -484,22 +486,16 @@ def _drain_box_request(
     wt: Path, batch_id: str, label: str, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's mounts: ro over the whole worktree leaf (it carries `<wt>/defender` and
-    is both drain roles' cwd_anchor), rw only over what this batch needs — both lessons corpora
-    for `author_drain` (its two curators share one box), `<wt>/defender/skills` for
-    `lead_author_drain`. Nothing outside the leaf.
+    is both drain roles' cwd_anchor), rw over exactly the leaf's
+    `LoopPaths.drain_writable_trees(label)`, in its order, each at its own path. Nothing
+    outside the leaf.
 
-    An unrecognized label gets no writable corpus rather than falling through to a default,
-    the safe answer for a mount grant."""
+    The rw list is taken whole from its owner, never derived here, so the box's writable
+    mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). An
+    unrecognized label therefore gets no writable tree."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
-    rw_dirs: tuple[Path, ...]
-    if label == "lead_author_drain":  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        rw_dirs = (wt_paths.skills_dir,)
-    elif label == "author_drain":
-        rw_dirs = (wt_paths.lessons_dir, wt_paths.lessons_questioner_dir)
-    else:
-        rw_dirs = ()
-    for d in rw_dirs:
+    for d in wt_paths.drain_writable_trees(label):
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(
         name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={},
@@ -761,7 +757,7 @@ def author_drain(
             _logger.warning("author_drain: another drainer holds the lock — exiting")
             return 0
         return _run_worktree_batch(
-            paths, branch, label="author_drain",
+            paths, branch, label=AUTHOR_DRAIN_LABEL,
             has_work=_has_curator_work,
             do_work=lambda wt_paths, *, box=None: _drain_curators(
                 wt_paths, trigger_author, box=box
@@ -812,7 +808,7 @@ def lead_author_drain(
             return 0
         try:
             return _run_worktree_batch(
-                paths, branch, label="lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+                paths, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, run_lead_author, run_pitfalls, box=box,
