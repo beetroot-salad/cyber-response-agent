@@ -192,12 +192,16 @@ reads. `config.env` holds non-secret config only — endpoints, timeouts,
 `MYSYS_API_TOKEN=<value>` in `secrets.env`); a bare `PASSWORD` / `TOKEN` /
 `SECRET` / `API_KEY` key is read as an inline secret and `validate_scaffold`
 FAILs it, as it does a reference whose entry is missing or blank. The adapter
-passes the declared key to the transport (`secrets=` on `docker_exec_curl`);
-the transport resolves it through the run's record, puts the value in the
-environment of that one child only, forwards it into the container by name, and
-replaces it with a marker in anything it returns. Nothing in the adapter reads a
-secret from `config.env`, logs one, or returns one in a captured payload. This is
-the single most important property of the layer; keep it that way.
+passes the `secrets.env` entry NAME to the transport (`secrets=("MYSYS_API_TOKEN",)`
+on `docker_exec_curl`) and writes `{{MYSYS_API_TOKEN}}` where the value goes — in
+a header value (`headers={"Authorization": "Bearer {{MYSYS_API_TOKEN}}"}`) or in
+`auth` (`auth="svc:{{MYSYS_PASSWORD}}"`). The transport resolves every name in one
+read of `secrets.env`, puts the values in the environment of that one child only,
+expands each `{{NAME}}` inside the container (never on the host's command line),
+and replaces the values with a marker in anything it returns; a `{{NAME}}` the
+call did not pass in `secrets=` is refused before anything runs. Nothing in the
+adapter reads a secret from `config.env`, logs one, or returns one in a captured
+payload. This is the single most important property of the layer; keep it that way.
 
 For a scheme beyond a bearer token / basic auth (mTLS, SigV4, OAuth
 client-credentials), implement it in the transport and note why in

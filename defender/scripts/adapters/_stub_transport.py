@@ -24,17 +24,18 @@ House conventions (auth posture, config keys, exit codes) are in `README.md` her
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import urllib.parse
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from defender.runtime.tenant_settings import (
     DOCKER_EXEC,
     NOT_CONFIGURED,
     SystemConfig,
+    config_pointer,
     is_blank,
     system_prefix,
 )
@@ -50,24 +51,25 @@ from defender.scripts.adapters.faults import (
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
-#: The system that owns the two raw lanes (`docker_exec_raw`, `docker_inspect_raw`): host-state
-#: is the only adapter that runs a command rather than an HTTP request.
-HOST_STATE = "host-state"
-
 #: What replaces a secret value found in text the transport returns (O4, MF-5 i).
 SECRET_MARKER = "[secret redacted]"
 
 #: A secret reaches its one child under `DEFENDER_SECRET_<i>`, `i` its position in the call's
 #: `secrets` tuple — never under the tenant's declared name (a declared `PATH` or `DOCKER_HOST`
 #: must set nothing of that name). `docker exec -e <name>` forwards it BY NAME, so only the name
-#: is ever on argv.
+#: is ever on argv. An adapter never writes this name: it writes `{{NAME}}` (`SECRET_SLOT`).
 SECRET_ENV_PREFIX = "DEFENDER_SECRET_"
 
+#: Where a placed secret goes in `auth` or a header value: `{{NAME}}`, NAME the `secrets.env`
+#: entry the call placed in `secrets=`. The transport writes the child variable carrying it into
+#: the in-container shell script, so the value is expanded there and is never on argv.
+SECRET_SLOT = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
+
 __all__ = [
-    "HOST_STATE",
     "REQUIRED_CONFIG_KEYS_TEMPLATE",
     "SECRET_ENV_PREFIX",
     "SECRET_MARKER",
+    "SECRET_SLOT",
     "USAGE_EXIT_CODE",
     "access_context",
     "docker_context",
@@ -89,11 +91,9 @@ def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
     `ConfigFault` for why there is none: a folder with no usable file keeps its own fault, and a
     system with no folder gets "this tenant's settings do not configure this system". A fresh
     instance each call, so a stored fault is never handed a second traceback."""
-    tenant = ctx.tenant
-    entry = tenant.systems.get(system)
+    entry = ctx.tenant.systems.get(system)
     if entry is None:
-        path = Path(tenant.settings) / "systems" / system / "config.env"
-        raise ConfigFault(f"config file not found: {path} — {NOT_CONFIGURED}")
+        raise ConfigFault(f"config file not found: {config_pointer(system)} — {NOT_CONFIGURED}")
     if isinstance(entry, ConfigFault):
         raise ConfigFault(str(entry))
     return entry
@@ -176,9 +176,8 @@ def load_config(
 
     missing = [k for k in required if k not in cfg]
     if missing:
-        path = Path(ctx.tenant.settings) / "systems" / system / "config.env"
         raise ConfigFault(
-            f"missing required config keys in {path}: "
+            f"missing required config keys in {config_pointer(system)}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}"
         )
     timeout = cfg.get("TIMEOUT_SEC")
@@ -186,35 +185,6 @@ def load_config(
         raise ConfigFault(
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
     return cfg
-
-
-def _destination_owner(ctx: VerbContext, container: str, url: str) -> str:
-    """The ONE system whose config declares this call's destination — its URL base the URL starts
-    with, its bastion or Elastic container the call execs into — for a caller that did not name
-    its system. Several systems may share a bastion, so the URL decides first and the container
-    only breaks a tie or stands alone. `ConfigFault` when the destination is nobody's or
-    several systems' (name `system=` then): a docker context is a per-system fact and is never
-    guessed."""
-    by_url: set[str] = set()
-    by_container: set[str] = set()
-    for name, entry in ctx.tenant.systems.items():
-        if not isinstance(entry, SystemConfig):
-            continue
-        for key, value in entry.items():
-            if is_blank(value):
-                continue
-            if key.endswith(("_URL_BASE", "ELASTICSEARCH_URL", "KIBANA_URL")) and url.startswith(
-                    value.rstrip("/")):
-                by_url.add(name)
-            if key.endswith(("_BASTION_HOST", "_ES_CONTAINER", "_KIBANA_CONTAINER")) and (
-                    value == container):
-                by_container.add(name)
-    owners = by_url & by_container or by_url or by_container
-    if len(owners) != 1:
-        raise ConfigFault(
-            f"cannot tell which of this tenant's systems the call to {url} (container "
-            f"{container!r}) belongs to — name system= so its docker context can be chosen")
-    return next(iter(owners))
 
 
 def _scrubbed(text: str, secrets: Sequence[str]) -> str:
@@ -227,21 +197,52 @@ def _scrubbed(text: str, secrets: Sequence[str]) -> str:
 
 
 def _place_secrets(ctx: VerbContext, names: Sequence[str]) -> tuple[list[str], dict[str, str], list[str]]:
-    """Resolve each declared secret NAME through the run's record (`ConfigFault` for an
-    undeclared or unreadable one, before any child is forked) and place it for ONE child: the
-    `docker exec` flags that forward it by name, the child-environment additions, and the values
-    (for scrubbing returned text). The value goes into that child's environment and nowhere
+    """Resolve the declared secret NAMES through the run's record in ONE lookup (one read of
+    `secrets.env`, so a rotation mid-call cannot pair two versions; `ConfigFault` for an
+    undeclared or unreadable one, before any child is forked) and place them for ONE child: the
+    `docker exec` flags that forward each by name, the child-environment additions, and the values
+    (for scrubbing returned text). A value goes into that child's environment and nowhere
     else — never argv, never `ctx.env`, never the process environment (O4)."""
+    values = ctx.tenant.secrets.get_many(tuple(names)) if names else []
     flags: list[str] = []
     extra: dict[str, str] = {}
-    values: list[str] = []
-    for i, name in enumerate(names):
-        value = ctx.tenant.secrets.get(name)
+    for i, value in enumerate(values):
         var = f"{SECRET_ENV_PREFIX}{i}"
         flags += ["-e", var]
         extra[var] = value
-        values.append(value)
     return flags, extra, values
+
+
+def _slotted(text: str) -> bool:
+    return SECRET_SLOT.search(text) is not None
+
+
+def _shell_word(text: str, var_of: Mapping[str, str], *, expand: bool) -> str:
+    """`text` as ONE word of the in-container `sh -c` script, each `{{NAME}}` replaced by a
+    double-quoted expansion of the child variable carrying that placed secret. The literal parts
+    are single-quoted (nothing in them is expanded) — except under `expand`, which keeps `auth`'s
+    contract that the container's own `${VAR}` expands there (the elastic read path's
+    `elastic:${ELASTIC_PASSWORD}`). A slot naming a secret this call did not place is a
+    `ConfigFault`, so a literal `{{NAME}}` is never sent upstream."""
+    out: list[str] = []
+    pos = 0
+    for m in SECRET_SLOT.finditer(text):
+        out.append(_quoted(text[pos:m.start()], expand=expand))
+        var = var_of.get(m.group(1))
+        if var is None:
+            raise ConfigFault(
+                f"{{{{{m.group(1)}}}}} names a secret this call does not place — add its "
+                "secrets.env entry name to secrets=")
+        out.append(f'"${{{var}}}"')
+        pos = m.end()
+    out.append(_quoted(text[pos:], expand=expand))
+    return "".join(out) or "''"
+
+
+def _quoted(literal: str, *, expand: bool) -> str:
+    if not literal:
+        return ""
+    return f'"{literal}"' if expand else shlex.quote(literal)
 
 
 def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
@@ -255,7 +256,7 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     timeout_sec: int = 10,
     insecure: bool = False,
     auth: str | None = None,
-    system: str | None = None,
+    system: str,
     secrets: Sequence[str] = (),
 ) -> tuple[int, str, str]:
     """Run curl inside `container` over `system`'s docker context.
@@ -265,34 +266,49 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     `TransportFault` when the docker exec itself fails (CLI missing / timeout),
     so a reachable-but-erroring service still returns its status + body.
 
-    `system` names the tenant system the call is for, so its OWN docker context is used; a
-    caller that omits it gets the one system whose config declares this destination
-    (`_destination_owner`). `secrets` are DECLARED secret names (`*_SECRET_REF` in the tenant's
-    systems): each is resolved through the record and set in the environment of this one child
-    only, forwarded into the container by name (`-e NAME`), and replaced by `SECRET_MARKER` in the
-    text this returns (O4).
+    `system` is required: it names the tenant system the call is for, so its OWN docker context
+    is used. A docker context is a per-system fact and is never guessed from the URL.
 
-    `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
-    container's shell so the ``${VAR}`` secret expands *there*, against the
-    container's own env, never on this host; None = no ``-u`` (the auth-less
-    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS.
+    `secrets` are `secrets.env` entry NAMES some `*_SECRET_REF` key of the tenant declares. They
+    are resolved through the record in one read and set in the environment of this one child
+    only, forwarded into the container by variable name, and replaced by `SECRET_MARKER` in the
+    text this returns (O4). Write `{{NAME}}` where a value goes, in `auth` or in a header value
+    (``headers={"Authorization": "Bearer {{MYSYS_API_TOKEN}}"}``,
+    ``auth="svc:{{MYSYS_PASSWORD}}"``): the in-container shell expands it from the child's
+    environment, never on this host's argv.
+
+    `auth` runs curl inside the container's shell, so a ``${VAR}`` in it expands *there*,
+    against the container's own env (``"elastic:${ELASTIC_PASSWORD}"``); None = no ``-u`` (the
+    auth-less stubs). Header values are never shell-expanded apart from their `{{NAME}}` slots.
+    `insecure` adds ``-k`` for the stack's self-signed TLS.
     """
     flags = ["-sS"] + (["-k"] if insecure else [])
     args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
+    slotted_headers: list[str] = []
     for key, val in (headers or {}).items():
-        args += ["-H", f"{key}: {val}"]
+        if _slotted(val):
+            slotted_headers.append(f"{key}: {val}")
+        else:
+            args += ["-H", f"{key}: {val}"]
     if body is not None:
         args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     # Status on its own trailing line so `split_status` can recover it from stdout.
     args += ["-w", "\n%{http_code}", url]
 
-    context = docker_context(ctx, system or _destination_owner(ctx, container, url))
-    secret_flags, secret_env, placed = _place_secrets(ctx, secrets)
+    context = docker_context(ctx, system)
+    var_of = {name: f"{SECRET_ENV_PREFIX}{i}" for i, name in enumerate(secrets)}
+    # Every slot is checked before the secrets are read or any child is forked.
+    script_words = [*flags]
     if auth:
-        # Static flags live in the in-container shell so ${VAR} expands there;
-        # everything dynamic is forwarded as argv after `--` (so a JSON body with
-        # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
-        inner = f'exec curl {" ".join(flags)} -u "{auth}" "$@"'
+        script_words += ["-u", _shell_word(auth, var_of, expand=True)]
+    for header in slotted_headers:
+        script_words += ["-H", _shell_word(header, var_of, expand=False)]
+    secret_flags, secret_env, placed = _place_secrets(ctx, secrets)
+    if auth or slotted_headers:
+        # The flags that carry a `${VAR}` or a placed secret live in the in-container shell so
+        # they expand there; everything else is forwarded as argv after `--` (so a JSON body
+        # with spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
+        inner = f'exec curl {" ".join(script_words)} "$@"'
         cmd = ["docker", "--context", context, "exec", "-i", *secret_flags, container,
                "sh", "-c", inner, "--", *args]
     else:
@@ -465,13 +481,14 @@ def docker_exec_raw(
     argv: list[str],
     *,
     timeout_sec: int = 10,
-    system: str = HOST_STATE,
+    system: str,
 ) -> tuple[int, str, str]:
     """Run `docker --context <system's context> exec <bastion> <argv...>`.
 
-    Exposed for host_state_adapter.py — which runs a command rather than curl, and so owns this
-    lane (`system` defaults to it). Returns (rc, stdout, stderr); raises `TransportFault` when
-    the exec itself never ran (CLI missing / timeout).
+    Exposed for host_state_adapter.py, which runs a command rather than curl. `system` is
+    required, as on every lane: the context is that system's, never a default's. Returns (rc,
+    stdout, stderr); raises `TransportFault` when the exec itself never ran (CLI missing /
+    timeout).
     """
     cmd = ["docker", "--context", docker_context(ctx, system), "exec", bastion, *argv]
     try:
@@ -497,7 +514,7 @@ def docker_inspect_raw(
     *,
     fmt: str | None = None,
     timeout_sec: int = 10,
-    system: str = HOST_STATE,
+    system: str,
 ) -> tuple[int, str, str]:
     """Run `docker --context <system's context> inspect [--format <fmt>] <target>`.
 

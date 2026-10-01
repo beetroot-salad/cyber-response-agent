@@ -12,7 +12,7 @@ from typing import Any
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
-from defender.runtime.tenant_settings import read_regular_bytes
+from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
 
 
 #: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
@@ -128,10 +128,11 @@ def load_case_mapping(settings: Path) -> CaseMapping:
     Called once per run, by `run_tenant.resolve_run_tenant`; every consumer is handed the result
     and none reads the file."""
     path = _mapping_path(settings)
+    shown = pointer_to(_MAPPING_RELPATH)
     try:
         raw = read_regular_bytes(path)
     except OSError as e:
-        raise CaseTicketError(f"case-history mapping not readable: {path}: {e.strerror}") from e
+        raise CaseTicketError(f"case-history mapping not readable: {shown}: {e.strerror}") from e
     import yaml
 
     from defender._yaml import safe_load
@@ -143,7 +144,7 @@ def load_case_mapping(settings: Path) -> CaseMapping:
     except yaml.YAMLError as e:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):
-        raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
+        raise CaseTicketError(f"case-history mapping is not a mapping: {shown}")
     _check_lifecycle(data)
     return CaseMapping(data)
 

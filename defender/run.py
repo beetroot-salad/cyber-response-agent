@@ -332,10 +332,16 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
         )
         investigation_ok = True
     finally:
-        box_mod.stop_and_scrub(
-            box, run_dir, stop_box=stop_box, scrub_tree=scrub,
-            in_flight=not investigation_ok,
-        )
+        try:
+            box_mod.stop_and_scrub(
+                box, run_dir, stop_box=stop_box, scrub_tree=scrub,
+                in_flight=not investigation_ok,
+            )
+        finally:
+            # The receipt is the host's record step's, written after this; anything at its name
+            # now is the box's. Cleared on every exit — a tainted tree and a crashed drive
+            # included — so no re-render shows a ticket line this run never wrote.
+            _default_ticket_writer.clear_receipt(run_dir)
     return summary
 
 

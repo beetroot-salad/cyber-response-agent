@@ -324,7 +324,8 @@ def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env,
                       tenant=S.resolve(tmp_path / "tenants"))
 
-    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"])
+    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"],
+                                                    system="host-state")
 
     assert rc == 0, "the fake docker exec failed — wrong thing under test"
     assert "�" in stdout, "the undecodable byte was not replaced"

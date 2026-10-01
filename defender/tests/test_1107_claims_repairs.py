@@ -30,7 +30,7 @@ def test_a_fifo_at_a_config_path_is_a_fault_not_a_hang(tmp_path):
     fifo = tmp_path / "config.env"
     os.mkfifo(fifo)
     with pytest.raises(S.config_fault()):
-        ts.read_env_file(fifo)
+        ts.read_env_file(fifo, shown="the tenant's settings/systems/x/config.env")
     mapping = tmp_path / "mapping.yaml"
     os.mkfifo(mapping)
     with pytest.raises(case_ticket.CaseTicketError):

@@ -11,6 +11,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
+from defender.runtime.tenant_settings import config_pointer
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_index, guard_outbound
@@ -78,9 +79,15 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
     config = dict(entry)
     missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
     if missing:
-        path = _Path(ctx.tenant.settings) / "systems" / SYSTEM / "config.env"
-        raise ConfigFault(f"missing required config keys in {path}: {', '.join(missing)}")
+        raise ConfigFault(
+            f"missing required config keys in {config_pointer(SYSTEM)}: {', '.join(missing)}")
     return config
+
+
+def _configured(ctx: VerbContext, key: str) -> str | None:
+    """The container named by `key` in the tenant's file, or None when it is absent or blank."""
+    value = transport.system_entry(ctx, SYSTEM).get(key)
+    return None if value is None or not value.strip() else value
 
 
 def _container(ctx: VerbContext, key: str) -> str:
@@ -88,8 +95,8 @@ def _container(ctx: VerbContext, key: str) -> str:
     tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
     `elasticsearch` or `kibana` would address whatever container the host happens to hold of that
     name."""
-    value = transport.system_entry(ctx, SYSTEM).get(key)
-    if value is None or not value.strip():
+    value = _configured(ctx, key)
+    if value is None:
         raise ConfigFault(
             f"{key} is not set — name the container this system is reached through in its "
             "config.env; there is no default")
@@ -329,6 +336,12 @@ def health_check(ctx: VerbContext) -> dict:
         "nodes": body.get("number_of_nodes"),
     }
 
+    # Kibana is optional to this adapter (MF-7 c: an Elasticsearch-only tenant keeps answering),
+    # so a missing container is a RESULT here — asked before the call, never a ConfigFault that
+    # would discard the Elasticsearch answer above and charge the breaker.
+    if _configured(ctx, "ELASTIC_KIBANA_CONTAINER") is None:
+        out["kibana"] = "not configured (ELASTIC_KIBANA_CONTAINER is not set)"
+        return out
     kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
     try:
         kb_status, kb_body = _http_json(

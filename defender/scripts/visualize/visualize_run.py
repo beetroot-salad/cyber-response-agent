@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -14,7 +13,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _env
-from defender._io import read_guarded, read_jsonl_rows
+from defender._io import load_json_artifact, read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
@@ -456,9 +455,11 @@ def render_ticket_line(run_dir: Path) -> str:
 
     The receipt lives in the run dir, which the box is root on while it runs, so it is read as
     untrusted: only as a plain regular file (`read_guarded` — a link at that name is refused, never
-    followed, so a link to a secrets file shows none of the target), only if it is a JSON object
-    whose fields have the types the writer gives them, and every field that reaches the page is
-    escaped. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL is shown as
+    followed, so a link to a secrets file shows none of the target), decoded by the repo's one
+    bounded loader (`load_json_artifact`, so the verdict never depends on stack depth), only if
+    it is a JSON object whose fields have the types the writer gives them, and every field that
+    reaches the page is escaped. run.py's lifecycle clears this name once the box is down, so a
+    receipt the box planted does not outlive its run. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL is shown as
     text, never as a link: nothing on the page sends the reader to an address a file named.
     The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it wrote."""
     path = RunPaths(run_dir).ticket_write
@@ -467,10 +468,7 @@ def render_ticket_line(run_dir: Path) -> str:
     text, _refused = read_guarded(path)
     receipt: object = None
     if text is not None:
-        try:
-            receipt = json.loads(text)
-        except (ValueError, RecursionError):
-            receipt = None
+        receipt, _why = load_json_artifact(text)
     well_formed = (
         isinstance(receipt, dict)
         and isinstance(receipt.get("key"), str)

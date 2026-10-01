@@ -246,9 +246,10 @@ def source_pattern(verb: str, params: dict, ctx: Any = None) -> str | None:
         elastic = ctx.tenant.elastic
         if not isinstance(elastic, ElasticSettings):
             # The record carries a part that could not stand as a value, never raised at resolve
-            # (O5): the call it is read for faults here, as the adapter's own would.
-            raise elastic if isinstance(elastic, ConfigFault) else ConfigFault(
-                str(elastic_problem(elastic)))
+            # (O5): the call it is read for faults here, as the adapter's own would — with a new
+            # instance, so the record's own fault is never handed a traceback.
+            raise ConfigFault(str(elastic) if isinstance(elastic, ConfigFault)
+                              else str(elastic_problem(elastic)))
         return _one_source(
             getattr(elastic, _DEFAULT_INDEX_ATTR[verb]), f"{verb}'s configured default index")
     if verb != "esql":

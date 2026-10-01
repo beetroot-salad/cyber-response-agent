@@ -25,11 +25,11 @@ import errno
 import logging
 import os
 import re
-import stat
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 
+from defender._io import is_plain_entry
 from defender.scripts.adapters.faults import ConfigFault
 
 _log = logging.getLogger(__name__)
@@ -46,12 +46,19 @@ SECRETS_FILE = "secrets.env"
 #: configure this system", whether the folder is absent or its `config.env` is.
 NOT_CONFIGURED = "this tenant's settings do not configure this system"
 
-#: A secrets file larger than this is not a secrets file.
-_SECRETS_MAX_BYTES = 1 << 20
+#: A settings file larger than this is not a settings file. Every one is read whole at resolve
+#: (or, for `secrets.env`, at each lookup), so an unbounded read would let one sparse file
+#: exhaust memory before any fault could be kept as a value.
+SETTINGS_MAX_BYTES = 1 << 20
 
 #: The model-facing name of the tenant's settings folder, as `runtime.verbs.SETTINGS_POINTER`
 #: spells it. Restated rather than imported: `verbs` imports the record, not the other way.
 _SETTINGS_POINTER = "the tenant's settings/"
+
+#: A line ends at CRLF, CR or LF — exactly the endings a universal-newline read (the connect
+#: validator's `read_plain`) recognises, and no others (`str.splitlines` would also split on a
+#: form feed or a vertical tab inside a value).
+_LINE_END = re.compile(r"\r\n|\r|\n")
 
 _PREFIX_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -72,10 +79,12 @@ def parse_env(text: str) -> dict[str, str]:
       * the value is stripped, then ONE matched pair of surrounding quotes is trimmed (never a
         character set: a value that legitimately ends in a quote keeps it);
       * keys match case-sensitively and keep their prefix; a duplicate key yields the later
-        line; a leading byte-order mark is not part of the first key; CRLF leaves no `\\r`.
+        line; a leading byte-order mark is not part of the first key;
+      * a line ends at CRLF, CR or LF (`_LINE_END`), so a file the validator reads as five lines
+        is five lines here too.
     """
     out: dict[str, str] = {}
-    for line in text.removeprefix("\ufeff").split("\n"):
+    for line in _LINE_END.split(text.removeprefix("\ufeff")):
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line or re.match(r"export\s", line):
             continue
@@ -87,33 +96,69 @@ def parse_env(text: str) -> dict[str, str]:
     return out
 
 
+class _Refused(OSError):
+    """A settings file that is a link, not a plain single-linked regular file, or too large. An
+    `OSError`, so every reader's "cannot be read" arm covers it."""
+
+
+def read_plain_fd(fd: int) -> bytes:
+    """The bytes behind an open `fd`, judged before any is read: it must be a plain regular file
+    with at most one name (`_io.is_plain_entry`, the repo's one rule — a file renamed over after
+    it was opened has 0 names and still qualifies, so a rotation by rename never refuses a
+    reader), and at most `SETTINGS_MAX_BYTES` long. `_Refused` otherwise.
+
+    THE ONE READ every settings file goes through: the system configs, the case-history mapping
+    and `secrets.env`."""
+    if not is_plain_entry(os.fstat(fd)):
+        raise _Refused(errno.EINVAL, "not a plain, single-linked regular file")
+    chunks = []
+    remaining = SETTINGS_MAX_BYTES + 1
+    while remaining > 0 and (chunk := os.read(fd, min(65536, remaining))):
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    data = b"".join(chunks)
+    if len(data) > SETTINGS_MAX_BYTES:
+        raise _Refused(errno.EFBIG, f"larger than {SETTINGS_MAX_BYTES} bytes")
+    return data
+
+
 def read_regular_bytes(path: Path) -> bytes:
-    """The bytes of a regular file, opened without blocking: a FIFO or device planted at a
-    settings path is an `OSError` here, never a read that waits forever."""
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    """`read_plain_fd` over `path`, opened without following a link at its last component and
+    without blocking (a FIFO or device planted at a settings path is refused, never a read that
+    waits forever). The folders above it were walked for links when the tenant was accepted."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(errno.EINVAL, "not a regular file")
-        with os.fdopen(fd, "rb", closefd=False) as fh:
-            return fh.read()
+        return read_plain_fd(fd)
     finally:
         os.close(fd)
 
 
-def read_env_file(path: Path) -> dict[str, str]:
-    """`parse_env` over the file at `path`, or `ConfigFault`: a missing file is "this tenant's
-    settings do not configure this system", and one that cannot be read or is not UTF-8 text is
-    that system down — never an `OSError` or `UnicodeDecodeError` out of resolve."""
+def pointer_to(rel: str) -> str:
+    """How a fault names the settings file at `rel` (relative to the tenant's `settings/`): by
+    the settings pointer, never by its host path, so no fault text has a host path to redact."""
+    return f"{_SETTINGS_POINTER}{rel}"
+
+
+def config_pointer(system: str) -> str:
+    """`pointer_to` for `system`'s `config.env`."""
+    return pointer_to(f"systems/{system}/config.env")
+
+
+def read_env_file(path: Path, *, shown: str) -> dict[str, str]:
+    """`parse_env` over the file at `path`, or `ConfigFault` naming it as `shown`: a missing file
+    is "this tenant's settings do not configure this system", and one that cannot be read or is
+    not UTF-8 text is that system down — never an `OSError` or `UnicodeDecodeError` out of
+    resolve."""
     try:
         raw = read_regular_bytes(path)
     except FileNotFoundError:
-        raise ConfigFault(f"config file not found: {path} — {NOT_CONFIGURED}") from None
+        raise ConfigFault(f"config file not found: {shown} — {NOT_CONFIGURED}") from None
     except OSError as e:
-        raise ConfigFault(f"config file unreadable: {path}: {e.strerror or type(e).__name__}") from e
+        raise ConfigFault(f"config file unreadable: {shown}: {e.strerror or type(e).__name__}") from e
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise ConfigFault(f"config file is not UTF-8 text: {path}") from None
+        raise ConfigFault(f"config file is not UTF-8 text: {shown}") from None
     return parse_env(text)
 
 
@@ -215,7 +260,8 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
             if folder.name.startswith(".") or not folder.is_dir():
                 continue
             try:
-                out[folder.name] = SystemConfig(read_env_file(folder / "config.env"))
+                out[folder.name] = SystemConfig(
+                    read_env_file(folder / "config.env", shown=config_pointer(folder.name)))
             except ConfigFault as fault:
                 out[folder.name] = fault
     return MappingProxyType(out)
@@ -292,16 +338,12 @@ def declared_secrets(systems: Mapping[str, SystemConfig | ConfigFault]) -> dict[
     return {name: tuple(sorted(keys)) for name, keys in declared.items()}
 
 
-class _Refused(Exception):
-    """The secrets file, or a folder above it, is a link or not a regular file."""
-
-
 def _read_no_links(root: Path, parts: tuple[str, ...]) -> bytes:
     """The bytes of `root/parts...`, opened one component at a time from a directory handle, each
     with no-follow: a link at ANY level (the tenant folder, `settings/`, the file) is refused, and
-    so is a last component that is not a regular file or has more than one name (a hard link is
-    another tenant's bytes under this name). `O_NONBLOCK` keeps a FIFO with no writer from
-    blocking the open — it is then refused as not regular."""
+    the last component is judged by `read_plain_fd` (a hard link is another tenant's bytes under
+    this name). `O_NONBLOCK` keeps a FIFO with no writer from blocking the open — it is then
+    refused as not regular."""
     dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in parts[:-1]:
@@ -312,20 +354,9 @@ def _read_no_links(root: Path, parts: tuple[str, ...]) -> bytes:
     finally:
         os.close(dir_fd)
     try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise _Refused
-        chunks = []
-        remaining = _SECRETS_MAX_BYTES + 1
-        while remaining > 0 and (chunk := os.read(fd, min(65536, remaining))):
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        data = b"".join(chunks)
+        return read_plain_fd(fd)
     finally:
         os.close(fd)
-    if len(data) > _SECRETS_MAX_BYTES:
-        raise _Refused
-    return data
 
 
 class SecretLookup:
@@ -354,25 +385,42 @@ class SecretLookup:
 
     def get(self, name: str) -> str:
         """The value of the declared secret `name`, or `ConfigFault`."""
-        keys = self._declared.get(name)
-        if not keys:
-            raise ConfigFault(
-                "secret is not declared: no *_SECRET_REF key in this tenant's systems names it")
-        ref = ", ".join(keys)
+        return self.get_many((name,))[0]
+
+    def get_many(self, names: Sequence[str]) -> list[str]:
+        """The values of the declared secrets `names`, in order, from ONE read of `secrets.env` —
+        so a call that needs two never pairs one version of the file with another — or the
+        `ConfigFault` for the first that cannot be had. Every name is checked declared before the
+        file is opened."""
+        refs = []
+        for name in names:
+            keys = self._declared.get(name)
+            if not keys:
+                raise ConfigFault(
+                    "secret is not declared: no *_SECRET_REF key in this tenant's systems names it")
+            refs.append(", ".join(keys))
+        if not refs:
+            return []
         try:
             text = _read_no_links(self._root, self._parts).decode("utf-8")
         except FileNotFoundError:
-            raise ConfigFault(f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} is missing") from None
-        except (OSError, _Refused):
+            raise ConfigFault(f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} is missing") from None
+        except OSError:
             raise ConfigFault(
-                f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} cannot be read (a link, not a regular "
-                "file, or unreadable)") from None
+                f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} cannot be read (a link, not a "
+                "regular file, or unreadable)") from None
         except UnicodeDecodeError:
-            raise ConfigFault(f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} is not UTF-8 text") from None
-        value = parse_env(text).get(name)
-        if value is None or is_blank(value):
-            raise ConfigFault(f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} has no non-blank entry for it")
-        return value
+            raise ConfigFault(
+                f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} is not UTF-8 text") from None
+        entries = parse_env(text)
+        values = []
+        for name, ref in zip(names, refs, strict=True):
+            value = entries.get(name)
+            if value is None or is_blank(value):
+                raise ConfigFault(
+                    f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} has no non-blank entry for it")
+            values.append(value)
+        return values
 
 
 __all__ = [
@@ -382,16 +430,21 @@ __all__ = [
     "NO_ELASTIC",
     "NOT_CONFIGURED",
     "SECRET_REF_SUFFIX",
+    "SETTINGS_MAX_BYTES",
     "ElasticSettings",
     "SecretLookup",
     "SystemConfig",
     "declared_secrets",
+    "config_pointer",
     "elastic_problem",
     "elastic_view",
     "is_blank",
     "is_secret_name",
     "parse_env",
+    "pointer_to",
     "read_env_file",
+    "read_plain_fd",
+    "read_regular_bytes",
     "read_systems",
     "system_prefix",
     "warn_missing_access_method",

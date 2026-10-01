@@ -232,7 +232,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
-            _clear_receipt(run_dir)
+            clear_receipt(run_dir)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
         ctx = _verb_context(tenant, defender_dir, run_dir, env)
@@ -262,7 +262,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         _post_comment(run_dir, deps, config, case_id, payload, word, ctx)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
-        _clear_receipt(run_dir)
+        clear_receipt(run_dir)
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
@@ -295,10 +295,14 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
 
 
-def _clear_receipt(run_dir: Path) -> None:
+def clear_receipt(run_dir: Path) -> None:
     """Remove the run dir's receipt, if one is there, WITHOUT following a link at its name: a
     record-step branch that writes no receipt must not leave an earlier run's (or a planted)
-    one for the page to show. `unlink` removes the link itself, never its target."""
+    one for the page to show. `unlink` removes the link itself, never its target.
+
+    Also run.py's lifecycle's last act on EVERY exit, once the box is down: whatever the box left
+    at this name is not the host's, and a run that dies before the record step (a crash, a
+    Ctrl-C, a tainted tree) would otherwise keep it for a re-render to show."""
     try:
         RunPaths(run_dir).ticket_write.unlink(missing_ok=True)
     except OSError as e:
