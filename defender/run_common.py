@@ -88,7 +88,7 @@ def materialize_run(
 
         runs_base = EpisodePaths(world.episode_dir).runs
     else:
-        runs_base = _tenant.runs_base_for(tenant)
+        runs_base = tenant.runs
     # The runs base is the host-controlled trust root; nothing above it is judged.
     guarded_mkdir(runs_base, base=runs_base)
     # The tenant record comes before the provenance stamp (which must match it) and before the

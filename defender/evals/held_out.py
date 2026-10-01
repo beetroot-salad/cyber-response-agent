@@ -222,7 +222,7 @@ def main(argv: list[str]) -> int:
         except _tenant.TenantRefused as refused:
             print(f"[held_out] {refused}", file=sys.stderr)
             return 2
-        runs_dir = _tenant.runs_base_for(tenant)
+        runs_dir = tenant.runs
     else:
         runs_dir = Path(ns.runs_dir)
     if not runs_dir.is_dir():

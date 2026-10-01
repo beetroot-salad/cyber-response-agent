@@ -302,11 +302,10 @@ def investigate(
     the child `run.py` is handed its id as `--tenant`, inherits `DEFENDER_DATA_ROOT`, and
     re-accepts it.
     """
-    from defender import _tenant
 
     accepted = _accept(tenant_id)
     tenant = accepted.id
-    env_base = _tenant.runs_base_for(accepted)
+    env_base = accepted.runs
     candidate, attempt = run_id, 1
     while (env_base / candidate).exists():
         attempt += 1

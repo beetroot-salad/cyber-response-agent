@@ -1056,7 +1056,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     tenant = _episode_tenant(source, data_root)
     # The accepted tenant's tree under the data root (#1078 D4): the episodes root's data-root
     # refusal and the grade's runs base are handed it, never re-derive it.
-    runs_base = _tenant.runs_base_for(tenant.tenant)
+    runs_base = tenant.tenant.runs
     write_door = (staging_mod.write_door_from_env(staging_mod.host_context(tenant.settings))
                   if door is None else door)
     questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
