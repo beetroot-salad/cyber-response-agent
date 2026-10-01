@@ -81,8 +81,8 @@ def _shown(value: object) -> str:
 
 
 class TenantRefused(Exception):
-    """The one refusal shape (#0, F0/J29) for every tenant owner — this module, the settings
-    folder resolver (`_tenants.TenantDirError`) and the run's grants (`run_tenant`): the
+    """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
+    and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
     message names the value that was refused, and every entry catches THIS and surfaces it
     verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
     wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an

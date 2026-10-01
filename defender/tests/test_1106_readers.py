@@ -3,10 +3,10 @@
 The four settings kinds had eight-odd readers, and each found its file for itself: from
 `ctx.defender_dir`, from `PATHS.defender_dir`, from `$DEFENDER_DIR`, from `__file__`. After
 #1106 none of them finds anything. The run's tenant settings folder is resolved once at the
-process entry point (`tenant_dir(tenants_root, run.tenant_id).settings`) and HANDED to every
+process entry point (`accept_tenant(data_root, run.tenant_id).settings`) and HANDED to every
 reader — on the verb context (`VerbContext.settings_dir`, a required field) or as an argument.
 
-HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a tenants root in `tmp_path` —
+HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a data root in `tmp_path` —
 OUTSIDE the checkout — and carries the SAME id as the checkout's committed tenant
 (`playground`), with DIFFERENT values in every kind. A reader that ignored the handed folder and
 went looking — the checkout's `knowledge/tenants/playground`, `PATHS`, the old
@@ -31,15 +31,15 @@ MARK = "injected"
 
 @pytest.fixture
 def injected(tmp_path) -> Path:
-    """The injected tenant's settings folder: `<tmp root>/playground/settings`, every value
+    """The injected tenant's settings folder: `<tmp root>/playground/knowledge/settings`, every value
     carrying `MARK`, the mapping's released status and reporter distinct from the checkout's."""
     root = tmp_path / "injected-root"
-    T.plant_tenant(
+    T.place_tenant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
         lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
         released_status="resolved-by-a-person", reporter="injected-reporter",
     )
-    td = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    td = T.accept(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
     return td.settings
 
@@ -84,8 +84,8 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     faults = T.mod("scripts.adapters.faults")
     transport = T.mod("scripts.adapters._stub_transport")
     root = tmp_path / "injected-root"
-    T.plant_tenant(root, T.PLAYGROUND_ID, configs={})
-    settings = T.tenants().tenant_dir(root, T.PLAYGROUND_ID).settings
+    T.place_tenant(root, T.PLAYGROUND_ID, configs={})
+    settings = T.accept(root, T.PLAYGROUND_ID).settings
     with pytest.raises(faults.ConfigFault) as caught:
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
     assert str(settings / "systems" / "cmdb" / "config.env") in str(caught.value)

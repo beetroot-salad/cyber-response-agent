@@ -86,7 +86,7 @@ def _catalog(tmp_path: Path) -> Path:
 
 def _deps(tmp_path: Path, defender_dir: Path, *, role=None) -> tools.AgentDeps:
     """Bind `role` — gather by default, bound WITH a run's grant (#1106 M4: `GATHER_DEF`
-    carries none of its own; the playground tenant's is what a run over this checkout holds)."""
+    carries none of its own; the committed fixture tenant's is what these tests bind)."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.runtime.agent_definition import bind
@@ -829,7 +829,7 @@ def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_na
     ("read it first ... it already carries the entity-disjunct body"), so the id is prompt text
     a lead with no model in the loop acts on. The join is pinned at run start for every
     deployment (`lead_zero.resolve_correlation_dispatch`, #1003); this is repo CI's pin on
-    the repo's own copies — the config lives in the playground tenant's `settings/` (#1106),
+    the repo's own copies — the config lives in the fixture tenant's `settings/` (#1106, #1120 C26),
     the file in the catalog, and
     the grant that decides whether the file is even RENDERED in a third place.
 
@@ -845,11 +845,11 @@ def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_na
     from defender.runtime.lead_zero_config import lead_zero_config_path, load_correlation_template
     from defender.tests import _tenants1106 as T1106
 
-    # #1106 M4: the run's grants, projected from the committed playground tenant's table.
+    # #1106 M4: the run's grants, projected from the committed fixture tenant's table.
     grants = T1106.fixture_grants()
     CORRELATION_GRANT, CORRELATION_SYSTEM = grants.correlation, grants.correlation_system
     CORRELATION_TEMPLATE = load_correlation_template(
-        lead_zero_config_path(T1106.PLAYGROUND_SETTINGS))
+        lead_zero_config_path(T1106.FIXTURE_SETTINGS))
     established = [t for t in _corpus.iter_query_templates(_REAL_CATALOG) if _corpus.is_established(t)]
     named = [t for t in established if t.id == CORRELATION_TEMPLATE]
     assert named, (

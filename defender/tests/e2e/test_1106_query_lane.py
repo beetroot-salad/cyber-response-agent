@@ -2,7 +2,7 @@
 folder, and what it is told it may reach is its tenant's grant (O2 gather's `query`, O3).
 
 Driven end to end through the REAL `driver.run_investigation` on the replay harness, with the
-run's `TenantDir` and `RunGrants` handed in as the driver's two new inputs (#1106 M4: nothing
+run's accepted `Tenant` and `RunGrants` handed in as the driver's two new inputs (#1106 M4: nothing
 reads a table at import, so the run carries them). Two lanes are observed on what the fakes
 RECEIVED:
 
@@ -45,8 +45,8 @@ DONE = Turn(text="Summary: measured the lead.")
 
 def _tenant(tmp_path: Path, table: str, marker: str):
     root = tmp_path / f"root-{marker}"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker)
-    tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    T.place_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker)
+    tenant = T.accept(root, T.PLAYGROUND_ID)
     return tenant, T.run_grants(tenant.settings)
 
 
@@ -129,9 +129,9 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     after = "\n".join(gather.seen[1:])
     assert "config file not found: the tenant's settings/systems/cmdb/config.env" in after, after
     table = "\n".join(p.read_text(encoding="utf-8") for p in run_dir.rglob("*.jsonl"))
-    tenants_root = tenant.settings.parent.parent
+    data_root = tenant.data_root
     for text in (after, table):
-        assert str(tenants_root) not in text, text
+        assert str(data_root) not in text, text
 
 
 @pytest.mark.parametrize(("own", "system", "reached", "withheld"), [
@@ -170,9 +170,9 @@ def test_lead_zero_item1_reads_the_runs_tenant_alerts_index_and_hands_its_verbs_
     from defender.tests.e2e import _lead_zero_808 as LZ
 
     root = tmp_path / "root-lz"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=T.config_texts(
+    T.place_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=T.config_texts(
         "lz", events_index="lz-tenant-events-*", alerts_index="lz-tenant-alerts-*"))
-    tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    tenant = T.accept(root, T.PLAYGROUND_ID)
     grants = T.run_grants(tenant.settings)
     assert LZ.ALERTS_INDEX != "lz-tenant-alerts-*", "the fixture no longer discriminates"
 

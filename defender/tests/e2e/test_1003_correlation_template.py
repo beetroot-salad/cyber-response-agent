@@ -243,9 +243,9 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     )
     # #1106: the config is the RUN's tenant's, handed in — a tenant planted outside the tree
     # whose table grants the lead `elastic.alerts` and whose config names the planted id.
-    T1106.plant_tenant(tmp_path / "tenants", "acme",
+    T1106.place_tenant(tmp_path / "tenants", "acme",
                        lead_zero=f"correlation_template: {planted_id}\n")
-    tenant = T1106.tenants().tenant_dir(tmp_path / "tenants", "acme")
+    tenant = T1106.accept(tmp_path / "tenants", "acme")
     grants = T1106.run_grants(tenant.settings)
     config = lead_zero_config_path(tenant.settings)
     assert config.is_file(), "the planted tenant carries no config"

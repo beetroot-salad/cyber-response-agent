@@ -1004,9 +1004,10 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     separately is worse than none: it certifies a policy nobody runs."""
     c = cmd.format(run=env.run, dfn=env.dfn)
     # #1106 M2: gather's grant is built from a named tenant under an injected root — the CLI
-    # holds no process-level grant to fall back to.
-    tenant = (("--tenants-root", str(T1106.TENANTS_ROOT), "--tenant", T1106.PLAYGROUND_ID)
-              if which == "gather" else ())
+    # holds no process-level grant to fall back to. The root is `$DEFENDER_DATA_ROOT` (#1120),
+    # which the subprocess inherits; the tenant is the committed fixture placed there, whose
+    # grants `env.gather` was compiled from.
+    tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
     p = _cli("explain", which, c, "--run-dir", str(env.run), "--defender-dir", str(env.dfn),
              *tenant, "--json")
     assert p.returncode == 0, p.stderr

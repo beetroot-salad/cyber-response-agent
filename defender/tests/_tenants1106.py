@@ -299,19 +299,16 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     omit: tuple[str, ...] = (),
     agent_files: dict[str, str] | None = None,
 ) -> Path:
-    """Write a set-up tenant under the data root `root` (#1120 D1): its knowledge folder
-    `root/<tenant_id>/knowledge/{settings,agent}/`, the `agent/.tenant-id` naming it, and its
-    row written by hand (so one root can hold several fixture tenants — `create_tenant`'s
-    one-tenant guard is setup's, not acceptance's). Returns the KNOWLEDGE folder, so
-    `/ "settings"` and `/ "agent"` name the two halves; `accept(root, tenant_id)` accepts it.
+    """Write a plain knowledge folder `root/<tenant_id>/{settings,agent}/` and return it — the
+    shape of the committed template and fixture (no `.tenant-id`, no row). `place_tenant` puts
+    one under a data root as a set-up tenant.
 
     `omit` names settings-relative files NOT to write (e.g. one of `REQUIRED_FILES`), for the
-    refusal tests; the folder is otherwise complete. `agent/` always holds one marker file, so
-    a mount of it is observably THIS tenant's."""
-    folder = Path(root) / tenant_id
-    knowledge = folder / "knowledge"
-    settings = knowledge / "settings"
-    agent = knowledge / "agent"
+    refusal tests; the folder is otherwise complete. `agent/` always exists and holds one
+    marker file, so a mount of it is observably THIS tenant's."""
+    tenant = Path(root) / tenant_id
+    settings = tenant / "settings"
+    agent = tenant / "agent"
     files: dict[str, str] = {
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
@@ -331,7 +328,19 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():
         (agent / name).write_text(text, encoding="utf-8")
-    (agent / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
+    return tenant
+
+
+def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
+    """A set-up tenant under the data root `root` (#1120 D1): `plant_tenant`'s folder as its
+    knowledge folder `root/<tenant_id>/knowledge/`, the `agent/.tenant-id` naming it, and its
+    row written by hand (so one root can hold several fixture tenants — `create_tenant`'s
+    one-tenant guard is setup's, not acceptance's). Returns the KNOWLEDGE folder, so
+    `/ "settings"` and `/ "agent"` name the two halves; `accept(root, tenant_id)` accepts it."""
+    folder = Path(root) / tenant_id
+    defaults = {"marker": tenant_id, "agent_files": {"AGENT.md": f"agent half of {tenant_id}\n"}}
+    knowledge = plant_tenant(folder, "knowledge", **{**defaults, **kw})
+    (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     (folder / "tenant.json").write_text(json.dumps(
         {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"},
         indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -515,6 +524,7 @@ __all__ = [
     "mapping_text",
     "mod",
     "paths_in",
+    "place_tenant",
     "plant_tenant",
     "plant_tenant_record",
     "accept",

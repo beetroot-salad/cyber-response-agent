@@ -143,7 +143,7 @@ def _launch(tmp_path: Path, *, stamp_tenant: str | None,
 def _episode_tenant(root: Path) -> Path:
     """A complete tenant whose elastic patterns are the fixture's configured pair, so the
     stager's namespace checks accept the family's overlays."""
-    return T.plant_tenant(root, "acme", configs=T.config_texts(
+    return T.place_tenant(root, "acme", configs=T.config_texts(
         "acme", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
 
 
@@ -206,7 +206,7 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     stager = T.mod("learning.branch.estate.stagers.elastic")
     assert tuple(stager.configured_patterns(T.PLAYGROUND_SETTINGS)) != TENANT_PATTERNS, \
         "the fixture no longer discriminates from the checkout's copy"
-    T.plant_tenant(current_data_root(), "acme", configs=T.config_texts(
+    T.place_tenant(current_data_root(), "acme", configs=T.config_texts(
         "acme", events_index=TENANT_PATTERNS[0], alerts_index=TENANT_PATTERNS[1]))
     door = P.FakeDoor()
     outcome, spawn = _launch(tmp_path, stamp_tenant="acme", door=door)
@@ -229,7 +229,7 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
     `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant` (the two agree)."""
     root = current_data_root()
     _episode_tenant(root)
-    T.plant_tenant(root, "bravo", configs=T.config_texts(
+    T.place_tenant(root, "bravo", configs=T.config_texts(
         "bravo", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
     outcome, spawn = _launch(tmp_path, stamp_tenant="bravo", record_tenant="acme")
     text = f"{outcome} {capsys.readouterr().err}"
@@ -245,7 +245,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     that loads but grants gather only `health-check` is refused before the questioner is paid,
     the review replays or any sibling starts — not by every sibling afterwards. The control is
     `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant`."""
-    T.plant_tenant(current_data_root(), "acme", table=(
+    T.place_tenant(current_data_root(), "acme", table=(
         "dispositions:\n"
         "  cmdb:\n"
         "    get-host: {roles: [], reason: \"withheld in this fixture\"}\n"
@@ -295,7 +295,7 @@ def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_pat
     that tenant's table (by name, not host path), and carry that tenant's settings on its verb context. Tenant B's
     table differs from the checkout playground's, pair by pair."""
     seams = T.mod("learning.branch.seams")
-    b = T.plant_tenant(current_data_root(), "bravo", table=T.TABLE_B, marker="bravo")
+    b = T.place_tenant(current_data_root(), "bravo", table=T.TABLE_B, marker="bravo")
     tenant = T.accept(current_data_root(), "bravo")
     ep = P.episode(tmp_path)
     side = seams.adapter_seam(ep, T.run_tenant(tenant), runs_base=tmp_path / "runs")
@@ -336,8 +336,8 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
     root = current_data_root()
     # The fixture world touches elastic, and a world may only touch a system its grant serves,
     # so both tables reach elastic; they still differ on cmdb and identity.
-    T.plant_tenant(root, "acme", table=T.TABLE_A)
-    T.plant_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER)
+    T.place_tenant(root, "acme", table=T.TABLE_A)
+    T.place_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER)
     elastic = {("elastic", "health-check"), ("elastic", "query")}
     expected = {"acme": (T.GATHER_PAIRS_A, ("cmdb", "get-host"), ("identity", "get-user")),
                 "bravo": (T.GATHER_PAIRS_B | elastic, ("identity", "get-user"),

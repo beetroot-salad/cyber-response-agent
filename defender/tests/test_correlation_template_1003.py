@@ -38,7 +38,8 @@ THE NAMES this suite pins (the implementation is written against them):
   * `defender/runtime/driver/__init__.py` — `_correlation_dispatch_at_run_start`, the frame
     that reads the run's config and catalog and hands the result to the dispatch.
   * `defender/knowledge/environment/lead-zero.yaml` — one key, `correlation_template:`
-    (since #1106: `knowledge/tenants/<id>/settings/lead-zero.yaml`).
+    (since #1106: `<data root>/<id>/knowledge/settings/lead-zero.yaml`; the committed copy
+    this suite reads is the test fixture's, `knowledge/tenant-fixture/settings/`, #1120 C26).
 """
 from __future__ import annotations
 
@@ -172,7 +173,7 @@ def _pair(system: str, verb: str) -> str:
 def test_the_shipped_config_names_the_template_and_the_run_start_frame_reads_it():
     """Conservation and wiring in one: the shipped `lead-zero.yaml` exists at the path the
     module derives, names exactly the id `_spec.py` used to spell, and the RUN-START frame
-    over this checkout (`run_tenant.resolve_run_tenant`, whose value the driver's
+    over this checkout (`run_tenant.run_tenant_for`, whose value the driver's
     `_correlation_dispatch_at_run_start` carries) resolves that file's value on the shipped
     table to a dispatch on `elastic` carrying the id and the table's projection. Serves O1: the id is authored config, and the dispatch is its projection —
     there is no import-time constant for it to be read from."""
@@ -182,21 +183,24 @@ def test_the_shipped_config_names_the_template_and_the_run_start_frame_reads_it(
         lead_zero_config_path,
         load_correlation_template,
     )
-    from defender.runtime.run_tenant import resolve_run_tenant
+    from defender.runtime.run_tenant import run_tenant_for
 
-    # #1106: the config lives in the RUN's tenant settings folder (the committed playground
-    # tenant at the repo root), and the frame reads it from the tenant and grants it is handed.
-    settings = T1106.PLAYGROUND_SETTINGS
+    # #1106: the config lives in the RUN's tenant settings folder (the committed fixture
+    # tenant at the repo root, #1120 C26), and the frame reads it from the tenant and grants
+    # it is handed.
+    settings = T1106.FIXTURE_SETTINGS
     path = lead_zero_config_path(settings)
     assert path == settings / "lead-zero.yaml"
     assert path.is_file(), f"the shipped config is missing at {path}"
     assert path.relative_to(PATHS.repo_root).as_posix() == \
-        "knowledge/tenants/playground/settings/lead-zero.yaml"
+        "knowledge/tenant-fixture/settings/lead-zero.yaml"
 
     assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
     grants = T1106.fixture_grants()
-    run_tenant = resolve_run_tenant(
-        T1106.playground_tenant(), defender_dir=DEFENDER, dispatches_lead_zero=True)
+    tenant = T1106.fixture_tenant()
+    assert load_correlation_template(lead_zero_config_path(tenant.settings)) == \
+        SHIPPED_TEMPLATE_ID, "the fixture placed under the data root carries the same config"
+    run_tenant = run_tenant_for(tenant, defender_dir=DEFENDER, dispatches_lead_zero=True)
     assert _correlation_dispatch_at_run_start(
         tenant=run_tenant, resume=None, lead_zero_verbs=object(),
     ) == lead_zero.CorrelationDispatch(
@@ -319,32 +323,33 @@ def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
 
 
 def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_handed(tmp_path):
-    """`run_tenant.resolve_run_tenant(tenant, defender_dir=…)` joins THAT run's config (its
+    """`run_tenant.run_tenant_for(tenant, defender_dir=…)` joins THAT run's config (its
     tenant's settings folder, #1106) with THAT tree's catalog and the run's own grants, and the
     driver's `_correlation_dispatch_at_run_start` carries the value it resolved.
     A tree whose catalog holds only `elastic.other-alerts` and whose config names it resolves
     to a dispatch on that id — a frame reading the checkout's config would look for the
     shipped id in this catalog and refuse. Negative control on the same tree: the config
-    removed is `LeadZeroConfigError` naming the tree's path, not the checkout's — and NOT
+    removed is `LeadZeroConfigError` (carried as the cause of the run's one `TenantRefused`)
+    naming the tree's path, not the checkout's — and NOT
     raised for a run that will not dispatch the lead (a resume, no registry), which reads
     neither file."""
     from defender.runtime.driver import _correlation_dispatch_at_run_start
     from defender.runtime.lead_zero import CorrelationDispatch
     from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
-    from defender.runtime.run_tenant import resolve_run_tenant
+    from defender.runtime.run_tenant import TenantRefused, run_tenant_for
 
     tree = tmp_path / "repo" / "defender"
     _plant(tree / "skills" / "gather" / "queries", "elastic", "other-alerts", verb="alerts")
     # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts).
-    T1106.plant_tenant(tmp_path / "tenants", "acme",
+    T1106.place_tenant(tmp_path / "tenants", "acme",
                        lead_zero="correlation_template: elastic.other-alerts\n")
-    tenant = T1106.tenants().tenant_dir(tmp_path / "tenants", "acme")
+    tenant = T1106.accept(tmp_path / "tenants", "acme")
     grants = T1106.run_grants(tenant.settings)
     config = lead_zero_config_path(tenant.settings)
     assert config == tenant.settings / "lead-zero.yaml"
     assert config.is_file()
 
-    dispatching = resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=True)
+    dispatching = run_tenant_for(tenant, defender_dir=tree, dispatches_lead_zero=True)
     assert dispatching.correlation == CorrelationDispatch(
         template_id="elastic.other-alerts", system="elastic", grant=grants.correlation,
     )
@@ -352,11 +357,13 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
         tenant=dispatching, resume=None, lead_zero_verbs=object()) == dispatching.correlation
 
     config.unlink()
-    with pytest.raises(LeadZeroConfigError) as caught:
-        resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=True)
+    with pytest.raises(TenantRefused) as caught:
+        run_tenant_for(tenant, defender_dir=tree, dispatches_lead_zero=True)
+    assert isinstance(caught.value.__cause__, LeadZeroConfigError), repr(caught.value.__cause__)
+    assert str(config) in str(caught.value.__cause__), str(caught.value.__cause__)
     assert str(config) in str(caught.value), str(caught.value)
     # A run that will not dispatch the lead reads neither file, and the driver keys on that.
-    resumed = resolve_run_tenant(tenant, defender_dir=tree, dispatches_lead_zero=False)
+    resumed = run_tenant_for(tenant, defender_dir=tree, dispatches_lead_zero=False)
     assert resumed.correlation is None
     assert _correlation_dispatch_at_run_start(
         tenant=resumed, resume=object(), lead_zero_verbs=object()) is None

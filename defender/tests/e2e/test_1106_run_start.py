@@ -1,12 +1,12 @@
 """#1106 — a run starts on its own tenant or not at all, and the refusal comes BEFORE the box
 (O4, C9, D4, M5), end to end through `run.py`'s real `main`.
 
-`run.py` is the entry point that resolves the tenants root (`--tenants-root`, defaulting to
-`<checkout>/knowledge/tenants`) and hands it down (D2). The run's tenant is the one its
-request names (`--tenant`, #1078 — there is no default). Before
-`start_box` the run resolves `tenant_dir(root, tenant)`, loads the table and lead-zero, runs
-the lead-zero agreement check and checks gather's grant is not empty (M5) — every refusal
-naming the path an operator must fix.
+`run.py` is the entry point that resolves the data root (`$DEFENDER_DATA_ROOT`, #1120: the one
+place tenants are found, with no default) and hands it down (D2). The run's tenant is the one
+its request names (`--tenant`, #1078 — there is no default). Before `start_box` the run accepts
+the tenant (`accept_tenant(root, tenant)`, its knowledge folder at `<root>/<T>/knowledge/`),
+loads the table and lead-zero, runs the lead-zero agreement check and checks gather's grant is
+not empty (M5) — every refusal naming the path an operator must fix.
 
 Each scenario drives the REAL `main` with the REAL lifecycle (`_run_investigation_lifecycle`)
 composed over its existing seams: a recording `start_box` (so "never reached" is an
@@ -73,28 +73,33 @@ class TicketWriterRecorder:
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """An alert, a tenants root outside the checkout, and a `runs_base(tenant_id)` factory that
-    points `main` at a fresh data root holding that tenant's row and returns its runs base; the
-    tenant then rides on every argv below as `--tenant` (#1078)."""
+    """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`, where each scenario
+    plants its tenants' knowledge folders and rows), and a `runs_base(tenant_id)` factory that
+    chooses the run's tenant, gives it a row if the scenario planted none, and returns its runs
+    base; the tenant then rides on every argv below as `--tenant` (#1078)."""
     alert_dir = tmp_path / "alerts" / "a-1106"
     alert_dir.mkdir(parents=True)
     alert = alert_dir / "alert.json"
     alert.write_text(json.dumps({
         "rule": {"id": "r-1106", "description": "fixture"}, "timestamp": "2026-09-26T00:00:00Z",
     }), encoding="utf-8")
-    root = tmp_path / "tenants"
+    root = tmp_path / "data"
     root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learning-state"))
-    counter = iter(range(1000))
     chosen: dict[str, str] = {}
 
     def runs_base(tenant_id: str) -> Path:
-        data_root = tmp_path / f"data-{next(counter)}"
-        monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
         tenant = T.mod("_tenant")
-        tenant.create_tenant(data_root, tenant_id)
+        layout = tenant._TenantPaths(root, tenant_id)
+        if not layout.row.exists():
+            # The row alone (no knowledge folder): a tenant set up in name only.
+            layout.dir.mkdir(parents=True, exist_ok=True)
+            layout.row.write_text(json.dumps(
+                {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
+                encoding="utf-8")
         chosen["tenant"] = tenant_id
-        return tenant.runs_base_for(tenant_id)
+        return layout.runs
 
     return {"alert": alert, "root": root, "runs_base": runs_base, "chosen": chosen}
 
@@ -125,8 +130,7 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     stderr — the exit mechanism is not what is pinned; the TIMING (never reaching `start_box`)
     and the NAMED PATH are."""
     start = StartBoxRecorder(stop=True)
-    argv = [str(world["alert"]), "--tenant", world["chosen"]["tenant"],
-            "--tenants-root", str(world["root"]), "--no-learn", *extra]
+    argv = [str(world["alert"]), "--tenant", world["chosen"]["tenant"], "--no-learn", *extra]
     text = ""
     try:
         rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p: None,
@@ -142,7 +146,7 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     captured = capsys.readouterr()
     text = "\n".join((text, captured.err, captured.out))
     assert "unrecognized arguments" not in text, (
-        f"run.py does not accept --tenants-root, so nothing was checked:\n{text}")
+        f"run.py rejected its argv, so nothing was checked:\n{text}")
     assert start.calls == [], start.calls
     return text, start
 
@@ -152,7 +156,7 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
 # =============================================================================================
 
 def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(world, capsys):
-    T.plant_tenant(world["root"], "acme")
+    T.place_tenant(world["root"], "acme")
     world["runs_base"]("ghost")
     text, _ = _refusal(world, capsys)
     assert _names(text, world["root"] / "ghost"), text
@@ -164,32 +168,32 @@ def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(wor
     comments". And refused, it leaves NO runs-base record: a base gets its tenant record only
     when a run dir is actually built there (the run-dir builder creates it), never from a run
     that stopped."""
-    T.plant_tenant(world["root"], T.PLAYGROUND_ID,
+    T.place_tenant(world["root"], T.PLAYGROUND_ID,
                    omit=("systems/case-history/mapping.yaml",))
     base = world["runs_base"](T.PLAYGROUND_ID)
     text, _ = _refusal(world, capsys)
     assert _names(
-        text, world["root"] / T.PLAYGROUND_ID / "settings" / "systems" / "case-history"
-        / "mapping.yaml"), text
+        text, world["root"] / T.PLAYGROUND_ID / "knowledge" / "settings" / "systems"
+        / "case-history" / "mapping.yaml"), text
     assert not T.mod("_tenant").record_path(base).exists(), "a refused run minted a record"
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
 def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys, missing):
-    T.plant_tenant(world["root"], "acme", omit=(missing,))
+    T.place_tenant(world["root"], "acme", omit=(missing,))
     world["runs_base"]("acme")
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "acme" / "settings" / missing), text
+    assert _names(text, world["root"] / "acme" / "knowledge" / "settings" / missing), text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
     """C9: a grant-nothing table loads clean, and gather's own `GrantError` would fire only at
     `bind`, mid-run, after the box started and MAIN spent model calls. M5 moves it to start:
     refused before the box, naming the table the operator must grant gather a verb in."""
-    T.plant_tenant(world["root"], "newco", table=T.TABLE_BLANK)
+    T.place_tenant(world["root"], "newco", table=T.TABLE_BLANK)
     world["runs_base"]("newco")
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "newco" / "settings" / "verb-grants.yaml"), text
+    assert _names(text, world["root"] / "newco" / "knowledge" / "settings" / "verb-grants.yaml"), text
 
 
 #: Gather is granted `health-check` and nothing else: the table loads, gather's grant is
@@ -207,13 +211,13 @@ def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(wor
     empty grant, so a check on `entries` alone passes it — and the run then spends model calls
     to have every query DENIED. A health check reaches no data; refused before the box, naming
     the table. The control is the positive-control test below (a table granting a query)."""
-    T.plant_tenant(world["root"], "probe", table=TABLE_HEALTH_CHECK_ONLY)
-    grants = T.run_grants(world["root"] / "probe" / "settings")
+    T.place_tenant(world["root"], "probe", table=TABLE_HEALTH_CHECK_ONLY)
+    grants = T.run_grants(world["root"] / "probe" / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
         "the fixture must grant gather a health check and nothing else"
     world["runs_base"]("probe")
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "probe" / "settings" / "verb-grants.yaml"), text
+    assert _names(text, world["root"] / "probe" / "knowledge" / "settings" / "verb-grants.yaml"), text
     assert "query" in text, text
 
 
@@ -221,7 +225,7 @@ def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, ca
     """M5 runs the lead-zero agreement check at start: a tenant whose table grants the lead
     while its config names a template the catalog does not hold is refused before the box —
     today that surfaces inside `run_investigation`, after the box is up."""
-    T.plant_tenant(world["root"], "drift", lead_zero=T.lead_zero_text("elastic.no-such-template"))
+    T.place_tenant(world["root"], "drift", lead_zero=T.lead_zero_text("elastic.no-such-template"))
     world["runs_base"]("drift")
     text, _ = _refusal(world, capsys)
     assert "elastic.no-such-template" in text, text
@@ -249,8 +253,8 @@ def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_befo
     An existence-only check passes this; the run must refuse before the box, naming both
     sides. The control is `test_the_positive_control_reaches_the_box_…` — the same template
     with a table granting the lead the pair it binds."""
-    T.plant_tenant(world["root"], "drift", table=TABLE_LEAD_ON_QUERY)
-    grants = T.run_grants(world["root"] / "drift" / "settings")
+    T.place_tenant(world["root"], "drift", table=TABLE_LEAD_ON_QUERY)
+    grants = T.run_grants(world["root"] / "drift" / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.correlation.entries} == {
         ("elastic", "health-check"), ("elastic", "query")}, "the fixture's lead pair moved"
     world["runs_base"]("drift")
@@ -263,24 +267,23 @@ def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world,
     """The complementary condition for every refusal above: the same root, a complete tenant,
     and `start_box` IS called — with the run's resolved `agent/` half (M6), and with no
     settings path and no other tenant among its arguments (O1)."""
-    T.plant_tenant(world["root"], "acme")
-    T.plant_tenant(world["root"], "bravo", table=T.TABLE_B)
+    T.place_tenant(world["root"], "acme")
+    T.place_tenant(world["root"], "bravo", table=T.TABLE_B)
     world["runs_base"]("acme")
     start = StartBoxRecorder(stop=True)
     with pytest.raises(_StartBoxReached):
         _run().main(
-            [str(world["alert"]), "--tenant", "acme", "--tenants-root", str(world["root"]),
-             "--no-learn"],
+            [str(world["alert"]), "--tenant", "acme", "--no-learn"],
             lifecycle=_lifecycle(start), visualize=lambda p: None, preflight=lambda m: 0)
     assert len(start.calls) == 1, start.calls
     _args, kwargs = start.calls[0]
-    assert Path(kwargs["tenant_agent"]) == (world["root"] / "acme" / "agent").resolve()
-    assert not T.reaches(start.calls, world["root"] / "acme" / "settings")
-    assert not T.reaches(start.calls, world["root"] / "bravo")
+    acme, bravo = world["root"] / "acme" / "knowledge", world["root"] / "bravo"
+    assert Path(kwargs["tenant_agent"]) == (acme / "agent").resolve()
+    assert not T.reaches(start.calls, acme / "settings")
+    assert not T.reaches(start.calls, bravo)
     # Nor anything that CONTAINS a settings folder or the other tenant (a tenant folder or the
     # root handed over as a tree): `exposes` also counts an ancestor of the forbidden path.
-    for forbidden in (world["root"] / "acme" / "settings", world["root"] / "bravo" / "settings",
-                      world["root"] / "bravo"):
+    for forbidden in (acme / "settings", bravo / "knowledge" / "settings", bravo):
         assert not T.exposes(start.calls, forbidden), (forbidden, start.calls)
 
 
@@ -309,8 +312,8 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
     root = world["root"]
-    T.plant_tenant(root, "acme", table=T.TABLE_A, marker="acme")
-    T.plant_tenant(root, "bravo", table=T.TABLE_B, marker="bravo")
+    T.place_tenant(root, "acme", table=T.TABLE_A, marker="acme")
+    T.place_tenant(root, "bravo", table=T.TABLE_B, marker="bravo")
     expected = {"acme": T.GATHER_PAIRS_A, "bravo": T.GATHER_PAIRS_B}
     run = _run()
 
@@ -325,16 +328,16 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             investigate=lambda driven=driven, **kw: (
                 driven.append(kw) or {"output": "done", "requests": 0}))
         rc = run.main(
-            [str(world["alert"]), "--tenant", tenant_id, "--tenants-root", str(root),
-             "--no-learn", "--update-ticket"],
+            [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"],
             lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p: None,
             preflight=lambda m: 0, ticket_writer=writer)
         assert rc == 0, capsys.readouterr().err
-        own_settings = root / tenant_id / "settings"
+        own_settings = root / tenant_id / "knowledge" / "settings"
 
         # O1 — the box: this tenant's agent half, no settings path, nothing of the other tenant.
         assert len(start.calls) == 1, start.calls
-        assert Path(start.calls[0][1]["tenant_agent"]) == (root / tenant_id / "agent").resolve()
+        assert Path(start.calls[0][1]["tenant_agent"]) == \
+            (root / tenant_id / "knowledge" / "agent").resolve()
         assert not T.reaches(start.calls, own_settings)
         assert not T.reaches(start.calls, root / other)
         assert not T.exposes(start.calls, own_settings), start.calls
@@ -354,15 +357,5 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
             assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
             assert not T.reaches(payload, T.PLAYGROUND_SETTINGS), f"{seam} got the checkout's"
+            assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"
 
-
-def test_the_default_tenants_root_is_the_checkouts_when_none_is_given(world, capsys):
-    """D2's default, observed at the entry point: with no `--tenants-root`, a playground run
-    reaches the box with the CHECKOUT's playground `agent/` half."""
-    world["runs_base"](T.PLAYGROUND_ID)
-    start = StartBoxRecorder(stop=True)
-    with pytest.raises(_StartBoxReached):
-        _run().main([str(world["alert"]), "--tenant", T.PLAYGROUND_ID, "--no-learn"],
-                    lifecycle=_lifecycle(start),
-                    visualize=lambda p: None, preflight=lambda m: 0)
-    assert Path(start.calls[0][1]["tenant_agent"]) == T.PLAYGROUND_AGENT.resolve()
