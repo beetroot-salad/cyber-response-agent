@@ -1393,14 +1393,14 @@ def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_
                          "--tenant", T.SOURCE_TENANT])
 
     def settings() -> Path:
-        raise AssertionError("the tenant's settings were read for a manifest that names them")
+        raise AssertionError("the tenant's record was resolved for a manifest that names them")
 
     with pytest.raises(SystemExit):
-        run._resume_target(ns, episode=None, settings=settings)
+        run._resume_target(ns, episode=None, tenant=settings)
 
     ordinary = run.parse_args([str(src / "alert.json"), "--tenant", T.SOURCE_TENANT])
-    assert run._resume_target(ordinary, episode=None, settings=settings) is None
+    assert run._resume_target(ordinary, episode=None, tenant=settings) is None
     with S.open_episode(ep) as episode:
-        world = run._resume_target(ns, episode=episode, settings=settings)
+        world = run._resume_target(ns, episode=episode, tenant=settings)
     assert world is not None, "a held episode's --resume answered no world"
     assert world.label == "b", world

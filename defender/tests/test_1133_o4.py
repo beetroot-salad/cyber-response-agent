@@ -1013,7 +1013,7 @@ def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_pa
         raise AssertionError("a run dir was materialized for a refused manifest")
 
     with pytest.raises(SystemExit) as refused:
-        run.main(_resume_argv(other), lifecycle=lifecycle, visualize=lambda _run: None,
+        run.main(_resume_argv(other), lifecycle=lifecycle, visualize=lambda _run, **kw: None,
                  preflight=T.no_preflight, materialize=materialize)
     assert refused.value.code not in (0, None), refused.value.code
     assert str(LAYOUT.family) in str(refused.value.code), (
@@ -1023,7 +1023,7 @@ def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_pa
 
     lifecycle = Recorder()
     rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=lifecycle,
-                  visualize=lambda _run: None, preflight=T.no_preflight)
+                  visualize=lambda _run, **kw: None, preflight=T.no_preflight)
     assert rc == 0
     assert len(lifecycle.calls) == 1
 
@@ -1045,7 +1045,7 @@ def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(
             return super().__call__(**kw)
 
     rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=Holding(),
-                  visualize=lambda _run: None, preflight=T.no_preflight)
+                  visualize=lambda _run, **kw: None, preflight=T.no_preflight)
     assert rc == 0
     assert "fds" in seen, "the lifecycle never ran"
     assert len(seen["fds"]) == 1, (
