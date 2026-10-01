@@ -138,12 +138,23 @@ def _request_key(system: Any, verb: Any, params: Any) -> str:
 PARAMS_NESTING_LIMIT = 32
 
 
-class ParamsTooDeep(ValueError):
-    """A call's params nest past `PARAMS_NESTING_LIMIT`; nothing was stored."""
+class ParamsTooDeep(Exception):
+    """@owns the too-deep sentence — `field` nests past `PARAMS_NESTING_LIMIT`; nothing was
+    stored. Every refusal of a too-deep call says it in these words, naming the field.
+
+    An `Exception`, not a `ValueError`: `ServedCall` cleans its params as it is built, and
+    pydantic would wrap a `ValueError` raised there into its own `ValidationError` (`_model`)."""
+
+    def __init__(self, field: str = "params") -> None:
+        self.field = field
+        super().__init__(
+            f"{field} nest deeper than {PARAMS_NESTING_LIMIT} levels, the most a stored call "
+            "can carry")
 
 
-def _json_safe_params(value: Any) -> Any:
-    """@owns PARAMS_NESTING_LIMIT — params as every table stores them, or `ParamsTooDeep`.
+def _json_safe_params(value: Any, *, field: str = "params") -> Any:
+    """@owns PARAMS_NESTING_LIMIT — params as every table stores them, or `ParamsTooDeep`
+    naming `field`.
 
     Text for a non-finite float: the record is what a reader diagnoses a query from, and a
     `threshold` of infinity is not a missing one. The same rule `_request_key` keys by.
@@ -154,8 +165,7 @@ def _json_safe_params(value: Any) -> Any:
         return json_safe(value, non_finite="text",
                          max_depth=PARAMS_NESTING_LIMIT, deeper="refuse")
     except JsonTooDeep:
-        raise ParamsTooDeep(
-            f"params nest deeper than {PARAMS_NESTING_LIMIT} levels") from None
+        raise ParamsTooDeep(field) from None
 
 
 def params_too_deep(value: Any) -> bool:

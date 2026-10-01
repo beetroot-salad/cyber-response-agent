@@ -23,6 +23,7 @@ from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT
 from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
+from defender.scripts.gather_tools.record_query import ParamsTooDeep
 
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
 
@@ -160,10 +161,17 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
     if not system or not verb:
         counts["unreadable"] += 1
         return None
-    return ServedCall(
-        system=system, verb=verb, params=row.params,
-        payload_text=canonical, source=CAPTURED, world_id=None,
-    )
+    try:
+        return ServedCall(
+            system=system, verb=verb, params=row.params,
+            payload_text=canonical, source=CAPTURED, world_id=None,
+        )
+    except ParamsTooDeep:
+        # A row its own table can read but no ledger row can carry: written before the limit,
+        # or planted. Lost evidence like any other unreadable row; one such row must not make
+        # the whole branch point unprimeable.
+        counts["unreadable"] += 1
+        return None
 
 
 def _canonical_payload(text: str) -> str | None:

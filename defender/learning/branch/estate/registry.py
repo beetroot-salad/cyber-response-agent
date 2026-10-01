@@ -37,7 +37,7 @@ from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
 from ..comparator import Verdict, canonical, mechanical
 from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCall, payload_text
-from defender.scripts.gather_tools.record_query import PARAMS_NESTING_LIMIT, params_too_deep
+from defender.scripts.gather_tools.record_query import ParamsTooDeep, _json_safe_params
 from . import applier as applier_module
 from .applier import WorldApplier
 from .stagers.dispatch import STAGERS
@@ -332,7 +332,11 @@ class WorldRegistry(ModuleVerbRegistry):
         An adapter that cannot load raises out of `decide` and is filed `fault`, matching what
         the base world records for the same failure, then re-raised untouched. Rows go through
         `_record_beside` so a failed write never replaces the decision or exception.
+
+        A call no row could carry is refused first (`_refuse_unstorable`), so neither row is
+        ever attempted for it.
         """
+        _refuse_unstorable(system, verb, params)
         try:
             decision = super().decide_call(system, verb, params)
         except Exception as failure:
@@ -372,12 +376,7 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
-            # A call the ledger could not record is refused before it is served or keyed: the
-            # table's own refusal, so no FAULT row is filed against params it cannot store.
-            if params_too_deep(params):
-                raise LedgerError(
-                    f"{system}.{verb} was not served: its params nest deeper than "
-                    f"{PARAMS_NESTING_LIMIT} levels, so no row could record it")
+            _refuse_unstorable(system, verb, params)
             # The clock is set on every call, unlike `world_id`, which is set only where staging
             # moved the call: a `world_id` declaration widens what `confine_index` admits, while
             # a clock admits nothing. Host-state (never staged) is the adapter that stamps the
@@ -495,6 +494,19 @@ def _base_witness(
     except Exception:  # noqa: BLE001 — an unanswerable witness is unmeasured, not "no difference"
         return None, None
     return verdict not in (Verdict.SAME, Verdict.FORMATTING), digest
+
+
+def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> None:
+    """Refuse, as the table's own `LedgerError`, a call whose params no ledger row could carry.
+
+    Both doors into the registry (`decide_call`, `served`) ask this before anything is decided,
+    served or filed: past them every row is built from params already known to fit, so no
+    refused or FAULT row is ever attempted and then dropped. `served` re-raises `LedgerError`
+    untouched, where any other exception would be filed as a FAULT row."""
+    try:
+        _json_safe_params(params)
+    except ParamsTooDeep as too_deep:
+        raise LedgerError(f"{system}.{verb} was not served: {too_deep}") from too_deep
 
 
 def _record_beside(ledger: Ledger, call: ServedCall) -> None:

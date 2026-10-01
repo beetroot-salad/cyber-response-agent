@@ -26,12 +26,9 @@ from defender._io import read_jsonl_rows
 from defender._episode_handle import AppendRecord, Episode
 from defender._episode_paths import EpisodePaths
 from defender._run_paths import artifact_file
-from defender.scripts.gather_tools.record_query import (
-    PARAMS_NESTING_LIMIT,
-    ParamsTooDeep,
-    _json_safe_params,
-    _request_key,
-)
+from pydantic import ValidationInfo, field_validator
+
+from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
@@ -170,6 +167,18 @@ class ServedCall:
     #: `sha256` of the base pattern's own canonicalised text — see `differs_from_base`.
     base_pattern_digest: str | None = None
 
+    @field_validator("params", "asked_params")
+    @classmethod
+    def _stored_form(cls, value: dict | None, info: ValidationInfo) -> dict | None:
+        """Each params map as the row stores it, cleaned once, here. Params too deep to store
+        are `ParamsTooDeep` naming the field, so a call no row could carry is never built, and
+        `row()` and both keys cannot fail on depth.
+
+        Cleaned because the appenders dump with stdlib `json.dumps` defaults: otherwise a param
+        reaches the file as `Infinity`/`NaN` or raises `TypeError` mid-serve. The keys do not
+        move: `request_key` cleans by the same rules, and cleaning twice changes nothing."""
+        return None if value is None else _json_safe_params(value, field=info.field_name or "params")
+
     @property
     def key(self) -> str:
         """The memo identity: the call as it ran."""
@@ -183,18 +192,16 @@ class ServedCall:
             self.params if self.asked_params is None else self.asked_params)
 
     def row(self) -> dict:
-        # `_json_safe_params` because the appenders dump with stdlib `json.dumps` defaults: otherwise a
-        # param reaches the file as `Infinity`/`NaN` or raises `TypeError` mid-serve.
-        row = {
+        row: dict[str, Any] = {
             "system": self.system, "verb": self.verb,
-            "params": _json_safe_params(self.params),
+            "params": self.params,
             "payload_text": self.payload_text, "source": self.source,
             "world_id": self.world_id,
         }
         if self.asked_params is not None:
             # Absent means "nothing was rewritten"; echoing `params` on every row would make
             # the two identities look like one.
-            row["asked_params"] = _json_safe_params(self.asked_params)
+            row["asked_params"] = self.asked_params
         if self.source == STAGED:
             # Written on every staged row even when `None`: `None` (unmeasured) must be
             # distinguishable from a row that never took a witness. The meaning of the pair
@@ -367,14 +374,7 @@ class Ledger:
         # Persist first, memoize only on success: otherwise a failed append leaves a memo hit
         # with no row behind it, served without an adapter call.
         # Serialise outside the lock; only the write needs mutual exclusion.
-        # `LedgerError`, not `ParamsTooDeep`: `_served` re-raises the table's own refusal, where
-        # any other exception would be re-filed as a FAULT row carrying the same params.
-        try:
-            row = call.row()
-        except ParamsTooDeep as too_deep:
-            raise LedgerError(
-                f"{call.system}.{call.verb} was not recorded: its params nest deeper than "
-                f"{PARAMS_NESTING_LIMIT} levels") from too_deep
+        row = call.row()
         key = call.key
         with self._lock:
             self._append(served_line(row))

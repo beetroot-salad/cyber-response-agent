@@ -229,14 +229,27 @@ def test_the_params_limit_is_the_product_constant_32():
     assert rq.PARAMS_NESTING_LIMIT == LIMIT == 32
 
 
-def test_params_too_deep_is_a_typed_value_error_not_an_internal_error():
-    """B: the refusal is the typed `ParamsTooDeep`, a `ValueError` — a bad VALUE, which each
-    caller maps to its own refusal (`Ledger.record` to `LedgerError`) — and not a
-    `RuntimeError`, which `WorldRegistry._served`'s `except Exception` would re-file as a
-    FAULT row carrying the same deep params."""
+def test_params_too_deep_is_a_typed_domain_error_not_a_value_error_or_an_internal_error():
+    """B: the refusal is the typed `ParamsTooDeep`, which each caller maps to its own refusal.
+    Not a `ValueError`: `ServedCall` cleans its params as it is built, and pydantic wraps a
+    `ValueError` raised there into its `ValidationError`, so `except ParamsTooDeep` would miss
+    it. Not a `RuntimeError`, which `WorldRegistry._served`'s `except Exception` would re-file
+    as a FAULT row carrying the same deep params."""
     error = too_deep_error()
-    assert issubclass(error, ValueError)
+    assert issubclass(error, Exception)
+    assert not issubclass(error, ValueError)
     assert not issubclass(error, RuntimeError)
+
+
+def test_the_refusal_names_the_field_and_the_limit_in_one_sentence():
+    """#1127 review: one sentence, owned by the error, naming the field that was too deep — the
+    ledger once blamed `params` when `asked_params` was the deep one."""
+    err = raised(lambda: rq._json_safe_params({"k": dict_chain(LIMIT)}, field="asked_params"))
+
+    assert isinstance(err, too_deep_error())
+    assert getattr(err, "field", None) == "asked_params"
+    assert str(err) == (f"asked_params nest deeper than {LIMIT} levels, the most a stored call "
+                        "can carry")
 
 
 @pytest.mark.parametrize("chain", [
