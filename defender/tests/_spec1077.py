@@ -348,15 +348,16 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("tenant_row", "tenant_row", "row"),
 )
 
-#: The three UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs
-#: base, not the run directory. `session_db`'s root is the sessions directory, a sibling of the
+#: The UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs base, not
+#: the run directory. (#1107 moved the ticket receipt out of the box-writable run dir, making it
+#: the fourth sidecar.) `session_db`'s root is the sessions directory, a sibling of the
 #: runs base (claims C10/C15).
-SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "accounting_failures")
+SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "accounting_failures", "ticket_write")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 
 
 def upward_root(attr: str, runs_base: Path) -> Path:
-    """The root an UPWARD accessor is confined to: the three sidecars sit directly in the runs
+    """The root an UPWARD accessor is confined to: the four sidecars sit directly in the runs
     base; the sessions directory is its SIBLING (`<runs_base>/../sessions`, claims C10/C15),
     so the session db's root is the runs base's parent — one table, so no test carries its
     own guess."""

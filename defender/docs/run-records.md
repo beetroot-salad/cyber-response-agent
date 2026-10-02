@@ -87,7 +87,6 @@ unreachable by root containment rather than by a named deny.
 | budget | 1 | `budget.json` | — | — | run.observability.budget | counter, locked json |
 | circuit_breaker | 1 | `circuit_breaker.json` | — | — | run.observability.circuit_breaker | counter |
 | lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
-| ticket_write | 1 | `ticket_write.json` | — | — | run.observability.ticket_write |  |
 | ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive |
 | session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
 | runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
@@ -96,6 +95,7 @@ unreachable by root containment rather than by a named deny.
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
 | scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
 | accounting | 2 | `<run>.accounting_failures.json` | — | — | run.facts.accounting |  |
+| ticket_write | 2 | `<run>.ticket-write.json` | — | — | run.observability.ticket_write | the case-ticket write's receipt, written by the host's record step (`ticket_writer._write_receipt`); moved out of the run dir by #1107 so the box can neither plant nor block it |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
 | family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
 | family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |
@@ -126,7 +126,7 @@ the run-end record (as `run_end.json`), `lessons_loaded.jsonl`, `alert.json`; pl
 through `lead_repository.stage_tables`, and a `run_dir` text pointer (never a link). Every read
 is lstat-screened first and a planted link archives nothing. Everything else — wire logs,
 traces, counters, denials, review records, the session pointer, `runtime.html`,
-`ticket_write.json`, the tenant record — does not survive the copy. `ArchivedWorld.at(world_dir)`
+the ticket receipt, the tenant record — does not survive the copy. `ArchivedWorld.at(world_dir)`
 is the read-only handle over this projection; it is not a `Run`.
 
 ## 6. Not a run record

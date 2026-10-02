@@ -221,10 +221,10 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     #1107 O6 — `tenant` is the run's record, `defender_dir` and `env` are run.py's. The #1047
     no-verdict check runs BEFORE the config is read, so a budget- or store-cut run writes no
     receipt whatever its tenant's config says, and every branch that writes no receipt first
-    unlinks any receipt already in the run dir (a link at that name is removed, never followed),
-    so a page never shows a ticket line this run did not write. Every other failure — no usable
-    config, a refused mapping, a store that cannot be reached or answers an error — writes an
-    `error` receipt whose `reason` is the failing check's own text with the host's settings
+    removes any receipt an earlier attempt on this run dir left (a resumed run drives this step
+    again), so a page never shows a ticket line this attempt did not write. Every other failure —
+    no usable config, a refused mapping, a store that cannot be reached or answers an error, or an
+    unexpected error anywhere in the step — writes an `error` receipt whose `reason` is the failing check's own text with the host's settings
     path redacted (`redact_settings_path`); `url` is null when there was no usable config to
     name a store, and the store's address otherwise."""
     case_id = key if key is not None else run_dir.name
@@ -262,7 +262,10 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         _post_comment(run_dir, deps, config, case_id, payload, word, ctx)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
-        clear_receipt(run_dir)
+        # Only the exception's type reaches the receipt (and so the page): its text may carry a
+        # host path or a store's body; the log line above has it whole.
+        _write_receipt(run_dir, None, case_id, RECEIPT_ERROR,
+                       f"the record step failed unexpectedly ({type(e).__name__}); see the run log")
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
@@ -295,16 +298,19 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
 
 
-def clear_receipt(run_dir: Path) -> None:
-    """Remove the run dir's receipt, if one is there, WITHOUT following a link at its name: a
-    record-step branch that writes no receipt must not leave an earlier run's (or a planted)
-    one for the page to show. `unlink` removes the link itself, never its target.
+def receipt_path(run_dir: Path) -> Path:
+    """The receipt: a sidecar beside the run dir, keyed by the run's name, like the scrub verdict.
+    Never inside the run dir, where the box is root while it runs and could plant a receipt or
+    block the host's write with a directory at its name."""
+    run_dir = Path(run_dir)
+    return RunPaths(run_dir).ticket_write(run_dir.parent)
 
-    Also run.py's lifecycle's last act on EVERY exit, once the box is down: whatever the box left
-    at this name is not the host's, and a run that dies before the record step (a crash, a
-    Ctrl-C, a tainted tree) would otherwise keep it for a re-render to show."""
+
+def clear_receipt(run_dir: Path) -> None:
+    """Remove the receipt an earlier attempt on this run dir left, if any: a record-step branch
+    that writes no receipt must not leave one for the page to show."""
     try:
-        RunPaths(run_dir).ticket_write.unlink(missing_ok=True)
+        receipt_path(run_dir).unlink(missing_ok=True)
     except OSError as e:
         _logger.warning(f"could not clear the stale receipt: {e}")
 
@@ -323,7 +329,6 @@ def _write_receipt(
         "reason": reason,
     }
     try:
-        # The run dir is box-writable: the guarded write refuses a planted link.
-        write_guarded(RunPaths(run_dir).ticket_write, json.dumps(receipt, indent=2) + "\n")
+        write_guarded(receipt_path(run_dir), json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _logger.warning(f"could not write receipt: {e}")

@@ -69,7 +69,10 @@ def test_a_nested_receipt_renders_unreadable_not_a_crash(tmp_path, bomb):
     assert visualize_run.RECEIPT_UNREADABLE in visualize_run.render_ticket_line(run_dir)
 
 
-def test_a_raising_record_step_clears_a_stale_receipt(tmp_path, monkeypatch):
+def test_a_raising_record_step_writes_an_error_receipt(tmp_path, monkeypatch):
+    """An unexpected error in the record step replaces a stale success with an `error` receipt
+    naming only the exception's type (third review: clearing left the page silent, so the
+    operator could not tell "no ticket was attempted" from "the write crashed")."""
     def boom(*_a, **_k):
         raise PermissionError(13, "denied")
 
@@ -82,7 +85,12 @@ def test_a_raising_record_step_clears_a_stale_receipt(tmp_path, monkeypatch):
         json.dumps({"key": "K-1", "status": "commented", "url": None, "ok": True,
                     "reason": None}), encoding="utf-8")
     S.record_step(run_dir, record, env={})
-    assert S.receipt(run_dir) is None, "a stale success receipt outlived a raising record step"
+    got = S.receipt(run_dir)
+    assert got is not None, "the raising step left no receipt"
+    assert got["ok"] is False, got
+    assert got["status"] == "error", got
+    assert "PermissionError" in got["reason"], got
+    assert "denied" not in got["reason"], got
 
 
 def _lint():

@@ -482,9 +482,15 @@ def open_ticket(
     return ticket_writer.open_case_ticket(run_dir, writer_deps(store), **_handed(run_dir, config))
 
 
+def receipt_path(run_dir: Path) -> Path:
+    """The receipt's location: a sidecar beside the run dir, keyed by the run's name (#1107
+    moved it out of the box-writable run dir; it was `run_dir/ticket_write.json`)."""
+    return run_dir.parent / f"{run_dir.name}.ticket-write.json"
+
+
 def receipt(run_dir: Path) -> dict[str, Any]:
-    path = run_dir / "ticket_write.json"
-    assert path.is_file(), "no `ticket_write.json` receipt was written"
+    path = receipt_path(run_dir)
+    assert path.is_file(), "no ticket receipt was written"
     return json.loads(path.read_text(encoding="utf-8"))
 
 

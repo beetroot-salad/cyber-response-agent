@@ -51,6 +51,7 @@ from defender.tests._spec767 import (
     mapping_doc,
     open_ticket,
     receipt,
+    receipt_path,
     record,
     require,
     shipped_mapping_doc,
@@ -95,7 +96,7 @@ def _render_comment(rec):
 def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
     """d0_record_return — `record_case_ticket(run_dir, deps)` returns nothing, posts exactly
     one comment to `POST /tickets/{case_id}/comments` and no transition, and leaves a
-    `run_dir/ticket_write.json` receipt `{key, status, url, ok}` on BOTH branches — the
+    receipt `{key, status, url, ok}` (beside the run dir since #1107) on BOTH branches — the
     success word is `"commented"`, not `"closed"`, and a fault writes `ok: false`.
 
     §7 R6/FK29 decided the success word: the receipt has ZERO readers (c5), so nothing breaks,
@@ -244,7 +245,7 @@ def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys
     ):
         use_mapping(monkeypatch, root, doc)
         undecidable_dir = make_run(tmp_path, name=run_dir.name)
-        (undecidable_dir / "ticket_write.json").unlink(missing_ok=True)
+        receipt_path(undecidable_dir).unlink(missing_ok=True)
         assert record(undecidable_dir, store) is None, f"{why}: the fault escaped into the run"
         assert store.writes() == [], f"{why}: the writer POSTed without knowing the case's state"
         assert receipt(undecidable_dir)["ok"] is False, f"{why}: receipted as a success"
@@ -698,7 +699,7 @@ def test_767_planted_frontmatter_fence_never_reaches_the_wire(tmp_path, monkeypa
     assert STANDALONE_FENCE.search(narrative) is None, "a standalone `---` line crossed"
     for surface, text in (
         ("the comment payload", json.dumps(store.only_comment(), ensure_ascii=False)),
-        ("the receipt", (run_dir / "ticket_write.json").read_text(encoding="utf-8")),
+        ("the receipt", receipt_path(run_dir).read_text(encoding="utf-8")),
         ("the writer's log", capsys.readouterr().err),
     ):
         assert marker not in text, f"{surface} carries the text that followed the fence"
@@ -853,7 +854,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
     assert record(run_dir, store) is None, f"{arm}: the fault escaped into the run"
     assert len(store.writes()) == 1, f"{arm}: the writer retried — D2 is one POST"
     assert capsys.readouterr().err.count("WARNING defender.scripts.case_history.ticket_writer") <= 1, f"{arm}: warned twice"
-    assert (run_dir / "ticket_write.json").is_file(), (
+    assert receipt_path(run_dir).is_file(), (
         f"{arm}: no receipt was written — r1/c14 record the receipt on BOTH branches, which "
         "is what the `error` word and the `ok` boolean are for"
     )
@@ -912,7 +913,8 @@ def test_767_failed_write_leaves_no_capture_record(tmp_path, monkeypatch, capsys
     record(run_dir, FakeStore(transport_fault_on=COMMENTS_SUFFIX))
 
     new = {p.name for p in run_dir.iterdir()} - before
-    assert new == {"ticket_write.json"}, (
+    # #1107: the receipt is a sidecar beside the run dir, so the run dir gains nothing at all.
+    assert new == set(), (
         f"the failed write left {sorted(new)} behind — the only trace the design names is the "
         "receipt"
     )
@@ -929,14 +931,14 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
     and warned; the run's exit code is unchanged (c14, O7), independently of whether the
     store call itself succeeded.
 
-    The fault is REAL and induced through the real primitive: `ticket_write.json` is a
+    The fault is REAL and induced through the real primitive: the receipt's path is a
     DIRECTORY, so the writer's own `write_text` raises `IsADirectoryError` — an `OSError`,
     which is the class `_write_receipt` catches. (Not a chmod: this suite runs as root in the
     devcontainer, where permission bits are ignored and a chmod-based fault silently
     succeeds — see defender/CLAUDE.md.)"""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
-    (run_dir / "ticket_write.json").mkdir()
+    receipt_path(run_dir).mkdir()
 
     store = FakeStore()
     assert record(run_dir, store) is None, "a receipt IO failure escaped into the run"

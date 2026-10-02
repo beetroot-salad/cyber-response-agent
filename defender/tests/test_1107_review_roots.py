@@ -192,50 +192,35 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
 
 
 # ======================================================================================
-# 5 — a planted receipt does not outlive its run.
+# 5 — the receipt is out of the box's reach (third review: it moved beside the run dir).
 # ======================================================================================
 
-def _planted_receipt(run_dir: Path) -> Path:
-    path = S.receipt_path(run_dir)
-    path.write_text(json.dumps({"key": "SOC-1", "status": "commented", "url": "http://x",
-                                "ok": True, "reason": None}), encoding="utf-8")
-    return path
+def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_path):
+    """The receipt is a sidecar in the runs base, never inside the run dir the box is root on.
+    Whatever the box leaves in the run dir — a directory or a forged success at the old in-tree
+    name — neither blocks the host's write nor reaches the page."""
+    from defender.scripts.case_history import ticket_writer
+    from defender.scripts.visualize import visualize_run
 
-
-@pytest.mark.parametrize("ending", ["investigation raises", "scrub taints"])
-def test_planted_receipt_is_cleared_however_the_run_ends(tmp_path, ending):
-    """The box writes a success receipt — and keeps writing it until it is stopped — then the
-    run dies, in the investigation or in the scrub (RunTainted). The receipt is gone once the
-    lifecycle unwinds: the clear runs after the box is down, so a re-render of the crashed run
-    shows no ticket line the host never wrote."""
-    from defender.runtime.scrub import RunTainted
-
-    root, _ = _tenant(tmp_path, "rcp")
-    record = S.resolve(root)
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-
-    def investigate(**_kw):
-        _planted_receipt(run_dir)
-        if ending == "investigation raises":
-            raise RuntimeError("the drive died")
-        return {}
-
-    def scrub(_tree):
-        if ending == "scrub taints":
-            raise RunTainted("planted link")
-
-    with pytest.raises((RuntimeError, RunTainted)):
-        S.run_py()._run_investigation_lifecycle(
-            run_dir=run_dir, model="m", model_override=None, defender_dir=S.DEFENDER,
-            tenant=record, investigate=investigate, start_box=lambda *a, **k: object(),
-            stop_box=lambda _box: _planted_receipt(run_dir), scrub=scrub)
-
-    assert not S.receipt_path(run_dir).exists(), "the box's receipt survived the run"
+    path = S.receipt_path(run_dir)
+    assert path.parent == run_dir.parent, f"the receipt is not beside the run dir: {path}"
+    (run_dir / "ticket_write.json").mkdir()
+    (run_dir / "ticket_write.json" / "x").write_text(json.dumps(
+        {"key": "SOC-FORGED", "status": "commented", "url": None, "ok": True, "reason": None}),
+        encoding="utf-8")
+    ticket_writer._write_receipt(run_dir, None, "SOC-1", ticket_writer.RECEIPT_ERROR, "REASON-1")
+    assert S.receipt(run_dir) == {"key": "SOC-1", "status": ticket_writer.RECEIPT_ERROR,
+                                  "url": None, "ok": False, "reason": "REASON-1"}
+    line = visualize_run.render_ticket_line(run_dir)
+    assert "SOC-1" in line, line
+    assert "REASON-1" in line, line
+    assert "SOC-FORGED" not in line, line
 
 
 def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
-    """The page decodes the box-writable receipt with the repo's bounded JSON loader: a receipt
+    """The page decodes the receipt with the repo's bounded JSON loader: a receipt
     with valid fields and one field nested past the limit is unreadable, not a ticket line."""
     from defender.scripts.visualize import visualize_run
 
@@ -247,24 +232,6 @@ def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
         f'"x": {deep}}}', encoding="utf-8")
     line = visualize_run.render_ticket_line(run_dir)
     assert visualize_run.RECEIPT_UNREADABLE in line, line
-
-
-def test_rerender_shows_no_ticket_line_for_an_unverified_tree(tmp_path):
-    """A run killed by a signal never reached the lifecycle's clear, and a run whose teardown
-    faulted may have had a live box after it. Neither has a verified reap verdict, so a
-    standalone re-render asked for `--update-ticket` shows no ticket line; a verified tree does."""
-    from defender.runtime import scrub
-    from defender.scripts.visualize import visualize_run
-
-    run_dir = tmp_path / "runs" / "run-1"
-    run_dir.mkdir(parents=True)
-    _planted_receipt(run_dir)
-    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is False
-    scrub.write_did_not_run(run_dir, "teardown faulted")
-    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is False
-    scrub.scrub(run_dir)
-    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is True
-    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=False) is False
 
 
 # ======================================================================================

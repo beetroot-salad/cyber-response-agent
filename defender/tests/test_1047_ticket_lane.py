@@ -520,17 +520,18 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(
         tmp_path):
-    """A ticket_write.json forged to claim a prior closure suppresses nothing: the genuine
+    """A ticket receipt forged to claim a prior closure suppresses nothing: the genuine
     record/note call is issued regardless, because nothing in this design reads the receipt
     back as an input.
 
-    The receipt is an OUTPUT — the lane's own record of what it did — and the run dir it sits
-    in is the box's rw bind, so treating it as an input would let the graded subject suppress
-    its own record. Both arms are driven: the record arm and the note arm."""
+    The receipt is an OUTPUT — the lane's own record of what it did — and it used to sit in the
+    box's rw bind (#1107 moved it beside the run dir), so treating it as an input would have let
+    the graded subject suppress its own record. Both arms are driven: the record arm and the note arm."""
     for exit_class, expect in (("request-limit", "records"), ("aborted", "notes")):
         run_dir = S.closed_run_dir(tmp_path / exit_class, disposition="unresolved",
                                    report=expect == "records")
-        (run_dir / "ticket_write.json").write_text(
+        # #1107 moved the receipt beside the run dir; forged at its name there.
+        S.receipt_path(run_dir).write_text(
             json.dumps({"key": run_dir.name, "status": "closed", "ok": True,
                         "url": "http://tickets.test/tickets/forged"}), encoding="utf-8")
         fake = S.record_ticket(run_dir, truncated_by=exit_class)

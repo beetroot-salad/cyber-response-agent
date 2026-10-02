@@ -457,14 +457,18 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     the streams at the run root, the box sentinel, the session pointer, the ticket receipt —
     because the name gate (`scripts/lint/lint_run_records.py`) is what now keeps a name from
     being spelled anywhere else, and a name the owner does not hold cannot be reached at all.
-    The set is still pinned EXACTLY, so an accessor can only appear here on purpose."""
+    The set is still pinned EXACTLY, so an accessor can only appear here on purpose.
+
+    #1107 moved the ticket receipt out of the run dir to a sidecar in the runs base (beside the
+    scrub verdict), so `ticket_write` is now an upward accessor taking the runs base, like
+    `run_end_sidecar`, and no longer a property here."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
         # #1077 D1
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
-        "budget", "circuit_breaker", "lessons_loaded", "ticket_write", "session_pointer",
+        "budget", "circuit_breaker", "lessons_loaded", "session_pointer",
         "runtime_html", "box_sentinel",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"

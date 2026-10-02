@@ -396,11 +396,17 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
             "env": mod("run_common").run_env(_tenants1106.DEFENDER, Path(run_dir))}
 
 
+def receipt_path(run_dir: Path) -> Path:
+    """The ticket receipt's location: a sidecar beside the run dir, keyed by the run's name
+    (#1107 moved it out of the box-writable run dir; it was `run_dir/ticket_write.json`)."""
+    return Path(run_dir).parent / f"{Path(run_dir).name}.ticket-write.json"
+
+
 def receipt(run_dir: Path) -> dict | None:
-    """`ticket_write.json`, the lane's own record of what it did — or `None` when the lane
+    """The ticket receipt, the lane's own record of what it did — or `None` when the lane
     wrote none. Demand #0b's stated observable, and F-L's resolution puts the note call's
     outcome here too."""
-    path = Path(run_dir) / "ticket_write.json"
+    path = receipt_path(run_dir)
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8"))

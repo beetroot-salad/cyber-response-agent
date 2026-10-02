@@ -1892,9 +1892,9 @@ demands:
   - interacts(_run_paths->ticket_write)
   - interacts(_run_handle->ticket_write)
   discharged_by: test_s60_ticket_write_path_stable_for_path_helpers
-  seed_docstring: 'RunPaths(run_dir).ticket_write is <run_dir>/ticket_write.json, unchanged by #1107 (only the writer''s
-    content and access vias change, O6). _run_paths and _run_handle resolve this same path before and after the
-    change.'
+  seed_docstring: 'RunPaths(run_dir).ticket_write(runs_base) is <runs_base>/<run id>.ticket-write.json, a sidecar beside the
+    run dir like the scrub verdict (moved out of the box-writable run dir at the third #1156 review; it was <run_dir>/ticket_write.json).
+    _run_paths and _run_handle resolve this same path, and the record step''s receipt lands there.'
   source: 'gate residue (phase D-gate), R7 firings on interacts(_run_paths->ticket_write) and interacts(_run_handle->ticket_write);
     non-material, cheap regression pin; accepted at the post-gate §7 pass (resolved_by: auto, non-material; gate-leaf
     routing)'
@@ -2979,15 +2979,16 @@ structure:
     note: '"the tenant''s settings/" — the model-facing pointer for the settings path (#1106).'
   - id: ticket_write
     provenance: design
-    where: RunPaths(run_dir).ticket_write = <run_dir>/ticket_write.json
+    where: RunPaths(run_dir).ticket_write(runs_base) = <runs_base>/<run id>.ticket-write.json (a sidecar beside the
+      run dir, like the scrub verdict; moved out of the run dir at the third #1156 review, it was <run_dir>/ticket_write.json)
     note: '{key, status, url, ok, reason}; url null when there is no usable config; reason null on success (d0).'
     facets:
       identity:
         key_axes:
         - run_id
         evidence:
-          nl: 'One fixed name per run dir: RunPaths(run_dir).ticket_write is <run_dir>/ticket_write.json (_run_paths.py:167;
-            G17). An earlier attempt''s, a resumed run''s or a box-planted file shares the name (MF-12, F9).'
+          nl: 'One fixed name per run: <runs_base>/<run id>.ticket-write.json (was <run_dir>/ticket_write.json, G17).
+            An earlier attempt''s or a resumed run''s receipt shares the name (MF-12, F9); the box can no longer reach it.'
         derivations: []
         sharing: unique-key
       access:
@@ -3000,6 +3001,7 @@ structure:
             trust: attacker-influenced
             constraints:
             - box-torn-down-before-record-step
+            - outside-the-box-mount
           page:
             trust: derived
             constraints:
@@ -3545,7 +3547,9 @@ structure:
     provenance: code
     interpolates:
     - run_id
-    note: 'F9: a planted file survives the no-receipt branches unless cleared (MF-12 B).'
+    note: 'F9: a planted file survives the no-receipt branches unless cleared (MF-12 B). Since the third #1156 review
+      the receipt is a sidecar outside the box''s rw bind, so this edge is the in-tree name the box can still write;
+      the page and the writer never read that name.'
   - from: box
     to: run_dir
     mode: write
@@ -5868,7 +5872,7 @@ gate:
   - rule: R2
     element: ticket_write.identity
     witness: 'binds match: s7_mf12_no_receipt_branch_clears_stale_receipt is the actual uniqueness/collision-resolution
-      demand at the composition frame (every no-receipt branch unlinks any existing ticket_write.json, box-planted
+      demand at the composition frame (every no-receipt branch unlinks any existing receipt, an earlier attempt''s
       included, before the real writer runs) -- R2''s obligation exactly, not d0_return_contract''s shape-only assertion.
       (also: d0_return_contract, o4_secret_nowhere_else, o6_aborted_missing_config_receipt, o6_bad_config_receipt,
       o6_budget_cut_missing_config_no_receipt, o6_mapping_fault_receipt, o6_missing_config_receipt, o6_open_step_no_receipt,

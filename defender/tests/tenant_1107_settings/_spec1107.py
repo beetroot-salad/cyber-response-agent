@@ -697,7 +697,8 @@ def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
 
 
 def receipt_path(run_dir: Path) -> Path:
-    return mod("_run_paths").RunPaths(Path(run_dir)).ticket_write
+    """The receipt: a sidecar beside the run dir, keyed by the run's name, out of the box's reach."""
+    return mod("_run_paths").RunPaths(Path(run_dir)).ticket_write(Path(run_dir).parent)
 
 
 def receipt(run_dir: Path) -> dict[str, Any] | None:

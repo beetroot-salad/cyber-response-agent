@@ -16,7 +16,6 @@ from defender import _env
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
-from defender.runtime.scrub import tree_verified
 from defender.learning import lead_repository
 from defender.scripts.visualize import _mirror_write
 from defender.scripts.visualize._page_failed import VisualizeFailed
@@ -452,18 +451,18 @@ RECEIPT_UNREADABLE = "receipt unreadable"
 
 def render_ticket_line(run_dir: Path) -> str:
     """The page's one line about the case-ticket write (#1107 O6): the key, status and reason the
-    host's record step left in `ticket_write.json`, or nothing when it left no receipt.
+    host's record step left in its receipt, or nothing when it left no receipt.
 
-    The receipt lives in the run dir, which the box is root on while it runs, so it is read as
-    untrusted: only as a plain regular file (`read_guarded` — a link at that name is refused, never
-    followed, so a link to a secrets file shows none of the target), decoded by the repo's one
-    bounded loader (`load_json_artifact`, so the verdict never depends on stack depth), only if
-    it is a JSON object whose fields have the types the writer gives them, and every field that
-    reaches the page is escaped. run.py's lifecycle clears this name once the box is down, so a
-    receipt the box planted does not outlive its run. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL is shown as
-    text, never as a link: nothing on the page sends the reader to an address a file named.
-    The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it wrote."""
-    path = RunPaths(run_dir).ticket_write
+    The receipt is a sidecar beside the run dir (`ticket_writer.receipt_path`), out of the box's
+    reach. It is still read defensively: only as a plain regular file (`read_guarded` — a link at
+    that name is refused, never followed), decoded by the repo's one bounded loader
+    (`load_json_artifact`, so the verdict never depends on stack depth), only if it is a JSON
+    object whose fields have the types the writer gives them, and every field that reaches the
+    page is escaped. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL
+    is shown as text, never as a link: nothing on the page sends the reader to an address a file
+    named. The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it
+    wrote."""
+    path = RunPaths(run_dir).ticket_write(Path(run_dir).parent)  # = ticket_writer.receipt_path
     if not path.is_symlink() and not path.exists():
         return ""
     text, _refused = read_guarded(path)
@@ -613,19 +612,6 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 """
 
 
-def rerender_shows_ticket(run_dir: Path, *, update_ticket: bool) -> bool:
-    """Whether a standalone re-render shows the ticket line: the operator's `--update-ticket`,
-    and a tree the reap scan verified. run.py clears a box-planted receipt once the box is down,
-    but a run killed by a signal, or whose teardown faulted with the box maybe still alive, never
-    got that far — and its reap verdict (beside the tree, out of the box's reach) says so."""
-    if update_ticket and not tree_verified(run_dir):
-        _logger.warning(
-            "no ticket line: this run's tree was never verified by the reap scan, so the receipt "
-            "in it may be the box's")
-        return False
-    return update_ticket
-
-
 def main(argv: list[str]) -> int:
     """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
     through the same step `run.py` takes, with every line stamped with the run and the tenant
@@ -646,7 +632,6 @@ def main(argv: list[str]) -> int:
         return 1
     run = Run.at(run_dir)
     with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
-        update_ticket = rerender_shows_ticket(run_dir, update_ticket=update_ticket)
         try:
             copy = publish_page(run, update_ticket=update_ticket)
         except VisualizeFailed:

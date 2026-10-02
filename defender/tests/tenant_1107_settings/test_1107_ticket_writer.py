@@ -712,18 +712,20 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
 
 
 def test_s60_ticket_write_path_stable_for_path_helpers(tmp_path, monkeypatch):
-    """RunPaths(run_dir).ticket_write is <run_dir>/ticket_write.json, unchanged by #1107 (only the
-    writer's content and access vias change, O6). _run_paths and _run_handle resolve this same path
-    before and after the change."""
+    """RunPaths(run_dir).ticket_write(runs_base) is <runs_base>/<run id>.ticket-write.json, a
+    sidecar beside the run dir like the scrub verdict (moved out of the box-writable run dir at
+    the third #1156 review; it was <run_dir>/ticket_write.json). _run_paths and _run_handle
+    resolve this same path, and the record step's receipt lands there."""
     root, _folder, alert = _world(tmp_path)
     run_id = "r-path"
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
     _run(tmp_path, root, alert, run_id=run_id)
     run_dir = tmp_path / "runs" / run_id
-    expected = run_dir / "ticket_write.json"
-    assert RunPaths(run_dir).ticket_write == expected, RunPaths(run_dir).ticket_write
-    assert Run.at(run_dir).observability.ticket_write.path == expected, (
-        "the run handle resolves the receipt somewhere else")
+    expected = run_dir.parent / f"{run_id}.ticket-write.json"
+    assert RunPaths(run_dir).ticket_write(run_dir.parent) == expected, (
+        RunPaths(run_dir).ticket_write(run_dir.parent))
+    assert Run.under(run_dir.parent, run_id).observability.ticket_write.path \
+        == expected, "the run handle resolves the receipt somewhere else"
     assert expected.is_file(), (
         f"the record step's receipt did not land at {expected}: {sorted(os.listdir(run_dir))}")
 
