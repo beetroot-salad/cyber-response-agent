@@ -35,6 +35,7 @@ from defender.tests._declared870 import (
     write,
     write_reducer_surface,
 )
+from defender.tests._lead_author_1134 import lane_tree_for
 
 DECLARED = frozenset({"elastic", "cmdb"})
 FAILURE_KEYS = {"query_id", "goal", "executed_query", "stderr_digest", "occurrences"}
@@ -306,9 +307,11 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
 
     good = reducer_surface_text(bullets=("keep the unnest argument a LIST",))
     write(repo / REDUCER_REL, good)
-    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL) is None
+    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL,
+                                                   tree_for=lane_tree_for(repo)) is None
     assert pitfalls_curator._verify_pitfalls_state(
         repo, baseline_stray=[], systems=DECLARED, reducer_offered=True,
+        tree_for=lane_tree_for(repo),
     ) == [REDUCER_REL]
     # The same compliant edit, on a tick whose batch held no reducer row: refused by the OFFER
     # half before the content half ever reads the diff. The document is identical in both
@@ -316,6 +319,7 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
     with pytest.raises(LeadAuthorError, match="offered no reducer handoff"):
         pitfalls_curator._verify_pitfalls_state(
             repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
+            tree_for=lane_tree_for(repo),
         )
 
     dropped_heading = good.replace(REDUCER_HEADINGS[1] + "\n\nUnnest takes a LIST.\n\n", "")
@@ -379,10 +383,12 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
     ):
         write(repo / REDUCER_REL, text)
         with pytest.raises(LeadAuthorError):
-            pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL)
+            pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL,
+                                                    tree_for=lane_tree_for(repo))
         with pytest.raises(LeadAuthorError):
             pitfalls_curator._verify_pitfalls_state(
                 repo, baseline_stray=[], systems=DECLARED, reducer_offered=True,
+                tree_for=lane_tree_for(repo),
             )
         assert what  # names the arm in the traceback when one of them is the failure
 
@@ -391,7 +397,8 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
     write(repo / REDUCER_REL, reducer_surface_text(
         bullets=("`;drop table` — ## not a heading, <img src=x> and a [link](x)",),
     ))
-    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL) is None
+    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL,
+                                                   tree_for=lane_tree_for(repo)) is None
 
     # The SECOND tick appends into the section the first one created, and the rule admits it
     # (settled premises #9/#10). Committing the first edit is what makes the second a genuine
@@ -402,7 +409,8 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
         bullets=("keep the unnest argument a LIST", "quote @timestamp as an identifier"),
     )
     write(repo / REDUCER_REL, second)
-    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL) is None
+    assert pitfalls_curator._pitfalls_content_rule(repo, " M", REDUCER_REL,
+                                                   tree_for=lane_tree_for(repo)) is None
     assert second.count(PITFALLS_SECTION) == 1, "the second tick restarted the section"
     assert [ln for ln in second.splitlines() if ln.startswith("## ")] == [
         *REDUCER_HEADINGS, PITFALLS_SECTION,
@@ -414,5 +422,5 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
     write(repo / "defender/skills/elastic/execution.md",
           f"# elastic\n\n{PITFALLS_SECTION}\n\n- anything at all\n")
     assert pitfalls_curator._pitfalls_content_rule(
-        repo, " M", "defender/skills/elastic/execution.md",
+        repo, " M", "defender/skills/elastic/execution.md", tree_for=lane_tree_for(repo),
     ) is None

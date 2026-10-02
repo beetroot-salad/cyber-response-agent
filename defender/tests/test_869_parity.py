@@ -33,6 +33,8 @@ from defender.tests._declared869 import (
     write,
 )
 from defender.runtime.verbs import read_roster
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, skills_view
 
 #: The name driven at every composition site. It must be undeclared under BOTH membership
 #: readings (NF2): a MARKER-ONLY name is declared at the three union sites and undeclared at
@@ -126,22 +128,25 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
         f"defender/skills/gather/queries/{PHANTOM}/hunt-creds.md",
     ):
         with pytest.raises(LeadAuthorError):
-            lead_author._skills_path_rule(repo, "A ", form, systems=DECLARED)
+            lead_author._skills_path_rule(repo, "A ", form, systems=DECLARED,
+                                          tree_for=lane_tree_for(repo))
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/elastic/_draft/lift-me.md", systems=DECLARED) is None
+        repo, "A ", "defender/skills/elastic/_draft/lift-me.md", systems=DECLARED,
+        tree_for=lane_tree_for(repo)) is None
 
     # site 3 — the host-side draft writer
     assert synthesize_drafts(
         [_lead(f"{PHANTOM}.hunt-creds", system=PHANTOM)],
-        catalog_dir=catalog, catalog=[], systems=DECLARED,
+        **drafts_under(catalog), catalog=[], systems=DECLARED,
     ) == []
     assert synthesize_drafts(
         [_lead("elastic.hunt-creds", system="elastic")],
-        catalog_dir=catalog, catalog=[], systems=DECLARED,
+        **drafts_under(catalog), catalog=[], systems=DECLARED,
     ) == [catalog / "elastic" / "_draft" / f"{_draft_basename('elastic.hunt-creds')}.md"]
 
     # site 4 — the draft discovery that hands the agent its work
-    found = lead_author.discover_system_drafts(skills_dir=skills, systems=DECLARED)
+    found = lead_author.discover_system_drafts(skills=skills_view(skills), where=skills,
+                                               systems=DECLARED)
     handed = lead_author.build_system_draft_handoffs(found, repo_root=repo)
     assert [h["system"] for h in handed] == ["elastic"]
 
@@ -177,7 +182,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     spawn = LeadAuthorSpawn()
     deps = dataclasses.replace(
-        lead_author.build_lead_author_deps(paths),
+        lead_deps(paths),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
         acquire_queue_lock=lambda: object(), release_queue_lock=lambda _fh: None,
     )
@@ -186,7 +191,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     run_dir = tmp_path / "run-x"
     (run_dir / "gather_raw").mkdir(parents=True)
     with pytest.raises(LeadAuthorError):
-        lead_author.run(run_dir, paths=paths, deps=deps)
+        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
 
     assert spawn.calls == [], "the agent must not be spawned against an empty declared set"
     assert head_files(repo) == before
@@ -224,7 +229,8 @@ def test_directory_and_id_prefix_derivations_agree_on_the_gated_catalog(tmp_path
     write(authored, "---\nid: elastic.agent-authored\nstatus: draft\n---\n\n## Goal\n\nx\n")
     rel = str(authored.relative_to(repo))
     real = frozenset({tpl.system for tpl in committed})
-    assert lead_author._skills_path_rule(repo, "A ", rel, systems=real) is None
+    assert lead_author._skills_path_rule(repo, "A ", rel, systems=real,
+                                         tree_for=lane_tree_for(repo)) is None
 
     for tpl in lead_neighbors.load_catalog(copied):
         assert tpl.system == tpl.cli, f"{tpl.path}: {tpl.system!r} vs {tpl.cli!r}"

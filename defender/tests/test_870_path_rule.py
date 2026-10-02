@@ -35,6 +35,7 @@ from defender.tests._declared870 import (
     write,
     write_reducer_surface,
 )
+from defender.tests._lead_author_1134 import lane_tree_for
 
 DECLARED = frozenset({"elastic", "cmdb"})
 ELASTIC_MD = "defender/skills/elastic/execution.md"
@@ -250,13 +251,15 @@ def test_only_the_pitfalls_lane_may_write_the_reducer_surface(repo):
     "it refuses the reducer surface" would be true of a lane that had stopped working.
     """
     with pytest.raises(LeadAuthorError) as exc:
-        lead_author._skills_path_rule(repo, " M", REDUCER_REL, systems=DECLARED)
+        lead_author._skills_path_rule(repo, " M", REDUCER_REL, systems=DECLARED,
+                                      tree_for=lane_tree_for(repo))
     assert "out-of-scope" in str(exc.value)
     assert pitfalls_curator._pitfalls_path_rule(" M", REDUCER_REL, systems=DECLARED) is None
 
     write(repo / "defender/skills/elastic/SKILL.md", "---\nname: defender-elastic\n---\n# e\n")
     assert lead_author._skills_path_rule(
         repo, " M", "defender/skills/elastic/SKILL.md", systems=DECLARED,
+        tree_for=lane_tree_for(repo),
     ) is None, "the sibling lane stopped admitting its own target"
     with pytest.raises(LeadAuthorError):
         pitfalls_curator._pitfalls_path_rule(

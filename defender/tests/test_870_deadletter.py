@@ -42,6 +42,7 @@ from defender.tests._declared870 import (
     shim_row,
     write_reducer_surface,
 )
+from defender.tests._lead_author_1134 import lead_trees
 
 #: M9's closed vocabulary, all four members (FK-11 adds the last). Two writers append to one
 #: `pitfalls.deadletter.jsonl` and a reason outside this set is a fifth shape a human triaging
@@ -153,7 +154,7 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
     )
 
     assert pitfalls_curator.run_pitfalls(
-        paths=inert, invoke=Spawn(curate_execution_md("elastic")),
+        paths=inert, invoke=Spawn(curate_execution_md("elastic")), trees=lead_trees(inert),
     ) == 0
     survivors = persist.read_pitfalls(inert)
     assert [r.get("pitfall_id") for r in survivors] == [None], (
@@ -258,7 +259,8 @@ def test_the_consumed_category_says_unattributable(tmp_path, monkeypatch):
         paths=nothing_teachable,
     )
     spawn = Spawn(None)
-    assert pitfalls_curator.run_pitfalls(paths=nothing_teachable, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=nothing_teachable, invoke=spawn,
+                                         trees=lead_trees(nothing_teachable)) == 0
     assert spawn.calls == [], "the batch had nothing to teach, so this is the wrong arm"
     for row in consumed_by_id(nothing_teachable).values():
         assert row["consumed_category"] == "consumed_unattributable"
@@ -271,6 +273,7 @@ def test_the_consumed_category_says_unattributable(tmp_path, monkeypatch):
     )
     assert pitfalls_curator.run_pitfalls(
         paths=mixed, invoke=Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface())),
+        trees=lead_trees(mixed),
     ) == 0
     consumed = consumed_by_id(mixed)
     assert consumed["b:l-001:0"]["consumed_category"] == "consumed_unattributable"

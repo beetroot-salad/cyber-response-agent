@@ -22,6 +22,7 @@ from defender.learning.author import shared as author_shared  # type: ignore[imp
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError  # type: ignore[import-not-found]
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
+from defender.tests._lead_author_1134 import lead_trees
 
 
 def _pitfalls_rows(n: int) -> list[dict]:
@@ -245,14 +246,16 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     h.seed(paths.pitfalls, _pitfalls_rows(2))
 
     with pytest.raises(Exception) as raised:  # noqa: PT011 - the raised class is the subject under test, asserted below
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7)
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7,
+                                      trees=lead_trees(paths))
     assert type(raised.value) in tuple(drain.RETIRE_SET), (
         f"the converted rc raises {type(raised.value).__name__}, which is not in the retire set — "
         "it would fall through uncaught and the channel would stay stuck"
     )
 
     def leg(_paths, box=None, **_kw):
-        return pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7)
+        return pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+                                             trees=lead_trees(_paths))
 
     drains._drain_pitfalls(paths, leg)
     assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [1, 1], (
@@ -320,7 +323,8 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
     late = h.row_for("pitfalls", "r:l-999:0")
 
     def leg(_paths, box=None, **_kw):
-        rc = pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7)
+        rc = pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+                                           trees=lead_trees(_paths))
         return rc
 
     def failing_then_append(_paths, box=None, **_kw):

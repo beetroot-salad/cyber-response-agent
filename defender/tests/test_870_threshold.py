@@ -48,6 +48,9 @@ from defender.tests._declared870 import (
     write,
     write_reducer_surface,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import lead_trees
+from defender.tests._lead_author_1134 import lane_fields
 
 
 @pytest.fixture
@@ -63,7 +66,7 @@ def _tick(paths) -> Spawn:
     """One curation tick with a curator that declines to edit — so what is observed is the
     GATE (was the curator reached at all), never what the curator then did."""
     spawn = Spawn(None)
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.calls, "the tick gate refused the batch — the curator was never spawned"
     return spawn
 
@@ -179,7 +182,7 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
     assert {r["occurrences"] for r in records} == {1}
     assert drains._has_lead_author_work(paths) is False, "silent noise woke the drain"
     shut = Spawn(None)
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=shut) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=shut, trees=lead_trees(paths)) == 0
     assert shut.calls == [], "silent noise alone reached the curator"
     assert queue_ids(paths) == [r["pitfall_id"] for r in below]
 
@@ -199,7 +202,7 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
         "does not remove the count"
     )
     offered = Spawn(None)
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=offered) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=offered, trees=lead_trees(paths)) == 0
     assert offered.calls, "the tick gate refused a batch its own count clears"
     assert [e["surface"] for e in offered.calls[-1]["handoffs"]] == ["reducer"]
     assert len(queue_ids(paths)) == 8, (
@@ -247,7 +250,7 @@ def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
         "reach a tick"
     )
     spawn = Spawn(curate_execution_md("elastic"))
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.calls, "the tick gate refused a batch that clears its own count"
     # Read shape-independently: whether the system lane still curates is a question about the
     # GATE, and it must not be answerable only through the key M6 adds.
@@ -326,6 +329,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     ]
     deps = lead_author.LeadAuthorDeps(
         paths=paths,
+        **lane_fields(paths),
         systems=frozenset({"elastic", "cmdb"}),
         invoke_agent=lambda *a, **k: 0,
         extract=lambda _run_dir: ([], executed),
@@ -337,7 +341,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     )
     capsys.readouterr()
 
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
 
     log = loop_log(capsys)
     counted = [ln for ln in log.splitlines() if "distinct mistake(s) in this run" in ln]

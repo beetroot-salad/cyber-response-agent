@@ -38,6 +38,7 @@ through the SAME child over the SAME tree, so a refusal cannot be blamed on the 
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import shutil
 import sys
@@ -75,6 +76,7 @@ from defender.tests._roster1035 import (
     read_roster,
     run_as_nobody,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 
 #: The phrase O5 keeps: `test_hardening_772.py` matches the resolver's absent-directory
 #: message on it through `bind`, and M2 unifies BOTH cannot-read arms onto it.
@@ -534,7 +536,8 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     assert len(persist.read_pitfalls(paths)) == 2
 
     def probe():
-        return drains._invoke_pitfalls(paths, on_curated=lambda _d: None)
+        return drains._invoke_pitfalls(paths, on_curated=lambda _d: None,
+                                       label=LEAD_AUTHOR_DRAIN_LABEL)
 
     with handed_to_nobody(repo, adapters, 0o400):
         verdict = run_as_nobody(probe, expected=LeadAuthorError)
@@ -877,7 +880,8 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     shutil.rmtree(adapters)
 
     with pytest.raises(LeadAuthorError) as exc:
-        drains._drain_pitfalls(paths, drains._invoke_pitfalls)
+        drains._drain_pitfalls(
+            paths, functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
     assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
         f"the raise is not the resolver's own refusal: {exc.value}"
     )
@@ -894,7 +898,8 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     # The tick's own `finally` (`_discard_worktree_changes`: `reset --hard` + `clean`) has
     # already put the committed adapters directory back, so the control needs no rebuild.
     assert (adapters / "cmdb_adapter.py").is_file()
-    drains._drain_pitfalls(paths, drains._invoke_pitfalls)
+    drains._drain_pitfalls(
+        paths, functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
     assert queue_ids(paths) == [], (
         "the readable control did not get past the resolver to rotate the unattributable rows"
     )

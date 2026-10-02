@@ -34,6 +34,8 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import drafts_under, lead_deps, skills_view
 
 DECLARED = frozenset({"elastic"})
 
@@ -49,7 +51,7 @@ def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> Exec
 
 
 def _catalog(tmp_path: Path) -> Path:
-    cat = tmp_path / "queries"
+    cat = tmp_path / "skills" / "gather" / "queries"
     (cat / "elastic").mkdir(parents=True)
     write(cat / "elastic" / "proc-tree.md",
           "---\nid: elastic.proc-tree\nstatus: established\n---\n\n## Goal\n\nx\n")
@@ -69,7 +71,7 @@ def test_synthesize_drafts_refuses_an_undeclared_system(tmp_path):
     cat = _catalog(tmp_path)
     created = synthesize_drafts(
         [_lead("fakesys.hunt-creds", system="fakesys")],
-        catalog_dir=cat, catalog=[], systems=DECLARED,
+        **drafts_under(cat), catalog=[], systems=DECLARED,
     )
     assert created == []
     assert not (cat / "fakesys").exists()
@@ -97,7 +99,7 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
     """
     cat = _catalog(tmp_path)
     created = synthesize_drafts(
-        [_lead("elastic.hunt-creds")], catalog_dir=cat, catalog=[], systems=DECLARED,
+        [_lead("elastic.hunt-creds")], **drafts_under(cat), catalog=[], systems=DECLARED,
     )
     draft = cat / "elastic" / "_draft" / f"{_draft_basename('elastic.hunt-creds')}.md"
     assert created == [draft]
@@ -111,7 +113,7 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
         assert system not in DECLARED
         assert synthesize_drafts(
             [_lead(undeclared, system=system, verb="map")],
-            catalog_dir=cat, catalog=[], systems=DECLARED,
+            **drafts_under(cat), catalog=[], systems=DECLARED,
         ) == []
         assert not (cat / system).exists()
 
@@ -150,7 +152,7 @@ def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_pat
 
     cat = _catalog(tmp_path)
     assert synthesize_drafts(
-        executed, catalog_dir=cat, catalog=[], systems=DECLARED) == []
+        executed, **drafts_under(cat), catalog=[], systems=DECLARED) == []
     assert not (cat / "fakesys").exists()
 
 
@@ -178,7 +180,7 @@ def test_synthesize_drafts_names_what_it_refused(tmp_path, capsys):
     capsys.readouterr()
     assert synthesize_drafts(
         [_lead("fakesys.hunt-creds", system="fakesys")],
-        catalog_dir=cat, catalog=[], systems=DECLARED,
+        **drafts_under(cat), catalog=[], systems=DECLARED,
     ) == []
     refusal = loop_log(capsys)
     assert "fakesys" in refusal
@@ -187,7 +189,7 @@ def test_synthesize_drafts_names_what_it_refused(tmp_path, capsys):
 
     capsys.readouterr()
     assert synthesize_drafts(
-        [_lead("elastic.hunt-creds")], catalog_dir=cat, catalog=[], systems=DECLARED,
+        [_lead("elastic.hunt-creds")], **drafts_under(cat), catalog=[], systems=DECLARED,
     ) != []
     quiet = loop_log(capsys)
     assert "fakesys" not in quiet
@@ -242,7 +244,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
 
     capsys.readouterr()
     found = lead_author.discover_system_drafts(
-        skills_dir=repo / SKILLS_REL, systems=systems)
+        skills=skills_view(repo / SKILLS_REL), where=repo / SKILLS_REL, systems=systems)
     assert [p.name for p in found] == ["lift-me.md"]
 
     assert log_lines_naming(loop_log(capsys), repr("gather")), (
@@ -252,7 +254,8 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     # The control on the same address: declare it, and the same walk says nothing.
     capsys.readouterr()
     lead_author.discover_system_drafts(
-        skills_dir=repo / SKILLS_REL, systems=systems | {"gather"})
+        skills=skills_view(repo / SKILLS_REL), where=repo / SKILLS_REL,
+        systems=systems | {"gather"})
     assert log_lines_naming(loop_log(capsys), repr("gather")) == [], (
         "a line that fires on a walk with nothing to skip reports nothing"
     )
@@ -262,13 +265,13 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     spawn = LeadAuthorSpawn()
     deps = dataclasses.replace(
-        lead_author.build_lead_author_deps(paths),
+        lead_deps(paths),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
         acquire_queue_lock=lambda: object(), release_queue_lock=lambda _fh: None,
     )
     run_dir = tmp_path / "run-x"
     (run_dir / "gather_raw").mkdir(parents=True)
-    lead_author.run(run_dir, paths=paths, deps=deps)
+    lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
 
     handed = spawn.calls[-1]["pending_drafts"]
     assert [d["system"] for d in handed] == ["elastic"]

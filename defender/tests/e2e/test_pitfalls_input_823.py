@@ -93,6 +93,7 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
     REPEAT_TRIP_QUERY_ID,
     SHIM_COMMAND_MAX_CHARS,
 )
+from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -191,7 +192,7 @@ class _Res:
                 lead.query_id, lead.verb, by_id, row_system=lead.system)
             is not None
         ]
-        handoff = build_handoff(self.run_dir, leads, catalog=catalog)
+        handoff = build_handoff(self.run_dir, leads, **repo_skills(), catalog=catalog)
         return len(pitfalls), len(drafts), len(handoff)
 
 
@@ -377,7 +378,7 @@ def test_the_shims_exit_codes_are_translated_to_the_tables_dialect(tmp_path):
         assert len(shim) == 1, f"rc={rc}: the failure was not recorded at all"
         assert shim[0]["error_class"] == want_class, f"rc={rc}: {why}"
         assert f"exit={rc}" in shim[0]["payload_digest"], "the raw status must stay legible"
-        reached = [p for p in collect_general_failures(r.leads(), r.run_dir)
+        reached = [p for p in collect_general_failures(r.leads(), r.run_dir, **repo_skills())
                    if p["query_id"] == BASH_SHIM_QUERY_ID]
         assert len(reached) == want_records, f"rc={rc}: {why}"
 
@@ -479,7 +480,7 @@ def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     shim = r.shim_rows
     assert len(shim) == 1, "the failure still produced its row"
     assert shim[0]["system"] == ""
-    pitfalls = collect_general_failures(r.leads(), r.run_dir)
+    pitfalls = collect_general_failures(r.leads(), r.run_dir, **repo_skills())
     shim_pitfalls = [p for p in pitfalls if p["query_id"] == BASH_SHIM_QUERY_ID]
     assert len(shim_pitfalls) == 1, "#870 M5′: the unattributed reduce reaches the queue"
     assert shim_pitfalls[0]["system"] == "", "a system was invented for it"
@@ -496,7 +497,7 @@ def test_shim_row_reaches_the_curator_and_nothing_else(failing_reducer_run):
     payload it opened selects nothing about whose mistake the SQL was, and the row is routed
     by its sentinel `query_id` to the reducer surface."""
     r = failing_reducer_run
-    pitfalls = collect_general_failures(r.own_leads(), r.run_dir)
+    pitfalls = collect_general_failures(r.own_leads(), r.run_dir, **repo_skills())
     assert len(pitfalls) == 1, "the shim failure did not reach the pitfalls curator"
     rec = pitfalls[0]
     assert rec["system"] == ""
@@ -646,7 +647,7 @@ def test_shim_command_is_capped_in_the_record(tmp_path):
     shim = r.shim_rows
     assert len(shim) == 1
     assert len(shim[0]["params"]["command"]) <= SHIM_COMMAND_MAX_CHARS
-    record = collect_general_failures(r.leads(), r.run_dir)[0]
+    record = collect_general_failures(r.leads(), r.run_dir, **repo_skills())[0]
     assert len(record["executed_query"]) <= SHIM_COMMAND_MAX_CHARS + 200, (
         "the cap did not survive into the record the curator's prompt receives"
     )
@@ -712,4 +713,4 @@ def test_budget_exhausted_lead_mints_no_record(tmp_path):
         DONE,
     ])
     assert [row["exit_code"] for row in r.own_rows] == [0, 0, 0], "a distinct-query lead tripped"
-    assert collect_general_failures(r.own_leads(), r.run_dir) == []
+    assert collect_general_failures(r.own_leads(), r.run_dir, **repo_skills()) == []

@@ -41,6 +41,7 @@ from defender.tests._spec791 import (
     noop_start_box,
     noop_stop_box,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
@@ -300,7 +301,7 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     holder = queue_lock.open("a+")
     try:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        rc = lead_author.run(run_dir, paths=paths)
+        rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()

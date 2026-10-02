@@ -45,6 +45,7 @@ from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead, collect_general_failures
 from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
 from defender.tests._repo import seed_skills_repo
+from defender.tests._lead_author_1134 import lead_trees
 
 #: l-003's real failure in `reviewer-measure-0807-b` — the same DuckDB diagnosis, turn after
 #: turn, while the SQL that provoked it changed every time.
@@ -313,7 +314,8 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
     persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], paths=paths)
     calls: list = []
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
+                                         trees=lead_trees(paths)) == 0
     assert calls == [], "the curator ran on one lesson wearing eight hats"
     assert len(_records(paths)) == 1
     assert len(_pending(paths)) == 8, "the under-threshold queue lost its evidence"
@@ -343,7 +345,8 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
 
     assert drains._has_lead_author_work(paths) is True, "the drain never wakes for it"
     calls: list = []
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
+                                         trees=lead_trees(paths)) == 0
     assert calls, "the tick gate refused the incident FK-3 exists to reach"
     assert [e["surface"] for e in calls[0]] == ["reducer"]
 
@@ -364,7 +367,8 @@ def test_three_distinct_lessons_do_clear_it(paths, monkeypatch):
         paths=paths,
     )
     calls: list = []
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
+                                         trees=lead_trees(paths)) == 0
     assert len(calls) == 1
     assert len(calls[0][0]["failures"]) == 3
     assert _pending(paths) == [], "the batch was curated but not rotated"
@@ -431,7 +435,8 @@ def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch)
     )
 
     calls: list = []
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
+                                         trees=lead_trees(paths)) == 0
     assert len(calls[0][0]["failures"]) == 1, "the curator saw the duplicates"
     assert _pending(paths) == []
     consumed = [json.loads(ln) for ln in

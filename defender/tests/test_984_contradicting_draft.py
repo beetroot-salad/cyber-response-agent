@@ -23,6 +23,7 @@ import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 from defender.tests.test_lead_author import _deps
+from defender.tests._lead_author_1134 import skills_view
 
 
 @pytest.fixture
@@ -216,15 +217,16 @@ def test_draft_contradicts_skill_predicate(tmp_path: Path):
     p = tmp_path / "x.md"
 
     _write_draft(p, contradicts_skill=True)
-    assert lead_author._draft_contradicts_skill(p) is True
+    assert lead_author._draft_contradicts_skill(skills_view(tmp_path), p, where=tmp_path) is True
 
     _write_draft(p, contradicts_skill=False)
-    assert lead_author._draft_contradicts_skill(p) is False
+    assert lead_author._draft_contradicts_skill(skills_view(tmp_path), p, where=tmp_path) is False
 
     _write_draft(p)
-    assert lead_author._draft_contradicts_skill(p) is False
+    assert lead_author._draft_contradicts_skill(skills_view(tmp_path), p, where=tmp_path) is False
 
     p.write_text("no frontmatter\n", encoding="utf-8")
-    assert lead_author._draft_contradicts_skill(p) is False
+    assert lead_author._draft_contradicts_skill(skills_view(tmp_path), p, where=tmp_path) is False
 
-    assert lead_author._draft_contradicts_skill(tmp_path / "missing.md") is False
+    assert lead_author._draft_contradicts_skill(
+        skills_view(tmp_path), tmp_path / "missing.md", where=tmp_path) is False

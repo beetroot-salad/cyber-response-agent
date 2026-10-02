@@ -83,6 +83,8 @@ from defender.tests._spec791 import (
     noop_start_box,
     noop_stop_box,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import lead_deps, lead_trees
 
 
 # --- substrate -------------------------------------------------------------------------------
@@ -861,10 +863,10 @@ def _lead(**kw) -> ExecutedLead:
 def _curator_deps(repo: Path, state: Path, **overrides):
     """Production lead-author deps over a seeded, committed skills tree, with the two tables
     bypassed (their own suite) and the queue lock stubbed (the drain's, under M5)."""
-    deps = lead_author.build_lead_author_deps(LoopPaths(repo_root=repo, state_dir=state))
+    deps = lead_deps(LoopPaths(repo_root=repo, state_dir=state))
     seams = dict(
         extract=lambda _rd: ([], [_lead()]),
-        synthesize=lambda executed, catalog_dir=None, catalog=None, systems=None: [],
+        synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
         discover_system_drafts=lambda: [],
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda _fh: None,
@@ -915,8 +917,9 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     head_before = _git.git_head_sha(repo)
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, deps=deps, on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, deps=deps)
+    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+                         on_done=captured.append) if deferred \
+        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     sha = _git.git_head_sha(repo)
@@ -950,8 +953,9 @@ def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
     head_before = _git.git_head_sha(repo)
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, deps=deps, on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, deps=deps)
+    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+                         on_done=captured.append) if deferred \
+        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     assert _git.git_head_sha(repo) == head_before, "a none-resolved run made a commit"
@@ -979,8 +983,9 @@ def test_952_m4_the_clean_path_writes_nothing_and_calls_nothing(tmp_path: Path, 
     )
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, deps=deps, on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, deps=deps)
+    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+                         on_done=captured.append) if deferred \
+        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     assert captured == []
@@ -1015,7 +1020,7 @@ def test_952_m4_done_sentinel_text_is_the_one_producer_and_write_done_sentinel_t
 
     repo = seed_skills_repo(tmp_path / "repo")
     deps = _curator_deps(repo, tmp_path / "state", invoke_agent=_agent_must_not_run)
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     assert _done(run_dir).read_text(encoding="utf-8") == written, "the short-circuit rewrote it"
 
 
@@ -1067,7 +1072,8 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_noth
     spawn = Spawn(curate_execution_md("elastic"))
     captured: list[PitfallsDisposition] = []
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
+                                         trees=lead_trees(paths)) == 0
 
     sha = _git.git_head_sha(pitfalls_repo)
     assert sha != head_before, "the commit is not deferred — only the consumption is"
@@ -1106,7 +1112,8 @@ def test_952_o5_run_pitfalls_default_consumes_exactly_as_today(pitfalls_repo: Pa
     _three_way_batch(paths)
     head_before = _git.git_head_sha(pitfalls_repo)
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_execution_md("elastic"))) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_execution_md("elastic")),
+                                         trees=lead_trees(paths)) == 0
 
     sha = _git.git_head_sha(pitfalls_repo)
     assert sha != head_before
@@ -1131,7 +1138,8 @@ def test_952_o5_run_pitfalls_by_hand_reads_no_drain_configuration(
     paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
     _three_way_batch(paths)
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_execution_md("elastic"))) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_execution_md("elastic")),
+                                         trees=lead_trees(paths)) == 0
 
     assert consumed_by_id(paths)["c:l-000:0"]["consumed_category"] == "consumed_committed"
     assert queue_ids(paths) == ["h:l-003:0"]
@@ -1196,12 +1204,14 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
         _bounded(
             lambda: pitfalls_curator.run_pitfalls(
                 paths=paths, invoke=_agent_must_not_run, lock_wait_seconds=0,
+                trees=lead_trees(paths),
             ),
             holder=holder,
         )
     assert paths.pitfalls.file.read_bytes() == queue_before
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run,
+                                         trees=lead_trees(paths)) == 0
     assert queue_ids(paths) == []
     assert consumed_by_id(paths)["u:l-001:0"]["consumed_category"] == "consumed_unattributable"
 
@@ -1235,7 +1245,7 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
     mid_serve: list[int] = []
 
     def probe() -> None:
-        mid_serve.append(lead_author.run(by_hand, paths=paths))
+        mid_serve.append(lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths))
 
     assert _tick(
         paths, branch=_Branch(tmp_path / "worktrees"), run_pitfalls=_no_curation,
@@ -1250,9 +1260,10 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
     # Positive control: the lock the tick held IS the file a by-hand run locks. Held here the
     # way a second process would hold it, the same call skips; released, it does not.
     with _held(paths.lead_pending_dir / ".lock"):
-        assert lead_author.run(by_hand, paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
+        assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL,
+                               paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
-    assert lead_author.run(by_hand, paths=paths) == 0
+    assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
     assert (by_hand / "lead_author" / "pitfalls_collected").is_file(), \
         "outside a tick the by-hand run must serve, not skip"
 
@@ -1315,13 +1326,15 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
     captured: list[str | None] = []
 
     with _held(paths.lead_pending_dir / ".lock"):
-        drains._invoke_lead_author(paths, drained, on_done=captured.append)
+        drains._invoke_lead_author(paths, drained, on_done=captured.append,
+                                   label=LEAD_AUTHOR_DRAIN_LABEL)
         assert (drained / "lead_author" / "pitfalls_collected").is_file(), \
             "the curator never ran past the lock the drain is supposed to have exempted it from"
         assert captured == [], "an empty run dir is the clean path: no sentinel to hand over"
         assert not _done(drained).exists()
 
-        assert lead_author.run(by_hand, paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
+        assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL,
+                               paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
 
 
@@ -1346,14 +1359,15 @@ def test_952_a_the_production_adapter_forwards_on_done_to_the_curator(tmp_path: 
     seed_executed_query(run_dir, query_id="nosuch.verb", system="nosuch", verb="verb")
     captured: list[str | None] = []
 
-    drains._invoke_lead_author(paths, run_dir, on_done=captured.append)
+    drains._invoke_lead_author(paths, run_dir, on_done=captured.append,
+                               label=LEAD_AUTHOR_DRAIN_LABEL)
 
     assert captured == [None], "the production adapter did not hand the record to on_done"
     assert not _done(run_dir).exists(), \
         "the production adapter let the curator write the sentinel inside do_work"
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
-    assert lead_author.run(run_dir, paths=paths) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
     assert _done_sha(run_dir) == "none"
 
 
@@ -1387,7 +1401,7 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
     in_curation: list[int] = []
 
     def probe() -> int:
-        return lead_author.run(by_hand, paths=paths)
+        return lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
 
     def curate(_paths, *, box=None, on_curated):
         in_curation.append(probe())
@@ -1406,7 +1420,7 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
     assert _inflight(paths) == []
     assert _done_sha(run_dir) == SHA
 
-    assert lead_author.run(by_hand, paths=paths) == 0
+    assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
     assert (by_hand / "lead_author" / "pitfalls_collected").is_file()
 
 
@@ -1548,7 +1562,8 @@ def test_952_g_a_held_only_deferred_tick_defers_the_decline_bump(pitfalls_repo: 
     spawn = Spawn(None)
     captured: list[PitfallsDisposition] = []
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
+                                         trees=lead_trees(paths)) == 0
 
     assert [h.get("surface") for h in spawn.handoffs] == ["reducer"], "the offer was never made"
     assert _git.git_head_sha(pitfalls_repo) == head_before

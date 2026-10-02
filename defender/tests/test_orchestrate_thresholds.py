@@ -27,6 +27,7 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 
 
 
@@ -101,7 +102,11 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 0
 
     empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
-    assert drains._invoke_pitfalls(empty, on_curated=lambda _d: None, lock_wait_seconds=0) == 0
+    # The seam holds the lane's `skills/` mount before it reads the queue (#1134 step 6), and
+    # a mount point always exists in a checkout: this tmp tree gets one.
+    empty.skills_dir.mkdir(parents=True)
+    assert drains._invoke_pitfalls(
+        empty, on_curated=lambda _d: None, lock_wait_seconds=0, label=LEAD_AUTHOR_DRAIN_LABEL) == 0
 
 
 
