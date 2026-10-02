@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
-from pydantic import SkipValidation
+from pydantic import SkipValidation, field_validator
 
 from .verb_grant import GrantError, VerbGrant
 
@@ -90,10 +90,11 @@ class VerbContext:
     #: replacing a read-only proxy or the live `os.environ` with a snapshot on every call.
     env: Annotated[Mapping[str, str], SkipValidation]
     #: The run's tenant record (#1107): its settings folder, grants and everything resolved from
-    #: the folder once (each system's `config.env`, the corpus-engine view, the ticket mapping,
-    #: the secret lookup), in place of the folder and the process environment. No default, so
-    #: no site can silently read another tenant's or the checkout's. `defender_dir` is the code
-    #: tree; the folder path stays reachable as `tenant.settings`.
+    #: the folder once (each system's `config.env`, the corpus-engine view, the ticket mapping),
+    #: in place of the folder and the process environment. No default, so no site can silently
+    #: read another tenant's or the checkout's. `defender_dir` is the code tree; the folder path
+    #: stays reachable as `tenant.settings`. `SkipValidation` because the real class cannot be
+    #: imported here (see the import note above); `_tenant_given` still refuses `None`.
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
     #: The branched world this call is served for; `None` for the ordinary run and the base
@@ -109,6 +110,15 @@ class VerbContext:
     #: because systems format timestamps differently; not a callable because a function as a
     #: dataclass default would bind `ctx` as its first argument when called.
     as_of: datetime | None = None
+
+    @field_validator("tenant")
+    @classmethod
+    def _tenant_given(cls, value: Any) -> Any:
+        # The guard `settings_dir: Path` gave for free: a verb over no record would fail later,
+        # inside the adapter, as an AttributeError the breaker files as an infra fault.
+        if value is None:
+            raise ValueError("a verb context needs the run's tenant record; got None")
+        return value
 
 
 Verb = Callable[..., Any]

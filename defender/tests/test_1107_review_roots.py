@@ -306,3 +306,120 @@ def _raised(fn, *args, **kw):
     except Exception as exc:  # noqa: BLE001 — the test inspects whatever was raised
         return exc
     return None
+
+
+# ======================================================================================
+# Third review: a verb over no record, env parameters, unreadable settings, one prefix.
+# ======================================================================================
+
+def test_a_verb_context_over_no_tenant_record_is_refused():
+    """The old `settings_dir: Path` refused None at construction; the record field, typed loosely
+    to dodge a circular import, must refuse it too, or the verb fails later inside the adapter."""
+    from pydantic import ValidationError
+
+    from defender.runtime.verbs import VerbContext
+
+    with pytest.raises(ValidationError, match="tenant record"):
+        VerbContext(defender_dir=S.DEFENDER, run_dir=S.DEFENDER, env={}, tenant=None)
+
+
+def _env_lint():
+    import importlib.util
+    import sys
+
+    path = S.REPO_ROOT / "scripts/lint/lint_tenant_env_reads.py"
+    spec = importlib.util.spec_from_file_location("lint_tenant_env_reads_review3", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(("src", "flagged"), [
+    ("def f(*, tenant, env):\n    return env.get('CASE_HISTORY_URL_BASE')\n", True),
+    ("def f(env):\n    return env['ELASTICSEARCH_URL']\n", True),
+    ("def f(env):\n    return 'X' in env\n", True),
+    ("import subprocess\n\ndef f(env):\n    subprocess.run(['true'], env=dict(env))\n", False),
+], ids=["kw-only .get", "positional subscript", "in test", "handed to a child"])
+def test_env_lint_follows_a_parameter_named_env(tmp_path, src, flagged):
+    """The run's environment arrives as a parameter named `env` in the swept trees (the ticket
+    writer, lead-zero): a read off it is a finding; handing it to a child is not."""
+    tree = tmp_path / "defender/runtime/lead_zero"
+    tree.mkdir(parents=True)
+    (tree / "x.py").write_text(src, encoding="utf-8")
+    assert _env_lint().main(["--root", str(tmp_path)]) == (1 if flagged else 0)
+
+
+def _two_systems(tmp_path: Path) -> Path:
+    settings = tmp_path / "settings"
+    for name in ("alpha", "beta"):
+        cfg = settings / "systems" / name / "config.env"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(f'{name.upper()}_URL_BASE="http://{name}:1"\n', encoding="utf-8")
+    return settings
+
+
+def test_an_unlistable_systems_folder_configures_no_system(tmp_path, monkeypatch, caplog):
+    """`settings/systems/` that has lost its read permission after acceptance: the resolver
+    warns and configures no system, never a raw PermissionError out of run.py. (Tests run as root,
+    where permission bits are ignored, so the refusal is induced at the listing call.)"""
+    from defender.runtime import tenant_settings as ts
+
+    settings = _two_systems(tmp_path)
+    real = Path.iterdir
+
+    def iterdir(self):
+        if self == settings / "systems":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)  # lint-monkeypatch: ok — EACCES cannot be induced as root
+    with caplog.at_level("WARNING"):
+        systems = ts.read_systems(settings)
+    assert dict(systems) == {}
+    assert "cannot be listed" in caplog.text
+    assert str(tmp_path) not in caplog.text, "the warning names the host path"
+
+
+def test_an_unexaminable_system_folder_is_that_system_down(tmp_path, monkeypatch):
+    """A system folder that cannot be examined (search permission lost on `systems/`) is that
+    system's ConfigFault; the other systems still resolve."""
+    from defender.runtime import tenant_settings as ts
+
+    settings = _two_systems(tmp_path)
+    real = Path.is_dir
+
+    def is_dir(self):
+        if self == settings / "systems" / "beta":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)  # lint-monkeypatch: ok — EACCES cannot be induced as root
+    systems = ts.read_systems(settings)
+    assert systems["alpha"]["ALPHA_URL_BASE"] == "http://alpha:1"
+    assert isinstance(systems["beta"], ConfigFault), systems["beta"]
+    assert str(tmp_path) not in str(systems["beta"]), "the fault names the host path"
+
+
+def test_the_access_lines_are_named_after_the_folder_whatever_the_adapter_prefix():
+    """An adapter may name its keys with its own prefix; the access lines are always named after
+    the system folder. `load_config` and the transport judge the same two keys, so a config the
+    adapter accepts is never refused at the first call."""
+    from types import SimpleNamespace
+
+    from defender.runtime.tenant_settings import SystemConfig
+    from defender.runtime.verbs import VerbContext
+
+    entry = SystemConfig({"MY_SYS_TRANSPORT": "docker-exec", "MY_SYS_DOCKER_CONTEXT": "ctx-a",
+                          "MYPFX_URL_BASE": "http://mysys:1", "MYPFX_TIMEOUT_SEC": "5"})
+    ctx = VerbContext(defender_dir=S.DEFENDER, run_dir=S.DEFENDER, env={},
+                      tenant=SimpleNamespace(systems={"my-sys": entry}))
+    assert transport.load_config(ctx, "my-sys", "MYPFX", ("URL_BASE", "TIMEOUT_SEC")) == {
+        "URL_BASE": "http://mysys:1", "TIMEOUT_SEC": "5"}
+    assert transport.docker_context(ctx, "my-sys") == "ctx-a"
+    lacking = SimpleNamespace(systems={"my-sys": SystemConfig({
+        "MYPFX_TRANSPORT": "docker-exec", "MYPFX_DOCKER_CONTEXT": "ctx-a",
+        "MYPFX_URL_BASE": "http://mysys:1", "MYPFX_TIMEOUT_SEC": "5"})})
+    ctx = VerbContext(defender_dir=S.DEFENDER, run_dir=S.DEFENDER, env={}, tenant=lacking)
+    with pytest.raises(ConfigFault, match="MY_SYS_TRANSPORT"):
+        transport.load_config(ctx, "my-sys", "MYPFX", ("URL_BASE", "TIMEOUT_SEC"))

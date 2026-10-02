@@ -21,7 +21,9 @@ _os`, `from os import environ as e`, `os.path.os.environ`):
   * `os.getenv`;
   * `env_str`, `env_int`, `env_bool` and `env_choice` (the platform's typed accessors);
   * on any expression ending in `.env` (`ctx.env`, `deps.ctx.env`), on a name bound from one
-    (`env = ctx.env`, annotated, or walrus), and on a direct copy of either (`dict(ctx.env)`, a
+    (`env = ctx.env`, annotated, or walrus), on a function parameter named `env` (the run's
+    environment handed in: `record_case_ticket(env=...)`, `resolve_lead_zero(env=...)`), and on
+    a direct copy of any of these (`dict(ctx.env)`, a
     lone `{**ctx.env}`): `.get(...)` and the other mapping reads, a subscript, an `in` test, and
     iteration. Not followed: tuple-unpacked bindings, `.copy()`, `list(...)`/`sorted(...)`,
     `|`, `getattr(ctx, "env")`, a `{**env, ...}` with extra keys.
@@ -129,7 +131,9 @@ class _Reads(ast.NodeVisitor):
 
     # -- scopes ----------------------------------------------------------------------------
     def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        self._bound.append(set())
+        a = node.args
+        params = [*a.posonlyargs, *a.args, *a.kwonlyargs, *filter(None, (a.vararg, a.kwarg))]
+        self._bound.append({p.arg for p in params if p.arg == "env"})
         self.generic_visit(node)
         self._bound.pop()
 

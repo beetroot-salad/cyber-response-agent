@@ -262,13 +262,27 @@ def system_prefix(system: str) -> str:
 def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
     """One entry per non-hidden folder under `settings/systems/`, keyed by its exact name: the
     `SystemConfig` of its `config.env`, or the `ConfigFault` for why there is none. Never
-    raises for a system's config. @owns systems"""
+    raises: a `systems/` folder that cannot be listed is warned and configures no system, and a
+    system folder that cannot be examined is that system's `ConfigFault`. @owns systems"""
     systems_dir = Path(settings) / "systems"
     out: dict[str, SystemConfig | ConfigFault] = {}
-    if systems_dir.is_dir():
-        for folder in sorted(systems_dir.iterdir()):
-            if folder.name.startswith(".") or not folder.is_dir():
-                continue
+    try:
+        folders = sorted(systems_dir.iterdir()) if systems_dir.is_dir() else []
+    except OSError as e:
+        _log.warning("%s cannot be listed (%s), so this tenant configures no system",
+                     pointer_to("systems/"), e.strerror or type(e).__name__)
+        folders = []
+    for folder in folders:
+        if folder.name.startswith("."):
+            continue
+        try:
+            is_folder = folder.is_dir()
+        except OSError as e:
+            out[folder.name] = ConfigFault(
+                f"{pointer_to(f'systems/{folder.name}/')} cannot be examined: "
+                f"{e.strerror or type(e).__name__}")
+            continue
+        if is_folder:
             try:
                 out[folder.name] = SystemConfig(
                     read_env_file(folder / "config.env", shown=config_pointer(folder.name)))

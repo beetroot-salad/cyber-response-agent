@@ -200,7 +200,7 @@ the layer.
 
 ## Access method
 
-Every system's `config.env` states how the host reaches it, in two lines that are both required and have no default: `<PREFIX>_TRANSPORT=docker-exec` and `<PREFIX>_DOCKER_CONTEXT=<the docker context the system is reached over>`. A system missing either is down (exit 2) and is never reached through a guessed docker context.
+Every system's `config.env` states how the host reaches it, in two lines that are both required and have no default: `<PREFIX>_TRANSPORT=docker-exec` and `<PREFIX>_DOCKER_CONTEXT=<the docker context the system is reached over>`. Here `<PREFIX>` is the system folder's name upper-cased with `-` as `_` (`case-history` → `CASE_HISTORY`), even if the adapter names its other keys with a different prefix. A system missing either is down (exit 2) and is never reached through a guessed docker context.
 
 `docker-exec` is the one implemented method; any other value is refused, naming it.
 `<PREFIX>` is the folder name upper-cased (`systems/host-state/` → `HOST_STATE_`).

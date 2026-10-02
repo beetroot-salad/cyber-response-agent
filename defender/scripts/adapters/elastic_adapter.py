@@ -75,7 +75,7 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
     Nothing is looked up in the environment, and the file is not re-read: the values are those
     of the run's start (O1, O2)."""
     entry = transport.system_entry(ctx, SYSTEM)
-    transport.access_context(ctx, SYSTEM, PREFIX)
+    transport.access_context(ctx, SYSTEM)
     config = dict(entry)
     missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
     if missing:

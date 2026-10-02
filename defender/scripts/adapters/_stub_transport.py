@@ -80,7 +80,7 @@ def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
     return entry
 
 
-def access_context(ctx: VerbContext, system: str, prefix: str | None = None) -> str:
+def access_context(ctx: VerbContext, system: str) -> str:
     """The docker context `system` is reached on — its `<PREFIX>_DOCKER_CONTEXT` — or
     `ConfigFault` (that system down, the run goes on). THE ONE CHECK of how a system is reached
     (D2): `<PREFIX>_TRANSPORT` must be `docker-exec` exactly, and the context must be named and
@@ -90,9 +90,14 @@ def access_context(ctx: VerbContext, system: str, prefix: str | None = None) -> 
 
     Called first by every adapter's `load_config` and by every transport entry, so a system that
     is down for its access method faults naming that key before any URL is confined or any
-    timeout parsed."""
+    timeout parsed.
+
+    The two keys are named after the system FOLDER (`system_prefix`: `case-history` →
+    `CASE_HISTORY_TRANSPORT`), whatever prefix an adapter uses for its other keys. One derivation,
+    the same the resolver's warning and the connect validator use, so `load_config` and the
+    transport can never judge two different keys."""
     entry = system_entry(ctx, system)
-    prefix = prefix or system_prefix(system)
+    prefix = system_prefix(system)
     method = entry.get(f"{prefix}_TRANSPORT")
     if method is None or is_blank(method):
         raise ConfigFault(
@@ -148,7 +153,7 @@ def load_config(
     have a missing environment fact resolve silently.
     """
     entry = system_entry(ctx, system)
-    access_context(ctx, system, prefix)
+    access_context(ctx, system)
     cfg: dict[str, str] = {}
     for key in required:
         val = entry.get(f"{prefix}_{key}")
