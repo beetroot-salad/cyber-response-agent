@@ -114,13 +114,14 @@ what manufactures the read PR's fixtures.
 - `knowledge/tenants/<tenant>/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions + the released status), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
-  `record_case_ticket` (one read-back, at most one comment POST, a `ticket_write.json`
-  receipt on every branch that called out; no transition call exists), non-fatal.
+  `record_case_ticket` (one read-back, at most one comment POST, a receipt on every
+  branch that called out; no transition call exists), non-fatal.
 - `runtime/ticket_screen.py` + `runtime/query_tool.py` — the read side: an
   unreleased case's comments are served to no model; a released case is served whole.
 - `run.py` — `--update-ticket`: open after materialize, record after
   `cross_check_tables`.
 - `knowledge/tenants/<tenant>/settings/systems/case-history/config.env` — `CASE_HISTORY_*`.
 
-The `ticket_write.json` receipt (`{key, status, url, ok}`) has no reader: it is a
-per-run trace for an operator, not a seam anything keys on.
+The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
+`<runs_base>/<run id>.ticket-write.json`, out of the box's reach. Its one reader is the run
+page's ticket line; nothing keys on it.
