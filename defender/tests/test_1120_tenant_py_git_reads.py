@@ -124,3 +124,14 @@ def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:
     H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)),
                      H.CANNOT_VERIFY_TENANT_ID)
     assert time.monotonic() - started < 120
+
+
+def test_a_repo_with_no_commits_reports_the_id_as_not_committed(tmp_path: Path) -> None:
+    """A tenant folder that is a fresh `git init` (no commit yet): check names `.tenant-id` as
+    not committed — the operator's next step — rather than "cannot verify"."""
+    folder = tmp_path / "fresh"
+    shutil.copytree(H.FIXTURE, folder, symlinks=True)
+    H.write_tenant_id_file(folder, H.TID, "id")
+    H.git(folder, "init", "-q", "-b", "main")
+    text = H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)), "is not committed")
+    assert H.CANNOT_VERIFY_TENANT_ID not in text, text

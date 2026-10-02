@@ -206,7 +206,10 @@ def _tenant_id_committed(folder: Path) -> str | None:
         if Path(top).resolve() != folder.resolve():
             return (f"{_CANNOT_VERIFY}: {folder / '.git'} is not a repository of its own — "
                     f"git reads {top}'s instead")
-        listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env, timeout=bound)
+        if _no_commits_yet(folder, env, bound):
+            listed = ""  # a repo with no commit commits nothing: "not committed", below
+        else:
+            listed = _git.git(["ls-tree", "HEAD", "--", rel], cwd=folder, env=env, timeout=bound)
         committed = (_git.git_blob_bytes(folder, listed.split()[2], env=env, timeout=bound)
                      if listed else None)
     except subprocess.TimeoutExpired:
@@ -226,6 +229,17 @@ def _tenant_id_committed(folder: Path) -> str | None:
         return (f"{folder / rel} differs from what the tenant repo's HEAD commits — the clone "
                 "is another tenant's, or the file was edited by hand; restore it or commit it")
     return None
+
+
+def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
+    """The repository has no commit at all (a fresh `git init`): HEAD does not resolve and no
+    ref exists. A HEAD that does not resolve while refs exist is not this — it is a repo git
+    cannot read, which the caller's `ls-tree` turns into "cannot verify"."""
+    head = _git.git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd=folder, env=env,
+                    check=False, timeout=bound)
+    if head:
+        return False
+    return not _git.git(["for-each-ref", "--count=1"], cwd=folder, env=env, timeout=bound)
 
 
 # ==========================================================================================
