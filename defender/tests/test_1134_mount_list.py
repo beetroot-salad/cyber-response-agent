@@ -69,7 +69,7 @@ from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests._drain_trees_1134 import PAYLOAD
 from defender.tests.e2e import _box665 as B
 from defender.tests.test_1111_rooted_io import HOST_BYTES, census
-from defender.tests.test_1134_bound_reads import descriptors_under, put_plain
+from defender.tests._tree_listing_1134 import descriptors_under, put_plain
 
 # ---------------------------------------------------------------------------------------
 # The labels and their trees, spelled literally
