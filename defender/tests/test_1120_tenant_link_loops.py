@@ -120,15 +120,18 @@ def test_a_nul_in_a_mounted_tree_path_is_a_refusal(tmp_path: Path) -> None:
     assert "could not be resolved" in text, text
 
 
-@pytest.mark.parametrize("target", ["knowledge/agent", "knowledge/settings/systems"])
+@pytest.mark.parametrize("target", ["knowledge/agent", "knowledge/settings/systems",
+                                    "knowledge/archive", "knowledge/.git"])
 def test_runs_linked_into_a_knowledge_half_is_refused(tmp_path: Path, target: str) -> None:
-    """`<T>/runs` linked INTO a half (code review max, finding 1): step 7 refuses it naming
-    the runs base, since every run dir would be a read-write mount inside the tenant's
-    knowledge. A tree beside the halves is still a near miss (pinned by the spec's s0 cell)."""
+    """`<T>/runs` linked INTO the knowledge folder — a half (code review max, finding 1), or
+    beside them in the tenant's repo (`archive/`, `.git/`; third pass): step 7 refuses it
+    naming the runs base, since every run dir would be a read-write mount inside the tenant's
+    repo. Another mounted tree beside the halves is still a near miss (the spec's s0 cell)."""
     root = tmp_path / "data"
     H.adopted(root)
     runs = H.tenant_folder(root) / "runs"
     shutil.rmtree(runs, ignore_errors=True)
+    (H.tenant_folder(root) / target).mkdir(parents=True, exist_ok=True)
     runs.symlink_to(target)
     text = H.accept_refusal(_tenant, root)
     assert str(runs) in text, text

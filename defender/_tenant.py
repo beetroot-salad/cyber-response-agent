@@ -447,7 +447,8 @@ def accept_tenant(
       6. `agent/.tenant-id` holds this id;
       7. `settings/` lies outside `defender_dir`, the tenant's own `runs/` and every
          `box_mounted` tree — the settings half is host-only — and none of those trees lies
-         inside either half, where a run's writes would become the tenant's knowledge. A path
+         inside either half, nor the runs base anywhere inside the knowledge folder, where a
+         run's writes would become the tenant's knowledge or land in its repo. A path
          comparison: the halves' real paths are the data root's resolution joined below it
          (steps 3-5 saw no link there), against each tree's resolution.
 
@@ -496,6 +497,7 @@ def _accept_knowledge(
     root_real = _resolve_or_refuse(root)
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
+    knowledge_real = root_real / paths.knowledge.relative_to(root)
     for mounted in (Path(defender_dir), paths.runs, *(Path(m) for m in box_mounted)):
         mounted_real = _resolve_or_refuse(mounted)
         if settings_real.is_relative_to(mounted_real):
@@ -503,11 +505,15 @@ def _accept_knowledge(
                 f"tenant {paths.tenant_id!r}'s settings {paths.settings} are inside {mounted}, "
                 "which a box mounts — the settings half is host-only; keep the data root "
                 "outside the code tree and the runs base")
-        if any(mounted_real.is_relative_to(half) for half in halves_real):
+        # The tenant's own runs base, where every run writes, stays out of the whole knowledge
+        # folder (its git working tree: a push would publish run data); any other mounted tree
+        # is held out of the two halves — the spec's near-miss cells name trees beside them.
+        inside = (knowledge_real,) if mounted == paths.runs else halves_real
+        if any(mounted_real.is_relative_to(tree) for tree in inside):
             raise TenantRefused(
                 f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
-                f"knowledge folder {paths.knowledge} — a run's writes would land in its "
-                "settings or agent half; keep the runs base and every mounted tree outside it")
+                f"knowledge folder {paths.knowledge} — a run's writes would land in the "
+                "tenant's repo; keep the runs base and every mounted tree outside it")
 
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
