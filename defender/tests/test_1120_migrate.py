@@ -106,7 +106,7 @@ def test_migrate_refuses_before_writing(tmp_path: Path, cell: str) -> None:
     root = _old_shape_root(tmp_path / "root")
     target = root / _TID / "knowledge"
     tenant_id, home, names = _TID, S._home(tmp_path / "cfg"), [str(target)]
-    identity_env = True
+    identity_env, script = True, None
     if cell == "bad-id":
         tenant_id, names = "A", ["A"]
     elif cell == "no-copy":
@@ -119,14 +119,18 @@ def test_migrate_refuses_before_writing(tmp_path: Path, cell: str) -> None:
         target = root / "absent" / "knowledge"
         names = [str(target.parent)]
     elif cell == "inside-defender":
-        target = PATHS.defender_dir / "scripts" / "spec1120-migrate-never-made"
+        # A tmp checkout's own copy, so a guard that regressed writes into tmp, never this tree.
+        checkout = H.tmp_checkout(tmp_path / "checkout")
+        script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
+        target = checkout / "defender" / "scripts" / "spec1120-migrate-never-made"
         names = [str(target), "defender"]
     elif cell == "no-identity":
         home, identity_env = S._home(tmp_path / "cfg-anon", identity=False), False
         names = ["identity"]
     before = H.tree_census(root)
     target_existed = target.exists()
-    H.assert_refused(_migrate(tenant_id, target, home=home, identity_env=identity_env), *names)
+    H.assert_refused(_migrate(tenant_id, target, home=home, script=script,
+                              identity_env=identity_env), *names)
     assert H.census_diff(before, H.tree_census(root)) == [], "a refused migrate wrote"
     assert target.exists() == target_existed
 
