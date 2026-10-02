@@ -221,12 +221,12 @@ def test_o6_run_page_renders_receipt(tmp_path):
 
 def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
     """The run page reads ticket_write.json only as a regular file, never following a link: a symlink
-    at that name, to a host settings file or any other file, renders "receipt unreadable" on the
-    ticket line and none of the link target's bytes. (The secrets.env target moved with credential
-    delivery to #1163; a system's config.env stands for the host-only settings here.)"""
-    secret = "HOSTONLY-NF26-1107-do-not-render"
-    folder = S.plant(tmp_path / "tenants", marker="nf26")
-    settings_file = S.set_key(folder, "case-history", "CASE_HISTORY_MARKER_1107", secret)
+    at that name, to settings/secrets.env or any other file, renders "receipt unreadable" on the
+    ticket line and none of the link target's bytes."""
+    secret = "SECRET-NF26-1107-do-not-render"
+    folder = S.plant(tmp_path / "tenants", marker="nf26",
+                     secrets={"CASE_HISTORY_TOKEN_1107": secret})
+    secrets_env = S.secrets_path(folder)
     elsewhere = tmp_path / "elsewhere" / "receipt.json"
     elsewhere.parent.mkdir(parents=True)
     elsewhere.write_text(json.dumps(_failure_receipt("SOC-LINKED-NF26-1107",
@@ -239,10 +239,10 @@ def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
     _write_receipt(regular, elsewhere.read_text(encoding="utf-8"))
     shown = S.render_page(regular, update_ticket=True)
     assert "SOC-LINKED-NF26-1107" in shown, "a regular receipt did not render (control)"
-    assert secret in settings_file.read_text(encoding="utf-8"), "the marker was not planted"
+    assert secret in secrets_env.read_text(encoding="utf-8"), "the secret was not planted"
 
     for label, target, needles in (
-        ("a settings file", settings_file, (secret, "CASE_HISTORY_MARKER_1107")),
+        ("secrets.env", secrets_env, (secret, "CASE_HISTORY_TOKEN_1107")),
         ("another file", elsewhere, ("SOC-LINKED-NF26-1107", "REASON-LINKED-NF26-1107")),
     ):
         run_dir = _seeded_run(tmp_path, f"r-nf26-{target.stem}")

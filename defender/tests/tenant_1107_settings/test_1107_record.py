@@ -1,4 +1,4 @@
-"""#1107 — the record: `RunTenant` grown by `systems`, `elastic` and `ticket_mapping`,
+"""#1107 — the record: `RunTenant` grown by `systems`, `elastic`, `ticket_mapping` and `secrets`,
 built once at resolve, never raising for a system's config (D-data-model, O2, O5, D2, §7 F0).
 
 Every tenant here is PLANTED under a tmp root through `_spec1107.plant` (every value carries a
@@ -37,7 +37,7 @@ from defender.tests._data_root_1078 import ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 TID = S.PLAYGROUND_ID
-RECORD_TYPES = ("SystemConfig", "ElasticSettings", "CaseMapping")
+FOUR_TYPES = ("SystemConfig", "ElasticSettings", "CaseMapping", "SecretLookup")
 
 
 def _resolve(root: Path, tenant_id: str = TID) -> object:
@@ -67,18 +67,19 @@ def _fault_text(fn, *args, **kw) -> str:
 
 def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every field of it, read top to bottom
     """RESOLVED at §7 (F0, human, round 1: the provisional reading accepted as written). resolve_tenant
-    and resolve_run_tenant return the existing frozen RunTenant, grown by three fields built in
+    and resolve_run_tenant return the existing frozen RunTenant, grown by four fields built in
     resolve_run_tenant (which resolve_tenant delegates to): systems, a read-only Mapping from each
     folder name under settings/systems/ to a SystemConfig or a ConfigFault, where a SystemConfig is
     a read-only Mapping[str, str] of the file's keys exactly as written; elastic, an ElasticSettings
     or a ConfigFault or None, whose ElasticSettings exposes events_index, alerts_index, url,
-    ssl_verify (the raw string), es_container, kibana_container and docker_context; and
-    ticket_mapping, a CaseMapping or a CaseTicketError. (A fourth, the secret lookup, moved with
-    credential delivery to #1163.) Neither resolver
+    ssl_verify (the raw string), es_container, kibana_container and docker_context; ticket_mapping,
+    a CaseMapping or a CaseTicketError; and secrets, a SecretLookup whose get(name) returns the
+    value as a str or raises ConfigFault, name being what a *_SECRET_REF key holds. Neither resolver
     raises for a system fault: TenantRefused (defender._tenant) keeps only its current
     tenant-acceptance reasons. VerbContext and AgentDeps carry the record in a field named tenant in
     place of settings_dir. An adapter's load_config keeps its return, a dict of prefix-stripped
-    keys, or raises ConfigFault. record_case_ticket and
+    keys, or raises ConfigFault. A transport is asked for a secret by its declared name and sets the
+    value into that one child's environment under a variable it picks. record_case_ticket and
     open_case_ticket return None and never raise; ticket_write.json is {key, status, url, ok,
     reason}, a failure receipt carrying status 'error', ok false, url null when there is no usable
     config, and a non-empty reason, a success receipt carrying reason null. The branch launcher
@@ -87,7 +88,8 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     findings. validate_scaffold.check_config keeps its signature and reports through Report's
     FAIL/PASS entries."""
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="d0")
+    folder = S.plant(root, marker="d0", secrets={"X_TOKEN": "d0-planted-secret"})
+    S.set_key(folder, "cmdb", "X_TOKEN_SECRET_REF", "X_TOKEN")
 
     rec = _resolve(root)
     rec_direct = run_tenant.resolve_run_tenant(
@@ -125,8 +127,14 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     assert rec.elastic.kibana_container == S.kibana_container("d0")
     assert rec.elastic.docker_context == S.context_name("d0", "elastic")
 
-    # ticket_mapping: a CaseMapping.
+    # ticket_mapping: a CaseMapping; secrets: a SecretLookup whose get(name) -> str | ConfigFault.
     assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), type(rec.ticket_mapping)
+    assert isinstance(rec.secrets, S.record_type("SecretLookup")), type(rec.secrets)
+    value = rec.secrets.get("X_TOKEN")
+    assert isinstance(value, str), value
+    assert value == "d0-planted-secret", value
+    with pytest.raises(S.config_fault()):
+        rec.secrets.get("NOT_DECLARED_ANYWHERE")
 
     # Neither resolver raises for a system fault: kept as the entry, not TenantRefused.
     S.config_path(folder, "cmdb").unlink()
@@ -152,8 +160,17 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     assert cfg == {"URL_BASE": "http://cmdb-d0:8080", "BASTION_HOST": "bastion-d0",
                    "TIMEOUT_SEC": "10"}, cfg
 
-    # record_case_ticket / open_case_ticket return None and never raise; the receipt shape.
+    # A transport is asked for a secret by its declared name; the value reaches that one child.
     shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
+    sctx = _ctx(rec, tmp_path, shim.env({"PATH": os.environ.get("PATH", "")}))
+    transport.docker_exec_curl(sctx, "bastion-d0", "http://cmdb-d0:8080/health",
+                               system="cmdb", **{S.SECRETS_KW: ("X_TOKEN",)})
+    calls = shim.calls()
+    assert len(calls) == 1, calls
+    assert "d0-planted-secret" in calls[0]["env"].values(), "the secret did not reach the child"
+    assert not any("d0-planted-secret" in a for a in calls[0]["argv"]), calls[0]["argv"]
+
+    # record_case_ticket / open_case_ticket return None and never raise; the receipt shape.
     unconfigured = tmp_path / "unconfigured"
     bare = S.plant(unconfigured, marker="d0u")
     S.config_path(bare, "case-history").unlink()
@@ -214,9 +231,9 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
 
 def test_d_record_fields_from_resolver():
     """resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one
-    entry per folder under settings/systems/), elastic and ticket_mapping, all built by
+    entry per folder under settings/systems/), elastic, ticket_mapping and secrets, all built by
     resolve_run_tenant. For the committed playground tenant every systems entry is a SystemConfig,
-    elastic is an ElasticSettings and ticket_mapping is a CaseMapping."""
+    elastic is an ElasticSettings, ticket_mapping is a CaseMapping and secrets is a SecretLookup."""
     tenants_root = S.REPO_ROOT / "knowledge" / "tenants"
     rec = _resolve(tenants_root, S.PLAYGROUND_ID)
     built = run_tenant.resolve_run_tenant(
@@ -232,6 +249,7 @@ def test_d_record_fields_from_resolver():
         assert isinstance(entry, SystemConfig), (name, entry)
     assert isinstance(rec.elastic, S.record_type("ElasticSettings")), rec.elastic
     assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), rec.ticket_mapping
+    assert isinstance(rec.secrets, S.record_type("SecretLookup")), rec.secrets
     # Built by resolve_run_tenant: the frame resolve_tenant delegates to gives the same fields.
     assert set(built.systems) == set(rec.systems)
     for name in rec.systems:
@@ -444,13 +462,14 @@ def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
     """systems has one entry per non-hidden directory under settings/systems/, keyed by its name
     exactly as listed; plain files and dot-directories are skipped. A case variant (CMDB/, Elastic/)
     is not the system: systems["cmdb"] gives "this tenant's settings do not configure this system"
-    and elastic is None. A stray directory such as cmdb.orig/ is an entry."""
+    and elastic is None. A stray directory such as cmdb.orig/ is an entry, and its *_SECRET_REF
+    declarations count (MF-1: tenant-wide)."""
     configs = S.config_texts("nf22")
     configs["CMDB"] = configs.pop("cmdb")
     configs["Elastic"] = configs.pop("elastic")
-    configs["cmdb.orig"] = 'ORIG_URL_BASE="http://orig-nf22:1"\n'
+    configs["cmdb.orig"] = 'ORIG_TOKEN_SECRET_REF="ORIG_TOKEN"\n'
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="nf22", configs=configs)
+    folder = S.plant(root, marker="nf22", configs=configs, secrets={"ORIG_TOKEN": "orig-secret"})
     systems_dir = S.settings_of(folder) / "systems"
     (systems_dir / "README.txt").write_text("not a system\n", encoding="utf-8")
     (systems_dir / ".hidden").mkdir()
@@ -467,7 +486,8 @@ def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
     with pytest.raises(S.config_fault()) as raised:
         transport.load_config(_ctx(rec, tmp_path), "cmdb", "CMDB")
     assert S.NOT_CONFIGURED in str(raised.value), str(raised.value)
-    assert rec.systems["cmdb.orig"]["ORIG_URL_BASE"] == "http://orig-nf22:1"
+    # MF-1 (human): tenant-wide — the stray folder's declaration counts.
+    assert rec.secrets.get("ORIG_TOKEN") == "orig-secret"
 
 
 def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
@@ -507,8 +527,9 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
 def test_s7_rg4_non_utf8_is_config_fault(tmp_path):
     """Non-UTF-8 bytes are that system down, never an uncaught UnicodeDecodeError. A non-UTF-8
     config.env leaves its system a ConfigFault in systems (and elastic's makes record.elastic a
-    ConfigFault) while resolve_tenant returns normally. At base the readers raise
-    UnicodeDecodeError (RG4). (The secrets.env arm moved with credential delivery to #1163.)"""
+    ConfigFault) while resolve_tenant returns normally; a non-UTF-8 secrets.env makes the lookup of
+    a declared name raise ConfigFault naming the reference. Today all three readers raise
+    UnicodeDecodeError (RG4)."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="rg4")
     # RG4n (executed): 0xff raises UnicodeDecodeError out of every reader today.
@@ -518,12 +539,17 @@ def test_s7_rg4_non_utf8_is_config_fault(tmp_path):
     # every elastic key present and non-blank: only the bytes make the part a fault
     S.write_config(folder, "elastic", texts["elastic"].encode("utf-8").replace(
         b"es-rg4:9200", b"es-\xff:9200"))
+    S.set_key(folder, "identity", "X_TOKEN_SECRET_REF", "X_TOKEN")
+    S.write_secrets(folder, b'X_TOKEN="val-\xff\xfe"\n')
 
     rec = _resolve(root)  # returns normally
 
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
     assert isinstance(rec.elastic, ConfigFault), rec.elastic
+    with pytest.raises(ConfigFault) as raised:
+        rec.secrets.get("X_TOKEN")
+    assert "X_TOKEN_SECRET_REF" in str(raised.value), str(raised.value)
 
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
@@ -614,8 +640,8 @@ def _closure(module: str) -> tuple[int, str, set[str]]:
 
 def test_d1096_record_types_outside_closure():
     """Importing defender.runtime.bash_exec in a fresh interpreter, and separately
-    defender.runtime.box_codec, loads no module that defines SystemConfig, ElasticSettings or
-    CaseMapping."""
+    defender.runtime.box_codec, loads no module that defines SystemConfig, ElasticSettings,
+    CaseMapping or SecretLookup."""
     closures = {}
     for module in ("defender.runtime.bash_exec", "defender.runtime.box_codec"):
         rc, err, loaded = _closure(module)
@@ -624,21 +650,40 @@ def test_d1096_record_types_outside_closure():
         assert module in loaded, (module, rc, err)
         closures[module] = loaded
 
-    defining = {name: S.record_type(name).__module__ for name in RECORD_TYPES}
+    defining = {name: S.record_type(name).__module__ for name in FOUR_TYPES}
     for module, loaded in closures.items():
         leaked = {name: where for name, where in defining.items() if where in loaded}
         assert not leaked, f"importing {module} loads {leaked}"
 
 
 def test_d1096_record_types_importable():
-    """Importing the record's module (runtime.run_tenant) makes SystemConfig, ElasticSettings and
-    CaseMapping available."""
+    """Importing the record's module (runtime.run_tenant) makes SystemConfig, ElasticSettings,
+    CaseMapping and SecretLookup available."""
     import importlib
 
     record_module = importlib.import_module("defender.runtime.run_tenant")
-    for name in RECORD_TYPES:
+    for name in FOUR_TYPES:
         assert isinstance(getattr(record_module, name, None), type), (
             f"runtime.run_tenant does not make {name} available")
+
+
+def test_s3_link_check_covers_secrets(tmp_path):
+    """resolve_tenant refuses with TenantRefused a tenant whose settings/secrets.env is a link to a
+    file outside the folder, and accepts the same tenant with a plain secrets.env (CX6)."""
+    # CX6 (executed, unrefuted): the link walk already covers settings/secrets.env — a
+    # survival pin, green at base by design.
+    root = tmp_path / "tenants"
+    S.plant(root, "plain", marker="s3p", secrets={"X_TOKEN": "plain-value"})
+    linked = S.plant(root, "linked", marker="s3l")
+    outside = tmp_path / "outside.env"
+    outside.write_text('X_TOKEN="outside-value"\n', encoding="utf-8")
+    S.secrets_path(linked).symlink_to(outside)
+
+    accepted = _resolve(root, "plain")
+    assert accepted.tenant_id == "plain"
+    with pytest.raises(S.tenant_refused()) as refused:
+        _resolve(root, "linked")
+    assert S.SECRETS_ENV in str(refused.value), str(refused.value)
 
 
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):

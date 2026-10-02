@@ -1,4 +1,4 @@
-# spec_graph_1107.yaml — issue #1107 (tenant settings: per-tenant config, access method)
+# spec_graph_1107.yaml — issue #1107 (tenant settings: per-tenant config, secrets, access method)
 # Assembled at phase D (write-tests, the assembler) from .spec-flow/frontiers/:
 #   10-brief.md (A-ground), 12-probe-g24.md (A-probe-g24), 20-demands.md (B), 45-dispositions.md (C-judge),
 #   47-reground.md (C-reground); gate record by the gate leaf (60-residue.md, D-gate); holes re-grounded in
@@ -7,15 +7,10 @@
 # Name reconciliation: boundary and actor ids are the extraction's (20-demands ## Address key); grounding's
 #   and the dispositions' names were keyed onto them by role+origin. Claim ids keep their origin prefix:
 #   C (design, source: discuss), G (grounding), CX (extraction), RG (re-ground), A (assembler), GR (gate), H (holes).
-# Demands: 132 = 75 ledger (20-demands) + 8 settled (sNNN) + 31 minted at §7 before D (s7_*) +
-#   3 waivers (w_*) + 11 gate-residue demands accepted at the post-gate §7 pass (s60_*) + 4 minted at the
-#   post-gate §7 pass (s7pg_*); forms: {'test': 125, 'clause': 4, 'waiver': 3}.
-# Claims: 130. Boundaries: 67.
-# Split (PR #1156 review, human): the secrets half — *_SECRET_REF references, settings/secrets.env, the
-#   record's secrets lookup, the transport's credential lane — moved to #1163 with its 35 demands
-#   (15 ledger, 6 settled, 12 s7_*, 2 w_*) and the secrets_env / SECRET_REF / SecretLookup / secrets
-#   structure (the counts above are after the split). Claim and handoff prose below still names those
-#   demands: it records how this graph was built, and #1163 re-adds them.
+# Demands: 167 = 89 ledger (20-demands) + 14 settled (sNNN) + 43 minted at §7 before D (s7_*) +
+#   6 waivers (w_*) + 11 gate-residue demands accepted at the post-gate §7 pass (s60_*) + 4 minted at the
+#   post-gate §7 pass (s7pg_*); forms: {'test': 157, 'clause': 4, 'waiver': 6}.
+# Claims: 125. Boundaries: 70.
 schema_version: 2
 design: '1107'
 base: dafb2da3a31309b93ee17ac6507e02429515905a
@@ -31,6 +26,7 @@ demands:
   - systems
   - elastic
   - ticket_mapping
+  - secrets
   - VerbContext
   - load_config
   - ticket_write
@@ -39,25 +35,28 @@ demands:
   - lint_tenant_env_reads
   - check_config
   discharged_by: test_d0_return_contract
-  seed_docstring: 'RESOLVED at §7 (F0, human, round 1: the provisional reading accepted as written). resolve_tenant and resolve_run_tenant
-    return the existing frozen RunTenant, grown by three fields built in resolve_run_tenant (which resolve_tenant delegates
-    to): systems, a read-only Mapping from each folder name under settings/systems/ to a SystemConfig or a ConfigFault, where
-    a SystemConfig is a read-only Mapping[str, str] of the file''s keys exactly as written; elastic, an ElasticSettings or
-    a ConfigFault or None, whose ElasticSettings exposes events_index, alerts_index, url, ssl_verify (the raw string), es_container,
-    kibana_container and docker_context; and ticket_mapping, a CaseMapping or a CaseTicketError. (A fourth, the secret lookup,
-    moved with credential delivery to #1163.) Neither resolver raises for a system fault: TenantRefused (defender._tenant)
-    keeps only its current tenant-acceptance reasons. VerbContext and AgentDeps carry the record in a field named tenant in
-    place of settings_dir. An adapter''s load_config keeps its return, a dict of prefix-stripped keys, or raises ConfigFault.
-    record_case_ticket and open_case_ticket return None and never raise; ticket_write.json is {key, status, url, ok, reason},
-    a failure receipt carrying status ''error'', ok false, url null when there is no usable config, and a non-empty reason,
-    a success receipt carrying reason null. The branch launcher refuses with its existing LauncherRefused (a SystemExit).
-    lint_tenant_env_reads exposes main(argv) -> int like every other custom lint, 0 when clean and non-zero with path:line
-    findings. validate_scaffold.check_config keeps its signature and reports through Report''s FAIL/PASS entries.'
+  seed_docstring: 'RESOLVED at §7 (F0, human, round 1: the provisional reading accepted as written). resolve_tenant
+    and resolve_run_tenant return the existing frozen RunTenant, grown by four fields built in resolve_run_tenant
+    (which resolve_tenant delegates to): systems, a read-only Mapping from each folder name under settings/systems/
+    to a SystemConfig or a ConfigFault, where a SystemConfig is a read-only Mapping[str, str] of the file''s keys
+    exactly as written; elastic, an ElasticSettings or a ConfigFault or None, whose ElasticSettings exposes events_index,
+    alerts_index, url, ssl_verify (the raw string), es_container, kibana_container and docker_context; ticket_mapping,
+    a CaseMapping or a CaseTicketError; and secrets, a SecretLookup whose get(name) returns the value as a str or
+    raises ConfigFault, name being what a *_SECRET_REF key holds. Neither resolver raises for a system fault: TenantRefused
+    (defender._tenant) keeps only its current tenant-acceptance reasons. VerbContext and AgentDeps carry the record
+    in a field named tenant in place of settings_dir. An adapter''s load_config keeps its return, a dict of prefix-stripped
+    keys, or raises ConfigFault. A transport is asked for a secret by its declared name and sets the value into
+    that one child''s environment under a variable it picks. record_case_ticket and open_case_ticket return None
+    and never raise; ticket_write.json is {key, status, url, ok, reason}, a failure receipt carrying status ''error'',
+    ok false, url null when there is no usable config, and a non-empty reason, a success receipt carrying reason
+    null. The branch launcher refuses with its existing LauncherRefused (a SystemExit). lint_tenant_env_reads exposes
+    main(argv) -> int like every other custom lint, 0 when clean and non-zero with path:line findings. validate_scaffold.check_config
+    keeps its signature and reports through Report''s FAIL/PASS entries.'
   source: 20-demands.md (phase B), amended at D from §7
-  note: 'F0 RESOLVED (human): the provisional reading is final. §7 refinements that read these shapes are their own demands:
-    ElasticSettings also requires ELASTIC_TRANSPORT = docker-exec (MF-7 a, folded into d_elastic_view), an unimplemented TRANSPORT
-    is a ConfigFault (F4), a missing case-history config writes the error receipt (MF-9), a no-receipt branch clears a stale
-    receipt (MF-12).'
+  note: 'F0 RESOLVED (human): the provisional reading is final. §7 refinements that read these shapes are their
+    own demands: ElasticSettings also requires ELASTIC_TRANSPORT = docker-exec (MF-7 a, folded into d_elastic_view),
+    a secret fault names the declaring key (MF-15), an unimplemented TRANSPORT is a ConfigFault (F4), a missing
+    case-history config writes the error receipt (MF-9), a no-receipt branch clears a stale receipt (MF-12).'
 - id: d_record_fields_from_resolver
   kind: behavior
   form: test
@@ -68,10 +67,12 @@ demands:
   - systems
   - elastic
   - ticket_mapping
+  - secrets
   discharged_by: test_d_record_fields_from_resolver
-  seed_docstring: resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one entry per
-    folder under settings/systems/), elastic and ticket_mapping, all built by resolve_run_tenant. For the committed playground
-    tenant every systems entry is a SystemConfig, elastic is an ElasticSettings and ticket_mapping is a CaseMapping.
+  seed_docstring: resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one
+    entry per folder under settings/systems/), elastic, ticket_mapping and secrets, all built by resolve_run_tenant.
+    For the committed playground tenant every systems entry is a SystemConfig, elastic is an ElasticSettings, ticket_mapping
+    is a CaseMapping and secrets is a SecretLookup.
   source: 20-demands.md (phase B)
 - id: d_systems_verbatim
   kind: shape
@@ -100,7 +101,7 @@ demands:
     raises that ConfigFault.
   source: 20-demands.md (phase B), amended at D from §7
   note: 'RG4: today every reader raises an uncaught UnicodeDecodeError on non-UTF-8 bytes; s7_rg4_non_utf8_is_config_fault
-    carries the spine''s ruling to the Elastic part.'
+    carries the spine''s ruling to secrets.env and the Elastic part.'
 - id: d_no_folder_fault_text
   kind: behavior
   form: test
@@ -334,6 +335,143 @@ demands:
   rejected:
   - 'N8: infra/bin/es.sh keeps reading its variables; it is lab tooling outside the census'
   source: 20-demands.md (phase B)
+- id: o4_secret_in_child_env
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - interacts(docker_exec_curl->child_env)
+  - child_env
+  discharged_by: test_o4_secret_in_child_env
+  seed_docstring: 'A test adapter''s config.env declares X_TOKEN_SECRET_REF=X_TOKEN, and the tenant''s secrets.env
+    holds X_TOKEN=<planted value>. The adapter makes one docker-exec call through a fake docker shim on the run
+    env''s PATH (F5 resolved auto: no new runner seam and no monkeypatch; CX8 shows the shim receives argv and the
+    whole child environment). The planted value is present in that child''s environment, under whatever variable
+    name the transport picks.'
+  source: 20-demands.md (phase B), amended at D from §7
+- id: o4_secret_nowhere_else
+  kind: negative
+  form: test
+  binds:
+  - interacts(docker_exec_curl->child_argv)
+  - run_dir
+  - ticket_write
+  - log
+  - model_visible
+  - secrets
+  - ConfigFault
+  discharged_by: test_o4_secret_nowhere_else
+  seed_docstring: In that same run the planted value appears nowhere else. It is not in the child's argv, not in
+    any file under the run dir (the receipt included), not in any log record, and not in model-visible text (the
+    query tool's fault digest and model view). It is not in repr(record.secrets), and not in the text of any ConfigFault
+    the lookup raises.
+  rejected:
+  - 'N2: `elastic:${ELASTIC_PASSWORD}` on the elastic argv is expanded inside the container and is not a tenant
+    secret'
+  - 'C8: no production system declares a secret, so the scan runs over the test adapter only'
+  source: 20-demands.md (phase B), amended at D from §7
+  note: The run-dir scan includes executed_queries.jsonl (the queries table, F6). A target that echoes the value
+    back is s7_mf5_reflected_secret_scrubbed.
+- id: o4_secret_single_child
+  kind: negative
+  form: test
+  binds:
+  - ctx_env
+  - interacts(docker_exec_curl->child_env)
+  discharged_by: test_o4_secret_single_child
+  seed_docstring: The secret is set for that one child only. ctx.env is unchanged after the call. A second docker-exec
+    call in the same run, whether the same system without the secret or another system, gets a child environment
+    without the planted value.
+  source: 20-demands.md (phase B)
+- id: o3_declared_name_resolves
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - secrets_env
+  - SECRET_REF
+  discharged_by: test_o3_declared_name_resolves
+  seed_docstring: A name that some *_SECRET_REF key in the tenant's systems declares, with a non-empty entry in
+    that tenant's secrets.env, is returned by the lookup. repr(record.secrets) lists the declared names. Neither
+    repr(record.secrets) nor the record formatted whole into text carries a secret value (NF-28, auto).
+  source: 20-demands.md (phase B), amended at D from §7
+  premises:
+  - '#5 test_env_two_systems_declare_the_same_secret_reference_name'
+  - '#100 test_validation_error_on_a_context_that_carries_the_record'
+  - '#101 test_record_or_context_formatted_whole_into_text'
+  note: 'F10 resolved (auto): the suffix stays _SECRET_REF. MF-1 (human): the declared set is tenant-wide (s7_mf1_declared_set_is_tenant_wide).'
+- id: o3_undeclared_name_refused
+  kind: negative
+  form: test
+  binds:
+  - secrets
+  - secrets_env
+  discharged_by: test_o3_undeclared_name_refused
+  seed_docstring: A name that no *_SECRET_REF key declares is refused with ConfigFault, even when the tenant's secrets.env
+    holds an entry for it.
+  source: 20-demands.md (phase B)
+- id: o3_other_tenant_refused
+  kind: negative
+  form: test
+  binds:
+  - secrets
+  - secrets_env
+  - interacts(SecretLookup->secrets_env)
+  discharged_by: test_o3_other_tenant_refused
+  seed_docstring: With two tenant folders A and B, A's lookup of a name that only B declares (and only B's secrets.env
+    holds) is refused with ConfigFault. A name that both declare returns A's value from A's file, never B's.
+  source: 20-demands.md (phase B)
+- id: o3_fault_at_ask
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - resolve_tenant
+  - ConfigFault
+  - secrets_env.domain.distinguished[absent]
+  - secrets_env.domain.distinguished[missing-entry]
+  - secrets_env.domain.distinguished[blank]
+  discharged_by: test_o3_fault_at_ask
+  seed_docstring: A declared reference whose secrets.env is absent, whose entry is missing, or whose value is blank
+    does not stop resolve_tenant. The lookup raises ConfigFault when the name is asked for, and the fault names
+    the reference, never any value. The fault names the declaring key (for example X_TOKEN_SECRET_REF), never a
+    value or the string the key holds (MF-15, human).
+  source: 20-demands.md (phase B), amended at D from §7
+- id: o2_secrets_read_per_lookup
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - interacts(SecretLookup->secrets_env)
+  discharged_by: test_o2_secrets_read_per_lookup
+  seed_docstring: 'The next lookup returns a secrets.env value rotated after the record was built: secrets are read
+    when asked for.'
+  source: 20-demands.md (phase B)
+- id: s3_secrets_env_gitignored
+  kind: behavior
+  form: test
+  binds:
+  - gitignore
+  - secrets_env
+  - secrets_env.access[git]
+  discharged_by: test_s3_secrets_env_gitignored
+  seed_docstring: '`git check-ignore` reports settings/secrets.env ignored wherever a tenant folder can sit in the
+    checkout: knowledge/tenants/<id>/settings/secrets.env for the playground id and an arbitrary one, knowledge/tenant-template/settings/secrets.env,
+    and a settings/secrets.env under any other directory (NF-30, auto, security-relevant). The test is red at base
+    (CX7).'
+  source: 20-demands.md (phase B), amended at D from §7
+  premises:
+  - '#49 test_secrets_env_created_beside_the_template_or_under_another_tenants_root'
+- id: s3_link_check_covers_secrets
+  kind: survival
+  form: test
+  binds:
+  - resolve_tenant
+  - secrets_env
+  discharged_by: test_s3_link_check_covers_secrets
+  seed_docstring: resolve_tenant refuses with TenantRefused a tenant whose settings/secrets.env is a link to a file
+    outside the folder, and accepts the same tenant with a plain secrets.env (CX6).
+  source: 20-demands.md (phase B)
 - id: s3_no_settings_copy_census
   kind: negative
   form: test
@@ -472,9 +610,9 @@ demands:
   - resolve_run_tenant
   - _replay_harness.drive
   discharged_by: test_d_replay_helper_through_resolver
-  seed_docstring: 'tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing else (human, early-exit
-    resolution 2). A replay-driven run''s RunTenant is the one resolve_run_tenant builds for its tenant folder: the same systems,
-    elastic, ticket_mapping, grants and correlation.'
+  seed_docstring: 'tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing else (human,
+    early-exit resolution 2). A replay-driven run''s RunTenant is the one resolve_run_tenant builds for its tenant
+    folder: the same systems, elastic, ticket_mapping, secrets, grants and correlation.'
   source: 20-demands.md (phase B), amended at D from §7
   note: The harness must still build with DEFENDER_DATA_ROOT and DEFENDER_RUNS_BASE unset (test_1078_env.py:343-361,
     G54). resolve_run_tenant holds no cache (RG5).
@@ -553,18 +691,19 @@ demands:
   - write_door
   - host_context
   - RunTenant
+  - secrets
   - drives(branch.cli.main->write_door_from_env)
   - interacts(write_door->child_env)
   discharged_by: test_d_launcher_door_transport_seam
-  seed_docstring: 'The branch launcher takes a transport for the write door it builds (the door_transport seam): with the
-    door left to the launcher, every door call goes through that transport, handed a context that carries the episode tenant''s
-    record, so the door addresses that record''s own elastic docker context and container. It is the door lane''s one injection
-    seam.'
+  seed_docstring: 'The branch launcher takes a transport for the write door it builds (the door_transport seam): with the door
+    left to the launcher, every door call goes through that transport, handed a context that carries the episode
+    tenant''s record, so the door addresses that record''s own elastic docker context and container. It is the
+    door lane''s one injection seam: a secret-bearing door call resolves its secret from that same record.'
   source: 'Phase F re-open (91-blind Finding 1, 92-reconciliation R6), human: extend the planted-secret nowhere-else scan
     to the branch launcher''s write door, minting a seam demand if the lane needs one'
-  note: 'The door lane''s injection seam (coined door_transport=, DOOR_TRANSPORT_KW in _spec1107): the launcher still builds
-    the real door from the episode tenant''s record; only the door''s transport is the caller''s. Paired with d_door_child_env_scrubbed
-    (the same door child''s env).'
+  note: 'The door lane''s injection seam (coined door_transport=, DOOR_TRANSPORT_KW in _spec1107): the launcher still
+    builds the real door from the episode tenant''s record; only the door''s transport is the caller''s. s026''s
+    door leg drives through it. Paired with d_door_child_env_scrubbed (the same door child''s env).'
 - id: d_door_child_env_carries_path
   kind: behavior
   form: test
@@ -806,11 +945,71 @@ demands:
   seed_docstring: .github/workflows/ci.yml runs scripts/lint/lint_tenant_env_reads.py as a step beside the other
     custom lints (CX20).
   source: 20-demands.md (phase B)
+- id: o8_blank_ref_fails
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - SECRET_REF
+  - SECRET_REF.domain.distinguished[blank]
+  discharged_by: test_o8_blank_ref_fails
+  seed_docstring: check_config FAILs a config.env reference key ending in _SECRET_REF whose value is blank.
+  rejected:
+  - the cold review's file-permission warning, dropped as invented scope
+  source: 20-demands.md (phase B), amended at D from §7
+- id: o8_ref_key_any_case
+  kind: domain-outcome
+  form: test
+  binds:
+  - check_config
+  - SECRET_REF.domain.distinguished[lowercase]
+  - SECRET_REF.domain.distinguished[mixedcase]
+  discharged_by: test_o8_ref_key_any_case
+  seed_docstring: 'RESOLVED at §7 (F2, human round 4: the plain reading). check_config matches the _SECRET_REF suffix
+    in any letter case, and FAILs a reference key that is not all uppercase (x_secret_ref, X_Secret_Ref) as a mis-spelled
+    reference, even when its value and its secrets.env entry are good. The uppercase spelling of the same reference
+    draws no FAIL. At base a lowercase _env key holding an inline value passes (C4).'
+  source: 20-demands.md (phase B), amended at D from §7
+  note: The runtime half (uppercase *_SECRET_REF only) is s7_f2_runtime_honours_uppercase_ref_only.
+- id: o8_missing_entry_fails
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - secrets_env
+  - secrets_env.domain.distinguished[missing-entry]
+  - secrets_env.domain.distinguished[blank]
+  discharged_by: test_o8_missing_entry_fails
+  seed_docstring: check_config FAILs a declared reference whose secrets.env entry is missing, and one whose entry
+    is blank.
+  source: 20-demands.md (phase B), amended at D from §7
+- id: o8_value_never_printed
+  kind: negative
+  form: test
+  binds:
+  - check_config
+  - secrets_env
+  discharged_by: test_o8_value_never_printed
+  seed_docstring: No line of check_config's report contains any value from secrets.env, whether for a valid reference,
+    a missing or blank one, or another entry in the same file.
+  source: 20-demands.md (phase B)
+  premises:
+  - '#4 test_validator_pointed_at_a_tenant_other_than_the_one_being_connected'
+- id: o8_valid_ref_passes
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - secrets_env
+  discharged_by: test_o8_valid_ref_passes
+  seed_docstring: check_config draws no FAIL for a non-blank reference with a non-empty secrets.env entry.
+  source: 20-demands.md (phase B)
 - id: o8_env_suffix_retired
   kind: behavior
   form: test
   binds:
   - check_config
+  - SECRET_REF
   discharged_by: test_o8_env_suffix_retired
   seed_docstring: 'RESOLVED (F9, auto). The _ENV convention is retired: check_config no longer treats <KEY>_ENV
     as a reference to a process environment variable, and a leftover <KEY>_ENV key is judged like any other key
@@ -822,11 +1021,15 @@ demands:
   binds:
   - adapter_md
   discharged_by: test_o8_guide_rewritten
-  seed_docstring: 'adapter.md''s Credentials section no longer says secrets come from environment variables, and the guide
-    no longer names the _ENV suffix. Its VerbContext note no longer tells an adapter to resolve config.env from defender_dir.
-    (What the section teaches instead — secret references into the tenant''s secrets.env — moved with credential delivery
-    to #1163.)'
+  seed_docstring: adapter.md's Credentials section describes secrets as <KEY>_SECRET_REF references into the tenant's
+    settings/secrets.env. It no longer says secrets come from environment variables, and it no longer names the
+    _ENV suffix. Its VerbContext note no longer tells an adapter to resolve config.env from defender_dir. It states
+    secrets.env's format (KEY=VALUE per line, one matched pair of quotes trimmed, no export prefix, no multi-line
+    values; NF-11) and tells operators to rotate a secret by writing a new file and renaming it over secrets.env
+    (NF-12).
   source: 20-demands.md (phase B), amended at D from §7
+  premises:
+  - '#41 test_secrets_env_rewritten_in_place_while_a_lookup_reads_it'
   note: The access-method half of the guide (MF-8 iii) is s7_mf8_guide_documents_access_method.
 - id: o8_example_reads_record
   kind: behavior
@@ -1034,9 +1237,10 @@ demands:
   - SystemConfig
   - ElasticSettings
   - CaseMapping
+  - SecretLookup
   discharged_by: test_d1096_record_types_outside_closure
   seed_docstring: Importing defender.runtime.bash_exec in a fresh interpreter, and separately defender.runtime.box_codec,
-    loads no module that defines SystemConfig, ElasticSettings or CaseMapping.
+    loads no module that defines SystemConfig, ElasticSettings, CaseMapping or SecretLookup.
   source: 20-demands.md (phase B)
 - id: d1096_record_types_importable
   kind: behavior
@@ -1045,9 +1249,11 @@ demands:
   - SystemConfig
   - ElasticSettings
   - CaseMapping
+  - SecretLookup
   - resolve_run_tenant
   discharged_by: test_d1096_record_types_importable
-  seed_docstring: Importing the record's module (runtime.run_tenant) makes SystemConfig, ElasticSettings and CaseMapping available.
+  seed_docstring: Importing the record's module (runtime.run_tenant) makes SystemConfig, ElasticSettings, CaseMapping
+    and SecretLookup available.
   source: 20-demands.md (phase B)
 - id: d1096_existing_guard_survives
   kind: survival
@@ -1141,6 +1347,96 @@ demands:
     the run''s call still uses the tenant file''s value: O1''s run tests are the net the lint is not.'
   source: '45-dispositions.md settled #17 (D6 + O7 named shapes; F15 records the shape gap; judge''s reading of
     the run half)'
+- id: s024
+  kind: negative
+  form: test
+  binds:
+  - fault_text
+  - interacts(docker_exec_curl->fault_text)
+  - model_visible
+  - run_dir
+  - secrets
+  discharged_by: test_transport_error_output_carries_request_headers
+  seed_docstring: 'Fault text built from the transport''s own tooling output carries no secret value. For each failure shape the
+    real tooling was observed to produce (82-author-probes.md: curl''s refused connection and its --max-time
+    timeout, the daemon''s "No such container" and "is not running", and an HTTP 500 whose body reflects the
+    credential), the value is absent from the fault text, from every file under the run dir and from model-visible
+    text. The premise''s stderr channel (curl or docker stderr repeating the request, headers included) was
+    refuted by probe: the transport never passes -v or --trace, so no such text reaches a fault.'
+  source: '45-dispositions.md settled #24 (O4 + F6; holds under every reading of MF-5)'
+  note: 'Paired positive control: o4_secret_in_child_env (the value did reach the child). Amended at E-fix (AF-1,
+    82-author-probes.md): premise #24''s channel (curl or docker stderr repeating the request, headers included)
+    is refuted by AP2 (the transport passes no -v/--trace); the test is re-derived from the observed shapes AP3
+    (curl rc=7 refused, rc=28 timeout; daemon rc=1 No such container / is not running) and AP1 (an HTTP 500 body
+    reflecting the credential). The outcome (fault text never carries the value) stands.'
+- id: s026
+  kind: negative
+  form: test
+  binds:
+  - secrets
+  - interacts(docker_exec_curl->child_env)
+  - _resolve_item1
+  - record_case_ticket
+  - review.verb_context
+  - write_door
+  - _run_gather
+  discharged_by: test_secret_needed_from_a_lane_other_than_the_query_tool
+  seed_docstring: 'O4''s nowhere-else guarantee holds on every lane that makes a secret-bearing docker-exec call,
+    not only the query tool: lead-zero item 1, a gather lead''s replaced deps, the ticket writer, review''s replay
+    contexts and the branch launcher''s write door each deliver the value only into that call''s child environment.'
+  source: '45-dispositions.md settled #26 (O4: no lane exemption)'
+  note: 'Paired positive control: o4_secret_in_child_env. Extended at the Phase F re-open (PF-O4, human): the review
+    lane runs the real review() over the launcher''s read side (seams.adapter_seam) with only the verb registry
+    swapped by EpisodeAdapters'' constructor, so the base arm and a world''s for_world copy both reach the child;
+    the door lane runs the real branch launcher with the door built from the record and only its transport
+    injected through d_launcher_door_transport_seam''s door_transport=. Neither lane uses monkeypatch.setattr (only env vars are set).'
+- id: s029
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - systems
+  - SECRET_REF
+  - SecretLookup
+  discharged_by: test_declared_secret_set_spans_a_faulted_sibling_config
+  seed_docstring: 'A sibling system whose config.env is missing or unparsable does not narrow what another, successfully
+    parsed system declares: that system''s *_SECRET_REF name still resolves.'
+  source: '45-dispositions.md settled #29 (per-folder independence; holds under both readings of MF-1)'
+- id: s042
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - secrets_env.domain.distinguished[blank]
+  - interacts(SecretLookup->secrets_env)
+  discharged_by: test_env_secret_rotated_to_blank_between_two_lookups_in_one_run
+  seed_docstring: 'A secret rotated to blank between two lookups in one run: the second lookup raises ConfigFault
+    cleanly, in O5''s shape (that system down, the run goes on).'
+  source: '45-dispositions.md settled #42 (O2 exemption + O3 fault shape)'
+- id: s043
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - secrets_env.domain.distinguished[absent]
+  - interacts(SecretLookup->secrets_env)
+  discharged_by: test_secrets_env_becomes_unreadable_between_two_lookups_same_run
+  seed_docstring: 'secrets.env becoming unreadable between two lookups in one run: the next lookup faults per lookup,
+    in O5''s shape; the first lookup''s already-delivered value stands.'
+  source: '45-dispositions.md settled #43 (O2 + O3)'
+- id: s048
+  kind: behavior
+  form: test
+  binds:
+  - secrets_env.access[read-tool]
+  - secrets_env.access[bash]
+  - permission.files.decide_read
+  - interacts(permission.files.decide_read->secrets_env)
+  discharged_by: test_model_asks_to_read_the_tenants_secrets_env
+  seed_docstring: The model's read tool and bash are refused settings/secrets.env, a git-ignored file outside today's
+    committed-file census (G32), the same as any other file under the settings half, while a corpus file stays readable
+    (the control).
+  source: '45-dispositions.md settled #48 (S3; G32 deny-by-location)'
 - id: s063
   kind: behavior
   form: test
@@ -1205,6 +1501,40 @@ demands:
   seed_docstring: 'Two systems sharing one docker context: a transient failure on one system''s call is attributed
     to that system alone; the sibling system''s own successful call is unaffected.'
   source: '45-dispositions.md settled #108 (O5 per-system framing)'
+- id: s7_mf1_declared_set_is_tenant_wide
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - SecretLookup
+  - systems
+  - interacts(SecretLookup->systems)
+  discharged_by: test_s7_mf1_declared_set_is_tenant_wide
+  seed_docstring: 'In one tenant, a name only the ticket system''s config.env declares (TICKET_TOKEN_SECRET_REF=TICKET_TOKEN)
+    resolves when a cmdb verb asks for it: the declared set is the whole tenant''s. A declaration in a system whose
+    own config is otherwise down (its <PREFIX>_TRANSPORT missing, so its calls fault) still declares its name for
+    the rest of the tenant.'
+  source: 70-resolutions.draft.md MF-1 (A, human round 1)
+  premises:
+  - '#1 test_one_system_asks_for_a_secret_only_another_system_declares'
+  - '#30 test_declaration_in_a_system_whose_config_is_otherwise_down'
+- id: s7_mf2_declarations_fixed_at_start
+  kind: behavior
+  form: test
+  binds:
+  - secrets
+  - SecretLookup
+  - interacts(SecretLookup->systems)
+  - secrets_env.domain.distinguished[missing-entry]
+  discharged_by: test_s7_mf2_declarations_fixed_at_start
+  seed_docstring: 'Declarations ride the run''s start, values each lookup. A *_SECRET_REF line added to a config.env
+    after the record is built does not make its name resolvable: asking for it is refused as undeclared. When an
+    operator renames a secrets.env entry X to Y and repoints config.env to Y mid-run, the lookup of X raises ConfigFault
+    for a missing entry naming X''s declaring key, and Y is refused as undeclared.'
+  source: 70-resolutions.draft.md MF-2 (A, human batch, round 4)
+  premises:
+  - '#46 test_reference_renamed_mid_run'
+  - '#47 test_a_secret_reference_declared_after_the_record_is_built'
 - id: s7_mf3_empty_destination_is_config_fault
   kind: behavior
   form: test
@@ -1248,6 +1578,71 @@ demands:
   source: '70-resolutions.draft.md MF-3 (human, clarified): transport-agnostic rules only'
   note: 'Paired positive control: d2_docker_context_per_system. RG1: the --context flag wins over DOCKER_CONTEXT,
     so an explicit non-empty flag is what keeps the env out.'
+- id: s7_mf5_reflected_secret_scrubbed
+  kind: negative
+  form: test
+  binds:
+  - fault_text
+  - interacts(docker_exec_curl->fault_text)
+  - executed_queries
+  - model_visible
+  - run_dir
+  - secrets
+  discharged_by: test_s7_mf5_reflected_secret_scrubbed
+  seed_docstring: 'A fake target that echoes the planted secret value back, once in an HTTP error body and once
+    in a truncated response, does not carry the value into any text the transport returns or raises: the fault text,
+    the returned stdout, the queries table (executed_queries.jsonl), a capture, any file under the run dir and model-visible
+    text each hold a fixed marker where the value was. The transport replaces every secret value it placed in that
+    child''s environment, for any access method (transport-agnostic).'
+  rejected:
+  - O4 stopping at the host's own transmission, with the planted-value scan run only against a non-reflecting fake
+    (MF-5 i B)
+  source: 70-resolutions.draft.md MF-5 (i) (A, human round 2)
+  premises:
+  - '#23 test_target_system_reflects_the_credential_in_its_response'
+  - '#27 test_fault_text_from_secret_bearing_call_echoes_truncated_response'
+  note: 'Paired positive control: o4_secret_in_child_env. KNOWN LIMIT (45 MF-5 i A): the scrub catches the literal
+    value only; a URL-encoded, base64-encoded or cut-mid-value echo slips past (handoff.deviations).'
+- id: s7_mf6_lookup_refuses_link_or_nonregular
+  kind: negative
+  form: test
+  binds:
+  - secrets_env.access[fs-lookup]
+  - secrets_env.domain.distinguished[symlink]
+  - secrets_env.domain.distinguished[hardlink]
+  - secrets_env.domain.distinguished[fifo]
+  - secrets_env.domain.distinguished[directory]
+  - SecretLookup
+  - interacts(SecretLookup->secrets_env)
+  - interacts(_refuse_links->secrets_env)
+  discharged_by: test_s7_mf6_lookup_refuses_link_or_nonregular
+  seed_docstring: 'Each lookup opens settings/secrets.env refusing a link at every path component from the tenant folder down to
+    secrets.env, and anything at that path that is not a regular file (a no-follow open or an lstat check of each
+    component). A secrets.env swapped for a symlink after resolve, to another tenant''s secrets.env or to a
+    box-writable file, makes the next lookup raise ConfigFault naming the reference and read nothing through the
+    link; so does the settings/ folder, or the tenant folder itself, swapped for a link to another tenant''s (R2).
+    A hard link made at secrets.env after resolve (a regular file with more than one name, such as a second name
+    for another tenant''s secrets.env) faults the same way, matching the refusal resolve already makes
+    (_tenants._refuse_links, RV1). A FIFO with no writer, or a directory, at that path faults the same way and
+    never blocks (NF-12).'
+  source: 70-resolutions.draft.md MF-6 (i) (A, human round 2)
+  cites:
+  - AP5
+  premises:
+  - '#40 test_secrets_env_swapped_after_link_check'
+  - '#44 test_secrets_env_is_a_named_pipe_or_a_directory'
+  - '#45 test_secrets_env_hardlinked_to_a_file_in_a_box_mounted_tree'
+  - '#60 test_env_hardlinked_config_file_bypasses_the_folder_link_check'
+  note: 'Paired positive control: s3_link_check_covers_secrets (a plain secrets.env resolves) and
+    o3_declared_name_resolves. Amended at the Phase F re-open (R2, human): the per-lookup link refusal covers
+    every path component from the tenant folder down to secrets.env; the test adds the settings/ folder and the
+    tenant folder swapped for a link to another tenant''s. Amended at the Phase F re-open (PF-RV1, human, reading
+    A; 92-reconciliation RV1): the per-lookup check also refuses a hard link at secrets.env (st_nlink > 1),
+    matching resolve''s _refuse_links (_tenants.py:108-113; test_1106_tenant_dir.py:325; AP5); the test adds a
+    hard link to another tenant''s secrets.env and to a box-writable file, each followed by the same lookup
+    answering once the link is gone. w_mf6ii_hard_links is retired; premises #45 and #60 are re-homed here: a hard
+    link present at resolve is already refused at base (their titles'' ''bypass'' is refuted), and the
+    post-resolve one is this demand''s.'
 - id: s7_mf7a_launcher_refuses_elastic_without_docker_exec
   kind: behavior
   form: test
@@ -1468,6 +1863,49 @@ demands:
   seed_docstring: The same doc census, run over a planted doc line saying CMDB_URL_BASE can be overridden by exporting
     it, reports that file and line.
   source: 70-resolutions.draft.md MF-14 (A) (the census negative's positive control)
+- id: s7_mf15_validator_fails_ref_not_name_shaped
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - SECRET_REF.domain.distinguished[not-name-shaped]
+  - interacts(check_config->SECRET_REF)
+  discharged_by: test_s7_mf15_validator_fails_ref_not_name_shaped
+  seed_docstring: validate_scaffold FAILs a *_SECRET_REF whose value is not shaped like an environment-variable
+    name (letters, digits and underscore, not starting with a digit), including a reference that holds the secret
+    itself (FOO_TOKEN_SECRET_REF=hunter2-value!) and one holding a space or '='; its FAIL line names the key only,
+    never the held string.
+  source: 70-resolutions.draft.md MF-15 (A) (human round 4)
+  premises:
+  - '#31 test_reference_value_that_is_itself_the_secret'
+  - '#32 test_secret_ref_name_not_env_file_safe'
+- id: s7_mf15_runtime_fault_names_declaring_key
+  kind: negative
+  form: test
+  binds:
+  - SecretLookup
+  - fault_text
+  - interacts(SecretLookup->fault_text)
+  - ConfigFault
+  - SECRET_REF.domain.distinguished[not-name-shaped]
+  discharged_by: test_s7_mf15_runtime_fault_names_declaring_key
+  seed_docstring: At runtime a declared reference whose held string is not a secrets.env key (malformed, or the
+    secret itself) faults as a missing entry, and the ConfigFault text names the declaring key (for example FOO_TOKEN_SECRET_REF),
+    never the string it holds.
+  source: '70-resolutions.draft.md MF-15 (A) (human round 4: "runtime fault names declaring key, never held string")'
+  note: 'Paired positive control: o3_declared_name_resolves.'
+- id: s7_f2_runtime_honours_uppercase_ref_only
+  kind: behavior
+  form: test
+  binds:
+  - SecretLookup
+  - SECRET_REF.domain.distinguished[lowercase]
+  - SECRET_REF.domain.distinguished[mixedcase]
+  discharged_by: test_s7_f2_runtime_honours_uppercase_ref_only
+  seed_docstring: 'The runtime lookup declares names only from all-uppercase *_SECRET_REF keys: a name held by x_secret_ref
+    or X_Secret_Ref, with a good secrets.env entry, is refused as undeclared, while the same reference spelled X_SECRET_REF
+    resolves. The validator FAILs the other spellings (o8_ref_key_any_case), so the two readers agree.'
+  source: '70-resolutions.draft.md F2 (human round 4: "runtime honours uppercase *_SECRET_REF only")'
 - id: s7_mf16_resume_reflects_its_own_start
   kind: behavior
   form: test
@@ -1520,15 +1958,20 @@ demands:
   form: test
   binds:
   - config_env.domain.distinguished[undecodable]
+  - secrets_env.domain.distinguished[undecodable]
   - systems
   - elastic
+  - SecretLookup
   - resolve_tenant
   discharged_by: test_s7_rg4_non_utf8_is_config_fault
-  seed_docstring: 'Non-UTF-8 bytes are that system down, never an uncaught UnicodeDecodeError. A non-UTF-8 config.env leaves
-    its system a ConfigFault in systems (and elastic''s makes record.elastic a ConfigFault) while resolve_tenant returns normally.
-    At base the readers raise UnicodeDecodeError (RG4). (The secrets.env arm moved with credential delivery to #1163.)'
+  seed_docstring: Non-UTF-8 bytes are that system down, never an uncaught UnicodeDecodeError. A non-UTF-8 config.env
+    leaves its system a ConfigFault in systems (and elastic's makes record.elastic a ConfigFault) while resolve_tenant
+    returns normally; a non-UTF-8 secrets.env makes the lookup of a declared name raise ConfigFault naming the reference.
+    Today all three readers raise UnicodeDecodeError (RG4).
   source: '70-resolutions.draft.md spine call (resolved_by: spine, grounded in O5 "bad config = that system down";
     RG4)'
+  premises:
+  - '#39 test_secrets_env_non_utf8_encoding'
 - id: s7_nf4_every_resolve_reads_the_folder_fresh
   kind: behavior
   form: test
@@ -1587,6 +2030,93 @@ demands:
   - '#104 test_environment_reached_through_an_alias_or_indirection'
   - '#105 test_membership_iteration_and_copy_then_index_on_the_context_env'
   - '#106 test_lookup_at_module_import_time'
+- id: s7_nf8_transport_names_the_child_variable
+  kind: shape
+  form: test
+  binds:
+  - interacts(docker_exec_curl->child_env).payload
+  - child_env
+  - secrets
+  - ctx_env
+  discharged_by: test_s7_nf8_transport_names_the_child_variable
+  seed_docstring: A secret-bearing docker call's child environment is the run's ctx.env passed through plus the
+    resolved value under a variable the transport picks. The tenant's declared name is only a key into secrets.env
+    and never becomes a child variable (a declared name of DOCKER_HOST, PATH or LD_PRELOAD sets nothing of that
+    name); if ctx.env already carries the transport's chosen name, the child sees the resolved secret, never the
+    operator's value; two secrets for one child each get their own transport-chosen variable, and neither goes on
+    argv.
+  source: 70-resolutions.draft.md NF-8 (auto, judge's recommendation)
+  premises:
+  - '#19 test_secret_variable_already_present_in_the_run_env_with_another_value'
+  - '#20 test_declared_secret_name_is_one_the_docker_client_interprets'
+  - '#25 test_one_call_needs_two_secrets'
+- id: s7_nf10_blank_rule_shared
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - SecretLookup
+  - secrets_env.domain.distinguished[whitespace-only]
+  - secrets_env.domain.distinguished[blank]
+  discharged_by: test_s7_nf10_blank_rule_shared
+  seed_docstring: 'validate_scaffold and the runtime lookup read secrets.env with the same parser and the same blank
+    rule: a whitespace-only value counts as blank, a ConfigFault naming the reference when asked for and a FAIL
+    in the validator, exactly as an empty value does.'
+  source: 70-resolutions.draft.md NF-10 (auto, judge's recommendation)
+  premises:
+  - '#33 test_validate_scaffold_and_secret_lookup_disagree_on_blank'
+  - '#35 test_secrets_value_whitespace_only'
+  - '#37 test_validate_scaffold_and_secretlookup_parse_secrets_env_differently'
+- id: s7_nf11_secrets_env_uses_the_one_parser
+  kind: behavior
+  form: test
+  binds:
+  - parse_env
+  - secrets_env
+  - interacts(parse_env->secrets_env)
+  - check_config
+  - SecretLookup
+  discharged_by: test_s7_nf11_secrets_env_uses_the_one_parser
+  seed_docstring: 'secrets.env is read by the one config.env parser, with its rules: KEY=VALUE per line and one
+    matched pair of quotes trimmed. An export-prefixed line and a quoted value spanning a newline are not entries
+    of the intended name, and a name given twice resolves to the one value the parser keeps for a duplicate, identically
+    in the validator and the lookup.'
+  source: 70-resolutions.draft.md NF-11 (auto, judge's recommendation; RG4)
+  premises:
+  - '#34 test_secrets_env_written_in_shell_export_style'
+  - '#36 test_env_secret_value_spans_a_quoted_newline'
+  - '#38 test_secrets_env_names_one_entry_twice'
+- id: s7_nf13_fixture_copy_omits_secrets_env
+  kind: behavior
+  form: test
+  binds:
+  - tenants_root_beside_data_root
+  - interacts(tenants_root_beside_data_root->settings)
+  - secrets_env
+  discharged_by: test_s7_nf13_fixture_copy_omits_secrets_env
+  seed_docstring: '#1078''s test-harness copy of the committed playground folder (_spec1078.tenants_root_beside_data_root)
+    omits settings/secrets.env even when one exists on disk under the playground folder, while every other file
+    is copied (the control); a scenario that needs a secret plants its own, and no test resolves a value it did
+    not plant.'
+  source: 70-resolutions.draft.md NF-13 (auto, judge's recommendation)
+  premises:
+  - '#50 test_replay_fixture_tenant_carries_a_local_secrets_env'
+- id: s7_nf14_validator_fails_unreadable_secrets_env
+  kind: behavior
+  form: test
+  binds:
+  - check_config
+  - secrets_env.access[fs-validator]
+  - secrets_env.domain.distinguished[undecodable]
+  - interacts(check_config->secrets_env)
+  discharged_by: test_s7_nf14_validator_fails_unreadable_secrets_env
+  seed_docstring: 'validate_scaffold run where secrets.env cannot be read (no permission, not a regular file, or
+    non-UTF-8 bytes) FAILs with a line saying secrets.env could not be read: never a PASS, never a crash, never
+    a value.'
+  source: '70-resolutions.draft.md NF-14 (auto) with the spine''s non-UTF-8 ruling (RG4: the validator raises UnicodeDecodeError
+    today)'
+  premises:
+  - '#52 test_validator_run_from_where_the_settings_half_is_unreachable'
 - id: s7_nf15_one_parser_line_rules
   kind: behavior
   form: test
@@ -1651,11 +2181,12 @@ demands:
   - systems
   - resolve_run_tenant
   - elastic
+  - secrets
   discharged_by: test_s7_nf22_systems_keyed_by_exact_directory_name
-  seed_docstring: 'systems has one entry per non-hidden directory under settings/systems/, keyed by its name exactly as listed;
-    plain files and dot-directories are skipped. A case variant (CMDB/, Elastic/) is not the system: systems["cmdb"] gives
-    "this tenant''s settings do not configure this system" and elastic is None. A stray directory such as cmdb.orig/ is an
-    entry.'
+  seed_docstring: 'systems has one entry per non-hidden directory under settings/systems/, keyed by its name exactly
+    as listed; plain files and dot-directories are skipped. A case variant (CMDB/, Elastic/) is not the system:
+    systems["cmdb"] gives "this tenant''s settings do not configure this system" and elastic is None. A stray directory
+    such as cmdb.orig/ is an entry, and its *_SECRET_REF declarations count (MF-1: tenant-wide).'
   source: 70-resolutions.draft.md NF-22 (auto, judge's recommendation)
   premises:
   - '#75 test_system_folder_name_differs_only_in_case'
@@ -1704,11 +2235,11 @@ demands:
   - visualize_run
   - run_page
   - interacts(visualize_run->ticket_write)
+  - secrets_env
   discharged_by: test_s7_nf26_page_reads_receipt_without_following_links
-  seed_docstring: 'The run page reads ticket_write.json only as a regular file, never following a link: a symlink at that
-    name, to a host settings file or any other file, renders "receipt unreadable" on the ticket line and none of the link
-    target''s bytes. (The secrets.env target moved with credential delivery to #1163; a system''s config.env stands for the
-    host-only settings here.)'
+  seed_docstring: 'The run page reads ticket_write.json only as a regular file, never following a link: a symlink
+    at that name, to settings/secrets.env or any other file, renders "receipt unreadable" on the ticket line and
+    none of the link target''s bytes.'
   source: 70-resolutions.draft.md NF-26 (auto; SECURITY-RELEVANT, listed for the merge-gate human)
   premises:
   - '#96 test_box_plants_a_link_at_the_receipt_name'
@@ -1777,6 +2308,40 @@ demands:
   source: '70-resolutions.draft.md MF-4 (human, via the MF-3 clarification): waiver'
   premises:
   - '#16 test_env_two_tenants_declare_the_same_docker_context_and_container'
+- id: w_mf5ii_in_container_argv_expansion
+  kind: negative
+  form: waiver
+  binds:
+  - interacts(docker_exec_curl->child_argv)
+  - child_argv
+  outcome:
+    nl: 'Waived to the follow-up issue "per-tenant hands box / box registry": O4''s argv clause means the host child''s
+      argv, where only the bare variable name appears (G24). A shell inside the target container expanding the secret
+      onto an in-container process''s argv (curl -H "Authorization: $TOKEN") is a documented limit of the docker-exec
+      method, following N2''s precedent for the Elastic password; no production system uses a secret yet (C8).'
+  cites:
+  - G24
+  - C8
+  source: '70-resolutions.draft.md MF-5 (ii) (human, via the MF-3 clarification): waiver'
+  premises:
+  - '#21 test_secret_expanded_by_the_container_shell_onto_an_in_container_argv'
+- id: w_mf5iii_ssh_helper_env
+  kind: negative
+  form: waiver
+  binds:
+  - interacts(docker_exec_curl->child_env)
+  - child_env
+  outcome:
+    nl: 'Waived to the follow-up issue "per-tenant hands box / box registry": for an ssh-type docker context, the
+      docker client''s ssh helper (ssh ... docker system dial-stdio) inherits the secret in its own environment
+      (RG8, executed). Whether an operator ssh config''s SendEnv would carry it off-host is unprobed (RG8b, blocked:
+      no sshd without a package install). Operator machine configuration, outside #1107''s transport-agnostic rules;
+      no demand documents SendEnv here.'
+  cites:
+  - RG8
+  source: '70-resolutions.draft.md MF-5 (iii) (human, via the MF-3 clarification): waiver'
+  premises:
+  - '#22 test_docker_client_for_an_ssh_context_spawns_helpers'
 - id: w_mf7d_read_adapter_tls
   kind: behavior
   form: waiver
@@ -2054,6 +2619,13 @@ structure:
     where: 'new; module unplaced (design: One parser)'
     note: Replaces _stub_transport._parse_env_file and elastic_adapter.config_from (C6/G6); config_from's one-matched-quote-pair
       rule (C12/G7). RG4 records today's line rules; NF-15 sets the targets.
+  - id: SecretLookup
+    frame: leg
+    provenance: design
+    where: new record type on RunTenant.secrets
+    note: Resolves a name iff some uppercase *_SECRET_REF key in this tenant's systems declares it (MF-1 A tenant-wide,
+      F2 uppercase only, MF-2 A declarations fixed at start); reads settings/secrets.env on each lookup (O2 exemption),
+      refusing a link or non-regular file (MF-6 i A).
   - id: _refuse_links
     frame: leg
     provenance: code
@@ -2546,6 +3118,10 @@ structure:
     facets: {}
     note: 'RunTenant.ticket_mapping: CaseMapping | CaseTicketError, loaded once from systems/case-history/mapping.yaml;
       read-only (MF-11 A).'
+  - id: secrets
+    provenance: design
+    facets: {}
+    note: 'RunTenant.secrets: a SecretLookup (get(name) -> str or ConfigFault; repr lists declared names only).'
   - id: SystemConfig
     provenance: design
     facets: {}
@@ -2639,6 +3215,56 @@ structure:
             trust: operator
             constraints:
             - removed-by-D1-never-consulted
+  - id: secrets_env
+    provenance: design
+    where: settings/secrets.env (new, per tenant, git-ignored)
+    note: The development secret store (D3); read per lookup (O2 exemption); a second reader is the validator (F39).
+    facets:
+      domain:
+        type: file
+        refinement:
+          nl: 'KEY=VALUE lines parsed by the one parser (NF-11). A lookup of a declared name faults (ConfigFault
+            naming the reference) when the file is absent, the entry missing, blank or whitespace-only (NF-10),
+            the bytes undecodable (RG4 spine call), or the path is a link or not a regular file (MF-6 i A; NF-12:
+            never blocks): a symlink at any component (PF-R2) or a hard link, a regular file with st_nlink > 1
+            (RV1 A, as resolve''s _refuse_links already refuses).'
+        default: absent (no system uses a secret yet, C8)
+        distinguished:
+        - absent
+        - missing-entry
+        - blank
+        - whitespace-only
+        - undecodable
+        - symlink
+        - hardlink
+        - fifo
+        - directory
+        falsy_valid: false
+        documented_alternatives: []
+      access:
+        constraints_by_via:
+          fs-lookup:
+            trust: operator
+            constraints:
+            - declared-names-only
+            - per-lookup-read
+            - regular-file-no-follow
+          fs-validator:
+            trust: operator
+            constraints:
+            - value-never-printed
+          read-tool:
+            trust: attacker-influenced
+            constraints:
+            - deny-by-location
+          bash:
+            trust: attacker-influenced
+            constraints:
+            - deny-by-location
+          git:
+            trust: operator
+            constraints:
+            - gitignored-wherever-a-tenant-folder-sits
   - id: mapping_yaml
     provenance: code
     facets: {}
@@ -2833,6 +3459,25 @@ structure:
         default: (none)
         distinguished:
         - absent
+        falsy_valid: false
+        documented_alternatives: []
+  - id: SECRET_REF
+    provenance: design
+    where: 'the *_SECRET_REF key suffix (F10: kept)'
+    note: 'Replaces the _ENV convention (D3). F2 (human): a reference key not all uppercase is a validator FAIL;
+      the runtime honours uppercase *_SECRET_REF only. MF-15 (human): the value must be name-shaped.'
+    facets:
+      domain:
+        type: str
+        refinement:
+          nl: 'A config.env key ending _SECRET_REF whose value names an entry in settings/secrets.env: letters,
+            digits and underscore, not starting with a digit (MF-15).'
+        default: (none)
+        distinguished:
+        - lowercase
+        - mixedcase
+        - blank
+        - not-name-shaped
         falsy_valid: false
         documented_alternatives: []
   - id: SOC_PLAYGROUND_DOCKER_CONTEXT
@@ -3093,6 +3738,12 @@ structure:
     mode: read
     via: fs
     provenance: design
+  - from: parse_env
+    to: secrets_env
+    mode: read
+    via: fs-lookup
+    provenance: design
+    note: 'NF-11: secrets.env uses the one parser.'
   - from: resolve_run_tenant
     to: systems
     mode: write
@@ -3105,6 +3756,11 @@ structure:
     provenance: design
   - from: resolve_run_tenant
     to: ticket_mapping
+    mode: write
+    via: api
+    provenance: design
+  - from: resolve_run_tenant
+    to: secrets
     mode: write
     via: api
     provenance: design
@@ -3172,6 +3828,34 @@ structure:
     mode: read
     via: fs
     provenance: code
+  - from: _refuse_links
+    to: secrets_env
+    mode: read
+    via: fs
+    provenance: code
+    note: Covers secrets.env at resolve (CX6); never re-run per lookup (F12/G33).
+  - from: SecretLookup
+    to: secrets_env
+    mode: read
+    via: fs-lookup
+    provenance: design
+  - from: SecretLookup
+    to: systems
+    mode: read
+    via: api
+    provenance: design
+    note: Declared names come from the record's systems as built (MF-2 A).
+  - from: SecretLookup
+    to: SECRET_REF
+    mode: read
+    via: api
+    provenance: design
+  - from: SecretLookup
+    to: fault_text
+    mode: write
+    via: api
+    provenance: design
+    note: Names the declaring key, never the held string or a value (MF-15 A).
   - from: load_config
     to: systems
     mode: read
@@ -3291,6 +3975,12 @@ structure:
     via: env
     provenance: code
     note: '_child_env(ctx) = dict(ctx.env): the N4 pass-through.'
+  - from: docker_exec_curl
+    to: secrets
+    mode: read
+    via: api
+    provenance: design
+    note: A transport is asked for a secret by its declared name (d0).
   - from: docker_exec_curl
     to: fault_text
     mode: write
@@ -3872,6 +4562,16 @@ structure:
     via: fs
     provenance: design
   - from: check_config
+    to: secrets_env
+    mode: read
+    via: fs-validator
+    provenance: design
+  - from: check_config
+    to: SECRET_REF
+    mode: read
+    via: api
+    provenance: design
+  - from: check_config
     to: TRANSPORT
     mode: read
     via: api
@@ -3905,6 +4605,12 @@ structure:
     mode: read
     via: read-tool
     provenance: code
+  - from: permission.files.decide_read
+    to: secrets_env
+    mode: read
+    via: read-tool
+    provenance: code
+    note: 'Denies by location (G32); settled #48 requires secrets.env denied.'
   - from: _tenants1106.run_tenant
     to: verb_grants_yaml
     mode: read
@@ -4064,6 +4770,10 @@ structure:
     multiplicity: serial
   - from: docker_inspect_raw
     to: docker_context
+    provenance: design
+    multiplicity: serial
+  - from: docker_exec_curl
+    to: SecretLookup
     provenance: design
     multiplicity: serial
   - from: docker_exec_curl
@@ -5860,11 +6570,35 @@ gate:
     - GR8
   obligations:
   - rule: R1
+    element: interacts(docker_exec_curl->child_env).payload
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly; o4_secret_in_child_env
+      is the payload-shape assertion R1 wants (the fake records the inbound payload). (also: d_door_child_env_carries_path,
+      d_door_child_env_scrubbed, o4_secret_single_child, s026, s7_f6_run_env_handed_to_writer_and_lead_zero, s7_nf8_transport_names_the_child_variable)'
+    discharged_by: o4_secret_in_child_env
+  - rule: R1
+    element: interacts(docker_exec_raw->child_env).payload
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly; o4_secret_in_child_env
+      is the payload-shape assertion R1 wants (the fake records the inbound payload). (also: d_door_child_env_carries_path,
+      d_door_child_env_scrubbed, o4_secret_single_child, s026, s7_f6_run_env_handed_to_writer_and_lead_zero, s7_nf8_transport_names_the_child_variable)'
+    discharged_by: o4_secret_in_child_env
+  - rule: R1
+    element: interacts(docker_inspect_raw->child_env).payload
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly; o4_secret_in_child_env
+      is the payload-shape assertion R1 wants (the fake records the inbound payload). (also: d_door_child_env_carries_path,
+      d_door_child_env_scrubbed, o4_secret_single_child, s026, s7_f6_run_env_handed_to_writer_and_lead_zero, s7_nf8_transport_names_the_child_variable)'
+    discharged_by: o4_secret_in_child_env
+  - rule: R1
+    element: interacts(host_state_adapter->child_env).payload
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly; o4_secret_in_child_env
+      is the payload-shape assertion R1 wants (the fake records the inbound payload). (also: d_door_child_env_carries_path,
+      d_door_child_env_scrubbed, o4_secret_single_child, s026, s7_f6_run_env_handed_to_writer_and_lead_zero, s7_nf8_transport_names_the_child_variable)'
+    discharged_by: o4_secret_in_child_env
+  - rule: R1
     element: interacts(write_door->child_env).payload
-    witness: 'binds match: d_door_child_env_carries_path binds interacts(write_door->child_env) and asserts the
-      door child''s environment as handed (re-pointed from o4_secret_in_child_env when the secrets demands moved
-      to #1163). (also: d_door_child_env_scrubbed, d_launcher_door_transport_seam)'
-    discharged_by: d_door_child_env_carries_path
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly; o4_secret_in_child_env
+      is the payload-shape assertion R1 wants (the fake records the inbound payload). (also: d_door_child_env_carries_path,
+      d_door_child_env_scrubbed, o4_secret_single_child, s026, s7_f6_run_env_handed_to_writer_and_lead_zero, s7_nf8_transport_names_the_child_variable)'
+    discharged_by: o4_secret_in_child_env
   - rule: R2
     element: ticket_write.identity
     witness: 'binds match: s7_mf12_no_receipt_branch_clears_stale_receipt is the actual uniqueness/collision-resolution
@@ -5880,6 +6614,26 @@ gate:
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: o1_resolver_ignores_env,
       o1_staged_patterns_ignore_env, o1_ticket_writer_ignores_env, o1_write_door_ignores_env, s017, s7_mf3_destination_never_from_process_env)'
     discharged_by: o1_adapter_ignores_env
+  - rule: R3
+    element: secrets_env.access[fs-lookup]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
+  - rule: R3
+    element: secrets_env.access[fs-validator]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_nf14_validator_fails_unreadable_secrets_env
+  - rule: R3
+    element: secrets_env.access[read-tool]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s048
+  - rule: R3
+    element: secrets_env.access[bash]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s048
+  - rule: R3
+    element: secrets_env.access[git]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s3_secrets_env_gitignored
   - rule: R3
     element: ticket_write.access[page]
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_nf26_page_tolerates_and_escapes_receipt)'
@@ -5906,6 +6660,45 @@ gate:
     element: config_env.domain.distinguished[directory]
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
     discharged_by: s7_nf16_unreadable_config_env_kept_as_fault
+  - rule: R4
+    element: secrets_env.domain.distinguished[absent]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s043)'
+    discharged_by: o3_fault_at_ask
+  - rule: R4
+    element: secrets_env.domain.distinguished[missing-entry]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: o8_missing_entry_fails,
+      s7_mf2_declarations_fixed_at_start)'
+    discharged_by: o3_fault_at_ask
+  - rule: R4
+    element: secrets_env.domain.distinguished[blank]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: o8_missing_entry_fails,
+      s042, s7_nf10_blank_rule_shared)'
+    discharged_by: o3_fault_at_ask
+  - rule: R4
+    element: secrets_env.domain.distinguished[whitespace-only]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_nf10_blank_rule_shared
+  - rule: R4
+    element: secrets_env.domain.distinguished[undecodable]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_rg4_non_utf8_is_config_fault)'
+    discharged_by: s7_nf14_validator_fails_unreadable_secrets_env
+  - rule: R4
+    element: secrets_env.domain.distinguished[symlink]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
+  - rule: R4
+    element: secrets_env.domain.distinguished[hardlink]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly (added at the RV1 pass,
+      PF-RV1).'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
+  - rule: R4
+    element: secrets_env.domain.distinguished[fifo]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
+  - rule: R4
+    element: secrets_env.domain.distinguished[directory]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
   - rule: R4
     element: TRANSPORT.domain.distinguished[docker-exec]
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
@@ -5992,6 +6785,22 @@ gate:
     element: TIMEOUT_SEC.domain.distinguished[non-digit]
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
     discharged_by: o6_bad_config_receipt
+  - rule: R4
+    element: SECRET_REF.domain.distinguished[lowercase]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_f2_runtime_honours_uppercase_ref_only)'
+    discharged_by: o8_ref_key_any_case
+  - rule: R4
+    element: SECRET_REF.domain.distinguished[mixedcase]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_f2_runtime_honours_uppercase_ref_only)'
+    discharged_by: o8_ref_key_any_case
+  - rule: R4
+    element: SECRET_REF.domain.distinguished[blank]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly.'
+    discharged_by: o8_blank_ref_fails
+  - rule: R4
+    element: SECRET_REF.domain.distinguished[not-name-shaped]
+    witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_mf15_validator_fails_ref_not_name_shaped)'
+    discharged_by: s7_mf15_runtime_fault_names_declaring_key
   - rule: R4
     element: truncated_by.domain.distinguished[budget]
     witness: 'binds match: an existing test-form demand''s `binds:` names this address directly. (also: s7_mf12_no_receipt_branch_clears_stale_receipt)'
@@ -6149,6 +6958,20 @@ gate:
       row 4).'
     discharged_by: d2_shipped_tenants_complete
   - rule: R7
+    element: interacts(_refuse_links->secrets_env)
+    witness: 'secrets_env''s unmoved reader _refuse_links is the shared link-refusal helper MF-6(i) requires on
+      the new lookup path; s7_mf6_lookup_refuses_link_or_nonregular exercises SecretLookup''s refusal end to end
+      (which calls it), but the edge itself isn''t named. Post-gate D follow-up: s7_mf6_lookup_refuses_link_or_nonregular''s
+      binds now name this address (60-residue.md pre-discharged row 5).'
+    discharged_by: s7_mf6_lookup_refuses_link_or_nonregular
+  - rule: R7
+    element: interacts(permission.files.decide_read->secrets_env)
+    witness: 'secrets_env''s unmoved reader permission.files.decide_read is exactly the read-tool/bash denylist
+      s048 binds via secrets_env.access[read-tool]/[bash] and the permission.files.decide_read actor — the new secrets.env
+      path is covered, the edge address itself is not. Post-gate D follow-up: s048''s binds now name this address
+      (60-residue.md pre-discharged row 6).'
+    discharged_by: s048
+  - rule: R7
     element: interacts(test_767_writer->mapping_yaml)
     witness: 'mapping_yaml''s unmoved reader test_767_writer is test_767_writer.py:981 test_767_the_mapping_is_parsed_once_per_edit,
       which d_reversed_pins_rewritten records as rewritten (O2: an edit after the record is built does not reach
@@ -6224,42 +7047,6 @@ gate:
     witness: Same stale-fake risk, test_1106_run_start.writer. Same mint.
     discharged_by: s60_ticket_writer_fakes_migrated
   holes:
-  - rule: R1
-    element: interacts(docker_exec_curl->child_env).payload
-    note: 'Split (PR #1156 review, human): this payload obligation was discharged by o4_secret_in_child_env,
-      which moved to #1163 with the rest of the secrets lane. No kept demand binds this edge.'
-    resolution: 'pass-through until #1163: with no credential lane the child environment is the N4 pass-through
-      (env=dict(ctx.env), G28) and carries none of the values #1107 moves, so there is no #1107 payload to assert.
-      Non-material here; #1163 re-adds o4_secret_in_child_env, which binds the edge again.'
-    cites:
-    - G28
-  - rule: R1
-    element: interacts(docker_exec_raw->child_env).payload
-    note: 'Split (PR #1156 review, human): this payload obligation was discharged by o4_secret_in_child_env,
-      which moved to #1163 with the rest of the secrets lane. No kept demand binds this edge.'
-    resolution: 'pass-through until #1163: with no credential lane the child environment is the N4 pass-through
-      (env=dict(ctx.env), G28) and carries none of the values #1107 moves, so there is no #1107 payload to assert.
-      Non-material here; #1163 re-adds o4_secret_in_child_env, which binds the edge again.'
-    cites:
-    - G28
-  - rule: R1
-    element: interacts(docker_inspect_raw->child_env).payload
-    note: 'Split (PR #1156 review, human): this payload obligation was discharged by o4_secret_in_child_env,
-      which moved to #1163 with the rest of the secrets lane. No kept demand binds this edge.'
-    resolution: 'pass-through until #1163: with no credential lane the child environment is the N4 pass-through
-      (env=dict(ctx.env), G28) and carries none of the values #1107 moves, so there is no #1107 payload to assert.
-      Non-material here; #1163 re-adds o4_secret_in_child_env, which binds the edge again.'
-    cites:
-    - G28
-  - rule: R1
-    element: interacts(host_state_adapter->child_env).payload
-    note: 'Split (PR #1156 review, human): this payload obligation was discharged by o4_secret_in_child_env,
-      which moved to #1163 with the rest of the secrets lane. No kept demand binds this edge.'
-    resolution: 'pass-through until #1163: with no credential lane the child environment is the N4 pass-through
-      (env=dict(ctx.env), G28) and carries none of the values #1107 moves, so there is no #1107 payload to assert.
-      Non-material here; #1163 re-adds o4_secret_in_child_env, which binds the edge again.'
-    cites:
-    - G28
   - rule: R4
     element: ELASTIC_EVENTS_INDEX.domain.distinguished[*]
     note: '60-residue.md hole #33 (material, §7 human). Readings: A, accept a bare ''*'' as today (NF-18); B, refuse

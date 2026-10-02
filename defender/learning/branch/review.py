@@ -138,8 +138,8 @@ def verb_context(episode_dir: Path, tenant: Any, *, runs_base: Path) -> VerbCont
     """The host-side context the replay's adapter calls run under.
 
     `tenant` is the EPISODE's tenant record (#1107) — the source run's tenant, resolved by the
-    launcher and handed down; the replay's adapters read that record's systems and corpus-engine
-    view and nothing they find for themselves. `capture` is `None`: a review is not
+    launcher and handed down; the replay's adapters read that record's systems, corpus-engine
+    view and secrets and nothing they find for themselves. `capture` is `None`: a review is not
     a run, so it writes no `executed_queries.jsonl` row.
 
     `DEFENDER_RUNS_BASE` is set explicitly to `runs_base`, the episode tenant's runs base the

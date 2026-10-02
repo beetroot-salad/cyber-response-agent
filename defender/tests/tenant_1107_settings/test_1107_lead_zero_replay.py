@@ -406,11 +406,14 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
     """tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing
     else (human, early-exit resolution 2). A replay-driven run's RunTenant is the one
     resolve_run_tenant builds for its tenant folder: the same systems, elastic, ticket_mapping,
-    grants and correlation."""
+    secrets, grants and correlation."""
     # G54 / test_1078_env.py:343-361: the harness builds with no data root and no runs base.
     H.set_data_root(monkeypatch, None)
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
-    _root, _folder, tenant = _plant(tmp_path, "rh1107")
+    secret_name, secret_value = "RH1107_TOKEN", "rh1107-secret-value"
+    _root, folder, tenant = _plant(tmp_path, "rh1107", secrets={secret_name: secret_value})
+    # A secret is only visible to a lookup when a system's config names it (O3).
+    S.set_key(folder, "cmdb", "CMDB_API_SECRET_REF", secret_name)
     resolved = run_tenant.resolve_run_tenant(tenant, defender_dir=S.DEFENDER,
                                              dispatches_lead_zero=True)
 
@@ -437,6 +440,12 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
             == [getattr(resolved.elastic, a) for a in S.ELASTIC_ATTRS])
     assert type(record.ticket_mapping) is type(resolved.ticket_mapping)
     assert S.released_status(record.ticket_mapping) == S.released_status(resolved.ticket_mapping)
+    assert type(record.secrets) is type(resolved.secrets)
+    # Compared record-to-resolver, and the value by containment: how `KEY="value"` is unquoted
+    # is the secrets parser's own business (C12: the two config parsers disagree on quotes).
+    looked_up = record.secrets.get(secret_name)
+    assert looked_up == resolved.secrets.get(secret_name), secret_name
+    assert secret_value in looked_up, (secret_name, looked_up)
     assert record.grants == resolved.grants
     assert record.correlation == resolved.correlation
 

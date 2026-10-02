@@ -38,8 +38,10 @@ second one.
 - **Auth — none.** The stubs are auth-less on the compose network, so this
   tree has no `resolve_auth` / `AUTH_TYPE` layer. The connect skill's
   example carries one because a *credentialed* deployment needs it; a system
-  here that genuinely needed credentials has no way to receive them yet —
-  credential delivery is #1163 — and nothing in this tree needs one today.
+  here that genuinely needed credentials would name them in `config.env` with a
+  `*_SECRET_REF` key (a reference, never a value) and pass the declared name to
+  the transport, which resolves it from the tenant's `settings/secrets.env` — but
+  nothing in this tree does today.
 - **Config — `URL_BASE`, `BASTION_HOST`, `TIMEOUT_SEC`** in
   the run's tenant's `settings/systems/{system}/config.env`
   (`knowledge/tenants/<tenant>/` at the repo root; the adapter reads `ctx.tenant.systems`, the record

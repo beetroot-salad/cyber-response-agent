@@ -560,8 +560,8 @@ def test_d_launcher_door_transport_seam(tmp_path, data_root, monkeypatch):
     """The branch launcher takes a transport for the write door it builds (the door_transport
     seam): with the door left to the launcher, every door call goes through that transport,
     handed a context that carries the episode tenant's record, so the door addresses that
-    record's own elastic docker context and container. It is the door lane's one injection
-    seam."""
+    record's own elastic docker context and container. It is the door lane's one injection seam:
+    a secret-bearing door call resolves its secret from that same record."""
     # Minted at the Phase F re-open (O4 lanes, human): without it the door lane is reachable only
     # by building a door OUTSIDE the launcher, which never exercises the launcher's own wiring.
     import inspect

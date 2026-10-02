@@ -82,7 +82,8 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
 
 - **`VerbContext` is harness carriage, passed positionally.** It carries the
   RUN's tenant record (`ctx.tenant`: each system's `config.env` already read
-  into `ctx.tenant.systems` — take your settings from there, never from an import-time constant, a file you open or
+  into `ctx.tenant.systems`, with the secret lookup beside it — take your
+  settings from there, never from an import-time constant, a file you open or
   the process, so a worktree or an eval's tmp tree reads its own tenant), the
   RUN's `defender_dir`, and the RUN's scrubbed `env` (hand it whole to any
   child you fork; the driver's own process holds provider keys). The model
@@ -183,20 +184,52 @@ gather redesign removed — never the recommended shape.
 
 ## Credentials
 
-**There is no credential delivery yet** (#1163). A tenant's `config.env` holds
-non-secret config only — endpoints, timeouts, `AUTH_TYPE`, the access lines.
-A key that holds a secret (`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or
-references one (`*_SECRET_REF`) is FAILed by `validate_scaffold`, on every line of
-the file, an `export` line or a repeated key included. A system whose
-read source needs a credential cannot be connected until #1163 lands: say so and
-stop.
+Secrets are held in **the tenant's `settings/secrets.env` and nowhere else** — a
+host-only file, gitignored, that the maintainer fills in and the skill never
+reads. `config.env` holds non-secret config only — endpoints, timeouts,
+`AUTH_TYPE`, the access lines — and, for a secret, a `*_SECRET_REF` key that
+*names* an entry of `secrets.env` (`API_TOKEN_SECRET_REF=MYSYS_API_TOKEN`, with
+`MYSYS_API_TOKEN=<value>` in `secrets.env`); a bare `PASSWORD` / `TOKEN` /
+`SECRET` / `API_KEY` key is read as an inline secret and `validate_scaffold`
+FAILs it, as it does a reference whose entry is missing or blank. The adapter
+passes the `secrets.env` entry NAME through the transport's confined request
+helpers and writes `{{NAME}}` where the value goes — in a header value or in `auth`:
 
-`system=` is required on every transport call, and an adapter reaches its store
-through `http_get` / `http_get_obj` / `http_post`, which run `guard_outbound`
-first. **Never** accept a pasted token, password, or auth-bearing cURL — if the
-maintainer offers one, stop and refuse it. Nothing in an adapter logs a secret or
-returns one in a captured payload; this is the single most important property of
-the layer.
+```python
+transport.http_get(ctx, config, f"/records/{record_id}", system=SYSTEM,
+                   secrets=("MYSYS_API_TOKEN",),
+                   headers={"Authorization": "Bearer {{MYSYS_API_TOKEN}}"})
+```
+
+`system=` is required on every transport call. Use `http_get` / `http_get_obj` /
+`http_post`, never `docker_exec_curl` directly: the helpers run `guard_outbound`
+first, so each path must be listed for the system in the confinement allowlist
+(`READ_ENDPOINT_ALLOWLIST` in `scripts/adapters/confinement.py`), and a
+model-supplied id cannot walk the request to another endpoint with your token on
+it. The transport resolves every name in one read of `secrets.env`, hands the
+values to that one child process only, expands each `{{NAME}}` inside
+the container — a header reaches curl on its standard input, so the token is on no
+process list — and replaces the values with a marker in anything it returns. A
+`{{NAME}}` the call did not pass in `secrets=` is refused before anything runs;
+slots are read in header values and `auth` only. Nothing in the adapter reads a
+secret from `config.env`, logs one, or returns one in a captured payload. This is
+the single most important property of the layer; keep it that way.
+
+For a scheme beyond a bearer token / basic auth (mTLS, SigV4, OAuth
+client-credentials), implement it in the transport and note why in
+`execution.md`; keep secrets in `secrets.env` regardless. **Never** accept a
+pasted token, password, or auth-bearing cURL — if the maintainer offers one,
+stop and remind them it belongs in `settings/secrets.env`.
+
+### `secrets.env` format
+
+`settings/secrets.env` is `KEY=VALUE` per line. One matched pair of surrounding
+quotes is trimmed (`KEY="value"` holds `value`); a line starting `export ` is not a
+key; there are no multi-line values; a `#` line is a comment; a later duplicate
+wins. Create it host-only and gitignored, never inside a run or an episode. To
+rotate a secret, write the new file beside it and rename it over `secrets.env`
+(a rename is atomic, so a run never reads a half-written file); the lookup reads
+the file per call, so the next call sees the new value.
 
 ## Access method
 

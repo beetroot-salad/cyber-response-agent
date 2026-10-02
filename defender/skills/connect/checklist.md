@@ -79,8 +79,10 @@ This file covers the rest — the calls a script can't make.
 - [ ] **Credential boundary held by eye, too.** No tokens, passwords, or
       auth-bearing cURL anywhere in the adapter, docs, examples, or commit
       — not just in `config.env` (which the script scans).
-- [ ] **No credential needed.** The system's read source is auth-less;
-      a system that needs a credential waits for #1163 (noted in the commit).
+- [ ] **Secret names communicated.** The maintainer was told which keys to
+      add to the tenant's `settings/secrets.env` (the names each `*_SECRET_REF`
+      points at) and confirmed them (or explicitly deferred, noted in the
+      commit).
 - [ ] **One system.** If others came up in the interview, they were noted
       for a separate re-run, not folded in here.
 - [ ] **Divergences surfaced.** Any legitimate departure from the default
