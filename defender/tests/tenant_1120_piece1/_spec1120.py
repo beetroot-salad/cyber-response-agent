@@ -81,10 +81,9 @@ KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 FIXTURE = KNOWLEDGE_ROOT / "tenant-fixture"
 TEMPLATE = KNOWLEDGE_ROOT / "tenant-template"
 
-#: The checkout's lab. It stays committed in piece 1 (H2: the path-only readers keep it until
-#: D9 step 7); the suite reads it only to make a checkout whose settings DIFFER from the data
-#: root's, never as an oracle.
-LAB = KNOWLEDGE_ROOT / "tenants" / "playground"
+#: The lab (`knowledge/tenants/playground`) is retired in piece 1 (human, PR #1157: #1158
+#: folded in); the fixture is its frozen copy, and the checkout copy a test sets the data
+#: root's settings against.
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"

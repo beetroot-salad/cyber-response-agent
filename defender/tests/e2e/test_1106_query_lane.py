@@ -98,7 +98,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_settings_folder(tmp_path):
          ])
     call = rec.only()
     assert Path(call.ctx.settings_dir).resolve() == tenant.settings
-    assert Path(call.ctx.settings_dir).resolve() != T.PLAYGROUND_SETTINGS.resolve()
+    assert Path(call.ctx.settings_dir).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
     transport = T.mod("scripts.adapters._stub_transport")
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"

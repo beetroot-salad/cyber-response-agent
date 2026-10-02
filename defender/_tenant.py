@@ -538,8 +538,9 @@ def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
             f"tenant {paths.tenant_id!r} has no knowledge folder: {knowledge} does not "
             f"exist — clone the tenant repo into it on the host, then run "
             f"tenant.py setup {paths.tenant_id} (a tenant set up before #1120, whose settings "
-            f"the product checkout still carries, has no repo to clone: build the folder with "
-            f"tenant.py migrate {paths.tenant_id} {knowledge} instead)")
+            f"the product repo committed until then, has no repo to clone: build the folder "
+            f"from the repo's history with tenant.py migrate {paths.tenant_id} {knowledge} "
+            f"instead)")
     if found.st is None or not stat.S_ISDIR(found.st.st_mode):
         why = found.reason or ("it is a link" if found.st is not None
                                and stat.S_ISLNK(found.st.st_mode) else "it is not a directory")

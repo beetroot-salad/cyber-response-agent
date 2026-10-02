@@ -56,7 +56,7 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
     cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
     assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
     assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
-    checkout = transport.load_config(_ctx(T.PLAYGROUND_SETTINGS, tmp_path), "cmdb", "CMDB")
+    checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
     assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
 
 
@@ -74,7 +74,7 @@ def test_the_elastic_adapter_loads_the_injected_tenants_config(injected, tmp_pat
     cfg = elastic.load_config(_ctx(injected, tmp_path))
     assert cfg["ELASTICSEARCH_URL"] == f"https://es-{MARK}:9200"
     assert cfg["ELASTIC_EVENTS_INDEX"] == f"{MARK}-events-*"
-    checkout = elastic.load_config(_ctx(T.PLAYGROUND_SETTINGS, tmp_path))
+    checkout = elastic.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path))
     assert checkout["ELASTICSEARCH_URL"] != cfg["ELASTICSEARCH_URL"]
 
 
@@ -91,7 +91,7 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     assert str(settings / "systems" / "cmdb" / "config.env") in str(caught.value)
     # Control: the checkout's playground does carry a cmdb config, so the refusal above is
     # the absence of a fallback, not the absence of a file anywhere.
-    assert (T.PLAYGROUND_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
+    assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
 
 
 # ---- the case-history mapping --------------------------------------------------------------
@@ -102,7 +102,7 @@ def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
     assert predicate.released_status == "resolved-by-a-person"
     assert predicate.is_released({"status": "resolved-by-a-person"}) is True
     assert predicate.is_released({"status": "closed"}) is False
-    assert case_ticket.release_predicate(T.PLAYGROUND_SETTINGS).released_status != \
+    assert case_ticket.release_predicate(T.FIXTURE_SETTINGS).released_status != \
         predicate.released_status
 
 
@@ -112,7 +112,7 @@ def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
     payload = case_ticket.alert_to_open_payload(alert, "case-1", settings_dir=injected)
     assert payload["reporter"] == "injected-reporter"
     checkout = case_ticket.alert_to_open_payload(
-        alert, "case-1", settings_dir=T.PLAYGROUND_SETTINGS)
+        alert, "case-1", settings_dir=T.FIXTURE_SETTINGS)
     assert checkout["reporter"] != payload["reporter"]
 
 
@@ -125,7 +125,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
     with pytest.raises(case_ticket.CaseTicketError) as caught:
         case_ticket.release_predicate(settings)
     assert str(settings / "systems" / "case-history" / "mapping.yaml") in str(caught.value)
-    assert (T.PLAYGROUND_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
+    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
 
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
@@ -164,7 +164,7 @@ def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
     lz = T.mod("runtime.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(injected)) == \
         "elastic.injected-tenant-template"
-    assert lz.load_correlation_template(lz.lead_zero_config_path(T.PLAYGROUND_SETTINGS)) != \
+    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \
         "elastic.injected-tenant-template"
 
 
@@ -180,7 +180,7 @@ def test_the_configured_patterns_are_the_injected_tenants(injected):
     stager = T.mod("learning.branch.estate.stagers.elastic")
     patterns = stager.configured_patterns(injected)
     assert tuple(patterns) == (f"{MARK}-events-*", f"{MARK}-alerts-*")
-    assert tuple(stager.configured_patterns(T.PLAYGROUND_SETTINGS)) != tuple(patterns)
+    assert tuple(stager.configured_patterns(T.FIXTURE_SETTINGS)) != tuple(patterns)
 
 
 def test_the_staging_write_door_addresses_the_injected_tenants_cluster(injected, tmp_path):

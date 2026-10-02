@@ -716,7 +716,7 @@ def estate(tmp_path: Path, *, answers: dict[str, Any] | None = None) -> tuple[Pa
     # The committed playground tenant's settings — the folder this estate's reads resolved
     # before #1106 made the run hand it in (the checkout's copy, now at the repo root).
     ctx = verbs.VerbContext(defender_dir=defender_dir, run_dir=run_dir, env={},
-                            settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                            settings_dir=_tenants1106.FIXTURE_SETTINGS)
     return adapters, grant, ctx
 
 

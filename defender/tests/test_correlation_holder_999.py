@@ -47,7 +47,7 @@ from defender.tests import _tenants1106 as T1106
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
 #: The committed tenant's settings folder, where the shipped table lives since #1106.
-SETTINGS = T1106.PLAYGROUND_SETTINGS
+SETTINGS = T1106.FIXTURE_SETTINGS
 
 #: The holder's name as the table spells it. Written here as a LITERAL rather than imported,
 #: so a rename on one side cannot silently pass on the other — the constant's own test below

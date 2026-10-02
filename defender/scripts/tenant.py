@@ -30,9 +30,9 @@ commits (failing closed when git cannot answer). `check <id>` judges the tenant 
 folder with no data root at all (tenant CI).
 
 `migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
-its settings still in the product checkout): it builds the knowledge folder acceptance now
-requires from the checkout's committed copy, as a new repo exactly like scaffold's, and the
-operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding or a refusal, 2 a
+its settings committed in the product repo until #1120 deleted them): it builds the knowledge
+folder acceptance now requires from the last copy in the checkout's history, as a new repo
+exactly like scaffold's, and the operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding or a refusal, 2 a
 usage error. Every refusal is printed as `[tenant.py] <message>`.
 """
 from __future__ import annotations
@@ -328,12 +328,13 @@ def _git_preflight(target: Path) -> str | None:
     return None
 
 
-def _committed_files(source: str) -> list[tuple[str, str]]:
-    """The regular files the running checkout's HEAD commits under `source` (repo-relative), as
-    `(path relative to source, blob sha)` — read from git, never from the disk, so an untracked
-    file beside them (a `.DS_Store`, a stray `.env`) or a local edit is never carried into a
-    tenant's repo. A link, a submodule or anything else that is not a plain file is left out."""
-    listing = _git.git(["ls-tree", "-r", "-z", "HEAD", "--", source], cwd=_REPO_ROOT,
+def _committed_files(source: str, rev: str = "HEAD") -> list[tuple[str, str]]:
+    """The regular files the running checkout's commit `rev` holds under `source`
+    (repo-relative), as `(path relative to source, blob sha)` — read from git, never from the
+    disk, so an untracked file beside them (a `.DS_Store`, a stray `.env`) or a local edit is
+    never carried into a tenant's repo. A link, a submodule or anything else that is not a
+    plain file is left out."""
+    listing = _git.git(["ls-tree", "-r", "-z", rev, "--", source], cwd=_REPO_ROOT,
                        env=_git.env_for_cwd())
     files = []
     for entry in sorted(filter(None, listing.split("\0"))):
@@ -380,17 +381,18 @@ def _empty(target: Path) -> None:
 
 def migrate(tenant_id: str, target: Path) -> int:
     """ONE-OFF (#1120): build the knowledge folder a tenant set up before #1120 lacks. Such a
-    tenant has a row and `runs/` under the data root, and its settings in the product
-    checkout's `knowledge/tenants/<id>/`; acceptance now refuses it for the missing
-    `<root>/<id>/knowledge`, and there is no tenant repo to clone. `target` (normally
-    `$DEFENDER_DATA_ROOT/<id>/knowledge`) becomes a new repo committing the running checkout's
-    HEAD copy of that folder plus `agent/.tenant-id`, built as scaffold builds one from the
-    template. It writes nothing else — no row — and judges nothing: the operator then runs
-    `setup <id>`, which applies every rule to it and, finding the row there, writes nothing.
-    Needs no data root. Refused before any write for a bad id, a checkout carrying no copy for
-    the id, a target that exists already, whose parent is not a real directory, or that lies in the
-    running checkout's `defender/` tree, or a git with no commit identity; a failure after it
-    creates `target` removes `target` again. Retire it with the checkout's copies (#1158)."""
+    tenant has a row and `runs/` under the data root, and its settings were committed in the
+    product repo's `knowledge/tenants/<id>/`, which #1120 deleted; acceptance now refuses it for
+    the missing `<root>/<id>/knowledge`, and there is no tenant repo to clone. `target`
+    (normally `$DEFENDER_DATA_ROOT/<id>/knowledge`) becomes a new repo committing the LAST copy
+    of that folder the running checkout's history holds (`_last_committed`) plus
+    `agent/.tenant-id`, built as scaffold builds one from the template. It writes nothing else
+    — no row — and judges nothing: the operator then runs `setup <id>`, which applies every
+    rule to it and, finding the row there, writes nothing. Needs no data root. Refused before
+    any write for a bad id, a target that exists already, whose parent is not a real
+    directory, or that lies in the running checkout's `defender/` tree, a git with no commit
+    identity, or a history with no copy for the id (a shallow clone is told to fetch its
+    history); a failure after it creates `target` removes `target` again."""
     try:
         tid = _tenant.TenantId(tenant_id)
     except _tenant.TenantRefused as refused:
@@ -398,21 +400,27 @@ def migrate(tenant_id: str, target: Path) -> int:
         return 1
     target = Path(target).absolute()
     source = f"knowledge/tenants/{tid}"
-    try:
-        # migrate writes the id file itself, for the id it is asked to migrate
-        files = [(rel, sha) for rel, sha in _committed_files(source)
-                 if rel != TENANT_ID_FILE.as_posix()]
-    except (OSError, _git.GitError) as failed:
-        _say(f"could not read {source}/ from the checkout's HEAD: {failed}")
-        return 1
-    refusal = (_migrate_target_refusal(target)
-               or _git_preflight(target)
-               or (None if files else
-                   f"the checkout's HEAD commits no {source}/ — there is nothing to migrate for "
-                   f"tenant {tid!r}; clone the tenant repo into {target} on the host, then run "
-                   f"tenant.py setup {tid}"))
+    refusal = _migrate_target_refusal(target) or _git_preflight(target)
     if refusal is not None:
         _say(refusal)
+        return 1
+    try:
+        rev = _last_committed(source)
+        # migrate writes the id file itself, for the id it is asked to migrate
+        files = [] if rev is None else [(rel, sha) for rel, sha in _committed_files(source, rev)
+                                        if rel != TENANT_ID_FILE.as_posix()]
+        shallow = not files and _git.git(
+            ["rev-parse", "--is-shallow-repository"], cwd=_REPO_ROOT,
+            env=_git.env_for_cwd()).strip() == "true"
+    except (OSError, _git.GitError) as failed:
+        _say(f"could not read {source}/ from the checkout's history: {failed}")
+        return 1
+    if rev is None or not files:
+        _say(f"the checkout's history holds no {source}/ — "
+             + ("it is a shallow clone: fetch its whole history (git fetch --unshallow) and "
+                "run migrate again" if shallow else
+                f"there is nothing to migrate for tenant {tid!r}; clone the tenant repo into "
+                f"{target} on the host, then run tenant.py setup {tid}"))
         return 1
     try:
         # An EXCLUSIVE create: an existing folder, or a link at the name, is refused, so the undo
@@ -422,8 +430,9 @@ def migrate(tenant_id: str, target: Path) -> int:
         _say(f"could not create {target}: {blocked}")
         return 1
     try:
-        _commit_new_tenant_repo(target, tid, files,
-                                f"tenant {tid}: moved out of the product repo's {source} (#1120)")
+        _commit_new_tenant_repo(
+            target, tid, files,
+            f"tenant {tid}: moved out of the product repo's {source} (#1120, from {rev[:12]})")
     except (OSError, _git.GitError) as failed:
         try:
             shutil.rmtree(target)
@@ -433,9 +442,27 @@ def migrate(tenant_id: str, target: Path) -> int:
             return 1
         _say(f"migrating into {target} failed and was undone: {failed}")
         return 1
-    print(f"{target}: built from the checkout's {source}/ and committed — now run "
-          f"tenant.py setup {tid}")
+    print(f"{target}: built from {source}/ as commit {rev[:12]} last held it, and committed — "
+          f"now run tenant.py setup {tid}")
     return 0
+
+
+def _last_committed(source: str) -> str | None:
+    """The newest commit in HEAD's history whose tree holds `source`, or None. The last commit
+    to change `source` either holds it (an edit) or deleted it, and then its first parent holds
+    the last copy. Through a merge, git follows the side the merge's tree agrees with, so a
+    branch that deleted the folder is found whether it was merged or squashed."""
+    env = _git.env_for_cwd()
+    last = _git.git(["rev-list", "--max-count=1", "HEAD", "--", source], cwd=_REPO_ROOT,
+                    env=env).strip()
+    for rev in (last, f"{last}^") if last else ():
+        try:
+            if _git.git(["ls-tree", rev, "--", source], cwd=_REPO_ROOT, env=env).strip():
+                return _git.git(["rev-parse", "--verify", f"{rev}^{{commit}}"], cwd=_REPO_ROOT,
+                                env=env).strip()
+        except _git.GitError:  # the root commit has no parent
+            return None
+    return None
 
 
 def _migrate_target_refusal(target: Path) -> str | None:
@@ -473,8 +500,8 @@ def main(argv: list[str]) -> int:
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
     migrate_p = sub.add_parser(
-        "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from the "
-                        "checkout's copy")
+        "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from its "
+                        "last copy in the checkout's history")
     migrate_p.add_argument("tenant_id")
     migrate_p.add_argument("target", type=Path)
     ns = p.parse_args(argv)

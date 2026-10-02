@@ -199,7 +199,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     budget_enforcer.open_budget(run_dir, budget_enforcer.DEFAULT_LIMITS)
     # #1106: a run hands MAIN's deps its tenant's settings folder, which every lead inherits.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
-                   settings_dir=T1106.PLAYGROUND_SETTINGS)
+                   settings_dir=T1106.FIXTURE_SETTINGS)
     rec = VerbRecorder()
     model = GatherModel(responses)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")

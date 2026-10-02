@@ -207,7 +207,7 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns
     as `configured_patterns` — the set every sibling, the registry's own-view test and the
     judge re-read. The episode still runs (the positive control: siblings start)."""
     stager = T.mod("learning.branch.estate.stagers.elastic")
-    assert tuple(stager.configured_patterns(T.PLAYGROUND_SETTINGS)) != TENANT_PATTERNS, \
+    assert tuple(stager.configured_patterns(T.FIXTURE_SETTINGS)) != TENANT_PATTERNS, \
         "the fixture no longer discriminates from the checkout's copy"
     T.place_tenant(current_data_root(), "acme", configs=T.config_texts(
         "acme", events_index=TENANT_PATTERNS[0], alerts_index=TENANT_PATTERNS[1]))

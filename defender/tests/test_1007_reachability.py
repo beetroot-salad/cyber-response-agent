@@ -59,7 +59,7 @@ def run_review(ep: Path, family, *, adapters=None, door=None, invoke=None):
             adapters=adapters if adapters is not None else W.FakeAdapters(),
             door=door if door is not None else W.FakeDoor(),
             invoke=invoke if invoke is not None else W.FakeAgent("same"),
-            settings_dir=_tenants1106.PLAYGROUND_SETTINGS, runs_base=ep.parent / "runs-base")
+            settings_dir=_tenants1106.FIXTURE_SETTINGS, runs_base=ep.parent / "runs-base")
 
 
 def block_of(record: dict, label: str = "b") -> dict:

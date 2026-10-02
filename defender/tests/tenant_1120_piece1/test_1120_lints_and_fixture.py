@@ -563,9 +563,14 @@ REMOVED_NAMES = frozenset({
 #: flagged only when read off the `_tenants` module.
 REMOVED_MODULE_ATTRS = frozenset({"tenant_dir"})
 #: `_tenants1106`'s helpers that resolve the lab through the removed resolver (H2: no
-#: test-only survival of it) — as distinct from its path-only constants, exempt until D9 step 7.
+#: test-only survival of it), and — the lab now retired (human, PR #1157: #1158 folded in) —
+#: its path constants, which the path-only readers used until then.
 RETIRED_HELPERS = frozenset({"playground_tenant", "playground_run_tenant"})
+RETIRED_LAB_CONSTANTS = frozenset({"PLAYGROUND", "PLAYGROUND_SETTINGS", "PLAYGROUND_AGENT",
+                                   "TENANTS_ROOT"})
 REMOVED_FLAG = "--tenants-root"
+#: The retired lab's tree, as a path string spells it.
+LAB_TREE = "knowledge/tenants"
 
 
 def _bare_strings(tree: ast.AST) -> set[int]:
@@ -598,7 +603,7 @@ def _removed_imports(node: ast.ImportFrom) -> list[list[str]]:
     finding: once D1 removes the member, the import fails whatever name it would bind."""
     names = {a.name for a in node.names}
     removed = names & (REMOVED_NAMES | REMOVED_MODULE_ATTRS)
-    retired = names & RETIRED_HELPERS
+    retired = names & (RETIRED_HELPERS | RETIRED_LAB_CONSTANTS)
     module = str(node.module)
     return [sorted(hit) for hit, owner in (
                 (removed, module == "defender._tenants"),  # lint-ast-resolve: ok — reports an import statement naming a removed member; it fails at import whatever it binds
@@ -622,17 +627,29 @@ def _py_findings(path: Path, rel: str) -> list[str]:
                 out.append(f"{rel}:{line}: _tenants.{node.attr}")
             elif node.attr in RETIRED_HELPERS:
                 out.append(f"{rel}:{line}: .{node.attr} (resolves the lab via the removed resolver)")
+            elif node.attr in RETIRED_LAB_CONSTANTS:
+                out.append(f"{rel}:{line}: .{node.attr} (the retired lab's path)")
         elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
-              and id(node) not in prose and REMOVED_FLAG in node.value):
-            out.append(f"{rel}:{line}: spells {REMOVED_FLAG}")
+              and id(node) not in prose):
+            out += [f"{rel}:{line}: {hit}" for hit in _spelled(node.value)]
     return out
+
+
+def _spelled(text: str) -> list[str]:
+    """What a non-prose string spells of the removed surface: the flag, or the lab's path."""
+    if REMOVED_FLAG in text:
+        return [f"spells {REMOVED_FLAG}"]
+    if LAB_TREE in text:
+        return [f"spells the retired lab's path {LAB_TREE}"]
+    return []
 
 
 def lab_reach_census(root: Path, *, exclude: tuple[Path, ...] = ()) -> list[str]:
     """Every place under `root`'s defender/tests, scripts/lint and .github/workflows that
-    reaches the lab through a removed symbol, flag or retired resolver helper. `exclude`
-    names directories skipped whole (the spec suite, which names the removed surface on
-    purpose to pin its removal)."""
+    reaches the lab through a removed symbol, flag, retired resolver helper or path constant,
+    or spells its path. `exclude` names directories or files skipped whole (the spec suite,
+    which names the removed surface on purpose to pin its removal; migrate's test, which
+    builds a lab into a tmp checkout's history)."""
     root = Path(root)
     # The lint dir is the census lint's own home: the one lint piece 1 moves off the lab.
     lint_dir = root / lint_verb_disposition_census.parent.relative_to(REPO)
@@ -651,33 +668,38 @@ def lab_reach_census(root: Path, *, exclude: tuple[Path, ...] = ()) -> list[str]
 
 
 def test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants(tmp_path: Path) -> None:
-    """Narrowed per H2 (human): no file under defender/tests/, scripts/lint/ or
-    .github/workflows/ reaches the checkout's lab through a removed symbol or flag —
-    default_tenants_root, entry_tenant, entry_tenant_args, TenantDir, TenantDirError, the
-    _tenants module's tenant_dir, --tenants-root — or through the retired _tenants1106
-    resolver helpers (playground_tenant, playground_run_tenant); no workflow names the
-    tenants root. The 58 path-only literal readers of knowledge/tenants/playground are exempt
-    until D9 step 7. The failure lists every offending site: that list is the re-home census
-    H2 hands the implementer. The positive control: the same census over a tmp tree holding
-    one planted reference of each shape reports each, and leaves a planted path-only read
-    alone; it runs first, so it is live at base."""
+    """Narrowed per H2 (human), then widened when the lab was retired (human, PR #1157: #1158
+    folded in): no file under defender/tests/, scripts/lint/ or .github/workflows/ reaches the
+    checkout's lab through a removed symbol or flag — default_tenants_root, entry_tenant,
+    entry_tenant_args, TenantDir, TenantDirError, the _tenants module's tenant_dir,
+    --tenants-root — through the retired _tenants1106 resolver helpers (playground_tenant,
+    playground_run_tenant) or path constants (PLAYGROUND, PLAYGROUND_SETTINGS,
+    PLAYGROUND_AGENT, TENANTS_ROOT), or by spelling knowledge/tenants in a non-prose string;
+    no workflow names the tenants root. The path-only readers' H2 exemption ends with the lab.
+    The failure lists every offending site. The positive control: the same census over a tmp
+    tree holding one planted reference of each shape reports each, the path-only read
+    included; it runs first, so it is live at base."""
     planted = tmp_path / "planted"
     S.plant(planted, "defender/tests/test_planted.py",
             "from defender._tenants import default_tenants_root\n"
             "from defender import _tenants\n"
             "from defender.tests._tenants1106 import playground_tenant\n"
+            "from defender.tests import _tenants1106 as T\n"
+            "SETTINGS = T.PLAYGROUND_SETTINGS\n"
             "ARGV = ['--tenants-root', 'x']\n"
             "LAB = 'knowledge/tenants/playground/settings'\n"
             "def f(root):\n    return _tenants.tenant_dir(root, 'playground')\n")
     S.plant(planted, ".github/workflows/ci.yml", "run: lint --tenants-root knowledge/tenants\n")
     control = "\n".join(lab_reach_census(planted))
     for needle in ("default_tenants_root", "playground_tenant", "spells --tenants-root",
-                   "_tenants.tenant_dir", ".github/workflows/ci.yml"):
+                   "_tenants.tenant_dir", ".github/workflows/ci.yml",
+                   ".PLAYGROUND_SETTINGS (the retired lab's path)",
+                   "test_planted.py:7: spells the retired lab's path"):
         assert needle in control, f"the census misses a planted {needle!r}:\n{control}"
-    assert "test_planted.py:5:" not in control, f"the census flags a path-only read (H2 exempts it):\n{control}"
 
     spec_suite = Path(__file__).resolve().parent
-    found = lab_reach_census(REPO, exclude=(spec_suite,))
+    migrate_test = DEFENDER / "tests" / "test_1120_migrate.py"
+    found = lab_reach_census(REPO, exclude=(spec_suite, migrate_test))
     files = sorted({f.split(":", 1)[0] for f in found})
     assert found == [], (
         f"{len(found)} site(s) in {len(files)} file(s) still reach the lab through the removed "
@@ -751,19 +773,19 @@ def test_1120_s9_adapter_gains_a_verb_while_lab_is_walked_by_no_gate(tmp_path: P
 # R5 — the path-only readers survive piece 1 (H2).
 # ======================================================================================
 
-def test_1120_the_path_only_readers_still_find_the_lab_by_path_and_no_removed_symbol() -> None:
-    """R5 (path_only_tests, H2): piece 1 removes the tenants-root RESOLVER, not the lab. The
-    58 path-only test files keep reading knowledge/tenants/playground by path until D9 step
-    7, so the lab stays committed there in piece 1: its settings half holds the required
-    settings, its table still loads through the unchanged settings loader with a gather grant,
-    and its agent half exists. The symbol half — that none of those files reaches the lab
-    through a removed symbol or flag — is o10_tests_need_no_tenant_repo's census."""
-    lab_settings = H.LAB / "settings"
-    missing = [rel for rel in H.REQUIRED_SETTINGS if not (lab_settings / rel).is_file()]
-    assert missing == [], f"piece 1 removed the lab's {missing} before D9 step 7 (H2)"
-    assert (H.LAB / "agent").is_dir(), "piece 1 removed the lab's agent half before D9 step 7"
-    grants = verb_dispositions.run_grants(lab_settings)
-    assert grants.gather.entries, "the lab's table no longer grants gather anything"
+def test_1120_the_lab_is_retired_from_the_checkout() -> None:
+    """R5 superseded (human, PR #1157: "Fold" — #1158 folded into piece 1, D9 step 7 reached
+    early): the lab is no longer committed — the checkout's git tracks nothing under
+    knowledge/tenants/ — and the template and the fixture, the two committed tenants, are.
+    That no test reads the lab by path or symbol is o10_tests_need_no_tenant_repo's census."""
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "--cached", "--", LAB_TREE,
+         "knowledge/tenant-template", "knowledge/tenant-fixture"],
+        capture_output=True, text=True, check=True, timeout=60).stdout.splitlines()
+    lab = [t for t in tracked if t.startswith(LAB_TREE + "/")]
+    assert lab == [], f"the checkout still commits the retired lab: {lab[:5]}"
+    for kept in ("knowledge/tenant-template/", "knowledge/tenant-fixture/"):
+        assert any(t.startswith(kept) for t in tracked), f"the checkout no longer commits {kept}"
 
 
 # ======================================================================================

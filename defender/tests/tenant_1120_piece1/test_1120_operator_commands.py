@@ -9,10 +9,10 @@ each command's own idiom (M7: `validate_scaffold` is advisory and prints it as a
 traceback. The settings loaders that survive the move unchanged take the folder as a parameter,
 so each is handed the ACCEPTED tenant's `settings` and must read the file there (R7).
 
-The checkout's lab (`knowledge/tenants/playground`) stays committed in piece 1, so the scenarios
-that ask "which copy was read" use the id `playground` in the data root with settings that
-DIFFER from the lab's: a gather grant, a `config.env` marker, a missing config key. The lab is
-never written. Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the
+The checkout's lab is retired (human, PR #1157: #1158 folded in), so the scenarios that ask
+"which copy was read" use the id `playground` in the data root with settings that DIFFER from
+the committed fixture's (the lab's frozen copy): a gather grant, a `config.env` marker, a
+missing config key, and assert nothing under the checkout's `knowledge/` was reported. Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the
 census lint) run as processes; `policy_cli`, `run.main`, the launcher and
 `generate_case` are driven in-process through their own seams. No transport ever leaves the
 host: every `ticket_adapter` leg either stops at a named config fault or runs against a docker
@@ -52,15 +52,15 @@ CENSUS_LINT = H.REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.p
 #: fast on it instead of reaching a network.
 NO_SUCH_DOCKER_CONTEXT = {"SOC_PLAYGROUND_DOCKER_CONTEXT": "spec1120-no-such-context"}
 
-#: A table that loads but grants gather no query verb — a table that DIFFERS from the lab's
-#: (the lab grants gather dozens of query verbs), so a command that builds gather's grant from
-#: it is refused naming it, and one that read the lab would not be.
+#: A table that loads but grants gather no query verb — a table that DIFFERS from the fixture's
+#: (the fixture grants gather dozens of query verbs), so a command that builds gather's grant from
+#: it is refused naming it, and one that read a checkout copy would not be.
 HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]}\n"
 
 #: A `verb-grants.yaml` that is not YAML (an unclosed flow mapping) — the unloadable table.
 UNPARSEABLE_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]\n"
 
-#: The fixture's (and the lab's) withheld `cmdb.list-roles` row; the loader test's data-root
+#: The fixture's withheld `cmdb.list-roles` row; the loader test's data-root
 #: table grants it instead, so a grant for it can only have come from the data-root copy.
 CMDB_LIST_ROLES_WITHHELD = (
     '    list-roles:\n      roles: []\n'
@@ -143,12 +143,13 @@ def _census_lint(repo: Path) -> Any:
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """The checkout's knowledge/tenants/playground still holds the lab settings. Under
+    """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/
+    holds only the template and the fixture, a complete copy of the lab's settings. Under
     DEFENDER_DATA_ROOT the tenant playground has knowledge/settings that differ: a
     verb-grants.yaml granting gather only a health-check, and a systems/ticket/config.env
     carrying a distinct marker key and lacking TICKET_TIMEOUT_SEC. In that setup policy_cli
     gather --tenant playground builds gather's grant from the data-root table (refused naming
-    <root>/playground/knowledge/settings/verb-grants.yaml, where the lab's table would build a
+    <root>/playground/knowledge/settings/verb-grants.yaml, where the fixture's table would build a
     policy; with the fixture's table put back it builds one); ticket_adapter --tenant
     playground health-check addresses the data-root config.env (its config fault names that
     file); and validate_scaffold ticket --tenant playground checks the data-root config.env (it
@@ -167,7 +168,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, "policy_cli built gather's policy from a table that grants it no query"
     assert str(table) in text, f"policy_cli's refusal does not name the data-root table:\n{text}"
-    assert str(H.LAB) not in text, f"policy_cli read the checkout's lab:\n{text}"
+    assert str(H.KNOWLEDGE_ROOT) not in text, f"policy_cli read the checkout's knowledge/:\n{text}"
     shutil.copyfile(H.FIXTURE / "settings" / "verb-grants.yaml", table)
     rc, text = _policy_gather(tmp_path, tid)
     assert rc == 0, f"policy_cli refused the data-root tenant's granting table: {text}"
@@ -180,7 +181,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
         assert "Traceback (most recent call last)" not in out, out
         assert str(config) in out, (
             f"ticket_adapter did not address the data-root config ({defender_dir_env}):\n{out}")
-        assert str(H.LAB) not in out, out
+        assert str(H.KNOWLEDGE_ROOT) not in out, out
         assert "OTHER_TREE" not in out, out
         # validate_scaffold: the data-root config.env is the one checked.
         out = H.output(_validate_scaffold(data_root, tid, unset=unset, **defender_dir_env))
@@ -189,7 +190,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
             f"validate_scaffold did not check the data-root config.env ({defender_dir_env}):"
             f"\n{out}")
         assert "OTHER_TREE" not in out, out
-        assert str(H.LAB) not in out, out
+        assert str(H.KNOWLEDGE_ROOT) not in out, out
 
 
 def test_1120_ticket_adapter_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
@@ -559,7 +560,7 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
     """Every settings-half loader that survives the move unchanged is handed the accepted
     Tenant's settings folder, <root>/acme/knowledge/settings, and reads the file there — never
-    the checkout's lab: verb_dispositions.run_grants (the data-root table's extra
+    a checkout copy: verb_dispositions.run_grants (the data-root table's extra
     cmdb.list-roles grant) and dispositions_path; lead_zero_config.lead_zero_config_path;
     case_ticket._mapping_path; elastic_adapter.config_path (the data-root cluster marker);
     _stub_transport._config_path and load_config for a VerbContext carrying that folder (the
@@ -595,7 +596,7 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     grants = verb_dispositions.run_grants(settings)
     assert Path(grants.path) == expected / "verb-grants.yaml"
     assert ("cmdb", "list-roles") in {(s, v) for s, v, *_ in grants.gather.entries}, (
-        "run_grants did not read the data-root table (the lab withholds cmdb.list-roles)")
+        "run_grants did not read the data-root table (the fixture withholds cmdb.list-roles)")
     assert verb_dispositions.dispositions_path(settings) == expected / "verb-grants.yaml"
     assert lead_zero_config.lead_zero_config_path(settings) == expected / "lead-zero.yaml"
     assert case_ticket._mapping_path(settings) == (

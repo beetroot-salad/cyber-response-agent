@@ -15,11 +15,11 @@ THE SEAMS THIS MODULE REACHES — each imported at CALL time, never at collectio
   * `VerbContext(..., settings_dir=...)` — a REQUIRED field with no default.
 
 A test that names no tenant runs as the committed fixture (`knowledge/tenant-fixture/`), set up
-under its own tmp data root (`fixture_tenant`, #1120 H2). The `PLAYGROUND*` constants are the
-lab's PATH, kept for the path-only readers until D9 step 7; no helper here resolves it.
+under its own tmp data root (`fixture_tenant`, #1120 H2). The lab is retired (#1120, PR #1157):
+a test that wants a complete committed settings folder reads `FIXTURE_SETTINGS`, its copy.
 
 THE ORACLES ARE LITERALS. Every PLANTED tenant is written from data spelled here — never copied
-from the checkout's `knowledge/tenants/playground/`, never from the retired
+from a committed tenant, never from the retired
 `defender/knowledge/environment/` — so an expected value can disagree with the file under test,
 and the fixtures do not depend on where the committed copy lives.
 
@@ -37,15 +37,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 
-#: The committed tenants root and template, as the design lays them out (M1). Spelled as
-#: literals rather than through `default_tenants_root`, so the layout test can compare the
-#: helper's answer against an independent statement of where the folder is.
-TENANTS_ROOT = REPO_ROOT / "knowledge" / "tenants"
+#: The committed template, as the design lays it out (M1), spelled as a literal.
 TEMPLATE_DIR = REPO_ROOT / "knowledge" / "tenant-template"
+#: The retired lab's id: tests still name a tenant `playground` under their own data root.
 PLAYGROUND_ID = "playground"
-PLAYGROUND = TENANTS_ROOT / PLAYGROUND_ID
-PLAYGROUND_SETTINGS = PLAYGROUND / "settings"
-PLAYGROUND_AGENT = PLAYGROUND / "agent"
 TEMPLATE_SETTINGS = TEMPLATE_DIR / "settings"
 #: The frozen test fixture tenant (#1120 H2): what a test runs as when it names no tenant.
 FIXTURE = REPO_ROOT / "knowledge" / "tenant-fixture"
@@ -504,10 +499,7 @@ __all__ = [
     "FIXTURE_SETTINGS",
     "GATHER_PAIRS_A",
     "GATHER_PAIRS_B",
-    "PLAYGROUND",
-    "PLAYGROUND_AGENT",
     "PLAYGROUND_ID",
-    "PLAYGROUND_SETTINGS",
     "REPO_ROOT",
     "REQUIRED_FILES",
     "RETIRED_KNOWLEDGE",
@@ -518,7 +510,6 @@ __all__ = [
     "TEMPLATE_AGENT",
     "TEMPLATE_DIR",
     "TEMPLATE_SETTINGS",
-    "TENANTS_ROOT",
     "config_texts",
     "lead_zero_text",
     "mapping_text",

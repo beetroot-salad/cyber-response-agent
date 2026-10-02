@@ -55,7 +55,7 @@ def _shipped_rows():
     from defender.tests import _tenants1106 as T1106
 
     return verb_dispositions.load_dispositions(
-        verb_dispositions.dispositions_path(T1106.PLAYGROUND_SETTINGS))
+        verb_dispositions.dispositions_path(T1106.FIXTURE_SETTINGS))
 REPO_ROOT = PATHS.repo_root
 URL_BASE = "http://case-history.test"
 

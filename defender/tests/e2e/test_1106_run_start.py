@@ -356,6 +356,6 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             assert payload, seam
             assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
             assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
-            assert not T.reaches(payload, T.PLAYGROUND_SETTINGS), f"{seam} got the checkout's"
+            assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"
             assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"
 

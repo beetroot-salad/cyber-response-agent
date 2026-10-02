@@ -275,7 +275,7 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
         # #1106: the run's tenant settings folder — the committed playground's unless a caller
         # hands its own (the folder every read resolved before the run had to hand it in).
         settings_dir=(settings_dir if settings_dir is not None
-                      else _tenants1106.PLAYGROUND_SETTINGS),
+                      else _tenants1106.FIXTURE_SETTINGS),
         env={
             "PATH": str(fake_docker(tmp_path)),
             "DOCKER_CALL_LOG": str(tmp_path / DOCKER_LOG),

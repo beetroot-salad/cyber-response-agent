@@ -587,9 +587,9 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
 
     ctx_a = VerbContext(defender_dir=a, run_dir=tmp_path / "run", env={},
-                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                        settings_dir=_tenants1106.FIXTURE_SETTINGS)
     ctx_b = VerbContext(defender_dir=b, run_dir=tmp_path / "run", env={},
-                        settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                        settings_dir=_tenants1106.FIXTURE_SETTINGS)
     fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
     fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
 

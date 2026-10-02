@@ -6,10 +6,10 @@ Two lanes, each driven through the REAL runtime on the replay harness
 `make_model` seam and every registry either the production one or the harness's `FakeVerbs`:
 
   * O1 — `run.main` resolves the run's tenant from `DEFENDER_DATA_ROOT` (never from the
-    checkout's `knowledge/tenants/`), and the gather lead the run then drives is granted
-    exactly that tenant's table. The data-root tenant carries the committed lab's OWN id
-    (`playground`) and a table that differs from the lab's by one gather verb, so a lane that
-    resolved the checkout's lab by id is caught by value, not only by path.
+    checkout's `knowledge/`), and the gather lead the run then drives is granted exactly that
+    tenant's table. The data-root tenant carries the retired lab's OWN id (`playground`) and a
+    table that differs from the committed fixture's (the lab's frozen copy) by one gather
+    verb, so a lane that read a checkout copy is caught by value, not only by path.
   * H2 (the replay harness's R5 survival) — a replay that names no tenant runs as the fixture
     tenant (`knowledge/tenant-fixture/`) set up under the test's own data root, never as the
     checkout's lab resolved through the removed `tenant_dir`.
@@ -33,11 +33,11 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: The committed lab's own id: the data-root tenant carries it, so reading the checkout's lab
-#: by id would be caught by the table's value.
+#: The retired lab's own id: the data-root tenant carries it, so reading a checkout copy would
+#: be caught by the table's value.
 LAB_ID = "playground"
 
-#: The one gather pair the data-root table withholds and the checkout's lab grants.
+#: The one gather pair the data-root table withholds and the checkout's fixture grants.
 WITHHELD = ("change-mgmt", "list-changes")
 
 LEAD = "l-001"
@@ -46,7 +46,7 @@ DONE = R.Turn(text="Summary: measured the lead.")
 
 def _withhold_in_data_root_table(settings: Path) -> None:
     """Rewrite the placed tenant's `list-changes` row as withheld (roles: [] with a reason) —
-    one gather verb fewer than the lab grants, and still total over the census."""
+    one gather verb fewer than the fixture grants, and still total over the census."""
     H.edit_table(settings, drop=("    list-changes:",))
     table = settings / "verb-grants.yaml"
     text = table.read_text(encoding="utf-8")
@@ -90,9 +90,10 @@ def _under(path: Path, parent: Path) -> bool:
 def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_root_copy(
         data_root: Path, tmp_path: Path) -> None:
     """This drives run.main over an alert with --tenant playground from this checkout, whose
-    committed lab (knowledge/tenants/playground/settings) grants gather change-mgmt
-    list-changes. A tmp data root holds the same id, whose knowledge/settings/verb-grants.yaml
-    differs from the lab's by that one gather verb (withheld, with a reason). The RunTenant
+    committed fixture (knowledge/tenant-fixture/settings, the retired lab's frozen copy) grants
+    gather change-mgmt list-changes. A tmp data root holds the same id, whose
+    knowledge/settings/verb-grants.yaml differs from the fixture's by that one gather verb
+    (withheld, with a reason). The RunTenant
     run.main hands its lifecycle reads the data-root copy: its tenant's settings is
     <root>/playground/knowledge/settings, its table path lies there, and its gather grant is
     exactly the fixture's census minus the withheld pair. No path the run resolved for its
@@ -100,11 +101,11 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
     The gather lead the run then drives, through the real driver on that tenant and those
     grants, is granted exactly the data-root table: list_verbs for change-mgmt publishes
     active-changes but not list-changes, and a query for list-changes is refused as not
-    granted — the lab's grant would have admitted it."""
-    lab_table = (H.LAB / "settings" / "verb-grants.yaml").read_text(encoding="utf-8")
-    assert "    list-changes: {roles: [gather]}" in lab_table, (
-        "precondition: the checkout's lab no longer grants change-mgmt list-changes, so this "
-        "scenario no longer tells the lab's table from the data root's")
+    granted — the fixture's grant would have admitted it."""
+    checkout_table = (H.FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8")
+    assert "    list-changes: {roles: [gather]}" in checkout_table, (
+        "precondition: the checkout's fixture no longer grants change-mgmt list-changes, so "
+        "this scenario no longer tells a checkout copy's table from the data root's")
     H.adopted(data_root, LAB_ID)
     settings = H.settings_dir(data_root, LAB_ID)
     _withhold_in_data_root_table(settings)
@@ -119,7 +120,7 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
 
     assert Path(run_tenant.settings) == settings, (
         f"the run read its tenant's settings from {run_tenant.settings}, not the data root's "
-        f"copy {settings} — the checkout's lab decided the run")
+        f"copy {settings} — a checkout copy decided the run")
     assert Path(run_tenant.tenant.settings) == settings
     assert Path(run_tenant.grants.path) == settings / "verb-grants.yaml"
     expected = set(D995.GATHER_CENSUS) - {WITHHELD}

@@ -121,11 +121,11 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount():
     argv = box_mod._create_argv(
         "defender-run-r1106", Path("/workspace/.runs/r1106"), Path("/workspace/defender"),
         box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
-        tenant_agent=Path("/workspace/knowledge/tenants/acme/agent"),
+        tenant_agent=Path("/workspace/.defender-data/acme/knowledge/agent"),
     ).argv
     joined = " ".join(argv)
     assert (
-        "type=bind,source=/home/dev/projects/repo/knowledge/tenants/acme/agent,"
+        "type=bind,source=/home/dev/projects/repo/.defender-data/acme/knowledge/agent,"
         f"target={box_mod.TENANT_AGENT_TARGET},readonly"
     ) in joined, joined
 

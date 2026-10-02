@@ -43,7 +43,8 @@ the container never fetches. Run setup once the clone has exited 0 — setup ado
 folder as it is (it copies nothing and runs no git), checks it, and writes the row last.
 
 A data root made before #1120 (`<id>/tenant.json`, `runs/` and `sessions/`, no `knowledge/`) has
-no tenant repo to clone: on the host, build its knowledge folder once from this checkout with
+no tenant repo to clone: on the host, build its knowledge folder once from this checkout's git
+history (a full clone, not a shallow one) with
 `python3 defender/scripts/tenant.py migrate playground "<HOST_DATA_ROOT>/playground/knowledge"`
 (one-off), then run the setup step above.
 

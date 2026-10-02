@@ -196,7 +196,7 @@ def current_settings() -> Path:
     playground tenant's — the file a driven run resolves when nothing repoints it."""
     from defender.tests import _tenants1106
 
-    return _PLANTED.get("settings", _tenants1106.PLAYGROUND_SETTINGS)
+    return _PLANTED.get("settings", _tenants1106.FIXTURE_SETTINGS)
 
 
 def shipped_released_status_and_author() -> tuple[str, str]:
@@ -226,7 +226,7 @@ def shipped_mapping_doc() -> dict[str, Any]:
     from defender.tests import _tenants1106
 
     return yaml.safe_load(
-        (_tenants1106.PLAYGROUND_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
+        (_tenants1106.FIXTURE_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------

@@ -769,7 +769,7 @@ def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
         record = review.review(family_mod.parse_family(doc), episode=episode,
                                adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
                                door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                               settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+                               settings_dir=_tenants1106.FIXTURE_SETTINGS,
                                runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]

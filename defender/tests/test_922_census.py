@@ -157,7 +157,7 @@ def shipped_table():
     """
     from defender.tests import _tenants1106 as T1106
 
-    return load_dispositions(dispositions_path(T1106.PLAYGROUND_SETTINGS))
+    return load_dispositions(dispositions_path(T1106.FIXTURE_SETTINGS))
 
 
 

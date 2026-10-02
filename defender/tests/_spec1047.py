@@ -397,7 +397,7 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
 def _playground_settings() -> Path:
     from defender.tests import _tenants1106
 
-    return _tenants1106.PLAYGROUND_SETTINGS
+    return _tenants1106.FIXTURE_SETTINGS
 
 
 def receipt(run_dir: Path) -> dict | None:
