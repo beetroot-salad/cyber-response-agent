@@ -615,18 +615,14 @@ def _refuse_links_and_special_files(bound: _real_io.Bound, folder: Path, half: s
     pending = [half]
     while pending:
         current = pending.pop()
-        listed = bound.under(current).entries()
-        if listed.entries is None:
+        listed = _real_io.stat_entries(bound.under(current))
+        if listed.stats is None:
             raise TenantRefused(f"{_entry_shown(folder, current)} could not be checked for links: "
                                 f"{listed.reason or 'it vanished during the check'}")
-        for name in sorted(listed.entries):
+        for name, st in sorted(listed.stats.items()):
             rel = f"{current}/{name}"
             entry = _entry_shown(folder, rel)
-            found = _real_io.stat_entry(bound, rel)
-            if found.st is None:
-                raise TenantRefused(f"{entry} could not be checked: "
-                                    f"{found.reason or 'it vanished during the check'}")
-            mode = found.st.st_mode
+            mode = st.st_mode
             if stat.S_ISLNK(mode):
                 raise TenantRefused(
                     f"{entry} is a link — a tenant's knowledge holds no links: a link can "
@@ -637,9 +633,9 @@ def _refuse_links_and_special_files(bound: _real_io.Bound, folder: Path, half: s
                 raise TenantRefused(
                     f"{entry} is not a regular file or directory — a tenant's knowledge holds "
                     "no FIFOs, sockets or devices")
-            elif _real_io.is_hard_linked(found.st):
+            elif _real_io.is_hard_linked(st):
                 raise TenantRefused(
-                    f"{entry} is a hard link ({found.st.st_nlink} names for one file) — its "
+                    f"{entry} is a hard link ({st.st_nlink} names for one file) — its "
                     "bytes may be another tenant's")
 
 

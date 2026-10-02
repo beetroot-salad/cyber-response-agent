@@ -259,6 +259,14 @@ class StatRead(_Read):
     st: os.stat_result | None
 
 
+@dataclasses.dataclass(frozen=True)
+class StatsRead(_Read):
+    """A `bind`ed reader's answer to "what stands in this directory" (`stat_entries`): present
+    (`stats` maps each name to its own no-follow `stat`), absent, or refused."""
+
+    stats: dict[str, os.stat_result] | None
+
+
 # -- the core: reaching a file below a trust root (#1111) -----------------------------------
 #
 # Every no-follow read and write in this module past the path seams (`Bound`, and the rooted
@@ -601,6 +609,36 @@ def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
     except OSError as e:
         return StatRead(name=spelling, st=None, absent=False, reason=_read_reason(e))
     return StatRead(name=spelling, st=st, absent=False, reason=None)
+
+
+def stat_entries(bound: Bound) -> StatsRead:
+    """Every entry of the directory `bound` names, each judged without following it: the
+    directory is reached as `Bound.entries` reaches it (once), and each entry is `stat`ed
+    no-follow relative to it — one call per entry, where `entries()` plus a `stat_entry` per
+    name would walk from the root again for every one. Opens no entry: a FIFO cannot block
+    it. A function beside `Bound`, like `stat_entry`, for the same reason (#1133 O3)."""
+    spelling = "/".join(bound._prefix)
+    if bound._absent:
+        return StatsRead(name=spelling, stats=None, absent=True, reason=None)
+    if bound._error is not None:
+        return StatsRead(name=spelling, stats=None, absent=False, reason=bound._error)
+    try:
+        with bound._handle.dup() as root_fd:
+            kind, payload = bound._directory_fd(root_fd)
+    except OSError as e:  # the root closed: the dup's `EBADF`
+        return StatsRead(name=spelling, stats=None, absent=False, reason=(e.strerror or str(e)))
+    if kind != "leaf":
+        return StatsRead(name=spelling, stats=None, absent=kind == "absent",
+                         reason=None if kind == "absent" else str(payload))
+    fd = payload
+    try:
+        with bound._os.scandir(fd) as it:
+            stats = {entry.name: entry.stat(follow_symlinks=False) for entry in it}
+    except OSError as e:
+        return StatsRead(name=spelling, stats=None, absent=False, reason=_read_reason(e))
+    finally:
+        bound._os.close(fd)
+    return StatsRead(name=spelling, stats=stats, absent=False, reason=None)
 
 
 def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
