@@ -83,14 +83,16 @@ def correlation_dispatch(
     """Item 3's dispatch identity for one tenant: its `lead-zero.yaml` id, resolved against
     `templates` and checked for agreement with `grant`, its table's correlation grant.
     Raises `LeadZeroConfigError`, `CorrelationDispatchError` or `GrantError`, each naming the
-    file an operator edits — `lead-zero.yaml` — whichever of the three disagrees."""
+    file an operator edits: `verb-grants.yaml` for a correlation grant of the wrong shape,
+    `lead-zero.yaml` for everything else."""
     from defender.runtime import lead_zero as lead_zero_mod
     from defender.runtime.lead_zero_config import lead_zero_config_path, load_correlation_template
+    from defender.runtime.verb_dispositions import dispositions_path
 
     config = lead_zero_config_path(settings)
     template_id = load_correlation_template(config)
     return lead_zero_mod.resolve_correlation_dispatch(
-        template_id, templates, grant, source=config)
+        template_id, templates, grant, source=config, table=dispositions_path(settings))
 
 
 def refusals() -> tuple[type[Exception], ...]:

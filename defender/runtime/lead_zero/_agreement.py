@@ -52,7 +52,7 @@ def _pair(system: str, verb: str) -> str:
 
 def resolve_correlation_dispatch(
     template_id: str, templates: Iterable[QueryTemplate], grant: VerbGrant, *,
-    source: Path | None = None,
+    source: Path | None = None, table: Path | None = None,
 ) -> CorrelationDispatch:
     """Resolve `template_id` against `templates` and check it agrees with `grant`.
 
@@ -67,16 +67,18 @@ def resolve_correlation_dispatch(
       (d) `(template.system, template.verb)` is not exactly the holder's one query pair.
 
     The grant passes through unchanged: the config selects a template, only the table grants.
-    `source`, when given, is the config file the id was read from: every refusal opens with it,
-    so an operator is told which file to edit.
+    `source`, when given, is the config file the id was read from, and `table` the grant
+    table the grant was loaded from: each refusal opens with the file its fault is in, so an
+    operator is told which one to edit — the table for a grant of the wrong shape, the config
+    for everything about the template it names.
     """
-    def at(message: str) -> str:
-        return message if source is None else f"{source}: {message}"
+    def at(message: str, where: Path | None = source) -> str:
+        return message if where is None else f"{where}: {message}"
 
     try:
         system = correlation_system(grant)
     except GrantError as two_systems:
-        raise GrantError(at(str(two_systems))) from two_systems
+        raise GrantError(at(str(two_systems), table)) from two_systems
     if system is None:
         return CorrelationDispatch(template_id, None, grant)
     # The loader already refuses a second query verb; this guards grants built elsewhere.
@@ -85,7 +87,8 @@ def resolve_correlation_dispatch(
         raise GrantError(at(
             f"the correlation grant for role {grant.role!r} holds {len(query_pairs)} query "
             f"pairs ({[_pair(s, v) for s, v in query_pairs]}) — the template is checked "
-            "against ONE, and only a one-query-pair grant determines it."
+            "against ONE, and only a one-query-pair grant determines it.",
+            table,
         ))
     table_system, table_verb = query_pairs[0]
     granted = _pair(table_system, table_verb)
