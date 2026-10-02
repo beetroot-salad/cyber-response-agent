@@ -745,14 +745,17 @@ def test_a_gitignored_name_the_agent_made_survives_a_faulted_tick(tmp_path):
 
     def agent(rows, batch_id, cfg):
         put(cfg.corpus_dir / "x.log", "ignored by git\n")
+        put(cfg.corpus_dir / "build" / "out.bin", "ignored by git too\n")
         put(cfg.corpus_dir / "y.md", lesson_text("f1"))
         raise drain.AuthorError("injected after the writes")
 
-    sc = _scene(tmp_path, seed_corpus={SEEDED: lesson_text("f0"), ".gitignore": "*.log\n"},
+    sc = _scene(tmp_path, seed_corpus={SEEDED: lesson_text("f0"),
+                                       ".gitignore": "*.log\nbuild/\n"},
                 curator=S.FakeCurator(also=agent))
 
     assert _run(sc) == ("rc", 2)
     assert (sc.corpus / "x.log").read_text() == "ignored by git\n"
+    assert (sc.corpus / "build" / "out.bin").read_text() == "ignored by git too\n"
     assert not (sc.corpus / "y.md").exists()
 
 

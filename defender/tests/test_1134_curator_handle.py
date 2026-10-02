@@ -54,6 +54,7 @@ import errno
 import inspect
 import logging
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -651,14 +652,16 @@ def test_a_gitignored_name_the_agent_made_survives_the_fault_restore(tmp_path):
     recursive sweep deleted it). Positive control in the same call: the agent's `y.md`, which git
     reports, is swept."""
     w = world(tmp_path)
-    put(w.corpus_dir / ".gitignore", "*.log\n")
+    put(w.corpus_dir / ".gitignore", "*.log\n__pycache__/\n")
     snapshot = _baseline(w)
     put(w.corpus_dir / "x.log", b"ignored by git\n")
+    put(w.corpus_dir / "__pycache__" / "y.cpython-311.pyc", b"ignored by git too\n")
     put(w.corpus_dir / "y.md", b"the agent's own\n")
 
     _restore(w, snapshot)
 
     assert (w.corpus_dir / "x.log").read_bytes() == b"ignored by git\n"
+    assert (w.corpus_dir / "__pycache__" / "y.cpython-311.pyc").exists()
     assert not (w.corpus_dir / "y.md").exists()
 
 
@@ -704,7 +707,7 @@ def test_a_broken_index_still_sweeps_through_gits_worktree_listing(tmp_path, bro
     assert (w.corpus_dir / "a.md").read_bytes() == snapshot["a.md"]
     assert (w.corpus_dir / "b.md").read_bytes() == snapshot["b.md"]
     said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert any("git status" in m for m in said), said
+    assert any(re.search(r"git status[^\n]*rc=\d+", m) for m in said), said
     assert not any(str(w.tmp) in m for m in said), said
     assert sorted(p.name for p in (w.repo / ".git").iterdir()) == git_dir_before
 
@@ -732,7 +735,8 @@ def test_a_restore_git_cannot_answer_at_all_sweeps_nothing_but_still_rewrites(tm
     assert (w.corpus_dir / "a.md").read_bytes() == snapshot["a.md"]
     assert (w.corpus_dir / "b.md").read_bytes() == snapshot["b.md"]
     said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert any("git status" in m and "ls-files" in m for m in said), said
+    assert any(re.search(r"git status\D*rc=\d+", m) and re.search(r"ls-files\D*rc=\d+", m)
+               for m in said), said
     assert not any(str(w.tmp) in m for m in said), said
 
 
@@ -1521,10 +1525,11 @@ def _disk_touches(tree: ast.Module) -> list[tuple[int, str]]:
     found = []
     # `import os` for `os.environ` alone (a git child's environment) reaches no disk; any other
     # use of the module (a call, `os.path`, ...) keeps the import a touch.
-    os_uses = {n.attr for n in ast.walk(tree)
-               if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
-               and n.value.id == "os"}
-    environ_only = os_uses <= {"environ"}
+    environ_reads = {id(n.value) for n in ast.walk(tree)
+                     if isinstance(n, ast.Attribute) and n.attr == "environ"
+                     and isinstance(n.value, ast.Name) and n.value.id == "os"}
+    os_names = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "os"]
+    environ_only = all(id(n) in environ_reads for n in os_names)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             spelled = [node.module or ""] if isinstance(node, ast.ImportFrom) else []
@@ -1537,8 +1542,12 @@ def _disk_touches(tree: ast.Module) -> list[tuple[int, str]]:
         elif isinstance(node, ast.Call):
             origin = astlib.callee(node, env) or ""
             method = node.func.attr if isinstance(node.func, ast.Attribute) else ""
+            looked_up = (origin in ("builtins.getattr", "builtins.vars") and node.args
+                         and isinstance(node.args[0], ast.Name)
+                         and node.args[0].id in {*_DISK_MODULES, "_io", "lane_trees"})
             if (origin == "builtins.open" or origin.split(".")[0] in _DISK_MODULES
-                    or method in _DISK_METHODS or method.startswith(_DISK_PREFIXES)):
+                    or method in _DISK_METHODS or method.startswith(_DISK_PREFIXES)
+                    or looked_up):
                 found.append((node.lineno, ast.unparse(node)))
     return found
 
@@ -1576,6 +1585,9 @@ def test_git_py_makes_no_filesystem_call_and_imports_no_handle():
     environ_only = ast.parse("import os\nimport subprocess\n"
                              "def f():\n    subprocess.run(['git'], env={**os.environ})\n")
     assert _disk_touches(environ_only) == []
+    looked_up = ast.parse("import os\nPROBE = 'lstat'\n"
+                          "def f(p):\n    x = os.environ\n    getattr(os, PROBE)(p)\n")
+    assert {line for line, _ in _disk_touches(looked_up)} == {1, 5}, _disk_touches(looked_up)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1594,7 +1606,8 @@ _CURATOR_MODULES = {
 #: predicates): B2's own lister included, which the curator does not use (C1).
 _LISTERS = frozenset({"list_tree", "entries", "under", "walk", "kind", "stat", "lstat",
                       "iterdir", "glob", "rglob", "scandir", "listdir", "exists", "lexists",
-                      "is_file", "is_dir", "is_symlink"})
+                      "is_file", "is_dir", "is_symlink", "isdir", "isfile", "islink",
+                      "access"})
 
 
 def _function(module, name: str) -> ast.FunctionDef:
