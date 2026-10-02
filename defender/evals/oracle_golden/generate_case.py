@@ -418,8 +418,9 @@ def _accept(tenant_id: object) -> Tenant:
     from defender import _tenant
     from defender._paths import PATHS
 
+    requested = _tenant.requested_tenant_id(tenant_id)
     return _tenant.accept_tenant(
-        _tenant.resolve_data_root(), tenant_id, defender_dir=PATHS.defender_dir)
+        _tenant.resolve_data_root(), requested, defender_dir=PATHS.defender_dir)
 
 
 def main(argv: list[str] | None = None) -> int:

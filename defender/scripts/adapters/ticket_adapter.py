@@ -196,10 +196,9 @@ def _accepted_settings(tenant_id: str | None, defender_dir: Path) -> Path:
     """The `--tenant`'s settings half, accepted under `$DEFENDER_DATA_ROOT` as a run accepts it
     — never a folder found through `$DEFENDER_DIR` or the checkout — and held outside
     `defender_dir`, the code tree this command serves the verb against."""
-    if tenant_id is None:
-        raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
+    requested = _tenant.requested_tenant_id(tenant_id)
     return _tenant.accept_tenant(
-        _tenant.resolve_data_root(), tenant_id, defender_dir=defender_dir).settings
+        _tenant.resolve_data_root(), requested, defender_dir=defender_dir).settings
 
 
 def main():

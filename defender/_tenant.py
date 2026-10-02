@@ -429,6 +429,18 @@ class Tenant:
         return self._layout.agent
 
 
+def requested_tenant_id(raw: object) -> TenantId:
+    """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
+    every entry point applies to it before accepting: absent is refused (there is no default
+    tenant), anything else is held to `TenantId`. Reads nothing, so an entry point applies it
+    before it resolves the data root."""
+    if raw is None:
+        raise TenantRefused(
+            "--tenant is required: every request names its tenant, and there is no default "
+            "tenant")
+    return TenantId(raw)
+
+
 def accept_tenant(
     data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
 ) -> Tenant:

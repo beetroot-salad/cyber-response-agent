@@ -487,11 +487,7 @@ def _accept_request_tenant(
     checkout — a sibling's runs base, inside its held episode — and the tenant's settings must
     sit under none of it."""
     try:
-        if ns.tenant is None:
-            raise _tenant.TenantRefused(
-                "--tenant is required: every run names its tenant, a sibling included, and "
-                "there is no default")
-        tenant_id = _tenant.TenantId(ns.tenant)
+        tenant_id = _tenant.requested_tenant_id(ns.tenant)
         return _tenant.accept_tenant(
             _tenant.resolve_data_root(), tenant_id, defender_dir=DEFENDER_DIR,
             box_mounted=box_mounted)

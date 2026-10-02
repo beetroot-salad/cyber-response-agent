@@ -217,8 +217,9 @@ def main(argv: list[str]) -> int:
         from defender._paths import PATHS
 
         try:
+            requested = _tenant.requested_tenant_id(ns.tenant)
             tenant = _tenant.accept_tenant(
-                _tenant.resolve_data_root(), ns.tenant, defender_dir=PATHS.defender_dir)
+                _tenant.resolve_data_root(), requested, defender_dir=PATHS.defender_dir)
         except _tenant.TenantRefused as refused:
             print(f"[held_out] {refused}", file=sys.stderr)
             return 2

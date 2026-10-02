@@ -91,10 +91,9 @@ def _definition(role: AgentRole, defender_dir: Path, tenant: str | None) -> Agen
     from defender.runtime.driver import gather_def_for
 
     try:
-        if tenant is None:
-            raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
+        requested = _tenant.requested_tenant_id(tenant)
         run = run_tenant_mod.resolve_tenant(
-            _tenant.resolve_data_root(), tenant, defender_dir=defender_dir,
+            _tenant.resolve_data_root(), requested, defender_dir=defender_dir,
             dispatches_lead_zero=False)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"defender-policy: {refusal}")

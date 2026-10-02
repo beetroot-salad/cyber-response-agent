@@ -248,10 +248,9 @@ def main() -> None:
     # A tenant acceptance refuses only warns: the config check is advisory. The tenant is the
     # one under `$DEFENDER_DATA_ROOT`, never a folder found through `$DEFENDER_DIR`.
     try:
-        if args.tenant is None:
-            raise _tenant.TenantRefused("--tenant is required: there is no default tenant")
+        requested = _tenant.requested_tenant_id(args.tenant)
         settings_dir = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), args.tenant, defender_dir=defender).settings
+            _tenant.resolve_data_root(), requested, defender_dir=defender).settings
     except _tenant.TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")
