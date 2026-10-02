@@ -260,7 +260,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     metacharacter survives into the built URL as a delimiter."""
     seen = {}
 
-    def fake_request(c, cfg, url, system=None, method="GET", body=None, **_credentials):
+    def fake_request(c, cfg, url, system=None, method="GET", body=None):
         seen["url"] = url
         return {"tickets": [], "total": 0}
 

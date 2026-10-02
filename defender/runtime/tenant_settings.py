@@ -1,11 +1,11 @@
 """#1107 — the settings half of a run's tenant record: what each system's `config.env` says, parsed
-ONCE at resolve, and the lookup that hands out the tenant's secrets.
+ONCE at resolve.
 
 WHY IT EXISTS. Adapters used to find their URLs, container names and credentials themselves, when
 called: each parsed its own `config.env` and let the process environment override it, so "whose
 systems does this run talk to" was decided by how the process was launched. Here the file is read
 once, when the run's tenant is resolved (`run_tenant.resolve_run_tenant`), and the values ride the
-run as the record's `systems` / `elastic` / `secrets` fields. Nothing below the entry point reads
+run as the record's `systems` / `elastic` fields. Nothing below the entry point reads
 the process environment or the tenant folder for a setting again.
 
 FAULTS ARE VALUES, never raises, at resolve. A system whose `config.env` is missing, unreadable or
@@ -14,7 +14,10 @@ fault when CALLED (exit 2 → the breaker), and the run goes on (O5). `TenantRef
 its tenant-acceptance reasons.
 
 NO MODEL, NO PYDANTIC. The record's parts are plain read-only classes: a pydantic `ValidationError`
-echoes the offending field's repr, and a secret must never ride into error text (O4).
+echoes the offending field's repr into error text.
+
+NO SECRETS. Credential delivery (`*_SECRET_REF` references into a tenant `secrets.env`) is #1163;
+until it lands a `config.env` holds no secret, and the connect validator FAILs one.
 
 This module is outside `bash_exec`'s per-exec import closure (#1096) and must stay so.
 """
@@ -25,7 +28,7 @@ import errno
 import logging
 import os
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -37,18 +40,13 @@ _log = logging.getLogger(__name__)
 #: The one implemented access method (D2). A system's `<PREFIX>_TRANSPORT` names it.
 DOCKER_EXEC = "docker-exec"
 
-#: A reference key ends with this; its value names an entry of `settings/secrets.env` (D3).
-SECRET_REF_SUFFIX = "_SECRET_REF"
-
-SECRETS_FILE = "secrets.env"
-
 #: The text a missing system folder raises — one wording for "this tenant's settings do not
 #: configure this system", whether the folder is absent or its `config.env` is.
 NOT_CONFIGURED = "this tenant's settings do not configure this system"
 
-#: A settings file larger than this is not a settings file. Every one is read whole at resolve
-#: (or, for `secrets.env`, at each lookup), so an unbounded read would let one sparse file
-#: exhaust memory before any fault could be kept as a value.
+#: A settings file larger than this is not a settings file. Every one is read whole at resolve,
+#: so an unbounded read would let one sparse file exhaust memory before any fault could be kept
+#: as a value.
 SETTINGS_MAX_BYTES = 1 << 20
 
 #: The model-facing name of the tenant's settings folder, as `runtime.verbs.SETTINGS_POINTER`
@@ -68,10 +66,10 @@ _PREFIX_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 # --------------------------------------------------------------------------------------------
 
 def parse_env(text: str) -> dict[str, str]:
-    """`KEY=VALUE` lines of a `config.env` / `secrets.env`, as written. @owns config.env parse
+    """`KEY=VALUE` lines of a `config.env`, as written. @owns config.env parse
 
-    THE ONE PARSE for every settings file (the system configs, `secrets.env`, and the connect
-    validator that checks them) — two parsers had grown with different quote rules, so one
+    THE ONE PARSE for every settings file (the system configs, and the connect validator that
+    checks them) — two parsers had grown with different quote rules, so one
     file described two deployments. Rules:
       * blank lines, `#` comment lines and lines with no `=` are skipped; a `#` mid-line is part
         of the value;
@@ -119,8 +117,8 @@ def read_plain_fd(fd: int) -> bytes:
     it was opened has 0 names and still qualifies, so a rotation by rename never refuses a
     reader), and at most `SETTINGS_MAX_BYTES` long. `_Refused` otherwise.
 
-    THE ONE READ every settings file goes through: the system configs, the case-history mapping
-    and `secrets.env`."""
+    THE ONE READ every settings file goes through: the system configs and the case-history
+    mapping."""
     if not is_plain_entry(os.fstat(fd)):
         raise _Refused(errno.EINVAL, "not a plain, single-linked regular file")
     chunks = []
@@ -175,7 +173,7 @@ def read_env_file(path: Path, *, shown: str) -> dict[str, str]:
 
 
 def is_blank(value: str) -> bool:
-    """THE blank rule: empty or whitespace-only. Shared by the view, the lookup and the validator."""
+    """THE blank rule: empty or whitespace-only. Shared by the view and the validator."""
     return not value.strip()
 
 
@@ -323,139 +321,20 @@ def elastic_view(systems: Mapping[str, SystemConfig | ConfigFault]) -> ElasticSe
     return ElasticSettings(**{attr: entry[key] for attr, key in ELASTIC_KEYS.items()})
 
 
-# --------------------------------------------------------------------------------------------
-# Secrets.
-# --------------------------------------------------------------------------------------------
-
-#: What a `*_SECRET_REF` value must look like to be the NAME of a `secrets.env` entry: letters,
-#: digits and underscore, not starting with a digit. A value of any other shape is a secret pasted
-#: where a reference belongs (the connect validator FAILs it, naming only the key). Shape cannot
-#: tell a name from an alphanumeric secret, so a value that IS name-shaped is taken as a name.
-_SECRET_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def is_secret_name(value: str) -> bool:
-    """Whether `value` is shaped like the name of a `secrets.env` entry."""
-    return _SECRET_NAME.fullmatch(value) is not None
-
-
-def declared_secrets(systems: Mapping[str, SystemConfig | ConfigFault]) -> dict[str, tuple[str, ...]]:
-    """Secret name → the all-uppercase `*_SECRET_REF` keys that declare it, across EVERY parsed
-    system of the tenant (a faulted sibling narrows nothing). A blank reference declares
-    nothing; a key spelled in any other case is not a reference (the validator FAILs it)."""
-    declared: dict[str, set[str]] = {}
-    for entry in systems.values():
-        if not isinstance(entry, SystemConfig):
-            continue
-        for key, held in entry.items():
-            if key.endswith(SECRET_REF_SUFFIX) and key == key.upper() and not is_blank(held):
-                declared.setdefault(held, set()).add(key)
-    return {name: tuple(sorted(keys)) for name, keys in declared.items()}
-
-
-def _read_no_links(root: Path, parts: tuple[str, ...]) -> bytes:
-    """The bytes of `root/parts...`, opened one component at a time from a directory handle, each
-    with no-follow: a link at ANY level (the tenant folder, `settings/`, the file) is refused, and
-    the last component is judged by `read_plain_fd` (a hard link is another tenant's bytes under
-    this name). `O_NONBLOCK` keeps a FIFO with no writer from blocking the open — it is then
-    refused as not regular."""
-    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for part in parts[:-1]:
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
-            os.close(dir_fd)
-            dir_fd = next_fd
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
-    finally:
-        os.close(dir_fd)
-    try:
-        return read_plain_fd(fd)
-    finally:
-        os.close(fd)
-
-
-class SecretLookup:
-    """Resolves a secret name for THIS tenant, only if some `*_SECRET_REF` key in its systems
-    declares it (O3), reading `settings/secrets.env` on each lookup — a rotation takes effect
-    mid-run (O2's exemption), while the declarations ride the run's start (MF-2). @owns secrets
-
-    A fault names the DECLARING KEY, never a value or the string the key holds (MF-15), so the
-    text is safe for a row, a log and a model. `repr` shows declared names only."""
-
-    __slots__ = ("_declared", "_root", "_parts")
-    _declared: Mapping[str, tuple[str, ...]]
-    _root: Path
-    _parts: tuple[str, ...]
-
-    def __init__(self, tenants_root: Path, tenant_id: str, declared: Mapping[str, tuple[str, ...]]) -> None:
-        object.__setattr__(self, "_root", Path(tenants_root))
-        object.__setattr__(self, "_parts", (str(tenant_id), "settings", SECRETS_FILE))
-        object.__setattr__(self, "_declared", MappingProxyType(dict(declared)))
-
-    def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError("SecretLookup is read-only")
-
-    def __repr__(self) -> str:
-        return f"SecretLookup(declared={sorted(self._declared)})"
-
-    def get(self, name: str) -> str:
-        """The value of the declared secret `name`, or `ConfigFault`."""
-        return self.get_many((name,))[0]
-
-    def get_many(self, names: Sequence[str]) -> list[str]:
-        """The values of the declared secrets `names`, in order, from ONE read of `secrets.env` —
-        so a call that needs two never pairs one version of the file with another — or the
-        `ConfigFault` for the first that cannot be had. Every name is checked declared before the
-        file is opened."""
-        refs = []
-        for name in names:
-            keys = self._declared.get(name)
-            if not keys:
-                raise ConfigFault(
-                    "secret is not declared: no *_SECRET_REF key in this tenant's systems names it")
-            refs.append(", ".join(keys))
-        if not refs:
-            return []
-        try:
-            text = _read_no_links(self._root, self._parts).decode("utf-8")
-        except FileNotFoundError:
-            raise ConfigFault(f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} is missing") from None
-        except OSError:
-            raise ConfigFault(
-                f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} cannot be read (a link, not a "
-                "regular file, or unreadable)") from None
-        except UnicodeDecodeError:
-            raise ConfigFault(
-                f"{refs[0]}: {_SETTINGS_POINTER}{SECRETS_FILE} is not UTF-8 text") from None
-        entries = parse_env(text)
-        values = []
-        for name, ref in zip(names, refs, strict=True):
-            value = entries.get(name)
-            if value is None or is_blank(value):
-                raise ConfigFault(
-                    f"{ref}: {_SETTINGS_POINTER}{SECRETS_FILE} has no non-blank entry for it")
-            values.append(value)
-        return values
-
-
 __all__ = [
     "DOCKER_EXEC",
     "ELASTIC_KEYS",
     "BAD_ELASTIC",
     "NO_ELASTIC",
     "NOT_CONFIGURED",
-    "SECRET_REF_SUFFIX",
     "SETTINGS_MAX_BYTES",
     "ElasticSettings",
-    "SecretLookup",
     "SystemConfig",
     "assignments",
-    "declared_secrets",
     "config_pointer",
     "elastic_problem",
     "elastic_view",
     "is_blank",
-    "is_secret_name",
     "parse_env",
     "pointer_to",
     "read_env_file",

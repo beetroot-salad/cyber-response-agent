@@ -421,7 +421,6 @@
         "grep": [
           "config.env",
           "mapping.yaml",
-          "secrets.env",
           "settings_dir",
           "verb-grants.yaml",
           "lead-zero.yaml"

@@ -45,10 +45,6 @@ def test_elastic_transport_with_spaces_is_refused_by_the_view(tmp_path):
     assert isinstance(record.elastic, S.config_fault())
 
 
-def test_scrub_replaces_the_longer_secret_first():
-    assert transport._scrubbed("v=abcdef", ["abc", "abcdef"]) == f"v={transport.SECRET_MARKER}"
-
-
 def test_huge_timeout_is_a_config_fault(tmp_path):
     root = tmp_path / "t"
     folder = S.plant(root)

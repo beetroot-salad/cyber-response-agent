@@ -5,8 +5,7 @@
 2. A stored fault is never re-raised as the same object, and no settings fault names a host path.
 3. Every settings file is read one way: capped, single-linked, no-follow at the leaf, and split
    on the same line endings the connect validator reads with.
-4. A call's secrets come from ONE read of `secrets.env`, and a placed secret can reach a request
-   header (`{{NAME}}`), not only `-u`.
+4. (Secret delivery — one read of `secrets.env`, `{{NAME}}` header slots — moved to #1163.)
 5. A receipt the box planted does not survive the run that planted it, however the run ends.
 
 Each test fails on 755177b6 (the PR head these fixes land on).
@@ -15,8 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -133,20 +130,19 @@ def test_stager_raises_a_fresh_fault_each_call(tmp_path):
 # ======================================================================================
 
 def test_lone_cr_line_endings_parse_as_lines(tmp_path):
-    """A config.env and a secrets.env written with lone-CR line endings parse line by line,
-    the way the connect validator (universal newlines) reads them."""
+    """A config.env written with lone-CR line endings parses line by line, the way the connect
+    validator (universal newlines) reads it."""
     from defender.runtime.tenant_settings import parse_env
 
     assert parse_env("A=1\rB=2\r\nC=3\n") == {"A": "1", "B": "2", "C": "3"}
     assert parse_env("A=x\x0cy\n") == {"A": "x\x0cy"}, "only CR/LF end a line, as in the validator"
 
-    root, folder = _tenant(tmp_path, "crx", secrets=b"API_A=alpha\rAPI_B=bravo\r")
+    root, folder = _tenant(tmp_path, "crx")
     text = S.config_path(folder, "cmdb").read_text(encoding="utf-8").replace("\n", "\r")
-    S.write_config(folder, "cmdb", text + 'A_SECRET_REF="API_A"\rB_SECRET_REF="API_B"\r')
+    S.write_config(folder, "cmdb", text)
     record = S.resolve(root)
     assert record.systems["cmdb"]["CMDB_TRANSPORT"] == S.DOCKER_EXEC
-    assert record.secrets.get("API_A") == "alpha"
-    assert record.secrets.get("API_B") == "bravo"
+    assert record.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-crx:8080"
 
 
 def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):
@@ -164,7 +160,7 @@ def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):
 def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
     """Tenant acceptance walks the folder for links before resolve, but a link swapped in after
     that walk reaches the reader: it refuses a hard-linked or symlinked config.env itself, as the
-    secrets file and the run-dir readers do, rather than reading another file's bytes."""
+    run-dir readers do, rather than reading another file's bytes."""
     from defender.runtime import tenant_settings
 
     other = tmp_path / "other.env"
@@ -179,12 +175,12 @@ def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
 
 
 def test_an_opened_file_renamed_over_still_reads(tmp_path):
-    """The rotation adapter.md prescribes renames a new secrets.env over the old: a read that
-    opened the old one sees its link count drop to 0, and that is still a plain file to read —
-    the repo's one rule (`_io.is_plain_entry`) refuses more than one name, never zero."""
+    """A settings file replaced by write-then-rename while a read has it open: the reader sees
+    its link count drop to 0, and that is still a plain file to read — the repo's one rule
+    (`_io.is_plain_entry`) refuses more than one name, never zero."""
     from defender.runtime import tenant_settings
 
-    path = tmp_path / "secrets.env"
+    path = tmp_path / "config.env"
     path.write_text("A=1\n", encoding="utf-8")
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -193,152 +189,6 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
         assert tenant_settings.read_plain_fd(fd) == b"A=1\n"
     finally:
         os.close(fd)
-
-
-# ======================================================================================
-# 4 — secrets: one read per call, and a header can carry one.
-# ======================================================================================
-
-def _secret_tenant(tmp_path: Path, marker: str, secrets: dict[str, str]):
-    root, folder = _tenant(tmp_path, marker, secrets=secrets)
-    for i, name in enumerate(secrets):
-        S.set_key(folder, "cmdb", f"REF{i}_SECRET_REF", name)
-    return S.resolve(root)
-
-
-_FAKE_CURL = """\
-import json, sys
-argv = sys.argv[1:]
-stdin_headers = []
-for i, a in enumerate(argv[:-1]):
-    if a == "-H" and argv[i + 1] == "@-":
-        stdin_headers = sys.stdin.read().splitlines()
-print(json.dumps({"argv": argv, "stdin_headers": stdin_headers}))
-"""
-
-
-def _in_container(call: dict, tmp_path: Path, **container_env: str) -> dict:
-    """Replay the in-container half of a recorded `docker exec` the way docker runs it: the
-    container's environment holds only the variables named by `-e NAME` (taken from the docker
-    CLI's own environment) plus `container_env`, and a fake `curl` reports its argv — what a
-    process list shows — and any headers it read on stdin (`-H @-`)."""
-    fakebin = tmp_path / "incontainer"
-    fakebin.mkdir(exist_ok=True)
-    curl = fakebin / "curl"
-    curl.write_text(f"#!{sys.executable}\n{_FAKE_CURL}", encoding="utf-8")
-    curl.chmod(0o755)
-    argv = call["argv"]
-    rest = argv[argv.index("exec") + 1:]
-    forwarded: dict[str, str] = {}
-    while rest[0].startswith("-"):
-        if rest[0] == "-e":
-            name = rest[1]
-            if name in call["env"]:
-                forwarded[name] = call["env"][name]
-            rest = rest[2:]
-        else:
-            rest = rest[1:]
-    inner = rest[1:]  # past the container name
-    proc = subprocess.run(inner, capture_output=True, text=True, check=True,
-                          env={"PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}",
-                               **forwarded, **container_env})
-    return json.loads(proc.stdout)
-
-
-def test_a_placed_secret_reaches_a_header_off_every_argv(tmp_path):
-    """`{{NAME}}` in a header value is the declared secret NAME, forwarded into the container by
-    `-e` and expanded there. curl reads the slotted header on stdin, so the value is on neither
-    the docker argv nor curl's own (a process list in the bastion shows no token). Shell syntax
-    in a slotted header's literal text is sent as written, never run."""
-    value = "tok header-1156"
-    record = _secret_tenant(tmp_path, "hdr", {"X_TOKEN": value})
-    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
-    ctx = _ctx(record, tmp_path, shim)
-
-    transport.docker_exec_curl(
-        ctx, "bastion-hdr", "http://cmdb-hdr:8080/x", system="cmdb", secrets=("X_TOKEN",),
-        headers={"Authorization": "Bearer {{X_TOKEN}}",
-                 "X-Sig": "{{X_TOKEN}} $(echo pwned) `id -u` $HOME '\"",
-                 "X-Lit": "$(echo lit)"})
-
-    (call,) = shim.calls()
-    assert all(value not in a for a in call["argv"]), "the secret is on the docker argv"
-    seen = _in_container(call, tmp_path)
-    assert all(value not in a for a in seen["argv"]), "the secret is on curl's argv"
-    assert f"Authorization: Bearer {value}" in seen["stdin_headers"], seen
-    assert f"X-Sig: {value} $(echo pwned) `id -u` $HOME '\"" in seen["stdin_headers"], seen
-    assert "X-Lit: $(echo lit)" in seen["argv"], seen
-
-
-def test_two_secrets_reach_their_own_headers(tmp_path):
-    """Two placed secrets in two headers each arrive under their own header."""
-    record = _secret_tenant(tmp_path, "two", {"X_TOKEN": "vx-1156", "Y_TOKEN": "vy-1156"})
-    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
-    ctx = _ctx(record, tmp_path, shim)
-    transport.docker_exec_curl(ctx, "b", "http://cmdb-two:8080/x", system="cmdb",
-                               secrets=("X_TOKEN", "Y_TOKEN"),
-                               headers={"A": "{{Y_TOKEN}}", "B": "{{X_TOKEN}}"})
-    seen = _in_container(shim.calls()[0], tmp_path)
-    assert seen["stdin_headers"] == ["A: vy-1156", "B: vx-1156"], seen
-
-
-def test_auth_expands_container_vars_and_secrets_and_nothing_else(tmp_path):
-    """`auth` still expands a container's own braced `${VAR}` there (the elastic read path), a
-    `{{NAME}}` in it is a placed secret, and every other character — a quote, `$1`, a
-    backslash — is literal."""
-    value = "pw auth-1156"
-    record = _secret_tenant(tmp_path, "ath", {"SVC_PASS": value})
-    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
-    ctx = _ctx(record, tmp_path, shim)
-
-    transport.docker_exec_curl(ctx, "b", "http://cmdb-ath:8080/x", system="cmdb",
-                               auth="elastic:${ELASTIC_PASSWORD}")
-    transport.docker_exec_curl(ctx, "b", "http://cmdb-ath:8080/x", system="cmdb",
-                               secrets=("SVC_PASS",), auth='o"ps$1\\x:{{SVC_PASS}}')
-
-    legacy, placed = shim.calls()
-    argv = _in_container(legacy, tmp_path, ELASTIC_PASSWORD="container-pw")["argv"]
-    assert argv[argv.index("-u") + 1] == "elastic:container-pw", argv
-    argv = _in_container(placed, tmp_path)["argv"]
-    assert argv[argv.index("-u") + 1] == f'o"ps$1\\x:{value}', argv
-
-
-def test_an_unplaced_reference_is_refused_before_any_child(tmp_path):
-    """`{{NAME}}` for a name the call did not place is a ConfigFault before docker runs — never a
-    literal `{{NAME}}` sent upstream."""
-    record = _secret_tenant(tmp_path, "unp", {"X_TOKEN": "v"})
-    shim = S.DockerShim(tmp_path / "shim")
-    ctx = _ctx(record, tmp_path, shim)
-    with pytest.raises(ConfigFault, match="Y_TOKEN"):
-        transport.docker_exec_curl(ctx, "b", "http://cmdb-unp:8080/x", system="cmdb",
-                                   secrets=("X_TOKEN",), headers={"A": "{{Y_TOKEN}}"})
-    assert shim.calls() == []
-
-
-def test_one_call_reads_secrets_once(tmp_path):
-    """A call placing two secrets resolves them in one lookup — one read of secrets.env — so a
-    rotation landing mid-call cannot pair an old value with a new one."""
-    from types import SimpleNamespace
-
-    reads: list[tuple[str, ...]] = []
-
-    class _Lookup:
-        def get_many(self, names):
-            reads.append(tuple(names))
-            return [f"v-{n}" for n in names]
-
-        def get(self, name):  # a second read path would show up here
-            raise AssertionError("a per-name read")
-
-    root, _ = _tenant(tmp_path, "one")
-    record = S.resolve(root)
-    fake = SimpleNamespace(**{f: getattr(record, f) for f in ("systems", "settings")},
-                           secrets=_Lookup())
-    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
-    ctx = _ctx(fake, tmp_path, shim)
-    transport.docker_exec_curl(ctx, "b", "http://cmdb-one:8080/x", system="cmdb",
-                               secrets=("A", "B"))
-    assert reads == [("A", "B")]
 
 
 # ======================================================================================
@@ -482,28 +332,6 @@ def test_validator_finds_secrets_on_lines_the_run_ignores(tmp_path, extra):
     assert any(s == "FAIL" for s, _ in rows), rows
     assert ("PASS", "config.env carries no inline secrets") not in rows, rows
 
-
-def test_validator_no_pass_beside_a_pasted_reference(tmp_path):
-    """A reference holding a pasted value FAILs, and the report does not also say the file
-    carries no inline secrets."""
-    rows = _validate(tmp_path, 'MYSYS_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\n')
-    assert any(s == "FAIL" and "not hold a value" in m for s, m in rows), rows
-    assert ("PASS", "config.env carries no inline secrets") not in rows, rows
-
-
-@pytest.mark.parametrize("name", ["secrets.env", "secrets.env.new", "secrets.env.old",
-                                  ".secrets.env.0a1b2c"])
-def test_rotation_leftovers_are_git_ignored(name):
-    """Every file a secrets rotation can leave in a tenant's settings folder is ignored, not only
-    the file itself; a system's config.env is not."""
-    repo = S.REPO_ROOT
-    rel = f"knowledge/tenants/acme/settings/{name}"
-    ignored = subprocess.run(["git", "-C", str(repo), "check-ignore", "--no-index", "-q", rel],
-                             check=False).returncode == 0
-    assert ignored, f"{rel} is not git-ignored"
-    cfg = "knowledge/tenants/acme/settings/systems/cmdb/config.env"
-    assert subprocess.run(["git", "-C", str(repo), "check-ignore", "--no-index", "-q", cfg],
-                          check=False).returncode == 1, "config.env is ignored"
 
 def _raised(fn, *args, **kw):
     try:

@@ -1038,7 +1038,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its eight injection se
     `door_transport` is the one injection seam of the write door this launcher builds when
     `door` is left to it (#1107): every call the door makes goes through it, handed a context
     carrying the episode tenant's record, so a test drives the door's real wiring (its docker
-    context, container and secrets all come from that record) over a recording transport.
+    context and container both come from that record) over a recording transport.
 
     The delegated checks (source store, branch point, primer, family loader, staging guard,
     review) raise their own classes with operator-ready messages; they are converted here.

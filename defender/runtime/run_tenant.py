@@ -20,7 +20,6 @@ from defender._tenants import TenantDir
 from defender.runtime import tenant_settings
 from defender.runtime.tenant_settings import (
     ElasticSettings,
-    SecretLookup,
     SystemConfig,
 )
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
@@ -64,8 +63,6 @@ class RunTenant:
     elastic: ElasticSettings | ConfigFault | None  # lint-shippable: ok — the record's field name (#1107)
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError
-    #: Resolves a secret only if THIS tenant's systems declare it; read per lookup (O2's exemption).
-    secrets: SecretLookup
 
     @property
     def tenant_id(self) -> TenantId:
@@ -164,10 +161,9 @@ def resolve_run_tenant(
 
 
 def resolved_settings(tenant: TenantDir) -> dict[str, Any]:
-    """The four parts of the record built from the tenant's settings folder — each system's
-    `config.env` (`systems`), the corpus-engine view, the case-history mapping
-    (`ticket_mapping`) and the secret lookup (`secrets`) — as the keyword arguments `RunTenant`
-    takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a part's
+    """The three parts of the record built from the tenant's settings folder — each system's
+    `config.env` (`systems`), the corpus-engine view and the case-history mapping
+    (`ticket_mapping`) — as the keyword arguments `RunTenant` takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a part's
     content (O5): a part that cannot stand is carried as the fault that says why."""
     systems = tenant_settings.read_systems(tenant.settings)
     tenant_settings.warn_missing_access_method(tenant.tenant_id, systems)
@@ -182,9 +178,6 @@ def resolved_settings(tenant: TenantDir) -> dict[str, Any]:
         "systems": systems,
         "elastic": tenant_settings.elastic_view(systems),  # lint-shippable: ok — the record's field name (#1107)
         "ticket_mapping": ticket_mapping,
-        "secrets": SecretLookup(
-            tenant.settings.parent.parent, tenant.tenant_id,
-            tenant_settings.declared_secrets(systems)),
     }
 
 
@@ -192,7 +185,6 @@ __all__ = [
     "CaseMapping",
     "ElasticSettings",
     "RunTenant",
-    "SecretLookup",
     "SystemConfig",
     "TenantRefused",
     "resolve_tenant",

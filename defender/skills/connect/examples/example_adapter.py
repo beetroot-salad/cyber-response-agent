@@ -25,8 +25,8 @@ PREFIX = "EXAMPLE"
 def _config(ctx: VerbContext) -> dict[str, str]:
     """This system's settings, from the run's record (`ctx.tenant.systems`) — resolved once when
     the run began. Never the settings folder as it is now and never the process environment: an
-    adapter reads its configuration from the record and its secrets through `*_SECRET_REF`
-    references the record resolves, so an exported variable changes nothing a run addresses.
+    adapter reads its configuration from the record, so an exported variable changes nothing a
+    run addresses. (A credentialed system has no secret delivery yet: #1163.)
     `load_config` strips the prefix and raises `ConfigFault` (infra, exit 2) for a system with no
     config, one on an unimplemented access method, or a missing or blank required key."""
     return _stub_transport.load_config(ctx, SYSTEM, PREFIX, ("URL_BASE", "TIMEOUT_SEC"))
@@ -46,8 +46,8 @@ def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) 
         body = exc.read().decode(errors="replace")
         if exc.code in (401, 403):
             raise faults.TransportFault(
-                f"{SYSTEM}: authentication failed (HTTP {exc.code}). Check "
-                f"the credential this system's `*_SECRET_REF` names in the tenant's secrets.env."
+                f"{SYSTEM}: authentication failed (HTTP {exc.code}). This system needs a "
+                f"credential, and credential delivery is not supported yet (#1163)."
             ) from exc
         raise faults.UpstreamFault(body or f"{SYSTEM}: query rejected (HTTP {exc.code}).") from exc
     except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
