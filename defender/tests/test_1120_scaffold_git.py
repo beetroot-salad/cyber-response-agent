@@ -99,3 +99,21 @@ def test_scaffold_does_not_borrow_an_enclosing_repos_identity(tmp_path: Path) ->
     assert "failed and was undone" not in text, (
         f"the preflight passed on the enclosing repo's identity; the commit then failed:\n{text}")
     assert not any(target.iterdir()), sorted(p.name for p in target.iterdir())
+
+
+def test_scaffold_into_a_relative_target_asks_the_identity_of_that_target(
+        tmp_path: Path) -> None:
+    """`scaffold acme newrepo` (relative, from the target's parent) under an `includeIf
+    "gitdir:<parent>/"` identity: exits 0 and commits under it. (A relative `GIT_DIR` read
+    from `cwd=target` named `newrepo/newrepo/.git`, which git refused outright.)"""
+    parent = tmp_path / "work"
+    included = tmp_path / "work-identity"
+    included.write_text("[user]\n\tname = Work\n\temail = work@example.invalid\n",
+                        encoding="utf-8")
+    home = S._home(tmp_path / "cfg", identity=False,
+                   extra=f'[includeIf "gitdir:{parent}/"]\n\tpath = {included}\n')
+    S._empty_dir(parent / "newrepo")
+    H.assert_clean(S._scaffold(H.TID, Path("newrepo"), home=home, cwd=parent,
+                               identity_env=False, GIT_CONFIG_NOSYSTEM="1"))
+    author = H.git(parent / "newrepo", "log", "-1", "--format=%ae").stdout.strip()
+    assert author == "work@example.invalid", author

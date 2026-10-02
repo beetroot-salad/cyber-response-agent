@@ -245,7 +245,7 @@ def scaffold(tenant_id: str, target: Path) -> int:
     except _tenant.TenantRefused as refused:
         _say(refused)
         return 1
-    target = Path(target)
+    target = Path(target).absolute()  # git runs with cwd=target: a relative GIT_DIR would nest
     refusal = _target_refusal(target) or _git_preflight(target)
     if refusal is not None:
         _say(refusal)
