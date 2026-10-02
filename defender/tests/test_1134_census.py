@@ -121,15 +121,22 @@ functions (with `os.path.lexists`), walks, xattrs, `chdir` / `chroot` / `pathcon
                 mount's spelling `held._where` is where every "judge through the handle, then go
                 by path" regression starts (s5v2 06, 10; s6v2 E9).
 - ``listing``   a folder listed outside B2's sanctioned listers (#1134 addendum 2, B2/B3; C1):
-                a raw `<x>.entries()` call with no argument, on any receiver (`Bound.entries` is
+                a raw `<x>.entries(...)` call at any arity, on any receiver (`Bound.entries` is
                 the only `entries` method scan A calls; a listing record's `.entries` field is
-                never called), a provable `Bound`'s `.entries` referenced uncalled, and any
-                `list_tree(...)` call (resolved; its `view` slot is judged as `reader` too).
+                never called: `view.entries(*())`, `type(view).entries(view)` — s7v3 A, B); an
+                uncalled `.entries` off a provable `Bound`, a `type(...)` call or the `Bound`
+                class; any `list_tree(...)` call (resolved; its `view` slot is judged as
+                `reader` too); and, in a curator module (`CURATOR_MODULES`: drain.py, shared.py,
+                the two channel run.py), a call of any def of the scanned tree that lists,
+                however deep (`lister`: a shared reader, a `_corpus` name selector, a curator
+                helper over one — s7v3 C) — B2's kind checks `entry_kind` / `kind_at` aside.
                 Allowed only at the named listers, reason `B2`: `_tree_listing`'s own three
                 listings, `_corpus._listed` (the readers' fixed shapes), `_handoff.
-                discover_system_drafts` (the catalog's drafts) and `lane_trees.kind_at`'s one
-                `.entries()` at a mount point (which `entry_kind` refuses: no listed parent). No
-                curator module may list (s5v3 K08, s6v3 E5/E6, s4v3 v1/v8/v12). `Bound.under()` is
+                discover_system_drafts` (the catalog's drafts), `lane_trees.kind_at`'s one
+                `.entries()` at a mount point (which `entry_kind` refuses: no listed parent), and
+                the curator's reads of its corpus through `iter_lessons` for its findings' ids and
+                its prompt's manifest (`CURATOR_READS`). No raw listing in a curator module, and
+                no listing at all in drain.py (s5v3 K08, s6v3 E5/E6, s4v3 v1/v8/v12, s7v3 A-C). `Bound.under()` is
                 not flagged: it validates a name and opens nothing (`_tree_listing`'s docstring),
                 and it is rule 3 of a provable view; the listing happens at `.entries()`.
 
@@ -215,10 +222,11 @@ passed in is not seen. A `Path` handed to a non-vocabulary helper in another mod
 (`_flock`, `persist`, `lead_repository`, `_git`) is not seen. A computed name is not seen:
 `getattr(p, "read_" + "text")`, `vars(os)["unlink"]`, `vars(held)["_where"]`. `isinstance`
 narrowing is not understood (`_corpus`'s readers stand on their `construct` entries instead).
-`listing` matches `.entries()` by name (any receiver) and an uncalled `.entries` only on a
-provable `Bound` (an uncalled reference on an unprovable receiver collides with the listing
-records' `.entries` field); a listing reached through a helper — a shared reader, `_corpus`'s
-name selectors — is the helper's, not the caller's. `private` matches attribute names, so an unrelated `x._os` in a scanned module is a hit by
+`listing` matches `.entries(...)` by name (any receiver) and an uncalled `.entries` only off a
+provable `Bound`, a `type(...)` call or the class (an uncalled reference on an unprovable
+receiver collides with the listing records' `.entries` field); outside the curator modules a
+listing reached through a helper is the helper's, not the caller's, and a method or a value
+called (`cfg.invoke_repair(...)`) is never judged a lister. `private` matches attribute names, so an unrelated `x._os` in a scanned module is a hit by
 design, and a handle's private methods (`Held._dup`) are not in it (each hands back a
 descriptor, whose use is an `os.*` call). An `_io` underscore name is a word wherever it is
 named, so a pure private helper or constant used in a scanned module is a hit by design too.
@@ -228,9 +236,12 @@ callers, as rule 1 says. The stdlib's long tail of path-taking calls outside the
 `ctypes.CDLL`) is not in the vocabulary. The handle's own verbs (`.read`, `.write`, `.view`,
 `.under`) are not Path verbs, so on a receiver the rule cannot prove they are not hits.
 `Path.group()` is not in the vocabulary: it collides with every zero-argument
-`re.Match.group()`. An allow-list entry is an anchor, not a control-flow fact:
-`TREE_FOR_FALLBACKS` pins only that each `D3` fallback's function still names `tree_for` —
-whether the handle branch runs first is D7's behaviour tests' job. A module-level path owner
+`re.Match.group()`. An allow-list entry is an anchor, not a control-flow fact, so each `D3`
+fallback's plain touch (`TREE_FOR_FALLBACKS`) is also pinned behind its miss: in the body of an
+`if <miss> is None:`, the true arm of `... if <miss> is None else ...`, or after an earlier
+sibling `if <miss> is not None:` that always leaves, where `<miss>` is a `tree_for(...)` result
+or element 0 of a rule-7 helper's optional `Bound` (s7v3 E). That is a syntactic pin; whether the
+handle branch does the right thing is D7's behaviour tests' job. A module-level path owner
 (`DEFAULT_PATHS`, `loop_paths()`) is not a fresh one and not a hit, and an owner rebuilt by
 another spelling (`model_copy`, a helper in another module) is not seen.
 
@@ -317,6 +328,10 @@ _BOOTSTRAP_WHY = "resolves the module's own file to put the repo root on sys.pat
 _MISS = "`tree_for(...)` is None: the path lies outside the lane's mounts (the box's read-only area)"
 _OPENER = "the lane's one mount list, held at its named opener (A3/O4)"
 _VIEWED = "the Path form's own `bind`: a `Bound` passes through as given"
+_FINDING_IDS = ("the finding-id pre-flight reads the corpus's lessons through `iter_lessons` over the "
+                "held view (A4); it names no file to touch")
+_MANIFEST = ("the curator prompt's corpus manifest reads the lessons through `iter_lessons` over the "
+             "held view (A4); it names no file to touch")
 _GIT = "git's own read or write (a `git` child process), never a path opened here"
 
 #: Every host filesystem touch the migrated modules keep at base 87f013fe (the v3 curator head),
@@ -442,6 +457,33 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(LANE_TREES, "kind_at", "listing", "held.view().entries()", B2,
             "the mount point itself, which `entry_kind` refuses (it has no listed parent below "
             "the mount): its own listing says present, absent or refused"),
+    # --- the curator's reads of its corpus through a shared reader (C1: never a sweep's or a
+    # --- before-state's names) — each call site of a def that lists, however deep ---------------
+    Allowed(SHARED, "existing_finding_ids", "listing",
+            "iter_lessons(cfg.corpus.view(), where=cfg.corpus_dir, warn_label=lambda p: f'finding-id pre-flight: {p.name}')",
+            B2, _FINDING_IDS),
+    Allowed(SHARED, "build_corpus_manifest", "listing",
+            "iter_lessons(corpus, where=where, warn_label=lambda p: f'corpus manifest: {p.name}', on_skip=skipped.append)",
+            B2, _MANIFEST),
+    Allowed(SHARED, "build_curator_user_prompt", "listing",
+            "build_corpus_manifest(corpus, where=corpus_dir, seed=seed)", B2, _MANIFEST),
+    Allowed(LESSONS_RUN, "existing_finding_ids", "listing", "_shared.existing_finding_ids(cfg)", B2,
+            _FINDING_IDS),
+    Allowed(LESSONS_RUN, "_gate_findings", "listing", "existing_finding_ids(cfg)", B2, _FINDING_IDS),
+    Allowed(LESSONS_RUN, "build_user_prompt", "listing",
+            "_shared.build_curator_user_prompt(findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir, corpus_dir_rel=cfg.corpus_dir_rel, label='findings', manifest_seed=cfg.manifest_seed, salt=salt)",
+            B2, _MANIFEST),
+    Allowed(LESSONS_RUN, "invoke_agent", "listing", "build_user_prompt(findings, batch_id, cfg, salt=stage_salt)",
+            B2, _MANIFEST),
+    Allowed(QUESTIONER_RUN, "questioner_existing_finding_ids", "listing",
+            "_shared.existing_finding_ids(cfg)", B2, _FINDING_IDS),
+    Allowed(QUESTIONER_RUN, "_gate_questioner", "listing", "questioner_existing_finding_ids(cfg)", B2,
+            _FINDING_IDS),
+    Allowed(QUESTIONER_RUN, "build_questioner_user_prompt", "listing",
+            "_shared.build_curator_user_prompt(findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir, corpus_dir_rel=cfg.corpus_dir_rel, label='world findings', manifest_seed=cfg.manifest_seed, salt=salt)",
+            B2, _MANIFEST),
+    Allowed(QUESTIONER_RUN, "invoke_agent", "listing",
+            "build_questioner_user_prompt(findings, batch_id, cfg, salt=stage_salt)", B2, _MANIFEST),
     # --- _git.py: git's own reads and writes ---------------------------------------------------
     Allowed(GIT, "<module>", "attr", _BOOTSTRAP, N_D,
             "resolves the module's own file for the default `cwd` (the checkout); opens nothing"),
@@ -501,7 +543,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 24, N_D: 14, N_H: 9, B2: 6, N_A: 5}
+ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 24, N_D: 14, N_H: 9, B2: 17, N_A: 5}
 
 
 def judge(
@@ -640,13 +682,32 @@ LISTERS = frozenset({
     (TREE_LISTING, "entry_kind"), (TREE_LISTING, "list_tree"), (CORPUS, "_listed"),
     (HANDOFF, "discover_system_drafts"), (LANE_TREES, "kind_at"),
 })
+#: The curator's reads of its corpus through a shared reader — the finding-id pre-flight and the
+#: prompt's corpus manifest, each call site of a def that lists (`_census1134.lister`).
+CURATOR_READS = frozenset({
+    (SHARED, "existing_finding_ids"), (SHARED, "build_corpus_manifest"),
+    (SHARED, "build_curator_user_prompt"), (LESSONS_RUN, "existing_finding_ids"),
+    (LESSONS_RUN, "_gate_findings"), (LESSONS_RUN, "build_user_prompt"),
+    (LESSONS_RUN, "invoke_agent"), (QUESTIONER_RUN, "questioner_existing_finding_ids"),
+    (QUESTIONER_RUN, "_gate_questioner"), (QUESTIONER_RUN, "build_questioner_user_prompt"),
+    (QUESTIONER_RUN, "invoke_agent"),
+})
 CURATOR_MODULES = frozenset({DRAIN, SHARED, LESSONS_RUN, QUESTIONER_RUN})
 
 
 def test_only_the_named_listers_list_and_the_curator_lists_nothing():
-    listing = {(e.module, e.qualname) for e in ALLOW if e.kind == "listing"}
-    assert listing == LISTERS
-    assert not {m for m, _q in listing} & CURATOR_MODULES
+    """A raw listing (`.entries(...)`, `list_tree(...)`) only at the named listers, none in a
+    curator module; a curator module reaches a listing only through a shared reader, for its
+    findings' ids or its prompt's manifest — never in drain.py, whose before-state is git's and
+    whose sweep is `git status`'s (C1)."""
+    assert tuple(sorted(C.CURATOR_MODULES)) == tuple(sorted(CURATOR_MODULES))
+    raw = {(e.module, e.qualname) for e in ALLOW if e.kind == "listing"
+           and (".entries(" in e.text or e.text.startswith("list_tree("))}
+    assert raw == LISTERS
+    assert not {m for m, _q in raw} & CURATOR_MODULES
+    reached = {(e.module, e.qualname) for e in ALLOW if e.kind == "listing"} - raw
+    assert reached == CURATOR_READS
+    assert DRAIN not in {m for m, _q in reached}
     # `_corpus` lists only through `list_tree` (no raw `.entries()`), and B2's two helpers'
     # `view` slots are tree slots of the `Bound` kind, like a shared reader's.
     assert not [e for e in ALLOW if e.module == CORPUS and e.kind == "listing"
@@ -712,6 +773,110 @@ def test_a_d3_fallback_still_asks_tree_for_first():
     assert not judge(DRAIN, C.census_source(WORKTREE, DRAIN, dropped, tree=TREE))[0], (
         "the anchors alone cannot see a dropped handle branch")
     assert not _asks_tree_for(DRAIN, dropped, "_put_back")
+
+
+def _is_a_miss(scan: C.ModuleScan, name: str, fn: ast.FunctionDef) -> bool:
+    """`name` is a `tree_for` miss in `fn`: bound only ever as `name = <provable tree_for>(...)`,
+    or only as element 0 of an unpack of a helper whose element 0 is an optional `Bound` (`view,
+    where = _catalog_in_tree(...)`, rule 7's summary: `None` exactly on the miss)."""
+    if scan._tree_for_result(name, fn):
+        return True
+    bs = scan.bindings(fn).get(name, [])
+    return bool(bs) and name not in C._params(fn) and all(
+        b.how == "unpack" and b.index == 0 and isinstance(b.value, ast.Call)
+        and scan.returned(b.value, "bound", 0) == "optional" for b in bs)
+
+
+def _behind_the_miss(scan: C.ModuleScan, node: ast.AST, fn: ast.FunctionDef) -> bool:
+    """`node` runs only on a `tree_for` miss: it sits in the body of an `if <miss> is None:` (or
+    the `else` of an `is not None` test), in the true arm of a `... if <miss> is None else ...`,
+    or after an earlier sibling `if <miss> is not None:` with no `else` whose body ends in `return`
+    or `raise` — in its own block or an enclosing one, up to `fn`'s body."""
+    def covers(test: ast.expr, want: str) -> bool:
+        return any(C.none_test(test, n) == want and _is_a_miss(scan, n, fn)
+                   for n in {x.id for x in ast.walk(test) if isinstance(x, ast.Name)})
+    cur: ast.AST = node
+    while cur is not fn:
+        up = scan.parent[cur]
+        if isinstance(up, ast.IfExp) and (
+                (cur is up.body and covers(up.test, "is")) or (cur is up.orelse and covers(up.test, "is not"))):
+            return True
+        if isinstance(cur, ast.stmt):
+            block, at = C._block_holding(up, cur)
+            if isinstance(up, ast.If) and ((block is up.body and covers(up.test, "is"))
+                                           or (block is up.orelse and covers(up.test, "is not"))):
+                return True
+            if any(isinstance(e, ast.If) and not e.orelse and isinstance(e.body[-1], (ast.Return, ast.Raise))
+                   and covers(e.test, "is not") for e in block[:at]):
+                return True
+        cur = up
+    return False
+
+
+def _d3_fallback_touches(module: str, source: str) -> tuple[list[str], int]:
+    """`(off, judged)`: each node of `module` that a `D3` fallback entry (a function in
+    `TREE_FOR_FALLBACKS`) anchors and that does not sit behind its function's `tree_for` miss,
+    and how many such nodes were judged."""
+    scan = C.ModuleScan(TREE, module, ast.parse(source))
+    wanted = {(e.qualname, e.text) for e in ALLOW if e.module == module and e.reason == D3
+              and (e.module, e.qualname) in TREE_FOR_FALLBACKS}
+    off, judged = [], 0
+    for node in ast.walk(scan.ast):
+        if not isinstance(node, (ast.Call, ast.Attribute, ast.Name)):
+            continue
+        if (scan.qualname(node), ast.unparse(node)) not in wanted:
+            continue
+        judged += 1
+        fn = scan.innermost_def(node)
+        if fn is None or not _behind_the_miss(scan, node, fn):
+            off.append(f"{module}:{node.lineno} [{scan.qualname(node)}] {ast.unparse(node)}")
+    return off, judged
+
+
+def test_each_d3_fallback_touch_sits_behind_its_tree_for_miss():
+    """An anchor cannot see the branch in front of it, so each `D3` fallback's plain touch is
+    also pinned to run only on its `tree_for` miss (s7v3 E: `read_bytes_at` keeping `tree_for`
+    but reading every path by `full.read_bytes()`). Every such entry's node is found and judged."""
+    seen = 0
+    for module in sorted({m for m, _q in TREE_FOR_FALLBACKS}):
+        off, judged = _d3_fallback_touches(module, _source(module))
+        assert not off, off
+        seen += judged
+    assert seen == sum(e.count for e in ALLOW if e.reason == D3 and e.kind != "construct"
+                       and (e.module, e.qualname) in TREE_FOR_FALLBACKS)
+
+
+#: Fallbacks moved off their miss, each on this base's text: the anchors stay as they were.
+OFF_THE_MISS = {
+    # s7v3 E: the handle branch skipped; every path read by its plain spelling.
+    "s7v3-E-read-bytes-at-skips-its-handle-branch": (LANE_TREES, (
+        ("    if hit is None:\n        try:\n            return full.read_bytes(), None\n",
+         "    if hit is not None:\n        pass\n    if True:\n        try:\n"
+         "            return full.read_bytes(), None\n", 1),)),
+    # The leaving guard that does not leave: `kind_at`'s plain stats after a non-returning branch.
+    "kind-at-handle-branch-falls-through": (LANE_TREES, (
+        ("        return KIND_ABSENT if got.absent else str(got.kind)\n    if full.is_file():\n",
+         "        _ = KIND_ABSENT if got.absent else str(got.kind)\n    if full.is_file():\n", 1),)),
+    # The conditional's arms swapped: the Path form on the hit.
+    "skills-content-rule-arms-swapped": (RULES, (
+        ("check_system_skill(repo_root / path, system) if hit is None\n",
+         "check_system_skill(repo_root / path, system) if hit is not None\n", 1),
+        ("            else _scaffold_rules.check_system_skill(hit[0].view(), system, hit[1]),\n",
+         "            else _scaffold_rules.check_system_skill(hit[0].view(), system, hit[1]) if hit else None,\n", 1))),
+    # A miss that is not one: the guard tests a local the census cannot tie to `tree_for`.
+    "put-back-guarded-by-a-stand-in": (DRAIN, (
+        ("    hit = tree_for(target)\n    if hit is None:\n",
+         "    hit = tree_for(target)\n    gone = None\n    if gone is None:\n", 1),)),
+}
+
+
+@pytest.mark.parametrize("name", sorted(OFF_THE_MISS))
+def test_a_fallback_moved_off_its_miss_is_caught(name: str):
+    module, edits = OFF_THE_MISS[name]
+    patched = _apply(module, _source(module), edits)
+    assert not judge(module, C.census_source(WORKTREE, module, patched, tree=TREE))[0], (
+        "the anchors alone do not see it: this row is what does")
+    assert _d3_fallback_touches(module, patched)[0], name
 
 
 # =============================================================================================
@@ -1637,6 +1802,26 @@ REGRESSIONS: dict[str, Regression] = {
     ), (("git_worktree_files", "call",
          "subprocess.run(['git', 'read-tree', '--empty'], cwd=cwd, check=False, capture_output=True, "
          "env={**os.environ, 'GIT_INDEX_FILE': absent_index})", 1),)),
+    # --- this step's adversary (scratchpad s7v3-adv-patches/) ------------------------------------
+    # A / B: the sweep's names from a raw listing the no-argument rule missed.
+    "s7v3-A-sweep-by-entries-splat": Regression(DRAIN, (
+        (_SWEEP, "    made = [(corpus_dir / leaf).relative_to(repo_root).as_posix()\n"
+         "            for leaf in (view.entries(*()).entries or {})]\n" + _SWEEP, 1),
+    ), (("_restore_corpus", "listing", "view.entries(*())", 1),)),
+    "s7v3-B-sweep-by-unbound-entries": Regression(DRAIN, (
+        (_SWEEP, "    made = [(corpus_dir / leaf).relative_to(repo_root).as_posix()\n"
+         "            for leaf in (type(view).entries(view).entries or {})]\n" + _SWEEP, 1),
+    ), (("_restore_corpus", "listing", "type(view).entries(view)", 1),)),
+    # C: the sweep's names from a shared reader's listing of the held corpus.
+    "s7v3-C-sweep-via-a-shared-reader": Regression(DRAIN, (
+        (_SWEEP, "    from defender._corpus import iter_lesson_paths\n"
+         "    made = [q.relative_to(repo_root).as_posix() for q in iter_lesson_paths(view, where=corpus_dir)]\n"
+         + _SWEEP, 1),
+    ), (("_restore_corpus", "listing", "iter_lesson_paths(view, where=corpus_dir)", 1),)),
+    # C, through a curator helper that lists (the prompt's manifest), one module over.
+    "s7v3-C-sweep-via-the-curator-manifest": Regression(DRAIN, (
+        (_SWEEP, "    made = list(author_shared.build_corpus_manifest(view, where=corpus_dir))\n" + _SWEEP, 1),
+    ), (("_restore_corpus", "listing", "author_shared.build_corpus_manifest(view, where=corpus_dir)", 1),)),
     # --- the v3 lead-author step's adversary (scratchpad s6v3-adv-patches/), on this base's text --
     # E5 (V3-H7): `discover_system_drafts` lists the catalog by hand beside `list_tree`.
     "s6v3-E5-discover-lists-by-hand": Regression(HANDOFF, (
@@ -2384,6 +2569,12 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
     "list-tree-on-a-provable-view-is-still-a-listing": (
         _H + _TL + "def f(h: Held):\n    return list_tree(h.view(), depth=1)\n",
         (("f", "listing", "list_tree(h.view(), depth=1)"),)),
+    # s7v3 A / B: a raw listing at any arity, and unbound.
+    "raw-listings-at-any-arity-and-unbound": (
+        _H + "def f(v: Bound):\n    v.entries(*())\n    type(v).entries(v)\n    g = type(v).entries\n"
+        "    return g, Bound.entries\n",
+        (("f", "listing", "v.entries(*())"), ("f", "listing", "type(v).entries(v)"),
+         ("f", "listing", "type(v).entries"), ("f", "listing", "Bound.entries"))),
     "a-bound-has-no-walk-or-kind": (
         _H + "def f(v: Bound):\n    v.walk()\n    return v.is_dir()\n",
         (("f", "attr", "v.walk()"), ("f", "attr", "v.is_dir()"))),

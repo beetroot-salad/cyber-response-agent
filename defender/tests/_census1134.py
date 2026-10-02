@@ -75,9 +75,10 @@ Kinds:
                 ``self._x`` a scanned `Held`, `Bound` or `DrainTrees` assigns) on any receiver
                 but ``self`` inside the class that assigns it — ``corpus._where``, the held
                 mount's spelling, is where every "then go by path" regression starts.
-- ``listing``   a folder listed (#1134 addendum 2, B2/B3): a raw ``<x>.entries()`` call with no
-                argument, a provable `Bound`'s ``.entries`` referenced uncalled, and any
-                ``list_tree(...)`` call — each allowed only at the listers the test names.
+- ``listing``   a folder listed (#1134 addendum 2, B2/B3; C1): a raw ``<x>.entries(...)`` call at
+                any arity, an uncalled ``.entries`` off a provable `Bound`, a ``type(...)`` call or
+                the class, any ``list_tree(...)`` call, and in a curator module a call of any def
+                that lists however deep (`lister`) — each allowed only at the listers the test names.
 
 `defender/_paths.py`'s only export that touches disk is `process_defender_dir`, which resolves
 the package's own `__file__`; `adapters_under` and every `DefenderPaths` property only join
@@ -311,6 +312,21 @@ OPENER_MODULES: tuple[str, ...] = (
 #: `list_tree(...)` call, are each a `listing` hit, allowed only at the sites the test names.
 LISTING_VERB = "entries"
 
+#: B2's kind checks (#1134 addendum 2, B3: "kind checks use `kind_at` / `entry_kind`"): each
+#: lists one parent folder to judge one name, and is no listing of a tree to its callers.
+KIND_CHECKS = frozenset({ENTRY_KIND, "defender.learning.core.lane_trees.kind_at"})
+#: The curator modules (#1134 addendum 2 correction, C1: the curator lists no folder — its
+#: before-state is git's and its sweep `git status`'s). In these, a call of any def that lists a
+#: folder, however deep (`lister`), is a `listing` hit of its own, allowed only at the named sites
+#: that read the corpus through a shared reader for its findings' ids or the prompt's manifest
+#: (s7v3 C: the sweep driven by `iter_lesson_paths`).
+CURATOR_MODULES: tuple[str, ...] = (
+    "learning/author/drain.py",
+    "learning/author/shared.py",
+    "learning/author/lessons/run.py",
+    "learning/author/questioner/run.py",
+)
+
 KINDS = frozenset({
     "call", "attr", "load", "getattr", "construct", "reader", "tree_for", "private", "listing",
 })
@@ -443,6 +459,8 @@ class Tree:
         self._imports: dict[str, dict[str, str]] = {}
         self._modules: dict[str, bool] = {}
         self._scans: dict[str, ModuleScan | None] = {}
+        #: Def origin -> whether it lists a folder (`ModuleScan.lister`).
+        self.lists: dict[str, bool] = {}
 
     def scan_of(self, dotted: str) -> ModuleScan | None:
         """The (unscanned) `ModuleScan` of `dotted` in this checkout, for its defs' summaries
@@ -787,6 +805,7 @@ class ModuleScan:
         #: (`v = v.under("x")`) proves nothing.
         self._judging: set[tuple[ast.AST, str, str]] = set()
         self._summaries: dict[tuple[ast.AST, str, int | None], str] = {}
+        self._lists: dict[str, bool] = {}
         self.hits: list[Hit] = []
 
     # -- structure --------------------------------------------------------------------------
@@ -1218,7 +1237,7 @@ class ModuleScan:
 
     def scan_call(self, call: ast.Call) -> None:
         origin = self.callee(call)
-        if origin == LIST_TREE:
+        if origin == LIST_TREE or self.curator_reaches_a_lister(origin):
             self.hit(call, "listing")  # beside the `reader` judgement of its view slot below
         if origin in CONSTRUCTORS or self.rebuilds_paths(call, origin) or self.rebuilds_own_class(call):
             self.hit(call, "construct")
@@ -1286,18 +1305,56 @@ class ModuleScan:
         if hidden or any(not self.provable(v, "tree_for") for v in given):
             self.hit(call, "tree_for")
 
+    def curator_reaches_a_lister(self, origin: str | None) -> bool:
+        """In a curator module, a call of any def that lists a folder, however deep (`lister`): a
+        shared reader, a `_corpus` name selector, a curator helper that calls one
+        (`build_corpus_manifest`, `existing_finding_ids`) — each call site is its own hit, so a
+        new one (a sweep's names from `iter_lesson_paths`, or from a manifest) is a new anchor."""
+        return self.module in CURATOR_MODULES and self.lister(origin)
+
+    def lister(self, origin: str | None, seen: frozenset[str] = frozenset()) -> bool:
+        """`origin` names a top-level def of the scanned tree whose body (nested defs included)
+        lists a folder: an `.entries(...)` call, a `list_tree(...)` call, or a call of another
+        such def, however deep — B2's kind checks (`KIND_CHECKS`) aside. A def that leans on
+        itself proves nothing more."""
+        if origin is None or origin in seen or origin in KIND_CHECKS:
+            return False
+        found = self.def_of(origin)
+        # A def of this scan's own (possibly patched) source is memoized on the scan, one read off
+        # the checkout on the tree.
+        memo = self._lists if found is not None and found[0] is self else self.tree.lists
+        if origin in memo:
+            return memo[origin]
+        got = False
+        if found is not None:
+            scan, fn = found
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                f = node.func
+                callee = scan.callee(node)
+                if ((isinstance(f, ast.Attribute) and f.attr == LISTING_VERB) or callee == LIST_TREE
+                        or scan.lister(callee, seen | {origin})):
+                    got = True
+                    break
+        if not seen:
+            memo[origin] = got
+        return got
+
     def scan_listing(self, node: ast.Attribute) -> None:
-        """A raw listing (#1134 addendum 2, B2/B3): `<x>.entries()` called with no argument, on
-        any receiver (`Bound.entries` is the only `entries` method scan A calls; a listing
-        record's `.entries` field is never called), or `<provable Bound>.entries` referenced
-        without being called (`f = view.entries`)."""
+        """A raw listing (#1134 addendum 2, B2/B3): `<x>.entries(...)` called, on any receiver and
+        with any arguments (`Bound.entries` is the only `entries` method scan A calls, and a
+        listing record's `.entries` field is never called: `view.entries(*())` and the unbound
+        `type(view).entries(view)` are listings too — s7v3 A, B); or `.entries` referenced without
+        being called off a provable `Bound`, a `type(...)` call, or the `Bound` class
+        (`f = view.entries`, `type(view).entries`)."""
         if node.attr != LISTING_VERB or not isinstance(node.ctx, ast.Load):
             return
         up = self.parent.get(node)
         if isinstance(up, ast.Call) and up.func is node:
-            if not up.args and not up.keywords:
-                self.hit(up, "listing")
-        elif self.provable(node.value, "bound"):
+            self.hit(up, "listing")
+        elif (self.provable(node.value, "bound") or self.origin(node.value) == BOUND
+              or (isinstance(node.value, ast.Call) and self.callee(node.value) == "builtins.type")):
             self.hit(node, "listing")
 
     def scan_private(self, node: ast.Attribute) -> None:
