@@ -232,14 +232,11 @@ def _tenant_id_committed(folder: Path) -> str | None:
 
 
 def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
-    """The repository has no commit at all (a fresh `git init`): HEAD does not resolve and no
-    ref exists. A HEAD that does not resolve while refs exist is not this — it is a repo git
-    cannot read, which the caller's `ls-tree` turns into "cannot verify"."""
-    head = _git.git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd=folder, env=env,
-                    check=False, timeout=bound)
-    if head:
-        return False
-    return not _git.git(["for-each-ref", "--count=1"], cwd=folder, env=env, timeout=bound)
+    """The repository holds no commit at all (a fresh `git init`). A repo with commits whose
+    HEAD does not resolve is not this — it is one git cannot read, which the caller's
+    `ls-tree` turns into "cannot verify"."""
+    return not _git.git(["rev-list", "--max-count=1", "--all"], cwd=folder, env=env,
+                        timeout=bound)
 
 
 # ==========================================================================================
