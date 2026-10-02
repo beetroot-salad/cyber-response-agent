@@ -122,7 +122,10 @@ def _findings_cfg(paths: LoopPaths):
     suite, say)."""
     import dataclasses as _dc
 
-    return _dc.replace(lessons_run.build_author_config(paths), forward_check=None)
+    from defender.tests._curator1134 import author_trees
+
+    return _dc.replace(lessons_run.build_author_config(paths, trees=author_trees(paths)),
+                       forward_check=None)
 
 
 BUILDERS = {

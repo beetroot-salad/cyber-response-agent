@@ -40,6 +40,7 @@ from defender.learning.leads import lead_author, pitfalls_curator
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
+from defender.tests._curator1134 import corpus_view
 from defender.tests._repo import seed_adapter_stubs
 
 
@@ -227,6 +228,7 @@ def _curator_prompt(tmp_path: Path, *, hostile="ROW-BODY", rows=None, salt="5a" 
         author_shared.build_curator_user_prompt,
         rows,
         "batch",
+        corpus=corpus_view(tmp_path),
         corpus_dir=tmp_path,
         corpus_dir_rel="lessons",
         label="rows",

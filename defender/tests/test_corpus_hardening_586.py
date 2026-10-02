@@ -40,6 +40,7 @@ from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._frontmatter import parse_frontmatter, split_frontmatter
 from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
 from defender.learning.core.config import LoopPaths
+from defender.tests._curator1134 import author_trees
 from defender.tests._locale import C_LOCALE_ENV
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
@@ -116,9 +117,10 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
     Re-pointed by #922 onto the surviving findings pre-flight, the only one left. Its provenance
     key differs (`source_finding_ids`, from the findings channel's own `id_key`) and it holds no
     cache; the tolerance demand is the same one."""
-    cfg = build_author_config(LoopPaths(repo_root=tmp_path))
+    paths = LoopPaths(repo_root=tmp_path)
+    cfg = build_author_config(paths, trees=author_trees(paths))
     d = cfg.corpus_dir
-    d.mkdir(parents=True)
+    d.mkdir(parents=True, exist_ok=True)  # the trees made the mount point (a drain's always exists)
     (d / "good.md").write_text("---\nname: good\nsource_finding_ids: [o-1]\n---\nbody\n")
     (d / "dangling.md").symlink_to(d / "never-existed.md")
 

@@ -1333,6 +1333,9 @@ def drive_drain_restore(worktree: Path, corpus: Path, snapshot: dict[str, bytes]
     call. Both halves redirect at HEAD — a symlink at a snapshot leaf truncates the outside
     file, and a symlink-to-directory at a snapshot key's parent component lands the restored
     blob inside the outside directory."""
+    from defender._io import hold
     from defender.learning.author import drain
 
-    drain._restore_corpus(worktree, corpus, snapshot)
+    # The second positional is the corpus's spelling (git pathspec); `corpus=` is its held mount.
+    with hold(corpus) as held:
+        drain._restore_corpus(worktree, corpus, snapshot, corpus=held)

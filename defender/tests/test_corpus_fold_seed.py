@@ -45,6 +45,7 @@ import pytest
 
 import defender.learning.author.shared as _shared  # noqa: E402
 from defender.learning.author.shared import build_curator_user_prompt  # noqa: E402
+from defender.tests._curator1134 import author_trees, corpus_view  # noqa: E402
 
 from defender.tests.test_curator_manifest import (  # noqa: E402
     _actor_lesson,
@@ -450,7 +451,8 @@ def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path)
     effect. The rows and the rest of the prompt (P1) must survive unchanged."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     rows = [{"id": "f/1", "text": "a finding"}]
-    kw = dict(corpus_dir=corpus, corpus_dir_rel="defender/lessons", label="findings")
+    kw = dict(corpus=corpus_view(corpus), corpus_dir=corpus, corpus_dir_rel="defender/lessons",
+              label="findings")
 
     p1 = build_curator_user_prompt(rows, "batch-one", **kw)
     p2 = build_curator_user_prompt(rows, "batch-two", **kw)
@@ -550,13 +552,14 @@ def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):
         _findings_lesson(corpus, f"lesson-{i}")
     rows = [{"id": "f/1", "text": "a finding"}]
 
-    pinned = build_author_config(LoopPaths(repo_root=tmp_path), manifest_seed="fixed-eval-seed")
+    paths = LoopPaths(repo_root=tmp_path)
+    pinned = build_author_config(paths, trees=author_trees(paths), manifest_seed="fixed-eval-seed")
     a = _prompt_manifest(build_user_prompt(rows, "batch-one", pinned))
     b = _prompt_manifest(build_user_prompt(rows, "batch-two", pinned))
     assert a == b
     assert a == _shared.build_corpus_manifest(corpus, seed="fixed-eval-seed")
 
-    unpinned = build_author_config(LoopPaths(repo_root=tmp_path))
+    unpinned = build_author_config(paths, trees=author_trees(paths))
     c = _prompt_manifest(build_user_prompt(rows, "batch-one", unpinned))
     d = _prompt_manifest(build_user_prompt(rows, "batch-two", unpinned))
     assert c != d

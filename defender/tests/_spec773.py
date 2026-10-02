@@ -86,6 +86,7 @@ from defender.learning.author import drain
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths, QueueChannel
+from defender.tests._curator1134 import author_trees
 
 
 class _NotYetWritten:
@@ -335,7 +336,7 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
     repair = repair if repair is not None else FakeRepair()
     keys = keys if keys is not None else FakeKeySource()
 
-    base = lessons_run.build_author_config(paths)
+    base = lessons_run.build_author_config(paths, trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": verifier.as_check(),
@@ -406,7 +407,7 @@ def build_questioner_scene(
     verifier = FakeVerifier()
     repair = FakeRepair()
 
-    base = questioner_run.build_questioner_config(paths)
+    base = questioner_run.build_questioner_config(paths, trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": None,

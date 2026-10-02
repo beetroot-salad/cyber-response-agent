@@ -239,13 +239,15 @@ def tmp_repo(tmp_path: Path):
 
     from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
     from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
+    from defender.tests._curator1134 import author_trees
 
     paths = LoopPaths(repo_root=repo)
     # #773: the drain-run check is disarmed here — this fixture predates it and every test
     # built against it fakes `invoke_agent` alone, never meaning to exercise a real
     # verifier model call. A test that wants the check overrides `forward_check` itself.
     import dataclasses as _dc
-    cfg = _dc.replace(author_mod.build_author_config(paths), forward_check=None)
+    cfg = _dc.replace(author_mod.build_author_config(paths, trees=author_trees(paths)),
+                      forward_check=None)
 
     class Ctx:
         def __init__(self) -> None:

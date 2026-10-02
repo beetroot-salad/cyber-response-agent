@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from defender.tests import _spec773 as S
+from defender.tests._curator1134 import author_trees
 
 LESSON = "defender/lessons/l1.md"
 
@@ -303,7 +304,8 @@ def test_queue_row_is_missing_the_field_the_exempt_predicate_reads_773(tmp_path)
     # And it is THIS function the drain consults, not a second spelling of the same rule:
     # a predicate the config did not wire could be `.get`-based and still never run.
     paths = S.make_paths(tmp_path)
-    assert S.lessons_run.build_author_config(paths).exempt is checks.skips_forward_check
+    assert S.lessons_run.build_author_config(
+        paths, trees=author_trees(paths)).exempt is checks.skips_forward_check
 
 
 # ---------------------------------------------------------------------------

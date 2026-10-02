@@ -15,6 +15,7 @@ committed spec, so it lives in its own file rather than editing a locked one.
 from __future__ import annotations
 
 from defender.learning.author import drain
+from defender.tests._curator1134 import lane_tree_for
 from defender.tests._drain719 import git
 
 
@@ -38,7 +39,7 @@ def test_a_crlf_only_rewrite_is_not_byte_identical_to_head(tmp_path):
     status = git(repo, "status", "--porcelain")
     assert status.stdout.strip() == "M f.txt", "git itself must see this as a dirty file"
 
-    assert drain._byte_identical_to_head(repo, "f.txt") is False
+    assert drain._byte_identical_to_head(repo, "f.txt", tree_for=lane_tree_for(repo)) is False
 
 
 def test_a_genuine_byte_identical_file_is_still_recognised(tmp_path):
@@ -57,4 +58,4 @@ def test_a_genuine_byte_identical_file_is_still_recognised(tmp_path):
 
     f.chmod(0o755)
 
-    assert drain._byte_identical_to_head(repo, "f.txt") is True
+    assert drain._byte_identical_to_head(repo, "f.txt", tree_for=lane_tree_for(repo)) is True

@@ -93,7 +93,8 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     )
 
     _repair_index(paths.repo_root)
-    author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel)
+    author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel,
+                                          corpus=cfg.corpus)
     recovered = h.cfg_for(
         paths, "findings", max_attempts=1, invoke_agent=h.committing("after")
     )

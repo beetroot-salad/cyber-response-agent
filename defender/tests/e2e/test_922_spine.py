@@ -43,6 +43,7 @@ from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core import drains
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
+from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
 
 pytestmark = pytest.mark.e2e
@@ -122,7 +123,8 @@ class TriggerRecorder:
         # verifier's key source is faked too, or a host with no real key configured
         # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent,
+            lessons_run.build_author_config(paths, trees=author_trees(paths), box=box),
+            invoke_agent=self._agent,
             source_key=lambda model, *, label=None: None,
         )
         lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)

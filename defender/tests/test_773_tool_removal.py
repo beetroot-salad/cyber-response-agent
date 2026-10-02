@@ -13,6 +13,7 @@ import pytest
 
 from defender.learning.core.config import FatalConfigError
 from defender.tests import _spec773 as S
+from defender.tests._curator1134 import author_trees
 
 LESSON = "defender/lessons/l1.md"
 QLESSON = "defender/lessons-questioner/w1.md"
@@ -296,7 +297,8 @@ def test_a_questioner_tick_runs_vouching_and_no_verdict_step_773(tmp_path):
     is enforced on the questioner's too, minus the step M2 says it skips."""
     from defender.learning.author.questioner import run as questioner_run
 
-    real = questioner_run.build_questioner_config(S.make_paths(tmp_path / "real"))
+    real_paths = S.make_paths(tmp_path / "real")
+    real = questioner_run.build_questioner_config(real_paths, trees=author_trees(real_paths))
     assert real.forward_check is None
     assert real.exempt({"direction": "anything at all"}) is True
 

@@ -842,8 +842,10 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     without either claiming its ids or tripping on them."""
     from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
     from defender.learning.core.config import LoopPaths
+    from defender.tests._curator1134 import author_trees
 
-    cfg = build_author_config(LoopPaths(repo_root=tmp_path))
+    paths = LoopPaths(repo_root=tmp_path)
+    cfg = build_author_config(paths, trees=author_trees(paths))
     corpus = cfg.corpus_dir
     corpus.mkdir(parents=True, exist_ok=True)
     _findings_lesson(corpus, "good", finding_ids=("fid/0", "fid/1"))

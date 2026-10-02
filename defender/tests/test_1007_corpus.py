@@ -39,6 +39,7 @@ from defender.learning.core import drains
 from defender.tests import _by_path as P
 from defender.tests import _drain719 as D
 from defender.tests import _world_1007 as W
+from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
 from defender.tests.e2e.test_922_spine import (
     RepoBranch,
@@ -96,7 +97,8 @@ class TwoLaneRecorder:
         # verifier's key source is faked too, or a host with no real key configured
         # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, box=box), invoke_agent=self._agent,
+            lessons_run.build_author_config(paths, trees=author_trees(paths), box=box),
+            invoke_agent=self._agent,
             source_key=lambda model, *, label=None: None,
         )
         lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
@@ -171,7 +173,7 @@ def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     curator = W.mod("learning.author.questioner.run")
-    cfg = curator.build_questioner_config(paths)
+    cfg = curator.build_questioner_config(paths, trees=author_trees(paths))
 
     # `CorpusAuthorConfig.gate`'s own documented order, which is what `drain.run_batch`
     # unpacks: `held, consumed_pre, to_author = cfg.gate(keyed, cfg)`.
@@ -203,7 +205,8 @@ def test_the_questioner_curator_registers_no_forward_check(tmp_path):
                   if isinstance(value, checks.ForwardCheck)]
     assert registered == ["FINDINGS_CHECK"], (
         f"the forward-check registry holds {registered}; the questioner corpus added one")
-    cfg = curator.build_questioner_config(D.make_paths(tmp_path))
+    paths = D.make_paths(tmp_path)
+    cfg = curator.build_questioner_config(paths, trees=author_trees(paths))
     assert cfg.forward_check is None, (
         "the questioner config wires a forward check — a world lesson has no defender "
         "verdict for one to re-run against")
@@ -224,7 +227,8 @@ def test_the_defender_curator_still_registers_findings_check(tmp_path):
 
     assert getattr(checks, "FINDINGS_CHECK", None) is not None, (
         "the incumbent findings forward check is gone")
-    cfg = lessons_run.build_author_config(D.make_paths(tmp_path))
+    paths = D.make_paths(tmp_path)
+    cfg = lessons_run.build_author_config(paths, trees=author_trees(paths))
     assert cfg.forward_check is checks.FINDINGS_CHECK, (
         "the defender curator stopped wiring its forward check — the regression gate every "
         "lesson edit passes through")
@@ -489,7 +493,7 @@ def test_each_curator_consumes_its_own_channel_and_is_scoped_to_its_own_corpus(t
 
     assert D.pending(paths.findings), (
         "the defender queue was consumed by a tick in which only the questioner curator ran")
-    cfg = curator.build_questioner_config(paths)
+    cfg = curator.build_questioner_config(paths, trees=author_trees(paths))
     assert Path(cfg.corpus_dir) == paths.lessons_questioner_dir, (
         f"the questioner curator's corpus dir is {cfg.corpus_dir}")
 
