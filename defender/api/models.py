@@ -194,3 +194,22 @@ class CredentialsPut(_Request):
 class SystemCheck(BaseModel):
     ok: bool
     detail: str
+
+
+class FieldError(BaseModel):
+    """One part of a request that failed validation. The refused value is never echoed."""
+
+    loc: list[str | int] = Field(description="Where: `body`, `query`, `path` or `header`, then the field's path.")
+    msg: str
+    type: str = Field(description="The validation rule that failed, e.g. `string_pattern_mismatch`.")
+
+
+class Problem(BaseModel):
+    """An error, as RFC 9457 problem details, served as `application/problem+json`."""
+
+    type: str = Field(default="about:blank", description="`about:blank`: the status says what kind of problem it is.")
+    title: str = Field(description="The status's phrase.")
+    status: int
+    detail: str | None = Field(default=None, description="What happened to this request.")
+    errors: list[FieldError] | None = Field(
+        default=None, description="On a 422 from validation: each failing part of the request.")

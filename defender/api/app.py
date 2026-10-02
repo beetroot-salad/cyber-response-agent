@@ -12,6 +12,8 @@ learned from is the store's (`ports.py`). What they own is the mapping onto HTTP
   the record the port returned.
 - `None` from a read, or `NotFound`, is a 404; a record another tenant owns reads the same.
 - `UnknownReference` (a body naming a missing record) is a 422; `Conflict` is a 409.
+- Every error is an RFC 9457 problem (`problems.py`), and each route declares the ones it can
+  answer.
 - Malformed input never reaches a port, whichever way it comes in (path, query, body or
   cursor): ids outside `RECORD_ID_PATTERN`, times without an offset and bare numbers where a
   time is due are 422s at the boundary.
@@ -21,15 +23,11 @@ learned from is the store's (`ports.py`). What they own is the mapping onto HTTP
 from __future__ import annotations
 
 import datetime as _dt
-import json
-from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import ValidationError
 
@@ -52,6 +50,8 @@ from .models import (
     SystemSettings,
 )
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
+from .problems import install as install_problems
+from .problems import refusal, responses
 from .ports import (
     ApiDeps,
     Conflict,
@@ -100,6 +100,11 @@ Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor`
 Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
 
 
+#: The problems any route can answer: no login, a request that fails validation (every route
+#: takes an id, a body, a cursor or a page size), an unexpected failure.
+_EVERY_ROUTE = responses(401, 422, 500)
+
+
 #: Each list's total order, as its port states it (`ports.py`).
 _ALERT_ORDER: Order[AlertSummary, TimePosition] = newest_first(lambda a: a.fired_at, lambda a: a.alert_id)
 _INVESTIGATION_ORDER: Order[Investigation, TimePosition] = newest_first(lambda i: i.created_at, lambda i: i.investigation_id)
@@ -136,7 +141,7 @@ def _created_at(request: Request, response: Response, route: str, **path: str) -
     response.headers["Location"] = str(request.url_for(route, **path))
 
 
-alerts = APIRouter(prefix="/alerts", tags=["alerts"])
+alerts = APIRouter(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
 
 
 @alerts.get("")
@@ -160,7 +165,7 @@ def list_alerts(
     )
 
 
-@alerts.get("/{alert_id}")
+@alerts.get("/{alert_id}", responses=responses(404))
 def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
     alert = deps.alerts.get_alert(caller.tenant_id, alert_id)
     if alert is None:
@@ -168,10 +173,10 @@ def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
     return alert
 
 
-investigations = APIRouter(prefix="/investigations", tags=["investigations"])
+investigations = APIRouter(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
 
 
-@investigations.post("", responses={201: {"model": Investigation}})
+@investigations.post("", responses={201: {"model": Investigation}, **responses(409)})
 def start_investigation(
     deps: Deps, caller: Caller, body: InvestigationCreate, request: Request, response: Response
 ) -> Investigation:
@@ -207,7 +212,7 @@ def list_investigations(
     )
 
 
-@investigations.get("/{investigation_id}")
+@investigations.get("/{investigation_id}", responses=responses(404))
 def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
     investigation = deps.investigations.get_investigation(caller.tenant_id, investigation_id)
     if investigation is None:
@@ -215,7 +220,7 @@ def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Inves
     return investigation
 
 
-@investigations.post("/{investigation_id}/cancel")
+@investigations.post("/{investigation_id}/cancel", responses=responses(404, 409))
 def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
     with _transaction(deps, caller) as tx:
         investigation = tx.cancel_investigation(investigation_id)
@@ -223,7 +228,8 @@ def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> In
     return investigation
 
 
-@investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
+                        responses=responses(404, 409))
 def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
     """Hide an investigation from every read. Its records are kept: lessons cite runs."""
     with _transaction(deps, caller) as tx:
@@ -235,6 +241,7 @@ def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> No
     "/{investigation_id}/artifacts/{key:path}",
     status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     response_class=RedirectResponse,
+    responses=responses(404),
 )
 def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) -> RedirectResponse:
     """Redirect to a short-lived signed link on the blob store's own origin. The bytes never
@@ -252,10 +259,10 @@ def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) ->
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
-learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"])
+learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"], responses=_EVERY_ROUTE)
 
 
-@learning_jobs.post("", responses={201: {"model": LearningJob}})
+@learning_jobs.post("", responses={201: {"model": LearningJob}, **responses(409)})
 def start_learning_job(
     deps: Deps, caller: Caller, body: LearningJobCreate, request: Request, response: Response
 ) -> LearningJob:
@@ -288,7 +295,7 @@ def list_learning_jobs(
     )
 
 
-@learning_jobs.get("/{learning_job_id}")
+@learning_jobs.get("/{learning_job_id}", responses=responses(404))
 def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> LearningJob:
     job = deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
     if job is None:
@@ -296,7 +303,7 @@ def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> Learnin
     return job
 
 
-lessons = APIRouter(prefix="/lessons", tags=["learning"])
+lessons = APIRouter(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
 
 
 @lessons.get("")
@@ -310,7 +317,7 @@ def list_lessons(
     )
 
 
-systems = APIRouter(prefix="/systems", tags=["systems"])
+systems = APIRouter(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
 
 
 def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
@@ -356,7 +363,8 @@ def put_system(
     return _served(deps, caller, settings)
 
 
-@systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT)
+@systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT,
+             responses=responses(404))
 def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
     _settings(deps, caller, system_id)
@@ -369,31 +377,10 @@ def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: Credentials
         deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
 
 
-@systems.post("/{system_id}/check")
+@systems.post("/{system_id}/check", responses=responses(404))
 def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
     """Test the connection and a first query."""
     return deps.checker.check(caller.tenant_id, _served(deps, caller, _settings(deps, caller, system_id)))
-
-
-def _refusal(code: int) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
-    async def handle(_request: Request, exc: Exception) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=code)
-    return handle
-
-
-class _AsciiJSONResponse(JSONResponse):
-    """JSON with every non-ASCII character escaped. A 422 echoes the refused input, and a lone
-    surrogate in it cannot be encoded as UTF-8: rendered raw, the refusal itself would be a 500."""
-
-    def render(self, content: Any) -> bytes:
-        return json.dumps(content, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("ascii")
-
-
-async def _invalid_request(_request: Request, exc: Exception) -> JSONResponse:
-    """FastAPI's own 422 shape, rendered so any refused input can be echoed."""
-    if not isinstance(exc, RequestValidationError):
-        raise exc
-    return _AsciiJSONResponse({"detail": jsonable_encoder(exc.errors())}, status_code=422)
 
 
 def create_app(deps: ApiDeps) -> FastAPI:
@@ -405,9 +392,9 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.state.deps = deps
     for router in (alerts, investigations, learning_jobs, lessons, systems):
         app.include_router(router)
-    app.add_exception_handler(NotFound, _refusal(status.HTTP_404_NOT_FOUND))
-    app.add_exception_handler(Conflict, _refusal(status.HTTP_409_CONFLICT))
+    install_problems(app)
+    app.add_exception_handler(NotFound, refusal(status.HTTP_404_NOT_FOUND))
+    app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
     # The literal, not starlette's constant: it was renamed across starlette releases.
-    app.add_exception_handler(UnknownReference, _refusal(422))
-    app.add_exception_handler(RequestValidationError, _invalid_request)
+    app.add_exception_handler(UnknownReference, refusal(422))
     return app

@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import json
+from http import HTTPStatus
 import subprocess
 import sys
 from collections.abc import Callable
@@ -457,7 +458,9 @@ def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
     api = Api(**{port: error})
     response = api.client.request(method, path, headers=AUTH, json=body)
     assert response.status_code == code
-    assert response.json() == {"detail": "x"}
+    assert response.headers["Content-Type"] == "application/problem+json"
+    assert response.json() == {"type": "about:blank", "title": HTTPStatus(code).phrase,
+                               "status": code, "detail": "x"}
     assert api.ports.audits == [], "the refused write's transaction committed nothing"
 
 
@@ -567,6 +570,73 @@ def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store()
     assert api.ports.called("put_credentials") == []
     assert Api().client.put("/systems/tix/credentials", headers=AUTH,
                             json={"credentials": {}}).status_code == 422
+
+
+# --- errors: one shape, RFC 9457 ----------------------------------------------------------
+
+PROBLEM_KEYS = {"type", "title", "status", "detail"}
+
+
+@pytest.mark.parametrize(("method", "path", "body", "headers", "answers", "code"), [
+    ("GET", "/alerts", None, {}, {}, 401),
+    ("GET", "/alerts/al-1", None, AUTH, {"get_alert": None}, 404),
+    ("GET", "/nowhere", None, AUTH, {}, 404),
+    ("POST", "/alerts", None, AUTH, {}, 405),
+    ("POST", "/investigations/inv-1/cancel", None, AUTH, {"cancel_investigation": Conflict("ended")}, 409),
+    ("POST", "/investigations", {"alert_id": "al-1", "client_request_id": "r"}, AUTH,
+     {"create_investigation": UnknownReference("no alert")}, 422),
+    ("GET", "/alerts?cursor=zz", None, AUTH, {}, 422),
+    ("GET", "/alerts?limit=0", None, AUTH, {}, 422),
+    ("GET", "/alerts", None, AUTH, {"list_alerts": RuntimeError("db exploded at host-7")}, 500),
+])
+def test_every_error_is_an_rfc_9457_problem(
+    method: str, path: str, body: dict[str, Any] | None, headers: dict[str, str],
+    answers: dict[str, Any], code: int,
+) -> None:
+    api = Api(**answers)
+    response = api.lenient().request(method, path, headers=headers, json=body)
+    assert response.status_code == code
+    assert response.headers["Content-Type"] == "application/problem+json"
+    problem = response.json()
+    assert PROBLEM_KEYS <= set(problem) <= PROBLEM_KEYS | {"errors"}
+    assert (problem["type"], problem["title"], problem["status"]) == (
+        "about:blank", HTTPStatus(code).phrase, code)
+    if code == 401:
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+    if code == 500:
+        assert problem["detail"] == "internal error", "a 500 says nothing about its cause"
+
+
+def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> None:
+    secret = 87654321987654321
+    api = Api()
+    response = api.client.put("/systems/tix/credentials", headers=AUTH,
+                              json={"credentials": {"api_token": secret}})
+    assert response.status_code == 422
+    problem = response.json()
+    assert problem["errors"] == [{"loc": ["body", "credentials", "api_token"],
+                                  "msg": "Input should be a valid string", "type": "string_type"}]
+    assert str(secret) not in response.text
+
+
+def test_the_published_contract_declares_each_routes_problems() -> None:
+    doc = Api().client.get("/openapi.json").json()
+    assert "HTTPValidationError" not in json.dumps(doc)
+    declared: dict[tuple[str, str], set[int]] = {}
+    for path, operations in doc["paths"].items():
+        for method, operation in operations.items():
+            errors = {int(s) for s in operation["responses"] if int(s) >= 400}
+            declared[(method.upper(), path)] = errors
+            for status in errors:
+                assert operation["responses"][str(status)]["content"] == {
+                    "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+    assert all({401, 422, 500} <= errors for errors in declared.values())
+    assert declared[("POST", "/investigations/{investigation_id}/cancel")] >= {404, 409}
+    assert declared[("DELETE", "/investigations/{investigation_id}")] >= {404, 409}
+    assert declared[("POST", "/investigations")] >= {409}
+    assert declared[("POST", "/learning-jobs")] >= {409}
+    assert declared[("GET", "/investigations/{investigation_id}/artifacts/{key}")] >= {404}
+    assert 404 not in declared[("GET", "/alerts")]
 
 
 # --- the boundary: malformed input never reaches a port ------------------------------------
