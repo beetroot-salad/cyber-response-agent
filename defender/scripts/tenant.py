@@ -388,7 +388,7 @@ def migrate(tenant_id: str, target: Path) -> int:
     template. It writes nothing else — no row — and judges nothing: the operator then runs
     `setup <id>`, which applies every rule to it and, finding the row there, writes nothing.
     Needs no data root. Refused before any write for a bad id, a checkout carrying no copy for
-    the id, a target that exists already, whose parent is not a directory, or that lies in the
+    the id, a target that exists already, whose parent is not a real directory, or that lies in the
     running checkout's `defender/` tree, or a git with no commit identity; a failure after it
     creates `target` removes `target` again. Retire it with the checkout's copies (#1158)."""
     try:
@@ -399,7 +399,9 @@ def migrate(tenant_id: str, target: Path) -> int:
     target = Path(target).absolute()
     source = f"knowledge/tenants/{tid}"
     try:
-        files = _committed_files(source)
+        # migrate writes the id file itself, for the id it is asked to migrate
+        files = [(rel, sha) for rel, sha in _committed_files(source)
+                 if rel != TENANT_ID_FILE.as_posix()]
     except (OSError, _git.GitError) as failed:
         _say(f"could not read {source}/ from the checkout's HEAD: {failed}")
         return 1
@@ -443,7 +445,8 @@ def _migrate_target_refusal(target: Path) -> str | None:
                     "is not there yet")
         parent = target.parent
         if not parent.is_dir() or parent.is_symlink():
-            return f"{parent} is not a directory — migrate builds the knowledge folder inside it"
+            return (f"{parent} is not a real directory (a link is refused) — migrate builds the "
+                    "knowledge folder inside it")
         if parent.resolve().is_relative_to(_DEFENDER_DIR.resolve()):
             return (f"{target} is inside the checkout's {_DEFENDER_DIR} tree — a tenant's "
                     "knowledge lives under the data root, outside it")

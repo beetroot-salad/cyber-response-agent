@@ -99,7 +99,7 @@ def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(tmp_path: Path
 
 
 @pytest.mark.parametrize("cell", ["bad-id", "no-copy", "target-exists", "no-parent",
-                                  "inside-defender", "no-identity"])
+                                  "linked-parent", "inside-defender", "no-identity"])
 def test_migrate_refuses_before_writing(tmp_path: Path, cell: str) -> None:
     """Each refusal exits 1 naming what it refuses, and the data root (and the target) are as
     they were. Control: the same root with a clean target migrates (the happy-path test)."""
@@ -118,6 +118,10 @@ def test_migrate_refuses_before_writing(tmp_path: Path, cell: str) -> None:
     elif cell == "no-parent":
         target = root / "absent" / "knowledge"
         names = [str(target.parent)]
+    elif cell == "linked-parent":
+        (root / "linked").symlink_to(root / _TID, target_is_directory=True)
+        target = root / "linked" / "knowledge"
+        names = [str(target.parent), "a link is refused"]
     elif cell == "inside-defender":
         # A tmp checkout's own copy, so a guard that regressed writes into tmp, never this tree.
         checkout = H.tmp_checkout(tmp_path / "checkout")
@@ -150,3 +154,18 @@ def test_a_migrate_that_fails_after_creating_the_folder_removes_it(tmp_path: Pat
     H.assert_refused(_migrate(_TID, target, home=home), "undone")
     assert not target.exists()
     assert H.census_diff(before, H.tree_census(root)) == []
+
+
+def test_a_copy_that_commits_its_own_tenant_id_migrates_with_the_requested_one(
+        tmp_path: Path) -> None:
+    """A checkout whose copy also commits `agent/.tenant-id` (another tenant's id, say): migrate
+    still exits 0, and the new repo's `.tenant-id` is the one it writes for the id asked for."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    (checkout / _LAB / H.TENANT_ID_FILE).write_text(f"{H.OTHER}\n", encoding="utf-8")
+    H.git(checkout, "add", "--force", "--", f"{_LAB}/{H.TENANT_ID_FILE.as_posix()}")
+    H.git(checkout, "commit", "-q", "-m", "a copy carrying an id")
+    root = _old_shape_root(tmp_path / "root")
+    knowledge = root / _TID / "knowledge"
+    script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
+    H.assert_clean(_migrate(_TID, knowledge, home=S._home(tmp_path / "cfg"), script=script))
+    assert _committed(knowledge)[H.TENANT_ID_FILE.as_posix()] == f"{_TID}\n".encode()
