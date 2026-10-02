@@ -4,6 +4,7 @@
     python3 defender/scripts/tenant.py scaffold <tenant-id> <empty dir>
     python3 defender/scripts/tenant.py setup <tenant-id>
     python3 defender/scripts/tenant.py check <tenant-id> | --folder <path>
+    python3 defender/scripts/tenant.py migrate <tenant-id> <new knowledge folder>   # one-off
 
 A tenant's knowledge (its `settings/` and `agent/` halves) lives in the tenant's OWN repo, never
 in the product repo. `scaffold` starts one: it copies `knowledge/tenant-template` into an empty
@@ -26,7 +27,12 @@ the adapters declare that the table leaves undecided, a row for a verb nobody de
 lead-zero agreement, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
 commits (failing closed when git cannot answer). `check <id>` judges the tenant under
 `$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
-folder with no data root at all (tenant CI). Exit status: 0 clean, 1 a finding or a refusal, 2 a
+folder with no data root at all (tenant CI).
+
+`migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
+its settings still in the product checkout): it builds the knowledge folder acceptance now
+requires from the checkout's committed copy, as a new repo exactly like scaffold's, and the
+operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding or a refusal, 2 a
 usage error. Every refusal is printed as `[tenant.py] <message>`.
 """
 from __future__ import annotations
@@ -262,19 +268,13 @@ def scaffold(tenant_id: str, target: Path) -> int:
     if refusal is not None:
         _say(refusal)
         return 1
+    template = template_dir(_REPO_ROOT).relative_to(_REPO_ROOT).as_posix()
     try:
-        written = _copy_template(target)
-        write_guarded(target / TENANT_ID_FILE, _tenant.tenant_id_file_text(tid), mode="create")
-        written.append(TENANT_ID_FILE.as_posix())
-        env = _git.env_for_cwd()
-        _git.git(["init", "-q", "-b", "main"], cwd=target, env=env)
-        _git.git(["add", "--force", "--", *written], cwd=target, env=env)
-        staged = set(_git.git(["ls-files", "-z"], cwd=target, env=env).split("\0")) - {""}
-        if staged != set(written):
-            raise OSError(f"git staged {sorted(staged ^ set(written))} differently from what "
-                          "scaffold wrote")
-        _git.git(["commit", "-q", "-m", f"tenant {tid}: scaffolded from the template"],
-                 cwd=target, env=env)
+        files = [(rel, sha) for rel, sha in _committed_files(template)
+                 if "examples" not in PurePosixPath(rel).parts]
+        if not files:
+            raise OSError(f"the checkout's HEAD commits no {template}/ to scaffold from")
+        _commit_new_tenant_repo(target, tid, files, f"tenant {tid}: scaffolded from the template")
     except (OSError, _git.GitError) as failed:
         try:
             _empty(target)
@@ -307,15 +307,17 @@ def _target_fault(target: Path) -> str | None:
 
 def _git_preflight(target: Path) -> str | None:
     """git is there and can commit as someone, asked before anything is written. The identity
-    is asked as the repository scaffold is about to create will see it: `GIT_DIR` names its
+    is asked as the repository about to be created in `target` will see it: `GIT_DIR` names its
     `.git` (not yet there, and not created by asking), so an `includeIf "gitdir:…"` rule
-    matches as it will for the commit, and an enclosing repo's identity is not borrowed."""
+    matches as it will for the commit, and an enclosing repo's identity is not borrowed. Asked
+    from `target`'s parent: migrate's target does not exist yet."""
     env = _git.env_for_cwd()
     future = {**env, "GIT_DIR": str(target / ".git")}
+    cwd = target.parent
     try:
-        _git.git(["--version"], cwd=target, env=env)
+        _git.git(["--version"], cwd=cwd, env=env)
         for ident in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            _git.git(["var", ident], cwd=target, env=future)
+            _git.git(["var", ident], cwd=cwd, env=future)
     except FileNotFoundError as absent:
         return f"scaffold needs git, and git is not available on PATH ({absent})"
     except OSError as unusable:
@@ -326,27 +328,41 @@ def _git_preflight(target: Path) -> str | None:
     return None
 
 
-def _copy_template(target: Path) -> list[str]:
-    """Write the template's files into `target` as the running checkout's HEAD commits them —
-    read from git, never from the disk, so an untracked file beside them (a `.DS_Store`, a
-    stray `.env`) or a local edit is never carried into a tenant's repo. Returns the relative
-    paths written."""
-    template = template_dir(_REPO_ROOT).relative_to(_REPO_ROOT).as_posix()
-    env = _git.env_for_cwd()
-    listing = _git.git(["ls-tree", "-r", "-z", "HEAD", "--", template], cwd=_REPO_ROOT, env=env)
-    if not listing:
-        raise OSError(f"the checkout's HEAD commits no {template}/ to scaffold from")
-    written: list[str] = []
+def _committed_files(source: str) -> list[tuple[str, str]]:
+    """The regular files the running checkout's HEAD commits under `source` (repo-relative), as
+    `(path relative to source, blob sha)` — read from git, never from the disk, so an untracked
+    file beside them (a `.DS_Store`, a stray `.env`) or a local edit is never carried into a
+    tenant's repo. A link, a submodule or anything else that is not a plain file is left out."""
+    listing = _git.git(["ls-tree", "-r", "-z", "HEAD", "--", source], cwd=_REPO_ROOT,
+                       env=_git.env_for_cwd())
+    files = []
     for entry in sorted(filter(None, listing.split("\0"))):
         meta, path = entry.split("\t", 1)
         mode, kind, sha = meta.split()
-        rel = PurePosixPath(path).relative_to(template)
-        if "examples" in rel.parts or kind != "blob" or mode not in ("100644", "100755"):
-            continue
+        if kind == "blob" and mode in ("100644", "100755"):
+            files.append((PurePosixPath(path).relative_to(source).as_posix(), sha))
+    return files
+
+
+def _commit_new_tenant_repo(target: Path, tid: _tenant.TenantId,
+                            files: list[tuple[str, str]], message: str) -> None:
+    """Write `files` (from `_committed_files`) and `agent/.tenant-id` into `target`, and commit
+    exactly those on a new branch `main`, whatever the operator's ignore rules say."""
+    env = _git.env_for_cwd()
+    written = []
+    for rel, sha in files:
         guarded_mkdir((target / rel).parent, base=target)
         write_guarded(target / rel, _git.git_blob_bytes(_REPO_ROOT, sha, env=env), mode="create")
-        written.append(rel.as_posix())
-    return written
+        written.append(rel)
+    write_guarded(target / TENANT_ID_FILE, _tenant.tenant_id_file_text(tid), mode="create")
+    written.append(TENANT_ID_FILE.as_posix())
+    _git.git(["init", "-q", "-b", "main"], cwd=target, env=env)
+    _git.git(["add", "--force", "--", *written], cwd=target, env=env)
+    staged = set(_git.git(["ls-files", "-z"], cwd=target, env=env).split("\0")) - {""}
+    if staged != set(written):
+        raise OSError(f"git staged {sorted(staged ^ set(written))} differently from what was "
+                      "written")
+    _git.git(["commit", "-q", "-m", message], cwd=target, env=env)
 
 
 def _empty(target: Path) -> None:
@@ -356,6 +372,84 @@ def _empty(target: Path) -> None:
             shutil.rmtree(entry)
         else:
             entry.unlink()
+
+
+# ==========================================================================================
+# migrate (one-off, #1120)
+# ==========================================================================================
+
+def migrate(tenant_id: str, target: Path) -> int:
+    """ONE-OFF (#1120): build the knowledge folder a tenant set up before #1120 lacks. Such a
+    tenant has a row and `runs/` under the data root, and its settings in the product
+    checkout's `knowledge/tenants/<id>/`; acceptance now refuses it for the missing
+    `<root>/<id>/knowledge`, and there is no tenant repo to clone. `target` (normally
+    `$DEFENDER_DATA_ROOT/<id>/knowledge`) becomes a new repo committing the running checkout's
+    HEAD copy of that folder plus `agent/.tenant-id`, built as scaffold builds one from the
+    template. It writes nothing else — no row — and judges nothing: the operator then runs
+    `setup <id>`, which applies every rule to it and, finding the row there, writes nothing.
+    Needs no data root. Refused before any write for a bad id, a checkout carrying no copy for
+    the id, a target that exists already, whose parent is not a directory, or that lies in the
+    running checkout's `defender/` tree, or a git with no commit identity; a failure after it
+    creates `target` removes `target` again. Retire it with the checkout's copies (#1158)."""
+    try:
+        tid = _tenant.TenantId(tenant_id)
+    except _tenant.TenantRefused as refused:
+        _say(refused)
+        return 1
+    target = Path(target).absolute()
+    source = f"knowledge/tenants/{tid}"
+    try:
+        files = _committed_files(source)
+    except (OSError, _git.GitError) as failed:
+        _say(f"could not read {source}/ from the checkout's HEAD: {failed}")
+        return 1
+    refusal = (_migrate_target_refusal(target)
+               or _git_preflight(target)
+               or (None if files else
+                   f"the checkout's HEAD commits no {source}/ — there is nothing to migrate for "
+                   f"tenant {tid!r}; clone the tenant repo into {target} on the host, then run "
+                   f"tenant.py setup {tid}"))
+    if refusal is not None:
+        _say(refusal)
+        return 1
+    try:
+        # An EXCLUSIVE create: an existing folder, or a link at the name, is refused, so the undo
+        # below only ever removes what migrate made. guarded_mkdir is exist_ok.
+        target.mkdir()  # lint-unguarded-tree-write: ok — exclusive create; parent judged above
+    except OSError as blocked:
+        _say(f"could not create {target}: {blocked}")
+        return 1
+    try:
+        _commit_new_tenant_repo(target, tid, files,
+                                f"tenant {tid}: moved out of the product repo's {source} (#1120)")
+    except (OSError, _git.GitError) as failed:
+        try:
+            shutil.rmtree(target)
+        except OSError as stuck:
+            _say(f"migrating into {target} failed ({failed}), and removing it failed too "
+                 f"({stuck}) — remove {target} by hand before retrying")
+            return 1
+        _say(f"migrating into {target} failed and was undone: {failed}")
+        return 1
+    print(f"{target}: built from the checkout's {source}/ and committed — now run "
+          f"tenant.py setup {tid}")
+    return 0
+
+
+def _migrate_target_refusal(target: Path) -> str | None:
+    try:
+        if os.path.lexists(target):
+            return (f"{target} already exists — migrate only builds a knowledge folder that "
+                    "is not there yet")
+        parent = target.parent
+        if not parent.is_dir() or parent.is_symlink():
+            return f"{parent} is not a directory — migrate builds the knowledge folder inside it"
+        if parent.resolve().is_relative_to(_DEFENDER_DIR.resolve()):
+            return (f"{target} is inside the checkout's {_DEFENDER_DIR} tree — a tenant's "
+                    "knowledge lives under the data root, outside it")
+    except (OSError, RuntimeError) as unusable:
+        return f"{target} could not be checked as a migrate target: {unusable}"
+    return None
 
 
 # ==========================================================================================
@@ -375,11 +469,18 @@ def main(argv: list[str]) -> int:
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
+    migrate_p = sub.add_parser(
+        "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from the "
+                        "checkout's copy")
+    migrate_p.add_argument("tenant_id")
+    migrate_p.add_argument("target", type=Path)
     ns = p.parse_args(argv)
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)
     if ns.command == "setup":
         return setup(ns.tenant_id)
+    if ns.command == "migrate":
+        return migrate(ns.tenant_id, ns.target)
     if (ns.tenant_id is None) == (ns.folder is None):
         check_p.error("give exactly one of <tenant-id> and --folder")
     if ns.folder is not None:

@@ -42,6 +42,11 @@ Clone on the HOST with a credential helper or an ssh agent (never a credential i
 the container never fetches. Run setup once the clone has exited 0 — setup adopts the placed
 folder as it is (it copies nothing and runs no git), checks it, and writes the row last.
 
+A data root made before #1120 (`<id>/tenant.json`, `runs/` and `sessions/`, no `knowledge/`) has
+no tenant repo to clone: on the host, build its knowledge folder once from this checkout with
+`python3 defender/scripts/tenant.py migrate playground "<HOST_DATA_ROOT>/playground/knowledge"`
+(one-off), then run the setup step above.
+
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) to a MOUNTED host folder — the row it writes is what every later run is
 checked against, so a data root inside the throwaway container is gone when setup exits — and

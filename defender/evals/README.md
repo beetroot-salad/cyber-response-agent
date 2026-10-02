@@ -32,6 +32,8 @@ python3 defender/scripts/tenant.py setup playground
 
 Clone with a credential helper or an ssh agent (never a credential in the URL), and run setup
 once the clone has exited 0; setup adopts the placed folder and copies nothing.
+A data root made before #1120 (no `<id>/knowledge/`) has no repo to clone: build the folder
+once with `tenant.py migrate <id> <root>/<id>/knowledge`, then run setup.
 
 Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) and no run, fork or drain in flight on any checkout of the host, as the same

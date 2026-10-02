@@ -530,13 +530,16 @@ def _accept_knowledge(
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
     """Step 3's first half: `<T>/knowledge`, reached without following `<T>` or itself, is a
-    real directory. Absent, it is the operator's to place, so the refusal says how."""
+    real directory. Absent, it is the operator's to place, so the refusal says how — and, for
+    a tenant from before #1120, names the one-off `tenant.py migrate`."""
     knowledge = paths.knowledge
     if found.absent:
         raise TenantRefused(
             f"tenant {paths.tenant_id!r} has no knowledge folder: {knowledge} does not "
             f"exist — clone the tenant repo into it on the host, then run "
-            f"tenant.py setup {paths.tenant_id}")
+            f"tenant.py setup {paths.tenant_id} (a tenant set up before #1120, whose settings "
+            f"the product checkout still carries, has no repo to clone: build the folder with "
+            f"tenant.py migrate {paths.tenant_id} {knowledge} instead)")
     if found.st is None or not stat.S_ISDIR(found.st.st_mode):
         why = found.reason or ("it is a link" if found.st is not None
                                and stat.S_ISLNK(found.st.st_mode) else "it is not a directory")

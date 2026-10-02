@@ -137,6 +137,15 @@ has exited 0: setup adopts the placed folder as it is — it copies nothing and 
 it, and writes the tenant's row last. A new tenant's repo starts from
 `tenant.py scaffold <id> <empty dir>`.
 
+**A data root made before #1120** holds `<root>/<id>/{tenant.json,runs,sessions}` and no
+`knowledge/`, so every run refuses it. Its settings are still in this checkout and there is no
+tenant repo to clone: build the folder from them once with the one-off `migrate`, then run setup —
+
+```bash
+python3 defender/scripts/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"
+python3 defender/scripts/tenant.py setup playground
+```
+
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) and no run, fork or drain in flight on any checkout of the host, as the same
 user that runs defender; a destination already occupied makes setup refuse, naming it in the
