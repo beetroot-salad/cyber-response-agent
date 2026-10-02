@@ -12,7 +12,10 @@ and asks git for an identity as the repository it creates will see it (code revi
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
@@ -117,3 +120,24 @@ def test_scaffold_into_a_relative_target_asks_the_identity_of_that_target(
                                identity_env=False, GIT_CONFIG_NOSYSTEM="1"))
     author = H.git(parent / "newrepo", "log", "-1", "--format=%ae").stdout.strip()
     assert author == "work@example.invalid", author
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root removes a read-only folder's entries")
+def test_a_failed_undo_is_reported_not_raised(tmp_path: Path) -> None:
+    """The commit fails (a pre-commit hook exits 1), and the hook has left a read-only folder
+    holding a file, so the undo cannot empty the target: scaffold exits non-zero with no
+    traceback, saying the undo failed and naming the target."""
+    target = S._empty_dir(tmp_path / "acme")
+    hooks = S._empty_dir(tmp_path / "hooks")
+    (hooks / "pre-commit").write_text(
+        "#!/bin/sh\nmkdir -p stuck && touch stuck/f && chmod 555 stuck\nexit 1\n",
+        encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)
+    home = S._home(tmp_path / "cfg", extra=f"[core]\n\thooksPath = {hooks}\n")
+    checkout = H.tmp_checkout(tmp_path / "checkout")  # owned by whoever runs the test
+    script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
+    try:
+        text = S._refused(S._scaffold(H.TID, target, home=home, script=script), str(target))
+    finally:
+        (target / "stuck").chmod(0o755)
+    assert "undoing it failed too" in text, text

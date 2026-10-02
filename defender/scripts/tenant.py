@@ -253,7 +253,8 @@ def scaffold(tenant_id: str, target: Path) -> int:
     files, whatever the operator's ignore rules say. Needs no data root.
     Refused before any write for a bad id, a target that is not an empty directory outside
     the running checkout, or a git that is absent or has no commit identity; a failure after
-    the first write leaves `target` empty again."""
+    the first write leaves `target` empty again — or, when the undo itself fails, says so and
+    names the folder to empty by hand."""
     try:
         tid = _tenant.TenantId(tenant_id)
     except _tenant.TenantRefused as refused:
@@ -278,7 +279,12 @@ def scaffold(tenant_id: str, target: Path) -> int:
         _git.git(["commit", "-q", "-m", f"tenant {tid}: scaffolded from the template"],
                  cwd=target, env=env)
     except (OSError, _git.GitError) as failed:
-        _empty(target)
+        try:
+            _empty(target)
+        except OSError as stuck:
+            _say(f"scaffolding {target} failed ({failed}), and undoing it failed too "
+                 f"({stuck}) — empty {target} by hand before retrying")
+            return 1
         _say(f"scaffolding {target} failed and was undone: {failed}")
         return 1
     return 0
