@@ -260,8 +260,14 @@ learning_jobs(
 - **Auto creation is deduped; explicit re-learn is not.** Re-learning is cheap and unlimited; only the
   _auto_ path must not double-fire. Partial unique index on auto jobs:
   `UNIQUE (investigation_id) WHERE client_request_id IS NULL AND status IN ('queued','running','completed','skipped')`.
-  Explicit re-learns carry a `client_request_id`, dedupe by `UNIQUE (tenant_id, client_request_id)`, and
-  coexist.
+  Explicit re-learns carry a `client_request_id`, dedupe by
+  `UNIQUE (tenant_id, investigation_id, client_request_id)`, and coexist. A request id is scoped to the
+  investigation it names, as an investigation's is to its alert (§4.1): the same id sent for another
+  investigation is another request, never a replay of a job for a different investigation. This is the
+  one statement of the re-learn rules; the API's port points here. The insert transaction, in order: a
+  job with this `(tenant_id, investigation_id, client_request_id)` → return it, `created=false`; else
+  refuse an `unparseable` investigation (`Conflict`); else insert the job and its `learning_job.start`
+  audit row (§2.10), `created=true`.
 - **One `status_detail`, not two** — a `skipped` or `failed` job just needs a short note. A `skipped` job
   is a record, not a lock; re-learning is just another job. The one hard block is `unparseable` (§4.6).
 - **No durable URLs** — `lessons_corpus_version` resolves to a blob bundle and the PR link is a GitHub URL;
@@ -292,8 +298,9 @@ GET  /lessons                                 lesson-corpus read
 
 **A rerun is not a separate verb** — `POST /investigations` on an alert whose investigations have all
 terminated _is_ the rerun (the UI button can say "rerun"); §4.1 covers the live/terminal gating.
-`POST /learning-jobs` carries `investigation_id` + `client_request_id` and returns the existing live job
-for that id; refused only when the investigation is `unparseable` (a prior `skipped`/`completed` doesn't
+`POST /learning-jobs` carries `investigation_id` + `client_request_id`; a repeat of the same request
+returns the job it created, and otherwise each call queues another job (§2.5: explicit re-learns
+coexist). Refused only when the investigation is `unparseable` (a prior `skipped`/`completed` doesn't
 block it).
 
 ### 2.7 Vendor alert normalization envelope
@@ -325,6 +332,16 @@ Tenant identities, authorization at the API boundary; no separate internal user-
 `read` (view), `investigate` (also fire investigations + reruns + re-learns), `write` (administer
 tenant/source bindings + credentials). Internal workers use service identity. All writes and artifact
 reads are tenant-scoped audit events.
+
+**Where audit events live.** Audit events are rows in the same Postgres as the records. The store
+provides the transaction and the API writes into it: a route writes the record **and** its audit row
+through one transaction, so a create, cancel, delete or settings change is audited exactly when it
+commits, and a retry that replays it adds nothing and loses nothing. Which actions are audited, and with
+what, is the API's (its tests pin it); that the two commit together is the store's. An artifact read is
+audited in a transaction of its own once the signed link is issued, committed before the link is handed
+out. A credentials write goes to the secret store, outside the database: its audit row is written first
+and committed after the secret write, so a failed audit write stops the secret write, and only a commit
+failing after the secret is stored can leave it unaudited.
 
 ---
 
@@ -439,9 +456,23 @@ columns move.
 `alerts(tenant_id, source_vendor, remote_alert_id)` unique; a partial unique index allowing at most one
 live (`queued`/`running`) investigation per `(tenant_id, alert_id)` — this is **both** the enqueue-dedup
 and the live-collapse guarantee; `client_request_id` unique per `(tenant_id, alert_id)` so a
-retried/double-clicked create collapses onto the same investigation. The DAL transaction
-`create_investigation_for_alert(alert)`: lock the alert (`FOR UPDATE`); if a live investigation exists,
-return it; else insert (`job_status='queued'`); return `{alert_id, investigation_id}`.
+retried/double-clicked create collapses onto the same investigation. **This paragraph is the one
+statement of the start and replay rules**; the API's port (`defender/api/ports.py`) points here rather
+than restating them. A request id is bound **only to the investigation it created** (the row's own
+`client_request_id`): a request that collapsed onto a live investigation answers that one but is not
+bound to it, so a retry of it after that investigation ended starts a rerun. That retry needs a lost
+response and a gap of minutes; the price of keeping the binding in the row instead of a separate table.
+The DAL transaction `create_investigation_for_alert(alert, client_request_id)`, in order:
+
+1. lock the alert (`FOR UPDATE`);
+2. a row with this `(tenant_id, alert_id, client_request_id)` exists → this request already started it:
+   return it, `created=false`, whatever its status since (a repeat after it ended is never a rerun) —
+   unless it was deleted since, which is refused (`Conflict`): it is hidden from every read, and a
+   repeat must not start another;
+3. a live investigation of the alert exists → return it, `created=false`, without recording the request
+   id on it;
+4. else insert (`job_status='queued'`, the request id on the row) and its `investigation.start` audit
+   row (§2.10); return it, `created=true`.
 
 Starting _another_ investigation: a live one **blocks** (returns the existing); only `failed`/`aborted`
 priors → fresh start, no friction; a `completed` prior → allowed but the UI requires an explicit "start

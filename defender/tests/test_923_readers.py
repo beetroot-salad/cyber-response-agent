@@ -240,6 +240,28 @@ def _visualize_runtime_calls_it_unreviewed(tmp_path: Path) -> None:
     )
 
 
+
+def _api_models_serves_it_and_coerces_nothing(_tmp_path: Path) -> None:
+    import datetime as _dt
+
+    from pydantic import ValidationError
+
+    from defender.api.models import Investigation
+
+    def serve(disposition: str) -> Investigation:
+        return Investigation(
+            investigation_id="i", alert_id="a", status="completed", disposition=disposition,
+            cost_usd=0.0, created_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
+        )
+
+    for verdict in (MEMBER, GAP_MEMBER):
+        assert serve(verdict).disposition == verdict, (
+            f"the API refuses to serve {verdict!r}, a verdict the host committed"
+        )
+    for variant in (" malicious ", " Malicious ", UNKNOWN_DISPOSITION):
+        with pytest.raises(ValidationError):
+            serve(variant)
+
 def _report_frontmatter_gate_admits_it(tmp_path: Path) -> None:
     from defender._artifact_schema import validate_artifact
 
@@ -311,6 +333,7 @@ _READERS = {
     # newly in scope
     "visualize_runtime": _visualize_runtime_calls_it_unreviewed,
     "visualize_episode": _visualize_episode_counts_the_member_and_coerces_nothing,
+    "api_models": _api_models_serves_it_and_coerces_nothing,
     "decide_report_write": _report_frontmatter_gate_admits_it,
     "run_investigation->prompt_rosters": _no_roster_enumerates_a_stale_vocabulary,
     "decide_write->prompt_rosters": _no_roster_states_a_stale_price_count,
