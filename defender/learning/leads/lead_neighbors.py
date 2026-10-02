@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_query_templates
 from defender._io import Bound
 from defender._paths import PATHS
+from defender.learning.leads.path_validation import CATALOG_FOLDER
 
 
 PLUMBING_TOKENS = frozenset({"run_dir", "position", "window"})
@@ -92,6 +93,14 @@ def load_catalog(catalog: Bound | Path | None = None, *, where: Path | None = No
         )
         for t in iter_query_templates(root, where=where)
     ]
+
+
+def load_lane_catalog(skills: Bound, *, where: Path) -> list[Template]:
+    """The catalog read through the held `skills/` mount's view: `load_catalog` of
+    `skills.under("gather/queries")`, spelled `where / "gather/queries"` (`where` is the Path the
+    `skills/` mount is spelled as, so each template's `path` is today's `catalog_dir / …`). The
+    lead-author lane's one catalog load (#1134)."""
+    return load_catalog(skills.under(CATALOG_FOLDER), where=Path(where) / CATALOG_FOLDER)
 
 
 

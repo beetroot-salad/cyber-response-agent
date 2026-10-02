@@ -18,16 +18,18 @@ from defender._corpus import _FENCE_RE
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
-from defender._io import TEXT_READ_ERRORS, append_jsonl, read_text_utf8
+from defender._io import ENTRY_FILE, append_jsonl
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
+from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
+    lane_skills,
 )
 from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
@@ -262,9 +264,12 @@ def _line_ops(
     return added, removed, kept
 
 
-def _readable_pair(repo_root: Path, path: str) -> tuple[str, str]:
+def _readable_pair(repo_root: Path, path: str, *, tree_for: TreeFor) -> tuple[str, str]:
     """The document as committed and as the curator left it, or this rule's refusal. Also
     compares frontmatter, the one check that reads raw text rather than lines.
+
+    The working-copy side is read through the lane's held `skills/` mount (`tree_for`), so a link
+    at the name or at a holding folder is refused, never followed (#1134).
     """
     committed = _git.git_show_file(repo_root, "HEAD", path)
     if committed is None:
@@ -272,19 +277,17 @@ def _readable_pair(repo_root: Path, path: str) -> tuple[str, str]:
             f"pitfalls curator created {path}; refusing to commit (the reducer surface is a "
             "committed document this lane amends in place, never mints)"
         )
-    full = repo_root / path
-    if not full.is_file():
+    if kind_at(repo_root, tree_for, path) != ENTRY_FILE:
         raise LeadAuthorError(
             f"pitfalls curator left {path} unreadable as a file; refusing to commit"
         )
-    # Narrowed so undecodable bytes are refused as this rule's own error rather than escaping
-    # as `UnicodeDecodeError` into the batch-retire path.
-    try:
-        current = read_text_utf8(full)
-    except TEXT_READ_ERRORS as e:
+    # A refused read (undecodable bytes, a hard link, an entry swapped since the kind probe) is
+    # this rule's own error rather than escaping into the batch-retire path.
+    current, reason = read_at(repo_root, tree_for, path)
+    if current is None:
         raise LeadAuthorError(
-            f"pitfalls curator left {path} unreadable as UTF-8 text ({e}); refusing to commit"
-        ) from e
+            f"pitfalls curator left {path} unreadable as UTF-8 text ({reason}); refusing to commit"
+        )
     if _frontmatter_block(current) != _frontmatter_block(committed):
         raise LeadAuthorError(
             f"pitfalls curator rewrote {path}'s frontmatter block; refusing to commit "
@@ -293,7 +296,7 @@ def _readable_pair(repo_root: Path, path: str) -> tuple[str, str]:
     return committed, current
 
 
-def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
+def _pitfalls_content_rule(repo_root: Path, xy: str, path: str, *, tree_for: TreeFor) -> None:
     """The content half of the gate (mirror of `lead_author._skills_content_rule`): is what the
     curator wrote still the document?
 
@@ -310,7 +313,7 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
     """
     if path != REDUCER_REL or "D" in xy:
         return
-    committed, current = _readable_pair(repo_root, path)
+    committed, current = _readable_pair(repo_root, path, tree_for=tree_for)
     lines, committed_lines = current.splitlines(), committed.splitlines()
     survived, sections = _outline(lines)
     committed_headings, committed_sections = _outline(committed_lines)
@@ -396,7 +399,7 @@ def _pitfalls_offer_rule(path: str, *, reducer_offered: bool) -> None:
 
 def _pitfalls_rule(
     repo_root: Path, xy: str, path: str, *,
-    systems: frozenset[str], reducer_offered: bool,
+    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
 ) -> None:
     """The whole per-path gate: may the lane write this path at all, was this tick offered it,
     and is what the curator wrote still the document.
@@ -407,12 +410,12 @@ def _pitfalls_rule(
     reading)."""
     _pitfalls_path_rule(xy, path, systems=systems)
     _pitfalls_offer_rule(path, reducer_offered=reducer_offered)
-    _pitfalls_content_rule(repo_root, xy, path)
+    _pitfalls_content_rule(repo_root, xy, path, tree_for=tree_for)
 
 
 def _verify_pitfalls_state(
     repo_root: Path, baseline_stray: list[str], *,
-    systems: frozenset[str], reducer_offered: bool,
+    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
 ) -> list[str]:
     """`reducer_offered` is required: either default ("every tick may write the reducer
     surface" or "no tick may") is wrong for a caller that forgot it."""
@@ -420,7 +423,7 @@ def _verify_pitfalls_state(
         repo_root, baseline_stray, actor="pitfalls curator",
         rule=partial(
             _pitfalls_rule, repo_root,
-            systems=systems, reducer_offered=reducer_offered,
+            systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
         ),
     )
 
@@ -543,6 +546,7 @@ PitfallsDisposition = _disposition.PitfallsDisposition
 def run_pitfalls(
     *,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    trees: DrainTrees,
     invoke: Callable[..., int] | None = None,
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
@@ -558,7 +562,12 @@ def run_pitfalls(
 
     `lock_wait_seconds` bounds every wait on the queue's append lock this tick makes. The drain
     passes its configured wait, since it holds the tick's locks meanwhile; `None` is
-    unbounded."""
+    unbounded.
+
+    `trees` are the lane's held mounts (the drain's work step opens them for its label): the
+    commit gate reads the working copy through them (#1134). Checked before any work: they must
+    hold `paths.skills_dir` itself as a mount point, else `LeadAuthorError`."""
+    lane_skills(trees, paths)
     rows = _loop_persist.read_pitfalls(paths)
     # The gate counts distinct mistakes, not rows: the queue keeps one row per failure, so a
     # looping lead would otherwise clear the threshold on a single lesson.
@@ -634,6 +643,7 @@ def run_pitfalls(
 
     changed = _verify_pitfalls_state(
         repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
+        tree_for=trees.tree_for,
     )
     sha = None
     if changed:

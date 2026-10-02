@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _corpus  # noqa: E402
+from defender._io import Bound  # noqa: E402
 
 
 _FENCE_RE = re.compile(r"```(?:[\w-]+)?\n(.*?)```", re.DOTALL)
@@ -29,8 +30,14 @@ def _extract_query_body(template_text: str) -> str:
     return body.strip()
 
 
-def render_query(template_path: Path, params: dict[str, Any]) -> str:
-    text = template_path.read_text(encoding="utf-8")
+def render_query(source: Bound, name: str | PurePath, params: dict[str, Any]) -> str:
+    """The template at `name` below the view `source`, with `params` substituted into its query
+    body. Read through the view, so a link at the name or at a holding folder is refused, never
+    followed (#1134); a refused or absent template raises `OSError` naming why."""
+    rec = source.read(name)
+    if rec.text is None:
+        raise OSError(f"{rec.name}: {rec.reason or 'absent'}")
+    text = rec.text
     body = _extract_query_body(text)
     if not body:
         return ""

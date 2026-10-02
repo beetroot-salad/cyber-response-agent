@@ -14,6 +14,8 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 from defender.learning.author import shared as _author_shared
 from defender._frontmatter import parse_frontmatter_or_none
+from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
+from defender._tree_listing import list_tree
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -121,11 +123,14 @@ def _templates_by_identity(catalog: list) -> dict:
 
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
-    *, repo_root: Path = REPO_ROOT, catalog_dir: Path | None = None,
+    *, repo_root: Path = REPO_ROOT, skills: Bound, where: Path,
     catalog: list | None = None,
 ) -> list[dict]:
+    """One handoff per executed catalog template. `skills` is the held `skills/` mount's view and
+    `where` the Path it is spelled as: the catalog (when not given) and each template's rendering
+    are read through it, never through a link (#1134)."""
     if catalog is None:
-        catalog = lead_neighbors.load_catalog(catalog_dir)
+        catalog = lead_neighbors.load_lane_catalog(skills, where=where)
     by_id = _templates_by_identity(catalog)
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
 
@@ -161,8 +166,10 @@ def build_handoff(
                 rendered_query = _executed_query(lead)
             else:
                 try:
-                    rendered_query = lead_render.render_query(tpl.path, lead.params)
-                except OSError as e:
+                    rendered_query = lead_render.render_query(
+                        skills, tpl.path.relative_to(where).as_posix(), lead.params,
+                    )
+                except (OSError, ValueError) as e:
                     _logger.warning(f"render_query failed for {tpl.path}: {e}")
                     rendered_query = ""
             invocations.append(
@@ -204,17 +211,21 @@ def build_handoff(
 _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
 
 
-def _draft_contradicts_skill(draft: Path) -> bool:
+def _draft_contradicts_skill(skills: Bound, draft: Path, *, where: Path) -> bool:
     """True only when `draft`'s frontmatter declares `contradicts_skill: true` — it disagrees
     with a claim already in the system's SKILL.md rather than adding detail. Such a draft
     bypasses `_lift_threshold`, since a SKILL.md that is actively wrong shouldn't wait for
     unrelated drafts to accumulate.
 
-    Opt-in only: missing or unparseable frontmatter, or no key, doesn't bypass.
+    Opt-in only: missing or unparseable frontmatter, or no key, doesn't bypass. Read through the
+    held `skills/` mount's view (`draft` spelled under `where`), so a draft that is not a plain
+    file — a planted link — doesn't bypass either (#1134).
     """
     try:
-        text = draft.read_text(encoding="utf-8")
-    except OSError:
+        text = skills.read(draft.relative_to(where).as_posix()).text
+    except ValueError:
+        return False
+    if text is None:
         return False
     fm = parse_frontmatter_or_none(text)
     if not fm:
@@ -223,32 +234,42 @@ def _draft_contradicts_skill(draft: Path) -> bool:
 
 
 def discover_system_drafts(
-    *, skills_dir: Path = SKILLS_DIR, systems: frozenset[str],
+    *, skills: Bound, where: Path, systems: frozenset[str],
 ) -> list[Path]:
-    """Every draft under a declared system's `_draft/` in `skills_dir`. Undeclared directories
-    are skipped (the commit gate would refuse their edits) and each skip is logged."""
+    """Every draft under a declared system's `_draft/` in the held `skills/` mount's view, each
+    spelled `where / name`, in path order. Undeclared directories are skipped (the commit gate
+    would refuse their edits) and each skip is logged.
+
+    Listed through the view to the tree's fixed depth (`<system>/_draft/<draft>`, three levels),
+    never following a link: a link at a system folder, at `_draft` or at a draft name is neither a
+    directory nor a plain file, so it is neither entered nor returned (#1134). A declared
+    system's folder or `_draft` whose own listing is refused is warned with that listing's reason
+    and skipped, and every other system is still read; one found gone since the folder above was
+    listed is passed over silently, as a missing folder always was. A listing refused whole is
+    warned and finds nothing."""
+    listed = list_tree(skills, depth=3)
+    if listed.reason is not None:
+        _logger.warning(f"warn: skipping {where} ({listed.reason})")
     out: list[Path] = []
-    if not skills_dir.is_dir():
-        return out
-    for system_dir in sorted(skills_dir.iterdir()):
-        if not system_dir.is_dir():
+    for name, kind in (listed.entries or {}).items():
+        parts = name.split("/")
+        system = parts[0]
+        if len(parts) == 1 and kind == ENTRY_DIR and system not in systems:
+            _logger.warning(f"discover_system_drafts: skipped undeclared directory {system!r}")
             continue
-        if system_dir.name not in systems:
-            _logger.warning(
-                f"discover_system_drafts: skipped undeclared directory {system_dir.name!r}"
-            )
+        if system not in systems:
             continue
-        draft_dir = system_dir / "_draft"
-        if not draft_dir.is_dir():
+        if name in listed.refused and (len(parts) == 1 or parts[1:] == ["_draft"]):
+            _logger.warning(f"warn: skipping {where / name} ({listed.refused[name]})")
             continue
-        for draft in sorted(draft_dir.iterdir()):
-            if not draft.is_file():
-                continue
-            if draft.suffix != ".md":
-                continue
-            if draft.name in _DRAFT_README_NAMES:
-                continue
-            out.append(draft)
+        # Only a plain file directly in `<system>/_draft/`: nothing but a real directory is ever
+        # listed, so a draft's holding folders are real directories by construction.
+        if len(parts) != 3 or parts[1] != "_draft" or kind != ENTRY_FILE:
+            continue
+        leaf = parts[2]
+        if Path(leaf).suffix != ".md" or leaf in _DRAFT_README_NAMES:
+            continue
+        out.append(where / name)
     return out
 
 

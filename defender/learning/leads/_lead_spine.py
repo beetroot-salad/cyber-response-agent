@@ -9,7 +9,9 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._io import Held
 from defender.learning.core import config as _loop_config
+from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_records
 
@@ -86,6 +88,21 @@ def _verify_corpus_scope(
     if batch_rule is not None:
         batch_rule(in_corpus)
     return sorted(path for _, path in in_corpus)
+
+
+def lane_skills(trees: DrainTrees, paths: _loop_config.LoopPaths) -> Held:
+    """The held `skills/` mount of the lane's trees, `trees.mount(paths.skills_dir)`: never a
+    handle built here. The lane's trees must hold `paths.skills_dir` itself as a mount point; trees
+    opened for a label that grants no such mount (another lane's, an unknown one, a mount list that
+    moved it or holds a folder above it) are refused rather than left to fall back on plain paths
+    (#1134)."""
+    try:
+        return trees.mount(paths.skills_dir)
+    except ValueError:
+        raise LeadAuthorError(
+            f"refused: the lane's held trees {[str(m) for m in trees.mounts]} hold no mount at "
+            f"{paths.skills_dir}"
+        ) from None
 
 
 def _loop_commit_body(

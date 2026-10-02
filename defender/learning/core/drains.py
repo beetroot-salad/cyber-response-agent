@@ -32,6 +32,7 @@ from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
+from defender.learning.core.lane_trees import open_drain_trees
 from defender.learning.core.markers import (
     ClaimedMarker,
     claim_markers,
@@ -56,21 +57,26 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, run_dir: Path, *, box: Any = None,
+    paths: LoopPaths, run_dir: Path, *, label: str, box: Any = None,
     on_done: Callable[[str | None], None],
 ) -> None:
+    """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
+    `lead_author_drain`): the held roots of its writable mounts are opened here, with the box up,
+    and closed when the claim's serve returns or raises (#1134 A3). A fault holding them
+    propagates as itself, never as a swallowed transient."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
     # The drain holds the per-author queue lock for the whole tick (`lead_author_drain`), so
     # the curator is entered past its own acquisition and its done sentinel is deferred to
     # `on_done`.
-    rc = _run_curator_module(
-        "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        lambda mod: mod.run_under_held_queue_lock(
-            run_dir, paths=paths, box=box, on_done=on_done,
-        ),
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            lambda mod: mod.run_under_held_queue_lock(
+                run_dir, paths=paths, trees=trees, box=box, on_done=on_done,
+            ),
+        )
     if rc not in (0, None):
         raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
     if rc is None:
@@ -406,16 +412,21 @@ def _drain_lead_author_markers(
 
 
 def _invoke_pitfalls(
-    paths: LoopPaths, *, box: Any = None,
+    paths: LoopPaths, *, label: str, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
 ) -> int:
+    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
+    of the `label` lane's writable mounts are opened here and closed when the curation returns
+    or raises (#1134 A3)."""
     _logger.info("step=pitfalls-curation")
-    rc = _run_curator_module(
-        "pitfalls_curator",
-        lambda mod: mod.run_pitfalls(
-            paths=paths, box=box, on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-        ),
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            "pitfalls_curator",
+            lambda mod: mod.run_pitfalls(
+                paths=paths, trees=trees, box=box, on_curated=on_curated,
+                lock_wait_seconds=lock_wait_seconds,
+            ),
+        )
     return rc if rc is not None else 0
 
 
@@ -780,10 +791,14 @@ def lead_author_drain(
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
+    # The lane's label reaches its work steps bound into the DEFAULT seams, so an injected seam
+    # keeps its call shape (#1134).
     if run_lead_author is None:
-        run_lead_author = _invoke_lead_author
+        run_lead_author = functools.partial(_invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL)
     if run_pitfalls is None:
-        run_pitfalls = functools.partial(_invoke_pitfalls, lock_wait_seconds=lock_wait_seconds)
+        run_pitfalls = functools.partial(
+            _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
+        )
     if branch is None:
         branch = AuthorBranch(
             repo_root=paths.repo_root,

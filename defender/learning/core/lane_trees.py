@@ -9,12 +9,15 @@ descriptor, so nothing below it is followed and the mount is resolved once, at `
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from defender._io import Held, hold
+from defender._io import ENTRY_DIR, ENTRY_FILE, ENTRY_OTHER, Bound, Held, hold, read_text_soft
+from defender._tree_listing import entry_kind
 
 if TYPE_CHECKING:
     from defender.learning.core.config import LoopPaths
@@ -140,3 +143,64 @@ def open_drain_trees(wt_paths: LoopPaths, label: str) -> DrainTrees:
     `wt_paths` with a relative `repo_root` is refused, never joined to the cwd. Use it as a
     context manager inside the lane's work step."""
     return DrainTrees.open(wt_paths.drain_writable_trees(label))
+
+
+#: :meth:`DrainTrees.tree_for`, bound: a working-copy path to the held mount containing it and its
+#: name below that mount, or `None` outside the lane's mounts.
+TreeFor: TypeAlias = Callable[[Path | str], tuple[Held, str] | None]
+
+
+def view_at(held: Held, name: str) -> Bound:
+    """A reader over `held` bound at its folder `name` (`"."` is the held root itself): a name
+    prefix over the same held handle, nothing opened."""
+    view = held.view()
+    return view if name == "." else view.under(name)
+
+
+#: :func:`kind_at`'s answer when nothing stands at the path.
+KIND_ABSENT = "absent"
+
+
+def kind_at(repo_root: Path, tree_for: TreeFor, path: Path | str) -> str:
+    """What stands at the working-copy `path` (absolute, or relative to `repo_root` as git
+    status spells it): `"absent"`, `"file"`, `"dir"` or `"other"`.
+
+    Asked of the held mount when `tree_for` places `path` inside one: its folder's listing
+    judges it (`entry_kind`), so nothing below the mount point is followed and a hard link is
+    `"file"` here (refused by :func:`read_at`). A holding folder whose listing is refused —
+    linked, not a directory, unreadable — answers `"other"` (#1134 O2): something stands in the
+    way, and it is not the plain entry. Never raises for a plant or a refusal. A path outside
+    the lane's mounts keeps its plain path: it lies in the box's read-only area (#1134 D3)."""
+    full = repo_root / path
+    hit = tree_for(full)
+    if hit is not None:
+        held, name = hit
+        if name == ".":  # the mount point itself, which has no listed parent below the mount
+            top = held.view().entries()
+            if top.reason is not None:
+                return ENTRY_OTHER
+            return KIND_ABSENT if top.absent else ENTRY_DIR
+        got = entry_kind(held.view(), name)
+        if got.reason is not None:
+            return ENTRY_OTHER
+        return KIND_ABSENT if got.absent else str(got.kind)
+    if full.is_file():
+        return ENTRY_FILE
+    if full.is_dir():
+        return ENTRY_DIR
+    return ENTRY_OTHER if os.path.lexists(full) else KIND_ABSENT
+
+
+def read_at(repo_root: Path, tree_for: TreeFor, path: Path | str) -> tuple[str | None, str | None]:
+    """The text of the plain file at the working-copy `path`, as `(text, None)`, or `(None,
+    reason)`; placed as :func:`kind_at` places it. Through a held mount nothing but a plain file
+    is read (a link, a hard link, a FIFO, a folder is refused with the view's reason)."""
+    full = repo_root / path
+    hit = tree_for(full)
+    if hit is None:
+        return read_text_soft(full)
+    held, name = hit
+    rec = held.view().read(name)
+    if rec.text is not None:
+        return rec.text, None
+    return None, rec.reason or os.strerror(errno.ENOENT)

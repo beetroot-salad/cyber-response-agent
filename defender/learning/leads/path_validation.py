@@ -12,6 +12,9 @@ CATALOG_DIR = PATHS.catalog_dir
 CATALOG_REL = DefenderPaths.catalog_rel
 SKILLS_DIR = PATHS.skills_dir
 SKILLS_REL = DefenderPaths.skills_rel
+#: The catalog's folder below the `skills/` mount (`gather/queries`): drain code reaches the catalog
+#: through the held `skills/` mount, never through a handle rooted at the catalog (#1134).
+CATALOG_FOLDER = CATALOG_REL[len(SKILLS_REL):].strip("/")
 
 
 def _under_draft(path: str) -> bool:

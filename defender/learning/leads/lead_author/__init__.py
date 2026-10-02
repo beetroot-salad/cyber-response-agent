@@ -28,8 +28,10 @@ from defender.learning.author import shared as _author_shared
 from defender import _corpus
 from defender import _git
 from defender import _scaffold_rules
+from defender._io import Held
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
+from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_trees
 from defender.learning.core import persist as _loop_persist
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
@@ -112,6 +114,7 @@ from defender.learning.leads._lead_spine import (
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
+    lane_skills,
 )
 
 _logger = logging.getLogger(__name__)
@@ -168,13 +171,23 @@ class LeadAuthorDeps:
     discover_system_drafts: Callable[[], list[Path]]
     acquire_queue_lock: Callable[[], Any]
     release_queue_lock: Callable[[Any], None]
+    #: The lane's held `skills/` mount (`lane_skills`): every host read and write of the catalog
+    #: and the system skills goes through it or its view (#1134). Lives only as long as the
+    #: `DrainTrees` it came from.
+    skills: Held
+    #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
+    tree_for: TreeFor
 
 
 def build_lead_author_deps(
-    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS, *, trees: DrainTrees,
 ) -> LeadAuthorDeps:
+    """The lane's seams over `paths`, reading and writing `skills/` through `trees`, the lane's
+    held mounts (`open_drain_trees`): `trees` must hold `paths.skills_dir` itself, else
+    `LeadAuthorError`. The deps must not outlive `trees`."""
     from defender.learning.leads.declared_systems import declared_systems
 
+    skills = lane_skills(trees, paths)
     systems = declared_systems(paths.repo_root)
     return LeadAuthorDeps(
         paths=paths,
@@ -183,19 +196,24 @@ def build_lead_author_deps(
         extract=extract,
         synthesize=synthesize_drafts,
         build_handoff=functools.partial(
-            build_handoff, repo_root=paths.repo_root, catalog_dir=paths.catalog_dir
+            build_handoff, repo_root=paths.repo_root, skills=skills.view(),
+            where=paths.skills_dir,
         ),
         discover_system_drafts=functools.partial(
-            discover_system_drafts, skills_dir=paths.skills_dir, systems=systems
+            discover_system_drafts, skills=skills.view(), where=paths.skills_dir,
+            systems=systems,
         ),
         acquire_queue_lock=functools.partial(acquire_queue_lock, paths),
         release_queue_lock=release_queue_lock,
+        skills=skills,
+        tree_for=trees.tree_for,
     )
 
 
 def run(
     run_dir: Path,
     *,
+    label: str,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
@@ -206,7 +224,12 @@ def run(
     `on_done` is the consumption switch: left `None`, a clean exit writes the `done` sentinel
     at once (the CLI's contract); given, the commit sha is handed to it instead, so the drain
     can record the run done only after the scrub. The `pitfalls_collected` marker and pitfalls
-    rows are written either way — they are facts about the run, not a commit."""
+    rows are written either way — they are facts about the run, not a commit.
+
+    `label` is the drain lane whose mount list grants `skills/` (the CLI passes
+    `LEAD_AUTHOR_DRAIN_LABEL`): without `deps`, the held trees are opened for it here, under the
+    queue lock, and closed when the run ends; with `deps`, a label that does not mount
+    `deps.paths.skills_dir` is refused (#1134)."""
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
@@ -216,6 +239,10 @@ def run(
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
+        if deps.paths.skills_dir not in deps.paths.drain_writable_trees(label):
+            raise LeadAuthorError(
+                f"refused: the {label!r} lane does not mount {deps.paths.skills_dir}"
+            )
         queue_lock = deps.acquire_queue_lock()
         if queue_lock is None:
             return QUEUE_LOCK_SKIP_RC
@@ -228,21 +255,26 @@ def run(
     if queue_lock is None:
         return QUEUE_LOCK_SKIP_RC
     try:
-        deps = build_lead_author_deps(paths)
-        return _run_locked(run_dir, deps, box=box, on_done=sink)
+        with open_drain_trees(paths, label) as trees:
+            deps = build_lead_author_deps(paths, trees=trees)
+            return _run_locked(run_dir, deps, box=box, on_done=sink)
     finally:
         release_queue_lock(queue_lock)
 
 
 def run_under_held_queue_lock(
-    run_dir: Path, *, paths: _loop_config.LoopPaths, box: Any = None, on_done: DoneSink,
+    run_dir: Path, *, paths: _loop_config.LoopPaths, trees: DrainTrees, box: Any = None,
+    on_done: DoneSink,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
-    its whole tick, since it defers the done sentinel). Never skips."""
+    its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
+    drain's work step opens them for its label). Never skips."""
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
-    return _run_locked(run_dir, build_lead_author_deps(paths), box=box, on_done=on_done)
+    return _run_locked(
+        run_dir, build_lead_author_deps(paths, trees=trees), box=box, on_done=on_done,
+    )
 
 
 def _run_locked(
@@ -266,10 +298,11 @@ def _run_locked(
         _logger.critical(f"cannot extract leads: {e}")
         return 2
 
-    catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
+    skills_dir = deps.paths.skills_dir
+    catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
 
     synth = deps.synthesize(
-        executed, catalog_dir=deps.paths.catalog_dir, catalog=catalog, systems=deps.systems,
+        executed, skills=deps.skills, where=skills_dir, catalog=catalog, systems=deps.systems,
     )
     if synth:
         _logger.info(
@@ -278,13 +311,11 @@ def _run_locked(
         )
     # Captured before the agent runs: these drafts are untracked, so if the agent removes one
     # git can't recover the identities it recorded.
-    minted = _minted_identities(synth)
+    minted = _minted_identities(deps.skills.view(), synth, where=skills_dir)
 
     collected_marker = _state_dir(run_dir) / "pitfalls_collected"
     if not collected_marker.is_file():
-        failures = collect_general_failures(
-            executed, run_dir, catalog_dir=deps.paths.catalog_dir, catalog=catalog
-        )
+        failures = collect_general_failures(executed, run_dir, catalog=catalog)
         if failures:
             _loop_persist.append_pitfalls(failures, paths=deps.paths)
             # Both numbers: a large gap between failures and this run's distinct mistakes
@@ -300,7 +331,7 @@ def _run_locked(
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
 
     if synth:
-        catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
+        catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
     handoffs, pending_drafts, rc = _prepare_handoffs(
         run_dir, deps, executed, joined_leads, catalog=catalog, on_done=on_done,
     )
@@ -317,7 +348,7 @@ def _run_locked(
         return 2
 
     changed = _verify_skills_state(
-        repo_root, baseline_stray, systems=deps.systems, minted=minted
+        repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
     )
     sha = _author_shared.commit_corpus(
         repo_root, repo_root / "defender" / "skills",
@@ -337,7 +368,10 @@ def _prepare_handoffs(
     record_done = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
-    contradicting = [d for d in pending_drafts_raw if _draft_contradicts_skill(d)]
+    contradicting = [
+        d for d in pending_drafts_raw
+        if _draft_contradicts_skill(deps.skills.view(), d, where=deps.paths.skills_dir)
+    ]
     if len(pending_drafts_raw) < threshold and not contradicting:
         if pending_drafts_raw:
             _logger.info(
@@ -463,7 +497,8 @@ def main(argv: list[str]) -> int:
                    help=f"defender run dir containing {names['EXECUTED_QUERIES']} "
                         f"+ {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    return run(args.run_dir)
+    # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
+    return run(args.run_dir, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
 
 
 

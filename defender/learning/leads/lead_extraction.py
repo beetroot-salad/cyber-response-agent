@@ -9,6 +9,7 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._io import Bound
 from defender.learning import lead_repository
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.draft_synthesis import (
@@ -108,11 +109,20 @@ def _is_reducer_failure(lead: ExecutedLead) -> bool:
 
 
 def collect_general_failures(
-    executed: list[ExecutedLead], run_dir: Path, *, catalog_dir: Path | None = None,
-    catalog: list | None = None,
+    executed: list[ExecutedLead], run_dir: Path, *, skills: Bound | None = None,
+    where: Path | None = None, catalog: list | None = None,
 ) -> list[dict]:
+    """The agent-fixable failures no draft will absorb, as pitfalls queue rows.
+
+    Scored against `catalog` when given; otherwise against the catalog read through `skills`,
+    the held `skills/` mount's view, spelled `where` (#1134). Without a catalog both are
+    required: there is no `Path` fallback."""
     if catalog is None:
-        catalog = lead_neighbors.load_catalog(catalog_dir)
+        if skills is None or where is None:
+            raise TypeError(
+                "collect_general_failures needs a loaded catalog, or the skills/ view and where="
+            )
+        catalog = lead_neighbors.load_lane_catalog(skills, where=where)
     # The same answered set `synthesize_drafts` mints against, so every `agent-fixable`
     # failure lands as either a draft or pitfalls residue, never neither.
     by_id = answered_identities(catalog)
