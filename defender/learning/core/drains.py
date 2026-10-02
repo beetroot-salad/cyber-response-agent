@@ -90,8 +90,14 @@ def _maybe_trigger_author(
     module_name: str,
     pending_label: str,
     *,
+    label: str,
     box: Any = None,
 ) -> None:
+    """The author lane's default work step for one curator. `label` is the lane's (bound in by
+    `author_drain`): when the curator's queue is at threshold, the held roots of the lane's
+    writable mounts are opened here, with the box up, and closed when the curator's batch
+    returns or raises (#1134 A3). Each curator opens its own. A fault holding them propagates
+    out of this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash."""
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
@@ -106,9 +112,11 @@ def _maybe_trigger_author(
         f"step={module_name} {pending_label}={pending_count} held={held_count} "
         f"threshold={threshold}"
     )
-    rc = _run_curator_module(
-        module_name, lambda mod: mod.run_batch(hold_committed=True, paths=paths, box=box)
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            module_name,
+            lambda mod: mod.run_batch(hold_committed=True, paths=paths, trees=trees, box=box),
+        )
     if rc not in (0, None):
         _logger.warning(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
 
@@ -758,8 +766,10 @@ def author_drain(
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
     _validate_merge_mode()
+    # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
+    # keeps its call shape (#1134).
     if trigger_author is None:
-        trigger_author = _maybe_trigger_author
+        trigger_author = functools.partial(_maybe_trigger_author, label=AUTHOR_DRAIN_LABEL)
     if branch is None:
         branch = AuthorBranch(repo_root=paths.repo_root)
 

@@ -27,6 +27,9 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 import dataclasses
+import errno
+import functools
+import os
 from dataclasses import replace
 from defender._model import model
 from pathlib import Path
@@ -39,13 +42,15 @@ from defender._clock import now_iso
 from defender._git import GitError
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import (
-    TEXT_READ_ERRORS,
+    ENTRY_DIR,
+    ENTRY_FILE,
+    ENTRY_OTHER,
+    Bound,
+    Held,
+    NotPlainEntry,
     append_jsonl,
-    guarded_mkdir,
     read_jsonl_rows,
     read_jsonl_rows_report,
-    read_text_utf8,
-    write_guarded,
 )
 from defender._untrusted import wrap
 from defender.learning._prompt import stage_user_message
@@ -60,8 +65,12 @@ from defender.learning.core.config import (
     QueueChannel,
     provenance_field,
 )
+from defender._tree_listing import entry_kind
+from defender.learning.core.lane_trees import TreeFor, kind_at, read_bytes_at
 
 AuthorError = author_shared.AuthorError
+
+_logger = logging.getLogger(__name__)
 
 #: The forward-check gap ledger, under the host-side pending dir.
 GAP_LEDGER_NAME = "findings.forward_bad.jsonl"
@@ -126,16 +135,34 @@ def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
     fault."""
     for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True):
         if not rel.endswith(".md") and "D" not in xy:
-            _put_back(cfg.repo_root, rel)
+            _put_back(cfg.repo_root, rel, tree_for=cfg.tree_for)
 
 
-def _put_back(repo_root: Path, rel: str) -> None:
-    """Return one path to what HEAD has: checked out if tracked, unlinked if not."""
+def _put_back(repo_root: Path, rel: str, *, tree_for: TreeFor) -> None:
+    """Return one path to what HEAD has: checked out if tracked, removed if not.
+
+    An untracked name is judged by `kind_at` (#1134, addendum 2 B3). Inside one of the lane's
+    mounts (this corpus or its sibling) it is judged by its folder's listing and removed through
+    that mount's held root: a plain file is unlinked; anything else that is not a folder (a link,
+    a hard link, a FIFO, or a name below a holding folder whose listing is refused) goes to the
+    same `unlink`, which refuses it — `NotPlainEntry` for an entry AT the name, left in place for
+    the scrub (O5.2), the core's plain `OSError` for a refused holding folder. A name outside the
+    lane's mounts lies in the box's read-only area and keeps its plain path (D3): `kind_at`
+    answers it from that path, and only a file there is unlinked."""
     _git.git(["checkout", "-q", "--", rel], cwd=repo_root, check=False)
-    target = repo_root / rel
     tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=repo_root)
-    if not tracked and target.is_file():
-        target.unlink()
+    if tracked:
+        return
+    target = repo_root / rel
+    kind = kind_at(repo_root, tree_for, rel)
+    hit = tree_for(target)
+    if hit is None:
+        if kind == ENTRY_FILE:
+            target.unlink()
+        return
+    held, name = hit
+    if kind in (ENTRY_FILE, ENTRY_OTHER):
+        held.unlink(name)
 
 
 def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
@@ -344,7 +371,7 @@ def run_batch(
         try:
             try:
                 author_shared.assert_clean_corpus_dir(
-                    cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel
+                    cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel, corpus=cfg.corpus,
                 )
             except AuthorError as e:
                 log.critical(f"{e}")
@@ -460,12 +487,15 @@ class _PreState:
 
 
 def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
+    head_before = _git_read("HEAD", author_shared.git_head_sha, cfg.repo_root)
     return _PreState(
-        snapshot=_snapshot_corpus(cfg.corpus_dir),
+        snapshot=_git_read(
+            "corpus before-state", _snapshot_corpus, cfg.repo_root, cfg.corpus_dir, head_before
+        ),
         baseline_stray=_git_read(
             "worktree status", author_shared.changes_outside, cfg.repo_root, cfg.corpus_dir_rel
         ),
-        head_before=_git_read("HEAD", author_shared.git_head_sha, cfg.repo_root),
+        head_before=head_before,
     )
 
 
@@ -513,7 +543,7 @@ def _settle_tree(
         for xy, rel in _changed_corpus_records(cfg):
             if "D" in xy:
                 deleted.append(rel)
-            elif xy != "??" and _byte_identical_to_head(cfg.repo_root, rel):
+            elif xy != "??" and _byte_identical_to_head(cfg.repo_root, rel, tree_for=cfg.tree_for):
                 _git.git(["checkout", "-q", "--", rel], cwd=cfg.repo_root)
             else:
                 changed.append(rel)
@@ -590,7 +620,7 @@ class _Judgement:
         field_name = provenance_field(self.cfg.channel.id_key)
         texts: dict[str, str] = {}
         for _ in range(_JUDGE_ROUNDS):
-            texts = {rel: _read_or_empty(self.cfg.repo_root / rel) for rel in files}
+            texts = {rel: self.read(rel) for rel in files}
             jobs = [
                 (rel, fid, text)
                 for rel, text in texts.items()
@@ -598,7 +628,7 @@ class _Judgement:
                 if (rel, _digest(text), fid) not in self.memo
             ]
             self.mint(jobs, pass_no)
-            if all(_read_or_empty(self.cfg.repo_root / rel) == text for rel, text in texts.items()):
+            if all(self.read(rel) == text for rel, text in texts.items()):
                 break
         else:
             raise AuthorError(
@@ -624,12 +654,17 @@ class _Judgement:
                     rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
                     verdict="BAD",
                     reasoning="repair rewrite dropped this file's citation of this finding",
-                    lesson_text=texts.get(rel, _read_or_empty(self.cfg.repo_root / rel)),
+                    lesson_text=texts.get(rel, self.read(rel)),
                     pass_no=pass_no,
                 )
                 self.history.append(dropped)
                 pairs[(fid, rel)] = dropped
         return _Judged(pairs=pairs, cites=cites)
+
+    def read(self, rel: str) -> str:
+        """The text the repo-relative corpus file `rel` holds now, read through the corpus
+        mount's view; `""` when it cannot be read."""
+        return _read_or_empty(self.cfg.corpus.view(), _corpus_relative(self.cfg, rel))
 
     def mint(self, jobs: list[tuple[str, str, str]], pass_no: int) -> None:
         """Judge the pairs concurrently, bounded by `verify_batch_workers()`."""
@@ -918,46 +953,51 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
 
 
 def _corpus_relative(cfg: CorpusAuthorConfig, rel: str) -> str:
-    return str((cfg.repo_root / rel).relative_to(cfg.corpus_dir))
+    """The repo-relative corpus path `rel` as a name under the corpus mount."""
+    return (cfg.repo_root / rel).relative_to(cfg.corpus_dir).as_posix()
 
 
 def _restore_unapproved_files(
     cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: set[str],
 ) -> None:
     """Put every file this tick changed but did not approve back to its tick-start bytes, or
-    unlink it if the tick created it."""
+    remove it if the tick created it, through the corpus mount (#1134).
+
+    Not on the fault path, so a refusal propagates: anything left at a created name, even a
+    non-file, must go, and the held root refuses (never follows, never unlinks) a link, a hard
+    link or a FIFO there, leaving it for the scrub (O5.2); a folder raises `IsADirectoryError`,
+    as the plain `unlink()` did. The folder test asks the name's folder listing (`entry_kind`,
+    addendum 2 B3); a holding folder whose listing is refused is no folder here, so the `unlink`
+    meets it and the core's `OSError` propagates."""
     if snapshot is None:
         return
+    view = cfg.corpus.view()
     for rel in rels:
-        corpus_rel = _corpus_relative(cfg, rel)
-        target = cfg.corpus_dir / corpus_rel
-        pre = snapshot.get(corpus_rel)
+        name = _corpus_relative(cfg, rel)
+        pre = snapshot.get(name)
         if pre is None:
-            # Anything left here, even a non-file, must go: `unlink()` raises (e.g.
-            # `IsADirectoryError`) rather than silently leaving a corrupted entry.
-            if target.exists() or target.is_symlink():
-                target.unlink()
+            if entry_kind(view, name).kind == ENTRY_DIR:
+                # A folder was never removable here; it keeps the error `unlink()` gave it.
+                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), rel)
+            cfg.corpus.unlink(name)
             continue
-        if not target.is_file() or target.read_bytes() != pre:
-            guarded_mkdir(target.parent, base=cfg.corpus_dir)
-            write_guarded(target, pre)
+        if view.read_bytes(name).data != pre:
+            cfg.corpus.write(name, pre, mode="replace")
 
 
 def _restore_from_snapshot(
     cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: list[str],
 ) -> None:
-    """Restore, from the tick-start snapshot, deletions the repair spawn may not make. A path
-    the snapshot never held has nothing to restore to and is left alone."""
+    """Put each of `rels` back to its tick-start bytes, through the corpus mount (#1134). A
+    name the snapshot does not hold is skipped."""
     if snapshot is None:
         return
     for rel in rels:
-        corpus_rel = _corpus_relative(cfg, rel)
-        pre = snapshot.get(corpus_rel)
+        name = _corpus_relative(cfg, rel)
+        pre = snapshot.get(name)
         if pre is None:
             continue
-        target = cfg.corpus_dir / corpus_rel
-        guarded_mkdir(target.parent, base=cfg.corpus_dir)
-        write_guarded(target, pre)
+        cfg.corpus.write(name, pre, mode="replace")
 
 
 def _append_terminal_block(message: str, terminal_ids: list[str]) -> str:
@@ -1046,7 +1086,8 @@ def _assert_corpus_attributable(
     unwinds the tick via `_undo_agent_edits`; the batch is bumped and stays queued."""
     field = provenance_field(cfg.channel.id_key)
     unattributed = [
-        rel for rel in changed if not (_cited_ids(cfg.repo_root / rel, field) & ids)
+        rel for rel in changed
+        if not (_cited_ids(cfg.corpus.view(), _corpus_relative(cfg, rel), field) & ids)
     ]
     if unattributed:
         raise AuthorError(
@@ -1068,27 +1109,24 @@ def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
     )
 
 
-def _byte_identical_to_head(repo_root: Path, rel: str) -> bool:
+def _byte_identical_to_head(repo_root: Path, rel: str, *, tree_for: TreeFor) -> bool:
     """Raw byte comparison: text decoding applies universal-newline translation, so a CRLF-only
-    rewrite would compare equal and a real content change would escape judgement."""
+    rewrite would compare equal and a real content change would escape judgement.
+
+    The worktree bytes are read through the lane's held mount (`read_bytes_at`), so a link, hard
+    link or FIFO at `rel` is never read and never identical (#1134)."""
     head_bytes = _git.git_show_file_bytes(repo_root, "HEAD", rel)
     if head_bytes is None:
         return False
-    try:
-        wt_bytes = (repo_root / rel).read_bytes()
-    except OSError:
-        return False
-    return wt_bytes == head_bytes
+    wt_bytes, _reason = read_bytes_at(repo_root, tree_for, rel)
+    return wt_bytes is not None and wt_bytes == head_bytes
 
 
-def _cited_ids(path: Path, field: str) -> set[str]:
-    """The queue-row ids one corpus file claims as its source. A file whose frontmatter cannot
-    be read cites nothing, so it is unattributable."""
-    try:
-        text = read_text_utf8(path)
-    except TEXT_READ_ERRORS:
-        return set()
-    return _cited_ids_in(text, field)
+def _cited_ids(corpus: Bound, name: str, field: str) -> set[str]:
+    """The queue-row ids the corpus file `name` claims as its source, read through the corpus
+    mount's view. A file whose frontmatter cannot be read (a link or hard link at the name
+    included) cites nothing, so it is unattributable."""
+    return _cited_ids_in(_read_or_empty(corpus, name), field)
 
 
 def _cited_ids_in(text: str, field: str) -> set[str]:
@@ -1102,11 +1140,11 @@ def _cited_ids_in(text: str, field: str) -> set[str]:
     return {c for c in cited if isinstance(c, str)}
 
 
-def _read_or_empty(path: Path) -> str:
-    try:
-        return read_text_utf8(path)
-    except TEXT_READ_ERRORS:
-        return ""
+def _read_or_empty(corpus: Bound, name: str) -> str:
+    """The text of the corpus file `name`, read through the corpus mount's view; `""` when it is
+    absent, undecodable or refused (a link, hard link or FIFO at the name, O5.1)."""
+    rec = corpus.read(name)
+    return rec.text if rec.text is not None else ""
 
 
 def _resolves_inside_runs_dir(runs_dir: Path, source_id: str) -> bool:
@@ -1301,14 +1339,21 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
     )
 
 
-def _snapshot_corpus(corpus_dir: Path) -> dict[str, bytes] | None:
-    if not corpus_dir.is_dir():
-        return None
-    return {
-        str(p.relative_to(corpus_dir)): p.read_bytes()
-        for p in sorted(corpus_dir.rglob("*"))
-        if p.is_file()
-    }
+def _snapshot_corpus(repo_root: Path, corpus_dir: Path, head: str) -> dict[str, bytes]:
+    """The corpus's before-state: every regular file the commit `head` carries under
+    `corpus_dir`, nested folders included, with its exact stored bytes, keyed by its name under
+    the corpus mount.
+
+    Read from git, not from the worktree (#1134 addendum 2 correction, C1): the clean gate
+    (`assert_clean_corpus_dir`) refused the tick unless the corpus equals the tick-start commit,
+    so `head` names exactly what stood there, and git's own read (`_git.git_tree_blobs`, N-a)
+    lists no folder and follows no worktree entry (O3, O5.1). A tracked symlink (mode 120000) is
+    left out, so no restore writes it back as a file. A git failure raises `GitError` before the
+    agent runs."""
+    rel = corpus_dir.relative_to(repo_root).as_posix()
+    prefix = "" if rel == "." else f"{rel}/"
+    return {path[len(prefix):]: blob
+            for path, blob in _git.git_tree_blobs(repo_root, head, rel).items()}
 
 
 def _undo_agent_edits(
@@ -1326,10 +1371,27 @@ def _undo_agent_edits(
 
     Strays outside the corpus are always reverted (the commit is pathspec-limited, so it
     can't have captured them); otherwise they fold into the next tick's baseline and disarm
-    the out-of-scope-write guard."""
+    the out-of-scope-write guard.
+
+    Both run while a fault is propagating, and every host touch of the lane's trees goes through
+    its held mounts (#1134). An entry the core will not remove or write over because it is not a
+    plain file (`NotPlainEntry`: a link, hard link, FIFO or folder at the name) is logged and
+    passed over (`_left_for_scrub`), so the fault being unwound propagates unchanged and keeps
+    its routing; the entry stays for the scrub (O5.3). Any other `OSError` propagates."""
     if not _commit_landed(cfg.repo_root, head_before):
-        _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot)
-    _revert_strays(cfg.repo_root, cfg.corpus_dir_rel, baseline_stray)
+        _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot, corpus=cfg.corpus)
+    _revert_strays(cfg.repo_root, cfg.corpus_dir_rel, baseline_stray, tree_for=cfg.tree_for)
+
+
+def _left_for_scrub(what: str, fn: Callable[..., Any], *args: Any) -> None:
+    """Run one fault-path restore step; the core's leaf refusal (`NotPlainEntry`: an entry at the
+    name that is not a plain file) is logged and passed over, the entry left in place. Any other
+    `OSError` (a linked or non-directory folder on the way, EACCES, EIO, ENOSPC) propagates
+    (#1134 O5.3)."""
+    try:
+        fn(*args)
+    except NotPlainEntry as e:
+        _logger.warning(f"warn: {what} left for the scrub: {e.strerror}")
 
 
 def _commit_landed(repo_root: Path, head_before: str) -> bool:
@@ -1340,11 +1402,13 @@ def _commit_landed(repo_root: Path, head_before: str) -> bool:
         return True
 
 
-def _revert_strays(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
+def _revert_strays(
+    repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str], *, tree_for: TreeFor,
+) -> None:
     """Undo what the agent wrote outside the corpus this tick, leaving pre-existing dirt alone.
 
     Best-effort: it runs while a fault is propagating, and a second failure would replace that
-    diagnosis."""
+    diagnosis — a git failure listing the strays, or a non-plain entry putting one back."""
     try:
         strays = sorted(
             set(author_shared.changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
@@ -1352,25 +1416,56 @@ def _revert_strays(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[st
     except GitError:
         return
     for rel in strays:
-        _put_back(repo_root, rel)
+        _left_for_scrub(rel, functools.partial(_put_back, tree_for=tree_for), repo_root, rel)
 
 
 def _restore_corpus(
-    repo_root: Path, corpus_dir: Path, snapshot: dict[str, bytes] | None
+    repo_root: Path, corpus_dir: Path, snapshot: dict[str, bytes] | None, *, corpus: Held,
 ) -> None:
-    """Put the corpus back to its pre-agent contents.
+    """Put the corpus back to its pre-agent contents, through `corpus`, its held mount
+    (`corpus_dir` is that folder's spelling, the git pathspec only).
 
     The content restore is filesystem-only: the failure it handles is usually git's, and a git
-    restore would need the index lock that failed. The unstage is best-effort, for a rejected
-    commit where the add did land."""
+    restore would need the index lock that failed (`git status`, a read, needs none). The
+    unstage is best-effort, for a rejected commit where the add did land.
+
+    No folder is listed (#1134 addendum 2 correction, C1): which names the agent made comes from
+    git (`git status --untracked-files=all` over the corpus), and each one the snapshot (the
+    before-state) does not hold is removed through `corpus`: a plain file is unlinked; a link,
+    hard link or anything else at the name is the core's refusal, never followed (O5.2). A name
+    git does not report — a gitignored file, a FIFO or socket — is left (C2).
+
+    When `git status` fails (a broken index: the fault being unwound is often git's), git is
+    asked instead for every non-ignored worktree file under the corpus against an empty index
+    (`_git.git_worktree_files`, which never opens the real index), and each the snapshot lacks
+    is swept the same way; a tracked symlink is then among them, and its unlink is refused and
+    logged. If git cannot answer that either, nothing is swept (a warning). Either way, each
+    snapshot file whose bytes differ, or that is gone, is written back through `corpus`. Fault
+    path only: see `_undo_agent_edits`."""
     if snapshot is None:
         return
     _git.git(["reset", "-q", "--", str(corpus_dir)], cwd=repo_root, check=False)
-    for p in sorted(corpus_dir.rglob("*")):
-        if p.is_file() and str(p.relative_to(corpus_dir)) not in snapshot:
-            p.unlink()
-    for rel, blob in snapshot.items():
-        target = corpus_dir / rel
-        if not target.is_file() or target.read_bytes() != blob:
-            guarded_mkdir(target.parent, base=corpus_dir)
-            write_guarded(target, blob)
+    view = corpus.view()
+    made: list[str] = []
+    try:
+        made = [rel for xy, rel in _git.git_status(repo_root, pathspec=corpus_dir,
+                                                   no_renames=True) if "D" not in xy]
+    except GitError as status_fault:
+        try:
+            made = _git.git_worktree_files(repo_root, str(corpus_dir))
+        except GitError as files_fault:
+            _logger.warning(
+                "warn: the corpus restore cannot ask git what changed (git status "
+                f"rc={status_fault.returncode}, git ls-files rc={files_fault.returncode}); "
+                "nothing swept")
+        else:
+            _logger.warning(
+                f"warn: the corpus restore's git status failed (rc={status_fault.returncode}); "
+                "it swept the worktree files git ls-files names instead")
+    for rel in made:
+        name = (repo_root / rel).relative_to(corpus_dir).as_posix()
+        if name not in snapshot:
+            _left_for_scrub(name, corpus.unlink, name)
+    for name, blob in snapshot.items():
+        if view.read_bytes(name).data != blob:
+            _left_for_scrub(name, functools.partial(corpus.write, mode="replace"), name, blob)

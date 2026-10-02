@@ -5,9 +5,11 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
+from defender._io import Held
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.core.config import QueueChannel, source_first_party_key
+from defender.learning.core.lane_trees import TreeFor
 
 
 @model(frozen=True)
@@ -41,7 +43,17 @@ class CorpusAuthorConfig:
     repo_root: Path
     runs_dir: Path
     pending_dir: Path
+    #: The corpus folder's spelling: git pathspecs, the readers' `where=`, the forward check's
+    #: and the curator engine's path checks. Never opened: every host read, write, delete and
+    #: listing of the corpus goes through `corpus` (#1134).
     corpus_dir: Path
+    #: The corpus mount, held by the lane's open trees (`shared.lane_corpus`): writes through it,
+    #: reads through its `view()`. Lives only as long as the `DrainTrees` it came from.
+    corpus: Held
+    #: The lane's `DrainTrees.tree_for`: a working-copy path (a git-status name joined to
+    #: `repo_root`) to its held mount and name, the sibling corpus included, or `None` outside
+    #: the lane's mounts.
+    tree_for: TreeFor
     corpus_dir_rel: str
     channel: QueueChannel
     repo_lock_file: Path

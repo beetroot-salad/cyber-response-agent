@@ -204,3 +204,24 @@ def read_at(repo_root: Path, tree_for: TreeFor, path: Path | str) -> tuple[str |
     if rec.text is not None:
         return rec.text, None
     return None, rec.reason or os.strerror(errno.ENOENT)
+
+
+def read_bytes_at(
+    repo_root: Path, tree_for: TreeFor, path: Path | str,
+) -> tuple[bytes | None, str | None]:
+    """The exact bytes of the plain file at the working-copy `path`, as `(data, None)`, or
+    `(None, reason)`; placed as :func:`kind_at` places it. Through a held mount nothing but a
+    plain file is read (`Bound.read_bytes`: a link, a hard link, a FIFO, a folder is refused with
+    the view's reason). A path outside the lane's mounts keeps its plain read (#1134 D3)."""
+    full = repo_root / path
+    hit = tree_for(full)
+    if hit is None:
+        try:
+            return full.read_bytes(), None
+        except OSError as e:
+            return None, str(e)
+    held, name = hit
+    rec = held.view().read_bytes(name)
+    if rec.data is not None:
+        return rec.data, None
+    return None, rec.reason or os.strerror(errno.ENOENT)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -157,6 +158,73 @@ def git_blob_bytes(cwd: Path, sha: str, *, env: Mapping[str, str] | None = None,
     return proc.stdout
 
 
+#: `ls-tree` modes of a regular file blob: the only entries a before-state restores as a file
+#: (a symlink, 120000, and a submodule, 160000, never are).
+_REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
+
+
+def _run_bytes(args: Sequence[str], *, cwd: Path, input: bytes | None = None) -> bytes:
+    """`git <args>` with raw bytes in and out (no decoding, no newline translation); a non-zero
+    exit raises `GitError`."""
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, input=input, check=False)
+    if proc.returncode != 0:
+        raise GitError(args, proc.returncode, proc.stderr.decode("utf-8", "surrogateescape"))
+    return proc.stdout
+
+
+def git_tree_blobs(cwd: Path, rev: str, pathspec: str) -> dict[str, bytes]:
+    """Every regular-file blob under `pathspec` at `rev`, nested folders included, by its
+    repo-relative path, with its exact stored bytes (`ls-tree -r` then one `cat-file --batch`):
+    git's own read of a commit (#1134 addendum 2 correction, C1), which no worktree entry can
+    redirect. A symlink (mode 120000) or submodule entry is left out, so nothing restores it as a
+    file. A `pathspec` `rev` does not carry answers `{}`; an unknown `rev` or a missing object
+    raises `GitError`. The bytes are the blob's, unfiltered, as `git_show_file_bytes` gives
+    them."""
+    listing = _run_bytes(["ls-tree", "-r", "-z", "--full-name", rev, "--", pathspec], cwd=cwd)
+    wanted: list[tuple[str, str]] = []
+    for record in listing.split(b"\0"):
+        if not record:
+            continue
+        meta, _tab, raw_path = record.partition(b"\t")
+        mode, kind, oid = meta.decode("ascii").split(" ")
+        if kind == "blob" and mode in _REGULAR_BLOB_MODES:
+            wanted.append((oid, raw_path.decode("utf-8", "surrogateescape")))
+    if not wanted:
+        return {}
+    batch_args = ["cat-file", "--batch"]
+    out = _run_bytes(batch_args, cwd=cwd, input="".join(f"{oid}\n" for oid, _ in wanted).encode())
+    blobs: dict[str, bytes] = {}
+    pos = 0
+    for oid, path in wanted:
+        end = out.index(b"\n", pos)
+        header = out[pos:end].decode("ascii").split(" ")
+        if len(header) != 3 or header[0] != oid:
+            raise GitError(batch_args, 0, f"{oid}: {' '.join(header[1:]) or 'no answer'}")
+        size = int(header[2])
+        blobs[path] = out[end + 1:end + 1 + size]
+        pos = end + 1 + size + 1
+    return blobs
+
+
+def git_worktree_files(cwd: Path, pathspec: str) -> list[str]:
+    """Every file under `pathspec` in the working tree that `.gitignore` does not exclude, by its
+    repo-relative path, nested folders included: git's own walk of the worktree (`ls-files
+    --others --exclude-standard`) run against an index file that does not exist, which git reads
+    as an empty index — so the repo's real index is never opened and every such file counts as
+    "other". For a caller whose `git status` failed on a broken index (#1134 addendum 2
+    correction, C1: git names the names; nothing here lists a folder in Python). The index path
+    is a fresh name in the repo's git dir, never written (`ls-files` writes no index). A git
+    failure raises `GitError`."""
+    absent_index = git(["rev-parse", "--path-format=absolute", "--git-path",
+                        f"curator-absent-index-{uuid.uuid4().hex}"], cwd=cwd)
+    args = ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec]
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False,
+                          env={**os.environ, "GIT_INDEX_FILE": absent_index})
+    if proc.returncode != 0:
+        raise GitError(args, proc.returncode, proc.stderr.decode("utf-8", "surrogateescape"))
+    return [p.decode("utf-8", "surrogateescape") for p in proc.stdout.split(b"\0") if p]
+
+
 def git_rev_list_count(
     cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD"
 ) -> int:
@@ -195,22 +263,25 @@ def git_commit(
 
 def git_commit_paths(
     cwd: Path,
-    paths: Sequence[str],
+    present: Sequence[str],
+    absent: Sequence[str],
     message: str,
     *,
     trailers: list[tuple[str, str]] | None = None,
 ) -> str | None:
-    """Stage exactly `paths` (including deletions) and commit them; `None` if nothing changed.
+    """Stage exactly `present` (added) and `absent` (deleted) and commit them; `None` if nothing
+    changed.
 
-    An empty `paths` returns `None` without calling git: `git commit -F - --` with an empty
-    pathspec would commit the whole index, sweeping in whatever else is staged."""
+    The caller says which paths still stand in the worktree: this module asks the filesystem
+    nothing (#1134 — the drain judges present from absent through its mount handle). `git add`
+    refuses the whole call if any path is gone from both worktree and index ("did not match any
+    files"), so absent paths go through `git rm --cached --ignore-unmatch`, a no-op when the
+    index no longer has them. Nothing to stage returns `None` without calling git: `git commit
+    -F - --` with an empty pathspec would commit the whole index, sweeping in whatever else is
+    staged."""
+    paths = [*present, *absent]
     if not paths:
         return None
-    # `git add` refuses the whole call if any path is gone from both worktree and index
-    # ("did not match any files"), so absent paths go through `git rm --cached
-    # --ignore-unmatch`, which is a no-op when the index no longer has them.
-    present = [p for p in paths if (cwd / p).exists()]
-    absent = [p for p in paths if p not in present]
     if present:
         git(["add", "--", *present], cwd=cwd)
     if absent:
