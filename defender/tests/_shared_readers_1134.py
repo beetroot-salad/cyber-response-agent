@@ -15,7 +15,8 @@ imports every reader BEFORE it drops privileges.
 * `os_` stand-ins over the real `os`: `SpellingRecorder` (every `os_.open` with its flags and
   `dir_fd`, judged for a spelling that could follow a link), `RefusesFolder` (one folder,
   named by its real path, refused on one route with one errno: a `_draft` folder appears at two
-  depths in the test tree, so a last-component match would refuse both), `VanishesOnOpen`
+  depths in the test tree, so a last-component match would refuse both; with `once`, only its
+  first listing; `RefusesFolders` holds several at once), `VanishesOnOpen`
   (a listed record removed the moment it is opened: absent at read time), and
   `SwapsFolderBetweenListings` (a folder its parent's listing showed as a directory REALLY
   moved out of the tree, and a link to a marked folder, a file, a FIFO or nothing left at its
@@ -47,7 +48,8 @@ from typing import Any
 from defender.tests._tree_listing_1134 import NOBODY, RealOs, _drop_privileges, fd_path
 from defender.tests._tree_listing_1134 import spelled as _spelled
 
-__all__ = ["NOBODY", "REFUSAL_ROUTES", "SWAP_PLANTS", "RefusesFolder", "SpellingRecorder",
+__all__ = ["NOBODY", "REFUSAL_ROUTES", "SWAP_PLANTS", "RefusesFolder", "RefusesFolders",
+           "SpellingRecorder",
            "SwapsFolderBetweenListings", "VanishesOnOpen", "audit_readers", "child", "fd_path",
            "kernel_watch", "project_record", "run_readers"]
 
@@ -175,29 +177,61 @@ class RefusesFolder(RealOs):
     refused with `err` on `route` (see `REFUSAL_ROUTES`). Matched by its whole real path, so a
     folder of the same name elsewhere in the tree is untouched. On the `step` route `folder` may
     be a plain file: its open off its holding folder is refused, and nothing else (a `stat` of
-    it answers). `refused` counts the refusals (non-vacuity)."""
+    it answers). `refused` counts the refusals (non-vacuity). With `once`, only the first such
+    call is refused and every later one runs for real (a transient fault: a reader that asked
+    again would get an answer the first listing never gave); `asked` counts every such call,
+    refused or not."""
 
-    def __init__(self, folder: Path, route: str, err: int) -> None:
+    def __init__(self, folder: Path, route: str, err: int, *, once: bool = False) -> None:
         assert route in REFUSAL_ROUTES, route
         self.folder = os.path.realpath(folder)
-        self.route, self.err = route, err
+        self.route, self.err, self.once = route, err, once
         self.refused = 0
+        self.asked = 0
 
     def _fail(self) -> None:
+        self.asked += 1
+        if self.once and self.refused:
+            return
         self.refused += 1
         raise OSError(self.err, os.strerror(self.err), self.folder)
 
-    def open(self, path: Any, *args: Any, **kwargs: Any) -> int:
-        opened = _opened_path(path, kwargs.get("dir_fd"))
-        is_reopen = _spelled(path) == "." and kwargs.get("dir_fd") is not None
+    def check_open(self, path: Any, dir_fd: Any) -> None:
+        """Refuse an `os_.open(path, dir_fd=dir_fd)` this seam refuses; else nothing."""
+        opened = _opened_path(path, dir_fd)
+        is_reopen = _spelled(path) == "." and dir_fd is not None
         if opened == self.folder and (self.route == "reopen") == is_reopen \
                 and self.route in ("step", "reopen"):
             self._fail()
+
+    def check_scandir(self, path: Any) -> None:
+        """Refuse an `os_.scandir(path)` this seam refuses; else nothing."""
+        if self.route == "scandir" and fd_path(path) == self.folder:
+            self._fail()
+
+    def open(self, path: Any, *args: Any, **kwargs: Any) -> int:
+        self.check_open(path, kwargs.get("dir_fd"))
         return os.open(path, *args, **kwargs)
 
     def scandir(self, path: Any) -> Any:
-        if self.route == "scandir" and fd_path(path) == self.folder:
-            self._fail()
+        self.check_scandir(path)
+        return os.scandir(path)
+
+
+class RefusesFolders(RealOs):
+    """Several `RefusesFolder`s at once, each judging every call as it would alone."""
+
+    def __init__(self, seams: list[RefusesFolder]) -> None:
+        self.seams = seams
+
+    def open(self, path: Any, *args: Any, **kwargs: Any) -> int:
+        for seam in self.seams:
+            seam.check_open(path, kwargs.get("dir_fd"))
+        return os.open(path, *args, **kwargs)
+
+    def scandir(self, path: Any) -> Any:
+        for seam in self.seams:
+            seam.check_scandir(path)
         return os.scandir(path)
 
 

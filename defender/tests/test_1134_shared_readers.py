@@ -152,6 +152,14 @@ implementation, and kept here as they were:
   tmp dir) for records, warnings, `on_skip` and `read_query_template`.
 - H7: a `read_query_template` that spelled a view under a prefix as `where / prefix / name`: the
   `held-view-under` form.
+
+Added after v3's step-4 implementation, each against a green but wrong reader v3's scoped
+adversary built (V3-H1 to V3-H5), each checked red against it and green against the
+implementation (the section at the end of this file): a reader that listed a `<sys>` again
+instead of keeping its listing's `refused` (exactly-once asks, and a refused-once row); one that
+passed through only the reasons the other rows use (uncommon errnos); one that warned out of
+path order (several faults in one catalog); a Path form that listed below the shape (a kernel
+watch on the folder below); and a Path-form generator that listed before its first `next`.
 """
 from __future__ import annotations
 
@@ -191,6 +199,7 @@ from defender.tests._shared_readers_1134 import (
     REFUSAL_ROUTES,
     SWAP_PLANTS,
     RefusesFolder,
+    RefusesFolders,
     SpellingRecorder,
     SwapsFolderBetweenListings,
     VanishesOnOpen,
@@ -1308,9 +1317,12 @@ def test_a_refused_listing_warns_once_and_yields_what_it_should(
     assert got == ([] if kept is None else reader.expected(where, kept))
     assert said(caplog) == warnings
     if folder in NEVER_ENTERED:
-        assert seam.refused == 0, f"{folder} lies below the listing's depth, yet was entered"
+        assert seam.asked == 0, f"{folder} lies below the listing's depth, yet was entered"
     else:
-        assert seam.refused, "the seam refused nothing, so the row is void"
+        # Exactly once (v3 adversary hole V3-H1): the listing's verdict is the one the reader
+        # keeps; a reader that listed the folder again could hear a different answer.
+        assert seam.asked == 1, (
+            f"the folder was asked for {seam.asked} times; its one listing decides")
     caplog.clear()
     with called_as(scene, reader.tree, form) as (arg, kw):
         assert in_time(lambda: reader.run(arg, kw)) == reader.expected(where, shape.records)
@@ -2018,3 +2030,148 @@ def test_read_query_template_spells_a_relative_path_as_given(
 
     assert got == ((None, f"malformed template: {gone(path)}") if missing
                    else (template_record(path, PROBE_TEXT[probe]), ""))
+
+
+# =======================================================================================
+# The v3 step-4 adversary's holes (V3-H1 to V3-H5): rows added after the implementation
+# =======================================================================================
+#
+# Each was checked red against the adversary's green-but-wrong reader (scratchpad
+# `adv1134v3s4/`) and green against the implementation. V3-H1's other half is the exactly-once
+# assert in `test_a_refused_listing_warns_once_and_yields_what_it_should`.
+
+@pytest.mark.parametrize("route", REFUSAL_ROUTES)
+@pytest.mark.parametrize("form", BOUND_FORMS)
+@pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
+def test_a_folder_refused_once_is_warned_from_that_one_listing(scene, reader, form, route, caplog):
+    """V3-H1: a reader that ignored `refused` and listed each `<sys>` again to see whether to
+    warn passed every row whose refusal is permanent. Here `wazuh`'s listing is refused with EIO
+    the FIRST time only (a transient fault); asked again it would list. The reader keeps what
+    its one listing said: wazuh's records are gone, and ONE warning names it with that reason.
+    Never silence, never wazuh's records."""
+    shape = TREES["catalog"]
+    where = scene.t / shape.top
+    seam = RefusesFolder(where / "wazuh", route, errno.EIO, once=True)
+    caplog.clear()
+    with called_as(scene, "catalog", form, os_=seam) as (arg, kw):
+        got = in_time(lambda: reader.run(arg, kw))
+
+    assert seam.refused == 1, "the seam refused nothing, so the row is void"
+    assert got == reader.expected(where, [r for r in shape.records
+                                          if not under(r, f"{CATALOG}/wazuh")])
+    assert said(caplog) == [f"warn: skipping {where}/wazuh ({os.strerror(errno.EIO)})"]
+    assert seam.asked == 1, f"wazuh was listed {seam.asked} times; its one listing decides"
+
+
+#: Errnos outside the ones every other row uses (V3-H2): whatever `entries()` says is the reason.
+UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
+
+
+@pytest.mark.parametrize("err", UNCOMMON_ERRNOS, ids=errno.errorcode.get)
+@pytest.mark.parametrize("route", ["reopen", "scandir"])
+@pytest.mark.parametrize("form", BOUND_FORMS)
+@pytest.mark.parametrize("site", ["wazuh", "wazuh/_draft"])
+def test_a_refused_folders_reason_is_the_listings_verbatim_whatever_the_errno(
+        scene, site, form, route, err, caplog):
+    """V3-H2: a reader that passed through only the reasons the other rows produce (EACCES, EIO,
+    ENOTDIR, the alias sentence) and rewrote the rest passed them all. Any errno's `strerror`
+    reaches the warning verbatim."""
+    reader = BY_NAME["iter_query_templates"]
+    shape = TREES["catalog"]
+    where = scene.t / shape.top
+    seam = RefusesFolder(where / site, route, err)
+    caplog.clear()
+    with called_as(scene, "catalog", form, os_=seam) as (arg, kw):
+        got = in_time(lambda: reader.run(arg, kw))
+
+    assert seam.refused == 1
+    assert got == reader.expected(where, [r for r in shape.records
+                                          if not under(r, f"{CATALOG}/{site}")])
+    assert said(caplog) == [f"warn: skipping {where}/{site} ({os.strerror(err)})"]
+
+
+#: Two folder faults in one catalog (V3-H3), each `(site, fault)`: a fault is a seam refusal
+#: (`"EIO"`), found gone (`"gone"`), or a plant left by the parent listing (`"fifo"`, `"link"`).
+TWO_FAULTS = {
+    "refused-first": ((".dotsys", "EIO"), ("wazuh", "fifo")),
+    "other-first": ((".dotsys", "link"), ("wazuh", "EIO")),
+    "draft-refused-after-sys-other": ((".dotsys", "fifo"), ("wazuh/_draft", "EIO")),
+    "gone-between": ((".dotsys", "EIO"), ("cmdb", "gone"), ("wazuh", "fifo")),
+}
+
+
+@pytest.mark.parametrize("form", BOUND_FORMS)
+@pytest.mark.parametrize("case", list(TWO_FAULTS))
+@pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
+def test_several_folder_faults_warn_once_each_in_path_order(scene, reader, case, form, caplog):
+    """V3-H3: every other folder row plants ONE fault, so a reader that warned its refused
+    folders after its non-plain ones, or in any order but the catalog's, passed. With several,
+    the warnings are exactly one per warned folder, in path-parts order; a gone one is silent;
+    every system without a fault yields."""
+    shape = TREES["catalog"]
+    where = scene.t / shape.top
+    seams: list[RefusesFolder] = []
+    warnings: list[str] = []
+    for site, fault in TWO_FAULTS[case]:
+        if fault in ("fifo", "link"):
+            plant_folder_at(scene, f"{CATALOG}/{site}", fault)
+            warnings.append(f"warn: skipping {where}/{site} ({NOT_A_PLAIN_FOLDER})")
+        elif fault == "EIO":
+            seams.append(RefusesFolder(where / site, "scandir", errno.EIO))
+            warnings.append(f"warn: skipping {where}/{site} ({os.strerror(errno.EIO)})")
+        else:
+            seams.append(RefusesFolder(where / site, "reopen", errno.ENOENT))
+    faulted = [f"{CATALOG}/{site}" for site, _fault in TWO_FAULTS[case]]
+    caplog.clear()
+    with called_as(scene, "catalog", form, os_=RefusesFolders(seams)) as (arg, kw):
+        got = in_time(lambda: reader.run(arg, kw))
+
+    assert all(seam.refused == 1 for seam in seams), [seam.refused for seam in seams]
+    assert got == reader.expected(where, [r for r in shape.records
+                                          if not any(under(r, f) for f in faulted)])
+    assert said(caplog) == warnings
+
+
+#: Per tree, `(a folder below the listing's depth, a folder the listing must list)`, relative
+#: to the listed folder: the corpus is listed one level deep, so `sub/` is a row and never
+#: listed (the corpus itself is the control); the catalog three, so `wazuh/notes` (level 2) is
+#: listed and `wazuh/_draft/deeper` (level 3) is not.
+BELOW_THE_SHAPE = {"lessons": ("sub", ""), "catalog": ("wazuh/_draft/deeper", "wazuh/notes")}
+
+
+@pytest.mark.parametrize("reader", READERS, ids=reader_id)
+def test_the_path_form_never_lists_a_folder_below_the_shape(scene, reader, caplog):
+    """V3-H4: the never-entered rows run through an `os_` seam, which the bare Path form has
+    not, so a Path form that listed one level deeper than the shape passed. The kernel watch
+    sees the Path form list the folder it must list (non-vacuity) and never open or list the
+    one below the shape."""
+    shape = TREES[reader.tree]
+    top = scene.t / shape.top
+    deep, listed = BELOW_THE_SHAPE[reader.tree]
+    control = top / listed if listed else top
+    with kernel_watch(opens=[top / deep, control]) as events:
+        got = in_time(lambda: reader.run(top, {}))
+        seen = events()
+
+    assert got == reader.expected(top, shape.records)
+    assert (str(control), "open") in seen, f"the watch never saw {control} listed: {seen}"
+    assert [e for e in seen if e[0].startswith(str(top / deep))] == [], (
+        f"{deep} lies below the listing's depth, yet was opened: {seen}")
+
+
+@pytest.mark.parametrize("reader", [r for r in READING if r.name != "load_catalog"], ids=reader_id)
+def test_a_path_form_generator_lists_nothing_before_its_first_next(scene, reader):
+    """V3-H5: the descriptor-count row could not see a Path form that bound and listed at call
+    time, closed that, and bound again in the generator body (names from one moment, records
+    from another). The kernel watch on the root sees no listing before the first `next`, and
+    sees one after it (non-vacuity)."""
+    top = scene.t / TREES[reader.tree].top
+    with kernel_watch(opens=[top]) as events:
+        it = reader.call(top)
+        before = events()
+        assert next(it) is not None
+        after = events()
+        it.close()
+
+    assert before == [], f"the Path form listed before its first `next`: {before}"
+    assert (str(top), "open") in after, f"the watch never saw {top} listed: {after}"
