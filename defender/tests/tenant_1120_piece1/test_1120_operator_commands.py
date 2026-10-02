@@ -13,7 +13,7 @@ The checkout's lab (`knowledge/tenants/playground`) stays committed in piece 1, 
 that ask "which copy was read" use the id `playground` in the data root with settings that
 DIFFER from the lab's: a gather grant, a `config.env` marker, a missing config key. The lab is
 never written. Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the
-census lint) run as processes; `policy_cli`, `run.main`, the launcher, `held_out` and
+census lint) run as processes; `policy_cli`, `run.main`, the launcher and
 `generate_case` are driven in-process through their own seams. No transport ever leaves the
 host: every `ticket_adapter` leg either stops at a named config fault or runs against a docker
 context that does not exist. See `_spec1120.py` for the coined names.
@@ -29,7 +29,6 @@ import pytest
 
 from defender import _tenant
 from defender import run as run_py
-from defender.evals import held_out
 from defender.evals.oracle_golden import generate_case
 from defender.learning.branch import cli as branch_cli
 from defender.learning.branch import staging
@@ -372,9 +371,9 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     exits 1 naming verb-grants.yaml (M6: a malformed table is a named finding, never a
     traceback). run.main (before anything is spent), the branch launcher, policy_cli gather
     and tenant.py setup (NF1: "the settings tables load") each refuse naming the file, and
-    setup writes nothing. held_out, generate_case, ticket_adapter and validate_scaffold never
-    load the table and accept the tenant: each proceeds past acceptance to its own work, and
-    none mentions verb-grants.yaml."""
+    setup writes nothing. generate_case, ticket_adapter and validate_scaffold never load the
+    table and accept the tenant: each proceeds past acceptance to its own work, and none
+    mentions verb-grants.yaml. (held_out takes no tenant — human, PR #1157.)"""
     # rejected: an all-withheld table as a finding (M6, human).
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
@@ -411,15 +410,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
 
     # The consumers that never load the table accept the tenant.
     capsys.readouterr()
-    fixtures = tmp_path / "held-out-fixtures"
-    fixtures.mkdir()
-    held_rc = held_out.main(["--tenant", H.TID, "--fixtures-dir", str(fixtures)])
-    held = capsys.readouterr()
-    assert "[held_out]" not in held.err, (
-        f"held_out refused a tenant whose table it never loads: {held.err}")
-    assert held_rc == 1, (held_rc, held)
-    assert "held-out fixtures found" in held.out + held.err, held
-    assert "verb-grants.yaml" not in held.out + held.err
     generate_case.main(["--scenario", "s", "--tenant", H.TID, "--case-id", "c", "--split",
                         "dev", "--activity-family", "f"])
     gen = capsys.readouterr()

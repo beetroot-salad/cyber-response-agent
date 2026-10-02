@@ -43,7 +43,7 @@ setup run as root — that adoption case only.)
 # Primary: score against ground truth. It walks fixtures/held-out/ and finds each
 # fixture's run by run-id, so launch scored runs as:
 #   run.py <fixture>/alert.json --tenant playground --run-id <slug> --no-learn
-python3 defender/evals/held_out.py --tenant playground
+python3 defender/evals/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor

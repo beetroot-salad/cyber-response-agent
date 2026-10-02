@@ -239,15 +239,16 @@ demands:
   # carry decided constraints, so binding them no longer silences an unknown.
   - {id: o3_entry_point_refusal_matrix, kind: parity, form: test,
      binds: ["accept_tenant.access[run.main]", "accept_tenant.access[branch.cli.main]",
-             "accept_tenant.access[held_out.main]", "accept_tenant.access[generate_case.main]",
+             "accept_tenant.access[generate_case.main]",
              "accept_tenant.access[tenant.setup]", "accept_tenant.access[tenant.check]",
              "accept_tenant.access[ticket_adapter.main]", "accept_tenant.access[tenant.scaffold]",
              "accept_tenant.access[policy_cli.main]", "accept_tenant.access[validate_scaffold.main]",
              "DEFENDER_DATA_ROOT.domain.distinguished[learning-state-overlap]"],
      discharged_by: test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses}
+  # HELD-OUT-NO-TENANT (human, PR #1157): held_out takes no tenant, so its half is gone.
   - {id: o3_no_row_only_acceptance, kind: behavior, form: test,
-     binds: ["interacts(held_out.main->accept_tenant)", "interacts(generate_case.main->accept_tenant)"],
-     discharged_by: test_1120_held_out_and_generate_case_refuse_a_tenant_with_a_row_but_no_knowledge}
+     binds: ["interacts(generate_case.main->accept_tenant)"],
+     discharged_by: test_1120_generate_case_refuses_a_tenant_with_a_row_but_no_knowledge}
   # ---- D1: removals, plumbing, survivals
   # + request_tenant (F11, non-material, auto: removed; held_out/generate_case call accept_tenant).
   # The four --tenants-root cells re-coined onto tenants_root (NAME RECONCILIATION).
@@ -591,13 +592,13 @@ demands:
   # §7 fold (47 row 61; M4 decided, human: PRIVATE LAYOUT CLASS): the clause becomes a TEST. A private
   # layout class in _tenant.py (no public name; pre_acceptance_guard here, its spelling is phase E's)
   # carries J03 and O11a in its constructor; create_tenant, require_tenant, tenant_of_run_dir and setup's
-  # row probe construct it, and Tenant composes from it. Setup, held_out, the launcher and accept_tenant
+  # row probe construct it, and Tenant composes from it. Setup, the launcher and accept_tenant
   # each refuse a relative DEFENDER_DATA_ROOT, or one inside the running checkout's defender/, with
   # TenantRefused naming it, before reading anything under the root. O11a stays keyed to the running
   # checkout. Also carries x1078_o11a_*, x1078_s013, x1078_s014, x1078_s053, x1078_s7_j03_*.
   - {id: d1_pre_acceptance_guards_on_every_path, kind: behavior, form: test,
      binds: [pre_acceptance_guard, create_tenant, require_tenant, tenant_of_run_dir, tenant.setup,
-             held_out.main, branch.cli.main, accept_tenant, "interacts(create_tenant->pre_acceptance_guard)",
+             branch.cli.main, accept_tenant, "interacts(create_tenant->pre_acceptance_guard)",
              "interacts(require_tenant->pre_acceptance_guard)",
              "interacts(tenant_of_run_dir->pre_acceptance_guard)",
              "interacts(tenant.setup->pre_acceptance_guard)", "interacts(accept_tenant->pre_acceptance_guard)",
@@ -630,11 +631,11 @@ demands:
      discharged_by: test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_running_catalog}
   # §7 fold (47 row 64; M6 (b)+(x) decided, human): the clause becomes a TEST. check exits 1 naming
   # verb-grants.yaml; run, the launcher, policy_cli gather and setup (NF1's "tables load") refuse it
-  # naming the file; held_out, generate_case, ticket_adapter and validate_scaffold never load it and
+  # naming the file; generate_case, ticket_adapter and validate_scaffold never load it and
   # accept. `# rejected: an all-withheld table as a finding` (M6).
   - {id: d7_check_refuses_an_unloadable_table, kind: domain-outcome, form: test,
      binds: [tenant.check, "grant_census.domain.distinguished[unloadable-table]", "grant_census.access[setup]",
-             run.main, branch.cli.main, policy_cli.main, tenant.setup, held_out.main, generate_case.main,
+             run.main, branch.cli.main, policy_cli.main, tenant.setup, generate_case.main,
              ticket_adapter.main, validate_scaffold.main],
      discharged_by: test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table}
   # §7 fold (47 row 65; M6 decided, human): the clause becomes a TEST. An adapter import failure while
@@ -1217,6 +1218,23 @@ demands:
         leg now asserts that refusal (no sibling started, the refusal naming <root>/T/knowledge);
         tenant_of_run_dir's resolved comparison over that shape, shape 2 (<root>/T/runs linked:
         accepted) and the old-layout control stand in pass-A unchanged.
+  # PHASE-E MINT (human, PR #1157, HELD-OUT-NO-TENANT): held_out is an evaluation tool outside the
+  # application and takes no tenant; its data is the playground's runs, handed to it as a folder.
+  - id: x1078_d4_held_out_takes_only_a_runs_dir
+    kind: survival
+    form: clause
+    binds: [held_out.main, resolve_data_root]
+    outcome:
+      nl: >-
+        Supersedes pass-A demands d4_held_out_exactly_one's --tenant branch (C27, N9) and
+        s7_generate_case_held_out_migrated's held_out half (held_out --tenant T checking the grammar
+        and the row, and refusing with DEFENDER_DATA_ROOT unset). held_out takes a REQUIRED runs dir
+        and no tenant option: `--tenant` (alone or beside a runs dir) and no runs dir are usage
+        refusals that score nothing; it never resolves DEFENDER_DATA_ROOT (the resolve census holds
+        it outside the entry modules) and never accepts a tenant. The positional branch (§7 J50),
+        held_out --help (C-R17) and generate_case's half stand in pass-A unchanged. Pinned by
+        pass-A's test_d4_held_out_exactly_one (rewritten) and by
+        test_1120_resolve_data_root_is_called_once_and_only_from_entry_points.
   # ======================================================================================
   # (6) §7-fold MINTS (47-dc2-delta.md "Minted demands"; MF1 and NF2 decided in 71) — the
   #     adopt path's own demands. x1078_s7_j08_rowless_own_folder, the fifth, closes block (5).
@@ -1510,7 +1528,6 @@ structure:
           constraints_by_via:
             run.main:            {trust: operator, constraints: [accept-tenant-checks, box-mounted-runs, grants-load, require-gather-query, lead-zero-agreement]}
             branch.cli.main:     {trust: derived,  constraints: [runs-base-record-id, accept-tenant-checks, episodes-base-refusal]}
-            held_out.main:       {trust: operator, constraints: [accept-tenant-checks]}
             generate_case.main:  {trust: operator, constraints: [accept-tenant-checks]}
             tenant.setup:        {trust: operator, constraints: [one-tenant-guard, accept-tenant-checks, settings-files-parse, run-start-readiness]}   # V18 (human, 73 round 4): setup = run start's own readiness function (V14) + the folder rules (accept-tenant-checks: links and special files, .tenant-id presence + match, the top-level allow-list; settings-files-parse: mapping.yaml included, which run start does not read); never check's census; rules first, then the row (MF1 Q2). Was [one-tenant-guard, accept-tenant-checks, tables-load] (DC1/NF1, pre-V1)
             tenant.check:        {trust: operator, constraints: [accept-tenant-checks, grant-census]}
@@ -1729,7 +1746,6 @@ structure:
     # ---- every tenant-taking entry point calls accept_tenant once (O3, D1)
     - {from: run.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: branch.cli.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
-    - {from: held_out.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: generate_case.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: tenant.setup, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: tenant.check, to: accept_tenant, mode: invoke, via: api, provenance: design}
@@ -1867,7 +1883,6 @@ structure:
     - {from: branch.cli.main, to: resolve_data_root, provenance: code, multiplicity: serial}   # was 2x
     - {from: branch.cli.main, to: tenant_of_run_dir, provenance: code, multiplicity: serial}
     - {from: branch.cli.main, to: episodes_root, provenance: code, multiplicity: serial}
-    - {from: held_out.main, to: resolve_data_root, provenance: design, multiplicity: serial}   # once, directly (was 2x through request_tenant/runs_base_for)
     - {from: generate_case.main, to: resolve_data_root, provenance: design, multiplicity: serial}
     - {from: policy_cli.main, to: resolve_data_root, provenance: design, multiplicity: serial}   # NEW: operator commands resolve the root (D1)
     - {from: ticket_adapter.main, to: resolve_data_root, provenance: design, multiplicity: serial}
@@ -3404,6 +3419,7 @@ handoff:
     # ---- HUMAN decisions: 15-design-corrections (H1-H3), §7 (70-resolutions: M1-M11, N9, N12, DC1, DC2), §7 addendum (71: MF1)
     - "H1 (design-refuted seam, 10-brief): fold the corrections in and continue; no kick-back to discuss-issue. resolved_by: human"
     - "J26-vs-tenant-dir-symlink (phase E, PR #1157): pass-A's s7_j26 shape 1 (a launch under a symlinked <root>/T gets past the launcher) contradicted accept_refuses_knowledge_not_real's tenant-dir-symlink cell, while the 13d claim listed J26 as contract-unchanged. #1120 wins: the symlinked tenant folder stays refused; superseding entry x1078_s7_j26_symlinked_tenant_folder; the pass-A test's shape-1 leg asserts the refusal, its other legs unchanged. resolved_by: human"
+    - "HELD-OUT-NO-TENANT (PR #1157, after the third code review): O3 had held_out take --tenant and accept the tenant like every entry point. The human: 'Held off eval should be outside of the application code, thus not \"care\" about tenant; regardless its data is playground based'. held_out takes a required runs dir and no tenant; it never resolves the data root or accepts a tenant. Graph: accept_tenant.access[held_out.main] and the held_out->accept_tenant edge withdrawn; the held_out->resolve_data_root drive withdrawn; held_out unbound from o3_no_row_only_acceptance (its test renamed test_1120_generate_case_refuses_a_tenant_with_a_row_but_no_knowledge), d1_pre_acceptance_guards_on_every_path and d7_check_refuses_an_unloadable_table; superseding entry x1078_d4_held_out_takes_only_a_runs_dir. generate_case keeps --tenant (not covered by the ruling). resolved_by: human"
     - "H2 (closes 20-demands F16 and brief R2): piece 1 re-homes the ~98 lab-reaching test files onto knowledge/tenant-fixture under a tmp data root through their ~10 helper chokepoints (replay harness drive first); no test-only survival of tenant_dir / default_tenants_root / entry_tenant* / --tenants-root; O3's census strict; the 58 path-only files may read the lab by path until D9 step 7. Graph: o10_tests_need_no_tenant_repo narrowed; replay_harness -> tenant_fixture edge. resolved_by: human"
     - "H3 (closes 20-demands F3 and brief R4): absorb TenantPaths fully; the four pre-acceptance sites get owners that are not Tenant (HOW decided at §7 as M4: a private layout class); J03 and O11a survive in its constructor; the pass-A demands binding TenantPaths (and J44's discharging test) are re-bound by explicit superseding entries — the 21 x1078_* clauses (20 + x1078_s7_j08_rowless_own_folder). resolved_by: human"
     - "DC1 (design change adopted at §7 by root-cause questioning; 70-resolutions; issue #1120 issuecomment-5873851696; claim DC1): setup applies only folder-intrinsic rules, never the version-relative grant-gap rule; a clean re-run is silent and writes nothing; check, tenant CI and (later) run start report the gap; drops A1's 'setup refuses a gap'. Dissolves M2 (and M1 with DC2). Graph: grant_census.access[setup] = [tables-load]; d7_setup_runs_acceptance_and_check's gap cell flips (setup exit 0, check exit 1); d7_setup_rerun_is_silent_and_writes_nothing gains the DC1 cell; setup -> tenant.check edge withdrawn. resolved_by: human REFINED by V1 (human, §7-verify, 73-resolutions-verify): setup refuses anything that would make a run refuse — the lead-zero agreement joins tables-load in setup (first run and re-run); a grant gap still passes (runs proceed with it). grant_census.access[setup] = [tables-load, lead-zero-agreement]. EXTENDED by V10 (human, 73 round 2): an all-withheld table (gather granted nothing) is setup's refusal too; grant_census.access[setup] = [tables-load, lead-zero-agreement, gather-granted]; check keeps accepting it (M6). SUPERSEDED IN FORM by V14 (human, 73 round 3): setup carries no rule list of its own — it calls run start's own readiness function (grant_census.access[setup] = [run-start-readiness]), so a table granting gather only health-check rows (92r2 #1) is setup's refusal too; the gap stays check's. STATED by V18 (human, 73 round 4): setup = run start's own readiness function + the folder rules, the settings files' parse (mapping.yaml included) among them — DC1's folder-intrinsic 'tables load' survives there for the file run start does not read."

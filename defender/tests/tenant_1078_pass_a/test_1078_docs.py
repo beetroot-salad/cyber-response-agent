@@ -177,7 +177,8 @@ _RETIRED_RUNS_DIR = re.compile(r"DEFENDER_RUNS_BASE|/tmp/defender-runs")
 
 def test_d8_held_out_docs():
     """held_out.py:29, evals/README.md:30 and fixtures/held-out/README.md:114 each take
-    --tenant or keep the positional runs dir.
+    --tenant or keep the positional runs dir. (#1120, human on PR #1157: held_out takes no
+    tenant now, so each documents the required runs dir.)
 
     Under D4's "exactly one of `--tenant` or the positional", a documented invocation must name
     one of them: `--tenant <id>`, or a runs dir that is REQUIRED (not `[<runs_dir>]`, which

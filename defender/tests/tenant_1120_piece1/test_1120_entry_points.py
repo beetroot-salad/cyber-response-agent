@@ -34,7 +34,6 @@ import pytest
 from defender import _tenant, _tenants
 from defender._episode_handle import Episode
 from defender import run as run_py
-from defender.evals import held_out
 from defender.evals.oracle_golden import generate_case
 from defender.learning.branch import cli as branch_cli
 from defender.learning.branch import seams as branch_seams
@@ -55,10 +54,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 #: The launcher's episodes knob (J44; the refusal stays until D12).
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-
-#: held_out's report header — printed only once it has read and scored a runs base.
-HELD_OUT_REPORT = "# Held-out eval"
-
 
 # ======================================================================================
 # Same-file helpers.
@@ -217,7 +212,6 @@ ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree", "learning-sta
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "held_out.main": ALL_CELLS,
     "generate_case.main": ALL_CELLS,
     "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree", "learning-state-overlap"),
     "tenant.check": ALL_CELLS,
@@ -317,10 +311,6 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         got = _launch(cell.source, spawn)
         text = H.exit_text(got) if isinstance(got, BaseException) else ""
         return isinstance(got, BaseException) or got != 0, text, bool(spawn.launches)
-    if entry == "held_out.main":
-        rc = held_out.main(["--tenant", cell.tenant_id])
-        cap = capsys.readouterr()
-        return rc != 0, cap.err + cap.out, HELD_OUT_REPORT in cap.out
     if entry == "generate_case.main":
         rc = generate_case.main(["--scenario", "s", "--tenant", cell.tenant_id, "--case-id", "c1",
                                  "--split", "dev", "--activity-family", "f"])
@@ -392,8 +382,9 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
 def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses(
         entry: str, tmp_path: Path, monkeypatch, capsys) -> None:
     """Each entry point that takes a tenant after piece 1 — run.py, the branch launcher,
-    held_out, generate_case, tenant.py setup and check, ticket_adapter, policy_cli,
-    validate_scaffold — and tenant.py scaffold for its bad-id cell, is driven over each cell:
+    generate_case, tenant.py setup and check, ticket_adapter, policy_cli, validate_scaffold
+    (held_out takes none: an evaluation tool, outside the application — human, PR #1157) —
+    and tenant.py scaffold for its bad-id cell, is driven over each cell:
     a bad id ('A'); a data root with no row for the id; a knowledge folder that is a symlink;
     settings inside a mounted tree (through policy_cli's own defender-dir option, and for the
     others a data root inside the running checkout's defender/ tree, which is O11a); and a
@@ -423,25 +414,19 @@ def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses
     assert not problems, "\n".join(problems)
 
 
-def test_1120_held_out_and_generate_case_refuse_a_tenant_with_a_row_but_no_knowledge(
+def test_1120_generate_case_refuses_a_tenant_with_a_row_but_no_knowledge(
         data_root: Path, tmp_path: Path, monkeypatch, capsys) -> None:
-    """A tenant whose row exists but whose knowledge folder does not is refused by held_out
-    with a tenant option and by generate_case with a tenant option, before any runs base is
-    read or any child is spawned: exactly as run.py refuses it, all three passing
-    accept_tenant's refusal (naming <root>/acme/knowledge) through verbatim. Today both
-    accept it (K7). The positive control: the same tenant with its knowledge placed is
+    """A tenant whose row exists but whose knowledge folder does not is refused by
+    generate_case with a tenant option, before any child is spawned: exactly as run.py
+    refuses it, both passing accept_tenant's refusal (naming <root>/acme/knowledge) through
+    verbatim. At a1c65801 it accepted it (K7). held_out no longer takes a tenant (human, PR
+    #1157), so it has no half here. The positive control: the same tenant with its knowledge placed is
     accepted by generate_case's investigation step, which then hands its child the tenant."""
     H.plant_row(data_root)
     runs = H.tenant_folder(data_root) / "runs" / "r1"
     runs.mkdir(parents=True)
     expected = _owner(data_root)
     assert str(H.knowledge_dir(data_root)) in expected, expected
-
-    rc = held_out.main(["--tenant", H.TID])
-    cap = capsys.readouterr()
-    assert rc != 0
-    assert expected in cap.err, f"held_out did not refuse verbatim: {cap.err!r}"
-    assert HELD_OUT_REPORT not in cap.out, f"held_out scored the runs base: {cap.out!r}"
 
     runner = _RunnerRecorder()
     with pytest.raises(_tenant.TenantRefused) as refused:
@@ -588,10 +573,9 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     """A relative DEFENDER_DATA_ROOT, and one inside the running checkout's defender/ tree,
     are refused with TenantRefused naming it before anything under the root is read or
     written, on every pre-acceptance path: create_tenant, require_tenant, tenant_of_run_dir
-    (which takes the data root), accept_tenant, held_out with a tenant option, the branch
-    launcher (before it reads the source's runs-base record) and tenant.py setup (over an
-    operator-placed knowledge folder inside a checkout's defender/, which it leaves
-    byte-identical, writing no row). M4 (human): the checks live in the constructor of a
+    (which takes the data root), accept_tenant, the branch launcher (before it reads the
+    source's runs-base record) and tenant.py setup (over an operator-placed knowledge folder
+    inside a checkout's defender/, which it leaves byte-identical, writing no row). M4 (human): the checks live in the constructor of a
     private layout class, so every path meets the same refusal. O11a is keyed to the RUNNING
     checkout: a data root inside ANOTHER checkout's defender/ is not refused by it — a
     finished tenant there is accepted (the positive control, with an absolute tmp root)."""
@@ -616,14 +600,9 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     assert not relative.exists()
     _assert_never_created(inside)
 
-    # The entries: held_out and the launcher, with the root in the environment.
+    # The launcher, with the root in the environment.
     for root in (relative, inside):
         monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-        capsys.readouterr()
-        rc = held_out.main(["--tenant", H.TID])
-        err = capsys.readouterr().err
-        assert rc != 0
-        assert str(root) in err, f"held_out over {root}: {err!r}"
         source = (root if root.is_absolute() else tmp_path / root) / H.TID / "runs" / "r1"
         got = _launch(source, T.FakeSpawn())
         text = H.exit_text(got) if isinstance(got, BaseException) else f"exit {got}"

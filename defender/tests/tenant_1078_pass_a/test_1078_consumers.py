@@ -10,9 +10,9 @@ The consumers, each driven through its REAL entry point:
   C26) and the sibling union (`render.sibling_union`);
 * the review replay (`learning/branch/review.verb_context`, `seams.adapter_seam`): the replay
   env's `DEFENDER_RUNS_BASE` is the threaded base (F3);
-* `evals/held_out.py`: exactly one of `--tenant` or the positional runs dir (C27, N9), the
-  positional branch never resolving the data root (§7 J50, human), `--help` never resolving a
-  runs base (C-R17);
+* `evals/held_out.py`: the positional runs dir, required, and never resolving the data root
+  (§7 J50, human), `--help` never resolving a runs base (C-R17). Its `--tenant` (C27, N9) is
+  gone: an evaluation tool outside the application takes no tenant (human, #1120 / PR #1157);
 * `evals/oracle_golden/generate_case.py`: `--tenant`, refused at entry (§7 J32), its child's
   run dir predicted as `runs_base_for(T)/candidate`, and no `/tmp/defender-runs` fallback of its
   own (C-R16).
@@ -331,12 +331,15 @@ def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
 # ======================================================================================
 
 def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
-    """held_out --tenant T scores runs_base_for(T), held_out <runs_dir> scores that dir, and
-    both or neither is refused.
+    """held_out <runs_dir> scores exactly that dir, and a `--tenant` (with or without a runs
+    dir) or no runs dir at all is refused. Superseded for #1120 (human, PR #1157): held_out is
+    an evaluation tool outside the application and takes no tenant, so the `--tenant` branch
+    this test once pinned (C27) is now a usage error.
 
-    Which tree was scored is read off the verdict: the fixture's run under the tenant's runs
-    base closes `benign` (OK), the one under a stale retired knob closes `malicious`, and the
-    positional dir's closes `inconclusive`. A refusal prints no scoring report."""
+    Which tree was scored is read off the verdict: a fixture's run under a set-up tenant's runs
+    base closes `benign`, the one under a stale retired knob closes `malicious`, and the
+    positional dir's closes `inconclusive` — so only the positional dir may be scored. A
+    refusal prints no scoring report."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
@@ -349,17 +352,13 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
     _scored_run(positional, "inconclusive")
     fx = ["--fixtures-dir", str(fixtures)]
 
-    status, out = _drive_held_out(["--tenant", TENANT, *fx], capsys)
-    assert status == 0, out
-    assert "slug-one: predicted='benign'" in out, (
-        f"held_out --tenant did not score runs_base_for(T):\n{out}")
-    assert "WRONG" not in out, out
-
     status, out = _drive_held_out([str(positional), *fx], capsys)
     assert status == 0, out
     assert "predicted='inconclusive'" in out, f"the positional dir was not the one scored:\n{out}"
 
-    for argv, what in (([str(positional), "--tenant", TENANT, *fx], "both"), (fx, "neither")):
+    for argv, what in ((["--tenant", TENANT, *fx], "--tenant"),
+                       ([str(positional), "--tenant", TENANT, *fx], "a runs dir and --tenant"),
+                       (fx, "no runs dir")):
         status, out = _drive_held_out(argv, capsys)
         assert status not in (0, None), f"held_out with {what} was not refused"
         assert SCORED not in out, f"held_out with {what} scored something before refusing:\n{out}"
@@ -474,16 +473,15 @@ def test_generate_case_parent_and_child_resolve_different_data_roots(tmp_path, m
 
 
 def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
-    """generate_case --tenant T and held_out --tenant T check the grammar and require_tenant at
-    entry, before prediction, scoring or spawn, and find their runs base only through
-    resolve_data_root/runs_base_for(T): with DEFENDER_DATA_ROOT unset each refuses up front
-    naming the variable, generate_case keeps no /tmp/defender-runs fallback of its own, and
-    held_out --help does not resolve a runs base.
+    """generate_case --tenant T checks the grammar and require_tenant at entry, before
+    prediction or spawn, and finds its runs base only through resolve_data_root/runs_base_for(T):
+    with DEFENDER_DATA_ROOT unset it refuses up front naming the variable, it keeps no
+    /tmp/defender-runs fallback of its own, and held_out --help does not resolve a runs base.
+    held_out's `--tenant` half is gone: it takes no tenant (human, #1120 / PR #1157).
 
     `--help` is driven in the one configuration today's eager default cannot survive (C-R17):
     the retired knob and the learning state dir naming one directory, which
     `resolve_runs_base()` refuses before argparse ever prints."""
-    fixtures = _fixtures(tmp_path)
     shared = tmp_path / "shared"
     shared.mkdir()
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(shared))
@@ -494,16 +492,12 @@ def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
         f"held_out --help resolved a runs base before printing:\n{out}")
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learning-state"))
 
-    # the grammar and the row, at entry — before scoring and before any spawn
+    # the grammar and the row, at entry — before any spawn
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     for bad in ("../x", "acme"):
         owner = (H.owner_refusal(H.tenant().TenantId, bad) if bad == "../x"
                  else H.owner_refusal(H.require_tenant, root, bad))
-        status, out = _drive_held_out(["--tenant", bad, "--fixtures-dir", str(fixtures)], capsys)
-        assert status not in (0, None), out
-        assert SCORED not in out, out
-        H.assert_verbatim(out, owner, entry=f"held_out --tenant {bad!r}")
         status, out = _drive_generate_case(
             _gc_argv("--tenant", bad, "--cases-dir", str(tmp_path / "cases")), capsys)
         assert status not in (0, None)
@@ -511,10 +505,6 @@ def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
 
     # DEFENDER_DATA_ROOT unset: refused up front, naming the variable
     H.set_data_root(monkeypatch, None)
-    status, out = _drive_held_out(["--tenant", TENANT, "--fixtures-dir", str(fixtures)], capsys)
-    assert status not in (0, None), out
-    assert H.DATA_ROOT_ENV in out, out
-    assert SCORED not in out, out
     status, out = _drive_generate_case(_gc_argv("--tenant", TENANT), capsys)
     assert status not in (0, None), out
     assert H.DATA_ROOT_ENV in out, out

@@ -114,7 +114,7 @@ for f in defender/fixtures/held-out/*/alert.json; do
 done
 
 # Score correctness against ground truth:
-python3 defender/evals/held_out.py --tenant playground
+python3 defender/evals/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
 ```
 
 `held_out.py` reports aggregate accuracy plus per-class recall and

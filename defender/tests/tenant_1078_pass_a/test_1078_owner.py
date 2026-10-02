@@ -540,5 +540,5 @@ def _d0_entry_surfaces(tmp_path: Path, root: Path, refusals: dict) -> None:
         status = held_out.main([])
     except SystemExit as refused_selector:
         status = refused_selector.code
-    assert status not in (0, None), "held_out with neither --tenant nor a runs dir ran"
+    assert status not in (0, None), "held_out with no runs dir ran"
     assert H.census(root) == before, "the refused selector tool touched the data root"
