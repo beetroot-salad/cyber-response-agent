@@ -83,16 +83,28 @@ def parse_env(text: str) -> dict[str, str]:
       * a line ends at CRLF, CR or LF (`_LINE_END`), so a file the validator reads as five lines
         is five lines here too.
     """
-    out: dict[str, str] = {}
+    return {key: value for key, value, exported in assignments(text) if not exported}
+
+
+def assignments(text: str) -> list[tuple[str, str, bool]]:
+    """Every `KEY=VALUE` line of a settings file as written, in order: `(key, value, exported)`,
+    an `export K=v` line included (as `K`, `exported` True) and every duplicate kept. The same
+    line, comment and quote rules as `parse_env`, which is the last non-exported value per key —
+    what a run reads. The connect validator scans all of them: a secret on a line the run ignores
+    is still a secret in a tracked file."""
+    out: list[tuple[str, str, bool]] = []
     for line in _LINE_END.split(text.removeprefix("\ufeff")):
         line = line.strip()
-        if not line or line.startswith("#") or "=" not in line or re.match(r"export\s", line):
+        if not line or line.startswith("#") or "=" not in line:
             continue
+        exported = re.match(r"export\s", line) is not None
+        if exported:
+            line = line[len("export"):].lstrip()
         key, _, raw = line.partition("=")
         raw = raw.strip()
         if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
             raw = raw[1:-1]
-        out[key.strip()] = raw
+        out.append((key.strip(), raw, exported))
     return out
 
 
@@ -263,7 +275,10 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
                 out[folder.name] = SystemConfig(
                     read_env_file(folder / "config.env", shown=config_pointer(folder.name)))
             except ConfigFault as fault:
-                out[folder.name] = fault
+                # A fresh instance, never the caught one: the caught fault's traceback holds this
+                # frame (and `out`, the live dict behind the read-only view) and its cause holds
+                # the OSError with the host path. The record keeps the text only.
+                out[folder.name] = ConfigFault(str(fault))
     return MappingProxyType(out)
 
 
@@ -434,6 +449,7 @@ __all__ = [
     "ElasticSettings",
     "SecretLookup",
     "SystemConfig",
+    "assignments",
     "declared_secrets",
     "config_pointer",
     "elastic_problem",

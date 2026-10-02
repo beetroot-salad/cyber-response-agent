@@ -61,9 +61,18 @@ SECRET_MARKER = "[secret redacted]"
 SECRET_ENV_PREFIX = "DEFENDER_SECRET_"
 
 #: Where a placed secret goes in `auth` or a header value: `{{NAME}}`, NAME the `secrets.env`
-#: entry the call placed in `secrets=`. The transport writes the child variable carrying it into
-#: the in-container shell script, so the value is expanded there and is never on argv.
+#: entry the call placed in `secrets=`. The in-container shell expands the child variable
+#: carrying it, so the value is never on this host's argv. In a header it is not on the
+#: container's argv either: slotted headers reach curl on its standard input (`-H @-`), written
+#: by the shell's builtin `printf`, because curl hides a `-u` password from the process list but
+#: never a `-H` value. Slots are read in header values and `auth` only; anywhere else (the URL,
+#: a body) the text is sent as written.
 SECRET_SLOT = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
+
+#: A container variable `auth` may name, expanded by the container's shell
+#: (`elastic:${ELASTIC_PASSWORD}`, the elastic read path). Only this braced form expands; every
+#: other character of `auth` is literal.
+_CONTAINER_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 __all__ = [
     "REQUIRED_CONFIG_KEYS_TEMPLATE",
@@ -217,32 +226,32 @@ def _slotted(text: str) -> bool:
     return SECRET_SLOT.search(text) is not None
 
 
-def _shell_word(text: str, var_of: Mapping[str, str], *, expand: bool) -> str:
-    """`text` as ONE word of the in-container `sh -c` script, each `{{NAME}}` replaced by a
-    double-quoted expansion of the child variable carrying that placed secret. The literal parts
-    are single-quoted (nothing in them is expanded) — except under `expand`, which keeps `auth`'s
-    contract that the container's own `${VAR}` expands there (the elastic read path's
-    `elastic:${ELASTIC_PASSWORD}`). A slot naming a secret this call did not place is a
-    `ConfigFault`, so a literal `{{NAME}}` is never sent upstream."""
+def _shell_word(text: str, var_of: Mapping[str, str], *, container_vars: bool) -> str:
+    """`text` as ONE word of the in-container `sh -c` script. Each `{{NAME}}` becomes a
+    double-quoted expansion of the child variable carrying that placed secret; under
+    `container_vars` (`auth` only) each `${VAR}` becomes a double-quoted expansion of the
+    container's own variable. Everything else is single-quoted, so no quote, backslash, `$` or
+    backtick in it is ever shell syntax. A slot naming a secret this call did not place is a
+    `ConfigFault`, raised before any child runs."""
+    pattern = (re.compile(f"{SECRET_SLOT.pattern}|{_CONTAINER_VAR.pattern}") if container_vars
+               else SECRET_SLOT)
     out: list[str] = []
     pos = 0
-    for m in SECRET_SLOT.finditer(text):
-        out.append(_quoted(text[pos:m.start()], expand=expand))
-        var = var_of.get(m.group(1))
-        if var is None:
+    for m in pattern.finditer(text):
+        out.append(shlex.quote(text[pos:m.start()]) if m.start() > pos else "")
+        slot = m.group(1)
+        if slot is None:  # `${VAR}`: the container's own variable
+            out.append(f'"${{{m.group(2)}}}"')
+        elif slot in var_of:
+            out.append(f'"${{{var_of[slot]}}}"')
+        else:
             raise ConfigFault(
-                f"{{{{{m.group(1)}}}}} names a secret this call does not place — add its "
+                f"{{{{{slot}}}}} names a secret this call does not place — add its "
                 "secrets.env entry name to secrets=")
-        out.append(f'"${{{var}}}"')
         pos = m.end()
-    out.append(_quoted(text[pos:], expand=expand))
+    if pos < len(text):
+        out.append(shlex.quote(text[pos:]))
     return "".join(out) or "''"
-
-
-def _quoted(literal: str, *, expand: bool) -> str:
-    if not literal:
-        return ""
-    return f'"{literal}"' if expand else shlex.quote(literal)
 
 
 def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
@@ -277,19 +286,24 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     ``auth="svc:{{MYSYS_PASSWORD}}"``): the in-container shell expands it from the child's
     environment, never on this host's argv.
 
-    `auth` runs curl inside the container's shell, so a ``${VAR}`` in it expands *there*,
-    against the container's own env (``"elastic:${ELASTIC_PASSWORD}"``); None = no ``-u`` (the
-    auth-less stubs). Header values are never shell-expanded apart from their `{{NAME}}` slots.
-    `insecure` adds ``-k`` for the stack's self-signed TLS.
+    `auth` runs curl inside the container's shell, so a braced ``${VAR}`` in it expands
+    *there*, against the container's own env (``"elastic:${ELASTIC_PASSWORD}"``); every other
+    character of it is literal. None = no ``-u`` (the auth-less stubs). Header values are never
+    shell-expanded apart from their `{{NAME}}` slots. `insecure` adds ``-k`` for the stack's
+    self-signed TLS.
+
+    This lane is not confined: an adapter reaches it through `http_get` / `http_post`, which run
+    `guard_outbound` first and take the same `headers`, `auth` and `secrets`.
     """
     flags = ["-sS"] + (["-k"] if insecure else [])
     args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
     slotted_headers: list[str] = []
     for key, val in (headers or {}).items():
-        if _slotted(val):
-            slotted_headers.append(f"{key}: {val}")
+        line = f"{key}: {val}"
+        if _slotted(str(val)):
+            slotted_headers.append(line)
         else:
-            args += ["-H", f"{key}: {val}"]
+            args += ["-H", line]
     if body is not None:
         args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     # Status on its own trailing line so `split_status` can recover it from stdout.
@@ -298,17 +312,20 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     context = docker_context(ctx, system)
     var_of = {name: f"{SECRET_ENV_PREFIX}{i}" for i, name in enumerate(secrets)}
     # Every slot is checked before the secrets are read or any child is forked.
-    script_words = [*flags]
+    curl_words = [*flags]
     if auth:
-        script_words += ["-u", _shell_word(auth, var_of, expand=True)]
-    for header in slotted_headers:
-        script_words += ["-H", _shell_word(header, var_of, expand=False)]
+        curl_words += ["-u", _shell_word(auth, var_of, container_vars=True)]
+    header_words = [_shell_word(h, var_of, container_vars=False) for h in slotted_headers]
     secret_flags, secret_env, placed = _place_secrets(ctx, secrets)
     if auth or slotted_headers:
-        # The flags that carry a `${VAR}` or a placed secret live in the in-container shell so
-        # they expand there; everything else is forwarded as argv after `--` (so a JSON body
-        # with spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
-        inner = f'exec curl {" ".join(script_words)} "$@"'
+        # What carries a `${VAR}` or a placed secret lives in the in-container shell so it
+        # expands there; everything else is forwarded as argv after `--` (so a JSON body with
+        # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0. Slotted headers
+        # go to curl on stdin (`-H @-`), off every process list (`SECRET_SLOT`).
+        inner = f'exec curl {" ".join(curl_words)} "$@"'
+        if header_words:
+            inner = (f"printf '%s\\n' {' '.join(header_words)} | "
+                     f'curl {" ".join(curl_words)} -H @- "$@"')
         cmd = ["docker", "--context", context, "exec", "-i", *secret_flags, container,
                "sh", "-c", inner, "--", *args]
     else:
@@ -344,9 +361,10 @@ def split_status(stdout: str) -> tuple[str, str]:
     return stdout[:sep], stdout[sep + 1:].strip()
 
 
-def http_get(
+def http_get(  # noqa: PLR0913 — the request plus its credential keywords
     ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
-    params: dict | None = None,
+    params: dict | None = None, headers: dict[str, str] | None = None,
+    auth: str | None = None, secrets: Sequence[str] = (),
 ) -> dict | list:
     """GET <URL_BASE><path>?<params>, return parsed JSON.
 
@@ -354,27 +372,34 @@ def http_get(
     error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
 
     `system` is required: it keys the confinement allowlist, and a default would let a caller
-    confine against the wrong one.
+    confine against the wrong one. `headers`, `auth` and `secrets` are `docker_exec_curl`'s: a
+    credentialed adapter passes its secrets here, so its calls are confined like every other.
     """
     qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
-    return _request(ctx, config, url, system=system, method="GET")
+    return _request(ctx, config, url, system=system, method="GET", headers=headers, auth=auth,
+                    secrets=secrets)
 
 
-def http_post(
+def http_post(  # noqa: PLR0913 — the request plus its credential keywords
     ctx: VerbContext, config: dict[str, str], path: str, body: dict, *, system: str,
+    headers: dict[str, str] | None = None, auth: str | None = None,
+    secrets: Sequence[str] = (),
 ) -> dict | list:
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    return _request(ctx, config, url, system=system, method="POST", body=body)
+    return _request(ctx, config, url, system=system, method="POST", body=body, headers=headers,
+                    auth=auth, secrets=secrets)
 
 
-def http_get_obj(
+def http_get_obj(  # noqa: PLR0913 — the request plus its credential keywords
     ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
-    params: dict | None = None,
+    params: dict | None = None, headers: dict[str, str] | None = None,
+    auth: str | None = None, secrets: Sequence[str] = (),
 ) -> dict[str, Any]:
     """`http_get` for endpoints whose contract is a JSON object: narrows the type and fails
     fast on anything else. List endpoints use `http_get` with their own guard."""
-    payload = http_get(ctx, config, path, system=system, params=params)
+    payload = http_get(ctx, config, path, system=system, params=params, headers=headers,
+                       auth=auth, secrets=secrets)
     if not isinstance(payload, dict):
         raise TransportFault(
             f"expected a JSON object from {path}, got {type(payload).__name__}"
@@ -442,9 +467,10 @@ def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
         raise UpstreamFault(f"HTTP {code} from {url}: {detail}")
 
 
-def _request(
+def _request(  # noqa: PLR0913 — the request plus its credential keywords
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None = None,
+    body: dict | None = None, headers: dict[str, str] | None = None, auth: str | None = None,
+    secrets: Sequence[str] = (),
 ) -> dict | list:
     # Confinement before any transport; every HTTP stub funnels through here.
     guard_outbound(ctx, system, url, method=method)
@@ -452,7 +478,8 @@ def _request(
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     rc, stdout, stderr = docker_exec_curl(
-        ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=system
+        ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=system,
+        headers=headers, auth=auth, secrets=secrets,
     )
 
     _raise_on_transport_failure(ctx, bastion, rc, stderr, system)

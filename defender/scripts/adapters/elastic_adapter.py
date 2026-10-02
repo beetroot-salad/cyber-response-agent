@@ -125,20 +125,16 @@ def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> Transport
 
 
 
-def _container_for(ctx: VerbContext, url: str, config: dict) -> str:
-    kibana_base = (config.get("KIBANA_URL") or "").rstrip("/")
-    if kibana_base and url.startswith(kibana_base):
-        return _kibana_container(ctx)
-    return _es_container(ctx)
-
-
-def _http_json(
+def _http_json(  # noqa: PLR0913 — one request's per-call state
     ctx, method, url, config, headers=None, body: OutboundBody | None = None, timeout=None,
+    *, kibana: bool = False,
 ):
-    """The one door to Elasticsearch. `body` is typed rather than a bare dict for the reason
-    `OutboundBody` gives."""
+    """The one door to Elasticsearch — and, with `kibana=True`, to Kibana. The caller says which
+    service it addresses; the container is never guessed from the URL (an Elasticsearch URL that
+    happens to start with KIBANA_URL is still Elasticsearch's). `body` is typed rather than a
+    bare dict for the reason `OutboundBody` gives."""
     guard_outbound(ctx, SYSTEM, url, method=method)
-    container = _container_for(ctx, url, config)
+    container = _kibana_container(ctx) if kibana else _es_container(ctx)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
     rc, stdout, stderr = transport.docker_exec_curl(
         ctx, container, url, method=method, headers=headers,
@@ -345,7 +341,7 @@ def health_check(ctx: VerbContext) -> dict:
     kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
     try:
         kb_status, kb_body = _http_json(
-            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10
+            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10, kibana=True,
         )
     except TransportFault as e:
         out["kibana"] = f"unreachable ({e.detail})"

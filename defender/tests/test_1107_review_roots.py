@@ -206,46 +206,87 @@ def _secret_tenant(tmp_path: Path, marker: str, secrets: dict[str, str]):
     return S.resolve(root)
 
 
-def _run_inner(argv: list[str], env: dict[str, str], tmp_path: Path) -> list[str]:
-    """Run the in-container half of a recorded `docker exec … sh -c <script> -- <args>` with a
-    fake `curl` that prints its argv, and return what curl received."""
+_FAKE_CURL = """\
+import json, sys
+argv = sys.argv[1:]
+stdin_headers = []
+for i, a in enumerate(argv[:-1]):
+    if a == "-H" and argv[i + 1] == "@-":
+        stdin_headers = sys.stdin.read().splitlines()
+print(json.dumps({"argv": argv, "stdin_headers": stdin_headers}))
+"""
+
+
+def _in_container(call: dict, tmp_path: Path, **container_env: str) -> dict:
+    """Replay the in-container half of a recorded `docker exec` the way docker runs it: the
+    container's environment holds only the variables named by `-e NAME` (taken from the docker
+    CLI's own environment) plus `container_env`, and a fake `curl` reports its argv — what a
+    process list shows — and any headers it read on stdin (`-H @-`)."""
     fakebin = tmp_path / "incontainer"
     fakebin.mkdir(exist_ok=True)
     curl = fakebin / "curl"
-    curl.write_text(f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n",
-                    encoding="utf-8")
+    curl.write_text(f"#!{sys.executable}\n{_FAKE_CURL}", encoding="utf-8")
     curl.chmod(0o755)
-    inner = argv[argv.index("sh"):]
+    argv = call["argv"]
+    rest = argv[argv.index("exec") + 1:]
+    forwarded: dict[str, str] = {}
+    while rest[0].startswith("-"):
+        if rest[0] == "-e":
+            name = rest[1]
+            if name in call["env"]:
+                forwarded[name] = call["env"][name]
+            rest = rest[2:]
+        else:
+            rest = rest[1:]
+    inner = rest[1:]  # past the container name
     proc = subprocess.run(inner, capture_output=True, text=True, check=True,
-                          env={"PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}", **env})
+                          env={"PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}",
+                               **forwarded, **container_env})
     return json.loads(proc.stdout)
 
 
-def test_a_placed_secret_reaches_a_header(tmp_path):
-    """`{{NAME}}` in a header value is the declared secret NAME, delivered through the child's
-    environment: curl receives the value in its -H, the docker argv never carries it, and the
-    literal parts of the header are not shell-expanded."""
-    value = "tok-header-1156"
+def test_a_placed_secret_reaches_a_header_off_every_argv(tmp_path):
+    """`{{NAME}}` in a header value is the declared secret NAME, forwarded into the container by
+    `-e` and expanded there. curl reads the slotted header on stdin, so the value is on neither
+    the docker argv nor curl's own (a process list in the bastion shows no token). Shell syntax
+    in a slotted header's literal text is sent as written, never run."""
+    value = "tok header-1156"
     record = _secret_tenant(tmp_path, "hdr", {"X_TOKEN": value})
     shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
     ctx = _ctx(record, tmp_path, shim)
 
     transport.docker_exec_curl(
         ctx, "bastion-hdr", "http://cmdb-hdr:8080/x", system="cmdb", secrets=("X_TOKEN",),
-        headers={"Authorization": "Bearer {{X_TOKEN}}", "X-Lit": "$(echo pwned) `id` $HOME"})
+        headers={"Authorization": "Bearer {{X_TOKEN}}",
+                 "X-Sig": "{{X_TOKEN}} $(echo pwned) `id -u` $HOME '\"",
+                 "X-Lit": "$(echo lit)"})
 
     (call,) = shim.calls()
     assert all(value not in a for a in call["argv"]), "the secret is on the docker argv"
-    forwarded = {k: v for k, v in call["env"].items() if k.startswith(transport.SECRET_ENV_PREFIX)}
-    curl_argv = _run_inner(call["argv"], forwarded, tmp_path)
-    assert f"Authorization: Bearer {value}" in curl_argv, curl_argv
-    assert "X-Lit: $(echo pwned) `id` $HOME" in curl_argv, curl_argv
+    seen = _in_container(call, tmp_path)
+    assert all(value not in a for a in seen["argv"]), "the secret is on curl's argv"
+    assert f"Authorization: Bearer {value}" in seen["stdin_headers"], seen
+    assert f"X-Sig: {value} $(echo pwned) `id -u` $HOME '\"" in seen["stdin_headers"], seen
+    assert "X-Lit: $(echo lit)" in seen["argv"], seen
 
 
-def test_auth_keeps_container_expansion_and_takes_a_secret(tmp_path):
-    """`auth` still expands a container's own `${VAR}` in the container (the elastic read path),
-    and `{{NAME}}` in it is a placed secret."""
-    value = "pw-auth-1156"
+def test_two_secrets_reach_their_own_headers(tmp_path):
+    """Two placed secrets in two headers each arrive under their own header."""
+    record = _secret_tenant(tmp_path, "two", {"X_TOKEN": "vx-1156", "Y_TOKEN": "vy-1156"})
+    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
+    ctx = _ctx(record, tmp_path, shim)
+    transport.docker_exec_curl(ctx, "b", "http://cmdb-two:8080/x", system="cmdb",
+                               secrets=("X_TOKEN", "Y_TOKEN"),
+                               headers={"A": "{{Y_TOKEN}}", "B": "{{X_TOKEN}}"})
+    seen = _in_container(shim.calls()[0], tmp_path)
+    assert seen["stdin_headers"] == ["A: vy-1156", "B: vx-1156"], seen
+
+
+def test_auth_expands_container_vars_and_secrets_and_nothing_else(tmp_path):
+    """`auth` still expands a container's own braced `${VAR}` there (the elastic read path), a
+    `{{NAME}}` in it is a placed secret, and every other character — a quote, `$1`, a
+    backslash — is literal."""
+    value = "pw auth-1156"
     record = _secret_tenant(tmp_path, "ath", {"SVC_PASS": value})
     shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
     ctx = _ctx(record, tmp_path, shim)
@@ -253,14 +294,13 @@ def test_auth_keeps_container_expansion_and_takes_a_secret(tmp_path):
     transport.docker_exec_curl(ctx, "b", "http://cmdb-ath:8080/x", system="cmdb",
                                auth="elastic:${ELASTIC_PASSWORD}")
     transport.docker_exec_curl(ctx, "b", "http://cmdb-ath:8080/x", system="cmdb",
-                               secrets=("SVC_PASS",), auth="svc:{{SVC_PASS}}")
+                               secrets=("SVC_PASS",), auth='o"ps$1\\x:{{SVC_PASS}}')
 
     legacy, placed = shim.calls()
-    assert "elastic:container-pw" in _run_inner(
-        legacy["argv"], {"ELASTIC_PASSWORD": "container-pw"}, tmp_path)
-    forwarded = {k: v for k, v in placed["env"].items()
-                 if k.startswith(transport.SECRET_ENV_PREFIX)}
-    assert f"svc:{value}" in _run_inner(placed["argv"], forwarded, tmp_path)
+    argv = _in_container(legacy, tmp_path, ELASTIC_PASSWORD="container-pw")["argv"]
+    assert argv[argv.index("-u") + 1] == "elastic:container-pw", argv
+    argv = _in_container(placed, tmp_path)["argv"]
+    assert argv[argv.index("-u") + 1] == f'o"ps$1\\x:{value}', argv
 
 
 def test_an_unplaced_reference_is_refused_before_any_child(tmp_path):
@@ -314,9 +354,10 @@ def _planted_receipt(run_dir: Path) -> Path:
 
 @pytest.mark.parametrize("ending", ["investigation raises", "scrub taints"])
 def test_planted_receipt_is_cleared_however_the_run_ends(tmp_path, ending):
-    """The box writes a success receipt, then the run dies — in the investigation, or in the
-    scrub (RunTainted). The receipt is gone once the lifecycle unwinds, so a re-render of the
-    crashed run shows no ticket line the host never wrote."""
+    """The box writes a success receipt — and keeps writing it until it is stopped — then the
+    run dies, in the investigation or in the scrub (RunTainted). The receipt is gone once the
+    lifecycle unwinds: the clear runs after the box is down, so a re-render of the crashed run
+    shows no ticket line the host never wrote."""
     from defender.runtime.scrub import RunTainted
 
     root, _ = _tenant(tmp_path, "rcp")
@@ -338,7 +379,7 @@ def test_planted_receipt_is_cleared_however_the_run_ends(tmp_path, ending):
         S.run_py()._run_investigation_lifecycle(
             run_dir=run_dir, model="m", model_override=None, defender_dir=S.DEFENDER,
             tenant=record, investigate=investigate, start_box=lambda *a, **k: object(),
-            stop_box=lambda _box: None, scrub=scrub)
+            stop_box=lambda _box: _planted_receipt(run_dir), scrub=scrub)
 
     assert not S.receipt_path(run_dir).exists(), "the box's receipt survived the run"
 
@@ -357,6 +398,112 @@ def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
     line = visualize_run.render_ticket_line(run_dir)
     assert visualize_run.RECEIPT_UNREADABLE in line, line
 
+
+def test_rerender_shows_no_ticket_line_for_an_unverified_tree(tmp_path):
+    """A run killed by a signal never reached the lifecycle's clear, and a run whose teardown
+    faulted may have had a live box after it. Neither has a verified reap verdict, so a
+    standalone re-render asked for `--update-ticket` shows no ticket line; a verified tree does."""
+    from defender.runtime import scrub
+    from defender.scripts.visualize import visualize_run
+
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _planted_receipt(run_dir)
+    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is False
+    scrub.write_did_not_run(run_dir, "teardown faulted")
+    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is False
+    scrub.scrub(run_dir)
+    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=True) is True
+    assert visualize_run.rerender_shows_ticket(run_dir, update_ticket=False) is False
+
+
+# ======================================================================================
+# Second review: routing, stored faults, the validator, the ignore rule.
+# ======================================================================================
+
+def test_elasticsearch_calls_never_route_to_kibana_by_url(tmp_path):
+    """An Elasticsearch-only tenant whose KIBANA_URL equals its ELASTICSEARCH_URL (a placeholder
+    for a required key) still has its searches run in the Elasticsearch container: which
+    service a call addresses is the caller's statement, never a URL-prefix guess."""
+    root, folder = _tenant(tmp_path, "kpx")
+    S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
+    es_url = S.config_path(folder, "elastic").read_text(encoding="utf-8").split(
+        'ELASTICSEARCH_URL="', 1)[1].split('"', 1)[0]
+    S.set_key(folder, "elastic", "KIBANA_URL", es_url)
+    shim = S.DockerShim(tmp_path / "shim", [
+        S.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))])
+    ctx = _ctx(S.resolve(root), tmp_path, shim)
+
+    elastic_adapter.query(ctx, native_query="*")
+
+    targets = [S.exec_target(c["argv"]) for c in shim.calls()]
+    assert targets == [S.es_container("kpx")], targets
+
+
+def test_stored_faults_carry_no_traceback_or_cause(tmp_path):
+    """A fault the record keeps is text only: no traceback (whose frames hold the live dict
+    behind the read-only view) and no cause (an OSError carrying the host path)."""
+    root, folder = _tenant(tmp_path, "sfc")
+    cfg = S.config_path(folder, "cmdb")
+    cfg.unlink()
+    cfg.mkdir()  # unreadable as a file: an OSError underneath the fault
+    S.mapping_path(folder).write_text("- not a mapping\n", encoding="utf-8")
+    record = S.resolve(root)
+    for kept in (record.systems["cmdb"], record.ticket_mapping):
+        assert isinstance(kept, Exception), kept
+        assert kept.__traceback__ is None, f"{kept!r} keeps a traceback"
+        assert kept.__cause__ is None, f"{kept!r} keeps its cause: {kept.__cause__!r}"
+        assert kept.__context__ is None, f"{kept!r} keeps its context: {kept.__context__!r}"
+
+
+def _validate(tmp_path: Path, extra: str) -> list[tuple[str, str]]:
+    from defender.skills.connect import validate_scaffold
+
+    settings = tmp_path / "settings"
+    cfg = settings / "systems" / "mysys" / "config.env"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('MYSYS_URL_BASE="http://mysys:8080"\nMYSYS_TRANSPORT="docker-exec"\n'
+                   'MYSYS_DOCKER_CONTEXT="ctx"\n' + extra, encoding="utf-8")
+    report = validate_scaffold.Report()
+    validate_scaffold.check_config(report, settings, "mysys")
+    return report.rows
+
+
+@pytest.mark.parametrize("extra", [
+    'export MYSYS_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n',
+    'MYSYS_PASSWORD="hunter2-live"\nMYSYS_PASSWORD=""\n',
+    'MYSYS_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nMYSYS_TOKEN_SECRET_REF=""\n',
+], ids=["export line", "overridden duplicate", "overridden reference"])
+def test_validator_finds_secrets_on_lines_the_run_ignores(tmp_path, extra):
+    """A secret on an `export` line, or on a line a later duplicate overrides, is ignored by the
+    run but still sits in the tracked file: the validator FAILs it and does not also claim the
+    file carries no inline secrets."""
+    rows = _validate(tmp_path, extra)
+    assert any(s == "FAIL" for s, _ in rows), rows
+    assert ("PASS", "config.env carries no inline secrets") not in rows, rows
+
+
+def test_validator_no_pass_beside_a_pasted_reference(tmp_path):
+    """A reference holding a pasted value FAILs, and the report does not also say the file
+    carries no inline secrets."""
+    rows = _validate(tmp_path, 'MYSYS_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\n')
+    assert any(s == "FAIL" and "not hold a value" in m for s, m in rows), rows
+    assert ("PASS", "config.env carries no inline secrets") not in rows, rows
+
+
+@pytest.mark.parametrize("name", ["secrets.env", "secrets.env.new", "secrets.env.old",
+                                  ".secrets.env.0a1b2c"])
+def test_rotation_leftovers_are_git_ignored(name):
+    """Every file a secrets rotation can leave in a tenant's settings folder is ignored, not only
+    the file itself; a system's config.env is not."""
+    repo = S.REPO_ROOT
+    rel = f"knowledge/tenants/acme/settings/{name}"
+    ignored = subprocess.run(["git", "-C", str(repo), "check-ignore", "--no-index", "-q", rel],
+                             check=False).returncode == 0
+    assert ignored, f"{rel} is not git-ignored"
+    cfg = "knowledge/tenants/acme/settings/systems/cmdb/config.env"
+    assert subprocess.run(["git", "-C", str(repo), "check-ignore", "--no-index", "-q", cfg],
+                          check=False).returncode == 1, "config.env is ignored"
 
 def _raised(fn, *args, **kw):
     try:

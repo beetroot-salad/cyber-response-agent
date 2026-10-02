@@ -23,6 +23,7 @@ from defender._scaffold_rules import (  # noqa: E402
 from defender.runtime.tenant_settings import (  # noqa: E402
     DOCKER_EXEC,
     SECRET_REF_SUFFIX,
+    assignments,
     is_blank,
     is_secret_name,
     parse_env,
@@ -211,26 +212,50 @@ def _check_reference(report: Report, key: str, val: str) -> bool:
     return False
 
 
-def _check_values(report: Report, entries: dict[str, str]) -> list[tuple[str, str]]:
-    """Every key's value, judged: the references (returned, for the `secrets.env` lookup), the
-    inline secrets (FAIL) and the high-entropy values (WARN). The retired `<KEY>_ENV` convention
-    gets no treatment of its own — a leftover is judged by the secret name it carries."""
+def _judge_reference(
+    report: Report, key: str, val: str, shown: str, *, read_by_run: bool,
+) -> tuple[bool, bool]:
+    """One `*_SECRET_REF` assignment: (a reference to look up, a pasted value). The line the run
+    reads gets `_check_reference`'s full judgement; a line it does not read (an `export`, an
+    overridden duplicate) FAILs only when it holds a value rather than a name."""
+    pasted = not is_blank(val) and not is_secret_name(val)
+    if read_by_run:
+        return _check_reference(report, key, val), pasted
+    if pasted:
+        report.add(FAIL, f"config.env: {shown} (a line the run does not read) holds a value, not "
+                         "a secrets.env entry name — remove it")
+    return False, pasted
+
+
+def _check_values(report: Report, every: list[tuple[str, str, bool]]) -> list[tuple[str, str]]:
+    """Every assignment in the file, judged — `export` lines and overridden duplicates included,
+    since a secret the run ignores is still a secret in a tracked file: the references
+    (returned, for the `secrets.env` lookup — only the ones the run reads, the last non-exported
+    line per key), the inline secrets (FAIL), a reference holding a value rather than a name
+    (FAIL, and an inline secret) and the high-entropy values (WARN). The retired `<KEY>_ENV`
+    convention gets no treatment of its own — a leftover is judged by the secret name it
+    carries."""
+    read = {key: i for i, (key, _val, exported) in enumerate(every) if not exported}
     inline_secret = False
     references: list[tuple[str, str]] = []
-    for key, val in entries.items():
+    for i, (key, val, exported) in enumerate(every):
+        shown = f"export {key}" if exported else key
         if key.upper().endswith(SECRET_REF_SUFFIX):
-            if _check_reference(report, key, val):
+            is_reference, pasted = _judge_reference(report, key, val, shown,
+                                                    read_by_run=read.get(key) == i)
+            if is_reference:
                 references.append((key, val))
+            inline_secret = inline_secret or pasted
         elif is_blank(val):
             continue
         elif _SECRET_KEYS.search(_RETIRED_ENV_SUFFIX.sub("", key)):
             stem = _RETIRED_ENV_SUFFIX.sub("", key)
-            report.add(FAIL, f"config.env: {key} holds a value inline — reference a secret via "
+            report.add(FAIL, f"config.env: {shown} holds a value inline — reference a secret via "
                              f"{stem}{SECRET_REF_SUFFIX} instead, with the value in the tenant's "
                              "secrets.env")
             inline_secret = True
         elif _HIGH_ENTROPY.match(val):
-            report.add(WARN, f"config.env: {key} looks high-entropy — confirm it isn't a secret")
+            report.add(WARN, f"config.env: {shown} looks high-entropy — confirm it isn't a secret")
     if not inline_secret:
         report.add(PASS, "config.env carries no inline secrets")
     return references
@@ -251,12 +276,12 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
         report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")
         return
     try:
-        entries = parse_env(read_plain(path))
+        text = read_plain(path)
     except TEXT_READ_ERRORS as e:
         report.add(FAIL, f"config.env could not be read ({_why_unreadable(e)})")
         return
-    _check_access_method(report, entries, system_prefix(system))
-    references = _check_values(report, entries)
+    _check_access_method(report, parse_env(text), system_prefix(system))
+    references = _check_values(report, assignments(text))
     if not references:
         return
     held = _secret_entries(report, settings_dir)

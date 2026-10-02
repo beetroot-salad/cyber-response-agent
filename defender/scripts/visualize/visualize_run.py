@@ -16,6 +16,7 @@ from defender import _env
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
+from defender.runtime.scrub import tree_verified
 from defender.learning import lead_repository
 from defender.scripts.visualize import _mirror_write
 from defender.scripts.visualize._page_failed import VisualizeFailed
@@ -612,6 +613,19 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 """
 
 
+def rerender_shows_ticket(run_dir: Path, *, update_ticket: bool) -> bool:
+    """Whether a standalone re-render shows the ticket line: the operator's `--update-ticket`,
+    and a tree the reap scan verified. run.py clears a box-planted receipt once the box is down,
+    but a run killed by a signal, or whose teardown faulted with the box maybe still alive, never
+    got that far — and its reap verdict (beside the tree, out of the box's reach) says so."""
+    if update_ticket and not tree_verified(run_dir):
+        _logger.warning(
+            "no ticket line: this run's tree was never verified by the reap scan, so the receipt "
+            "in it may be the box's")
+        return False
+    return update_ticket
+
+
 def main(argv: list[str]) -> int:
     """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
     through the same step `run.py` takes, with every line stamped with the run and the tenant
@@ -632,6 +646,7 @@ def main(argv: list[str]) -> int:
         return 1
     run = Run.at(run_dir)
     with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
+        update_ticket = rerender_shows_ticket(run_dir, update_ticket=update_ticket)
         try:
             copy = publish_page(run, update_ticket=update_ticket)
         except VisualizeFailed:

@@ -58,6 +58,9 @@ from defender.runtime import providers  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
+# Not the `ticket_writer=` seam: clearing what the box left at the receipt's name is a safety act
+# on the run dir, and a swapped-in writer (a test's, a sibling's) must not be able to skip it.
+from defender.scripts.case_history.ticket_writer import clear_receipt  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -341,7 +344,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             # The receipt is the host's record step's, written after this; anything at its name
             # now is the box's. Cleared on every exit — a tainted tree and a crashed drive
             # included — so no re-render shows a ticket line this run never wrote.
-            _default_ticket_writer.clear_receipt(run_dir)
+            clear_receipt(run_dir)
     return summary
 
 

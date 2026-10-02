@@ -175,7 +175,9 @@ def resolved_settings(tenant: TenantDir) -> dict[str, Any]:
         ticket_mapping: CaseMapping | CaseTicketError = case_ticket.load_case_mapping(
             tenant.settings)
     except CaseTicketError as error:
-        ticket_mapping = error
+        # The text only: the caught error's traceback and cause (the OSError, with its host
+        # path) must not ride the record.
+        ticket_mapping = CaseTicketError(str(error))
     return {
         "systems": systems,
         "elastic": tenant_settings.elastic_view(systems),  # lint-shippable: ok — the record's field name (#1107)

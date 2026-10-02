@@ -192,16 +192,28 @@ reads. `config.env` holds non-secret config only — endpoints, timeouts,
 `MYSYS_API_TOKEN=<value>` in `secrets.env`); a bare `PASSWORD` / `TOKEN` /
 `SECRET` / `API_KEY` key is read as an inline secret and `validate_scaffold`
 FAILs it, as it does a reference whose entry is missing or blank. The adapter
-passes the `secrets.env` entry NAME to the transport (`secrets=("MYSYS_API_TOKEN",)`
-on `docker_exec_curl`) and writes `{{MYSYS_API_TOKEN}}` where the value goes — in
-a header value (`headers={"Authorization": "Bearer {{MYSYS_API_TOKEN}}"}`) or in
-`auth` (`auth="svc:{{MYSYS_PASSWORD}}"`). The transport resolves every name in one
-read of `secrets.env`, puts the values in the environment of that one child only,
-expands each `{{NAME}}` inside the container (never on the host's command line),
-and replaces the values with a marker in anything it returns; a `{{NAME}}` the
-call did not pass in `secrets=` is refused before anything runs. Nothing in the
-adapter reads a secret from `config.env`, logs one, or returns one in a captured
-payload. This is the single most important property of the layer; keep it that way.
+passes the `secrets.env` entry NAME through the transport's confined request
+helpers and writes `{{NAME}}` where the value goes — in a header value or in `auth`:
+
+```python
+transport.http_get(ctx, config, f"/records/{record_id}", system=SYSTEM,
+                   secrets=("MYSYS_API_TOKEN",),
+                   headers={"Authorization": "Bearer {{MYSYS_API_TOKEN}}"})
+```
+
+`system=` is required on every transport call. Use `http_get` / `http_get_obj` /
+`http_post`, never `docker_exec_curl` directly: the helpers run `guard_outbound`
+first, so each path must be listed for the system in the confinement allowlist
+(`READ_ENDPOINT_ALLOWLIST` in `scripts/adapters/confinement.py`), and a
+model-supplied id cannot walk the request to another endpoint with your token on
+it. The transport resolves every name in one read of `secrets.env`, hands the
+values to that one child process only, expands each `{{NAME}}` inside
+the container — a header reaches curl on its standard input, so the token is on no
+process list — and replaces the values with a marker in anything it returns. A
+`{{NAME}}` the call did not pass in `secrets=` is refused before anything runs;
+slots are read in header values and `auth` only. Nothing in the adapter reads a
+secret from `config.env`, logs one, or returns one in a captured payload. This is
+the single most important property of the layer; keep it that way.
 
 For a scheme beyond a bearer token / basic auth (mTLS, SigV4, OAuth
 client-credentials), implement it in the transport and note why in
