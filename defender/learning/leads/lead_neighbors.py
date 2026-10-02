@@ -13,6 +13,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates
+from defender._io import Bound
 from defender._paths import PATHS
 
 
@@ -67,8 +68,14 @@ def _resolve_cli(template_id: str) -> str:
     return "unknown"
 
 
-def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
-    root = catalog_dir if catalog_dir is not None else PATHS.catalog_dir
+def load_catalog(catalog: Bound | Path | None = None, *, where: Path | None = None) -> list[Template]:
+    """The catalog's templates, read by `_corpus.iter_query_templates` (its `Bound | Path`
+    rules, #1134 A4). Drain code passes its held `skills/` mount's view of the catalog and the
+    Path that folder is spelled as: `load_catalog(skills.view().under("gather/queries"),
+    where=catalog_dir)`, so each `path` is today's `catalog_dir / "<sys>/x.md"`. A `Path` is bound
+    here and roots wherever it points, so drain code never passes one (N-h); `None` is the repo's
+    own catalog, `PATHS.catalog_dir`."""
+    root = catalog if catalog is not None else PATHS.catalog_dir
     return [
         Template(
             id=t.id,
@@ -83,7 +90,7 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
             status=t.status,
             covers=t.covers,
         )
-        for t in iter_query_templates(root)
+        for t in iter_query_templates(root, where=where)
     ]
 
 
