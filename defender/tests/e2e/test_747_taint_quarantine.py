@@ -166,6 +166,7 @@ def test_the_manifest_records_the_findings_and_the_displaced_fault(tmp_path):
     assert len(manifests) == 1, f"expected one manifest, got {manifests}"
     doc = json.loads(manifests[0].read_text(encoding="utf-8"))
 
+    assert doc["label"] == "author_drain", f"the manifest names the wrong lane: {doc['label']!r}"
     assert doc["branch"].endswith(doc["batch_id"]), \
         f"the manifest does not name the real branch: {doc['branch']!r}"
     assert "the curator exploded" in doc["cause"], \

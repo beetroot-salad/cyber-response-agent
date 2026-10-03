@@ -132,14 +132,34 @@ ALL_TREES = ("defender/lessons", "defender/lessons-questioner", "defender/skills
 DECOY_TREES = ("defender/lessons-actor", "defender/lessons-environment", "defender/skills-old")
 
 #: Labels no lane names: first the members' own values as bare strings (#1179: a string is never
-#: a label, however it is spelled), then near misses (v1's E5, and H7's spawn-label forms): a prefix,
+#: a label, however it is spelled), their names, and look-alike objects carrying their values
+#: (only the members themselves are labels), then near misses (v1's E5, and H7's spawn-label forms): a prefix,
 #: a case change, a leading or trailing space or newline, hyphens for underscores, a leading or
 #: trailing extra character, the empty string, a suffixed version, the pitfalls lane (drained
 #: inside the lead-author tick, never its own box), and a lane with a `:`, `/` or `.` suffix
 #: (`<lane>:<batch_id>` is this codebase's spawn-label shape). A label matched by prefix, by
 #: case, after `.strip()`, or up to a separator gets a tree.
-UNKNOWN_LABELS = (
+class _LookAlike(enum.Enum):
+    """A second enum whose members carry the drain labels' values: equal by `.value` and by
+    name, never the members themselves."""
+
+    AUTHOR = "author_drain"
+    LEAD_AUTHOR = "lead_author_drain"
+
+
+@dataclasses.dataclass(frozen=True)
+class _Valued:
+    """Any object carrying a member's value as `.value` (hashable, so the tables accept it)."""
+
+    value: str
+
+
+UNKNOWN_LABELS: tuple[object, ...] = (
     "author_drain", "lead_author_drain",
+    # The members' NAMES (a `DrainLabel[label]` / `__members__` lookup would grant them).
+    "AUTHOR", "LEAD_AUTHOR",
+    # Look-alikes (a `.value` comparison would grant them).
+    _LookAlike.AUTHOR, _LookAlike.LEAD_AUTHOR, _Valued("author_drain"), _Valued("lead_author_drain"),
     "a_third_drain", "", "author", "lead_author", "AUTHOR_DRAIN", "Lead_Author_Drain",
     "author_drain ", " author_drain", "lead_author_drain\n", "author-drain",
     "lead-author-drain", "xauthor_drain", "author_drain_", "lead_author_drain_v2",

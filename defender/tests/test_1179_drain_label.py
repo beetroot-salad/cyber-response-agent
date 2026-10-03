@@ -22,16 +22,20 @@ only captures).
 """
 from __future__ import annotations
 
+import ast
+import inspect
 import json
 import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from defender.learning.author.branch import AuthorBranch
-from defender.learning.core import drains, markers
+from defender.learning.core import drains, lane_trees, markers
+from defender.learning.core import quarantine as quarantine_mod
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
@@ -39,6 +43,7 @@ from defender.learning.core.quarantine import preserve_tainted_tree
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
 from defender.runtime import scrub as scrub_mod
+from defender.tests.e2e import _box665 as B
 
 VALUES = {AUTHOR_DRAIN_LABEL: "author_drain", LEAD_AUTHOR_DRAIN_LABEL: "lead_author_drain"}
 MEMBERS = list(VALUES)
@@ -206,3 +211,118 @@ def test_the_lead_author_lane_refuses_a_labels_value_as_a_bare_string(tmp_path: 
     assert paths.drain_writable_trees(value) == ()  # type: ignore[arg-type]
     with pytest.raises(LeadAuthorError):
         lead_author.run(run_dir, label=value, deps=deps)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------------------
+# O1 at the batch entry: the box a string-labelled batch starts mounts nothing writable
+# ---------------------------------------------------------------------------------------
+
+
+def _writable(request: Any) -> list[Path]:
+    return [Path(m.source) for m in request.mounts if m.writable]
+
+
+@pytest.mark.parametrize("value", ["author_drain", "lead_author_drain"])
+def test_a_batch_labelled_by_a_bare_string_starts_a_box_with_no_writable_mount(
+        tmp_path: Path, value: str):
+    """The real `_run_worktree_batch(label="<value>")`: the one `BoxRequest` its box seam is
+    handed has no writable mount (only the leaf, read-only). The positive control, the member
+    whose value it is, over a fresh drive: its box mounts the lane's trees writable.
+
+    Catches: a string coerced into a member at the batch entry (`DrainLabel(label)` before
+    `_drain_box_request`), which the per-function no-grant rows never see."""
+    member = {v: m for m, v in VALUES.items()}[value]
+    expected = {AUTHOR_DRAIN_LABEL: ("defender/lessons", "defender/lessons-questioner"),
+                LEAD_AUTHOR_DRAIN_LABEL: ("defender/skills",)}[member]
+
+    rec = B.BoxLifecycleRecorder()
+    B.drive_worktree_batch(tmp_path / "string", rec, do_work=lambda *_a, **_k: None,
+                           label=value)
+    assert _writable(rec.only_request()) == []
+
+    rec = B.BoxLifecycleRecorder()
+    B.drive_worktree_batch(tmp_path / "member", rec, do_work=lambda *_a, **_k: None,
+                           label=member)
+    request = rec.only_request()
+    [leaf] = [Path(m.source) for m in request.mounts if not m.writable]
+    assert _writable(request) == [leaf / rel for rel in expected]
+
+
+# ---------------------------------------------------------------------------------------
+# O3 by construction: every label in a message is formatted bare (its `str()`, the value)
+# ---------------------------------------------------------------------------------------
+
+#: The modules whose messages carry a drain label (design O3's sites).
+O3_MODULES = (drains, quarantine_mod, markers, lead_author)
+
+
+def _label_formats(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every f-string field naming `label` that is not a bare `{label}` (no `!r`/`!s`/`!a`, no
+    format spec) or `{str(label)!r}`: those would show something other than the value."""
+    bad = []
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.FormattedValue):
+            continue
+        names = {x.id for x in ast.walk(n.value) if isinstance(x, ast.Name)}
+        if "label" not in names:
+            continue
+        bare = (isinstance(n.value, ast.Name) and n.conversion == -1 and n.format_spec is None)
+        via_str = (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+                   and n.value.func.id == "str" and len(n.value.args) == 1
+                   and isinstance(n.value.args[0], ast.Name) and n.format_spec is None)
+        if not (bare or via_str):
+            bad.append((n.lineno, ast.unparse(n)))
+    return bad
+
+
+@pytest.mark.parametrize("module", O3_MODULES, ids=lambda m: m.__name__.rsplit(".", 1)[-1])
+def test_every_message_formats_the_label_bare(module: Any):
+    """In every module with a label-carrying message, each f-string field over `label` is a bare
+    `{label}` (which renders `str(member)`, the value, pinned above) or `{str(label)!r}`.
+
+    Non-vacuity: the drains and quarantine modules have such fields at all.
+
+    Catches: a `{label!r}`, `{label!s}` with a spec, `{label.name}` or `{label:...}` at any of
+    the message sites, captured by a test or not (the per-message rows cover only some)."""
+    tree = ast.parse(inspect.getsource(module))
+    assert _label_formats(tree) == []
+    if module in (drains, quarantine_mod):
+        fields = [n for n in ast.walk(tree) if isinstance(n, ast.FormattedValue)
+                  and isinstance(n.value, ast.Name) and n.value.id == "label"]
+        assert fields, f"{module.__name__} formats no label: the check judged nothing"
+
+
+# ---------------------------------------------------------------------------------------
+# M1: the label is typed `DrainLabel` along the flow (mypy does not check tests or callers'
+# strings, so the annotation is pinned here)
+# ---------------------------------------------------------------------------------------
+
+TYPED = {
+    "LoopPaths.drain_writable_trees": LoopPaths.drain_writable_trees,
+    "open_drain_trees": lane_trees.open_drain_trees,
+    "_invoke_lead_author": drains._invoke_lead_author,
+    "_maybe_trigger_author": drains._maybe_trigger_author,
+    "_invoke_pitfalls": drains._invoke_pitfalls,
+    "_run_worktree_batch": drains._run_worktree_batch,
+    "_open_batch": drains._open_batch,
+    "_land_batch": drains._land_batch,
+    "_deliver_pending": drains._deliver_pending,
+    "_record_pending_delivery": drains._record_pending_delivery,
+    "_drain_box_request": drains._drain_box_request,
+    "preserve_tainted_tree": preserve_tainted_tree,
+    "claim_markers": markers.claim_markers,
+    "lead_author.run": lead_author.run,
+}
+
+
+@pytest.mark.parametrize("name", list(TYPED))
+def test_the_label_parameter_is_typed_drainlabel(name: str):
+    """Each function on the label's flow annotates `label` as exactly `DrainLabel`: not `str`,
+    not a union with `str`, not `Any`.
+
+    Catches: a widened `DrainLabel | str` that lets a string through every type check."""
+    fn = TYPED[name]
+    annotation = inspect.signature(fn).parameters["label"].annotation
+    resolved = eval(annotation, {**fn.__globals__, "DrainLabel": DrainLabel}) \
+        if isinstance(annotation, str) else annotation
+    assert resolved is DrainLabel, (name, annotation)
