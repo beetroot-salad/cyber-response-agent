@@ -56,8 +56,7 @@ def _setup_state(run: Run) -> str:
     extra = sorted(set(listing.entries or {}) - setup_names)
     # The scrub verdict is written at box start, so even a box that died before writing into
     # the tree leaves a sidecar.
-    sidecars = (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path)
-    if extra or any(_io.entry_present(p) for p in sidecars):
+    if extra or any(_io.entry_present(p) for p in _sidecars(run)):
         return "ran"
     return "setup"
 
@@ -147,12 +146,17 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
     return run_id
 
 
+def _sidecars(run: Run) -> tuple[Path, ...]:
+    """The four files beside the run dir, keyed by its run id: the run-end record, the scrub
+    verdict, the accounting failures and the ticket receipt (#1107 moved it out of the tree)."""
+    return (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
+            run.observability.ticket_write.path)
+
+
 def _clear_stale_sidecars(run: Run) -> None:
     """Remove sidecars a previous attempt under this reused run id left beside its removed dir
     — exact-run-id-keyed, never a glob. Only called when the dir is absent."""
-    for sidecar in (
-        run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
-    ):
+    for sidecar in _sidecars(run):
         try:
             sidecar.unlink()
         except FileNotFoundError:
