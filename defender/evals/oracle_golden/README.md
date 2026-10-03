@@ -22,8 +22,8 @@ belonged to is deleted, and with it this suite's two DRIVERS: the case assembler
 and the replay projector. Everything that READS an existing case still works —
 `controls.py`, `score.py`, `report.py`, `audit_judge.py`, `validate_cases.py` —
 and the committed cases and audits stand as the record. What cannot be done
-today is recruiting a NEW case or re-projecting an old one; `generate_case.py`
-refuses up front and says so. Passages below that name either driver are
+today is recruiting a NEW case or re-projecting an old one; `generate_case.py`, which
+refused up front and said so, was removed in #1120 (PR #1157; it lives in git history). Passages below that name either driver are
 describing how the committed cases were produced, not a command you can run.
 
 Motivating probe + method write-up: `experiments/oracle-telemetry-fidelity/`
@@ -257,7 +257,7 @@ one.
 The two commands that WROTE a case — the assembler that captured one from a defender run
 plus its story and controls, and the projector that re-ran the production oracle over an
 existing case's `oracle_visible/` — were deleted with the oracle in #922. The assembler's
-contract is recorded as a named hole in `generate_case.py`; the projector's is the seam
+contract was recorded as a named hole in `generate_case.py` (removed in #1120); the projector's is the seam
 described below. Everything that follows still runs against the committed cases.
 
 ```bash
@@ -341,8 +341,8 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
 6. the assembler (retired, #922) to build the case; write `manifest.yaml` (split, unit,
    `capture_environment`, `lead_source`) and `environment.yaml` from the capture. Do
    **not** author labels: the label pass measures `hidden/` at score time, and inventing
-   the answers is the thing this redesign exists to avoid. `generate_case.py` does all
-   of this end to end.
+   the answers is the thing this redesign exists to avoid. `generate_case.py` did all
+   of this end to end (removed in #1120).
 
 A **derived** case declares its mutation in `must_not_emit` (its manifest, or
 `expected.yaml` where a seed case already keeps it). Re-read every query predicate when

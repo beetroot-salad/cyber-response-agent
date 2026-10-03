@@ -12,9 +12,10 @@ so each is handed the ACCEPTED tenant's `settings` and must read the file there 
 The checkout's lab is retired (human, PR #1157: #1158 folded in), so the scenarios that ask
 "which copy was read" use the id `playground` in the data root with settings that DIFFER from
 the committed fixture's (the lab's frozen copy): a gather grant, a `config.env` marker, a
-missing config key, and assert nothing under the checkout's `knowledge/` was reported. Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the
-census lint) run as processes; `policy_cli`, `run.main`, the launcher and
-`generate_case` are driven in-process through their own seams. No transport ever leaves the
+missing config key, and assert nothing under the checkout's `knowledge/` was reported.
+Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the census lint) run as
+processes; `policy_cli`, `run.main` and the launcher are driven in-process through their own
+seams. No transport ever leaves the
 host: every `ticket_adapter` leg either stops at a named config fault or runs against a docker
 context that does not exist. See `_spec1120.py` for the coined names.
 """
@@ -29,7 +30,6 @@ import pytest
 
 from defender import _tenant
 from defender import run as run_py
-from defender.evals.oracle_golden import generate_case
 from defender.learning.branch import cli as branch_cli
 from defender.learning.branch import staging
 from defender.learning.branch.estate.stagers import elastic as elastic_stager
@@ -372,9 +372,10 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     exits 1 naming verb-grants.yaml (M6: a malformed table is a named finding, never a
     traceback). run.main (before anything is spent), the branch launcher, policy_cli gather
     and tenant.py setup (NF1: "the settings tables load") each refuse naming the file, and
-    setup writes nothing. generate_case, ticket_adapter and validate_scaffold never load the
-    table and accept the tenant: each proceeds past acceptance to its own work, and none
-    mentions verb-grants.yaml. (held_out takes no tenant — human, PR #1157.)"""
+    setup writes nothing. ticket_adapter and validate_scaffold never load the table and
+    accept the tenant: each proceeds past acceptance to its own work, and neither mentions
+    verb-grants.yaml. (held_out takes no tenant and generate_case is removed — human, PR
+    #1157.)"""
     # rejected: an all-withheld table as a finding (M6, human).
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
@@ -411,13 +412,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
 
     # The consumers that never load the table accept the tenant.
     capsys.readouterr()
-    generate_case.main(["--scenario", "s", "--tenant", H.TID, "--case-id", "c", "--split",
-                        "dev", "--activity-family", "f"])
-    gen = capsys.readouterr()
-    assert "[generate_case]" not in gen.err, (
-        f"generate_case refused a tenant whose table it never loads: {gen.err}")
-    assert "cannot assemble" in gen.err, gen.err
-    assert "verb-grants.yaml" not in gen.out + gen.err
     out = H.output(_ticket_adapter(data_root, H.TID))
     assert str(config) in out, f"ticket_adapter did not get past acceptance to its config:\n{out}"
     assert "verb-grants.yaml" not in out, out

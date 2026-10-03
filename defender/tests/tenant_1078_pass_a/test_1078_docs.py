@@ -33,7 +33,6 @@ FRESH_RUN_DOCS = (
     DEFENDER / "evals" / "held_out.py",
     DEFENDER / "evals" / "README.md",
     DEFENDER / "evals" / "oracle_golden" / "README.md",
-    DEFENDER / "evals" / "oracle_golden" / "generate_case.py",
     DEFENDER / "docs" / "oracle-calibration.md",
     DEFENDER / "skills" / "handbook" / "SKILL.md",
     DEFENDER / "skills" / "handbook" / "content" / "runtime-loop.md",

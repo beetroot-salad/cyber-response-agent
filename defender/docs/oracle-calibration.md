@@ -88,8 +88,9 @@ leakage paths and only the first is obvious:
   visible while the prompt was being iterated, so calling them held-out now would
   be a fiction. Retro-splitting four captures would also leave 1–2 environments
   per side and burn the singleton classes.
-- **Held-out is assigned by the generator, before the first replay** — a
-  `generate_case.py --split` flag, not a human promise made after seeing a score.
+- **Held-out is assigned by the generator, before the first replay** — it was a
+  `generate_case.py --split` flag (the generator is removed, #1120), not a human promise
+  made after seeing a score.
 
 **What is enforced, and what is not.** A held-out result is written once per
 (case, tag) into the append-only `held_out_ledger.yaml` with the sha256 of its
@@ -232,7 +233,7 @@ estimate invites the point estimate to be read.
    ```
 
    Then choose whole-week offsets that land on live days — 14,21,28 for a 07-26 capture —
-   and pass them through: `generate_case.py --offsets-days 14,21,28`. Whole weeks are not
+   and pass them through (the removed `generate_case.py` took `--offsets-days 14,21,28`). Whole weeks are not
    optional: the benign generators are schedule-shaped, so an offset that changes the
    weekday is not a control at all.
 
@@ -520,7 +521,11 @@ own module docstring is the list of record; this mirrors it.
 
 ## Generating cases
 
-`generate_case.py` orchestrates the tools that already exist: fire
+**`generate_case.py` was removed in #1120 (PR #1157).** It had refused every call since #922
+deleted the case assembler it drove, so this section records how the committed cases were
+generated; recruiting a new case has no tool until the estate replay harness succeeds it.
+
+`generate_case.py` orchestrated the tools that already exist: fire
 (`attacks/runner.py`) → capture (`extract_alert.py`) → envelope (`defender/run.py`)
 → story (`story_from_run.py`) → assemble (`build_case.py`) → controls
 (`controls.py`) → label (`label.py`). Two properties the hand path could not

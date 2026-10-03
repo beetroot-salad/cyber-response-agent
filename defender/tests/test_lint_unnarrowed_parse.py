@@ -135,7 +135,7 @@ def test_taint_survives_a_deref_chain(tmp_path):
     that treated the dot as a boundary would let one deref launder the whole chain."""
     assert _checks(_scan_src(tmp_path, (
         "import yaml\n"
-        "def scenario_entry(t) -> dict:\n"
+        "def catalog_entry(t) -> dict:\n"
         "    catalog = yaml.safe_load(t) or {}\n"
         "    entries = catalog.get('scenarios') or []\n"
         "    for entry in entries:\n"

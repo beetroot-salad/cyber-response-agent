@@ -21,7 +21,7 @@ _DEFENDER = Path(__file__).resolve().parents[1]
 
 #: (the module, the line its runs base is bound on, the name the planted join appends).
 #: `materialize_run`'s `tenant` is an annotated parameter, which the lint tags. The launcher's
-#: and `generate_case`'s tenants come from local factories it does not follow yet (#1160).
+#: tenant comes from a local factory it does not follow yet (#1160).
 _SITES = [
     ("run_common.py", "        runs_base = tenant.runs\n", "run_id"),
 ]

@@ -799,7 +799,6 @@ M10_DOCS = (
     REPO / ".devcontainer" / "README.runtime.md",
     REPO / ".devcontainer" / "Dockerfile.runtime",
     DEFENDER / "evals" / "held_out.py",
-    DEFENDER / "evals" / "oracle_golden" / "generate_case.py",
     DEFENDER / "docs" / "case-history-write-path.md",
     DEFENDER / "docs" / "state-surface-adapters.md",
     DEFENDER / "scripts" / "adapters" / "README.md",
@@ -811,7 +810,6 @@ SETUP_STEP_DOCS = (
     REPO / "README.md", DEFENDER / "CLAUDE.md", REPO / ".devcontainer" / "README.runtime.md",
     DEFENDER / "run.py", DEFENDER / "evals" / "held_out.py", DEFENDER / "evals" / "README.md",
     DEFENDER / "evals" / "oracle_golden" / "README.md",
-    DEFENDER / "evals" / "oracle_golden" / "generate_case.py",
     DEFENDER / "docs" / "oracle-calibration.md", DEFENDER / "skills" / "handbook" / "SKILL.md",
     DEFENDER / "skills" / "handbook" / "content" / "runtime-loop.md",
 )
@@ -827,7 +825,7 @@ _CREDENTIALS = re.compile(r"credential helper|ssh[- ]agent", re.IGNORECASE)
 def test_1120_docs_and_skills_name_clone_then_setup_and_no_tenants_root() -> None:
     """The docs and skills piece 1's removals falsify — connect SKILL.md, the handbook's
     knowledge-and-skills.md, README.runtime.md and Dockerfile.runtime's comments, held_out's
-    and generate_case's docstrings, case-history-write-path.md, state-surface-adapters.md,
+    docstring (generate_case's went with it, human, PR #1157), case-history-write-path.md, state-surface-adapters.md,
     the adapters README and the prompt-hygiene skill — name no --tenants-root, no setup with a
     --from source, and no knowledge/tenants as a settings location. Every doc that documents
     the tenant.py setup step (these and the fresh-run docs pass-A pins it in) documents it as

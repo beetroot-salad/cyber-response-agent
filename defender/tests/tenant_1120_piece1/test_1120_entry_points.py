@@ -9,8 +9,8 @@ its grants and lead-zero dispatch. A child process gets `--tenant <id>`, inherit
 `--tenants-root`) is gone.
 
 Entry points are driven through their own injection seams (`run.main`'s recorded preflight,
-materialize and lifecycle seams, the launcher's spawn and preflight seams,
-`generate_case.investigate`'s runner seam), in-process where they take an argv, and as processes
+materialize and lifecycle seams, the launcher's spawn and preflight seams), in-process where
+they take an argv, and as processes
 where they read `sys.argv`. "Refused with accept_tenant's message verbatim" is observed as: the
 entry's refusal text CONTAINS the message `accept_tenant` itself raises on the same tree —
 obtained by calling the owner directly, so which check fired is an observation, not a guess at
@@ -34,7 +34,6 @@ import pytest
 from defender import _tenant, _tenants
 from defender._episode_handle import Episode
 from defender import run as run_py
-from defender.evals.oracle_golden import generate_case
 from defender.learning.branch import cli as branch_cli
 from defender.learning.branch import seams as branch_seams
 from defender.runtime import lead_zero
@@ -125,18 +124,6 @@ def _source_under(root: Path, record_tenant: str, *, runs_tenant: str = H.TID) -
     return P.source_run(base)
 
 
-class _RunnerRecorder:
-    """`generate_case.investigate`'s runner seam: records the child command, runs nothing, and
-    answers a failed child so `investigate` stops there."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[list[str], dict[str, Any]]] = []
-
-    def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
-        self.calls.append((list(argv), dict(kw)))
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="recorded, not run")
-
-
 class _UntouchedVerbs:
     """A verb registry lead zero may hold but must never reach: any use is a loud failure."""
 
@@ -212,7 +199,6 @@ ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree", "learning-sta
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "generate_case.main": ALL_CELLS,
     "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree", "learning-state-overlap"),
     "tenant.check": ALL_CELLS,
     "ticket_adapter.main": ALL_CELLS,
@@ -311,13 +297,6 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         got = _launch(cell.source, spawn)
         text = H.exit_text(got) if isinstance(got, BaseException) else ""
         return isinstance(got, BaseException) or got != 0, text, bool(spawn.launches)
-    if entry == "generate_case.main":
-        rc = generate_case.main(["--scenario", "s", "--tenant", cell.tenant_id, "--case-id", "c1",
-                                 "--split", "dev", "--activity-family", "f"])
-        cap = capsys.readouterr()
-        # generate_case refuses every call (its assembler retired, #922): refused-for-the-tenant
-        # is observed by the tenant refusal in its output, not by the status alone.
-        return rc != 0 and cell.expected in cap.err, cap.err + cap.out, False
     if entry == "policy_cli.main":
         argv = ["show", "gather", "--run-dir", str(base / "rd"), "--tenant", cell.tenant_id]
         if cell.defender_dir is not None:
@@ -382,8 +361,9 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
 def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses(
         entry: str, tmp_path: Path, monkeypatch, capsys) -> None:
     """Each entry point that takes a tenant after piece 1 — run.py, the branch launcher,
-    generate_case, tenant.py setup and check, ticket_adapter, policy_cli, validate_scaffold
-    (held_out takes none: an evaluation tool, outside the application — human, PR #1157) —
+    tenant.py setup and check, ticket_adapter, policy_cli, validate_scaffold (held_out takes
+    none: an evaluation tool, outside the application; generate_case is removed — human, PR
+    #1157) —
     and tenant.py scaffold for its bad-id cell, is driven over each cell:
     a bad id ('A'); a data root with no row for the id; a knowledge folder that is a symlink;
     settings inside a mounted tree (through policy_cli's own defender-dir option, and for the
@@ -412,46 +392,6 @@ def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses
         problems += _cell_problems(f"{entry} × {cell_name}", entry, cell_name, cell, base,
                                    before, refused=refused, text=text, spent=spent)
     assert not problems, "\n".join(problems)
-
-
-def test_1120_generate_case_refuses_a_tenant_with_a_row_but_no_knowledge(
-        data_root: Path, tmp_path: Path, monkeypatch, capsys) -> None:
-    """A tenant whose row exists but whose knowledge folder does not is refused by
-    generate_case with a tenant option, before any child is spawned: exactly as run.py
-    refuses it, both passing accept_tenant's refusal (naming <root>/acme/knowledge) through
-    verbatim. At a1c65801 it accepted it (K7). held_out no longer takes a tenant (human, PR
-    #1157), so it has no half here. The positive control: the same tenant with its knowledge placed is
-    accepted by generate_case's investigation step, which then hands its child the tenant."""
-    H.plant_row(data_root)
-    runs = H.tenant_folder(data_root) / "runs" / "r1"
-    runs.mkdir(parents=True)
-    expected = _owner(data_root)
-    assert str(H.knowledge_dir(data_root)) in expected, expected
-
-    runner = _RunnerRecorder()
-    with pytest.raises(_tenant.TenantRefused) as refused:
-        generate_case.investigate(H.plant_alert(tmp_path / "in"), "r2", tenant_id=H.TID,
-                                  run=runner)
-    assert expected in str(refused.value)
-    assert runner.calls == [], "generate_case spawned its child before refusing the tenant"
-    rc = generate_case.main(["--scenario", "s", "--tenant", H.TID, "--case-id", "c1",
-                             "--split", "dev", "--activity-family", "f"])
-    assert rc != 0
-    assert expected in capsys.readouterr().err, "generate_case did not refuse verbatim"
-
-    rec = H.RunRecorder(tmp_path / "run")
-    rc_run, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in2")), "--tenant", H.TID],
-                              rec)
-    assert exc is not None, f"run.main accepted a tenant with no knowledge (rc {rc_run})"
-    assert expected in H.exit_text(exc), H.exit_text(exc)
-    assert not rec.spent
-
-    # Positive control: knowledge placed, the same investigation step reaches its child.
-    H.place_knowledge(data_root)
-    with pytest.raises(RuntimeError):
-        generate_case.investigate(H.plant_alert(tmp_path / "in3"), "r3", tenant_id=H.TID,
-                                  run=runner)
-    assert len(runner.calls) == 1, "an accepted tenant never reached generate_case's child"
 
 
 # ======================================================================================
@@ -514,9 +454,8 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         data_root: Path, tmp_path: Path) -> None:
     """The branch launcher's sibling_argv for tenant acme contains --tenant acme and no root
     argument, and the launcher starts its siblings (start_family, which takes no tenants root)
-    with an environment carrying the parent's DEFENDER_DATA_ROOT unchanged. generate_case's
-    child command carries --tenant acme, no root argument, and inherits the environment. A
-    child run.py --resume … --tenant acme whose tenant has since lost
+    with an environment carrying the parent's DEFENDER_DATA_ROOT unchanged (generate_case, the
+    other parent, is removed — human, PR #1157). A child run.py --resume … --tenant acme whose tenant has since lost
     knowledge/settings/verb-grants.yaml refuses at its own acceptance, with accept_tenant's
     refusal naming that file, before it spends anything."""
     H.adopted(data_root)
@@ -539,17 +478,6 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         "the sibling's environment does not carry the parent's DEFENDER_DATA_ROOT unchanged")
     assert "--tenants-root" not in child_argv
     assert str(data_root) not in " ".join(child_argv)
-
-    runner = _RunnerRecorder()
-    with pytest.raises(RuntimeError):
-        generate_case.investigate(H.plant_alert(tmp_path / "in"), "r1", tenant_id=H.TID,
-                                  run=runner)
-    (cmd, kw), = runner.calls
-    at = cmd.index("--tenant")
-    assert cmd[at + 1] == H.TID, cmd
-    assert "--tenants-root" not in cmd
-    assert str(data_root) not in " ".join(map(str, cmd)), cmd
-    assert kw.get("env") is None or kw["env"].get(H.DATA_ROOT_ENV) == str(data_root), kw
 
     # The child re-accepts: its tenant lost a required settings file since the launch.
     src = _source_under(data_root, H.TID)

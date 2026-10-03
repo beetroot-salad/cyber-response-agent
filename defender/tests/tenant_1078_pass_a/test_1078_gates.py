@@ -255,7 +255,7 @@ def test_hygiene_allowance_and_the_retired_runs_spellings_in_one_commit(tmp_path
     assert allowed == [], f"lint_ci_hygiene allows {allowed}"
     run_common = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
     assert "DEFAULT_RUNS_BASE" not in run_common, "run_common still defines DEFAULT_RUNS_BASE"
-    generate_case = (DEFENDER / "evals" / "oracle_golden" / "generate_case.py").read_text(
-        encoding="utf-8")
-    assert "/tmp/defender-runs" not in generate_case, (
-        "generate_case.py keeps its own hardcoded /tmp/defender-runs fallback (C-R16)")
+    # generate_case.py is removed (#1120, PR #1157), which satisfies C-R16 by its absence.
+    generate_case = DEFENDER / "evals" / "oracle_golden" / "generate_case.py"
+    assert not generate_case.exists() or "/tmp/defender-runs" not in generate_case.read_text(
+        encoding="utf-8"), "generate_case.py keeps its own hardcoded /tmp/defender-runs fallback (C-R16)"
