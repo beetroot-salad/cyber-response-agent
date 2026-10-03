@@ -229,7 +229,9 @@ def run(
     `label` is the drain lane whose mount list grants `skills/` (the CLI passes
     `LEAD_AUTHOR_DRAIN_LABEL`): without `deps`, the held trees are opened for it here, under the
     queue lock, and closed when the run ends; with `deps`, a label that does not mount
-    `deps.paths.skills_dir` is refused (#1134)."""
+    `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
+    non-member raises before the queue lock or any of the run (#1179 O1')."""
+    writable = label.writable_trees(deps.paths if deps is not None else paths)
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
@@ -239,7 +241,7 @@ def run(
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
-        if deps.paths.skills_dir not in label.writable_trees(deps.paths):
+        if deps.paths.skills_dir not in writable:
             raise LeadAuthorError(
                 f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
             )
