@@ -47,6 +47,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
+from defender.tests._data_root_1078 import current_data_root
 
 
 def _archive():
@@ -55,7 +56,7 @@ def _archive():
 
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant_paths()
+    return T.current_tenant()
 
 
 def _episode():
@@ -334,9 +335,10 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     same base by the same production writer IS found by the same walk, so the emptiness above is
     a relocated episode rather than a walk that sees nothing."""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
-    tenant_id = T.mod("_tenant").tenant_of_run_dir(src)
+    tenant_id = T.mod("_tenant").tenant_of_run_dir(current_data_root(), src)
     ordinary = T.mod("run_common").materialize_run(
-        src / "alert.json", "20260728t170000z-other", tenant_id=tenant_id).run_dir
+        src / "alert.json", "20260728t170000z-other",
+        tenant=T1106.accept(current_data_root(), tenant_id)).run_dir
     assert ordinary.parent == base
     found = sorted(p.parent.name for p in base.rglob("provenance.json"))
     assert found == sorted([T.SOURCE_RUN_ID, ordinary.name])
@@ -409,8 +411,7 @@ def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_pat
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
     with Episode.open(ep) as episode:
         T.mod("learning.branch.cli").start_family(
-            episode, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT,
-            tenants_root=T1106.TENANTS_ROOT)
+            episode, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
     assert spawn.launches, "no sibling was started"
     for launch in spawn.launches:
         assert launch["env"].get("DEFENDER_RUNS_BASE") == str(base), (

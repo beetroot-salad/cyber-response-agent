@@ -902,7 +902,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
-    deps = replace(bind(_tenants1106.playground_gather_def(), run_dir, defender_dir=DEFENDER),
+    deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},

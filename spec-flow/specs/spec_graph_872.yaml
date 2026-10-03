@@ -1762,6 +1762,8 @@ demands:
       behavior change lands in the generated cases. `60-residue.md` asked for a waiver or a model and
       noted that a waiver "owes a claim citation that does not exist yet" — for THIS half no waiver is
       available at all, because the reach is unconditional and executed. The other half is d76.
+      #1120 (human, PR #1157: "Remove generate_case") deletes `generate_case.py`; the test keeps
+      pinning the child's own reach, which the branch launcher's `run.py` siblings still depend on.
 
   - id: d76_the_lead_eval_harness_cannot_reach_the_gate_and_is_waived
     kind: negative

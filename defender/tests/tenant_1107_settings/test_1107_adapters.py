@@ -933,8 +933,8 @@ def _cli_refs(source: str) -> list[str]:
 def test_d7_cli_mode_gone():
     """ticket_adapter defines no _cli_context, no main and no build_parser, and its module
     docstring no longer shows command-line usage (ticket_adapter.py:18-19). No test references
-    them (test_meta_json_retirement_647.py:830, test_query_tool_611.py:1408). generate_case.py's
-    lint-dup comment (:412) no longer names ticket_adapter.py's parser.
+    them (test_meta_json_retirement_647.py:830, test_query_tool_611.py:1408). (Its leg on
+    generate_case.py's lint-dup comment went with that file, which #1120 removed.)
     _stub_transport.AdapterArgumentParser, whose only production user was build_parser, goes
     with it (F13 resolved auto; CX25)."""
     assert {"list-tickets", "get-ticket", "key-pattern"} <= set(ticket_adapter.VERBS), \
@@ -956,12 +956,6 @@ def test_d7_cli_mode_gone():
     refs = {str(p.relative_to(S.REPO_ROOT)): r for p in tests
             if (r := _cli_refs(p.read_text(encoding="utf-8", errors="replace")))}
     assert refs == {}, f"tests still reference ticket_adapter's command-line mode: {refs}"
-
-    generate_case = S.DEFENDER / "evals" / "oracle_golden" / "generate_case.py"
-    text = generate_case.read_text(encoding="utf-8")
-    assert "def build_parser" in text, "precondition: generate_case keeps its own parser"
-    stale = [ln for ln in text.splitlines() if ln.lstrip().startswith("#") and "ticket_adapter" in ln]
-    assert stale == [], f"generate_case.py's comment still names ticket_adapter's parser: {stale}"
 
     assert "load_config" in transport.__all__, "precondition: _stub_transport's exports are read"
     assert not hasattr(transport, "AdapterArgumentParser"), "_stub_transport.AdapterArgumentParser outlived build_parser"
@@ -1039,8 +1033,14 @@ def test_tenant_copied_from_the_template_keeps_its_placeholders(tmp_path):
     unimplemented method) and the run goes on. Only CHANGE-ME index patterns are refused ahead
     of that, at branch launch (F23/G49)."""
     root = tmp_path / "tenants"
-    folder = root / S.PLAYGROUND_ID
+    # #1120: the copy is the tenant's knowledge folder under a data root — `agent/.tenant-id`
+    # naming it, and its row beside it (written by hand, as `_tenants1106.place_tenant` does).
+    folder = root / S.PLAYGROUND_ID / "knowledge"
     shutil.copytree(S.TEMPLATE_DIR, folder)
+    (folder / "agent" / ".tenant-id").write_text(f"{S.PLAYGROUND_ID}\n", encoding="utf-8")
+    (root / S.PLAYGROUND_ID / "tenant.json").write_text(json.dumps(
+        {"tenant_id": S.PLAYGROUND_ID, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
+        encoding="utf-8")
     # The template grants nothing (the run would be refused for that, not for its placeholders).
     (S.settings_of(folder) / "verb-grants.yaml").write_text(T1106.TABLE_A, encoding="utf-8")
     configs = sorted((S.settings_of(folder) / "systems").glob("*/config.env"))

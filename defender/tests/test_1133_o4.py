@@ -127,7 +127,7 @@ def launch(tmp_path: Path, *, questioner: Any, before: Any = None) -> tuple[Any,
     """One episode through the real launcher (`cli.main`), every model and cluster seam faked."""
     cli = T.mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant_paths())
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
     if before is not None:
         before(ep)
     door, adapters, spawn = T.FakeDoor(), T.FakeAdapters(), T.FakeSpawn()
@@ -510,7 +510,7 @@ class Primed:
 def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
     cli = T.mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant_paths()
+    tenant = T.current_tenant()
     return cli, src, tenant, cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
 
 

@@ -2,9 +2,9 @@
 record, and what it is told it may reach is its tenant's grant (O2 gather's `query`, O3).
 
 Driven end to end through the REAL `driver.run_investigation` on the replay harness, with the
-run's `TenantDir` handed in as the driver's new input (#1106 M4: nothing reads a table at
-import, so the run carries its tenant; its grants are that tenant's own table, #1107). Two lanes are observed on what the fakes
-RECEIVED:
+run's accepted `Tenant` handed in as the driver's new input (#1106 M4: nothing reads a table at
+import, so the run carries its tenant; its grants are that tenant's own table, #1107). Two lanes
+are observed on what the fakes RECEIVED:
 
   * the `query` lane — the verb context the query tool builds for a model-dispatched call
     carries the run's tenant record (M3), so an adapter's `load_config` reads THAT
@@ -15,7 +15,8 @@ RECEIVED:
     reaches cmdb and elastic, tenant B identity and threat-intel; each prompt must name its
     own tenant's systems and not the other's.
 
-Every fixture tenant carries the COMMITTED tenant's id (`playground`) under a tmp root, so a
+Every fixture tenant carries the id the committed fixture is set up under (`playground`) under
+a tmp root, so a
 lane that resolved the checkout's folder by id would be caught by value.
 """
 from __future__ import annotations
@@ -46,9 +47,9 @@ DONE = Turn(text="Summary: measured the lead.")
 
 def _tenant(tmp_path: Path, table: str, marker: str):
     root = tmp_path / f"root-{marker}"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker,
+    T.place_tenant(root, T.PLAYGROUND_ID, table=table, marker=marker,
                    configs=S.config_texts(marker))
-    return T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    return T.accept(root, T.PLAYGROUND_ID)
 
 
 def _run(tmp_path: Path, *, tenant, verbs, system: str, gather_turns: list[Turn],
@@ -99,7 +100,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
          ])
     call = rec.only()
     assert Path(call.ctx.tenant.settings).resolve() == tenant.settings
-    assert Path(call.ctx.tenant.settings).resolve() != T.PLAYGROUND_SETTINGS.resolve()
+    assert Path(call.ctx.tenant.settings).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
     transport = T.mod("scripts.adapters._stub_transport")
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
@@ -130,9 +131,9 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     after = "\n".join(gather.seen[1:])
     assert "config file not found: the tenant's settings/systems/cmdb/config.env" in after, after
     table = "\n".join(p.read_text(encoding="utf-8") for p in run_dir.rglob("*.jsonl"))
-    tenants_root = tenant.settings.parent.parent
+    data_root = tenant.data_root
     for text in (after, table):
-        assert str(tenants_root) not in text, text
+        assert str(data_root) not in text, text
 
 
 @pytest.mark.parametrize(("own", "system", "reached", "withheld"), [
@@ -171,9 +172,9 @@ def test_lead_zero_item1_reads_the_runs_tenant_alerts_index_and_hands_its_verbs_
     from defender.tests.e2e import _lead_zero_808 as LZ
 
     root = tmp_path / "root-lz"
-    T.plant_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=S.config_texts(
+    T.place_tenant(root, T.PLAYGROUND_ID, table=T.TABLE_A, configs=S.config_texts(
         "lz", events_index="lz-tenant-events-*", alerts_index="lz-tenant-alerts-*"))
-    tenant = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    tenant = T.accept(root, T.PLAYGROUND_ID)
     assert LZ.ALERTS_INDEX != "lz-tenant-alerts-*", "the fixture no longer discriminates"
 
     res = LZ.run(tmp_path / "run", run_id="lz1106-tenant", alert=LZ.alert_doc(signal_index=None),

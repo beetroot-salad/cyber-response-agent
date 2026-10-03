@@ -436,13 +436,15 @@ def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_ro
 
 
 def test_the_golden_case_generators_subprocess_child_carries_the_gate() -> None:
-    """The golden-case generator's subprocess child reaches `build_agent_core`, so the gate is
-    on that path unconditionally.
+    """A re-executed `run.py` child reaches `build_agent_core`, so the gate is on that path
+    unconditionally.
 
-    `evals/oracle_golden/generate_case.py` re-executes `defender/run.py` as a SUBPROCESS, and
-    that child reaches `build_agent_core` REGARDLESS of the ambient environment: `run.py` puts
-    the real repo root on `sys.path` itself, so the install site is on the child's path with
-    `PYTHONPATH` set and with it unset alike (`cN13`, executed both ways).
+    The driver this was written for, `evals/oracle_golden/generate_case.py`, is removed (#1120,
+    PR #1157); the branch launcher still starts every sibling as a `run.py` SUBPROCESS, and the
+    property is the child's own: it reaches `build_agent_core` REGARDLESS of the ambient
+    environment, because `run.py` puts the real repo root on `sys.path` itself, so the install
+    site is on the child's path with `PYTHONPATH` set and with it unset alike (`cN13`, executed
+    both ways).
 
     MODELLED, NOT WAIVED — for this half no waiver is available at all, because the reach is
     unconditional and executed. The other subprocess driver context, `evals/harness_lead.py`,
@@ -460,7 +462,7 @@ import json, os, sys
 # `run.py:39-40`'s own move, reproduced: the re-executed child puts the real repo root on
 # sys.path ITSELF, which is why the reach does not depend on the ambient environment. The
 # inherited PYTHONPATH is deleted first, so anything that resolves below resolves the way the
-# generator's child resolves it and not the way this test process was launched.
+# re-executed child resolves it and not the way this test process was launched.
 os.environ.pop("PYTHONPATH", None)
 for name in [m for m in sys.modules if m == "defender" or m.startswith("defender.")]:
     del sys.modules[name]
@@ -482,7 +484,7 @@ print(json.dumps({
         f"the re-executed child did not reach the gate's install site: {outcome.stderr[-800:]}"
     )
     result = json.loads(outcome.stdout.strip().splitlines()[-1])
-    not_on_path = ("the golden-case generator's child builds an agent the gate is not on, so "
-                   "any behavior change this gate makes would not land in the generated cases")
+    not_on_path = ("a re-executed run.py child builds an agent the gate is not on, so any "
+                   "behavior change this gate makes would not land in its runs")
     assert result["encoded"] == 1, not_on_path
     assert result["gated"] is True, not_on_path

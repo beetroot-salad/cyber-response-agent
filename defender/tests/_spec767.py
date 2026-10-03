@@ -21,7 +21,7 @@ THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile fo
   * the mapping file — the tenant's `settings/` folder, resolved into the run's record (#1107:
     `ticket_mapping`). `use_mapping` plants a complete tenant whose mapping is the test's and
     returns its settings folder; the helpers below resolve the record of the tenant the test
-    planted (or, with none planted, the committed playground tenant's) and hand it to the real
+    planted (or, with none planted, the committed fixture tenant's) and hand it to the real
     writer and screen, so a hostile-mapping control still needs no new seam;
   * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
     `tests/_spec791.py` already implements (g10).
@@ -164,13 +164,14 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
 
 
 def tenant_of(root: Path) -> Path:
-    """The tenants root `plant_tenant` writes `TENANT_ID` under."""
+    """The data root `plant_tenant` sets `TENANT_ID` up under (#1120)."""
     return Path(root)
 
 
 def settings_of(root: Path) -> Path:
-    """The settings folder `write_mapping` plants under `root`."""
-    return Path(root) / TENANT_ID / "settings"
+    """The settings folder `write_mapping` plants under `root` — the settings half of the
+    tenant's knowledge folder (#1120: `<root>/<T>/knowledge/settings`)."""
+    return Path(root) / TENANT_ID / "knowledge" / "settings"
 
 
 def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
@@ -206,8 +207,8 @@ def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None
 
 def current_settings() -> Path:
     """The settings folder the running test planted (`use_mapping`), else the committed
-    playground tenant's."""
-    return _PLANTED.get("settings", T1106.PLAYGROUND_SETTINGS)
+    fixture tenant's."""
+    return _PLANTED.get("settings", T1106.FIXTURE_SETTINGS)
 
 
 #: `config` distinguishes THREE states across `current_record`/`record`/`open_ticket`: omitted
@@ -230,16 +231,16 @@ def _write_case_history_config(settings: Path, config: dict[str, str] | None) ->
 
 
 def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) -> Any:
-    """The run record of the tenant the running test planted (else the committed playground
-    tenant), resolved NOW through the real resolver.
+    """The run record of the tenant the running test planted (else the committed fixture
+    tenant, set up under the test's data root), resolved NOW through the real resolver.
 
     `config` states the planted tenant's case-history store: omitted, the fixture's `CONFIG`;
     `None`, no `config.env` at all (a run with no case-history config); a dict, those keys."""
+    if "settings" not in _PLANTED:
+        return T1106.fixture_run_tenant()
     settings = current_settings()
-    if "settings" in _PLANTED:
-        _write_case_history_config(settings, CONFIG if config is _CONFIG_UNSET else config)
-    return T1106.run_tenant(T1106.tenants().TenantDir(
-        tenant_id=settings.parent.name, settings=settings, agent=settings.parent / "agent"))
+    _write_case_history_config(settings, CONFIG if config is _CONFIG_UNSET else config)
+    return T1106.run_tenant(T1106.accept(settings.parents[2], TENANT_ID))
 
 
 def current_mapping() -> Any:
@@ -268,14 +269,14 @@ def shipped_released_status_and_author() -> tuple[str, str]:
 
 
 def shipped_mapping_doc() -> dict[str, Any]:
-    """The repo's own checked-in mapping (the committed playground tenant's), read off the
+    """The repo's own checked-in mapping (the committed fixture tenant's), read off the
     real file."""
     import yaml
 
     from defender.tests import _tenants1106
 
     return yaml.safe_load(
-        (_tenants1106.PLAYGROUND_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
+        (_tenants1106.FIXTURE_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------

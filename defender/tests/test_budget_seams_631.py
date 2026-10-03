@@ -199,7 +199,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
             GatherRequest("l-001", "elastic", "goal", ("what",)),
-            T1106.playground_grants().gather, catalog=None,
+            T1106.fixture_grants().gather, catalog=None,
         ))
     assert seen_gather_deps[0].budget_started_monotonic == deps.budget_started_monotonic
 
@@ -214,7 +214,7 @@ def _drive_gather_query(run_dir: Path, registry):
                                        "params": {"index": "logs"},
                                        "query_id": "elastic.probe"})]])
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    gather_def = T1106.playground_gather_def()
+    gather_def = T1106.fixture_gather_def()
     agent = driver.build_agent_core(
         gather_def, deps_type=gather_def.deps_cls, instructions="probe",
         logger=logger, agent_id="gather:l-001",
@@ -223,7 +223,7 @@ def _drive_gather_query(run_dir: Path, registry):
     )
     deps = replace(bind(gather_def, run_dir,
                         defender_dir=DEFENDER), lead_id="l-001",
-                   tenant=T1106.playground_run_tenant())
+                   tenant=T1106.fixture_run_tenant())
 
     async def _go():
         with override_allow_model_requests(False):
@@ -386,7 +386,7 @@ def test_tier_table_over_the_real_census(tmp_path):
     is the only way MAIN records a finding, and a budget-refusable transcript would mean a
     run that hits the cap can no longer write down what it already knows."""
     main_names = _registered_names(MAIN_DEF)
-    gather_names = _registered_names(T1106.playground_gather_def())
+    gather_names = _registered_names(T1106.fixture_gather_def())
     assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
     assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
@@ -437,7 +437,7 @@ def test_same_tool_name_on_two_agents(tmp_path):
     open_budget(gather_dir, "r")
     update_budget_locked(gather_dir, "r", "bash", limits=limits)
     gather_result, _ = drive_agent(
-        T1106.playground_gather_def(), gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
+        T1106.fixture_gather_def(), gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
         limits=limits, enforce=True, agent_id="gather:l-001")
 
     assert "BUDGET" not in str(main_result.all_messages()).upper(), (
@@ -462,7 +462,7 @@ def _registered_names(defn) -> set[str]:
         from defender.runtime.tools import register_gather_tool
         register_gather_tool(
             agent, lambda agent_id, system, request_limit: agent, driver.GATHER_REQUEST_LIMIT,
-            T1106.playground_grants().gather, catalog=None,
+            T1106.fixture_grants().gather, catalog=None,
         )
     return set(agent._function_toolset.tools)
 
@@ -480,7 +480,7 @@ def test_gather_keeps_its_request_limit(tmp_path):
     open_budget(run_dir, "r")
     never_stops = [[("read_file", {"path": str(run_dir / "alert.json")})]] * 200
     with pytest.raises(UsageLimitExceeded):
-        drive_agent(T1106.playground_gather_def(), run_dir, never_stops, limits=DEFAULT_LIMITS,
+        drive_agent(T1106.fixture_gather_def(), run_dir, never_stops, limits=DEFAULT_LIMITS,
                     enforce=False, agent_id="gather:l-001",
                     request_limit=driver.GATHER_REQUEST_LIMIT)
 
@@ -560,24 +560,31 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     `runs_base_for(T)` under `DEFENDER_DATA_ROOT` (the D9 tenant fixture), and the
     refusal is widened to "equal, or either contains the other" against the data root
     (O13) — so a learning state root AT the tenant's runs base, or an alias of it, is
-    refused, and a disjoint one leaves the runs base where the tenant says."""
+    refused, and a disjoint one leaves the runs base where the tenant says.
+
+    #1120: `runs_base_for` takes an accepted `Tenant`, so the refusal is met where the data
+    root is resolved (`resolve_data_root`, J24 — every entry point resolves it before a
+    tenant is accepted under it), and the runs base is the one accepted under that root."""
     from defender import _tenant
 
-    base = _tenant.runs_base_for(d9_tenant)
+    def runs_base() -> Path:
+        return _tenant.runs_base_for(T1106.accept(_tenant.resolve_data_root(), d9_tenant))
+
+    base = T1106.accept(data_root, d9_tenant).runs
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(base))
     with pytest.raises(_tenant.TenantRefused):  # the owner's one refusal class (#1078 d0)
-        _tenant.runs_base_for(d9_tenant)
+        runs_base()
 
     alias = tmp_path / "alias"
     alias.symlink_to(data_root)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
     with pytest.raises(_tenant.TenantRefused):
-        _tenant.runs_base_for(d9_tenant)
+        runs_base()
 
     learn = tmp_path / "learn"
     learn.mkdir()
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learn))
-    assert _tenant.runs_base_for(d9_tenant) == data_root.resolve() / d9_tenant / "runs"
+    assert runs_base() == data_root.resolve() / d9_tenant / "runs"
 
 
 

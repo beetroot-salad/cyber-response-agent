@@ -3,7 +3,7 @@ the bridge (O9, M1, D1, C9, O7, D4).
 
 M1 moves the four settings kinds — each system's `config.env`, `verb-grants.yaml`,
 `lead-zero.yaml`, `systems/case-history/mapping.yaml` — out of `defender/knowledge/environment/`
-to `knowledge/tenants/playground/settings/` at the REPO ROOT, creates an empty `agent/` half
+to the lab tenant's `settings/` at the REPO ROOT, creates an empty `agent/` half
 beside it, and adds `knowledge/tenant-template/` whose table grants NOTHING (D1). Nothing under
 `defender/` holds a settings kind afterwards, and `defender/knowledge/` is gone (O9).
 
@@ -15,6 +15,11 @@ alone (K9). Pinned through the real gate, `decide_read` and the bash lane's
 
 D4's bridge: the tenant record a fresh runs base mints says `playground`, not `default`, and an
 existing record is read back as written — never remapped.
+
+#1120 (C26, H2): the lab is walked by no gate any more, so the lab-content assertions here are
+made on the committed test fixture (`knowledge/tenant-fixture/`), which holds the same four
+kinds, and "every committed tenant" means the committed knowledge folders the CI census walks —
+the fixture and the template. A tenant is reached only through `accept_tenant`.
 """
 from __future__ import annotations
 
@@ -51,7 +56,9 @@ def _is_settings_kind(rel: Path) -> bool:
 
 
 def _committed_tenant_dirs() -> list[Path]:
-    return sorted(p for p in T.TENANTS_ROOT.iterdir() if p.is_dir())
+    """The committed knowledge folders that are a tenant's shape and not the template: the
+    frozen test fixture (#1120 H2) — the one the CI census walks beside the template."""
+    return [T.FIXTURE]
 
 
 # =============================================================================================
@@ -84,54 +91,60 @@ def test_no_settings_kind_is_tracked_or_on_disk_under_defender():
 
 
 # =============================================================================================
-# M1 — the playground tenant holds the four kinds, moved rather than rewritten.
+# M1 — the fixture tenant holds the four kinds, moved rather than rewritten.
 # =============================================================================================
 
 def test_the_playground_settings_half_holds_the_four_kinds():
-    assert (T.PLAYGROUND_SETTINGS / "verb-grants.yaml").is_file()
-    assert (T.PLAYGROUND_SETTINGS / "lead-zero.yaml").is_file()
-    assert (T.PLAYGROUND_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
+    assert (T.FIXTURE_SETTINGS / "verb-grants.yaml").is_file()
+    assert (T.FIXTURE_SETTINGS / "lead-zero.yaml").is_file()
+    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
     configured = {
-        p.parent.name for p in (T.PLAYGROUND_SETTINGS / "systems").glob("*/config.env")
+        p.parent.name for p in (T.FIXTURE_SETTINGS / "systems").glob("*/config.env")
     }
     assert configured == _CONFIGURED_SYSTEMS, configured
 
 
 def test_the_playground_resolves_through_the_real_resolver():
-    td = T.playground_tenant()
-    assert td.tenant_id == T.PLAYGROUND_ID
-    assert td.settings == T.PLAYGROUND_SETTINGS.resolve()
-    assert td.agent == T.PLAYGROUND_AGENT.resolve()
+    """The committed fixture, placed under this test's data root as an operator places a
+    tenant, is accepted by the real `accept_tenant` — and its halves are the placed copies of
+    the committed ones, under `<root>/<id>/knowledge/`."""
+    td = T.fixture_tenant()
+    assert td.id == T.PLAYGROUND_ID
+    assert td.settings == td.data_root / T.PLAYGROUND_ID / "knowledge" / "settings"
+    assert td.agent == td.data_root / T.PLAYGROUND_ID / "knowledge" / "agent"
+    assert (td.settings / "verb-grants.yaml").read_bytes() == \
+        (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
+    assert td.agent.is_dir()
 
 
 def test_the_moved_table_grants_exactly_what_the_retired_one_did():
-    """Conservation across the move: the playground's projection is the census transcribed in
+    """Conservation across the move: the fixture's projection is the census transcribed in
     `_dispositions995.py` before #995 — a move that edited a row would change who may call
     what, silently, under a "rename" commit."""
-    grants = T.playground_grants()
+    grants = T.fixture_grants()
     assert {(s, v) for s, v, _ in grants.gather.entries} == set(GATHER_CENSUS)
     assert {(s, v) for s, v, _ in grants.correlation.entries} == set(CORRELATION_CENSUS)
     assert grants.correlation_system == "elastic"
     rows = T.mod("runtime.verb_dispositions").load_dispositions(
-        T.PLAYGROUND_SETTINGS / "verb-grants.yaml")
+        T.FIXTURE_SETTINGS / "verb-grants.yaml")
     assert {(r.system, r.verb) for r in rows if not r.roles} == set(WITHHELD_CENSUS)
 
 
 def test_the_moved_lead_zero_and_mapping_carry_the_retired_values():
     lz = T.mod("runtime.lead_zero_config")
-    assert lz.load_correlation_template(lz.lead_zero_config_path(T.PLAYGROUND_SETTINGS)) == \
+    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) == \
         T.SHIPPED_CORRELATION_TEMPLATE
     predicate = T.mod("scripts.case_history.case_ticket").release_predicate(
-        T.playground_run_tenant().ticket_mapping)
+        T.fixture_run_tenant().ticket_mapping)
     assert predicate.released_status == "closed"
 
 
 def test_the_playground_agent_half_exists_and_holds_no_settings_kind():
     """Created empty but for a placeholder (so git keeps it), and it is what the box mounts —
-    so a settings file here would be a settings file in every playground run's box (O1)."""
-    assert T.PLAYGROUND_AGENT.is_dir()
-    hits = [p for p in T.PLAYGROUND_AGENT.rglob("*")
-            if p.is_file() and _is_settings_kind(p.relative_to(T.PLAYGROUND_AGENT))]
+    so a settings file here would be a settings file in every fixture run's box (O1)."""
+    assert T.FIXTURE_AGENT.is_dir()
+    hits = [p for p in T.FIXTURE_AGENT.rglob("*")
+            if p.is_file() and _is_settings_kind(p.relative_to(T.FIXTURE_AGENT))]
     assert hits == [], hits
 
 
@@ -188,26 +201,29 @@ def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
 
 
 def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tmp_path):
-    """C9's premise: a copy of the template is a COMPLETE tenant (the resolver takes it) whose
+    """C9's premise: a copy of the template is a COMPLETE tenant (`accept_tenant` takes it,
+    once placed as an operator places one: its `.tenant-id` written, its row beside it) whose
     gather grant is empty — which the run then refuses at start (see
     `e2e/test_1106_run_start.py`). The correlation lead is withheld, which is legal alone."""
     root = tmp_path / "tenants"
-    shutil.copytree(T.TEMPLATE_DIR, root / "newco")
-    td = T.tenants().tenant_dir(root, "newco")
+    shutil.copytree(T.TEMPLATE_DIR, root / "newco" / "knowledge")
+    (root / "newco" / "knowledge" / "agent" / ".tenant-id").write_text("newco\n", encoding="utf-8")
+    T.mod("_tenant").create_tenant(root, "newco")
+    td = T.accept(root, "newco")
     grants = T.run_grants(td.settings)
     assert grants.gather.entries == ()
     assert grants.correlation_system is None
 
 
 # =============================================================================================
-# O8 (the committed half) — every committed tenant and the template load.
+# O8 (the committed half) — every committed knowledge folder and the template load.
 # =============================================================================================
 
 def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero():
     vd = T.mod("runtime.verb_dispositions")
     lz = T.mod("runtime.lead_zero_config")
     folders = [*(d / "settings" for d in _committed_tenant_dirs()), T.TEMPLATE_SETTINGS]
-    assert T.PLAYGROUND_SETTINGS in folders
+    assert T.FIXTURE_SETTINGS in folders
     for settings in folders:
         with warnings.catch_warnings():
             warnings.simplefilter("error", vd.DispositionWarning)
@@ -215,10 +231,24 @@ def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero()
         assert lz.load_correlation_template(lz.lead_zero_config_path(settings)), settings
 
 
-def test_every_committed_tenant_passes_the_resolver():
-    for tenant in _committed_tenant_dirs():
-        td = T.tenants().tenant_dir(T.TENANTS_ROOT, tenant.name)
-        assert td.settings == (tenant / "settings").resolve()
+def test_every_committed_tenant_passes_the_resolver(tmp_path):
+    """Each committed knowledge folder, placed under a data root as an operator places one, is
+    accepted by the real `accept_tenant`, and its settings half is the placed copy."""
+    root = tmp_path / "data"
+    folders = _committed_tenant_dirs()
+    assert folders, "no committed knowledge folder to check"
+    for n, folder in enumerate(folders):
+        tenant_id = f"committed-{n}"
+        shutil.copytree(folder, root / tenant_id / "knowledge")
+        (root / tenant_id / "knowledge" / "agent" / ".tenant-id").write_text(
+            f"{tenant_id}\n", encoding="utf-8")
+        (root / tenant_id / "tenant.json").write_text(
+            f'{{"tenant_id": "{tenant_id}", "created_at": "2026-09-28T00:00:00+00:00"}}\n',
+            encoding="utf-8")
+        td = T.accept(root, tenant_id)
+        assert td.settings == root / tenant_id / "knowledge" / "settings"
+        assert (td.settings / "verb-grants.yaml").read_bytes() == \
+            (folder / "settings" / "verb-grants.yaml").read_bytes()
 
 
 def test_the_settings_path_helpers_take_the_settings_folder(tmp_path):
@@ -240,7 +270,7 @@ def _reader_policies(run_dir: Path):
     driver = T.mod("runtime.driver")
     return {
         "main": compile_policy_for(driver.MAIN_DEF, run_dir, defender_dir=T.DEFENDER),
-        "gather": compile_policy_for(T.playground_gather_def(), run_dir, defender_dir=T.DEFENDER),
+        "gather": compile_policy_for(T.fixture_gather_def(), run_dir, defender_dir=T.DEFENDER),
     }
 
 

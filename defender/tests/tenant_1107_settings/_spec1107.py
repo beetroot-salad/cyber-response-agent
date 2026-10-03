@@ -33,7 +33,6 @@ receipt shape and the lint's `main(argv) -> int`. It does NOT name:
     lints' `# lint-monkeypatch: ok`, asserted ABSENT from every swept file);
   * the keyword the replay helper chain stops taking (`grants=` — `GRANTS_KW`) and the retired
     field / parameter the record replaces (`settings_dir` — `RETIRED_FIELD`).
-  * the keyword #1078's fixture copy takes its source tree under (`source=` — `FIXTURE_SOURCE_KW`).
   * how `review.review` is handed the episode tenant's record (`tenant=` — `review_run`), and the
     keyword the branch launcher takes its write door's transport under (`door_transport=` —
     `DOOR_TRANSPORT_KW`, the door lane's injection seam).
@@ -74,7 +73,7 @@ from defender.tests._by_path import LINT_DIR, load_module
 REPO_ROOT = T1106.REPO_ROOT
 DEFENDER = T1106.DEFENDER
 PLAYGROUND_ID = T1106.PLAYGROUND_ID
-PLAYGROUND = T1106.PLAYGROUND
+FIXTURE = T1106.FIXTURE
 TEMPLATE_DIR = T1106.TEMPLATE_DIR
 
 mod = T1106.mod
@@ -117,10 +116,6 @@ ELASTIC_ATTRS: tuple[str, ...] = (
 #: spell theirs `# lint-monkeypatch: ok — <reason>`). o7_lint_clean_empty_allowlist asserts no
 #: swept file carries it.
 ENV_LINT_SUPPRESSION = re.compile(r"lint[-_]tenant[-_]env[-_]reads\s*:", re.I)
-#: The keyword #1078's fixture-copy helper (`_spec1078.tenants_root_beside_data_root`) takes the
-#: tenant tree it copies FROM under (coined, AF-7): a test plants its own source tree under
-#: tmp_path instead of writing into the committed playground. Omitted, the committed playground.
-FIXTURE_SOURCE_KW = "source"
 #: The keyword the branch launcher (`learning.branch.cli.main`) takes a transport for the write
 #: door it builds under (coined, Phase F re-open, O4 lanes): the launcher still builds the REAL
 #: door from the episode tenant's record, and only the door's transport is the caller's — the
@@ -241,12 +236,18 @@ def config_texts(marker: str, *, events_index: str | None = None,
 def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",
           configs: dict[str, str] | None = None, secrets: str | Mapping[str, str] | None = None,
           table: str = T1106.TABLE_A, **kw: Any) -> Path:
-    """Write a complete #1107 tenant folder `root/<tenant_id>/` and return it.
+    """Set a complete #1107 tenant up under the data root `root` and return its knowledge
+    folder `root/<tenant_id>/knowledge/` (#1120: the settings half is `<folder>/settings`).
 
-    `configs` replaces the per-system `config.env` set (default `config_texts(marker)`);
-    `secrets` writes `settings/secrets.env` (a mapping is rendered `KEY="value"` per line). The
-    rest (`table`, `omit`, `lead_zero`, …) is `_tenants1106.plant_tenant`'s."""
-    folder = T1106.plant_tenant(
+    A knowledge folder already there (`_spec1078.tenant_source` places the committed fixture's)
+    is replaced whole, so every value the tenant carries is this call's. `configs` replaces the
+    per-system `config.env` set (default `config_texts(marker)`); `secrets` writes
+    `settings/secrets.env` (a mapping is rendered `KEY="value"` per line). The rest (`table`,
+    `omit`, `lead_zero`, …) is `_tenants1106.plant_tenant`'s."""
+    import shutil
+
+    shutil.rmtree(Path(root) / tenant_id / "knowledge", ignore_errors=True)
+    folder = T1106.place_tenant(
         root, tenant_id, table=table,
         configs=configs if configs is not None else config_texts(marker), **kw)
     if secrets is not None:
@@ -332,8 +333,18 @@ def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero:
 
 
 def tenant_folder_of(root: Path, tenant_id: str = PLAYGROUND_ID) -> Any:
-    """The `TenantDir` for a planted folder (the replay harness's `tenant=` input)."""
-    return T1106.tenants().tenant_dir(Path(root), tenant_id)
+    """The accepted `Tenant` for a planted tenant (the replay harness's `tenant=` input)."""
+    return T1106.accept(Path(root), tenant_id)
+
+
+def _require_data_root(root: Path) -> None:
+    """#1120: an entry point reads its tenants from `DEFENDER_DATA_ROOT` alone (there is no
+    tenants-root flag), so a test drives one over a tenant planted under THIS test's data root."""
+    from defender.tests import _data_root_1078
+
+    here = _data_root_1078.current_data_root()
+    assert Path(root).resolve() == here.resolve(), (
+        f"{root} is not this test's data root ({here}): plant the tenant under the data root")
 
 
 # ======================================================================================
@@ -371,10 +382,12 @@ def review_run(family: Any, episode_dir: Path, record: Any, *, adapters: Any, do
             runs_base=Path(runs_base), **{RECORD_FIELD: record})
 
 
-def launch_branch(src: Path, tenants_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
-    """The REAL branch launcher (`learning.branch.cli.main`) over the source run `src` with
-    `--tenants-root tenants_root`, every seam faked (`_triplet_947`'s fakes, no role preflight)
-    unless handed in. Returns `(rc, None)` or `(None, the SystemExit it refused with)`."""
+def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
+    """The REAL branch launcher (`learning.branch.cli.main`) over the source run `src`, whose
+    tenant is planted under `data_root` (this test's), every seam faked (`_triplet_947`'s fakes,
+    no role preflight) unless handed in. Returns `(rc, None)` or `(None, the SystemExit it
+    refused with)`."""
+    _require_data_root(data_root)
     from defender.tests import _triplet_947 as t947
     from defender.tests.tenant_1078_pass_a import _spec1078 as h1078
 
@@ -384,7 +397,7 @@ def launch_branch(src: Path, tenants_root: Path, **seams: Any) -> tuple[Any, Bas
         "live_tree": t947.source_capture(), "preflight": t947.no_preflight}
     fakes.update(seams)
     argv = [str(src), str(t947.BRANCH_MESSAGE_ID), "--continuation-prompt",
-            h1078.CONTINUATION, "--tenants-root", str(tenants_root)]
+            h1078.CONTINUATION]
     try:
         return mod("learning.branch.cli").main(argv, **fakes), None
     except SystemExit as refused:
@@ -578,10 +591,12 @@ def run_py() -> Any:
     return mod("run")
 
 
-def run_argv(alert: Path, tenants_root: Path, *, tenant_id: str = PLAYGROUND_ID,
+def run_argv(alert: Path, data_root: Path, *, tenant_id: str = PLAYGROUND_ID,
              update_ticket: bool = False, run_id: str | None = None,
              extra: Iterable[str] = ()) -> list[str]:
-    argv = [str(alert), "--tenant", tenant_id, "--tenants-root", str(tenants_root)]
+    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's)."""
+    _require_data_root(data_root)
+    argv = [str(alert), "--tenant", tenant_id]
     if update_ticket:
         argv.append("--update-ticket")
     if run_id is not None:

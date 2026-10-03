@@ -41,7 +41,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from _astlib import ScanBlind, module_env, owner_derived, read_and_parse
+from _astlib import PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -166,16 +166,18 @@ def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
 
 def _accessor_names() -> frozenset[str]:
     """Every public accessor name on the path owners (`RunPaths`, `SessionPaths`,
-    `EpisodePaths`, `TenantPaths`), computed so it never goes stale. A new owner class needs a
-    line here and in `_astlib._OWNER_CLASS_ORIGINS`."""
+    `EpisodePaths`), computed so it never goes stale, plus the members a partial owner owns
+    (`_astlib.PARTIAL_OWNER_ATTRS`: an accepted `Tenant`'s record locations, never its
+    knowledge halves). A new owner class needs a line here and in
+    `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender._run_paths import RunPaths, SessionPaths  # noqa: PLC0415
-    from defender._tenant import TenantPaths  # noqa: PLC0415
 
+    partial = (name for owned in PARTIAL_OWNER_ATTRS.values() for name in owned)
     return frozenset(
-        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths), *dir(TenantPaths))
+        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths), *partial)
         if not n.startswith("_"))
 
 

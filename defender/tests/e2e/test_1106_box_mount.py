@@ -1,10 +1,10 @@
 """#1106 — a run's box holds its own tenant's `agent/` half, read-only, and nothing else of any
 tenant's (O1, M6).
 
-M6: one extra READ-ONLY bind, whose source is the RESOLVED `TenantDir.agent` and whose target is
+M6: one extra READ-ONLY bind, whose source is the accepted `Tenant.agent` and whose target is
 one fixed constant (`box.TENANT_AGENT_TARGET`) outside the `defender_dir` mount target. The
 `settings/` half is never a mount source. The source goes through the existing shared-mount
-coverage check, so a tenants root on a path the daemon cannot see refuses the box at start
+coverage check, so a data root on a path the daemon cannot see refuses the box at start
 (C46's refusal) rather than surfacing as docker's "bind source path does not exist".
 
 Observed on the REAL `start_box` over the recording docker fake (`_box665.RecordingDocker`):
@@ -41,10 +41,9 @@ def _boxed_only(monkeypatch):
 @pytest.fixture
 def two_tenants(tmp_path):
     root = tmp_path / "tenants"
-    T.plant_tenant(root, "acme", table=T.TABLE_A)
-    T.plant_tenant(root, "bravo", table=T.TABLE_B)
-    resolve = T.tenants().tenant_dir
-    return root, resolve(root, "acme"), resolve(root, "bravo")
+    T.place_tenant(root, "acme", table=T.TABLE_A)
+    T.place_tenant(root, "bravo", table=T.TABLE_B)
+    return root, T.accept(root, "acme"), T.accept(root, "bravo")
 
 
 def _start(tmp_path: Path, agent: Path) -> RecordingDocker:
@@ -122,17 +121,17 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount():
     argv = box_mod._create_argv(
         "defender-run-r1106", Path("/workspace/.runs/r1106"), Path("/workspace/defender"),
         box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
-        tenant_agent=Path("/workspace/knowledge/tenants/acme/agent"),
+        tenant_agent=Path("/workspace/.defender-data/acme/knowledge/agent"),
     ).argv
     joined = " ".join(argv)
     assert (
-        "type=bind,source=/home/dev/projects/repo/knowledge/tenants/acme/agent,"
+        "type=bind,source=/home/dev/projects/repo/.defender-data/acme/knowledge/agent,"
         f"target={box_mod.TENANT_AGENT_TARGET},readonly"
     ) in joined, joined
 
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():
-    """The negative on the same builder: a tenants root the daemon cannot see is C46's
+    """The negative on the same builder: a data root the daemon cannot see is C46's
     refusal, naming the agent source — the run dir and defender dir around it are covered."""
     from defender.runtime import box as box_mod
     from defender.runtime.box_codec import BoxFault

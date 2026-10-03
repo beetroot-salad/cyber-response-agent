@@ -407,14 +407,14 @@ def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
     The owner is reached through its own constructor every time — `RunPaths(run_dir)`,
     `EpisodePaths(episode_dir)` — so a test that walks the kinds table is driving ~43 real
     accessors, not asserting a structural property of a registry. #1078 D1 adds `tenant_row`,
-    owned by `_tenant.TenantPaths(data_root, tenant_id).row` — a data-root-and-tenant-aware
+    owned by the layout class `_tenant._TenantPaths(data_root, tenant_id).row` (#1120 M4) — a data-root-and-tenant-aware
     accessor rather than a runs-base one.
     """
     values = acc.args if args is None else args
     if acc.owner == "tenant":
         return tenant().record_path(runs_base)
     if acc.owner == "tenant_row":
-        return tenant().TenantPaths(data_root, tenant_id).row
+        return tenant()._TenantPaths(data_root, tenant_id).row
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:

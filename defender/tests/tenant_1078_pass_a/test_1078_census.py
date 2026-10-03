@@ -166,6 +166,11 @@ U6_CLASSIFIED: dict[str, tuple[str, tuple[str, ...] | None]] = {
     "defender/evals/harness_lead.py::materialize": ("eval harness scratch tree", None),
     "defender/evals/oracle_golden/record_held_out.py::main": (
         "the golden eval's own checked-in ledger", None),
+    # #1120: `tenant.py scaffold` copies the committed template (read from the checkout) into
+    # the operator's EMPTY target directory, which `_target_refusal` refuses inside the
+    # checkout — the destination is never defender/; only the template's relative names are.
+    "defender/scripts/tenant.py::_copy_template": (
+        "#1120 scaffold into an operator-named dir outside the checkout", ("target / rel",)),
 }
 
 

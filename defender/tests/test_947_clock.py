@@ -95,7 +95,7 @@ REAL_ADAPTERS = PATHS.adapters_dir
 def _gather_grant() -> VerbGrant:
     """The committed playground tenant's gather grant (#1106: grants are per run, projected from
     the run's tenant's table — there is no process-level `GATHER_DEF.verb_grant` any more)."""
-    return _tenants1106.playground_grants().gather
+    return _tenants1106.fixture_grants().gather
 
 #: What the fake `docker` records, under the run dir the test reads.
 DOCKER_LOG = "docker-calls.jsonl"
@@ -428,12 +428,12 @@ def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
 
     assert names[-2:] == ["world_id", "as_of"], f"the clock did not land last: {names}"
     assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                       tenant=_tenants1106.playground_run_tenant()).as_of is None
+                       tenant=_tenants1106.fixture_run_tenant()).as_of is None
     # The world and the clock are two fields: a context naming a world names no moment. (#1106
     # made the tenant a REQUIRED field, so every site now builds by keyword and the old
     # positional spelling — fifth argument the world — is no longer one any site uses.)
     ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                      tenant=_tenants1106.playground_run_tenant(), capture=None, world_id="w1")
+                      tenant=_tenants1106.fixture_run_tenant(), capture=None, world_id="w1")
     assert ctx.world_id == "w1"
     assert ctx.as_of is None
 

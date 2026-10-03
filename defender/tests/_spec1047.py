@@ -380,14 +380,14 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
 def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
     """What `run.py` hands both legs (#1107): the run's record, the code tree and the run's env.
 
-    The record is the committed playground tenant's, as this lane read the checkout's own
-    mapping before the move; an unconfigured fake gets a tenant planted beside the run with no
-    case-history `config.env`."""
+    The record is the committed fixture tenant's (set up under the test's data root), as this
+    lane read the checkout's own mapping before the move; an unconfigured fake gets a tenant
+    planted beside the run with no case-history `config.env`."""
     from defender.tests import _tenants1106
     from defender.tests.tenant_1107_settings import _spec1107
 
     if fake.configured:
-        record = _tenants1106.playground_run_tenant()
+        record = _tenants1106.fixture_run_tenant()
     else:
         root = Path(run_dir).parent / "unconfigured-tenants"
         _spec1107.plant(root, "t1047", configs={})

@@ -5,7 +5,8 @@ Every tenant here is PLANTED under a tmp root through `_spec1107.plant` (every v
 marker, so a reader returning another tenant's, the checkout's or the environment's value is
 caught by the value alone) and resolved through the REAL acceptance frame,
 `run_tenant.resolve_tenant` — the one every entry point uses (C1). The one exception is
-`d2_shipped_tenants_complete`, which reads the COMMITTED playground and template.
+`d2_shipped_tenants_complete`, which reads the COMMITTED fixture and template (#1120: the
+fixture, `knowledge/tenant-fixture/`, replaced the committed playground).
 
 Faults are real inputs through the real primitive, written in the test itself: a deleted
 `config.env`, `0xff 0xfe` bytes (RG4n, executed: non-UTF-8 raises an uncaught UnicodeDecodeError
@@ -33,7 +34,7 @@ from defender.runtime import run_tenant
 from defender.scripts.adapters import _stub_transport as transport
 from defender.tests import _tenants1106 as T1106
 from defender.tests._by_path import load_module
-from defender.tests._data_root_1078 import ensure_d9_tenant
+from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 TID = S.PLAYGROUND_ID
@@ -90,7 +91,10 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     folder = S.plant(root, marker="d0")
 
     rec = _resolve(root)
-    rec_direct = run_tenant.resolve_run_tenant(
+    # #1120: `resolve_run_tenant` is the readiness function (grants, correlation) over a
+    # settings folder; the record builder over an accepted tenant, which `resolve_tenant`
+    # delegates to, is `run_tenant_for`.
+    rec_direct = run_tenant.run_tenant_for(
         S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
     # The existing frozen RunTenant, grown — from both resolvers.
@@ -215,16 +219,18 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
 def test_d_record_fields_from_resolver():
     """resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one
     entry per folder under settings/systems/), elastic and ticket_mapping, all built by
-    resolve_run_tenant. For the committed playground tenant every systems entry is a SystemConfig,
+    resolve_run_tenant. For the committed fixture tenant every systems entry is a SystemConfig,
     elastic is an ElasticSettings and ticket_mapping is a CaseMapping."""
-    tenants_root = S.REPO_ROOT / "knowledge" / "tenants"
-    rec = _resolve(tenants_root, S.PLAYGROUND_ID)
-    built = run_tenant.resolve_run_tenant(
-        S.tenant_folder_of(tenants_root, S.PLAYGROUND_ID), defender_dir=S.DEFENDER,
-        dispatches_lead_zero=False)
+    # #1120: the committed tenant is the fixture (`knowledge/tenant-fixture/`), set up under
+    # this test's data root as `playground`; `run_tenant_for` is the record builder over the
+    # accepted tenant that `resolve_tenant` delegates to.
+    shipped = T1106.fixture_tenant(S.PLAYGROUND_ID)
+    rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
+    built = run_tenant.run_tenant_for(shipped, defender_dir=S.DEFENDER,
+                                      dispatches_lead_zero=False)
 
     assert type(rec) is run_tenant.RunTenant
-    folders = {p.name for p in (S.PLAYGROUND / "settings" / "systems").iterdir()
+    folders = {p.name for p in (S.FIXTURE / "settings" / "systems").iterdir()
                if p.is_dir() and not p.name.startswith(".")}
     assert set(rec.systems) == folders, (sorted(rec.systems), sorted(folders))
     SystemConfig = S.record_type("SystemConfig")
@@ -533,7 +539,8 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     # No arm here forks a transport; the shim first on PATH makes sure a stray one cannot
     # reach the real docker (CX8).
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "shim").path_value())
-    root = tmp_path / "tenants"
+    # #1120: under this test's data root, the one `run.main` below reads its tenants from.
+    root = current_data_root()
     folder = S.plant(root, marker="nf4")
     S.plant(root, "other", marker="nf4o")
 
@@ -543,7 +550,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     S.mapping_path(folder).write_text(T1106.mapping_text(released_status="done"),
                                       encoding="utf-8")
     second = _resolve(root)
-    direct = run_tenant.resolve_run_tenant(
+    direct = run_tenant.run_tenant_for(
         S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
     assert first.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4:8080"
     assert second.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
@@ -725,11 +732,11 @@ def _config_keys(path: Path) -> set[str]:
 
 
 def test_d2_shipped_tenants_complete():
-    """The committed playground tenant and knowledge/tenant-template/ carry every new line. Each system
+    """The committed fixture tenant and knowledge/tenant-template/ carry every new line. Each system
     folder, host-state's new one included, has <PREFIX>_TRANSPORT and <PREFIX>_DOCKER_CONTEXT, and
-    elastic's also has ELASTIC_ES_CONTAINER and ELASTIC_KIBANA_CONTAINER. Resolving the playground
+    elastic's also has ELASTIC_ES_CONTAINER and ELASTIC_KIBANA_CONTAINER. Resolving the fixture
     tenant leaves no ConfigFault in systems or elastic."""
-    for tenant_settings in (S.PLAYGROUND / "settings", S.TEMPLATE_DIR / "settings"):
+    for tenant_settings in (S.FIXTURE / "settings", S.TEMPLATE_DIR / "settings"):
         systems = tenant_settings / "systems"
         folders = sorted(p.name for p in systems.iterdir() if p.is_dir())
         assert "host-state" in folders, (tenant_settings, folders)
@@ -744,7 +751,9 @@ def test_d2_shipped_tenants_complete():
                 needed |= {"ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER"}
             assert needed <= keys, (tenant_settings, name, sorted(needed - keys))
 
-    rec = _resolve(S.REPO_ROOT / "knowledge" / "tenants", S.PLAYGROUND_ID)
+    # #1120: the committed fixture, set up under this test's data root as `playground`.
+    T1106.fixture_tenant(S.PLAYGROUND_ID)
+    rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
     ConfigFault = S.config_fault()
     faulted = {name: str(entry) for name, entry in rec.systems.items()
                if isinstance(entry, ConfigFault)}
@@ -757,7 +766,8 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     configs are broken resolves without raising: the broken systems' entries in systems are
     ConfigFault, and the grants answer for the working systems is unchanged."""
     policy_cli = S.mod("scripts.policy_cli")
-    root = tmp_path / "tenants"
+    # #1120: policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
+    root = current_data_root()
     S.plant(root, "healthy", marker="pol")
     broken = S.plant(root, "broken", marker="pol")
     S.config_path(broken, "cmdb").unlink()
@@ -765,7 +775,7 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     S.drop_key(broken, "elastic", "ELASTICSEARCH_URL")
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    base = ["show", "gather", "--run-dir", str(run_dir), "--tenants-root", str(root)]
+    base = ["show", "gather", "--run-dir", str(run_dir)]
 
     assert policy_cli.main([*base, "--tenant", "healthy"]) == 0
     healthy_out = capsys.readouterr().out

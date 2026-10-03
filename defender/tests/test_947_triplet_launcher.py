@@ -60,7 +60,7 @@ def _verify_family(ep_dir, run_dirs, **kw):
 
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant_paths()
+    return T.current_tenant()
 
 
 def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams):
@@ -353,7 +353,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
         assert builder in src, f"the launcher never reaches {builder}"
 
     ep = T.episode(tmp_path)
-    assert callable(seams.adapter_seam(ep, _tenants1106.playground_run_tenant(), runs_base=tmp_path / "runs")), "the review has no production adapter layer"
+    assert callable(seams.adapter_seam(ep, _tenants1106.fixture_run_tenant(), runs_base=tmp_path / "runs")), "the review has no production adapter layer"
     assert callable(seams.model_seam(ep)), "the questioner has no production model call"
 
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half

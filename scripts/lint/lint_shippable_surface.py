@@ -45,8 +45,8 @@ BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 EXCLUDED_PREFIXES = (
     # Gather query templates (+ their SCHEMA doc) are per-system.
     "defender/skills/gather/queries/",
-    # No settings carve-out: per-tenant settings live under `knowledge/tenants/<id>/settings/`
-    # at the repo root, outside the scanned surface.
+    # No settings carve-out: per-tenant settings live under the data root
+    # (`$DEFENDER_DATA_ROOT/<id>/knowledge/settings/`), outside the repo.
     "defender/fixtures/",
     # Vendored golden runs replayed by the e2e harness: env-specific test data by design.
     "defender/fixtures-e2e/",

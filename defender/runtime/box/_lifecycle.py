@@ -38,8 +38,8 @@ _logger = logging.getLogger(__name__)
 
 
 #: Where the box sees its tenant's model-facing `agent/` half: a fixed target, so the model's
-#: view never depends on where the operator keeps the tenants root. Read-only; the tenant's
-#: `settings/` half is never mounted.
+#: view never depends on where the operator keeps the data root. Read-only; the tenant's
+#: `settings/` half, and its knowledge folder's `.git`, are never mounted.
 TENANT_AGENT_TARGET = Path("/tenant/agent")
 
 
@@ -55,7 +55,9 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         ("defender dir", defender_dir, "Check out the tree"),
     ]
     if tenant_agent is not None:
-        subjects.append(("tenant agent half", tenant_agent, "Put the tenants root"))
+        # The agent half lives under the data root, beside the run dir: moving it means moving
+        # the data root.
+        subjects.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
     for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)

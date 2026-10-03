@@ -720,7 +720,7 @@ def test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win(
 
     # `prepare_episode` now returns an `Episode` context manager, not a bare path (#1133 rev 2).
     with cli.prepare_episode(
-            W.EPISODE_ID, src, tenant=W.current_tenant_paths(), prime=prime) as adopted:
+            W.EPISODE_ID, src, tenant=W.current_tenant(), prime=prime) as adopted:
         assert adopted.dir == ep, (
             f"prepare_episode returned {adopted.dir!r} rather than adopting {ep} — a "
             "re-entered attempt on a killed episode is refused, which is the alternative H3 "
@@ -769,7 +769,7 @@ def test_a_re_entered_review_re_derives_every_worlds_reachability_block(
         record = review.review(family_mod.parse_family(doc), episode=episode,
                                adapters=W.FakeAdapters({("elastic", "query"): {"hits": []}}),
                                door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                               tenant=_tenants1106.playground_run_tenant(),
+                               tenant=_tenants1106.fixture_run_tenant(),
                                runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]

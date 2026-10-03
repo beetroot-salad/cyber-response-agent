@@ -392,7 +392,7 @@ def test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write
     with Episode.open(ep) as episode:
         record = review.review(family, episode=episode, adapters=W.FakeAdapters(),
                                door=W.FakeDoor(), invoke=W.FakeAgent("same"),
-                               write=writer, tenant=_tenants1106.playground_run_tenant(),
+                               write=writer, tenant=_tenants1106.fixture_run_tenant(),
                                runs_base=ep.parent / "runs-base")
 
     assert len(writer.calls) == 1, (

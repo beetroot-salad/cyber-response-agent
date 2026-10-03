@@ -265,7 +265,7 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
 
     env = MappingProxyType({"A": "1"})
     ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env=env,
-                      tenant=_tenants1106.playground_run_tenant())
+                      tenant=_tenants1106.fixture_run_tenant())
     assert ctx.env is env
 
 

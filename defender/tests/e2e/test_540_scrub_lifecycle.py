@@ -304,7 +304,7 @@ def gate_env(tmp_path):
         run=run, dfn=dfn,
         main=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn),
         gather=compile_policy_for(
-            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn),
+            _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn),
     )
 
 
@@ -380,7 +380,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
         run_dir=run, model="m-741", model_override=None, defender_dir=DEFENDER,
-        tenant=_tenants1106.playground_run_tenant(),
+        tenant=_tenants1106.fixture_run_tenant(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
 
@@ -1477,12 +1477,12 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     The refusal is asserted as BOTH a raise and the absence of any emitted argv: a start that
     refused only after handing the daemon a split spec would not be a refusal."""
     from defender import _tenant
+    from defender.tests._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    tenant_id = "t540"
-    _tenant.create_tenant(data_root, tenant_id)
-    runs_base = _tenant.runs_base_for(tenant_id)
+    tenant = set_up_tenant(data_root, "t540")
+    runs_base = _tenant.runs_base_for(tenant)
     runs_base.mkdir(parents=True)
     fixture = tmp_path / "fixtures"
     fixture.mkdir()
@@ -1490,7 +1490,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, None, tenant_id=tenant_id)
+        run_common.materialize_run(alert, None, tenant=tenant)
     assert list(runs_base.iterdir()) == [], (
         "the hostile id created run artifacts before it was refused"
     )

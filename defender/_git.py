@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+#: The variables that decide WHICH repository git acts on whatever `cwd=` says: an exported
+#: `GIT_DIR` points every call at that repository (J-PO1, executed).
+REPO_LOCATING_ENV = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
+)
+
+
+def env_for_cwd() -> dict[str, str]:
+    """This process's environment without the variables that would override `cwd=`, for a
+    call that must act on the repository at its `cwd` and nowhere else (a tenant's own repo,
+    never the product checkout an operator's shell may have exported)."""
+    return {k: v for k, v in os.environ.items() if k not in REPO_LOCATING_ENV}
 
 
 class GitError(RuntimeError):
@@ -24,6 +39,7 @@ def _run(
     check: bool = True,
     timeout: float | None = None,
     input: str | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         ["git", *args],
@@ -34,6 +50,7 @@ def _run(
         errors="surrogateescape",
         timeout=timeout,
         input=input,
+        env=None if env is None else dict(env),
     )
     if check and proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr)
@@ -47,8 +64,10 @@ def git(
     check: bool = True,
     timeout: float | None = None,
     input: str | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> str:
-    return _run(args, cwd=cwd, check=check, timeout=timeout, input=input).stdout.strip()
+    return _run(
+        args, cwd=cwd, check=check, timeout=timeout, input=input, env=env).stdout.strip()
 
 
 def git_ok(args: Sequence[str], *, cwd: Path = REPO_ROOT) -> bool:
@@ -121,6 +140,20 @@ def git_show_file_bytes(cwd: Path, rev: str, path: str) -> bytes | None:
     )
     if proc.returncode != 0:
         return None
+    return proc.stdout
+
+
+def git_blob_bytes(cwd: Path, sha: str, *, env: Mapping[str, str] | None = None,
+                   timeout: float | None = None) -> bytes:
+    """The raw bytes of the blob `sha` (`cat-file blob`): no filter, no line-ending
+    conversion and no configured command applied. `GitError` when git cannot answer."""
+    proc = subprocess.run(  # noqa: S603 — fixed argv
+        ["git", "cat-file", "blob", sha], cwd=cwd, capture_output=True, check=False,
+        env=None if env is None else dict(env), timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise GitError(["cat-file", "blob", sha], proc.returncode,
+                       proc.stderr.decode("utf-8", "replace"))
     return proc.stdout
 
 

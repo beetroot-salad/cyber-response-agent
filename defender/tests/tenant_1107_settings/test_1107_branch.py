@@ -4,9 +4,10 @@ patterns and the write door read from `record.elastic` (O1), the door child's sc
 foreign-view fallback (CX22).
 
 Every launch drives the REAL `learning/branch/cli.main` over a source run planted at its tenant
-location under this test's data root (`_spec1078.tenant_source`: runs-base record + stamp), with a
-`--tenants-root` of our own holding a COMPLETE #1107 tenant (`_spec1107.plant`; every value carries
+location under this test's data root (`_spec1078.tenant_source`: runs-base record + stamp), whose
+knowledge folder is then replaced by a COMPLETE #1107 tenant (`_spec1107.plant`; every value carries
 a marker, so a door reading the environment's or the base's default value is caught by the value).
+#1120: the launcher reads the tenant from `DEFENDER_DATA_ROOT` alone — no flag names it.
 Fakes enter only through the launcher's seams (`spawn`, `door`, `questioner`, `adapters`,
 `invoke`, `preflight`, `live_tree`). The role preflight is a RECORDING TRIPWIRE answering 1: a
 launch that got past every check knowable before spend reaches it and is refused there, so "the
@@ -66,19 +67,18 @@ class _Preflight:
         return self.rc
 
 
-def _layout(tmp_path: Path, data_root: Path, monkeypatch, *, marker: str,
-            root: Path | None = None) -> tuple[Path, Path, Path, Path]:
-    """A branchable source at TID's tenant location, TID's complete #1107 folder under `root`
-    (default `<tmp>/tenants`), and a configured episodes root. Returns (src, root, folder,
-    episodes)."""
+def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
+            marker: str) -> tuple[Path, Path, Path, Path]:
+    """A branchable source at TID's tenant location, TID's complete #1107 knowledge folder set
+    up under `data_root` (this test's, the one the launcher reads), and a configured episodes
+    root. Returns (src, data root, knowledge folder, episodes)."""
     for name in _CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
     episodes = tmp_path / "episodes"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = H.tenant_source(data_root, TID)
-    root = root if root is not None else tmp_path / "tenants"
-    folder = S.plant(root, TID, marker=marker)
-    return src, root, folder, episodes
+    folder = S.plant(data_root, TID, marker=marker)
+    return src, data_root, folder, episodes
 
 
 def _seams(**over: Any) -> dict[str, Any]:
@@ -93,10 +93,11 @@ def _seams(**over: Any) -> dict[str, Any]:
 
 
 def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseException | None]:
-    """The REAL launcher over `src`, with `--tenants-root root`. Returns (rc, None) or
-    (None, the SystemExit it refused with)."""
-    argv = [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", H.CONTINUATION,
-            "--tenants-root", str(root)]
+    """The REAL launcher over `src`, whose tenant is set up under `root` — this test's data root
+    (#1120: the launcher reads it from `DEFENDER_DATA_ROOT`; no flag names it). Returns (rc, None)
+    or (None, the SystemExit it refused with)."""
+    S._require_data_root(root)
+    argv = [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", H.CONTINUATION]
     try:
         return cli.main(argv, **seams), None
     except SystemExit as refused:
@@ -212,8 +213,7 @@ def test_branch_refusal_names_the_elastic_fault(tmp_path, data_root, monkeypatch
         env.pop(key, None)
     argv = [sys.executable,
             str(S.DEFENDER / "learning" / "branch" / "cli.py"),
-            str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", H.CONTINUATION,
-            "--tenants-root", str(root)]
+            str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", H.CONTINUATION]
     elastic_text = S.config_path(folder, "elastic").read_text(encoding="utf-8")
 
     # Arm 1: no systems/elastic/ folder.
@@ -299,6 +299,12 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
     resolves at cli.py:1374) to resolve_tenant as box_mounted: a tenants root inside either is
     refused at launch with LauncherRefused naming the tenant, before any episode dir exists and
     before any world is staged."""
+    # #1120: the tenants root is the data root (`DEFENDER_DATA_ROOT`, no flag), so "a tenants
+    # root inside the episodes base" is a data root inside it — the tenant's settings half then
+    # lies inside a tree the box mounts, which acceptance's step 7 refuses for the launcher's
+    # `box_mounted`. The runs-base arm has no #1120 counterpart: the runs base is
+    # `<data root>/<T>/runs`, derived from the data root, so a data root inside it is circular,
+    # and acceptance itself (not the launcher) holds every tenant's own runs base.
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
     src, outside, _folder, episodes = _layout(tmp_path, data_root, monkeypatch, marker="mf13")
 
@@ -309,20 +315,25 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
     assert control["preflight"].calls == [None], \
         "the control launch (tenants root outside both trees) never reached the role preflight"
 
-    runs_base = H.runs_dir(data_root, TID)
-    for arm, root in (("inside the episodes base", episodes / "tenants-in-episodes"),
-                      ("inside the runs base", runs_base / "tenants-in-runs")):
+    for arm, root in (("inside the episodes base", episodes / "tenants-in-episodes"),):
+        root.mkdir(parents=True)
+        H.set_data_root(monkeypatch, root)
+        _base, src_in = H.tenant_source(root, TID)
         S.plant(root, TID, marker="mf13")
         resolved = run_tenant.resolve_tenant(root, TID, defender_dir=S.DEFENDER,
                                              dispatches_lead_zero=False)
         assert resolved.tenant_id == TID, f"{arm}: the resolver alone refuses this root"
         seams = _seams()
-        rc, refused = _launch(src, root, seams)
+        rc, refused = _launch(src_in, root, seams)
         assert isinstance(refused, cli.LauncherRefused), \
             f"{arm}: the launcher accepted a box-mounted tenants root (rc={rc}, {refused!r})"
         text = H.refusal_text(refused)
-        assert TID in _sans_paths(text, src, root / TID, outside / TID, data_root / TID), \
+        assert TID in _sans_paths(text, src, src_in, root / TID, outside / TID, data_root / TID), \
             f"{arm}: the refusal does not name the tenant: {text!r}"
+        # The launcher's own episodes-base guard also refuses a base containing the data root;
+        # the refusal observed here is acceptance's, over the launcher's `box_mounted`.
+        assert "which a box mounts" in text, \
+            f"{arm}: the refusal is not the box-mounted settings refusal: {text!r}"
         assert seams["preflight"].calls == [], f"{arm}: the role preflight was spent: {text!r}"
         assert seams["door"].calls == [], f"{arm}: a world was staged: {seams['door'].ops}"
         assert seams["questioner"].prompts == [], f"{arm}: the questioner was asked"
@@ -594,7 +605,8 @@ def test_d_launcher_door_transport_seam(tmp_path, data_root, monkeypatch):
         carried = S.record_on(ctx)
         assert carried.tenant_id == record.tenant_id, \
             f"the door's context carries another tenant's record: {carried!r}"
-        assert carried.dir == record.dir, f"the door's context carries another folder: {carried!r}"
+        assert carried.tenant.dir == record.tenant.dir, \
+            f"the door's context carries another folder: {carried!r}"
         assert container == S.es_container("dts"), f"the door addressed {container!r}"
     for argv in (c["argv"] for c in shim.calls()):
         assert S.context_of(argv) == S.context_name("dts", "elastic"), \
@@ -664,12 +676,11 @@ def test_s60_launch_one_env_is_passthrough(tmp_path, data_root, monkeypatch):
     for name in _CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
     H.make_tenant(data_root, TID)
-    root = tmp_path / "tenants"
-    S.plant(root, TID, marker="gr7")
+    S.plant(data_root, TID, marker="gr7")
 
     quiet_ep = T.episode(tmp_path / "quiet", root=tmp_path / "quiet" / "episodes")
     quiet = T.FakeSpawn()
-    cli.start_family(Episode.open(quiet_ep), ["b"], spawn=quiet, tenant_id=TID, tenants_root=root)
+    cli.start_family(Episode.open(quiet_ep), ["b"], spawn=quiet, tenant_id=TID)
     quiet_environ = dict(os.environ)
 
     exported = {"CMDB_URL_BASE": "http://gr7-env-cmdb.invalid:1",
@@ -678,7 +689,7 @@ def test_s60_launch_one_env_is_passthrough(tmp_path, data_root, monkeypatch):
         monkeypatch.setenv(key, value)
     loud_ep = T.episode(tmp_path / "loud", root=tmp_path / "loud" / "episodes")
     loud = T.FakeSpawn()
-    cli.start_family(Episode.open(loud_ep), ["b"], spawn=loud, tenant_id=TID, tenants_root=root)
+    cli.start_family(Episode.open(loud_ep), ["b"], spawn=loud, tenant_id=TID)
     loud_environ = dict(os.environ)
 
     assert len(quiet.launches) == 1, (quiet.launches, loud.launches)
@@ -706,7 +717,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     for name in _CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
     _base, src = H.tenant_source(data_root, TID)
-    root = tmp_path / "tenants"
+    root = data_root
     folder = S.plant(root, TID, marker="mf17")
     manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
     # At the launcher's O9 check the Elastic part was whole ...
@@ -717,7 +728,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
 
     rec = S.RunRecorder(tmp_path / "sibling-run")
     rc, refused = S.drive_run(
-        H.resume_argv(manifest, "b", "--tenant", TID, "--tenants-root", str(root)), rec,
+        H.resume_argv(manifest, "b", "--tenant", TID), rec,
         visualize=rec.visualize)
 
     assert refused is None, f"the sibling was refused: {H.refusal_text(refused)!r}"

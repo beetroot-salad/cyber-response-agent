@@ -62,40 +62,37 @@ def _setup_state(run: Run) -> str:
 
 
 def materialize_run(
-    alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None = None,
+    alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None = None,
     world: ResumeWorld | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id` and return the tenant-bound
     handle the run's later records are saved through.
 
-    `tenant_id` is the tenant the request named. The runs-base record is created here when
-    absent; a record naming another tenant is refused rather than stamped.
+    `tenant` is the request's tenant, accepted by the entry point (`_tenant.accept_tenant`);
+    nothing here resolves the data root or re-accepts it. The runs-base record is created here
+    when absent; a record naming another tenant is refused rather than stamped.
 
     Every write is a guarded write-once verb (written when absent, kept when equal, refused
     when different), so resuming needs no ordering of checks and follows no planted link.
     `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
 
-    Order: the tenant's row must exist before anything is created; the runs base is the
-    tenant's own (`<data root>/<T>/runs`) or, for a fork, its episode's `runs/`; then the
-    runs-base record, then `Run.for_tenant` as the race backstop.
+    Order: the runs base is the tenant's own (`<data root>/<T>/runs`) or, for a fork, its
+    episode's `runs/`; then the runs-base record, then `Run.for_tenant` as the race backstop.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     run_id = _admit_run_id(alert, run_id)
-    data_root = _tenant.resolve_data_root()
-    # An unknown tenant leaves no runs base at all.
-    _tenant.require_tenant(data_root, tenant_id)
     if world is not None:
         from defender._episode_paths import EpisodePaths
 
         runs_base = EpisodePaths(world.episode_dir).runs
     else:
-        runs_base = _tenant.TenantPaths(data_root, tenant_id).runs
+        runs_base = tenant.runs
     # The runs base is the host-controlled trust root; nothing above it is judged.
     guarded_mkdir(runs_base, base=runs_base)
     # The tenant record comes before the provenance stamp (which must match it) and before the
     # box exists. Unlike the stamp, its failures propagate: a forged tenant is worse than no run.
-    tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant_id)
+    tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
     run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)

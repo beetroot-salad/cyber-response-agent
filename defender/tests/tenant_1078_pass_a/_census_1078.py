@@ -69,10 +69,13 @@ def o1_scope(repo: Path = REPO_ROOT) -> tuple[list[Path], list[Path]]:
     return py, shims
 
 
-#: The owner calls whose tenant id sits at a known position (D1/D2's signatures).
+#: The owner calls whose tenant id sits at a known position (D1/D2's signatures, and #1120's:
+#: acceptance and the private layout take `(data_root, id)` too).
 _TENANT_ARG_POS = {"TenantPaths": 1, "create_tenant": 1, "require_tenant": 1,
-                   "ensure_runs_base_record": 1, "runs_base_for": 0, "for_tenant": 0}
-_TENANT_KW = {"tenant", "tenant_id"}
+                   "ensure_runs_base_record": 1, "runs_base_for": 0, "for_tenant": 0,
+                   "_TenantPaths": 1, "accept_tenant": 1, "accept_placed_knowledge": 1,
+                   "resolve_tenant": 1, "refuse_foreign_data_root": 1}
+_TENANT_KW = {"tenant", "tenant_id", "raw_id"}
 
 
 def _docstring_ids(tree: ast.AST) -> set[int]:
@@ -202,7 +205,7 @@ def _row_like(node: ast.AST, tainted: set[str]) -> bool:
     for n in ast.walk(node):
         if _is_str(n) and (n.value == ROW_NAME or n.value.endswith("/" + ROW_NAME)):  # type: ignore[union-attr]
             return True
-        if isinstance(n, ast.Attribute) and n.attr == "row":
+        if isinstance(n, ast.Attribute) and n.attr in ("row", "row_path"):
             return True
         if isinstance(n, ast.Name) and n.id in tainted:
             return True

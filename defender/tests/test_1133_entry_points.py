@@ -238,8 +238,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
 
     with S.open_episode(ep) as episode:
         raised = S.raised_by(lambda: cli.start_family(
-            episode, ["b", "c"], spawn=spawn, tenant_id="acme",
-            tenants_root=tmp_path / "tenants"))
+            episode, ["b", "c"], spawn=spawn, tenant_id="acme"))
 
     assert_folder_refusal(raised, planted, where="start_family over a linked runs/")
     assert spawn.argvs == [], f"a sibling started over a linked runs base: {spawn.argvs}"
@@ -249,8 +248,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
 
     planted.remove()
     with S.open_episode(ep) as episode:
-        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme",
-                                 tenants_root=tmp_path / "tenants")
+        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
@@ -337,7 +335,7 @@ def launch(tmp_path: Path, *, before: Any = None, **seams: Any) -> tuple[Any, Pa
     status, or the refusal `main` raised (an operator exit is a `SystemExit`)."""
     cli = branch_cli()
     _base, src = T.runs_base(tmp_path)
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant_paths())
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
     if before is not None:
         before(ep)
     spawn = T.FakeSpawn()
@@ -874,7 +872,7 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant_paths()
+    tenant = T.current_tenant()
     ep = cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()

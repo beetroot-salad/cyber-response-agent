@@ -140,9 +140,9 @@ def load_case_mapping(settings: Path) -> CaseMapping:
     try:
         data = safe_load(raw.decode("utf-8"))
     except UnicodeDecodeError as e:
-        raise CaseTicketError(f"case-history mapping is not UTF-8: {e}") from e
+        raise CaseTicketError(f"case-history mapping {path} is not UTF-8: {e}") from e
     except yaml.YAMLError as e:
-        raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
+        raise CaseTicketError(f"case-history mapping {path} is not valid YAML: {e}") from e
     if not isinstance(data, dict):
         raise CaseTicketError(f"case-history mapping is not a mapping: {shown}")
     _check_lifecycle(data)
@@ -155,6 +155,23 @@ def _thawed(mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
     if isinstance(mapping, CaseTicketError):
         raise CaseTicketError(str(mapping)) from None
     return mapping.plain()
+
+
+def check_mapping(settings: Path) -> None:
+    """The tenant's case-history mapping parses and keeps its lifecycle invariant, or
+    `CaseTicketError` naming it — `tenant.py setup`'s settings-parse rule, since no run reads
+    the mapping before its post-run ticket write.
+
+    An operator command on the host, so the refusal names the file's own path: the loader
+    names some faults only by their place in the tenant's folder, because its message can
+    reach a run's record."""
+    try:
+        load_case_mapping(settings)
+    except CaseTicketError as bad:
+        path = str(_mapping_path(settings))
+        if path in str(bad):
+            raise
+        raise CaseTicketError(f"{path}: {bad}") from bad
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:

@@ -6,7 +6,8 @@ The investigation is driven by the in-process PydanticAI driver
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
-Usage (every run names its tenant, and there is no default; create one once with
+Usage (every run names its tenant, and there is no default; on the host,
+clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
     `python3 defender/scripts/tenant.py setup <tenant>`):
     python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
 
@@ -51,7 +52,6 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
 from defender._episode_paths import LAYOUT  # noqa: E402
-from defender._tenants import default_tenants_root  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
@@ -95,9 +95,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "flag now governs both lanes)")
     p.add_argument("--update-ticket", action="store_true",
                    help="Write/close a case-history ticket for this alert (default off)")
-    p.add_argument("--tenants-root", type=Path, default=None,
-                   help="the folder holding one sub-folder per tenant's settings (#1106); "
-                        "default <this checkout>/knowledge/tenants")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
@@ -340,25 +337,24 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 
 def _resolve_run_tenant(
-    tenants_root: Path, tenant_id: _tenant.TenantId, *, runs_base: Path, defender_dir: Path,
-    dispatches_lead_zero: bool,
+    tenant: _tenant.Tenant, *, defender_dir: Path, dispatches_lead_zero: bool,
 ) -> RunTenant:
-    """The run's tenant's settings, or the refusal — before the run dir, the box and any model
-    call, so tenant misconfiguration fails early. Refusals name the file to edit.
+    """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
+    readiness function — or the refusal, before the run dir, the box and any model call, so
+    tenant misconfiguration fails early. Refusals name the file to edit.
 
-    `tenant_id` is the request's (`_resolve_tenant_id`). `dispatches_lead_zero` is False for a
-    `--resume` sibling, which dispatches no turn-0 lead."""
+    `dispatches_lead_zero` is False for a `--resume` sibling, which dispatches no turn-0
+    lead."""
     from defender.runtime import run_tenant as run_tenant_mod
 
     try:
-        return run_tenant_mod.resolve_tenant(
-            tenants_root, tenant_id, defender_dir=defender_dir,
-            dispatches_lead_zero=dispatches_lead_zero, box_mounted=(runs_base,))
+        return run_tenant_mod.run_tenant_for(
+            tenant, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
     except run_tenant_mod.TenantRefused as refusal:
-        sys.exit(f"[run.py] this run's tenant {tenant_id!r} cannot be used: {refusal}")
+        sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
 
-def _sibling_tenant_agrees(world: Any, tenant_id: _tenant.TenantId) -> None:
+def _sibling_tenant_agrees(world: Any, tenant: _tenant.Tenant) -> None:
     """Refuse a sibling whose request names a tenant other than the episode's — the source
     run's, read from its runs-base record, never its box-writable stamp. The launcher names
     the episode's tenant on each sibling's command line, so a disagreement is a sibling resumed
@@ -366,11 +362,12 @@ def _sibling_tenant_agrees(world: Any, tenant_id: _tenant.TenantId) -> None:
     if world is None:
         return
     try:
-        source_tenant = _tenant.tenant_of_run_dir(Path(world.family.source_run_dir))
+        source_tenant = _tenant.tenant_of_run_dir(
+            tenant.data_root, Path(world.family.source_run_dir))
     except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] {refused}")
-    if source_tenant != tenant_id:
-        sys.exit(f"[run.py] the requested tenant {tenant_id!r} disagrees with the source run's "
+    if source_tenant != tenant.id:
+        sys.exit(f"[run.py] the requested tenant {tenant.id!r} disagrees with the source run's "
                  f"tenant {source_tenant!r}")
 
 
@@ -465,7 +462,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(
-    alert: Path, run_id: str | None, *, tenant_id: _tenant.TenantId, model: str | None,
+    alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None,
     world: Any = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
@@ -476,26 +473,31 @@ def _materialize_run(
     (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run = _run.materialize_run(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+        run = _run.materialize_run(alert, run_id, tenant=tenant, model=model, world=world)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
 
 
-def _resolve_tenant_id(ns: argparse.Namespace) -> _tenant.TenantId:
-    """The request's tenant, or a `[run.py]` refusal before the preflight. Every run names it
-    with `--tenant`, a sibling included: it comes from the request (for a platform, the acting
-    user's authentication context), never from a record or a stamp, and there is no default.
-    A sibling's is also checked against its source's record once the manifest is resolved
-    (`_sibling_tenant_agrees`)."""
+def _accept_request_tenant(
+    ns: argparse.Namespace, *, box_mounted: tuple[Path, ...],
+) -> _tenant.Tenant:
+    """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
+    names it with `--tenant`, a sibling included: it comes from the request (for a platform,
+    the acting user's authentication context), never from a record or a stamp, and there is no
+    default. The data root is resolved here, once, and accepted under through
+    `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
+    tenant is also checked against its source's record once the manifest is resolved
+    (`_sibling_tenant_agrees`). `box_mounted` is what the run's box mounts besides the
+    checkout — a sibling's runs base, inside its held episode — and the tenant's settings must
+    sit under none of it."""
     try:
-        if ns.tenant is None:
-            raise _tenant.TenantRefused(
-                "--tenant is required: every run names its tenant, a sibling included, and "
-                "there is no default")
-        return _tenant.request_tenant(ns.tenant)
+        tenant_id = _tenant.requested_tenant_id(ns.tenant)
+        return _tenant.accept_tenant(
+            _tenant.resolve_data_root(), tenant_id, defender_dir=DEFENDER_DIR,
+            box_mounted=box_mounted)
     except _tenant.TenantRefused as refused:
-        sys.exit(f"[run.py] {refused}")
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
 def _resume_episode_dir(ns: argparse.Namespace) -> Path | None:
@@ -520,12 +522,6 @@ def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
     return ns.alert.resolve(), ns.run_id
 
 
-def _runs_base(episode: Episode | None, tenant_id: _tenant.TenantId) -> Path:
-    """The runs base this run's box will mount — the tenant's own, or a sibling's inside its
-    episode — which the tenant's settings must not sit under."""
-    return _tenant.runs_base_for(tenant_id) if episode is None else episode.runs.path
-
-
 def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
     argv: list[str],
     *,
@@ -542,12 +538,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
-    # This entry point hands the tenants root down; nothing below finds it for itself.
-    tenants_root = (ns.tenants_root if ns.tenants_root is not None
-                    else default_tenants_root(DEFENDER_DIR.parent))
-    # The tenant, from the request, before anything is spent: required on every run, a sibling
-    # included, and checked against the grammar and the row.
-    tenant_id = _resolve_tenant_id(ns)
     # A sibling's door: the episode it resumes, held for the whole run. The handle serves the
     # manifest read and the world ledger's writes; nothing below reopens the episode by name.
     episode_dir = _resume_episode_dir(ns)
@@ -557,15 +547,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     except OSError as missing:
         sys.exit(f"[run.py] --resume {ns.resume}: its episode dir cannot be held ({missing})")
     with door as episode:
-        runs_base = _runs_base(episode, tenant_id)
-
-        # One tenant resolution, shared by the old-manifest judge (only for a manifest recording
+        # The tenant, from the request, accepted under the data root before anything is spent;
+        # nothing below resolves the root or a tenant path again. A sibling's runs base is its
+        # episode's, which the box mounts and the tenant's settings must not sit under.
+        accepted = _accept_request_tenant(
+            ns, box_mounted=() if episode is None else (episode.runs.path,))
+        # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            tenants_root, tenant_id, runs_base=runs_base, defender_dir=DEFENDER_DIR,
-            dispatches_lead_zero=ns.resume is None))
+            accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.resume is None))
         world = _resume_target(ns, episode=episode, tenant=tenant_of)
-        _sibling_tenant_agrees(world, tenant_id)
+        _sibling_tenant_agrees(world, accepted)
 
         alert, run_id = _case_input(ns, world)
 
@@ -580,7 +572,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             return rc
 
         # The handle, not just its directory: the post-run step saves the run page through it.
-        run = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
+        run = materialize(alert, run_id, tenant=accepted, model=model, world=world)
         run_dir = run.run_dir
 
         # Every log line from here on, the crash included, names this run and the tenant this

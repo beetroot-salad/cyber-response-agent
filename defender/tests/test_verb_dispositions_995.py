@@ -47,9 +47,10 @@ from defender.tests import _tenants1106 as T1106
 REPO_ROOT = PATHS.repo_root
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
-#: The committed tenant's settings folder — where the shipped table lives since #1106 moved it
-#: out of `defender/knowledge/environment/` (the repo-root `knowledge/tenants/playground/`).
-SETTINGS = T1106.PLAYGROUND_SETTINGS
+#: The committed fixture tenant's settings folder — the shipped table moved out of
+#: `defender/knowledge/environment/` by #1106; since #1120 (C26) the table these tests hold to
+#: is the frozen test fixture's (the repo-root `knowledge/tenant-fixture/`).
+SETTINGS = T1106.FIXTURE_SETTINGS
 
 #: A minimal well-formed row, for tests whose subject is some OTHER row's malformation.
 OK = {"roles": ["gather"]}

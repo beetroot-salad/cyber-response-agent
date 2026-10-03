@@ -47,7 +47,7 @@ def _gather_policy():
     """Gather's policy, compiled with a RUN's grant (#1106 M4: `GATHER_DEF` carries none) —
     lazily, so the module collects before the tenant folder exists."""
     return compile_policy_for(
-        T1106.playground_gather_def(), run_dir=Path("/run"), defender_dir=Path("/dfn"))
+        T1106.fixture_gather_def(), run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
 
 def _ident(run_dir: Path) -> dict:

@@ -122,10 +122,28 @@ Live runs additionally need a provider API key (Anthropic by default; Fireworks 
 ## Running The Agent
 
 Every run names its tenant, and there is no default (#1078): set `DEFENDER_DATA_ROOT` to a
-directory outside the checkout and create your tenant once —
+directory outside the checkout, clone your tenant's knowledge repo into it, and set the tenant up
+once —
 
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
+git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
+python3 defender/scripts/tenant.py setup playground
+```
+
+Before setup, clone the tenant's own repo into `<root>/<id>/knowledge` on the host, with a
+credential helper or an ssh agent (never a credential in the URL), and run setup once the clone
+has exited 0: setup adopts the placed folder as it is — it copies nothing and runs no git — checks
+it, and writes the tenant's row last. A new tenant's repo starts from
+`tenant.py scaffold <id> <empty dir>`.
+
+**A data root made before #1120** holds `<root>/<id>/{tenant.json,runs,sessions}` and no
+`knowledge/`, so every run refuses it. Its settings were committed in this repo until #1120 and
+there is no tenant repo to clone: build the folder once from their last copy in the repo's
+history (a full clone, not a shallow one) with the one-off `migrate`, then run setup —
+
+```bash
+python3 defender/scripts/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"
 python3 defender/scripts/tenant.py setup playground
 ```
 

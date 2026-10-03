@@ -38,7 +38,7 @@ from defender.scripts.case_history import case_ticket
 from defender.tests import _spec767 as M
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
-from defender.tests._data_root_1078 import ensure_d9_tenant
+from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
     FakeVerbs,
@@ -114,10 +114,11 @@ class _ReceiptWriter:
 
 
 def _run_world(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[Path, Path, S.DockerShim]:
-    """A data-root row (#1078), a planted #1107 tenant under a tmp tenants root, an alert, and the
-    docker shim first on PATH. Returns (tenants root, alert, shim)."""
+    """A data-root row (#1078), a complete #1107 tenant set up under this test's data root (#1120:
+    `run.py` reads its tenants from `DEFENDER_DATA_ROOT` alone), an alert, and the docker shim
+    first on PATH. Returns (data root, alert, shim)."""
     ensure_d9_tenant()
-    root = tmp_path / f"tenants-{name}"
+    root = current_data_root()
     S.plant(root, marker=f"pg{name}")
     alert = S.plant_alert(tmp_path / f"alert-{name}")
     shim = S.DockerShim(tmp_path / f"docker-{name}")
@@ -596,7 +597,8 @@ def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
     """A resumed sibling's WorldRegistry, built in run.py, and the estate applier judge a ticket
     comment patch against the record's ticket_mapping. Editing mapping.yaml's released status after
     the record is built does not change which patch is refused."""
-    root = tmp_path / "tenants"
+    # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
+    root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE, released_status="closed")
     probe = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
@@ -645,7 +647,7 @@ def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
         try:
             outcome: Any = S.drive_run(
                 H.resume_argv(ep / "family.yaml", world, "--tenant", S.PLAYGROUND_ID,
-                              "--tenants-root", str(root), "--no-learn"),
+                              "--no-learn"),
                 rec, preflight=edit_after_record, lifecycle=lifecycle)
         except EstateError as refused:
             outcome = refused

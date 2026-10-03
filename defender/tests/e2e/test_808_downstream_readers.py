@@ -312,7 +312,7 @@ def test_the_adapters_own_default_index_read_still_agrees_with_lead_zeros(tmp_pa
               alert=alert_doc(signal_index=ALERTS_INDEX), answer=answer_hits(DOCS))
 
     config = load_config(VerbContext(defender_dir=defender_dir(), run_dir=res.run_dir, env={},
-                                     tenant=_tenants1106.playground_run_tenant()))
+                                     tenant=_tenants1106.fixture_run_tenant()))
     assert config["ELASTIC_ALERTS_INDEX"] == ALERTS_INDEX, \
         "the adapter's configured alerts pattern moved out from under this fixture"
     assert config["ELASTIC_EVENTS_INDEX"] == EVENTS_INDEX

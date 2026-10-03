@@ -693,7 +693,7 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
     for defn in bash_roles:
         if defn.role is AgentRole.GATHER:
             # #1106 M4: gather binds with a RUN's grant (its definition carries none).
-            defn = T1106.playground_gather_def()
+            defn = T1106.fixture_gather_def()
         tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
         if defn.requires_explicit_tree:
             tree.mkdir(parents=True, exist_ok=True)

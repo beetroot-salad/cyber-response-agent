@@ -379,7 +379,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
                                        "params": params,
                                        "query_id": "elastic.probe"})]])
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    gather_def = T1106.playground_gather_def()
+    gather_def = T1106.fixture_gather_def()
     agent = driver.build_agent_core(
         gather_def, deps_type=gather_def.deps_cls, instructions="probe",
         logger=logger, agent_id="gather:l-001",

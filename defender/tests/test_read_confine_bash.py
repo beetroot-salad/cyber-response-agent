@@ -64,7 +64,7 @@ def env(tmp_path):
     (dfn / "fixtures" / "held-out" / "m01").mkdir(parents=True)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     gather = compile_policy_for(
-        _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn)
+        _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
     return SimpleNamespace(run=run, dfn=dfn, main=main, gather=gather)
 
 
@@ -84,7 +84,7 @@ def test_compile_policy_for_requires_run_dir():
     """compile_policy_for(GATHER_DEF) with NO run_dir RAISES → the confined reader policy can't
     be built in an unconfined state (run_dir is a required positional, no silent fallback)."""
     # rejected: return a permissive default policy (re-opens the cat /etc/passwd bypass)
-    gather_def = _tenants1106.playground_gather_def()
+    gather_def = _tenants1106.fixture_gather_def()
     with pytest.raises((TypeError, ValueError)):
         compile_policy_for(gather_def)
 
@@ -98,7 +98,7 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
     to the PATHS checkout when omitted — a real confined tree, not unconfined — so an OMITTED
     defender_dir is allowed; only a degenerate EXPLICIT root is rejected.)"""
     # rejected: accept '' or '/' and produce a root-anchored (=everything) policy
-    gather_def = _tenants1106.playground_gather_def()
+    gather_def = _tenants1106.fixture_gather_def()
     for bad in ("", "/"):
         with pytest.raises((TypeError, ValueError)):
             compile_policy_for(gather_def, run_dir=Path(bad), defender_dir=tmp_path)

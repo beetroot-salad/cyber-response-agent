@@ -10,21 +10,11 @@ The consumers, each driven through its REAL entry point:
   C26) and the sibling union (`render.sibling_union`);
 * the review replay (`learning/branch/review.verb_context`, `seams.adapter_seam`): the replay
   env's `DEFENDER_RUNS_BASE` is the threaded base (F3);
-* `evals/held_out.py`: exactly one of `--tenant` or the positional runs dir (C27, N9), the
-  positional branch never resolving the data root (§7 J50, human), `--help` never resolving a
-  runs base (C-R17);
-* `evals/oracle_golden/generate_case.py`: `--tenant`, refused at entry (§7 J32), its child's
-  run dir predicted as `runs_base_for(T)/candidate`, and no `/tmp/defender-runs` fallback of its
-  own (C-R16).
-
-COINED SEAM (named here so write-code-from-spec renames it in one place): generate_case's child
-`run.py` is spawned by `investigate(alert, run_id)` through the module-level `_run`, which calls
-`subprocess.run` directly — the design gives that spawn NO injection seam, so the seam is part
-of this contract: `investigate(alert, run_id, tenant_id=T, run=<Runner>)`, the same `run:
-Runner` parameter shape `rules_fired_since` and `wait_for_alert` in that module already take.
-The fake runner RECORDS the argv and keywords it is handed and stands in for the child only by
-leaving the run dir the child's own materialize would (named by the argv's `--run-id`, under
-the tenant's runs base) — it injects no fault.
+* `evals/held_out.py`: the positional runs dir, required, and never resolving the data root
+  (§7 J50, human), `--help` never resolving a runs base (C-R17). Its `--tenant` (C27, N9) is
+  gone: an evaluation tool outside the application takes no tenant (human, #1120 / PR #1157);
+* `evals/oracle_golden/generate_case.py` (D4 row 7, §7 J32, C-R16) is removed (human, #1120 /
+  PR #1157: "Remove generate_case"); its cells here went with it.
 
 Every other input is real: the colliding run, the sibling trials, the fixtures and run dirs
 held_out scores are written to disk in the test. The judge's model seam is `_judge_921.FakeJudge`
@@ -34,7 +24,6 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -95,10 +84,6 @@ def _held_out():
     return H.mod("evals.held_out")
 
 
-def _generate_case():
-    return H.mod("evals.oracle_golden.generate_case")
-
-
 def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign") -> Path:
     """One labeled held-out fixture: `<fixtures>/<slug>/{alert.json, ground_truth.yaml}`."""
     fx = tmp_path / "fixtures" / slug
@@ -128,38 +113,6 @@ def _drive_held_out(argv: list[str], capsys) -> tuple[Any, str]:
 
 
 SCORED = "# Held-out eval"
-
-
-class FakeRunner:
-    """generate_case's `run=` seam — records every child it is asked to start (argv and
-    keywords), and leaves the run dir the child's own materialize would leave, at `<the tenant's
-    runs base>/<the argv's --run-id>`. Injects no fault."""
-
-    def __init__(self, tenant_runs: Path) -> None:
-        self.tenant_runs = tenant_runs
-        self.calls: list[tuple[list[str], dict[str, Any]]] = []
-
-    def __call__(self, cmd, **kw: Any) -> subprocess.CompletedProcess:
-        argv = [str(c) for c in cmd]
-        self.calls.append((argv, dict(kw)))
-        if "--run-id" in argv:
-            (self.tenant_runs / argv[argv.index("--run-id") + 1]).mkdir(parents=True,
-                                                                       exist_ok=True)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
-
-def _gc_argv(*extra: str) -> list[str]:
-    return ["--scenario", "ssh-brute", "--case-id", "c1078", "--split", "dev",
-            "--activity-family", "auth", *extra]
-
-
-def _drive_generate_case(argv: list[str], capsys) -> tuple[Any, str]:
-    try:
-        status: Any = _generate_case().main(argv)
-    except SystemExit as stopped:
-        status = stopped.code
-    out = capsys.readouterr()
-    return status, out.out + out.err
 
 
 # ======================================================================================
@@ -292,16 +245,16 @@ def test_d4_review_env_threaded(tmp_path, monkeypatch):
 
     review = H.mod("learning.branch.review")
     seams = H.mod("learning.branch.seams")
-    ctx = review.verb_context(ep, H.T1106.PLAYGROUND_SETTINGS, runs_base=base)
+    ctx = review.verb_context(ep, H.T1106.FIXTURE_SETTINGS, runs_base=base)
     assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
     assert ctx.run_dir == ep, "the replay context stopped being the episode dir"
-    side = seams.adapter_seam(ep, H.T1106.playground_run_tenant(), runs_base=base)
+    side = seams.adapter_seam(ep, H.T1106.fixture_run_tenant(), runs_base=base)
     assert side.ctx.env["DEFENDER_RUNS_BASE"] == str(base)
 
     with pytest.raises(TypeError):
-        review.verb_context(ep, H.T1106.PLAYGROUND_SETTINGS)
+        review.verb_context(ep, H.T1106.FIXTURE_SETTINGS)
     with pytest.raises(TypeError):
-        seams.adapter_seam(ep, H.T1106.playground_run_tenant())
+        seams.adapter_seam(ep, H.T1106.fixture_run_tenant())
 
 
 def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
@@ -319,7 +272,7 @@ def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
     ep.mkdir(parents=True)
 
     ctx = H.mod("learning.branch.review").verb_context(
-        ep, H.T1106.PLAYGROUND_SETTINGS, runs_base=H.runs_base_for(TENANT))
+        ep, H.T1106.FIXTURE_SETTINGS, runs_base=H.runs_base_for(TENANT))
     child = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
         [sys.executable, "-c", "import os; print(os.environ['DEFENDER_RUNS_BASE'])"],
         env=ctx.env, capture_output=True, text=True, check=True, timeout=60)
@@ -331,12 +284,15 @@ def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
 # ======================================================================================
 
 def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
-    """held_out --tenant T scores runs_base_for(T), held_out <runs_dir> scores that dir, and
-    both or neither is refused.
+    """held_out <runs_dir> scores exactly that dir, and a `--tenant` (with or without a runs
+    dir) or no runs dir at all is refused. Superseded for #1120 (human, PR #1157): held_out is
+    an evaluation tool outside the application and takes no tenant, so the `--tenant` branch
+    this test once pinned (C27) is now a usage error.
 
-    Which tree was scored is read off the verdict: the fixture's run under the tenant's runs
-    base closes `benign` (OK), the one under a stale retired knob closes `malicious`, and the
-    positional dir's closes `inconclusive`. A refusal prints no scoring report."""
+    Which tree was scored is read off the verdict: a fixture's run under a set-up tenant's runs
+    base closes `benign`, the one under a stale retired knob closes `malicious`, and the
+    positional dir's closes `inconclusive` — so only the positional dir may be scored. A
+    refusal prints no scoring report."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
@@ -349,17 +305,13 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
     _scored_run(positional, "inconclusive")
     fx = ["--fixtures-dir", str(fixtures)]
 
-    status, out = _drive_held_out(["--tenant", TENANT, *fx], capsys)
-    assert status == 0, out
-    assert "slug-one: predicted='benign'" in out, (
-        f"held_out --tenant did not score runs_base_for(T):\n{out}")
-    assert "WRONG" not in out, out
-
     status, out = _drive_held_out([str(positional), *fx], capsys)
     assert status == 0, out
     assert "predicted='inconclusive'" in out, f"the positional dir was not the one scored:\n{out}"
 
-    for argv, what in (([str(positional), "--tenant", TENANT, *fx], "both"), (fx, "neither")):
+    for argv, what in ((["--tenant", TENANT, *fx], "--tenant"),
+                       ([str(positional), "--tenant", TENANT, *fx], "a runs dir and --tenant"),
+                       (fx, "no runs dir")):
         status, out = _drive_held_out(argv, capsys)
         assert status not in (0, None), f"held_out with {what} was not refused"
         assert SCORED not in out, f"held_out with {what} scored something before refusing:\n{out}"
@@ -385,105 +337,13 @@ def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, cap
     assert not (tmp_path / "rel").exists(), "the positional branch created the data root"
 
 
-# ======================================================================================
-# generate_case (D4 row 7)
-# ======================================================================================
-
-def test_d4_generate_case_tenant(tmp_path, monkeypatch, capsys):
-    """generate_case --tenant T passes --tenant T to the spawned run.py and predicts
-    runs_base_for(T)/candidate; without --tenant it is refused.
-
-    The spawn is driven through the coined `investigate(..., tenant_id, run)` seam (module
-    docstring). The prediction is discriminated by the free-suffix probe: the tenant's runs base
-    holds `golden-c1` and the stale retired knob holds `golden-c1` AND `golden-c1-2`, so a
-    prediction still probing the knob picks `-3` where the tenant's base gives `-2`."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, TENANT)
-    tenant_runs = H.runs_dir(root, TENANT)
-    (tenant_runs / "golden-c1").mkdir(parents=True)
-    stale = tmp_path / "stale-runs"
-    for taken in ("golden-c1", "golden-c1-2"):
-        (stale / taken).mkdir(parents=True)
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
-    alert = H.plant_alert(tmp_path / "case")
-
-    runner = FakeRunner(tenant_runs)
-    run_dir = _generate_case().investigate(alert, "golden-c1", tenant_id=TENANT, run=runner)
-    assert len(runner.calls) == 1, f"generate_case started {len(runner.calls)} children"
-    argv, _kw = runner.calls[0]
-    assert Path(argv[1]) == H.RUN_PY, f"the child is not defender/run.py: {argv}"
-    assert argv[argv.index("--tenant") + 1] == TENANT, f"--tenant T is not on the child: {argv}"
-    assert argv[argv.index("--run-id") + 1] == "golden-c1-2", argv
-    assert run_dir == H.runs_base_for(TENANT) / "golden-c1-2"
-
-    status, out = _drive_generate_case(_gc_argv(), capsys)
-    assert status not in (0, None), "generate_case without --tenant was not refused"
-    assert "--tenant" in out, f"generate_case's refusal does not name --tenant:\n{out}"
-
-
-def test_generate_case_for_a_tenant_with_no_row(tmp_path, monkeypatch, capsys):
-    """generate_case --tenant acme (well-formed, no row) is refused, with no candidate dir and
-    nothing spent (universal 2). Whether the parent refuses before spawning or the child run.py
-    refuses is J32's fork — resolved at §7 (auto): the parent refuses at entry, before
-    prediction or spawn, and passes require_tenant's message through verbatim."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, TENANT)
-    cases = tmp_path / "cases"
-    before = H.census(root)
-    owner = H.owner_refusal(H.require_tenant, root, "acme")
-
-    status, out = _drive_generate_case(_gc_argv("--tenant", "acme", "--cases-dir", str(cases)),
-                                       capsys)
-    assert status not in (0, None)
-    H.assert_verbatim(out, owner, entry="generate_case")
-
-    runner = FakeRunner(H.runs_dir(root, "acme"))
-    with pytest.raises((SystemExit, H.tenant().TenantRefused)) as refused:
-        _generate_case().investigate(H.plant_alert(tmp_path / "a"), "golden-c1",
-                                     tenant_id="acme", run=runner)
-    H.assert_verbatim(H.refusal_text(refused.value), owner, entry="generate_case.investigate")
-    assert runner.calls == [], "a run.py child was spawned for a tenant with no row"
-    assert H.census(root) == before, "the refused tenant left something under the data root"
-    assert not cases.exists(), "a candidate case dir was created"
-
-
-def test_generate_case_parent_and_child_resolve_different_data_roots(tmp_path, monkeypatch):
-    """generate_case's parent and its spawned run.py resolve the same data root: the child
-    inherits the parent's environment unchanged. PO2 stays carried.
-
-    What the child is handed is read off the runner seam: either no `env` (the child inherits
-    this process's environment, which must itself be untouched) or an `env` whose
-    `DEFENDER_DATA_ROOT` is the parent's."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, TENANT)
-    before = dict(os.environ)
-    runner = FakeRunner(H.runs_dir(root, TENANT))
-    _generate_case().investigate(H.plant_alert(tmp_path / "a"), "golden-c2", tenant_id=TENANT,
-                                 run=runner)
-    assert runner.calls, "no child was started"
-    _argv, kw = runner.calls[0]
-    child_env = kw.get("env")
-    if child_env is None:
-        assert dict(os.environ) == before, "the parent rewrote its own environment"
-        child_env = os.environ
-    assert child_env.get(H.DATA_ROOT_ENV) == str(root), (
-        "the child run.py resolves a different data root than the parent")
-
-
 def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
-    """generate_case --tenant T and held_out --tenant T check the grammar and require_tenant at
-    entry, before prediction, scoring or spawn, and find their runs base only through
-    resolve_data_root/runs_base_for(T): with DEFENDER_DATA_ROOT unset each refuses up front
-    naming the variable, generate_case keeps no /tmp/defender-runs fallback of its own, and
-    held_out --help does not resolve a runs base.
+    """held_out --help does not resolve a runs base. The other halves are gone (human, #1120 /
+    PR #1157): held_out takes no tenant, and generate_case is removed.
 
     `--help` is driven in the one configuration today's eager default cannot survive (C-R17):
     the retired knob and the learning state dir naming one directory, which
     `resolve_runs_base()` refuses before argparse ever prints."""
-    fixtures = _fixtures(tmp_path)
     shared = tmp_path / "shared"
     shared.mkdir()
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(shared))
@@ -492,41 +352,6 @@ def test_s7_generate_case_held_out_migrated(tmp_path, monkeypatch, capsys):
     assert status in (0, None), f"held_out --help failed:\n{out}"
     assert "usage" in out.lower(), (
         f"held_out --help resolved a runs base before printing:\n{out}")
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learning-state"))
-
-    # the grammar and the row, at entry — before scoring and before any spawn
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    for bad in ("../x", "acme"):
-        owner = (H.owner_refusal(H.tenant().TenantId, bad) if bad == "../x"
-                 else H.owner_refusal(H.require_tenant, root, bad))
-        status, out = _drive_held_out(["--tenant", bad, "--fixtures-dir", str(fixtures)], capsys)
-        assert status not in (0, None), out
-        assert SCORED not in out, out
-        H.assert_verbatim(out, owner, entry=f"held_out --tenant {bad!r}")
-        status, out = _drive_generate_case(
-            _gc_argv("--tenant", bad, "--cases-dir", str(tmp_path / "cases")), capsys)
-        assert status not in (0, None)
-        H.assert_verbatim(out, owner, entry=f"generate_case --tenant {bad!r}")
-
-    # DEFENDER_DATA_ROOT unset: refused up front, naming the variable
-    H.set_data_root(monkeypatch, None)
-    status, out = _drive_held_out(["--tenant", TENANT, "--fixtures-dir", str(fixtures)], capsys)
-    assert status not in (0, None), out
-    assert H.DATA_ROOT_ENV in out, out
-    assert SCORED not in out, out
-    status, out = _drive_generate_case(_gc_argv("--tenant", TENANT), capsys)
-    assert status not in (0, None), out
-    assert H.DATA_ROOT_ENV in out, out
-    runner = FakeRunner(tmp_path / "nowhere")
-    with pytest.raises((SystemExit, H.tenant().TenantRefused)) as refused:
-        _generate_case().investigate(H.plant_alert(tmp_path / "a"), "golden-c3",
-                                     tenant_id=TENANT, run=runner)
-    assert H.DATA_ROOT_ENV in H.refusal_text(refused.value)
-    assert runner.calls == [], "generate_case spawned a child with no data root to predict under"
-
-    source = Path(_generate_case().__file__).read_text(encoding="utf-8")
-    assert "/tmp/defender-runs" not in source, "generate_case keeps its own runs-base fallback"
 
 
 # ======================================================================================

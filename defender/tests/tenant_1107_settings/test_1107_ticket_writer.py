@@ -44,7 +44,7 @@ from defender._run_handle import Run
 from defender._run_paths import RunPaths
 from defender.runtime import run_end, run_tenant
 from defender.scripts.case_history import ticket_writer
-from defender.tests._data_root_1078 import ensure_d9_tenant
+from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 TW_LOGGER = ticket_writer.__name__
@@ -57,10 +57,11 @@ MARKER = "tw1107"
 
 def _world(tmp_path: Path, *, marker: str = MARKER, released_status: str = "closed",
            name: str = "tenants") -> tuple[Path, Path, Path]:
-    """The data-root row (#1078), a complete #1107 tenant under a tmp tenants root, and an alert.
-    Returns (tenants root, tenant folder, alert)."""
+    """The data-root row (#1078), a complete #1107 tenant set up under this test's data root
+    (#1120: `run.py` reads its tenants from `DEFENDER_DATA_ROOT` alone; a second call replaces the
+    first's knowledge whole), and an alert. Returns (data root, tenant knowledge folder, alert)."""
     ensure_d9_tenant()
-    root = tmp_path / name
+    root = current_data_root()
     folder = S.plant(root, marker=marker, released_status=released_status)
     alert = S.plant_alert(tmp_path / f"alert-{name}")
     return root, folder, alert
@@ -93,7 +94,7 @@ def _summary(truncated_by: str | None = None, closed_before_cut: bool = False) -
 
 
 def _host_paths(folder: Path, root: Path) -> set[str]:
-    """The tenant's host settings path and the tenants root, as given and resolved."""
+    """The tenant's host settings path and the data root, as given and resolved."""
     settings = S.settings_of(folder)
     return {str(settings), str(settings.resolve()), str(root), str(root.resolve())}
 

@@ -125,7 +125,7 @@ class _Env(SimpleNamespace):
 
     @functools.cached_property
     def gather(self) -> permission.AgentPolicy:
-        return compile_policy_for(T1106.playground_gather_def(), run_dir=self.run,
+        return compile_policy_for(T1106.fixture_gather_def(), run_dir=self.run,
                                   defender_dir=self.dfn)
 
 
@@ -908,7 +908,7 @@ def test_h1_compile_policy_for_is_idempotent(env):
     """h1: compiling the same (def, roots) twice yields an EQUAL policy — the compile is a pure
     projection of declared data, with no accumulated or cached state leaking between calls
     (`tools_gather.py:325` binds GATHER_DEF once per DISPATCH, many times per run)."""
-    for defn in (MAIN_DEF, T1106.playground_gather_def()):
+    for defn in (MAIN_DEF, T1106.fixture_gather_def()):
         a = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
         b = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
         assert _projection(a) == _projection(b)
@@ -1006,9 +1006,10 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
 
     c = cmd.format(run=env.run, dfn=env.dfn)
     # #1106 M2: gather's grant is built from a named tenant under an injected root — the CLI
-    # holds no process-level grant to fall back to.
-    tenant = (("--tenants-root", str(T1106.TENANTS_ROOT), "--tenant", T1106.PLAYGROUND_ID)
-              if which == "gather" else ())
+    # holds no process-level grant to fall back to. The root is `$DEFENDER_DATA_ROOT` (#1120);
+    # the tenant is the committed fixture placed there, whose grants `env.gather` was compiled
+    # from.
+    tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
     # The CLI's `main` in-process: the differential is about what `explain` decides, and a
     # fresh interpreter per (agent, command) pair only re-paid the import. i1 drives the shim.
     rc = policy_cli.main(["explain", which, c, "--run-dir", str(env.run),

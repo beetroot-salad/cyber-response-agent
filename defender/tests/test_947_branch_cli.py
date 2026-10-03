@@ -37,12 +37,18 @@ def cli_mod():
 def tenant_paths(tmp_path, monkeypatch):
     """#1078: `episodes_root`'s refused/accepted zones are judged against a TENANT's data root
     now, not a single configured runs base. `setenv`, never `setattr`: the environment is the
-    seam `resolve_data_root` reads."""
-    from defender import _tenant
+    seam `resolve_data_root` reads. #1120: the launcher takes an ACCEPTED `Tenant`, so the
+    tenant is set up under that root the way an operator does (`set_up_tenant`)."""
+    from defender.tests._data_root_1078 import set_up_tenant
 
     root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    return _tenant.TenantPaths(root, "acme")
+    return set_up_tenant(root, "acme")
+
+
+def _tree(root: Path) -> list[str]:
+    """Every path under `root`, sorted — a refusal's no-write claim is compared on this."""
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
 
 
 @pytest.fixture
@@ -84,6 +90,10 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
     still its own to enforce.
     """
     cli = cli_mod()
+    # #1120: an accepted tenant's data root exists before the launcher runs, so "created
+    # nothing under the data root" is compared on its tree rather than on its absence.
+    data_root = tenant_paths.dir.parent
+    before = _tree(data_root)
 
     def primed_too_early(*_args, **_kwargs):
         pytest.fail("prime_base was called before the episode id was validated")
@@ -93,7 +103,7 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
                             prime=primed_too_early)
 
     assert not episodes_root.exists()
-    assert not tenant_paths.dir.parent.exists(), "the refused priming created the data root"
+    assert _tree(data_root) == before, "the refused priming wrote under the data root"
 
 
 def test_a_safe_episode_id_resolves_beneath_the_configured_episodes_root(

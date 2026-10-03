@@ -34,6 +34,7 @@ from defender.scripts.adapters import (  # noqa: E402
     host_state_adapter,
 )
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests import _triplet_947 as T  # noqa: E402
 from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -56,21 +57,31 @@ SOC_PLAYGROUND_CONTEXT_KEY = "SOC_PLAYGROUND_DOCKER_CONTEXT"
 
 
 def _plant(tmp_path: Path, marker: str, **kw: Any) -> tuple[Path, Path, Any]:
-    """A complete #1107 tenant `playground` under its own tenants root: (root, folder, TenantDir)."""
+    """A complete #1107 tenant `playground` under its own data root:
+    (root, knowledge folder, accepted Tenant)."""
     root = tmp_path / f"tenants-{marker}"
+    folder = S.plant(root, marker=marker, **kw)
+    return root, folder, S.tenant_folder_of(root)
+
+
+def _plant_at_data_root(marker: str, **kw: Any) -> tuple[Path, Path, Any]:
+    """`_plant`, under THIS test's data root — the one an entry point (`run.main`, a resume)
+    reads its tenants from (#1120: `DEFENDER_DATA_ROOT` alone, no flag). Replaces
+    any knowledge folder already there. Returns (data root, knowledge folder, accepted Tenant)."""
+    root = current_data_root()
     folder = S.plant(root, marker=marker, **kw)
     return root, folder, S.tenant_folder_of(root)
 
 
 def _linked_root(tmp_path: Path, marker: str) -> tuple[Path, Path, Path]:
     """A tenant planted under a real root and reached through a SYMLINKED tenants root (a link
-    to the root is admitted; `tenant_dir` refuses links only inside the folder). Returns
+    to the root is admitted; `accept_tenant` refuses links only below the root). Returns
     (link root, real folder, the settings path as given through the link)."""
     real = tmp_path / f"tenants-{marker}-real"
     folder = S.plant(real, marker=marker)
     link = tmp_path / f"tenants-{marker}-link"
     link.symlink_to(real, target_is_directory=True)
-    return link, folder, link / S.PLAYGROUND_ID / "settings"
+    return link, folder, link / S.PLAYGROUND_ID / "knowledge" / "settings"
 
 
 def _identity_worlds() -> list[dict]:
@@ -82,8 +93,8 @@ def _identity_worlds() -> list[dict]:
             T.world_doc("c", ov=T.overlay(patches={"identity": {"web-1": {"owner": "y"}}}))]
 
 
-def _resume_argv(manifest: Path, root: Path) -> list[str]:
-    return H.resume_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID, "--tenants-root", str(root))
+def _resume_argv(manifest: Path) -> list[str]:
+    return H.resume_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
 
 
 def _jsonl_text(run_dir: Path) -> str:
@@ -188,6 +199,7 @@ def test_s7_nf20_lead_zero_note_names_no_host_path(tmp_path):
 
     for arm, link, given, cause in (("none", link_none, given_none, S.NO_ELASTIC),
                                     ("bad", link_bad, given_bad, S.BAD_ELASTIC)):
+        assert given.is_dir(), f"the settings path as given names no folder: {given}"
         resolved = given.resolve()
         assert str(given) != str(resolved), "the tenants root is not reached through a link"
         record = run_tenant.resolve_tenant(link, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
@@ -270,7 +282,7 @@ def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant)
     # CX8: the shim, first on the PATH the run env inherits, receives any docker call's argv.
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
-    root, folder, tenant = _plant(tmp_path, "o5")
+    root, folder, tenant = _plant_at_data_root("o5")
     S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
 
     rec = S.RunRecorder(tmp_path / "runs" / "o5-run")
@@ -303,7 +315,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
     snapshot file); within the resumed run the values then stay fixed (O2)."""
     marker = "mf16"
     _base, source = H.tenant_source(data_root, S.PLAYGROUND_ID)
-    root, folder, _tenant = _plant(tmp_path, marker)
+    root, folder, _tenant = _plant_at_data_root(marker)
     original = f"http://cmdb-{marker}:8080"
     edited = "http://cmdb-mf16-edited:8080"
     later = "http://cmdb-mf16-later:8080"
@@ -329,7 +341,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
                                                    worlds=_identity_worlds()),
                         episode_id=T.EPISODE_ID, root=tmp_path / "episodes")
     sibling = S.RunRecorder(tmp_path / "sibling", before_lifecycle=edit_within)
-    rc, refused = S.drive_run(_resume_argv(episode / "family.yaml", root), sibling,
+    rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
                               visualize=sibling.visualize)
     assert refused is None, (rc, refused and H.refusal_text(refused))
     assert rc == 0, (rc, refused and H.refusal_text(refused))
@@ -364,7 +376,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
     shim = S.DockerShim(tmp_path / "docker")
 
     for arm in ("none", "bad"):
-        root, folder, _tenant = _plant(tmp_path, f"mf7e{arm}")
+        _root, folder, _tenant = _plant_at_data_root(f"mf7e{arm}")
         if arm == "none":
             shutil.rmtree(S.config_path(folder, "elastic").parent)
         else:
@@ -375,7 +387,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
                             root=tmp_path / f"episodes-{arm}")
         sibling = S.RunRecorder(tmp_path / f"sibling-{arm}")
 
-        rc, refused = S.drive_run(_resume_argv(episode / "family.yaml", root), sibling,
+        rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
                                   visualize=sibling.visualize)
         assert refused is None, f"[{arm}] the resume was refused: {H.refusal_text(refused)}"
         assert rc == 0, (arm, rc, sibling.order)
@@ -411,14 +423,18 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
     H.set_data_root(monkeypatch, None)
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
     _root, _folder, tenant = _plant(tmp_path, "rh1107")
-    resolved = run_tenant.resolve_run_tenant(tenant, defender_dir=S.DEFENDER,
-                                             dispatches_lead_zero=True)
+    # #1120: `resolve_run_tenant` is the readiness function (grants, correlation) over the
+    # tenant's settings; the record builder over an accepted tenant, which run start's
+    # `resolve_tenant` delegates to, is `run_tenant_for`.
+    resolved = run_tenant.run_tenant_for(tenant, defender_dir=S.DEFENDER,
+                                         dispatches_lead_zero=True)
 
     # "Nothing else": the one table resolve_run_tenant refuses (CX24: TABLE_BLANK, gather can
     # query nothing) is refused by the helper too — a helper assembling the pieces itself is not.
     _broot, _bfolder, blank = _plant(tmp_path, "rhblank", table=T1106.TABLE_BLANK)
     with pytest.raises(run_tenant.refusals()):
-        run_tenant.resolve_run_tenant(blank, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+        run_tenant.resolve_run_tenant(blank.settings, defender_dir=S.DEFENDER,
+                                      dispatches_lead_zero=False)
     with pytest.raises(run_tenant.refusals()):
         T1106.run_tenant(blank, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
@@ -447,10 +463,10 @@ def test_d_grants_through_tenant_config(tmp_path):
     run_grants(tenant.settings) projects, and dispatches lead-zero under the correlation
     identity resolve_run_tenant checks. The grants the eight former injection sites handed in
     are exactly these (CX24)."""
-    # rejected: a grants= override on the replay helper chain (_tenants1106.run_tenant, playground_run_tenant, _replay_harness.drive, _lead_zero_808.run, test_1106_query_lane._run): fork F1, resolved by the human toward the design
+    # rejected: a grants= override on the replay helper chain (_tenants1106.run_tenant, fixture_run_tenant, _replay_harness.drive, _lead_zero_808.run, test_1106_query_lane._run): fork F1, resolved by the human toward the design
     _root, _folder, tenant = _plant(tmp_path, "gb1107", table=T1106.TABLE_B)
     projected = T1106.run_grants(tenant.settings)
-    resolved = run_tenant.resolve_run_tenant(tenant, defender_dir=S.DEFENDER,
+    resolved = run_tenant.resolve_run_tenant(tenant.settings, defender_dir=S.DEFENDER,
                                              dispatches_lead_zero=True)
     helper = T1106.run_tenant(tenant, defender_dir=S.DEFENDER, dispatches_lead_zero=True)
 

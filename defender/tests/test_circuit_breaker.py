@@ -37,7 +37,7 @@ def test_argparse_heuristic_is_gone():
 def test_no_adapter_has_a_cli_left_to_mistype():
     """The ticket adapter's CLI is gone (#1107): there is no argv an agent can mistype, so no
     adapter exits 64 and the parser class that minted it no longer exists."""
-    for name in ("build_parser", "main", "_cli_context"):
+    for name in ("build_parser", "main", "_cli_context"):  # lint-stale-ref: ok — asserts these are gone
         assert not hasattr(ticket_adapter, name), f"ticket_adapter still has `{name}`"
     assert not hasattr(transport, "AdapterArgumentParser")
     assert not cb.is_infra_failure(transport.USAGE_EXIT_CODE)

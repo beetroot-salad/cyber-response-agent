@@ -56,7 +56,7 @@ MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
 def _gather():
     """Gather's policy over the synthetic roots, compiled with a RUN's grant (#1106 M4:
     `GATHER_DEF` carries none) — lazily, so the module collects before the tenant folder exists."""
-    return compile_policy_for(T1106.playground_gather_def(), run_dir=_RUN, defender_dir=_DFN)
+    return compile_policy_for(T1106.fixture_gather_def(), run_dir=_RUN, defender_dir=_DFN)
 
 
 def _bash(cmd, policy):
@@ -531,7 +531,7 @@ def test_read_main_loop_gather_raw_not_enumerated_gather_allowed(tmp_path):
     # substring, so it is pinned here too.
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
-    gather = compile_policy_for(T1106.playground_gather_def(), run_dir=run, defender_dir=dfn)
+    gather = compile_policy_for(T1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
     raw = run / "gather_raw" / "l-001" / "0.json"
     d = permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=main)
     assert not d.allow

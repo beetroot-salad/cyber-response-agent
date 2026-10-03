@@ -114,7 +114,10 @@ def tenant() -> Any:
 
 
 def TenantPaths(root: Path | str, tenant_id: str) -> Any:  # noqa: N802 — it is the class's own name
-    return tenant().TenantPaths(root, tenant_id)
+    """The private layout class #1120 made of the public one (M4): the same constructor, with
+    the O11a/J03 guards, now reached by no production caller outside the owner. The pass-A
+    tests that built it are re-plumbed onto it (spec_graph_1120-piece1 block (5))."""
+    return tenant()._TenantPaths(root, tenant_id)
 
 
 def create_tenant(root: Path, tenant_id: str) -> Any:
@@ -125,8 +128,11 @@ def require_tenant(root: Path, tenant_id: str) -> Any:
     return tenant().require_tenant(root, tenant_id)
 
 
-def tenant_of_run_dir(run_dir: Path) -> str:
-    return tenant().tenant_of_run_dir(run_dir)
+def tenant_of_run_dir(run_dir: Path, data_root: Path | None = None) -> str:
+    """#1120 D1: the owner takes the data root, resolved once at the entry; a pass-A test that
+    names none means the one its process is pointed at."""
+    root = data_root if data_root is not None else resolve_data_root()
+    return tenant().tenant_of_run_dir(root, run_dir)
 
 
 def ensure_runs_base_record(runs_base: Path, tenant_id: str) -> Any:
@@ -138,7 +144,11 @@ def resolve_data_root() -> Path:
 
 
 def runs_base_for(tenant_id: str) -> Path:
-    return tenant().runs_base_for(tenant_id)
+    """#1120 D1: the owner takes an accepted `Tenant`. The tenant is set up from the committed
+    fixture under the process's data root first (`_data_root_1078.set_up_tenant`)."""
+    from defender.tests._data_root_1078 import set_up_tenant
+
+    return tenant().runs_base_for(set_up_tenant(resolve_data_root(), tenant_id))
 
 
 def run_common() -> Any:
@@ -186,10 +196,28 @@ def sessions_dir(root: Path, tenant_id: str) -> Path:
     return Path(root) / tenant_id / "sessions"
 
 
+def place_knowledge(root: Path, tenant_id: str = VALID_ID) -> Path:
+    """#1120 DC2: the knowledge folder the operator clones to `<root>/<T>/knowledge` BEFORE
+    setup — a copy of the committed fixture, with `agent/.tenant-id` naming T. Returns it."""
+    knowledge = Path(root) / tenant_id / "knowledge"
+    shutil.copytree(T1106.FIXTURE, knowledge, symlinks=True)
+    (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
+    return knowledge
+
+
 def make_tenant(root: Path, tenant_id: str = VALID_ID) -> Any:
     """`tenant_id` created in `root` through the REAL `create_tenant` (D10: fixtures call it
-    directly, against a fresh tmp root). Returns the `TenantRow` it wrote."""
+    directly, against a fresh tmp root), over the knowledge folder the operator placed first
+    (#1120 DC2: `place_knowledge`, the one entry O10 sanctions in a rowless own folder).
+    Returns the `TenantRow` it wrote."""
+    place_knowledge(Path(root), tenant_id)
     return create_tenant(Path(root), tenant_id)
+
+
+def accept(root: Path, tenant_id: str = VALID_ID) -> Any:
+    """#1120 D1: the accepted `Tenant` an entry point hands inward — the REAL `accept_tenant`
+    over `root`, keyed to this checkout's `defender/`, refusing as it would."""
+    return tenant().accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER)
 
 
 def plant_row(root: Path, tenant_id: str, body: str | bytes | None = None, *,
@@ -399,37 +427,28 @@ class Recorder:
         return any(s in self.order for s in ("preflight", "materialize", "lifecycle"))
 
 
-def tenants_root_beside_data_root(*, source: Path = T1106.PLAYGROUND) -> Path:
-    """#1106's tenants root for this test: a sibling of its data root (never inside it — O10
-    refuses a stray entry there), holding a settings folder for every tenant whose row the data
-    root holds, each a copy of `source` (default: the committed `playground`). A run resolves
-    its tenant's settings under the tenants root once the row is accepted, so a scenario about
-    the row, the record or the request reaches the same frame it did before #1106 put settings
-    per tenant. The copy never carries a `settings/secrets.env` (#1107: the on-disk secrets of
-    a tree are not a fixture's to inherit)."""
-    root = Path(os.environ[DATA_ROOT_ENV])
-    tenants = root.parent / f"{root.name}-tenants"
-    rows = sorted(root.glob("*/tenant.json")) if root.is_dir() else []
-    for row in rows:
-        folder = tenants / row.parent.name
-        if not folder.exists():
-            shutil.copytree(source, folder, ignore=shutil.ignore_patterns("secrets.env"))
-    return tenants
-
-
-def with_tenants_root(argv: list[str]) -> list[str]:
-    """`argv` plus `--tenants-root` at `tenants_root_beside_data_root()`, unless it names one
-    or no data root is set (the entry refuses that before it reads any tenant)."""
-    if "--tenants-root" in argv or not os.environ.get(DATA_ROOT_ENV):
-        return list(argv)
-    return [*argv, "--tenants-root", str(tenants_root_beside_data_root())]
+def place_knowledge_for_rows() -> None:
+    """#1120 DC2: give every tenant whose row this test's data root holds the knowledge folder
+    an operator would have cloned beside it — a copy of the committed fixture, with its
+    `agent/.tenant-id` — where it has none. A run accepts its tenant only over a placed
+    knowledge folder, so a scenario about the row, the record or the request reaches the same
+    frame it did before #1120 moved the settings under the data root."""
+    raw = os.environ.get(DATA_ROOT_ENV)
+    root = Path(raw) if raw else None
+    if root is None or not root.is_absolute() or not root.is_dir():
+        return
+    for row in sorted(root.glob("*/tenant.json")):
+        knowledge = row.parent / "knowledge"
+        if not os.path.lexists(knowledge):
+            place_knowledge(root, row.parent.name)
 
 
 def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
     """Drive the REAL `run.main` over `argv` with every seam recorded. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
     try:
-        return run_py().main(with_tenants_root(argv), **rec.seams()), None
+        place_knowledge_for_rows()
+        return run_py().main(list(argv), **rec.seams()), None
     except SystemExit as refused:
         return None, refused
 
@@ -454,8 +473,8 @@ CONTINUATION = "Continue from here."
 
 
 def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID) -> list[str]:
-    return with_tenants_root(
-        [str(source), str(message_id), "--continuation-prompt", CONTINUATION])
+    place_knowledge_for_rows()
+    return [str(source), str(message_id), "--continuation-prompt", CONTINUATION]
 
 
 def drive_launch(source: Path, *, spawn: Any = None, **seams: Any) -> BaseException | int:

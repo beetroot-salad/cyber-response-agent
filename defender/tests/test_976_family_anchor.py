@@ -55,7 +55,7 @@ def _cli():
 
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant_paths()
+    return T.current_tenant()
 
 
 #: A commit no fixture, no message and no argv could carry by accident — C13's sweep needs a

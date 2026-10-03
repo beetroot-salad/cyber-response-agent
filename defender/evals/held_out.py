@@ -2,15 +2,18 @@
 """Primary-metric harness: score defender held-out runs against ground truth.
 
 Walks the FIXTURE set (``defender/fixtures/held-out/``), locates each fixture's run
-under the runs dir (``--tenant``'s ``<T>/runs``, or the ``runs_dir`` argument) by run-id
-convention, and reports defender disposition correctness.
+under the runs dir it is given by run-id convention, and reports defender disposition
+correctness.
 
 Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
 carries no labels and no pointer back to its fixture.
 
-Every run names its tenant, and there is no default (#1078): create one once with
-``python3 defender/scripts/tenant.py setup playground``. Launch the runs this scores with
-(see ``index_runs``)::
+This is an evaluation tool, not part of the application: it takes no tenant and accepts
+none, and scores exactly the runs dir it is handed. The runs it scores are the playground
+tenant's. Every run names its tenant, and there is no default (#1078). On the host,
+clone the tenant's repo into ``$DEFENDER_DATA_ROOT/playground/knowledge``, then, once the
+clone exits 0, set it up once with ``python3 defender/scripts/tenant.py setup playground``.
+Launch the runs this scores with (see ``index_runs``)::
 
     python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \\
         --tenant playground --run-id <slug> --no-learn
@@ -20,9 +23,8 @@ Every run names its tenant, and there is no default (#1078): create one once wit
 A run without a parseable ``report.md`` (missing, bad frontmatter, disposition outside
 the closed enum, or crashed) counts as **wrong**, so regressions cannot hide behind crashes.
 
-Usage (exactly one of the two — never both, never neither):
-  python3 defender/evals/held_out.py --tenant playground
-  python3 defender/evals/held_out.py <runs_dir>
+Usage (the runs dir is required):
+  python3 defender/evals/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
 """
 from __future__ import annotations
 
@@ -193,33 +195,16 @@ def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """#1078 D4/C27/N9: exactly one of a positional runs dir or `--tenant` is required — never
-    both, never neither — and the two branches are strictly separate. `--tenant` resolves
-    `runs_base_for(T)` (grammar, then `require_tenant`, each refusal surfaced verbatim); the
-    positional branch never touches `DEFENDER_DATA_ROOT` at all (§7 J50) — it scores exactly
-    the directory it is given. `--help` resolves neither."""
+    """Score the runs dir it is given — required, with no default and no tenant option: an
+    evaluation tool outside the application takes no tenant, so it never resolves
+    `DEFENDER_DATA_ROOT` or accepts one (§7 J50). `--help` resolves nothing."""
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("runs_dir", nargs="?", default=None,
-                   help="directory of run dirs (mutually exclusive with --tenant)")
-    p.add_argument("--tenant", default=None,
-                   help="score runs_base_for(tenant) instead of a positional directory")
+    p.add_argument("runs_dir", type=Path, help="directory of run dirs to score")
     p.add_argument("--fixtures-dir", type=Path, default=FIXTURES_DIR,
                    help=f"held-out fixtures dir (default: {FIXTURES_DIR})")
     ns = p.parse_args(argv)
-    if (ns.runs_dir is None) == (ns.tenant is None):
-        p.error("exactly one of a positional runs dir or --tenant is required")
-    if ns.tenant is not None:
-        from defender import _tenant
-
-        try:
-            tenant_id = _tenant.request_tenant(ns.tenant)
-        except _tenant.TenantRefused as refused:
-            print(f"[held_out] {refused}", file=sys.stderr)
-            return 2
-        runs_dir = _tenant.runs_base_for(tenant_id)
-    else:
-        runs_dir = Path(ns.runs_dir)
+    runs_dir = ns.runs_dir
     if not runs_dir.is_dir():
         print(f"runs dir does not exist: {runs_dir}", file=sys.stderr)
         return 2

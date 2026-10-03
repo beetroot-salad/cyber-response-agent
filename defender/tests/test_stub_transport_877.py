@@ -40,7 +40,7 @@ CURL_FAULTS = [
 @pytest.fixture
 def ctx(tmp_path):
     return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
-                       tenant=_tenants1106.playground_run_tenant())
+                       tenant=_tenants1106.fixture_run_tenant())
 
 
 @pytest.fixture(autouse=True)

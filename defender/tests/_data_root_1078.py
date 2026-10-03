@@ -12,7 +12,8 @@ never needed before: a data root it owns, and a tenant created in it.
   reach a host data root and none shares one with another test or another xdist worker (J58).
   It only SETS THE VARIABLE — it calls nothing new, so it is inert against code that does not
   read the variable yet.
-* THE TENANT is created ON REQUEST, by `ensure_d9_tenant()` here (or the `d9_tenant` fixture in
+* THE TENANT is set up ON REQUEST — the committed fixture's knowledge placed, then its row
+  created — by `ensure_d9_tenant()` here (or the `d9_tenant` fixture in
   conftest, which calls it). Never autouse: `create_tenant` is the implementation under test,
   and an autouse call to it would turn every test in the repo into one failure about it.
 
@@ -26,7 +27,9 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
 from pathlib import Path
+from typing import Any
 
 #: The data-root knob #1078 adds (D2). Spelled here rather than imported from `_tenant`: the
 #: design deliberately exports no public string constant from the owner module (J05 — a public
@@ -35,6 +38,10 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
 #: The one tenant D9's helper creates (no test uses two tenants — D9, N12).
 D9_TENANT_ID = "playground"
+
+#: The committed fixture tenant (#1120 H2) — the knowledge every test tenant is set up from.
+FIXTURE = Path(__file__).resolve().parents[2] / "knowledge" / "tenant-fixture"
+DEFENDER = Path(__file__).resolve().parents[1]
 
 
 def _tenant_owner():
@@ -53,11 +60,25 @@ def current_data_root() -> Path:
 
 
 def ensure_d9_tenant(tenant_id: str = D9_TENANT_ID) -> str:
-    """Create `tenant_id` in the current test's data root through the REAL `create_tenant`
-    (D10: "evals and fixtures call `create_tenant` directly, each against a fresh tmp root"),
-    unless its row is already there. Returns the id, ready to hand to `--tenant`."""
+    """Set `tenant_id` up in the current test's data root (`set_up_tenant`), unless its row is
+    already there. Returns the id, ready to hand to `--tenant`."""
+    set_up_tenant(current_data_root(), tenant_id)
+    return tenant_id
+
+
+def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID) -> Any:
+    """`tenant_id` set up under the data root `root` the way an operator does (#1120 DC2) and
+    accepted: the committed fixture tenant (`knowledge/tenant-fixture/`) copied to
+    `<root>/<id>/knowledge` with its `agent/.tenant-id`, then the row minted by the REAL
+    `create_tenant` (D10: "evals and fixtures call `create_tenant` directly, each against a
+    fresh tmp root"). Each step is skipped when already done, so a second call is the first
+    one's tenant. Returns the `Tenant` the real `accept_tenant` hands back."""
     owner = _tenant_owner()
-    root = current_data_root()
+    root = Path(root)
+    knowledge = root / tenant_id / "knowledge"
+    if not knowledge.exists():
+        shutil.copytree(FIXTURE, knowledge, symlinks=True)
+        (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     if not (root / tenant_id / "tenant.json").is_file():
         owner.create_tenant(root, tenant_id)
-    return tenant_id
+    return owner.accept_tenant(root, tenant_id, defender_dir=DEFENDER)

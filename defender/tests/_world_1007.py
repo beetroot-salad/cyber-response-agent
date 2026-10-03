@@ -106,7 +106,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported: one spe
     capture_call,
     captured_row,
     configured_layout as _configured_layout_947,
-    current_tenant_paths,
+    current_tenant,
     elastic_overlay,
     episode,
     family_doc,
@@ -713,7 +713,7 @@ def estate(tmp_path: Path, *, answers: dict[str, Any] | None = None) -> tuple[Pa
     # The committed playground tenant's settings — the folder this estate's reads resolved
     # before #1106 made the run hand it in (the checkout's copy, now at the repo root).
     ctx = verbs.VerbContext(defender_dir=defender_dir, run_dir=run_dir, env={},
-                            tenant=_tenants1106.playground_run_tenant())
+                            tenant=_tenants1106.fixture_run_tenant())
     return adapters, grant, ctx
 
 

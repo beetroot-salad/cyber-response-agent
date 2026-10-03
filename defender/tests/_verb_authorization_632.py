@@ -372,7 +372,7 @@ def shipped_grants() -> dict[str, VerbGrant]:
     none. The shipped one is the committed playground tenant's."""
     from defender.tests import _tenants1106 as T1106
 
-    return {GATHER_ROLE: T1106.playground_grants().gather}
+    return {GATHER_ROLE: T1106.fixture_grants().gather}
 
 
 

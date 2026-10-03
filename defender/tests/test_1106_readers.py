@@ -3,17 +3,17 @@
 The four settings kinds had eight-odd readers, and each found its file for itself: from
 `ctx.defender_dir`, from `PATHS.defender_dir`, from `$DEFENDER_DIR`, from `__file__`. After
 #1106 none of them finds anything. The run's tenant settings folder is resolved once at the
-process entry point (`tenant_dir(tenants_root, run.tenant_id).settings`) and HANDED to every
+process entry point (`accept_tenant(data_root, run.tenant_id).settings`) and HANDED to every
 reader — on the verb context (`VerbContext.tenant`, a required field, whose `settings` is that
 folder) or as an argument.
 
-HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a tenants root in `tmp_path` —
-OUTSIDE the checkout — and carries the SAME id as the checkout's committed tenant
+HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a data root in `tmp_path` —
+OUTSIDE the checkout — and carries the SAME id the committed fixture is set up under
 (`playground`), with DIFFERENT values in every kind. A reader that ignored the handed folder and
-went looking — the checkout's `knowledge/tenants/playground`, `PATHS`, the old
+went looking — the checkout's `knowledge/tenant-fixture`, `PATHS`, the old
 `defender/knowledge/environment` — returns the checkout's value, and the assertion is on the
 VALUE that flows out, so it catches that. Each test also reads the checkout's own value and
-asserts it differs, so a later edit to the committed playground cannot make the test vacuous.
+asserts it differs, so a later edit to the committed fixture cannot make the test vacuous.
 
 The verb context's `defender_dir` is the REAL checkout's in every test: the tree the code runs
 from is not where its settings are, which is the whole of D2.
@@ -33,7 +33,7 @@ MARK = "injected"
 
 @pytest.fixture
 def injected(tmp_path) -> Path:
-    """The injected tenant's settings folder: `<tmp root>/playground/settings`, every value
+    """The injected tenant's settings folder: `<tmp root>/playground/knowledge/settings`, every value
     carrying `MARK`, the mapping's released status and reporter distinct from the checkout's."""
     root = tmp_path / "injected-root"
     S.plant(
@@ -41,15 +41,16 @@ def injected(tmp_path) -> Path:
         lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
         released_status="resolved-by-a-person", reporter="injected-reporter",
     )
-    td = T.tenants().tenant_dir(root, T.PLAYGROUND_ID)
+    td = T.accept(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
     return td.settings
 
 
 def _record(settings: Path):
-    """The run record of the tenant whose `settings/` is `settings` (#1107), through the resolver."""
-    return T.run_tenant(T.tenants().TenantDir(
-        tenant_id=settings.parent.name, settings=settings, agent=settings.parent / "agent"))
+    """The run record of the accepted tenant whose `settings/` is `settings`
+    (`<root>/<id>/knowledge/settings`, #1107/#1120), through the real `accept_tenant`."""
+    knowledge = settings.parent
+    return T.run_tenant(T.accept(knowledge.parent.parent, knowledge.parent.name))
 
 
 def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
@@ -64,7 +65,7 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
     cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
     assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
     assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
-    checkout = transport.load_config(_ctx(T.PLAYGROUND_SETTINGS, tmp_path), "cmdb", "CMDB")
+    checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
     assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
 
 
@@ -82,7 +83,7 @@ def test_the_elastic_adapter_loads_the_injected_tenants_config(injected, tmp_pat
     cfg = elastic.load_config(_ctx(injected, tmp_path))
     assert cfg["ELASTICSEARCH_URL"] == f"https://es-{MARK}:9200"
     assert cfg["ELASTIC_EVENTS_INDEX"] == f"{MARK}-events-*"
-    checkout = elastic.load_config(_ctx(T.PLAYGROUND_SETTINGS, tmp_path))
+    checkout = elastic.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path))
     assert checkout["ELASTICSEARCH_URL"] != cfg["ELASTICSEARCH_URL"]
 
 
@@ -93,15 +94,15 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     faults = T.mod("scripts.adapters.faults")
     transport = T.mod("scripts.adapters._stub_transport")
     root = tmp_path / "injected-root"
-    T.plant_tenant(root, T.PLAYGROUND_ID, configs={})
-    settings = T.tenants().tenant_dir(root, T.PLAYGROUND_ID).settings
+    T.place_tenant(root, T.PLAYGROUND_ID, configs={})
+    settings = T.accept(root, T.PLAYGROUND_ID).settings
     with pytest.raises(faults.ConfigFault) as caught:
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
     assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
     assert str(settings) not in str(caught.value)
     # Control: the checkout's playground does carry a cmdb config, so the refusal above is
     # the absence of a fallback, not the absence of a file anywhere.
-    assert (T.PLAYGROUND_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
+    assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
 
 
 # ---- the case-history mapping --------------------------------------------------------------
@@ -112,7 +113,7 @@ def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
     assert predicate.released_status == "resolved-by-a-person"
     assert predicate.is_released({"status": "resolved-by-a-person"}) is True
     assert predicate.is_released({"status": "closed"}) is False
-    assert case_ticket.release_predicate(_record(T.PLAYGROUND_SETTINGS).ticket_mapping
+    assert case_ticket.release_predicate(T.fixture_run_tenant().ticket_mapping
                                          ).released_status != predicate.released_status
 
 
@@ -123,7 +124,7 @@ def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
         alert, "case-1", mapping=_record(injected).ticket_mapping)
     assert payload["reporter"] == "injected-reporter"
     checkout = case_ticket.alert_to_open_payload(
-        alert, "case-1", mapping=_record(T.PLAYGROUND_SETTINGS).ticket_mapping)
+        alert, "case-1", mapping=T.fixture_run_tenant().ticket_mapping)
     assert checkout["reporter"] != payload["reporter"]
 
 
@@ -138,7 +139,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
         case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
     assert "the tenant's settings/systems/case-history/mapping.yaml" in str(caught.value)
     assert str(settings) not in str(caught.value)
-    assert (T.PLAYGROUND_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
+    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
 
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
@@ -178,14 +179,14 @@ def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
     lz = T.mod("runtime.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(injected)) == \
         "elastic.injected-tenant-template"
-    assert lz.load_correlation_template(lz.lead_zero_config_path(T.PLAYGROUND_SETTINGS)) != \
+    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \
         "elastic.injected-tenant-template"
 
 
 def test_the_table_is_read_from_the_injected_tenant(injected):
     grants = T.run_grants(injected)
     assert {(s, v) for s, v, _ in grants.gather.entries} == set(T.GATHER_PAIRS_B)
-    assert {(s, v) for s, v, _ in T.playground_grants().gather.entries} != set(T.GATHER_PAIRS_B)
+    assert {(s, v) for s, v, _ in T.fixture_grants().gather.entries} != set(T.GATHER_PAIRS_B)
 
 
 # ---- branching: the stager's patterns and the write door ----------------------------------------------
@@ -194,7 +195,7 @@ def test_the_configured_patterns_are_the_injected_tenants(injected):
     stager = T.mod("learning.branch.estate.stagers.elastic")
     patterns = stager.configured_patterns(_record(injected).elastic)
     assert tuple(patterns) == (f"{MARK}-events-*", f"{MARK}-alerts-*")
-    assert tuple(stager.configured_patterns(_record(T.PLAYGROUND_SETTINGS).elastic)) != tuple(patterns)
+    assert tuple(stager.configured_patterns(T.fixture_run_tenant().elastic)) != tuple(patterns)
 
 
 def test_the_staging_write_door_addresses_the_injected_tenants_cluster(injected, tmp_path):

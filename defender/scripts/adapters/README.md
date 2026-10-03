@@ -42,8 +42,8 @@ second one.
   credential delivery is #1163 — and nothing in this tree needs one today.
 - **Config — `URL_BASE`, `BASTION_HOST`, `TIMEOUT_SEC`** in
   the run's tenant's `settings/systems/{system}/config.env`
-  (`knowledge/tenants/<tenant>/` at the repo root; the adapter reads `ctx.tenant.systems`, the record
-  resolved from that folder when the run began), each key prefixed with the system
+  (`$DEFENDER_DATA_ROOT/<tenant>/knowledge/`; the adapter reads `ctx.tenant.systems`, the
+  record resolved from that folder when the run began), each key prefixed with the system
   name (e.g. `IDENTITY_URL_BASE`) next to the two access lines above. Non-secret only.
   An exported variable does not override a key: the run's record is the one source.
 - **Exit codes — `0` ok / `1` query rejected / `2`

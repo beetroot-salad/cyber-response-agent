@@ -282,7 +282,7 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     ])
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
-    gdeps = bind(_tenants1106.playground_gather_def(), r.run_dir, defender_dir=DEFENDER)
+    gdeps = bind(_tenants1106.fixture_gather_def(), r.run_dir, defender_dir=DEFENDER)
     out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
 
     assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
@@ -1271,7 +1271,7 @@ def _policies(tmp_path):
     (run_dir / "gather_raw" / LEAD).mkdir(parents=True)
     (run_dir / "gather_raw" / LEAD / "0.json").write_text("[]", encoding="utf-8")
     gather = compile_policy_for(
-        _tenants1106.playground_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
+        _tenants1106.fixture_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
     main = compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=DEFENDER)
     return run_dir, gather, main
 

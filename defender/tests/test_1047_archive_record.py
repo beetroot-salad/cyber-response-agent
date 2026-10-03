@@ -367,8 +367,7 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
         return 0
 
     with Episode.open(ep) as episode:
-        cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID,
-                         tenants_root=T1106.TENANTS_ROOT)
+        cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
         raise faults[0]
     assert set(written) == {"b", "c"}, f"the launcher fanned {sorted(written)}"
@@ -408,8 +407,7 @@ def test_sidecar_write_ordering_relative_to_the_archives_own_run_dir_discovery(t
         return 0
 
     with Episode.open(ep) as episode:
-        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID,
-                                 tenants_root=T1106.TENANTS_ROOT)
+        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
         raise faults[0]
     assert set(exits) == {"b", "c"}

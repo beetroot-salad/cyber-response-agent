@@ -13,6 +13,7 @@ import ctypes
 import os
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -112,6 +113,21 @@ def deployment_unset(monkeypatch) -> None:
     its own `monkeypatch.setenv(DEPLOYMENT_ENV, "dev")`, which wins (same function-scoped
     instance, later)."""
     monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def session_data_root(tmp_path_factory) -> Iterator[Path]:
+    """The data root for whatever runs BEFORE a test's own (`data_root` below): module- and
+    class-scoped fixtures are set up ahead of every function-scoped one, so without this they
+    would see the variable the launching shell exported — in the devcontainer, the host's real
+    data root — and set a tenant up inside it. A session tmp directory per xdist worker,
+    replacing any inherited value; each test then gets its own over it."""
+    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+
+    root = tmp_path_factory.mktemp("session-data-root")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(DATA_ROOT_ENV, str(root))
+        yield root
 
 
 @pytest.fixture(autouse=True)

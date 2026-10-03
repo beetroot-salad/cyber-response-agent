@@ -45,7 +45,7 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     corpus = dfn / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, "read-936", nodes=CLASS_SELECTOR)
-    gather = bind(_tenants1106.playground_gather_def(), run, defender_dir=dfn)
+    gather = bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn)
 
     assert "lesson body" in _tool_read_file(main, str(lesson.resolve()))
     assert "lesson body" in _tool_read_file(gather, str(lesson.resolve()))

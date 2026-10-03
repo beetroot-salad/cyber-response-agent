@@ -668,10 +668,14 @@ demands:
     J51 (auto) existing absent-dir behavior; migration off the hardcoded default is s7_generate_case_held_out_migrated.
 - id: d4_generate_case_tenant
   kind: coherence
-  form: test
+  form: waiver
   pass: A
   binds: [generate_case.main, interacts(generate_case.main->runs_base)]
-  discharged_by: test_d4_generate_case_tenant
+  cites:
+  - C-GC1
+  outcome:
+    nl: >-
+      Waived (#1120, human, PR #1157: "Remove generate_case"): evals/oracle_golden/generate_case.py is removed, so this demand has no subject. Was form: test, discharged_by test_d4_generate_case_tenant.
   seed_docstring: >-
     generate_case --tenant T passes --tenant T to the spawned run.py and predicts runs_base_for(T)/candidate;
     without --tenant it is refused.
@@ -2255,10 +2259,14 @@ demands:
   source: '45-dispositions.md settled premise #66 (single reading, judge-examined)'
 - id: s071
   kind: behavior
-  form: test
+  form: waiver
   pass: A
   binds: [generate_case.main, require_tenant, interacts(generate_case.main->runs_base)]
-  discharged_by: test_generate_case_for_a_tenant_with_no_row
+  cites:
+  - C-GC1
+  outcome:
+    nl: >-
+      Waived (#1120, human, PR #1157: "Remove generate_case"): evals/oracle_golden/generate_case.py is removed, so this demand has no subject. Was form: test, discharged_by test_generate_case_for_a_tenant_with_no_row.
   seed_docstring: >-
     generate_case --tenant acme (well-formed, no row) is refused, with no candidate dir and nothing spent
     (universal 2). Whether the parent refuses before spawning or the child run.py refuses is J32's fork.
@@ -2270,10 +2278,14 @@ demands:
     NOT bound here, so its `unknown` stays heard by R0.
 - id: s072
   kind: behavior
-  form: test
+  form: waiver
   pass: A
   binds: [generate_case.main, drives(generate_case.main->run.main), DEFENDER_DATA_ROOT]
-  discharged_by: test_generate_case_parent_and_child_resolve_different_data_roots
+  cites:
+  - C-GC1
+  outcome:
+    nl: >-
+      Waived (#1120, human, PR #1157: "Remove generate_case"): evals/oracle_golden/generate_case.py is removed, so this demand has no subject. Was form: test, discharged_by test_generate_case_parent_and_child_resolve_different_data_roots.
   seed_docstring: >-
     generate_case's parent and its spawned run.py resolve the same data root: the child inherits the parent's
     environment unchanged. PO2 stays carried.
@@ -2871,6 +2883,8 @@ demands:
   binds: [generate_case.main, held_out.main, 'tenant_id.access[held_out-argv]', 'tenant_id.access[generate_case-argv]',
     interacts(generate_case.main->runs_base), interacts(held_out.main->runs_base)]
   discharged_by: test_s7_generate_case_held_out_migrated
+  # #1120 (human, PR #1157): generate_case is removed and held_out takes no tenant; the test keeps
+  # only held_out --help (C-R17). See spec_graph_1120-piece1's x1078_d4_held_out_takes_only_a_runs_dir.
   seed_docstring: >-
     generate_case --tenant T and held_out --tenant T check the grammar and require_tenant at entry, before
     prediction, scoring or spawn, and find their runs base only through resolve_data_root/runs_base_for(T):
@@ -6576,6 +6590,20 @@ claims:
     70-resolutions.md records the waiver and hands the cross-tenant scope to #1112.
   verdict: holds
   source: the §7 fold (this graph)
+- id: C-GC1
+  kind: discharge
+  claim: >-
+    The human removed generate_case on PR #1157 ("Remove generate_case"), and
+    defender/evals/oracle_golden/generate_case.py no longer exists, nor does any production import of it.
+  probe: >-
+    test -e defender/evals/oracle_golden/generate_case.py; git grep -n "oracle_golden import generate_case\|oracle_golden.generate_case"
+    -- defender scripts
+  probe_kind: executed
+  observed: >-
+    the file is absent; no production module imports it (the only hits were tests, removed or re-pointed
+    in the same change).
+  verdict: holds
+  source: write-code-from-spec, PR #1157 (GENERATE-CASE-REMOVED)
 gate:
   evaluated:
   - rule: R0

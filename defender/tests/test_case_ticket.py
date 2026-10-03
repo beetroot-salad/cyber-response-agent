@@ -14,12 +14,12 @@ from pathlib import Path
 import pytest
 
 from defender.scripts.case_history import case_ticket
-from defender.tests._tenants1106 import PLAYGROUND_SETTINGS
+from defender.tests._tenants1106 import FIXTURE_SETTINGS
 
 #: The mapping the mapper is handed when a test does not plant its own (#1107: the mapper
-#: finds nothing itself) — the committed playground tenant's, which is what these tests read
-#: before the move through the checkout's own copy.
-SHIPPED = case_ticket.load_case_mapping(PLAYGROUND_SETTINGS)
+#: finds nothing itself) — the committed fixture tenant's (#1120 C26), which is what these
+#: tests read before the move through the checkout's own copy.
+SHIPPED = case_ticket.load_case_mapping(FIXTURE_SETTINGS)
 
 
 ALERT = {

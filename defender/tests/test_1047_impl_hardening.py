@@ -116,22 +116,22 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
     record beside it: `materialize_run` clears a stale sidecar host-side, before the box
     exists, so an attempt that ends before writing its own (a setup failure, an unhandled
     fault) cannot be archived under the previous attempt's exit class."""
-    from defender import _tenant
+    from defender.tests._data_root_1078 import set_up_tenant
 
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     tenant_id = "t1047"
-    _tenant.create_tenant(data_root, tenant_id)
+    tenant = set_up_tenant(data_root, tenant_id)
     run_common = S.mod("run_common")
 
-    run_dir = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
+    run_dir = run_common.materialize_run(alert, "case-1047-retry", tenant=tenant).run_dir
     S.plant_sidecar(run_dir, truncated_by="aborted")
     import shutil
     shutil.rmtree(run_dir)
 
-    again = run_common.materialize_run(alert, "case-1047-retry", tenant_id=tenant_id).run_dir
+    again = run_common.materialize_run(alert, "case-1047-retry", tenant=tenant).run_dir
 
     assert again == run_dir
     assert not S.sidecar_path(again).exists(), (

@@ -47,7 +47,7 @@ def _registry(grant, **kw):
 # ---- the value ------------------------------------------------------------------------------
 
 def test_run_grants_projects_the_settings_folders_own_table(tmp_path):
-    a = T.plant_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
+    a = T.place_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
     grants = T.run_grants(a / "settings")
     assert Path(grants.path).resolve() == (a / "settings" / "verb-grants.yaml").resolve()
     assert grants.gather.role == "gather"
@@ -58,7 +58,7 @@ def test_run_grants_projects_the_settings_folders_own_table(tmp_path):
 
 
 def test_a_table_that_withholds_the_lead_projects_no_correlation_system(tmp_path):
-    b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
+    b = T.place_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
     grants = T.run_grants(b / "settings")
     assert _pairs(grants.gather) == set(T.GATHER_PAIRS_B)
     assert grants.correlation.entries == ()
@@ -84,8 +84,8 @@ def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pa
     fixed per process (the pre-#1106 cache, or a first-tenant-wins memo) answers both tenants
     with one table and fails one side."""
     root = tmp_path / "tenants"
-    a = T.plant_tenant(root, "acme", table=T.TABLE_A)
-    b = T.plant_tenant(root, "bravo", table=T.TABLE_B)
+    a = T.place_tenant(root, "acme", table=T.TABLE_A)
+    b = T.place_tenant(root, "bravo", table=T.TABLE_B)
     grants_a = T.run_grants(a / "settings")
     grants_b = T.run_grants(b / "settings")
     again_a = T.run_grants(a / "settings")
@@ -113,7 +113,7 @@ def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pa
 def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
     """No per-process cache stands between a run and its tenant's file: the same folder, edited
     between two builds in one process, projects the edit."""
-    a = T.plant_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
+    a = T.place_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
     assert ("cmdb", "get-host") in _pairs(T.run_grants(a / "settings").gather)
     (a / "settings" / "verb-grants.yaml").write_text(T.TABLE_B, encoding="utf-8")
     assert _pairs(T.run_grants(a / "settings").gather) == set(T.GATHER_PAIRS_B)
@@ -159,8 +159,8 @@ def test_the_import_probe_does_see_a_settings_read_when_one_happens(tmp_path):
     """Positive control on the probe itself: the same hook, around a real `run_grants` call,
     records the table it opened — so an empty list above means nothing was opened, not that
     the hook saw nothing."""
-    T.plant_tenant(tmp_path / "tenants", "acme")
-    settings = tmp_path / "tenants" / "acme" / "settings"
+    T.place_tenant(tmp_path / "tenants", "acme")
+    settings = tmp_path / "tenants" / "acme" / "knowledge" / "settings"
     probe = _IMPORT_PROBE.replace(
         "print(json.dumps(opened))",
         "from defender.runtime.verb_dispositions import run_grants\n"
@@ -188,11 +188,11 @@ def test_a_denied_verb_names_the_runs_own_tenants_table_but_not_its_host_path(tm
     from defender.runtime.run_tenant import table_pointer
 
     root = tmp_path / "tenants"
-    a = T.plant_tenant(root, "acme", table=T.TABLE_A)
-    b = T.plant_tenant(root, "bravo", table=T.TABLE_B)
+    a = T.place_tenant(root, "acme", table=T.TABLE_A)
+    b = T.place_tenant(root, "bravo", table=T.TABLE_B)
     grants_a, grants_b = T.run_grants(a / "settings"), T.run_grants(b / "settings")
-    tenant_a = T.run_tenant(T.tenants().tenant_dir(root, "acme"))
-    tenant_b = T.run_tenant(T.tenants().tenant_dir(root, "bravo"))
+    tenant_a = T.run_tenant(T.accept(root, "acme"))
+    tenant_b = T.run_tenant(T.accept(root, "bravo"))
     assert tenant_a.table_pointer == table_pointer("acme")
     # A's gather reaches cmdb and does not hold `list-roles`, a verb the cmdb adapter really
     # declares: DENIED, and the pointer names A's table.
@@ -217,7 +217,7 @@ def test_the_narrowed_correlation_registry_names_its_inner_registrys_table(tmp_p
 
     from defender.runtime.run_tenant import table_pointer
 
-    a = T.plant_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
+    a = T.place_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
     grants = T.run_grants(a / "settings")
     inner = _registry(grants.gather, grant_home=table_pointer("acme"))
     narrowed = _NarrowedRegistry(inner, grants.correlation)
@@ -234,7 +234,7 @@ def test_the_withheld_lead_heading_names_the_runs_table(tmp_path):
 
     from defender.runtime.run_tenant import table_pointer
 
-    b = T.plant_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
+    b = T.place_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
     grants = T.run_grants(b / "settings")
     pointer = table_pointer("bravo")
     result = LeadZeroResult(text="", status="resolved")
@@ -256,25 +256,28 @@ def test_a_verb_context_without_a_tenant_cannot_be_built(tmp_path):
 
     with pytest.raises((TypeError, ValueError), match="tenant"):
         VerbContext(defender_dir=T.DEFENDER, run_dir=tmp_path, env={})
-    record = T.playground_run_tenant()
+    record = T.fixture_run_tenant()
     ctx = VerbContext(defender_dir=T.DEFENDER, run_dir=tmp_path, env={}, tenant=record)
     assert ctx.tenant is record
-    assert ctx.tenant.settings == T.PLAYGROUND_SETTINGS
+    assert ctx.tenant.settings == T.fixture_tenant().settings
 
 
 # ---- the operator's audit CLI is an entry point too -------------------------------------------------
 
 def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_tenant(
-        tmp_path, capsys):
+        tmp_path, capsys, monkeypatch):
     """M2: `defender-policy` reached the table at import through `agents.py` → `GATHER_DEF`.
     With no process-level grant it must build gather's grant from a root and a tenant it is
-    HANDED — a complete tenant shows gather's policy; an absent one is refused naming the path."""
+    HANDED — the root as `$DEFENDER_DATA_ROOT` (#1120: the one place tenants are found), the
+    tenant as `--tenant` — a complete tenant shows gather's policy; an absent one is refused
+    naming the path."""
     policy_cli = T.mod("scripts.policy_cli")
     root = tmp_path / "tenants"
-    T.plant_tenant(root, "acme")
+    T.place_tenant(root, "acme")
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    base = ["show", "gather", "--run-dir", str(run_dir), "--tenants-root", str(root)]
+    base = ["show", "gather", "--run-dir", str(run_dir)]
     assert policy_cli.main([*base, "--tenant", "acme"]) == 0
     assert "agent: gather" in capsys.readouterr().out
 
@@ -292,7 +295,8 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
     assert str(root / "ghost") in text, text
 
 
-def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(tmp_path, capsys):
+def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
+        tmp_path, capsys, monkeypatch):
     """A tenant freshly copied from the template grants gather nothing. `defender-policy show
     gather` for it is refused the way a run is — a `defender-policy:` line naming the table —
     never a `GrantError` traceback out of `compile_policy`. The control is the test above (a
@@ -301,12 +305,12 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
 
     policy_cli = T.mod("scripts.policy_cli")
     root = tmp_path / "tenants"
-    T.plant_tenant(root, "newco", table=T.TABLE_BLANK)
+    T.place_tenant(root, "newco", table=T.TABLE_BLANK)
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     with pytest.raises(SystemExit) as caught:
-        policy_cli.main(["show", "gather", "--run-dir", str(run_dir),
-                         "--tenants-root", str(root), "--tenant", "newco"])
+        policy_cli.main(["show", "gather", "--run-dir", str(run_dir), "--tenant", "newco"])
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert "verb-grants.yaml" in text, text
@@ -315,7 +319,7 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
 
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
 def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
-    """The settings half is host-only: a tenants root placed in the code tree (bound read-only
+    """The settings half is host-only: a data root placed in the code tree (bound read-only
     into every box) or under the runs base (whose run dirs are the box's writable bind) would
     hand the model every tenant's endpoints. `resolve_tenant` refuses it; the same tenant under
     a root outside both resolves (the control)."""
@@ -325,11 +329,11 @@ def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside)
     defender_dir.mkdir(parents=True)
     runs_base.mkdir()
     outside = tmp_path / "tenants"
-    T.plant_tenant(outside, "acme")
+    T.place_tenant(outside, "acme")
     assert rt.resolve_tenant(outside, "acme", defender_dir=defender_dir,
                              dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == "acme"
     root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
-    T.plant_tenant(root, "acme")
+    T.place_tenant(root, "acme")
     with pytest.raises(rt.TenantRefused, match="which a box mounts"):
         rt.resolve_tenant(root, "acme", defender_dir=defender_dir, dispatches_lead_zero=False,
                           box_mounted=(runs_base,))

@@ -437,6 +437,13 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
+def _default_tenant() -> Any:
+    """The tenant a replay that names none runs as: the committed fixture, set up under the
+    current data root (#1120 H2) — the test's own, or, for a module-scoped drive that runs
+    before it, the session's (conftest's `session_data_root`)."""
+    return _tenants1106.fixture_tenant()
+
+
 def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
@@ -461,10 +468,11 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     needs no provider settings). `override_allow_model_requests(False)` makes any real
     provider call raise, so the run is provably hermetic.
 
-    `tenant` (#1106) is the run's `TenantDir`; omitted, the committed playground tenant's,
-    resolved through the real resolver and loader. A scenario's grants are its tenant folder's
-    `verb-grants.yaml`: it plants a tenant whose table says what it needs (#1107). The tenant is
-    handed to the driver as one `RunTenant` (`_tenants1106.run_tenant`, i.e. `resolve_run_tenant`).
+    `tenant` (#1106) is the run's accepted `Tenant`; omitted, the committed fixture tenant set
+    up under this test's own data root and accepted through the real `accept_tenant` (#1120
+    H2). A scenario's grants are its tenant folder's `verb-grants.yaml`: it plants a tenant
+    whose table says what it needs (#1107). The tenant is handed to the driver as one
+    `RunTenant` (`_tenants1106.run_tenant`, i.e. `resolve_run_tenant`).
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
@@ -577,7 +585,8 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
-    # playground tenant — resolved through the real resolver, never a hand-built value.
+    # fixture tenant set up under the test's data root (#1120 H2) — accepted through the real
+    # `accept_tenant`, never a hand-built value.
     #
     # The driver takes them as ONE value (`RunTenant`), resolved before it runs, the way
     # `run.py` resolves it before the box: item 3's dispatch identity is checked here — for a
@@ -585,7 +594,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
     run_tenant = _tenants1106.run_tenant(
-        tenant if tenant is not None else _tenants1106.playground_tenant(),
+        tenant if tenant is not None else _default_tenant(),
         defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )

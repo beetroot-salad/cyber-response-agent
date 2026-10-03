@@ -63,9 +63,7 @@ UNRELATED_TREES = (
     # the runner's own tree; these are the same vocabulary read from inside
     # defender/, including the corpus of runner records the renderer is swept over.
     "defender/evals/oracle_golden/story_from_run.py",
-    "defender/evals/oracle_golden/generate_case.py",
     "defender/tests/evals/test_story_from_run.py",
-    "defender/tests/evals/test_generate_case.py",
     "defender/tests/evals/_run_records/",
     "defender/docs/oracle-calibration.md",
 )
@@ -216,7 +214,7 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
-        tenant=_tenants1106.playground_run_tenant(),
+        tenant=_tenants1106.fixture_run_tenant(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,
@@ -856,16 +854,16 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     the token has a pre-existing on-disk presence there that this change neither creates nor
     removes. The run-dir var itself still crosses (its positive control), so an empty result
     here is not just an empty environment."""
-    from defender import _tenant, run_common
+    from defender import run_common
+    from defender.tests._data_root_1078 import set_up_tenant
 
     alert = tmp_path / "alert.json"
     alert.write_text("{}", encoding="utf-8")
     data_root = tmp_path / "data"
-    tenant_id = "t647b"
     os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
     try:
-        _tenant.create_tenant(data_root, tenant_id)
-        run_dir = run_common.materialize_run(alert, "env-boundary-647", tenant_id=tenant_id).run_dir
+        tenant = set_up_tenant(data_root, "t647b")
+        run_dir = run_common.materialize_run(alert, "env-boundary-647", tenant=tenant).run_dir
     finally:
         os.environ.pop("DEFENDER_DATA_ROOT", None)
 

@@ -115,7 +115,7 @@ REAL_ADAPTERS = PATHS.adapters_dir
 def _gather_grant():
     """The shipped gather grant — the committed playground tenant's (#1106 M4: no grant is
     fixed per process, so it is projected from a tenant's table, lazily)."""
-    return T1106.playground_grants().gather
+    return T1106.fixture_grants().gather
 
 
 #: What the shipped grant covers today. Asserted rather than derived, so a grant that SHRINKS
@@ -300,7 +300,7 @@ def run_ctx(tmp_path: Path) -> VerbContext:
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={},
-                       tenant=T1106.playground_run_tenant())
+                       tenant=T1106.fixture_run_tenant())
 
 
 def adapter_calls(ctx: VerbContext, verb: str | None = None) -> list[dict]:
@@ -334,7 +334,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
-        as_of=AS_OF, tenant=T1106.playground_run_tenant(),
+        as_of=AS_OF, tenant=T1106.fixture_run_tenant(),
     )
 
 
@@ -462,7 +462,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
 def _built(logger, verbs):
     with override_allow_model_requests(False):
         return driver.build_agent_core(
-            T1106.playground_gather_def(), deps_type=GatherDeps, instructions="x", logger=logger,
+            T1106.fixture_gather_def(), deps_type=GatherDeps, instructions="x", logger=logger,
             agent_id="gather", verbs=verbs,
             make_model=fake_model(lambda messages, info: ModelResponse(
                 parts=[TextPart(content="ok")])),
@@ -881,7 +881,7 @@ def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_pa
     patch carrying `status: <released>` builds, because a released case IS served whole."""
     from defender.scripts.case_history import case_ticket
 
-    released = case_ticket.release_predicate(T1106.playground_run_tenant().ticket_mapping).released_status
+    released = case_ticket.release_predicate(T1106.fixture_run_tenant().ticket_mapping).released_status
     # The recording adapter body declared under the ticket system's name, so the grant can
     # name it: which verbs it carries is beside the point here — the refusal is about the
     # PATCH TABLE, decided before any call is served.

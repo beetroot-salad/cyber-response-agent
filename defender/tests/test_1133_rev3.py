@@ -1182,7 +1182,7 @@ def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(t
 def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
     cli = mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant_paths()
+    tenant = T.current_tenant()
     return cli, src, tenant, cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
 
 

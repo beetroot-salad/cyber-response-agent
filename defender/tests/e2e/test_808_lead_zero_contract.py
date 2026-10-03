@@ -187,7 +187,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", tenant=_tenants1106.playground_run_tenant(), env={},
+            alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         ), rec
 

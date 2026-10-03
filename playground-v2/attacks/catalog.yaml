@@ -50,7 +50,8 @@
 #     generators running. The oracle's answer is a signed diff over baseline, so
 #     with them off `+noise` cannot occur at all and `+event` is easier than
 #     production — the suite would be calibrating against an environment that
-#     does not exist. `generate_case.py` therefore runs with baseline on.
+#     does not exist. Case recruitment (`generate_case.py`, removed in #1120) ran with
+#     baseline on for that reason.
 #
 # `docs/runbook.md` (attack runs deliberately leave baseline on) is the newer
 # statement and the one to follow by default.

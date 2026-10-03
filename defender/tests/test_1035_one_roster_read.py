@@ -641,7 +641,7 @@ def test_the_run_hands_the_gate_its_own_roster_when_the_run_tree_is_the_checkout
     injected = object()
     _gating.release_capabilities()
     roster, registry = at_run_start(root / "defender", None, injected,
-                                    _tenants1106.playground_run_tenant())
+                                    _tenants1106.fixture_run_tenant())
     assert registry is injected
     assert _gating.known_capabilities() is roster.verbs, (
         "the run's tree is the checkout, and the gate holds a second read of it"
@@ -652,7 +652,7 @@ def test_the_run_hands_the_gate_its_own_roster_when_the_run_tree_is_the_checkout
     write(_repo_adapters(other) / "elastic_adapter.py", QUERY_ADAPTER)
     _gating.release_capabilities()
     roster, _ = at_run_start(other / "defender", None, injected,
-                             _tenants1106.playground_run_tenant())
+                             _tenants1106.fixture_run_tenant())
     assert set(roster.accepted) == {"elastic"}, "the run's registry is not over the run's tree"
     assert set(_gating.known_capabilities()) == {"cmdb"}, (
         "the gate is not priced against the CHECKOUT's roster"
@@ -680,7 +680,7 @@ def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
 
     _gating.release_capabilities()
     with pytest.raises(RegistryError) as exc:
-        at_run_start(run_tree / "defender", None, object(), _tenants1106.playground_run_tenant())
+        at_run_start(run_tree / "defender", None, object(), _tenants1106.fixture_run_tenant())
     assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
     with pytest.raises(_gating.CapabilitiesNotRead):
         _gating._capability_exists("cmdb")

@@ -369,12 +369,12 @@ def entrypoint_env(tmp_path, monkeypatch) -> Path:
     Answers the runs base."""
     from defender import _tenant
     from defender.runtime import providers
-    from defender.tests._data_root_1078 import ensure_d9_tenant
+    from defender.tests._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    return _tenant.runs_base_for(_tenant.TenantId(ensure_d9_tenant()))
+    return _tenant.runs_base_for(set_up_tenant(current_data_root()))
 
 
 def _main(**seams: Callable[..., Any]) -> int:

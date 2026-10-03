@@ -76,7 +76,7 @@ def env(tmp_path):
         run=run, dfn=dfn, wire=wire,
         main=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn),
         gather=compile_policy_for(
-            _tenants1106.playground_gather_def(), run_dir=run, defender_dir=dfn),
+            _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn),
     )
 
 
