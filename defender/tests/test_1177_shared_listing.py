@@ -135,7 +135,8 @@ def test_a_folder_removed_during_its_own_listing_is_absent_to_stat_entries(
     assert_listed(peer, {"p.md": stat.S_IFREG}, "peer")
     assert_listed(empty, {}, "the live empty folder")
 
-    _d2_tree(base)
+    put_plain(base / "sub" / "inner.md")
+    put_plain(base / "sub" / "deeper" / "d.md")
     agree = ListingFaults(remove={"sub"}, moment=moment)
     with view_of(how, scratch, agree) as view:
         listed = view.under("sub").entries()
