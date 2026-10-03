@@ -130,7 +130,7 @@ class DrainTrees:
         self._stack.__exit__(exc_type, exc, tb)
 
 
-def open_drain_trees(wt_paths: LoopPaths, label: str) -> DrainTrees:  # noqa: V103 — no production caller until #1134 steps 5-6 (each lane's work step opens it); pinned by tests/test_1134_mount_list.py
+def open_drain_trees(wt_paths: LoopPaths, label: str) -> DrainTrees:
     """The held roots of a `label` drain batch's writable mounts: :meth:`DrainTrees.open` over
     exactly `wt_paths.drain_writable_trees(label)` (the drain working copy's paths), the list
     `_drain_box_request` mounts read-write, so the held roots are the box's rw mounts (#1134
