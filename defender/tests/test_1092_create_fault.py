@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 
+from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender.runtime import box as box_mod
 from defender.runtime.box import BoxRequest, Mount
 from defender.runtime.box_codec import BoxFault
@@ -368,7 +369,7 @@ def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout
         starter = FaultingStartBox(docker)
         with pytest.raises(BoxFault) as e:
             _run_worktree_batch(
-                loop_paths(tmp_path), branch, label="author_drain", has_work=lambda p: True,
+                loop_paths(tmp_path), branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
                 do_work=lambda *a, **k: None, start_box=starter, stop_box=rec.stop_box,
                 scrub=rec.scrub,
             )
