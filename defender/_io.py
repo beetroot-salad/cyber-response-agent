@@ -194,14 +194,22 @@ def _read_plain_fd(
 def read_locked_whole(f: Any) -> Any:
     """The whole content of a rewrite handle (:func:`locked_for_rewrite`,
     :func:`rooted_locked_for_rewrite`) from its current position, bounded as every guarded read
-    is (#1174): `EFBIG` when `fstat` says the file is over :data:`READ_LIMIT`, and a read that
-    finds no data yet on a non-blocking descriptor (`None`) is `BlockingIOError`, never a
-    `None` handed on to a parser."""
+    is (#1174): `EFBIG` when `fstat` says the file is over :data:`READ_LIMIT`, and `EFBIG` too
+    when the read runs past it anyway. The lock is advisory, so a writer that ignores it can
+    grow the file after the `fstat`; the read asks for one unit more than the limit, never for
+    "everything". On a text handle the unit is a character (at most four bytes each).
+
+    A `None` read (a raw handle that finds no data yet on a non-blocking descriptor) is
+    `BlockingIOError`, never a `None` handed on to a parser. Today's callers hold buffered
+    text handles, whose read raises `BlockingIOError` itself, so this branch guards the
+    helper's own contract for any raw handle passed in."""
     if os.fstat(f.fileno()).st_size > READ_LIMIT:
         raise OSError(errno.EFBIG, _TOO_LARGE)
-    raw = f.read()
+    raw = f.read(READ_LIMIT + 1)
     if raw is None:
         raise BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+    if len(raw) > READ_LIMIT:
+        raise OSError(errno.EFBIG, _TOO_LARGE)
     return raw
 
 
