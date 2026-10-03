@@ -79,6 +79,7 @@ from defender._artifact_schema import INVESTIGATION_FILE_MAX
 from defender._provenance import RunProvenance
 from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests import _spec1077 as S
+from defender.tests._create_lane import assert_single_plain, no_unnamed_files
 from defender.tests._umask import umask
 
 RUN_ID = "run-1111"
@@ -1210,15 +1211,6 @@ def test_rooted_mkdir_refuses_a_name_outside_the_grammar_and_creates_nothing(scr
 
 # -- rooted_write -----------------------------------------------------------------------
 
-def _assert_single_plain_0644(path: Path) -> None:
-    """A plain, single-named file of mode 0644. Every caller writes it under a pinned umask
-    022: the lanes honour the umask (#1144), so 0644 is the mode under THAT umask only."""
-    st = os.lstat(path)
-    assert stat.S_ISREG(st.st_mode), f"{path} is not a regular file"
-    assert st.st_nlink == 1, f"{path} has {st.st_nlink} names, not one"
-    assert stat.S_IMODE(st.st_mode) == 0o644, f"{path} has mode {oct(stat.S_IMODE(st.st_mode))}"
-
-
 def test_rooted_write_create_lands_once_single_linked_and_a_second_create_is_unmarked(scratch):
     """`create`: the record lands whole, single-linked, mode 0644 under umask 022 (#1078's
     lane). A second create of the same name is the ordinary race: `FileExistsError`, unmarked,
@@ -1227,7 +1219,7 @@ def test_rooted_write_create_lands_once_single_linked_and_a_second_create_is_unm
     with umask(0o022):
         _io.rooted_write(scratch.root, DEEP, "first\n", mode="create")
     assert target.read_text(encoding="utf-8") == "first\n"
-    _assert_single_plain_0644(target)
+    assert_single_plain(target, 0o644)
     with pytest.raises(FileExistsError) as again:
         _io.rooted_write(scratch.root, DEEP, "second\n", mode="create")
     assert not getattr(again.value, "write_guarded_alias", False)
@@ -1265,15 +1257,7 @@ def test_rooted_write_create_links_the_unnamed_file_it_opened_off_the_parent_des
     finally:
         os.close(seen["file"])
     assert target.read_text(encoding="utf-8") == "body\n"
-    _assert_single_plain_0644(target)
-
-
-def _no_unnamed_files(errno_: int) -> Callable[[int], int]:
-    """An `open_unnamed` answering as a filesystem without `O_TMPFILE` does (NFS, virtiofs), or
-    with a real failure."""
-    def refuse(dir_fd: int) -> int:
-        raise OSError(errno_, os.strerror(errno_))
-    return refuse
+    assert_single_plain(target, 0o644)
 
 
 @pytest.mark.parametrize("unsupported", [errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL],
@@ -1284,12 +1268,12 @@ def test_rooted_write_create_falls_back_where_no_unnamed_file_can_be_made(scratc
     second create is `FileExistsError`, unmarked."""
     target = scratch.real_folders()
     _io.rooted_write(scratch.root, DEEP, "{}\n", mode="create",
-                     open_unnamed=_no_unnamed_files(unsupported))
+                     open_unnamed=no_unnamed_files(unsupported))
     assert target.read_text(encoding="utf-8") == "{}\n"
     assert os.lstat(target).st_nlink == 1
     with pytest.raises(FileExistsError) as again:
         _io.rooted_write(scratch.root, DEEP, "{}\n", mode="create",
-                         open_unnamed=_no_unnamed_files(unsupported))
+                         open_unnamed=no_unnamed_files(unsupported))
     assert not getattr(again.value, "write_guarded_alias", False)
 
 
@@ -1299,7 +1283,7 @@ def test_rooted_write_create_propagates_an_unrelated_unnamed_open_failure(scratc
     target = scratch.real_folders()
     with pytest.raises(OSError) as failed:  # noqa: PT011 — its errno is asserted below
         _io.rooted_write(scratch.root, DEEP, "{}\n", mode="create",
-                         open_unnamed=_no_unnamed_files(errno.ENOSPC))
+                         open_unnamed=no_unnamed_files(errno.ENOSPC))
     assert failed.value.errno == errno.ENOSPC
     assert not os.path.lexists(target)
 
@@ -1310,7 +1294,7 @@ def test_rooted_write_create_that_fails_mid_write_leaves_the_name_absent(scratch
     in either lane: the entry this call would have made is never named, or is removed."""
     target = scratch.real_folders()
     before = census(scratch.tmp)
-    kw = {} if lane == "unnamed" else {"open_unnamed": _no_unnamed_files(errno.EOPNOTSUPP)}
+    kw = {} if lane == "unnamed" else {"open_unnamed": no_unnamed_files(errno.EOPNOTSUPP)}
     with pytest.raises(UnicodeError):
         _io.rooted_write(scratch.root, DEEP, "bad \udc80 surrogate", mode="create", **kw)
     assert not os.path.lexists(target)
@@ -1913,7 +1897,7 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
     assert link["follow_symlinks"] is True, link
     assert link["name_existed"] is False, "the name existed before its one link"
     assert target.read_text(encoding="utf-8") == "body\n"
-    _assert_single_plain_0644(target)
+    assert_single_plain(target, 0o644)
 
 
 #: A child looping over the handle's production write-once write (run setup's alert), each in

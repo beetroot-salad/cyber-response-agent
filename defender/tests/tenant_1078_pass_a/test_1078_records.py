@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._create_lane import assert_single_plain, no_unnamed_files
 from defender.tests._umask import umask
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
@@ -132,17 +133,9 @@ class _Bystander:
         self._look()
 
 
-def _assert_single_plain_0644(path: Path) -> None:
-    """A plain, single-named file of mode 0644, owned by this process. Every caller writes it
-    under a pinned umask 022: the create lane honours the umask (#1144), so 0644 is its mode
-    under THAT umask only."""
-    st = os.lstat(path)
-    assert stat.S_ISREG(st.st_mode), f"{path} is not a regular file"
-    assert st.st_nlink == 1, f"{path} has {st.st_nlink} names, not one"
-    assert stat.S_IMODE(st.st_mode) == 0o644, (
-        f"{path} has mode {oct(stat.S_IMODE(st.st_mode))}, not today's 0644 (C-R6 found the "
-        "naive staged shape regressing to 0600)")
-    assert st.st_uid == os.geteuid(), f"{path} is not owned by the writing process"
+#: Why a create-lane record's mode is pinned at all: the first staged-name sketch of J16's lane
+#: (`tempfile.mkstemp`) regressed it to 0600 whatever the umask.
+_WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
 
 
 #: The crash children: each loops over ONE real create lane in fresh directories until it is
@@ -290,9 +283,10 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
 
     Four observations, each against the REAL lane: (1) the record race with a bystander
     reader; (2) the row race with a bystander reader; (3) mode, owner and name count of what
-    each leaves; (4) a real SIGKILL of a child looping over each lane. All four run under a
-    pinned umask 022, so (3)'s 0644 never rides the host's ambient umask: the umask is
-    process-wide, so the racing threads share it and the killed children inherit it.
+    each leaves; (4) a real SIGKILL of a child looping over each lane. (1)-(3) run under a
+    pinned umask 022, so (3)'s 0644 never rides the host's ambient umask (the umask is
+    process-wide, so the racing threads share it). (4) asserts no mode, so its children run
+    under whatever umask the suite was started with.
 
     PLATFORM-NEUTRAL BY CONSTRUCTION (phase F RC1): the harness uses only POSIX primitives —
     threads, `os.lstat`/`os.listdir`, `os.geteuid`, a child process and SIGKILL — and asserts
@@ -316,7 +310,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
             on_disk = json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
             assert on_disk["tenant_id"] == T_ID
             assert {r.base_world_id for r in results} == {on_disk["base_world_id"]}
-            _assert_single_plain_0644(base / H.RECORD_NAME)
+            assert_single_plain(base / H.RECORD_NAME, 0o644, why=_WHY_0644)
 
         # (2) + (3) the tenant row
         row_fields = ("tenant_id", "created_at")
@@ -331,41 +325,32 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
             assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
             assert os.listdir(root) == [T_ID], f"trial {trial}: stray entries in the root"
             assert os.listdir(root / T_ID) == [H.ROW_NAME], f"trial {trial}: stray beside the row"
-            _assert_single_plain_0644(root / T_ID / H.ROW_NAME)
+            assert_single_plain(root / T_ID / H.ROW_NAME, 0o644, why=_WHY_0644)
 
-        # (4) the crash
-        crash_root = tmp_path / "crash"
-        env = H.setup_env(None)
-        torn: list[str] = []
-        for lane, kills in (("record", 24), ("row", 8)):
-            for kill in range(kills):
-                root = crash_root / f"{lane}-{kill}"
-                root.mkdir(parents=True)
-                child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-                    [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                try:
-                    assert child.stdout.readline().strip() == "ready", child.stderr.read()
-                    time.sleep(random.uniform(0.02, 0.25))
-                    if child.poll() is not None:
-                        pytest.fail(f"the {lane} create-lane child died on its own: "
-                                    f"{child.stderr.read()}")
-                    child.send_signal(signal.SIGKILL)
-                finally:
-                    child.wait(timeout=30)
-                    child.stdout.close()
-                    child.stderr.close()
-                torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
-        assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
-
-
-def _no_unnamed_files(errno_: int):
-    """An `open_unnamed` seam answering as a filesystem without `O_TMPFILE` does (NFS,
-    virtiofs), or as a real failure — every host this suite runs on supports it, so the
-    fallback is reachable only through the seam."""
-    def refuse(directory: Path) -> int:
-        raise OSError(errno_, os.strerror(errno_), str(directory))
-    return refuse
+    # (4) the crash
+    crash_root = tmp_path / "crash"
+    env = H.setup_env(None)
+    torn: list[str] = []
+    for lane, kills in (("record", 24), ("row", 8)):
+        for kill in range(kills):
+            root = crash_root / f"{lane}-{kill}"
+            root.mkdir(parents=True)
+            child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
+                [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                assert child.stdout.readline().strip() == "ready", child.stderr.read()
+                time.sleep(random.uniform(0.02, 0.25))
+                if child.poll() is not None:
+                    pytest.fail(f"the {lane} create-lane child died on its own: "
+                                f"{child.stderr.read()}")
+                child.send_signal(signal.SIGKILL)
+            finally:
+                child.wait(timeout=30)
+                child.stdout.close()
+                child.stderr.close()
+            torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
+    assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
 
 
 @pytest.mark.parametrize("unsupported", [errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL])
@@ -377,17 +362,17 @@ def test_create_falls_back_where_no_unnamed_file_can_be_made(tmp_path, unsupport
     umask 022."""
     io_mod = H.mod("_io")
     target = tmp_path / "x.json"
-    io_mod.write_guarded(target, "{}\n", mode="create", open_unnamed=_no_unnamed_files(unsupported))
+    io_mod.write_guarded(target, "{}\n", mode="create", open_unnamed=no_unnamed_files(unsupported))
     assert target.read_text(encoding="utf-8") == "{}\n"
     with pytest.raises(FileExistsError) as again:
         io_mod.write_guarded(target, "{}\n", mode="create",
-                             open_unnamed=_no_unnamed_files(unsupported))
+                             open_unnamed=no_unnamed_files(unsupported))
     assert not getattr(again.value, "write_guarded_alias", False), "the race read as an alias"
 
     control = tmp_path / "y.json"
     with umask(0o022):
         io_mod.write_guarded(control, "{}\n", mode="create")
-    _assert_single_plain_0644(control)
+    assert_single_plain(control, 0o644, why=_WHY_0644)
 
 
 def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
@@ -398,7 +383,7 @@ def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
     target = tmp_path / "x.json"
     with pytest.raises(OSError, match="No space") as failed:
         io_mod.write_guarded(target, "{}\n", mode="create",
-                             open_unnamed=_no_unnamed_files(errno.ENOSPC))
+                             open_unnamed=no_unnamed_files(errno.ENOSPC))
     assert failed.value.errno == errno.ENOSPC
     assert not target.exists()
 
