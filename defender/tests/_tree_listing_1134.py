@@ -1,9 +1,10 @@
 """Seams, plants and child-process runners for #1134 v3 step 1's suite
 (`test_1134_tree_listing.py`). It defines no tests.
 
-It imports only the standard library at module level. `defender._io` is resolved inside the
-functions that use it, so a missing name fails the row that calls it (never collection), and a
-child interpreter loads this module in a fraction of a second.
+It imports only the standard library at module level. `defender._io` and
+`defender._tree_listing` are resolved inside the functions that use them, so a missing name fails
+the row that calls it (never collection), and a child interpreter loads this module in a fraction
+of a second.
 
 * `os_` stand-ins: pass-throughs over the real `os`, handed in through `bind(root, os_=...)` or
   `hold(root, os_=...)` (nothing is monkeypatched):
@@ -74,6 +75,11 @@ LISTING_ROUTES = ("step", "reopen", "scandir", "midway", "entry", "fstat")
 HOST_BYTES = b'{"planted": "HOST"}\n'
 #: What a plain entry at the address under test holds.
 PLAIN = b"plain entry at its own address\n"
+
+
+def tree_listing() -> Any:
+    """`defender._tree_listing`, imported per call."""
+    return importlib.import_module("defender._tree_listing")
 
 
 def io_module() -> Any:
@@ -332,9 +338,10 @@ class ListingFaults(RealOs):
     fails its `"."` reopen with that errno (EACCES: refused). A folder in `remove` is REALLY
     removed (`shutil.rmtree`, everything in it) at `moment` (`REMOVAL_MOMENTS`) of its own
     listing, and the real call then runs against the removed folder, so what the kernel and
-    CPython answer for a deleted folder is what `entries()` sees (addendum 3, D2: absent).
-    The folder is named off the descriptor BEFORE it is removed (once removed, `/proc` spells
-    it with a `" (deleted)"` suffix). `removed` lists the real paths removed, in order."""
+    CPython answer for a deleted folder is what `entries()` sees (addendum 3, D2: absent, so
+    `list_tree` reports it `gone`). The folder is named off the descriptor BEFORE it is removed
+    (once removed, `/proc` spells it with a `" (deleted)"` suffix). `removed` lists the real
+    paths removed, in order."""
 
     def __init__(self, refuse: dict[str, int] | None = None, *, remove: Iterable[str] = (),
                  moment: str = "reopen") -> None:
@@ -483,6 +490,12 @@ class SwapsOnStep(RealOs):
 # Answers as JSON rows (the child's, and the in-process runner's)
 # ---------------------------------------------------------------------------------------
 
+def tree_row(got: Any) -> dict[str, Any]:
+    return {"absent": got.absent, "reason": got.reason,
+            "entries": None if got.entries is None else [list(r) for r in got.entries.items()],
+            "refused": [list(r) for r in got.refused.items()], "gone": list(got.gone)}
+
+
 def entries_row(got: Any) -> dict[str, Any]:
     return {"name": got.name, "absent": got.absent, "reason": got.reason,
             "entries": None if got.entries is None else sorted(map(list, got.entries.items()))}
@@ -504,8 +517,10 @@ def _scenario_view(io: Any, scenario: dict[str, Any]) -> Iterator[Any]:
             yield bound.under(prefix) if prefix else bound
 
 
-def _answer(view: Any, scenario: dict[str, Any]) -> dict[str, Any]:
+def _answer(tl: Any, view: Any, scenario: dict[str, Any]) -> dict[str, Any]:
     op = scenario["op"]
+    if op == "list_tree":
+        return tree_row(tl.list_tree(view, depth=scenario["depth"]))
     if op == "entries":
         return entries_row(view.entries())
     if op == "read":
@@ -515,15 +530,15 @@ def _answer(view: Any, scenario: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_scenarios(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Each scenario (`root`, `how` = bind | held, optional `prefix`, `op` = entries |
-    read, and its `name`) answered as a JSON row, or
+    """Each scenario (`root`, `how` = bind | held, optional `prefix`, `op` = list_tree |
+    entries | read, and its `depth` or `name`) answered as a JSON row, or
     the exception it raised. Runs in whatever process calls it."""
-    io = io_module()
+    io, tl = io_module(), tree_listing()
     rows: list[dict[str, Any]] = []
     for scenario in scenarios:
         try:
             with _scenario_view(io, scenario) as view:
-                rows.append(_answer(view, scenario))
+                rows.append(_answer(tl, view, scenario))
         except Exception as e:  # noqa: BLE001 — reported in the row, for the test to judge
             rows.append(_raised(e))
     return rows
@@ -546,13 +561,13 @@ class _AuditLog:
 def run_audited(scenarios: list[dict[str, Any]], log: _AuditLog) -> list[dict[str, Any]]:
     """Each scenario as `run_scenarios` answers it, with the audit events raised during the
     helper call itself (the view is made, and closed, outside the recording)."""
-    io = io_module()
+    io, tl = io_module(), tree_listing()
     rows: list[dict[str, Any]] = []
     for scenario in scenarios:
         with _scenario_view(io, scenario) as view:
             log.events = []
             try:
-                answer = _answer(view, scenario)
+                answer = _answer(tl, view, scenario)
             except Exception as e:  # noqa: BLE001 — reported in the row, for the test to judge
                 answer = _raised(e)
             finally:
@@ -597,6 +612,7 @@ def child() -> None:
     request = json.loads(sys.stdin.read())
     try:
         io_module()
+        tree_listing()
         if request["mode"] == "as_nobody":
             if os.geteuid() == 0:
                 _drop_privileges()
