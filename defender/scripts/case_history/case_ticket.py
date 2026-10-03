@@ -160,8 +160,18 @@ def _thawed(mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
 def check_mapping(settings: Path) -> None:
     """The tenant's case-history mapping parses and keeps its lifecycle invariant, or
     `CaseTicketError` naming it — `tenant.py setup`'s settings-parse rule, since no run reads
-    the mapping before its post-run ticket write."""
-    load_case_mapping(settings)
+    the mapping before its post-run ticket write.
+
+    An operator command on the host, so the refusal names the file's own path: the loader
+    names some faults only by their place in the tenant's folder, because its message can
+    reach a run's record."""
+    try:
+        load_case_mapping(settings)
+    except CaseTicketError as bad:
+        path = str(_mapping_path(settings))
+        if path in str(bad):
+            raise
+        raise CaseTicketError(f"{path}: {bad}") from bad
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:
