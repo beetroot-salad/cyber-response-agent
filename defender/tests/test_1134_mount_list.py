@@ -433,7 +433,7 @@ def test_the_drains_pass_a_constant_to_the_worktree_batch():
 @pytest.mark.parametrize("label", KNOWN)
 def test_each_members_writable_trees_are_its_mount_points_in_order(
         tmp_path: Path, label: DrainLabel, on_disk: str):
-    """`label.writable_trees(paths)` (`@owns drain_writable_trees`, #1179 M1') is the member's
+    """`label.writable_trees(paths)` (the owner of `drain_writable_trees`, #1179 M1') is the member's
     mount points, a tuple in the contract's order, under the `LoopPaths` it is handed, whatever
     else the checkout holds.
 
