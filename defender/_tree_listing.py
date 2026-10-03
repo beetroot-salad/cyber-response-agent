@@ -9,14 +9,54 @@ what it opened before answering. A folder swapped or removed after its parent wa
 therefore that folder's own refusal or absence, never an empty folder (`entries()` answers a
 folder removed while it is listed absent).
 
-`list_tree` opens nothing itself, and catches nothing: every refusal is the reason
-`entries()` gave, verbatim. `under()` validates a name and opens nothing.
+Neither helper opens anything itself, and neither catches anything: every refusal is the
+reason `entries()` gave, verbatim. `under()` validates a name and opens nothing.
 """
 from __future__ import annotations
 
 import dataclasses
+from pathlib import PurePath
 
 from defender._io import ENTRY_DIR, Bound
+
+
+@dataclasses.dataclass(frozen=True)
+class EntryKind:
+    """`entry_kind`'s answer, in exactly one of three states: present (`kind` an `ENTRY_*`),
+    absent (`absent`), or refused (`reason`, the listing of `folder` refused)."""
+
+    #: The entry's name as the caller spelled it (POSIX), relative to the view.
+    name: str
+    #: The folder whose listing answered: the name's parent, relative to the view (`""` is the
+    #: view's own folder).
+    folder: str
+    kind: str | None
+    absent: bool
+    reason: str | None
+
+
+def entry_kind(view: Bound, name: str | PurePath) -> EntryKind:
+    """What stands at `name` below `view`, as its folder's listing judges it (`entries()`:
+    a link of any sort, a FIFO, socket or device is `ENTRY_OTHER`, a hard link `ENTRY_FILE`).
+
+    One listing: `view.entries()` for a one-component name, else `view.under(<parent>)
+    .entries()`. Absent when that folder is absent or has no row for the leaf; refused, with
+    the listing's reason, when the listing was refused — a linked or non-directory holding
+    folder among them (a caller that needs O2's "other" for that maps the refusal to it).
+
+    `name` follows `Bound.read`'s grammar, checked by `under` before any I/O (`ValueError`);
+    `""` and `"."` are refused too, since the view's own folder has no listed parent here
+    (ask `view.entries()`). Never raises for a plant or a refusal."""
+    spelling = name.as_posix() if isinstance(name, PurePath) else name
+    view.under(name)  # the grammar check: opens nothing, raises ValueError for a bad name
+    folder, _sep, leaf = spelling.rpartition("/")
+    listing = (view.under(folder) if folder else view).entries()
+    if listing.reason is not None:
+        return EntryKind(name=spelling, folder=folder, kind=None, absent=False,
+                         reason=listing.reason)
+    kind = None if listing.entries is None else listing.entries.get(leaf)
+    return EntryKind(name=spelling, folder=folder, kind=kind, absent=kind is None,
+                     reason=None)
 
 
 @dataclasses.dataclass(frozen=True)
