@@ -9,7 +9,7 @@ from defender._model import model
 from pathlib import Path
 
 from defender._io import write_atomic
-from defender.learning.core.config import LoopPaths
+from defender.learning.core.config import DrainLabel, LoopPaths
 
 _logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ClaimedMarker:
 
 
 def claim_markers(
-    queue_dir: Path, *, identity_key: str, label: str, noun: str, extra: str = ""
+    queue_dir: Path, *, identity_key: str, label: DrainLabel, noun: str, extra: str = ""
 ) -> Iterator[ClaimedMarker]:
     """Claim every queued request and yield the servable ones, in orphans-first order.
 

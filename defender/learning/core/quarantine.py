@@ -4,10 +4,14 @@ import json
 import logging
 import tarfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender._clock import now_iso
 from defender._env import env_int
 from defender.runtime.scrub import RunTainted, verdict_path
+
+if TYPE_CHECKING:
+    from defender.learning.core.config import DrainLabel
 
 _logger = logging.getLogger(__name__)
 
@@ -60,7 +64,7 @@ def _tree_verdict(wt: Path) -> dict:
 
 
 def _manifest(
-    wt: Path, archive: Path, *, batch_id: str, branch: str, label: str, taint: RunTainted,
+    wt: Path, archive: Path, *, batch_id: str, branch: str, label: DrainLabel, taint: RunTainted,
 ) -> dict:
     # `__context__` is the work's own failure, which the taint outranked. Recorded explicitly,
     # since the traceback is gone once the tree is.
@@ -68,7 +72,7 @@ def _manifest(
     return {
         "batch_id": batch_id,
         "branch": branch,
-        "label": label,
+        "label": label.value,
         "worktree": str(wt),
         "archive": archive.name,
         "quarantined_at": now_iso(),
@@ -91,7 +95,7 @@ def preserve_tainted_tree(
     *,
     batch_id: str,
     branch: str,
-    label: str,
+    label: DrainLabel,
     taint: RunTainted,
 ) -> Path | None:
     """Archive a tainted worktree before its caller destroys it. Returns the archive path,

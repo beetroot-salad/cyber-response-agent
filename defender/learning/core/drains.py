@@ -15,6 +15,7 @@ from collections.abc import Callable
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     DEFAULT_PATHS,
+    DrainLabel,
     LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     QueueChannel,
@@ -57,7 +58,7 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, run_dir: Path, *, label: str, box: Any = None,
+    paths: LoopPaths, run_dir: Path, *, label: DrainLabel, box: Any = None,
     on_done: Callable[[str | None], None],
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
@@ -90,7 +91,7 @@ def _maybe_trigger_author(
     module_name: str,
     pending_label: str,
     *,
-    label: str,
+    label: DrainLabel,
     box: Any = None,
 ) -> None:
     """The author lane's default work step for one curator. `label` is the lane's (bound in by
@@ -420,7 +421,7 @@ def _drain_lead_author_markers(
 
 
 def _invoke_pitfalls(
-    paths: LoopPaths, *, label: str, box: Any = None,
+    paths: LoopPaths, *, label: DrainLabel, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
@@ -502,7 +503,7 @@ def _validate_merge_mode() -> None:
 
 
 def _drain_box_request(
-    wt: Path, batch_id: str, label: str, paths: LoopPaths,
+    wt: Path, batch_id: str, label: DrainLabel, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's mounts: ro over the whole worktree leaf (it carries `<wt>/defender` and
     is both drain roles' cwd_anchor), rw over exactly the leaf's
@@ -538,12 +539,12 @@ def _pending_delivery_record(paths: LoopPaths, branch: AuthorBranch, batch_id: s
 
 
 def _record_pending_delivery(
-    paths: LoopPaths, branch: AuthorBranch, batch_id: str, *, label: str, reason: str,
+    paths: LoopPaths, branch: AuthorBranch, batch_id: str, *, label: DrainLabel, reason: str,
 ) -> None:
     record = _pending_delivery_record(paths, branch, batch_id)
     guarded_mkdir(record.parent, base=paths.state_root)
     rewrite_marker(record, {
-        "branch": branch.branch_name(batch_id), "batch_id": batch_id, "label": label,
+        "branch": branch.branch_name(batch_id), "batch_id": batch_id, "label": label.value,
         "reason": reason, "at": now_iso(),
     })
 
@@ -568,7 +569,7 @@ def _pending_deliveries(paths: LoopPaths, branch: AuthorBranch) -> list[PendingD
     return out
 
 
-def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: str) -> bool:
+def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: DrainLabel) -> bool:
     """Deliver every batch this lane committed but could not push or open a PR for, before
     anything new is served. Answers whether the lane is clear to serve.
 
@@ -597,7 +598,7 @@ def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: str) -> bool
 
 
 def _land_batch(
-    paths: LoopPaths, branch: AuthorBranch, batch_id: str, wt: Path, label: str,
+    paths: LoopPaths, branch: AuthorBranch, batch_id: str, wt: Path, label: DrainLabel,
 ) -> tuple[str | None, bool]:
     """Push and open the PR: `(pr, delivered)`. `pr` is `None` for a zero-commit batch. On a
     `BranchError` the commit stays on a local branch `cleanup` never deletes, and the failure
@@ -615,7 +616,7 @@ def _land_batch(
 
 
 def _open_batch(
-    paths: LoopPaths, branch: AuthorBranch, *, label: str, has_work: Callable[[LoopPaths], bool],
+    paths: LoopPaths, branch: AuthorBranch, *, label: DrainLabel, has_work: Callable[[LoopPaths], bool],
 ) -> tuple[str, Path] | None:
     """Everything that decides whether a tick serves at all, in order: an earlier batch's
     delivery (which holds the lease while it fails), the wake gate, the open-PR lease, the
@@ -659,7 +660,7 @@ def _run_worktree_batch(
     paths: LoopPaths,
     branch: AuthorBranch,
     *,
-    label: str,
+    label: DrainLabel,
     has_work: Callable[[LoopPaths], bool],
     do_work: Callable[..., BatchDisposition | None],
     start_box: Callable[..., Any] = box_mod.start_box,

@@ -213,7 +213,7 @@ def build_lead_author_deps(
 def run(
     run_dir: Path,
     *,
-    label: str,
+    label: _loop_config.DrainLabel,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
@@ -241,7 +241,7 @@ def run(
     if deps is not None:
         if deps.paths.skills_dir not in deps.paths.drain_writable_trees(label):
             raise LeadAuthorError(
-                f"refused: the {label!r} lane does not mount {deps.paths.skills_dir}"
+                f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
             )
         queue_lock = deps.acquire_queue_lock()
         if queue_lock is None:
