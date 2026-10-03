@@ -26,9 +26,11 @@ route, or a link count another filesystem reports. Nothing is monkeypatched.
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import errno
 import os
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -326,27 +328,37 @@ def test_a_live_folders_listing_fault_is_stat_entries_own_refusal(scratch, how, 
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_list_tree_answers_from_the_disk_on_every_call_never_a_cache(scratch, how):
-    """(a) A second `list_tree` on the SAME view sees what changed on disk since the first:
-    a file added in a sub-folder, a file removed from another, a folder added at the top. A
-    third call after undoing the changes answers the first tree again. Control: a fresh view
-    over the changed tree answers what the reused one does."""
+    """(a) A second `list_tree(depth=3)` on the SAME view sees what changed on disk since the
+    first, at EVERY listed level: a folder added at the top, a file added and one removed in a
+    level-1 folder, and a file added and one removed in a level-2 folder (`a/n/`), so a cache of
+    any one folder's listing, nested ones included, shows. A third call after undoing the
+    changes answers the first tree again. Control: a fresh view over the changed tree answers
+    what the reused one does (independent adversary, hole 3: depth 2 alone left nested
+    listings uncovered)."""
     base = base_of(how, scratch)
     put_plain(base / "a" / "x.md")
+    put_plain(base / "a" / "n" / "deep.md")
     put_plain(base / "b" / "gone.md")
-    first = {"a": DIR, "a/x.md": FILE, "b": DIR, "b/gone.md": FILE}
-    changed = {"a": DIR, "a/x.md": FILE, "a/y.md": FILE, "b": DIR, "c": DIR}
+    first = {"a": DIR, "a/n": DIR, "a/n/deep.md": FILE, "a/x.md": FILE, "b": DIR,
+             "b/gone.md": FILE}
+    changed = {"a": DIR, "a/n": DIR, "a/n/new.md": FILE, "a/x.md": FILE, "a/y.md": FILE,
+               "b": DIR, "c": DIR}
     with view_of(how, scratch) as view:
-        assert_tree(list_tree(view, 2), first)
+        assert_tree(list_tree(view, 3), first)
         put_plain(base / "a" / "y.md")
+        put_plain(base / "a" / "n" / "new.md")
+        (base / "a" / "n" / "deep.md").unlink()
         (base / "b" / "gone.md").unlink()
         (base / "c").mkdir()
-        assert_tree(list_tree(view, 2), changed)
+        assert_tree(list_tree(view, 3), changed)
         with view_of(how, scratch) as fresh:
-            assert_tree(list_tree(fresh, 2), changed)
+            assert_tree(list_tree(fresh, 3), changed)
         (base / "a" / "y.md").unlink()
+        (base / "a" / "n" / "new.md").unlink()
+        put_plain(base / "a" / "n" / "deep.md")
         put_plain(base / "b" / "gone.md")
         (base / "c").rmdir()
-        assert_tree(list_tree(view, 2), first)
+        assert_tree(list_tree(view, 3), first)
 
 
 def test_every_field_of_both_records_is_frozen():
@@ -361,6 +373,32 @@ def test_every_field_of_both_records_is_frozen():
     assert [len(dataclasses.fields(r)) for r in records] == [5, 5]
     for record in records:
         assert type(record).__dataclass_params__.frozen, type(record).__name__  # type: ignore[attr-defined]
+        for field in dataclasses.fields(record):
+            before = getattr(record, field.name)
+            with pytest.raises(dataclasses.FrozenInstanceError):
+                setattr(record, field.name, OTHER)
+            with pytest.raises(dataclasses.FrozenInstanceError):
+                delattr(record, field.name)
+            assert getattr(record, field.name) == before, (type(record).__name__, field.name)
+
+
+@pytest.mark.parametrize("how", VIEWS)
+def test_the_records_the_helpers_return_are_frozen_in_every_field(scratch, how):
+    """(b), on what the helpers actually hand back (independent adversary, hole 4): the
+    `TreeListing` `list_tree` returns and the `EntryKind` `entry_kind` returns are instances of
+    the module's frozen records, and EVERY field of each refuses `setattr` and `delattr`, its
+    value unchanged after. Non-vacuity: both answers carry content."""
+    from defender.tests.test_1134_tree_listing import entry_kind
+    base = base_of(how, scratch)
+    put_plain(base / "a" / "x.md")
+    with view_of(how, scratch) as view:
+        records = [list_tree(view, 2), entry_kind(view, "a/x.md")]
+    tl = TL()
+    assert type(records[0]) is tl.TreeListing, records[0]
+    assert records[0].entries, records[0]
+    assert type(records[1]) is tl.EntryKind, records[1]
+    assert records[1].kind == FILE, records[1]
+    for record in records:
         for field in dataclasses.fields(record):
             before = getattr(record, field.name)
             with pytest.raises(dataclasses.FrozenInstanceError):
@@ -487,3 +525,102 @@ def test_a_scan_fault_whose_dead_check_also_faults_is_still_a_refusal(scratch, h
     assert (got.absent, got.reason, got.stats) == (False, os.strerror(errno.EACCES), None), got
     assert_listed(peer, {"p.md": stat.S_IFREG}, "the unfaulted sibling")
     assert descriptors_under(scratch.tmp) == []
+
+
+class _DiesThenFaults(RealOs):
+    """The real `os`, except that the scan of the folder `folder` REALLY removes it
+    (`shutil.rmtree`) after handing back its first entry, then fails with `err`: a dead folder
+    whose scan faults with an errno other than ENOENT."""
+
+    def __init__(self, folder: Path, err: int) -> None:
+        self.folder, self.err, self.removed, self.raised = folder, err, False, False
+
+    def scandir(self, path: Any) -> Any:
+        it = os.scandir(path)
+        if isinstance(path, int) and os.path.realpath(f"/proc/self/fd/{path}") == str(
+                self.folder):
+            return _DiesThenFaultsIt(it, self)
+        return it
+
+
+class _DiesThenFaultsIt:
+    def __init__(self, it: Any, seam: _DiesThenFaults) -> None:
+        self._it, self._seam, self._given = it, seam, 0
+
+    def __iter__(self) -> _DiesThenFaultsIt:
+        return self
+
+    def __next__(self) -> Any:
+        if self._given == 1:
+            shutil.rmtree(self._seam.folder)
+            self._seam.removed = True
+            self._seam.raised = True
+            raise OSError(self._seam.err, os.strerror(self._seam.err))
+        self._given += 1
+        return next(self._it)
+
+    def __enter__(self) -> _DiesThenFaultsIt:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._it.close()
+
+    def close(self) -> None:
+        self._it.close()
+
+
+@pytest.mark.parametrize("how", VIEWS)
+@pytest.mark.parametrize("err", [errno.EIO, errno.EACCES, errno.ENOENT])
+@pytest.mark.parametrize("reader", ["entries", "stat_entries"])
+def test_a_folder_that_dies_mid_scan_and_then_faults_is_absent_to_both_readers(
+        scratch, how, err, reader):
+    """Independent adversary, holes 1 and 2: `sub` is REALLY removed mid-scan and the scan
+    then fails with EIO, EACCES or ENOENT. The folder is dead, so BOTH `entries()` and
+    `stat_entries` answer absent (no reason, nothing listed), whatever the errno, never the
+    scan's refusal. Non-vacuity: the seam removed `sub` and raised. Control: the same seam on
+    a live sibling it does not touch lists its file."""
+    base = base_of(how, scratch)
+    put_plain(base / "sub" / "a.md")
+    put_plain(base / "sub" / "b.md")
+    put_plain(base / "peer" / "p.md")
+    seam = _DiesThenFaults(Path(os.path.realpath(base / "sub")), err)
+    with view_of(how, scratch, seam) as view:
+        if reader == "entries":
+            got = view.under("sub").entries()
+            rows, peer = got.entries, view.under("peer").entries().entries
+        else:
+            got = _io.stat_entries(view.under("sub"))
+            rows, peer = got.stats, kinds_of(_io.stat_entries(view.under("peer")))
+    assert seam.removed, "the seam did not remove sub"
+    assert seam.raised, "the seam did not raise"
+    assert (got.absent, got.reason, rows) == (True, None, None), (
+        f"{reader}: a folder dead mid-scan whose scan raised {errno.errorcode[err]} "
+        f"answered {got!r}")
+    assert peer in ({"p.md": FILE}, {"p.md": stat.S_IFREG}), peer
+    assert descriptors_under(scratch.tmp) == []
+
+
+def _calls_named(node: ast.AST, attr: str) -> list[ast.Call]:
+    return [n for n in ast.walk(node) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute) and n.func.attr == attr]
+
+
+def test_both_readers_reach_the_one_directory_scan_in_io():
+    """Independent adversary, hole 2 (the design's one shared step, structurally): `_io.py`
+    makes exactly one directory scan (`.scandir(...)`), inside `Bound._listing`; `Bound.entries`
+    and `stat_entries` each call `_listing` and scan nothing themselves. Non-vacuity: the scan
+    is found."""
+    tree = ast.parse(Path(_io.__file__).read_text(encoding="utf-8"))
+    funcs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "Bound":
+            funcs.update({f"Bound.{f.name}": f for f in node.body
+                          if isinstance(f, ast.FunctionDef)})
+    funcs.update({f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)})
+    scans = [n for n in _calls_named(tree, "scandir")]
+    assert len(scans) == 1, [s.lineno for s in scans]
+    listing = funcs["Bound._listing"]
+    assert _calls_named(listing, "scandir") == scans, "the scan is not in Bound._listing"
+    for reader in ("Bound.entries", "stat_entries"):
+        assert _calls_named(funcs[reader], "_listing"), f"{reader} does not call _listing"
+        assert not _calls_named(funcs[reader], "scandir"), f"{reader} scans by itself"
