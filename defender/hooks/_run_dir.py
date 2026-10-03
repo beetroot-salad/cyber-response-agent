@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import TEXT_READ_ERRORS, locked_for_rewrite
+from defender._io import TEXT_READ_ERRORS, locked_for_rewrite, read_locked_whole
 
 
 def update_json_locked(
@@ -21,7 +21,7 @@ def update_json_locked(
     path = Path(path)
     with locked_for_rewrite(path) as f:
         try:
-            raw = f.read()
+            raw = read_locked_whole(f)
         except UnicodeDecodeError:
             raw = ""
         try:

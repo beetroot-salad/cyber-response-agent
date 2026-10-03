@@ -195,7 +195,7 @@ class RecordHandle:
         self._mkdir(root, name)
         with self._io.rooted_locked_for_rewrite(root, name) as f:
             f.seek(0)
-            raw = f.read()
+            raw = _real_io.read_locked_whole(f)
             try:
                 current = json.loads(raw) if raw.strip() else {}
             except ValueError:

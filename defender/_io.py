@@ -67,7 +67,9 @@ def entry_present(path: Path) -> bool:
     return True
 
 
-def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str | None]:
+def read_guarded(
+    path: Path, *, errors: str = "strict", os_: Any = os,
+) -> tuple[str | None, str | None]:
     """:func:`write_guarded`'s READ-side twin: the text at ``path``, or a refusal reason.
 
     Same return shape as :func:`read_text_soft`, but anything other than a plain,
@@ -79,12 +81,12 @@ def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str
     on absence differently uses :func:`read_plain` and catches it.
     """
     try:
-        return read_plain(path, errors=errors), None
+        return read_plain(path, errors=errors, os_=os_), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
 
-def read_plain(path: Path, *, errors: str = "strict") -> str:
+def read_plain(path: Path, *, errors: str = "strict", os_: Any = os) -> str:
     """The guarded read as a RAISING primitive: the text of the plain, single-linked regular
     file at ``path``, read with universal newlines exactly as ``Path.read_text`` would — or the
     exception that stopped it, every one a member of :data:`TEXT_READ_ERRORS`:
@@ -94,7 +96,11 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
         symlink (refused at the open, ``ELOOP``), a hard link (``EMLINK``, the write side's
         own errno for the shape ``O_NOFOLLOW`` cannot refuse), a directory, fifo, socket or
         device (``ELOOP``, as the write side folds them);
-      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``);
+      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``),
+        including the read step's refusals (:func:`_read_plain_fd`): larger than
+        :data:`READ_LIMIT` (``EFBIG``), no data yet on the non-blocking descriptor
+        (``EAGAIN``), gone while it was read (an ``ENOENT`` that is NOT a
+        ``FileNotFoundError``), and a path that does not encode (``EINVAL``);
       * ``UnicodeDecodeError`` — its bytes are not UTF-8.
 
     Plainness is judged on the open descriptor (``O_NOFOLLOW`` then ``fstat``), not by
@@ -102,50 +108,120 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     """
     # `_open_plain_fd` opens with `O_NONBLOCK`: a planted FIFO would otherwise block the open
     # forever before `fstat` could refuse it.
-    fd = _open_plain_fd(path)
+    fd = _open_plain_fd(path, os_)
     try:
-        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
-            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
-            return fh.read()
+        text = _read_plain_fd(os_, fd, binary=False, errors=errors)
     finally:
-        if fd >= 0:
-            os.close(fd)
+        os_.close(fd)
+    assert isinstance(text, str)
+    return text
 
 
-def read_plain_bytes(path: Path) -> bytes:
+def read_plain_bytes(path: Path, *, os_: Any = os) -> bytes:
     """:func:`read_plain` without newline translation, for records whose exact bytes matter
     (e.g. the alert's content hash)."""
-    fd = _open_plain_fd(path)
+    fd = _open_plain_fd(path, os_)
     try:
-        with os.fdopen(fd, "rb") as fh:
-            fd = -1
-            return fh.read()
+        data = _read_plain_fd(os_, fd, binary=True)
     finally:
-        if fd >= 0:
-            os.close(fd)
+        os_.close(fd)
+    assert isinstance(data, bytes)
+    return data
 
 
-def read_bytes_guarded(path: Path) -> tuple[bytes | None, str | None]:
+def read_bytes_guarded(path: Path, *, os_: Any = os) -> tuple[bytes | None, str | None]:
     """:func:`read_guarded`'s bytes twin — ``(data, None)`` or ``(None, reason)``."""
     try:
-        return read_plain_bytes(path), None
+        return read_plain_bytes(path, os_=os_), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
 
-def _open_plain_fd(path: Path) -> int:
-    """The guarded open both plain readers share; the caller owns the returned fd."""
+#: The most a whole-file read of a guarded plain file takes in (#1174): a planted sparse file
+#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. No caller
+#: reads anything near it; the one file kind that large, the wire log, none of them reads.
+READ_LIMIT = 64 * 1024 * 1024
+
+#: One `read(2)` of the read step: a typical record (investigation.md is capped at 64 KiB) is
+#: one read plus the empty one that says EOF.
+_READ_CHUNK = 256 * 1024
+
+_TOO_LARGE = f"larger than the {READ_LIMIT // (1024 * 1024)} MiB read limit"
+_VANISHED = "the file vanished while it was being read"
+_NOT_A_PATH = "not an encodable path"
+
+
+class _ReadVanished(OSError):
+    """An `ENOENT` after the descriptor was opened and judged plain. A subclass is not mapped to
+    `FileNotFoundError` the way `OSError(ENOENT, ...)` is, so no reader's `except
+    FileNotFoundError` (absent) catches it: it is a refusal (#1174 O3)."""
+
+
+def _read_plain_fd(
+    os_: Any, fd: int, *, binary: bool, errors: str = "strict",
+) -> str | bytes:
+    """@owns the bytes of a guarded plain file — every whole-file read of one comes here.
+
+    The whole content of `fd`, an open descriptor already judged a plain file, or the refusal
+    that stopped it: `EFBIG` when `fstat` says it is over :data:`READ_LIMIT` (before any byte
+    is read) or the reads run past it (it grew); `BlockingIOError` when the non-blocking
+    descriptor has no data yet; `_ReadVanished` for an `ENOENT` from the `fstat` or a `read`.
+    Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
+    `Path.read_text` would. The descriptor stays the caller's to close.
+    """
     try:
-        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
+        if os_.fstat(fd).st_size > READ_LIMIT:
+            raise OSError(errno.EFBIG, _TOO_LARGE)
+        chunks: list[bytes] = []
+        total = 0
+        while chunk := os_.read(fd, _READ_CHUNK):
+            total += len(chunk)
+            if total > READ_LIMIT:
+                raise OSError(errno.EFBIG, _TOO_LARGE)
+            chunks.append(chunk)
+    except FileNotFoundError:
+        raise _ReadVanished(errno.ENOENT, _VANISHED) from None
+    data = b"".join(chunks)
+    if binary:
+        return data
+    text = data.decode("utf-8", errors)
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
+
+
+def read_locked_whole(f: Any) -> Any:
+    """The whole content of a rewrite handle (:func:`locked_for_rewrite`,
+    :func:`rooted_locked_for_rewrite`) from its current position, bounded as every guarded read
+    is (#1174): `EFBIG` when `fstat` says the file is over :data:`READ_LIMIT`, and a read that
+    finds no data yet on a non-blocking descriptor (`None`) is `BlockingIOError`, never a
+    `None` handed on to a parser."""
+    if os.fstat(f.fileno()).st_size > READ_LIMIT:
+        raise OSError(errno.EFBIG, _TOO_LARGE)
+    raw = f.read()
+    if raw is None:
+        raise BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+    return raw
+
+
+def _open_plain_fd(path: Path, os_: Any = os) -> int:
+    """The guarded open both plain readers share; the caller owns the returned fd. A path that
+    does not encode is refused (`EINVAL`) before any open (#1174 O4)."""
+    try:
+        os.fsencode(path)
+    except UnicodeEncodeError:
+        raise OSError(errno.EINVAL, _NOT_A_PATH) from None
+    try:
+        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK, os_=os_)
     except OSError as e:
         # Reword a symlink-at-the-leaf `ELOOP` as the alias refusal. An `ELOOP` from a looped
         # component higher up keeps its own strerror: the leaf is not the alias.
-        if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path):
+        if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path, os_):
             raise _mark_alias(OSError(errno.ELOOP, ALIAS_READ_REFUSAL, str(path)),
                               is_alias=True) from None
         raise
     try:
-        st = os.fstat(fd)
+        st = os_.fstat(fd)
         # `O_NOFOLLOW` cannot refuse a hard link, so check the link count; directories,
         # FIFOs, sockets and devices get the same refusal as a planted symlink.
         if not is_plain_entry(st):
@@ -154,16 +230,16 @@ def _open_plain_fd(path: Path) -> int:
                 str(path),
             )
     except BaseException:
-        os.close(fd)
+        os_.close(fd)
         raise
     return fd
 
 
-def _leaf_is_link(path: Path) -> bool:
+def _leaf_is_link(path: Path, os_: Any = os) -> bool:
     """Is the entry at `path` itself a symlink? `False` if it cannot be `lstat`ed (a looped
     parent), where the leaf is not the alias."""
     try:
-        return stat.S_ISLNK(os.lstat(path).st_mode)
+        return stat.S_ISLNK(os_.lstat(path).st_mode)
     except OSError:
         return False
 
@@ -191,8 +267,8 @@ _NOT_A_NAME = "not a valid relative name — a name is a sequence of plain path 
 
 def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
     """A `bind`ed reader's name grammar: a POSIX `str` or a `PurePath`, split on `/` into
-    non-empty components that are never `.` or `..`. Absolute names, NULs and empty components
-    raise `ValueError` (naming no path) before any open.
+    non-empty components that are never `.` or `..`. Absolute names, NULs, empty components and
+    a spelling that does not encode raise `ValueError` (naming no path) before any open.
     """
     if isinstance(name, PurePath):
         spelling = name.as_posix()
@@ -202,6 +278,10 @@ def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
         raise ValueError(_NOT_A_NAME)
     if not spelling or spelling.startswith("/") or "\x00" in spelling:
         raise ValueError(_NOT_A_NAME)
+    try:
+        os.fsencode(spelling)  # a lone surrogate (not an undecodable byte) is no name (#1174)
+    except UnicodeEncodeError:
+        raise ValueError(_NOT_A_NAME) from None
     parts = tuple(spelling.split("/"))
     if any(p in ("", ".", "..") for p in parts):
         raise ValueError(_NOT_A_NAME)
@@ -406,24 +486,25 @@ def _read_leaf(
     os_: Any, dir_fd: int, leaf: str, where: Path, *, binary: bool, errors: str = "strict",
 ) -> str | bytes:
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
-    `FileNotFoundError` when absent, else a member of `TEXT_READ_ERRORS`."""
+    `FileNotFoundError` when absent at the open, else a member of `TEXT_READ_ERRORS` (the read
+    step's refusals among them, :func:`_read_plain_fd`)."""
     fd = _open_leaf(os_, dir_fd, leaf, os.O_RDONLY, where)
     try:
-        fh = os_.fdopen(fd, "rb") if binary else os_.fdopen(
-            fd, "r", encoding="utf-8", errors=errors)
-    except BaseException:
-        os_.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
-        raise
-    with fh:
-        return fh.read()
+        return _read_plain_fd(os_, fd, binary=binary, errors=errors)
+    finally:
+        os_.close(fd)
 
 
 def _read_reason(e: BaseException) -> str:
     """A refused read's reason, naming no path: the alias sentence for a link, hard link or
     other non-plain entry, else the error's own words."""
+    if isinstance(e, _ReadVanished):
+        return _VANISHED
     if isinstance(e, OSError) and e.errno:
         if e.errno in (errno.ELOOP, errno.EMLINK):
             return ALIAS_READ_REFUSAL
+        if e.errno in (errno.EFBIG, errno.EINVAL) and e.strerror in (_TOO_LARGE, _NOT_A_PATH):
+            return e.strerror
         return os.strerror(e.errno)
     return str(e)
 
@@ -1071,12 +1152,12 @@ def _refuse_unless_plain_stat(st: os.stat_result, where: object) -> None:
         )
 
 
-def open_nofollow_fd(path: Path, flags: int) -> int:
+def open_nofollow_fd(path: Path, flags: int, *, os_: Any = os) -> int:
     """`O_NOFOLLOW` open whose `ELOOP` is marked as an alias refusal: after
     `_refuse_unless_plain`, it means a symlink was planted in the race window, and must not
     count toward the accounting kill circuit as an ordinary failure."""
     try:
-        return os.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
+        return os_.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
     except OSError as e:
         raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
 
