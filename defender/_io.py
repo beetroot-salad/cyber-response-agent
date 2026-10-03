@@ -30,6 +30,11 @@ tuple first (mypy rejects a star-unpack in an ``except`` display)::
     except malformed as e:
 """
 
+#: The mode every `_io` lane that makes a file asks for. The kernel masks it by the process umask,
+#: so the file lands `0644 & ~umask`. The unnamed create lane applies that mask itself
+#: (`_link_unnamed`), because kernels before 6.0 skipped it for an unnamed file (#1144).
+_FILE_MODE = 0o644
+
 
 def read_text_utf8(path: Path) -> str:
     return path.read_text(encoding="utf-8")  # lint-text-io: ok — the canonical pinned reader
@@ -369,7 +374,7 @@ def _open_leaf(os_: Any, dir_fd: int, leaf: str, flags: int, where: Path) -> int
     """Open `leaf` off `dir_fd` no-follow and non-blocking, then judge the descriptor. The
     caller owns the returned fd."""
     try:
-        fd = os_.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o644,
+        fd = os_.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, _FILE_MODE,
                       dir_fd=dir_fd)
     except OSError as e:
         raise _open_refusal(e, where) from None
@@ -779,10 +784,19 @@ def _non_finite_text(v: float) -> str:
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:
+    """Append `rows` to `path` as JSONL, one row per line, making the file (and its folder)
+    when absent. A new file asks for `_FILE_MODE`, as every other lane's, so the umask masks
+    0644, not `open("a")`'s 0666 (#1144). Returns how many rows it wrote."""
     if not rows:
         return 0
     path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the unguarded primitive itself; the gate flags its callers  # noqa: E501
-    with path.open("a", encoding="utf-8") as fh:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, _FILE_MODE)
+    try:
+        fh = os.fdopen(fd, "a", encoding="utf-8")
+    except BaseException:
+        os.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
+        raise
+    with fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")  # lint-jsonl-io: ok — the canonical JSONL appender
     return len(rows)
@@ -824,7 +838,7 @@ def open_unnamed(directory: Path) -> int:
     flag = getattr(os, "O_TMPFILE", None)
     if flag is None:
         raise OSError(errno.EOPNOTSUPP, "no O_TMPFILE on this platform", str(directory))
-    return os.open(directory, flag | os.O_WRONLY, 0o644)
+    return os.open(directory, flag | os.O_WRONLY, _FILE_MODE)
 
 
 #: What an unnamed open answers on a filesystem (NFS, virtiofs, FUSE) or kernel that cannot make
@@ -836,7 +850,8 @@ def _create_unnamed(
     path: Path, text: str | bytes, open_unnamed: Callable[[Path], int],
 ) -> bool:
     """`create`'s complete-or-absent lane (#1078 J16/J63): the body is written in full and
-    synced on an unnamed file, which is then given `path`'s name in one `linkat`. No
+    synced on an unnamed file, set to 0644 masked by the process umask (`_link_unnamed` says
+    why it sets the mode itself), which is then given `path`'s name in one `linkat`. No
     reader ever sees the name absent-then-empty or partial, the file never has two names (its
     link count goes 0 -> 1), and a crash before the link leaves nothing in the directory.
 
@@ -845,8 +860,9 @@ def _create_unnamed(
     which does not follow that magic link and fails `EXDEV` on every host.
 
     True when this lane wrote the file; False when this filesystem or host cannot make an
-    unnamed file (or has no `/proc`), and the caller falls back. An occupied name raises
-    `FileExistsError` (the ordinary create race); anything else propagates."""
+    unnamed file (or has no `/proc`, or cannot report the umask), and the caller falls back. An
+    occupied name raises `FileExistsError` (the ordinary create race); anything else
+    propagates."""
     try:
         fd = open_unnamed(path.parent)
     except OSError as e:
@@ -863,13 +879,51 @@ def _create_unnamed(
         os.close(fd)
 
 
+#: Where Linux (4.7+) reports this process's umask without changing it, on its `Umask:` line.
+_PROC_STATUS = "/proc/self/status"
+
+
+def _process_umask(status: str = _PROC_STATUS) -> int | None:
+    """The process umask, read without changing it: the octal `Umask:` line of `status`
+    (`/proc/self/status`). None when the file cannot be read or has no such line (a kernel
+    before 4.7). Never `os.umask(m)` and back: in between, every other thread would create its
+    files under `m`."""
+    try:
+        with open(status, "rb") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        key, _, value = line.partition(b":")
+        if key == b"Umask":
+            try:
+                return int(value.strip(), 8)
+            except ValueError:
+                return None
+    return None
+
+
 def _link_unnamed(
     fd: int, dir_fd: int, leaf: str, text: str | bytes, *, os_: Any = os,
+    status: str = _PROC_STATUS,
 ) -> bool:
-    """The body of `create`'s unnamed lane, shared by the path and rooted seams: write `text`
-    in full to the unnamed `fd`, sync it, then name it `leaf` in `dir_fd`. False when the host
-    has no `/proc` to link through. The caller owns both descriptors. The file keeps the mode
-    its open gave it, 0644 under the process umask, as every other lane's (#1144)."""
+    """The body of `create`'s unnamed lane, shared by the path, rooted and held seams: set the
+    unnamed `fd` to `_FILE_MODE` masked by the process umask, write `text` to it in full, sync
+    it, then name it `leaf` in `dir_fd`. False, with nothing named, when the umask cannot be
+    read from `status` or the host has no `/proc` to link through; the caller then falls back.
+    The caller owns both descriptors.
+
+    The lane sets the mode itself because the kernel did not always mask it. Before Linux 6.0
+    (ac6800e279a2, "fs: Add missing umask strip in vfs_tmpfile", backported to the 4.19+ stable
+    lines), an `O_TMPFILE` open on a filesystem without POSIX ACLs skipped the umask, so the
+    file kept the 0644 it asked for even under umask 077. `0644 & ~umask` is what every other
+    lane lands, on every kernel (#1144). The umask is read by `_process_umask`, which does not
+    change it. Where it cannot be read, the lane stands down: the named fallback's plain open,
+    which every kernel masks, writes the file instead."""
+    mask = _process_umask(status)
+    if mask is None:
+        return False
+    os_.fchmod(fd, _FILE_MODE & ~mask)
     data = text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8")
     # Buffered: the file object loops over a short `os.write` until every byte has landed.
     with os_.fdopen(fd, "wb", closefd=False) as f:
@@ -887,7 +941,7 @@ def _link_unnamed(
 def _create_named(path: Path, text: str | bytes) -> None:
     """`create`'s fallback where no unnamed file can be made: ONE `O_CREAT|O_EXCL|O_NOFOLLOW`
     open of the target itself, then the write (see `write_guarded` for its residue)."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, _FILE_MODE)
     try:
         _write_all(fd, text)
     except BaseException:
@@ -944,7 +998,7 @@ def open_nofollow_fd(path: Path, flags: int) -> int:
     `_refuse_unless_plain`, it means a symlink was planted in the race window, and must not
     count toward the accounting kill circuit as an ordinary failure."""
     try:
-        return os.open(path, flags | os.O_NOFOLLOW, 0o644)
+        return os.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
     except OSError as e:
         raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
 
@@ -997,7 +1051,8 @@ def write_guarded(
         _refuse_unless_plain(path)
         staged = Path(stage_name(path))
         try:
-            fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+            fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         _FILE_MODE)
         except OSError as e:
             raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
         try:
@@ -1128,7 +1183,7 @@ def open_unnamed_at(dir_fd: int) -> int:
     flag = getattr(os, "O_TMPFILE", None)
     if flag is None:
         raise OSError(errno.EOPNOTSUPP, "no O_TMPFILE on this platform")
-    return os.open(".", flag | os.O_WRONLY | os.O_CLOEXEC, 0o644, dir_fd=dir_fd)
+    return os.open(".", flag | os.O_WRONLY | os.O_CLOEXEC, _FILE_MODE, dir_fd=dir_fd)
 
 
 @overload
@@ -1266,7 +1321,7 @@ def _create_at(
         finally:
             os_.close(fd)
     fd = os_.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-                  0o644, dir_fd=dir_fd)
+                  _FILE_MODE, dir_fd=dir_fd)
     try:
         _write_all(fd, text, os_=os_)
     except BaseException:
@@ -1286,7 +1341,7 @@ def _replace_at(
     staged = stage_name(leaf)
     try:
         fd = os_.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-                      0o644, dir_fd=dir_fd)
+                      _FILE_MODE, dir_fd=dir_fd)
     except OSError as e:
         raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
     try:
@@ -1331,10 +1386,13 @@ class Held:
 
     Each verb works off a private `dup` of the root (`_Handle.dup`, which its views share): a
     verb after `close` is `OSError(EBADF)` and touches nothing. Reads are the view's: this
-    handle writes."""
+    handle writes. `open_unnamed` is the unnamed-open seam every `create` takes, as
+    `rooted_write`'s is."""
 
-    def __init__(self, os_: Any, fd: int, where: Path) -> None:
+    def __init__(self, os_: Any, fd: int, where: Path, *,
+                 open_unnamed: Callable[[int], int]) -> None:
         self._os = os_
+        self._open_unnamed = open_unnamed
         self._root = _Handle(os_, fd)
         self._where = Path(where)
 
@@ -1372,7 +1430,7 @@ class Held:
         with self._dup() as root_fd, _descend(
                 self._os, root_fd, parts[:-1], self._where, create=not durable) as dir_fd:
             _write_at(self._os, dir_fd, parts[-1], Path(self._where, *parts), text,
-                      mode=mode, durable=durable)
+                      mode=mode, durable=durable, open_unnamed=self._open_unnamed)
 
     def mkdir(self, folder: str | PurePath) -> None:
         """Make each missing folder of `folder` below the held root, never through a link."""
@@ -1393,19 +1451,23 @@ class Held:
                 return False
 
 
-def hold(root: Path, *, os_: Any = os) -> Held:
+def hold(root: Path, *, os_: Any = os,
+         open_unnamed: Callable[[int], int] = open_unnamed_at) -> Held:
     """Hold `root` open, following its spelling (the operator's, as :func:`bind`'s). A missing
-    root is `FileNotFoundError`, a non-directory `NotADirectoryError`."""
+    root is `FileNotFoundError`, a non-directory `NotADirectoryError`. `open_unnamed` is the
+    unnamed-open seam the held root's creates take (`rooted_write(open_unnamed=)`'s)."""
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
-    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root))
+    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root), open_unnamed=open_unnamed)
 
 
-def hold_new(parent: Path, name: str, *, os_: Any = os) -> Held:
+def hold_new(parent: Path, name: str, *, os_: Any = os,
+             open_unnamed: Callable[[int], int] = open_unnamed_at) -> Held:
     """Make (or adopt) the folder `name` in `parent` and hold it. `parent` is made if missing,
     following its spelling; `name` is judged off `parent`'s handle and never followed (a link,
     file or FIFO there is the core's folder refusal). The held descriptor is the one that
-    judged it. `parent` is then fsynced, so the new folder's entry is durable."""
+    judged it. `parent` is then fsynced, so the new folder's entry is durable. `open_unnamed`
+    is the unnamed-open seam, as :func:`hold`'s."""
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
     if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
@@ -1425,7 +1487,7 @@ def hold_new(parent: Path, name: str, *, os_: Any = os) -> Held:
             raise
     finally:
         os_.close(parent_fd)
-    return Held(os_, fd, parent / name)
+    return Held(os_, fd, parent / name, open_unnamed=open_unnamed)
 
 
 #: The staged-name marker, matched loosely (not the exact `<name>.staged-<16 hex>` shape) so
