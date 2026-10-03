@@ -45,8 +45,8 @@ from typing import Any
 import pytest
 
 from defender import _corpus, _io
-from defender.learning.author import _config as author_config
 from defender.learning.author import drain
+from defender.learning.author import _config as author_config
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
@@ -907,19 +907,6 @@ def test_no_curator_module_hands_a_reader_the_corpus_by_its_spelling(name):
     assert by_spelling == [], by_spelling
     if name in ("shared", "lessons", "questioner"):
         assert seen, f"no reader call seen in {name}: the check judged nothing"
-
-
-@pytest.mark.parametrize(
-    "module", [lessons_run, questioner_run, drain, drains, author_shared, author_config,
-               lane_trees],
-    ids=["lessons", "questioner", "drain", "drains", "shared", "_config", "lane_trees"])
-def test_no_curator_module_spells_the_label_as_a_string(module):
-    """The author label's string appears in these modules nowhere as a literal: the label is the
-    constant everywhere below `config` (step 3's repo-wide scan, narrowed to this step's modules
-    so a regression names the module)."""
-    strays = [(n.lineno, n.value) for n in ast.walk(_tree(module))
-              if isinstance(n, ast.Constant) and n.value == AUTHOR_DRAIN_LABEL]
-    assert strays == [], strays
 
 
 def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, monkeypatch):

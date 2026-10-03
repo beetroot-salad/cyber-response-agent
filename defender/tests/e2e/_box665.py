@@ -440,9 +440,13 @@ def loop_paths(tmp_path: Path):
 
 
 def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
-                         label="author_drain", **kw):
-    """Drive the REAL _run_worktree_batch with the future injectable box seams."""
+                         label=None, **kw):
+    """Drive the REAL _run_worktree_batch with the future injectable box seams. `label`
+    defaults to the author drain's `DrainLabel` member."""
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
     from defender.learning.core.drains import _run_worktree_batch
+
+    label = AUTHOR_DRAIN_LABEL if label is None else label
 
     paths = loop_paths(tmp_path)
     branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)

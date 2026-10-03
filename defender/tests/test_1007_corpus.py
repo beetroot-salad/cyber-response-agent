@@ -36,6 +36,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.core import drains
+from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests import _by_path as P
 from defender.tests import _drain719 as D
 from defender.tests import _world_1007 as W
@@ -381,7 +382,7 @@ def test_the_lead_author_label_never_mounts_the_questioner_corpus(tmp_path):
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
 
     request = drains._drain_box_request(
-        paths.repo_root, "batch-1", "lead_author_drain", paths)
+        paths.repo_root, "batch-1", LEAD_AUTHOR_DRAIN_LABEL, paths)
 
     assert writable_sources(request) == {paths.with_repo_root(paths.repo_root).skills_dir}, (
         f"the lead-author box's writable mounts are "
@@ -404,7 +405,7 @@ def test_the_author_drain_box_mounts_exactly_the_two_lessons_corpora_writable(tm
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     wt = paths.with_repo_root(paths.repo_root)
 
-    request = drains._drain_box_request(paths.repo_root, "batch-1", "author_drain", paths)
+    request = drains._drain_box_request(paths.repo_root, "batch-1", AUTHOR_DRAIN_LABEL, paths)
 
     assert writable_sources(request) == {wt.lessons_dir, wt.lessons_questioner_dir}, (
         f"the author drain box's writable mounts are "

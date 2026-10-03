@@ -3,12 +3,13 @@
 The contract is #1134's 2026-10-01 design addendum, A3 (it replaces the 2026-09-28 design's D3
 and keeps O4), with the owner's 2026-09-29 decision that each drain label is spelled once:
 
-- `learning/core/config.py` spells the two labels once, as `AUTHOR_DRAIN_LABEL = "author_drain"`
-  and `LEAD_AUTHOR_DRAIN_LABEL = "lead_author_drain"`. No production module under `defender/`
-  spells either string any other way: not as a literal, and not as an expression that folds to
-  it (`"author" + "_drain"`, an f-string of constants, `"x".join(...)`). The two exceptions are
-  those two constant definitions and `learning/loop.py`'s `__all__` entries, which name the two
-  drain functions. `drain_writable_trees` keys on the two constants. In `drains`, each lane's
+- `learning/core/config.py` defines the two labels as the members of `DrainLabel`, a plain
+  `enum.Enum` (#1179, replacing the step-3 rule that each string is spelled once and the scan
+  that enforced it): `AUTHOR = "author_drain"`, `LEAD_AUTHOR = "lead_author_drain"`, aliased as
+  `AUTHOR_DRAIN_LABEL` and `LEAD_AUTHOR_DRAIN_LABEL`. No string equals a member, so a label
+  spelled as a string anywhere (a literal, `"author" + "_drain"`, a second table keyed by
+  strings) grants nothing: the members' values are rows of the unknown-label tests. A member's
+  `str()` is its value. In `drains`, each lane's
   `_run_worktree_batch(label=...)` passes its own constant by name, and the name resolves at the
   call (through `_astlib`'s scopes) to `config`'s binding. Nothing in `drains` binds that name
   again (a parameter, a local, a loop target, an import from elsewhere).
@@ -75,18 +76,20 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import enum
 import inspect
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from defender import _io
-from defender.learning import loop
 from defender.learning.core import config, drains, markers
-from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
+from defender.learning.core.config import (
+    AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
+)
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests._by_path import import_lint_lib
 from defender.tests._drain_trees_1134 import PAYLOAD
@@ -95,22 +98,27 @@ from defender.tests.test_1111_rooted_io import HOST_BYTES, census
 from defender.tests._tree_listing_1134 import descriptors_under, put_plain
 
 # ---------------------------------------------------------------------------------------
-# The labels and their trees, spelled literally
+# The labels and their trees
 # ---------------------------------------------------------------------------------------
 
-AUTHOR = "author_drain"
-LEAD = "lead_author_drain"
+#: The two labels are the members of `DrainLabel` (#1179): values no string equals.
+AUTHOR = DrainLabel.AUTHOR
+LEAD = DrainLabel.LEAD_AUTHOR
 KNOWN = (AUTHOR, LEAD)
+
+#: Each member's value, spelled literally: its written form (the pending-delivery record, the
+#: quarantine manifest) and its display form, and, as a bare string, a label that grants nothing.
+LABEL_VALUES: dict[DrainLabel, str] = {AUTHOR: "author_drain", LEAD: "lead_author_drain"}
 
 #: Each known label's mount points, repo-relative, in the contract's order. Literal on purpose:
 #: independent of the `LoopPaths` attribute names the implementation reads.
-EXPECTED_MOUNTS: dict[str, tuple[str, ...]] = {
+EXPECTED_MOUNTS: dict[DrainLabel, tuple[str, ...]] = {
     AUTHOR: ("defender/lessons", "defender/lessons-questioner"),
     LEAD: ("defender/skills",),
 }
 
 #: The same lists through the `LoopPaths` attributes the design names.
-MOUNTS_BY_ATTRIBUTE: dict[str, Callable[[LoopPaths], tuple[Path, ...]]] = {
+MOUNTS_BY_ATTRIBUTE: dict[DrainLabel, Callable[[LoopPaths], tuple[Path, ...]]] = {
     AUTHOR: lambda p: (p.lessons_dir, p.lessons_questioner_dir),
     LEAD: lambda p: (p.skills_dir,),
 }
@@ -123,13 +131,15 @@ ALL_TREES = ("defender/lessons", "defender/lessons-questioner", "defender/skills
 #: folders picks them up.
 DECOY_TREES = ("defender/lessons-actor", "defender/lessons-environment", "defender/skills-old")
 
-#: Labels no lane names, near misses included (v1's E5, and H7's spawn-label forms): a prefix,
+#: Labels no lane names: first the members' own values as bare strings (#1179: a string is never
+#: a label, however it is spelled), then near misses (v1's E5, and H7's spawn-label forms): a prefix,
 #: a case change, a leading or trailing space or newline, hyphens for underscores, a leading or
 #: trailing extra character, the empty string, a suffixed version, the pitfalls lane (drained
 #: inside the lead-author tick, never its own box), and a lane with a `:`, `/` or `.` suffix
 #: (`<lane>:<batch_id>` is this codebase's spawn-label shape). A label matched by prefix, by
 #: case, after `.strip()`, or up to a separator gets a tree.
 UNKNOWN_LABELS = (
+    "author_drain", "lead_author_drain",
     "a_third_drain", "", "author", "lead_author", "AUTHOR_DRAIN", "Lead_Author_Drain",
     "author_drain ", " author_drain", "lead_author_drain\n", "author-drain",
     "lead-author-drain", "xauthor_drain", "author_drain_", "lead_author_drain_v2",
@@ -233,234 +243,35 @@ def assert_asked_only(asked: list[tuple[Path, str]], wt: Path, label: str, who: 
 # ---------------------------------------------------------------------------------------
 
 #: Each label's value and the one constant it is spelled as.
-LABEL_CONSTANTS = {AUTHOR: "AUTHOR_DRAIN_LABEL", LEAD: "LEAD_AUTHOR_DRAIN_LABEL"}
 CONFIG_MODULE = "defender.learning.core.config"
 
 
-def test_the_label_constants_are_the_lanes_names():
-    """`AUTHOR_DRAIN_LABEL` is `"author_drain"` and `LEAD_AUTHOR_DRAIN_LABEL` is
-    `"lead_author_drain"`: the strings each lane passed as `label=` before this step (its log
-    prefix, and the `label` of its pending-delivery record), unchanged. `drains` sees the same
-    values.
+def test_the_label_constants_are_the_lanes_members():
+    """`AUTHOR_DRAIN_LABEL` and `LEAD_AUTHOR_DRAIN_LABEL` are the two members of `DrainLabel`, a
+    plain `enum.Enum` (never a `str` mixin), whose values are the strings each lane passed as
+    `label=` before #1179, unchanged. `drains` sees the same objects. A member's `str()` is its
+    value, the display form every log line formats.
 
-    Catches: a constant with the right name and a misspelled value, which the source pins below
-    accept, since they check only that each string is spelled once."""
-    assert AUTHOR_DRAIN_LABEL == "author_drain"
-    assert LEAD_AUTHOR_DRAIN_LABEL == "lead_author_drain"
-    assert drains.AUTHOR_DRAIN_LABEL == "author_drain"
-    assert drains.LEAD_AUTHOR_DRAIN_LABEL == "lead_author_drain"
+    Catches: a `str`/`StrEnum` label (it would equal its string and grant to one), a third
+    member, a misspelled value (the written records would change), an alias that is a fresh
+    string rather than the member, and a display form that leaks `DrainLabel.AUTHOR`."""
+    assert issubclass(DrainLabel, enum.Enum)
+    assert not issubclass(DrainLabel, str)
+    assert list(DrainLabel) == [AUTHOR, LEAD]
+    assert AUTHOR_DRAIN_LABEL is DrainLabel.AUTHOR
+    assert LEAD_AUTHOR_DRAIN_LABEL is DrainLabel.LEAD_AUTHOR
+    assert drains.AUTHOR_DRAIN_LABEL is DrainLabel.AUTHOR
+    assert drains.LEAD_AUTHOR_DRAIN_LABEL is DrainLabel.LEAD_AUTHOR
+    for member, value in LABEL_VALUES.items():
+        assert member.value == value
+        assert str(member) == value
+        assert f"{member}" == value
+        assert member != value
+        assert value != member
 
 
 def _source_tree(module: Any) -> ast.Module:
     return ast.parse(inspect.getsource(module))
-
-
-# -- Folding a string expression to its value, so a label built at runtime is still seen ---
-
-#: Answered by `fold` for anything it cannot evaluate.
-NOT_FOLDED = object()
-#: The `str` methods `fold` evaluates on a folded receiver with folded arguments.
-_STR_METHODS = frozenset({
-    "lower", "upper", "casefold", "title", "capitalize", "swapcase", "strip", "lstrip", "rstrip",
-    "replace", "join", "format", "removeprefix", "removesuffix",
-})
-
-
-def _fold_binop(n: ast.BinOp) -> Any:
-    left, right = fold(n.left), fold(n.right)
-    if left is NOT_FOLDED or right is NOT_FOLDED:
-        return NOT_FOLDED
-    if isinstance(n.op, ast.Mult) and any(isinstance(v, int) and v > 64 for v in (left, right)):
-        return NOT_FOLDED  # a long repeat (`"=" * 80`) is never a label; don't build one
-    ops: dict[type, Callable[[Any, Any], Any]] = {
-        ast.Add: lambda a, b: a + b, ast.Mult: lambda a, b: a * b, ast.Mod: lambda a, b: a % b}
-    op = ops.get(type(n.op))
-    try:
-        return NOT_FOLDED if op is None else op(left, right)
-    except (TypeError, ValueError, OverflowError, MemoryError):
-        return NOT_FOLDED
-
-
-def _fold_sequence(n: ast.Tuple | ast.List) -> Any:
-    parts = [fold(e) for e in n.elts]
-    return NOT_FOLDED if any(p is NOT_FOLDED for p in parts) else tuple(parts)
-
-
-def _fold_formatted(n: ast.FormattedValue) -> Any:
-    value = fold(n.value)
-    spec = "" if n.format_spec is None else fold(n.format_spec)
-    if value is NOT_FOLDED or not isinstance(spec, str):
-        return NOT_FOLDED
-    converted = {-1: value, ord("s"): str(value), ord("r"): repr(value),
-                 ord("a"): ascii(value)}[n.conversion]
-    try:
-        return format(converted, spec)
-    except (TypeError, ValueError):
-        return NOT_FOLDED
-
-
-def _fold_joined(n: ast.JoinedStr) -> Any:
-    parts = [fold(v) for v in n.values]
-    return NOT_FOLDED if any(not isinstance(p, str) for p in parts) else "".join(parts)
-
-
-def _fold_call(n: ast.Call) -> Any:
-    if not isinstance(n.func, ast.Attribute) or n.keywords:
-        return NOT_FOLDED
-    method = n.func.attr
-    if method not in _STR_METHODS:  # lint-ast-resolve: ok — the receiver must fold to a str literal (checked below), so this names str's own method, never an imported function
-        return NOT_FOLDED
-    receiver, args = fold(n.func.value), [fold(a) for a in n.args]
-    if not isinstance(receiver, str) or any(a is NOT_FOLDED for a in args):
-        return NOT_FOLDED
-    try:
-        got = getattr(receiver, method)(*args)
-    except (TypeError, ValueError, IndexError, KeyError):
-        return NOT_FOLDED
-    return got if isinstance(got, str) else NOT_FOLDED
-
-
-_FOLDERS: dict[type, Callable[[Any], Any]] = {
-    ast.BinOp: _fold_binop, ast.Tuple: _fold_sequence, ast.List: _fold_sequence,
-    ast.FormattedValue: _fold_formatted, ast.JoinedStr: _fold_joined, ast.Call: _fold_call,
-}
-
-
-def fold(n: ast.AST) -> Any:
-    """The value of a string expression built only from constants (`+`, `*`, `%`, f-strings,
-    tuples and lists of them, and a few `str` methods), or `NOT_FOLDED`."""
-    if isinstance(n, ast.Constant):
-        return n.value if isinstance(n.value, (str, int)) and not isinstance(n.value, bool) else (
-            NOT_FOLDED)
-    folder = _FOLDERS.get(type(n))
-    return NOT_FOLDED if folder is None else folder(n)
-
-
-def label_spellings(tree: ast.AST) -> Iterator[ast.expr]:
-    """Every expression in `tree` whose folded value is one of the two labels."""
-    for n in ast.walk(tree):
-        if isinstance(n, ast.expr) and fold(n) in LABEL_CONSTANTS:
-            yield n
-
-
-def _constant_definitions(tree: ast.Module) -> dict[str, ast.expr]:
-    """`config`'s module-level `NAME = <value>` (plain or annotated), by name."""
-    out: dict[str, ast.expr] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target, value = node.targets[0], node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            target, value = node.target, node.value
-        else:
-            continue
-        if isinstance(target, ast.Name):
-            out[target.id] = value
-    return out
-
-
-def test_config_spells_each_label_once_as_its_constant():
-    """In `config`, the strings `"author_drain"` and `"lead_author_drain"` are the values of
-    their two module constants and nothing else, so `drain_writable_trees` compares the
-    constants (v1 step 6's H7). A plain or annotated assignment both count. A stray is any
-    expression that folds to a label (round 2's H3: `"author" + "_drain"`).
-
-    Catches: `if label == "author_drain":` beside the constants, and a second table keyed by a
-    spelling built from pieces. Each is a second spelling that agrees with the constant until
-    one of them changes. No drive can see it."""
-    tree = _source_tree(config)
-    defined = _constant_definitions(tree)
-    owned = {name: defined.get(name) for name in LABEL_CONSTANTS.values()}
-    for label, name in LABEL_CONSTANTS.items():
-        value = owned[name]
-        assert isinstance(value, ast.Constant), f"{name} is not defined as a literal in config"
-        assert value.value == label, (name, value.value)
-
-    strays = [(n.lineno, ast.unparse(n)) for n in label_spellings(tree)
-              if not any(n is v for v in owned.values())]
-    assert strays == [], strays
-
-
-def _loads(node: ast.AST) -> set[str]:
-    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
-
-
-def test_drain_writable_trees_keys_on_the_two_constants():
-    """`LoopPaths.drain_writable_trees` reads both constants, in its body or through a
-    module-level table it reads (one level of indirection: `_TREES = {AUTHOR_DRAIN_LABEL: ...}`
-    is fine), round 2's H3.
-
-    Catches: a second table keyed by a spelling the stray scan cannot fold
-    (`"niard_rohtua"[::-1]`), with the constants defined but never read by the list."""
-    tree = _source_tree(config)
-    [cls] = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "LoopPaths"]
-    [fn] = [n for n in cls.body
-            if isinstance(n, ast.FunctionDef) and n.name == "drain_writable_trees"]
-    defined = _constant_definitions(tree)
-    read = _loads(fn)
-    for name in list(read):
-        if name in defined and name not in LABEL_CONSTANTS.values():
-            read |= _loads(defined[name])
-    assert set(LABEL_CONSTANTS.values()) <= read, sorted(read)
-
-
-#: The module that may spell each label as a function name, and where.
-EXPORT_MODULE = Path("learning") / "loop.py"
-
-
-def _production_modules() -> Iterator[Path]:
-    """Every `.py` under `defender/` that ships: not under a `tests` folder, a virtualenv, a
-    cache or a dot folder, and not a `test_*.py` or `conftest.py`."""
-    top = Path(config.__file__).resolve().parents[2]
-    for folder, dirs, files in os.walk(top):
-        dirs[:] = sorted(d for d in dirs
-                         if d not in ("tests", "__pycache__", "node_modules") and not d.startswith("."))
-        for name in sorted(files):
-            if name.endswith(".py") and not name.startswith("test_") and name != "conftest.py":
-                yield Path(folder, name)
-
-
-def _exempt_nodes(rel: Path, tree: ast.Module) -> list[ast.AST]:
-    """The nodes allowed to spell a label: `config`'s two constant values, and the entries of
-    `loop.py`'s module-level `__all__`, which name the two drain functions."""
-    if rel == Path("learning") / "core" / "config.py":
-        defined = _constant_definitions(tree)
-        return [defined[name] for name in LABEL_CONSTANTS.values() if name in defined]
-    if rel == EXPORT_MODULE:
-        exports = _constant_definitions(tree).get("__all__")
-        return list(exports.elts) if isinstance(exports, (ast.List, ast.Tuple)) else []
-    return []
-
-
-def test_no_production_module_spells_a_label_but_its_constant():
-    """Across every production module under `defender/`, the two labels are spelled only by
-    `config`'s two constants and by `loop.py`'s `__all__` entries (round 2's x1). Those are
-    exempt node by node, never file by file. A spelling is any expression that folds to a label.
-
-    True: the scan finds every exempt node it expects (non-vacuity: `config`'s two constants
-    and `loop.py`'s two exports, which `loop` does bind to the drain functions) and no other
-    spelling.
-
-    Catches: a literal label left in a call the batch pin does not look at
-    (`claim_markers(label="lead_author_drain")`), a parameter default, a dict key or a log
-    label, and the same built from pieces, in any module."""
-    top = Path(config.__file__).resolve().parents[2]
-    strays: list[tuple[str, int, str]] = []
-    exempted: list[tuple[str, Any]] = []
-    for path in _production_modules():
-        rel = path.relative_to(top)
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        exempt = _exempt_nodes(rel, tree)
-        for n in label_spellings(tree):
-            if any(n is e for e in exempt):
-                exempted.append((rel.as_posix(), fold(n)))
-            else:
-                strays.append((rel.as_posix(), n.lineno, ast.unparse(n)))
-    assert strays == [], strays
-    assert sorted(exempted) == sorted([
-        ("learning/core/config.py", AUTHOR), ("learning/core/config.py", LEAD),
-        (EXPORT_MODULE.as_posix(), AUTHOR), (EXPORT_MODULE.as_posix(), LEAD)]), exempted
-    assert loop.author_drain is drains.author_drain
-    assert loop.lead_author_drain is drains.lead_author_drain
 
 
 def _callee(call: ast.Call) -> str | None:
@@ -565,8 +376,8 @@ def test_drain_writable_trees_is_each_labels_mount_points_in_order(
     True: under the leaf, `author_drain` gives `(lessons_dir, lessons_questioner_dir)` and
     `lead_author_drain` gives `(skills_dir,)`, equal to the literal spellings
     `wt / "defender/..."` (a tuple: a list never equals one). The main checkout's `paths` gives
-    the same shape under its own root, so the list follows `repo_root`. The constant and the
-    literal label answer alike. `absent`: neither root is made on disk. `built_with_decoys`:
+    the same shape under its own root, so the list follows `repo_root`. `absent`: neither root
+    is made on disk. `built_with_decoys`:
     both roots carry every tree plus `lessons-actor/`, `lessons-environment/` and `skills-old/`,
     and the list is unchanged.
 
@@ -581,8 +392,8 @@ def test_drain_writable_trees_is_each_labels_mount_points_in_order(
 
     assert got == tuple(lf.wt / rel for rel in EXPECTED_MOUNTS[label])
     assert got == MOUNTS_BY_ATTRIBUTE[label](lf.wt_paths)
-    constant = AUTHOR_DRAIN_LABEL if label == AUTHOR else LEAD_AUTHOR_DRAIN_LABEL
-    assert lf.wt_paths.drain_writable_trees(constant) == got
+    assert lf.wt_paths.drain_writable_trees(LABEL_VALUES[label]) == (), (
+        "the label's value, as a bare string, got a tree")
     assert lf.paths.drain_writable_trees(label) == tuple(
         lf.paths.repo_root / rel for rel in EXPECTED_MOUNTS[label])
     if on_disk == "absent":
