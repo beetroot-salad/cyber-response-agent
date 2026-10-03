@@ -158,7 +158,7 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path) -> Scored:
 def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
     fixtures = load_held_out_fixtures(fixtures_dir)
     if not fixtures:
-        print(f"no held-out fixtures found under {fixtures_dir}", file=sys.stderr)
+        print(f"no held-out fixtures found under {fixtures_dir}")
         return 1
     warn_if_outside_the_net(fixtures_dir)
 
@@ -167,7 +167,7 @@ def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
           f"{len(scored.failures)} failure(s)")
     print()
     if not scored.total:
-        print(f"no runs found under {runs_dir} for any held-out fixture", file=sys.stderr)
+        print(f"no runs found under {runs_dir} for any held-out fixture")
         print("Aggregate accuracy: n/a — nothing scored")
     else:
         print(f"Aggregate accuracy: {scored.correct}/{scored.total} = "
@@ -206,7 +206,7 @@ def main(argv: list[str]) -> int:
     ns = p.parse_args(argv)
     runs_dir = ns.runs_dir
     if not runs_dir.is_dir():
-        print(f"runs dir does not exist: {runs_dir}", file=sys.stderr)
+        print(f"runs dir does not exist: {runs_dir}")
         return 2
     return report(runs_dir, ns.fixtures_dir)
 
