@@ -97,7 +97,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b"):
     _base, src = H.tenant_source(root, T_ID, row=False)
     ep = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, ep)
-    world = H.run_py().resume_world(Episode.open(manifest.parent), label, settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world = H.run_py().resume_world(Episode.open(manifest.parent), label, tenant=H.T1106.playground_run_tenant)
     return src, ep, world
 
 
@@ -328,7 +328,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     second reads it (one base_world_id), and neither lands under `<root>/T/runs/` (O4's gap
     until (B))."""
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
-    world_c = H.run_py().resume_world(Episode.open(ep), "c", settings=lambda: H.T1106.PLAYGROUND_SETTINGS)
+    world_c = H.run_py().resume_world(Episode.open(ep), "c", tenant=H.T1106.playground_run_tenant)
     alert = src / "alert.json"
     rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b))
     record_path = ep / "runs" / H.RECORD_NAME

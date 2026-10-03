@@ -39,6 +39,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -46,6 +47,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime.circuit_breaker import error_class_for_exit  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.scripts.adapters import identity_adapter  # noqa: E402
 from defender.scripts.adapters.confinement import (  # noqa: E402
@@ -113,26 +115,28 @@ REAL_STUB_ENDPOINTS = tuple(
 )
 
 
-def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Path:
-    """A real tenant SETTINGS folder (#1106) under `root`, carrying only the elastic system's
-    config — enough for the real adapter to resolve its index and its transport, and
-    unreachable on purpose so an ordering test can tell a confinement refusal from a transport
-    failure. Returns the settings folder, which the ctx is handed as `settings_dir`."""
-    root = root / "settings"
-    d = root / "systems" / "elastic"
-    d.mkdir(parents=True)
-    (d / "config.env").write_text(
+def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
+    """The run's tenant record (#1107), resolved from a real tenant folder under `root` that
+    carries only the elastic system's config — enough for the real adapter to resolve its index
+    and its transport, and unreachable on purpose so an ordering test can tell a confinement
+    refusal from a transport failure. Returns the record the ctx is handed as `tenant`."""
+    S.plant(root, configs={"elastic": (
         f"ELASTICSEARCH_URL={url}\n"
         f"KIBANA_URL={url}\n"
         "ELASTIC_EVENTS_INDEX=logs-*\n"
-        "ELASTIC_ALERTS_INDEX=security-audit-*\n",
-        encoding="utf-8",
-    )
-    return root
+        "ELASTIC_ALERTS_INDEX=security-audit-*\n"
+        "ELASTIC_SSL_VERIFY=true\n"
+        "ELASTIC_TRANSPORT=docker-exec\n"
+        "ELASTIC_DOCKER_CONTEXT=no-such-context-632-test\n"
+        "ELASTIC_ES_CONTAINER=es-632\n"
+        "ELASTIC_KIBANA_CONTAINER=kibana-632\n"),
+        "host-state": ("HOST_STATE_TRANSPORT=docker-exec\n"
+                       "HOST_STATE_DOCKER_CONTEXT=no-such-context-632-test\n")})
+    return S.resolve(root)
 
 
 def _ctx(tmp_path: Path) -> VerbContext:
-    return VerbContext(defender_dir=tmp_path / "tree", settings_dir=_tree(tmp_path / "tree"),
+    return VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                        run_dir=tmp_path / "run", env={})
 
 
@@ -443,7 +447,7 @@ def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Pat
     connect — and that ordering is what lets the confinement rule bind on the resolved
     target rather than on a request that already left."""
     capture = TransportCapture()
-    ctx = VerbContext(defender_dir=tmp_path / "tree", settings_dir=_tree(tmp_path / "tree"),
+    ctx = VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                       run_dir=tmp_path / "run", env={}, capture=capture)
 
     with pytest.raises(TransportFault):
@@ -459,7 +463,7 @@ def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Pat
         "so a capture without the method leaves the rule's second half unobservable"
     )
 
-    unobserved = VerbContext(defender_dir=tmp_path / "bare", settings_dir=_tree(tmp_path / "bare"),
+    unobserved = VerbContext(defender_dir=tmp_path / "bare", tenant=_tree(tmp_path / "bare"),
                              run_dir=tmp_path / "run2", env={})
     with pytest.raises(TransportFault):
         elastic_adapter.VERBS["query"](unobserved, native_query="FROM x", index="logs-*")
@@ -516,7 +520,7 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
             )
 
     capture = TransportCapture()
-    ctx = VerbContext(defender_dir=tmp_path / "tree", settings_dir=_tree(tmp_path / "tree"),
+    ctx = VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                       run_dir=tmp_path / "run", env={}, capture=capture)
     for verb, kwargs in (("query", {"native_query": "FROM x", "index": "logs-*"}),
                          ("alerts", {"native_query": "*", "index": "security-audit-*"}),
@@ -562,23 +566,19 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
                               verb_class="r")
 
 
-def _stub_tree(root: Path, system: str, prefix: str, *, bastion: str) -> Path:
-    """A real tenant settings folder (#1106) under `root`, returned, carrying one stub
-    system's config.env — the shape
-    `_stub_transport.load_config` reads, not a monkeypatch of it. `bastion` names a
-    docker context this host has never heard of, so a call that gets PAST confinement
-    still never reaches a real container: it fails on the docker exec, the same
-    ordering the elastic fixture above pins."""
-    root = root / "settings"
-    d = root / "systems" / system
-    d.mkdir(parents=True)
-    (d / "config.env").write_text(
+def _stub_tree(root: Path, system: str, prefix: str, *, bastion: str) -> Any:
+    """The run's tenant record (#1107), resolved from a real tenant folder under `root`
+    carrying one stub system's config.env — the shape the record's `systems` entry is read
+    from, not a monkeypatch of it. `bastion` names a docker context this host has never heard
+    of, so a call that gets PAST confinement still never reaches a real container: it fails on
+    the docker exec, the same ordering the elastic fixture above pins."""
+    S.plant(root, configs={system: (
         f"{prefix}_URL_BASE=http://stub-{system}\n"
-        f"{prefix}_BASTION_HOST={bastion}\n"
-        f"{prefix}_TIMEOUT_SEC=2\n",
-        encoding="utf-8",
-    )
-    return root
+        f"{prefix}_BASTION_HOST=stub-bastion\n"
+        f"{prefix}_TIMEOUT_SEC=2\n"
+        f"{prefix}_TRANSPORT=docker-exec\n"
+        f"{prefix}_DOCKER_CONTEXT={bastion}\n")})
+    return S.resolve(root)
 
 
 def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transport(
@@ -605,7 +605,7 @@ def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transpor
     the check and reach `docker_exec_curl` instead of stopping at a `ConfinementFault`."""
     ctx = VerbContext(
         defender_dir=tmp_path / "tree",
-        settings_dir=_stub_tree(tmp_path / "tree", "identity", "IDENTITY",
+        tenant=_stub_tree(tmp_path / "tree", "identity", "IDENTITY",
                                 bastion="no-such-context-632-test"),
         run_dir=tmp_path / "run", env={}, capture=TransportCapture(),
     )

@@ -586,21 +586,18 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
                        encoding="utf-8")
     defender_dir = tmp_path / "defender"
     defender_dir.mkdir(parents=True, exist_ok=True)
-    # #1106: the elastic config lives in the RUN's tenant settings folder, handed in on the ctx
-    # (`settings_dir`), never under the defender tree.
-    settings_dir = tmp_path / "settings"
-    config = settings_dir / "systems" / "elastic" / "config.env"
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        "ELASTICSEARCH_URL=http://elasticsearch:9200\nKIBANA_URL=http://kibana:5601\n"
-        f"ELASTIC_EVENTS_INDEX={EVENTS_PATTERN}\n"
-        f"ELASTIC_ALERTS_INDEX={ALERTS_PATTERN}\n", encoding="utf-8")
+    # #1107: the elastic config lives in the RUN's tenant folder; the ctx carries the record
+    # resolved from it, never the process env.
+    from defender.tests.tenant_1107_settings import _spec1107 as spec1107
+    tenants_root = tmp_path / "tenants"
+    folder = spec1107.plant(tenants_root, marker="spec1007", configs=spec1107.config_texts(
+        "spec1007", events_index=EVENTS_PATTERN, alerts_index=ALERTS_PATTERN))
+    spec1107.set_key(folder, "elastic", "ELASTIC_DOCKER_CONTEXT", "spec-1007")
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return verbs.VerbContext(
-        defender_dir=defender_dir, run_dir=run_dir, settings_dir=settings_dir,
-        env={"PATH": str(bindir), "ES_RESPONSE_FILE": str(payload),
-             "SOC_PLAYGROUND_DOCKER_CONTEXT": "spec-1007"},
+        defender_dir=defender_dir, run_dir=run_dir, tenant=spec1107.resolve(tenants_root),
+        env={"PATH": str(bindir), "ES_RESPONSE_FILE": str(payload)},
     )
 
 
@@ -716,7 +713,7 @@ def estate(tmp_path: Path, *, answers: dict[str, Any] | None = None) -> tuple[Pa
     # The committed playground tenant's settings — the folder this estate's reads resolved
     # before #1106 made the run hand it in (the checkout's copy, now at the repo root).
     ctx = verbs.VerbContext(defender_dir=defender_dir, run_dir=run_dir, env={},
-                            settings_dir=_tenants1106.PLAYGROUND_SETTINGS)
+                            tenant=_tenants1106.playground_run_tenant())
     return adapters, grant, ctx
 
 

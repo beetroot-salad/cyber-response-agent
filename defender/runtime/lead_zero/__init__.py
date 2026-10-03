@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -208,8 +209,12 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
 
 def resolve_lead_zero(
     *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
-    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, settings_dir: Path,
+    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, tenant: Any,
+    env: Mapping[str, str],
 ) -> LeadZeroResult:
+    """Item 1's resolution, over the run's record (`tenant`, #1107) and the run's env (`env`,
+    built once by the driver and handed in: nothing in this package builds or reads the
+    environment itself). The tenant's alerts-index fallback reads the record's corpus-engine view."""
     run_dir = Path(run_dir)
     defender_dir = Path(defender_dir)
     resolved_run_id = run_id or run_dir.name
@@ -232,13 +237,7 @@ def resolve_lead_zero(
         body = _unavailable("the alert is not a JSON object")
         return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
 
-    from defender import run_common
     from ..query_tool import QueryCapture
-
-    try:
-        env = run_common.run_env(defender_dir, run_dir)
-    except Exception:  # noqa: BLE001 — orientation-adjacent work must never break the run
-        env = {}
 
     capture = QueryCapture(verbs, "gather")
 
@@ -246,8 +245,8 @@ def resolve_lead_zero(
         try:
             return await _resolve_item1(
                 run_dir=run_dir, defender_dir=defender_dir, run_id=resolved_run_id,
-                alert=alert, capture=capture, env=env, limits=limits,
-                settings_dir=settings_dir,
+                alert=alert, capture=capture, env=dict(env), limits=limits,
+                tenant=tenant,
             )
         except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
                 KeyboardInterrupt, GeneratorExit):

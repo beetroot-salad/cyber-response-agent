@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import contextlib
-import copy
 import json
 import re
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender._run_paths import RunPaths
+from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
 
 
 #: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
@@ -66,23 +68,71 @@ class CaseRecord:
     narrative: str
 
 
-def _mapping_path(settings_dir: Path) -> Path:
-    return Path(settings_dir) / _MAPPING_RELPATH
+def _mapping_path(settings: Path) -> Path:
+    return Path(settings) / _MAPPING_RELPATH
 
 
-#: One parsed mapping per (path, bytes). Read on every call so operator edits take effect,
-#: but parsed and validated only when the bytes change.
-_MAPPING_CACHE: dict[Path, tuple[bytes, dict[str, Any]]] = {}
+def _freeze(value: Any) -> Any:
+    """A deep read-only view: mappings become `MappingProxyType`, lists become tuples."""
+    if isinstance(value, dict):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(v) for v in value)
+    return value
 
 
-def _load_mapping(settings_dir: Path) -> dict[str, Any]:
-    path = _mapping_path(settings_dir)
-    if not path.is_file():
-        raise CaseTicketError(f"case-history mapping not found: {path}")
-    raw = path.read_bytes()
-    cached = _MAPPING_CACHE.get(path)
-    if cached is not None and cached[0] == raw:
-        return copy.deepcopy(cached[1])
+def _thaw(value: Any) -> Any:
+    """A fresh plain-data copy of a `_freeze`d value — what a consumer that edits works on."""
+    if isinstance(value, Mapping):
+        return {k: _thaw(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(v) for v in value]
+    if isinstance(value, frozenset):
+        return {_thaw(v) for v in value}
+    return value
+
+
+class CaseMapping(Mapping[str, Any]):
+    """One tenant's `systems/case-history/mapping.yaml`, parsed and checked ONCE when the tenant
+    is resolved and read-only from then on (O2): a consumer that edits what it builds from it
+    works on its own copy (`plain`), and the next consumer sees the resolve-time content."""
+
+    __slots__ = ("_data",)
+    _data: Mapping[str, Any]
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        object.__setattr__(self, "_data", _freeze(data))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("CaseMapping is read-only")
+
+    def plain(self) -> dict[str, Any]:
+        """A fresh plain `dict` of the whole mapping — safe to edit."""
+        return _thaw(self._data)
+
+
+def load_case_mapping(settings: Path) -> CaseMapping:
+    """The tenant's mapping file, parsed and lifecycle-checked, or `CaseTicketError`. @owns ticket_mapping
+
+    Called once per run, by `run_tenant.resolve_run_tenant`; every consumer is handed the result
+    and none reads the file."""
+    path = _mapping_path(settings)
+    shown = pointer_to(_MAPPING_RELPATH)
+    try:
+        raw = read_regular_bytes(path)
+    except OSError as e:
+        raise CaseTicketError(f"case-history mapping not readable: {shown}: {e.strerror}") from e
     import yaml
 
     from defender._yaml import safe_load
@@ -94,10 +144,17 @@ def _load_mapping(settings_dir: Path) -> dict[str, Any]:
     except yaml.YAMLError as e:
         raise CaseTicketError(f"case-history mapping is not valid YAML: {e}") from e
     if not isinstance(data, dict):
-        raise CaseTicketError(f"case-history mapping is not a mapping: {path}")
+        raise CaseTicketError(f"case-history mapping is not a mapping: {shown}")
     _check_lifecycle(data)
-    _MAPPING_CACHE[path] = (raw, data)
-    return copy.deepcopy(data)
+    return CaseMapping(data)
+
+
+def _thawed(mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
+    """The mapping as a fresh plain dict, or the kept error re-raised (a new instance, so the
+    record's own error is never handed a second traceback)."""
+    if isinstance(mapping, CaseTicketError):
+        raise CaseTicketError(str(mapping)) from None
+    return mapping.plain()
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:
@@ -178,13 +235,15 @@ def _event_time(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
     return str(val) if val else ""
 
 
-def alert_event_time(alert: dict[str, Any], *, settings_dir: Path) -> str | None:
-    return _event_time(alert, _load_mapping(settings_dir)) or None
+def alert_event_time(alert: dict[str, Any], *, mapping: CaseMapping | CaseTicketError) -> str | None:
+    return _event_time(alert, _thawed(mapping)) or None
 
 
-def read_case_record(run_dir: Path, *, settings_dir: Path) -> CaseRecord:
-    # An unreadable headline must take the unreadable branch, since the bridge writes to a
-    # real ticket system from this record. Classified from `require_report`'s own refusal.
+def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -> CaseRecord:
+    # The bridge writes to a real ticket system off this record, so an unreadable headline must
+    # take the unreadable branch (`ReportNotParsable`) rather than the ordinary one. Re-raised
+    # from the shared accessor's own refusal, so this classification is a CONSUMER of
+    # `_report.read_report`'s verdict rather than a second, bespoke emptiness check (§7 R10).
     try:
         report = require_report(RunPaths(run_dir).report)
     except ReportUnreadable as e:
@@ -193,12 +252,12 @@ def read_case_record(run_dir: Path, *, settings_dir: Path) -> CaseRecord:
     case_id = run_dir.name
     cause = str(fm.get("cause") or "")
 
-    mapping = _load_mapping(settings_dir)
+    plain = _thawed(mapping)
     signature_id = _SIGNATURE_FALLBACK
     alert_path = RunPaths(run_dir).alert
     if alert_path.is_file():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), mapping)
+            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), plain)
 
     return CaseRecord(
         case_id=case_id,
@@ -210,20 +269,20 @@ def read_case_record(run_dir: Path, *, settings_dir: Path) -> CaseRecord:
 
 
 def alert_to_open_payload(
-    alert: dict[str, Any], case_id: str, *, settings_dir: Path,
+    alert: dict[str, Any], case_id: str, *, mapping: CaseMapping | CaseTicketError,
 ) -> dict[str, Any]:
-    mapping = _load_mapping(settings_dir)
-    signature = _signature_id(alert, mapping)
-    summary = _dig(alert, str(_dig(mapping, "source.summary") or "rule.description"))
+    plain = _thawed(mapping)
+    signature = _signature_id(alert, plain)
+    summary = _dig(alert, str(_dig(plain, "source.summary") or "rule.description"))
     ctx = _ctx(
         case_id=case_id,
         signature=signature,
         summary=str(summary) if summary else _SUMMARY_FALLBACK,
-        event_time=_event_time(alert, mapping),
+        event_time=_event_time(alert, plain),
     )
-    payload = _render(mapping.get("open") or {}, ctx)
+    payload = _render(plain.get("open") or {}, ctx)
     if isinstance(payload.get("labels"), list):
-        bare = {p for p in _open_label_prefixes(mapping) if p}
+        bare = {p for p in _open_label_prefixes(plain) if p}
         payload["labels"] = [lbl for lbl in payload["labels"] if lbl not in bare]
     return payload
 
@@ -253,12 +312,12 @@ def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
     return None
 
 
-def signature_label(alert: dict[str, Any], *, settings_dir: Path) -> str | None:
-    mapping = _load_mapping(settings_dir)
-    signature = _signature_id(alert, mapping)
-    labels = _render(_dig(mapping, "open.labels") or [], _ctx(signature=signature),
+def signature_label(alert: dict[str, Any], *, mapping: CaseMapping | CaseTicketError) -> str | None:
+    plain = _thawed(mapping)
+    signature = _signature_id(alert, plain)
+    labels = _render(_dig(plain, "open.labels") or [], _ctx(signature=signature),
                      "open.labels")
-    prefix = _open_label_prefix(mapping, "signature")
+    prefix = _open_label_prefix(plain, "signature")
     if prefix:
         for lbl in labels:
             if isinstance(lbl, str) and lbl.startswith(prefix):
@@ -303,9 +362,10 @@ def _resolve_comment_body_template(mapping: dict[str, Any]) -> str:
     return body
 
 
-def _host_comment(body: str, settings_dir: Path) -> dict[str, Any]:
-    """An attributed comment whose body is a fixed host sentence, nothing rendered into it."""
-    return {"author": _resolve_comment_author(_load_mapping(settings_dir)), "body": body}
+def _host_comment(body: str, mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
+    """A comment whose body is a FIXED host sentence — attributed like every other comment the
+    host makes, with nothing rendered into it."""
+    return {"author": _resolve_comment_author(_thawed(mapping)), "body": body}
 
 
 def _strip_planted_fence(text: str) -> str:
@@ -332,12 +392,15 @@ def _bound_wire_bytes(text: str) -> str:
     return cut + _ELLIPSIS
 
 
-def case_record_to_comment(rec: CaseRecord, *, settings_dir: Path) -> dict[str, Any]:
-    """`{author, body}` and nothing else. `body` is the mapping's rendering (e.g.
-    `"{disposition} — {cause}\\n\\n{narrative}"`), fence-stripped and bounded."""
-    mapping = _load_mapping(settings_dir)
-    author = _resolve_comment_author(mapping)
-    body_template = _resolve_comment_body_template(mapping)
+def case_record_to_comment(
+    rec: CaseRecord, *, mapping: CaseMapping | CaseTicketError,
+) -> dict[str, Any]:
+    """D3 replaces `case_record_to_close`: `{author, body}` and nothing else (S1). `body` is
+    the mapping's own `"{disposition} — {cause}\\n\\n{narrative}"` rendering, fence-stripped
+    and bounded on the wire."""
+    plain = _thawed(mapping)
+    author = _resolve_comment_author(plain)
+    body_template = _resolve_comment_body_template(plain)
     narrative = _prepare_narrative(rec.narrative)
     ctx = _ctx(
         case_id=rec.case_id,
@@ -350,16 +413,20 @@ def case_record_to_comment(rec: CaseRecord, *, settings_dir: Path) -> dict[str, 
     return {"author": author, "body": _bound_wire_bytes(rendered)}
 
 
-def unreadable_comment_payload(*, settings_dir: Path) -> dict[str, Any]:
-    """The unreadable-report branch's comment: attributed, with a fixed host sentence rather
-    than the report's own text."""
-    return _host_comment(UNREADABLE_COMMENT_BODY, settings_dir)
+def unreadable_comment_payload(*, mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
+    """The unreadable-report branch's outbound comment: still attributed (O3), but a fixed
+    host sentence in place of a rendered narrative — never `(unreadable)` as an accidental
+    literal, never the report's own (unparsable) text."""
+    return _host_comment(UNREADABLE_COMMENT_BODY, mapping)
 
 
-def escalation_comment_payload(truncated_by: str, *, settings_dir: Path) -> dict[str, Any]:
-    """The cut-short branch's comment: attributed, a fixed sentence naming the exit class, no
-    verdict — the case stays open for a person."""
-    return _host_comment(ESCALATION_COMMENT_BODY.format(exit=truncated_by), settings_dir)
+def escalation_comment_payload(
+    truncated_by: str, *, mapping: CaseMapping | CaseTicketError,
+) -> dict[str, Any]:
+    """The cut-short branch's outbound comment (#1047 O2): attributed like every other comment
+    the host makes, a fixed host sentence naming the exit class, and no verdict — the case
+    stays open for a person."""
+    return _host_comment(ESCALATION_COMMENT_BODY.format(exit=truncated_by), mapping)
 
 
 # --------------------------------------------------------------------------------------------
@@ -386,12 +453,18 @@ class ReleasePredicate:
         return isinstance(status, str) and status == self.released_status
 
 
-def release_predicate(settings_dir: Path) -> ReleasePredicate:
-    """The release predicate, safe by construction: raises in every unsafe mapping state (the
-    read screen degrades on the raise). The status is stripped once here so stray whitespace
-    in a quoted scalar still matches."""
-    mapping = _load_mapping(settings_dir)
-    section = mapping.get("released")
+def release_predicate(mapping: CaseMapping | CaseTicketError) -> ReleasePredicate:
+    """§7 R1's downstream consequence: the predicate is SAFE BY CONSTRUCTION — this raises in
+    every unsafe mapping state rather than merely behaving correctly when configured right.
+    The caller (the read screen) is what degrades on a raise; this function never does.
+
+    The configured status is stripped ONCE, here, so a quoted YAML scalar with stray
+    whitespace configures the same state the ticket carries rather than one nothing can ever
+    reach.
+
+    `mapping` is the record's `ticket_mapping` (#1107), handed in by the caller: the screen, the
+    writer and the branching applier each already hold the record, and none reads the file."""
+    section = _thawed(mapping).get("released")
     if not isinstance(section, dict):
         raise CaseTicketError(
             "case-history mapping has no `released` section (released.status required)"
@@ -405,8 +478,8 @@ def release_predicate(settings_dir: Path) -> ReleasePredicate:
     return ReleasePredicate(released_status=status.strip())
 
 
-def is_released(ticket: Any, *, settings_dir: Path) -> bool:
-    return release_predicate(settings_dir).is_released(ticket)
+def is_released(ticket: Any, *, mapping: CaseMapping | CaseTicketError) -> bool:
+    return release_predicate(mapping).is_released(ticket)
 
 
 # --------------------------------------------------------------------------------------------
@@ -418,14 +491,14 @@ def ticket_created(ticket: Any) -> str | None:
     return ticket.get("created") if isinstance(ticket, dict) else None
 
 
-def ticket_event_time(ticket: Any, *, settings_dir: Path) -> str | None:
+def ticket_event_time(ticket: Any, *, mapping: CaseMapping | CaseTicketError) -> str | None:
     if not isinstance(ticket, dict):
         return None
     labels = ticket.get("labels")
     if not isinstance(labels, list):
         return None
     try:
-        prefix = _open_label_prefix(_load_mapping(settings_dir), "event_time")
+        prefix = _open_label_prefix(_thawed(mapping), "event_time")
     except CaseTicketError:
         return None
     if not prefix:

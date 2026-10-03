@@ -270,7 +270,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             # Declared up front: a world that serves nothing must still leave a ledger.
             world=world, ledger=Ledger.for_world(episode, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
-            settings_dir=tenant.settings, grant_home=tenant.table_pointer,
+            tenant=tenant, grant_home=tenant.table_pointer,
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),
@@ -396,21 +396,26 @@ def _announce_provenance(run_dir: Path) -> None:
     _logger.info(f"commit={rec.commit[:12]}{mark}{detail}")
 
 
-def resume_world(episode: Episode, world_label: str, *, settings: Callable[[], Path]) -> Any:
-    """The world this process is, from `episode`'s manifest.
+def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any]) -> Any:
+    """The world this process is, from `episode`'s manifest — judged against the episode
+    tenant's configured corpus patterns only where the manifest does not record them.
 
     The episode dir is the manifest's own, so the world ledger sits beside the family's
     primed recording and depends on nothing the manifest does not say.
 
-    A manifest that records no `configured_patterns` is judged against the tenant's corpus
-    config, read from `settings`; otherwise no tenant is looked up.
+    A manifest that records no `configured_patterns` was judged against the checkout's corpus
+    config when it was authored. That config now lives in the tenant's record (#1107), so for
+    such a manifest — and only for one — the loader asks `tenant` for the sibling's own
+    `RunTenant` (resolved from the record the launcher seeded its runs base with, naming the
+    source's tenant) and takes its corpus patterns from the record's corpus-engine view. A
+    manifest that records its set is judged by the manifest, and no tenant is looked up.
     """
     from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
 
     return _family.resume_world_from(
         _family.load_family(
-            episode.view(), configured_patterns=lambda: configured_patterns(settings())),
+            episode.view(), configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
         world_label, episode.dir)
 
 
@@ -433,7 +438,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
 
 
 def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
-                   settings: Callable[[], Path]) -> Any:
+                   tenant: Callable[[], Any]) -> Any:
     """The world this process is, or `None` for an ordinary run — plus the sibling's two
     refusals, before anything is spent.
 
@@ -454,7 +459,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        return resume_world(episode, ns.world, settings=settings)
+        return resume_world(episode, ns.world, tenant=tenant)
     except FamilyError as refusal:
         sys.exit(f"[run.py] {refusal}")
 
@@ -525,7 +530,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
-    visualize: Callable[[Run], None] = _run.visualize,
+    visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     preflight: Callable[[str | None], int] = preflight_role_models,
@@ -554,11 +559,12 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
     with door as episode:
         runs_base = _runs_base(episode, tenant_id)
 
-        # One tenant resolution, shared by the old-manifest judge and the run.
+        # One tenant resolution, shared by the old-manifest judge (only for a manifest recording
+        # no corpus patterns) and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
             tenants_root, tenant_id, runs_base=runs_base, defender_dir=DEFENDER_DIR,
             dispatches_lead_zero=ns.resume is None))
-        world = _resume_target(ns, episode=episode, settings=lambda: tenant_of().settings)
+        world = _resume_target(ns, episode=episode, tenant=tenant_of)
         _sibling_tenant_agrees(world, tenant_id)
 
         alert, run_id = _case_input(ns, world)
@@ -577,10 +583,13 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
         run = materialize(alert, run_id, tenant_id=tenant_id, model=model, world=world)
         run_dir = run.run_dir
 
-        # Every log line from here on, the crash included, names this run and tenant.
+        # Every log line from here on, the crash included, names this run and the tenant this
+        # process resolved once above and hands inward as one value.
         with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
             if ns.update_ticket:
-                ticket_writer.open_case_ticket(run_dir, settings_dir=tenant.settings)
+                ticket_writer.open_case_ticket(
+                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    env=_run.run_env(DEFENDER_DIR, run_dir))
 
             _logger.info(f"run_dir={run_dir} model={model}")
             _announce_provenance(run_dir)
@@ -620,7 +629,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             if ns.update_ticket:
                 # Both inputs come from the driver's summary, not from a possibly stale sidecar.
                 ticket_writer.record_case_ticket(
-                    run_dir, settings_dir=tenant.settings, truncated_by=summary.get("truncated_by"),
+                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    env=_run.run_env(DEFENDER_DIR, run_dir), truncated_by=summary.get("truncated_by"),
                     closed_before_cut=summary.get("closed_before_cut") is True)
 
             # A sibling's evidence was staged on purpose, so it must never feed the catalog.
@@ -632,7 +642,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
                 _logger.info("enqueued for catalog curation")
 
             try:
-                visualize(run)
+                visualize(run, update_ticket=ns.update_ticket)
             except _run.VisualizeFailed:
                 _logger.warning("the run page was not saved", exc_info=True)
             return 0

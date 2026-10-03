@@ -7,7 +7,6 @@ import json
 import logging
 from collections.abc import Mapping
 from typing import Any, NoReturn
-from pathlib import Path
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
@@ -169,27 +168,28 @@ def _self_ticket_reject_reason(
     return None
 
 
-def _release_predicate(settings_dir: Path) -> Any:
-    """The ticket release predicate, built fresh per call (no cache).
+def _release_predicate(tenant: Any) -> Any:
+    """The ticket release predicate, built per call from the run's record (#1107: the mapping
+    is the one resolved when the run began, so a mid-run file edit changes nothing).
 
-    Any construction failure degrades to "nothing released", so no comment is served (fail
-    closed), rather than refusing the query as infra and charging the `ticket` breaker for a
-    config defect. The warning is logged because otherwise a broken mapping looks like a store
-    with no comments."""
+    Any construction failure (no mapping, or a mapping the loader kept as its error) degrades to
+    "nothing released", so no comment is served (fail closed), rather than refusing the query as
+    infra and charging the `ticket` breaker for a config defect. The warning is logged because
+    otherwise a broken mapping looks like a store with no comments."""
     from defender.scripts.case_history import case_ticket
 
     try:
-        return case_ticket.release_predicate(settings_dir).is_released
+        return case_ticket.release_predicate(tenant.ticket_mapping).is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
         _logger.warning(
-            f"ticket release predicate unavailable ({e!r}); serving no "
+            f"ticket release predicate unavailable ({e}); serving no "
             "ticket comments this call",
         )
         return lambda _ticket: False
 
 
 def _screen_ticket_payload(
-    self_key: str, system: str, verb: str, payload: Any, *, settings_dir: Path,
+    self_key: str, system: str, verb: str, payload: Any, *, tenant: Any,
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion, then the per-ticket release step, before capture
     and model display.
@@ -197,7 +197,8 @@ def _screen_ticket_payload(
     The exclusion is identity-only: another ticket mentioning ``self_key`` is still useful
     correlation evidence, since gather is not scoring the case. A record whose key cannot be
     established is withheld. The release step runs only after a served payload (``code == 0``),
-    so a malformed envelope is never patched. `settings_dir` is the run's tenant folder.
+    so a malformed envelope is never patched. `tenant` is the run's record (#1107): the
+    released status is that tenant's mapping's, as of the run's start.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
@@ -214,7 +215,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_get(payload, is_released=_release_predicate(settings_dir)), 0, ""
+        return screen_release_get(payload, is_released=_release_predicate(tenant)), 0, ""
 
     if verb == TICKET_LIST:
         payload, code, detail = screen_list(
@@ -225,7 +226,7 @@ def _screen_ticket_payload(
         )
         if code != 0:
             return payload, code, detail
-        return screen_release_list(payload, is_released=_release_predicate(settings_dir)), 0, ""
+        return screen_release_list(payload, is_released=_release_predicate(tenant)), 0, ""
 
     return payload, 0, ""
 
@@ -243,15 +244,12 @@ def _model_visible(deps: Any, detail: str) -> str:
     settings folder named rather than located. Both model-visible fault channels use this, so
     no adapter's error wording can put a host path in front of the model."""
     text = redact_model_visible(detail)
-    settings = getattr(deps, "settings_dir", None)
-    if settings is None:
+    tenant = getattr(deps, "tenant", None)
+    if tenant is None:
         return text
-    from .verbs import SETTINGS_POINTER
+    from .verbs import redact_settings_path
 
-    for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
-        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
-            spelling, SETTINGS_POINTER.rstrip("/"))
-    return text
+    return redact_settings_path(text, tenant.settings)
 
 
 class QueryCapture(AbstractCapability[Any]):
@@ -661,7 +659,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             payload = await handler(args)
             payload, exit_code, detail = _screen_ticket_payload(
-                self_key, system, verb, payload, settings_dir=deps.settings_dir,
+                self_key, system, verb, payload, tenant=deps.tenant,
             )
         except CONTROL_FLOW_EXCEPTIONS:
             raise
@@ -1013,7 +1011,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
-            settings_dir=deps.settings_dir,
+            tenant=deps.tenant,
         )
         return await asyncio.to_thread(fn, vctx, **params)
 

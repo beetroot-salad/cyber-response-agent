@@ -32,7 +32,7 @@ HEALTH_TIMEOUT_SEC = 10
 def _exec(
     ctx: VerbContext, host: str, argv: list[str], *, timeout_sec: int = DEFAULT_TIMEOUT_SEC
 ) -> tuple[int, str, str]:
-    return transport.docker_exec_raw(ctx, host, argv, timeout_sec=timeout_sec)
+    return transport.docker_exec_raw(ctx, host, argv, timeout_sec=timeout_sec, system=SYSTEM)
 
 
 def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) -> None:
@@ -49,7 +49,7 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
     if transport_down:
         raise TransportFault(
             f"host {host!r} unreachable: {s} — "
-            f"`docker --context {transport.docker_context(ctx)} ps` lists running hosts."
+            f"`docker --context {transport.docker_context(ctx, SYSTEM)} ps` lists running hosts."
         )
     raise UpstreamFault(f"docker exec on {host} (rc={rc}): {s or 'no stderr'}")
 
@@ -71,7 +71,7 @@ def _captured_at(ctx: VerbContext) -> str:
 
 
 def health_check(ctx: VerbContext) -> dict:
-    context = transport.docker_context(ctx)
+    context = transport.docker_context(ctx, SYSTEM)
     cmd = ["docker", "--context", context, "ps", "--format", "{{.Names}}"]
     try:
         proc = subprocess.run(
@@ -100,13 +100,13 @@ def health_check(ctx: VerbContext) -> dict:
 
 def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
     fmt = "{{json .Name}}\t{{json .Config.Image}}"
-    rc, out, err = transport.docker_inspect_raw(ctx, container_id, fmt=fmt)
+    rc, out, err = transport.docker_inspect_raw(ctx, container_id, fmt=fmt, system=SYSTEM)
     if rc != 0:
         s = err.strip()
         if "No such object" in s or "No such container" in s:
             raise UpstreamFault(
                 f"no container matching {container_id!r} on "
-                f"context {transport.docker_context(ctx)!r}: {s}"
+                f"context {transport.docker_context(ctx, SYSTEM)!r}: {s}"
             )
         raise TransportFault(f"docker inspect failed (rc={rc}): {s}")
     parts = out.strip().split("\t")

@@ -191,8 +191,8 @@ def test_a_denied_verb_names_the_runs_own_tenants_table_but_not_its_host_path(tm
     a = T.plant_tenant(root, "acme", table=T.TABLE_A)
     b = T.plant_tenant(root, "bravo", table=T.TABLE_B)
     grants_a, grants_b = T.run_grants(a / "settings"), T.run_grants(b / "settings")
-    tenant_a = T.run_tenant(T.tenants().tenant_dir(root, "acme"), grants=grants_a)
-    tenant_b = T.run_tenant(T.tenants().tenant_dir(root, "bravo"), grants=grants_b)
+    tenant_a = T.run_tenant(T.tenants().tenant_dir(root, "acme"))
+    tenant_b = T.run_tenant(T.tenants().tenant_dir(root, "bravo"))
     assert tenant_a.table_pointer == table_pointer("acme")
     # A's gather reaches cmdb and does not hold `list-roles`, a verb the cmdb adapter really
     # declares: DENIED, and the pointer names A's table.
@@ -247,17 +247,19 @@ def test_the_withheld_lead_heading_names_the_runs_table(tmp_path):
     assert pointer not in dispatched, dispatched
 
 
-# ---- the verb context carries the run's settings folder ------------------------------------------
+# ---- the verb context carries the run's tenant record -------------------------------------------
 
-def test_a_verb_context_without_a_settings_folder_cannot_be_built(tmp_path):
-    """M3: `settings_dir` is a REQUIRED field with no default, so every construction site has
-    to supply the run's folder — a default would let a site silently read some other one."""
+def test_a_verb_context_without_a_tenant_cannot_be_built(tmp_path):
+    """M3 (#1107): `tenant` is a REQUIRED field with no default, so every construction site has
+    to supply the run's record — a default would let a site silently read some other tenant's."""
     from defender.runtime.verbs import VerbContext
 
-    with pytest.raises((TypeError, ValueError), match="settings_dir"):
+    with pytest.raises((TypeError, ValueError), match="tenant"):
         VerbContext(defender_dir=T.DEFENDER, run_dir=tmp_path, env={})
-    ctx = VerbContext(defender_dir=T.DEFENDER, run_dir=tmp_path, env={}, settings_dir=tmp_path)
-    assert ctx.settings_dir == tmp_path
+    record = T.playground_run_tenant()
+    ctx = VerbContext(defender_dir=T.DEFENDER, run_dir=tmp_path, env={}, tenant=record)
+    assert ctx.tenant is record
+    assert ctx.tenant.settings == T.PLAYGROUND_SETTINGS
 
 
 # ---- the operator's audit CLI is an entry point too -------------------------------------------------

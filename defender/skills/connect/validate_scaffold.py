@@ -12,13 +12,20 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._io import read_text_soft  # noqa: E402
+from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
 from defender._paths import process_defender_dir  # noqa: E402
 from defender._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
     check_system_skill,
     check_template,
+)
+from defender.runtime.tenant_settings import (  # noqa: E402
+    DOCKER_EXEC,
+    assignments,
+    is_blank,
+    parse_env,
+    system_prefix,
 )
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
@@ -43,8 +50,8 @@ def _is_ctx(param: inspect.Parameter) -> bool:
         return True
     return isinstance(ann, str) and ann.rpartition(".")[2] == "VerbContext"
 
+_RETIRED_ENV_SUFFIX = re.compile(r"_ENV$", re.I)
 _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)$", re.I)
-_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _HIGH_ENTROPY = re.compile(r"^[A-Za-z0-9+/=_-]{24,}$")
 
 
@@ -143,32 +150,76 @@ def check_signatures(report: Report, verbs) -> None:
         report.add(PASS, f"{len(verbs)} verb(s) are dispatchable as fn(ctx, **params)")
 
 
+def _why_unreadable(error: Exception) -> str:
+    """A short cause for a file that could not be read — never its content."""
+    if isinstance(error, UnicodeDecodeError):
+        return "is not valid UTF-8"
+    return (error.strerror if isinstance(error, OSError) else None) or type(error).__name__
+
+
+def _check_access_method(report: Report, entries: dict[str, str], prefix: str) -> None:
+    """`<PREFIX>_TRANSPORT` is `docker-exec` and `<PREFIX>_DOCKER_CONTEXT` is set: both required,
+    neither defaulted."""
+    transport, context = f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT"
+    if is_blank(entries.get(transport, "")):
+        report.add(FAIL, f"config.env: {transport} is not set — name the access method "
+                         f"({DOCKER_EXEC}); there is no default")
+    elif entries[transport] != DOCKER_EXEC:
+        report.add(FAIL, f"config.env: {transport}={entries[transport]!r} is not an implemented "
+                         f"access method (only {DOCKER_EXEC})")
+    if is_blank(entries.get(context, "")):
+        report.add(FAIL, f"config.env: {context} is not set — name the docker context the "
+                         "system is reached over; there is no default")
+
+
+#: A key that would reference a tenant secret. Credential delivery is #1163; until it lands such a
+#: reference names nothing, and its value may be the secret itself.
+_SECRET_REF = re.compile(r"_SECRET_REF$", re.I)
+
+
+def _check_values(report: Report, every: list[tuple[str, str, bool]]) -> None:
+    """Every assignment in the file, judged — `export` lines and overridden duplicates included,
+    since a secret the run ignores is still a secret in a tracked file: a secret-named key holding
+    a value and a `*_SECRET_REF` reference (FAIL each — a config.env holds no secret, and there is
+    no credential delivery yet, #1163), and the high-entropy values (WARN). The retired `<KEY>_ENV`
+    convention gets no treatment of its own — a leftover is judged by the secret name it carries.
+    A row names the key, never the value."""
+    inline_secret = False
+    for key, val, exported in every:
+        shown = f"export {key}" if exported else key
+        if is_blank(val):
+            continue
+        if _SECRET_REF.search(key):
+            report.add(FAIL, f"config.env: {shown} references a secret, but credential delivery "
+                             "is not supported yet (#1163) — remove it")
+            inline_secret = True
+        elif _SECRET_KEYS.search(_RETIRED_ENV_SUFFIX.sub("", key)):
+            report.add(FAIL, f"config.env: {shown} holds a value inline — a config.env holds no "
+                             "secret, and credential delivery is not supported yet (#1163)")
+            inline_secret = True
+        elif _HIGH_ENTROPY.match(val):
+            report.add(WARN, f"config.env: {shown} looks high-entropy — confirm it isn't a secret")
+    if not inline_secret:
+        report.add(PASS, "config.env carries no inline secrets")
+
+
 def check_config(report: Report, settings_dir: Path, system: str) -> None:
-    """`system`'s `config.env` in the connected tenant's `settings/` folder."""
+    """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106).
+
+    Checked: the access method (`<PREFIX>_TRANSPORT=docker-exec` and `<PREFIX>_DOCKER_CONTEXT`,
+    both required, no default), and that no line — an `export` or an overridden duplicate
+    included — holds a secret or a secret reference. The report names keys, never a value."""
     path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
         report.add(WARN, f"no config.env at {path} (fine only if the adapter needs none)")
         return
-    secrets_found = False
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key, val = key.strip(), val.strip().strip('"').strip("'")
-        if not val:
-            continue
-        if key.endswith("_ENV"):
-            if not _ENV_NAME.match(val):
-                report.add(FAIL, f"config.env: {key}={val!r} should name an env var, not hold a value")
-                secrets_found = True
-        elif _SECRET_KEYS.search(key):
-            report.add(FAIL, f"config.env: {key} holds a value inline — reference a secret via {key}_ENV instead")
-            secrets_found = True
-        elif _HIGH_ENTROPY.match(val):
-            report.add(WARN, f"config.env: {key} looks high-entropy — confirm it isn't a secret")
-    if not secrets_found:
-        report.add(PASS, "config.env carries no inline secrets")
+    try:
+        text = read_plain(path)
+    except TEXT_READ_ERRORS as e:
+        report.add(FAIL, f"config.env could not be read ({_why_unreadable(e)})")
+        return
+    _check_access_method(report, parse_env(text), system_prefix(system))
+    _check_values(report, assignments(text))
 
 
 def check_skill(report: Report, defender: Path, system: str) -> None:

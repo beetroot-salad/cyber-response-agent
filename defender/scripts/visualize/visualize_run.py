@@ -13,7 +13,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _env
-from defender._io import read_jsonl_rows
+from defender._io import load_json_artifact, read_guarded, read_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import RunPaths
 from defender.learning import lead_repository
@@ -149,9 +149,10 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_page(run_dir: Path) -> str:
+def render_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
+    `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
 
     The store resolve is a precondition, not a data dependency: nothing on the page reads the
     session store, but a run dir copied without its store pointer would otherwise render a
@@ -160,10 +161,10 @@ def render_page(run_dir: Path) -> str:
     from defender.runtime import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    return render_runtime_page(run_dir)
+    return render_runtime_page(run_dir, update_ticket=update_ticket)
 
 
-def publish_page(run: Run) -> CopyOutcome:
+def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
     """The post-run step: render the run's page, save it as the run's `runtime_html` record
     through `run` — so whatever backend the handle sits on receives it like every other record —
     then hand it to the dev-only copy, and answer what the copy did (#1110).
@@ -172,7 +173,7 @@ def publish_page(run: Run) -> CopyOutcome:
     the cause chained: the caller's single "no record" signal. The copy never raises.
     """
     try:
-        page = render_page(run.run_dir)
+        page = render_page(run.run_dir, update_ticket=update_ticket)
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html
@@ -445,7 +446,53 @@ def _render_policy_denials_section(run_dir: Path) -> str:
     )
 
 
-def render_runtime_page(run_dir: Path) -> str:
+RECEIPT_UNREADABLE = "receipt unreadable"
+
+
+def render_ticket_line(run_dir: Path) -> str:
+    """The page's one line about the case-ticket write (#1107 O6): the key, status and reason the
+    host's record step left in its receipt, or nothing when it left no receipt.
+
+    The receipt is a sidecar beside the run dir (`ticket_writer.receipt_path`), out of the box's
+    reach. It is still read defensively: only as a plain regular file (`read_guarded` — a link at
+    that name is refused, never followed), decoded by the repo's one bounded loader
+    (`load_json_artifact`, so the verdict never depends on stack depth), only if it is a JSON
+    object whose fields have the types the writer gives them, and every field that reaches the
+    page is escaped. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL
+    is shown as text, never as a link: nothing on the page sends the reader to an address a file
+    named. The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it
+    wrote."""
+    path = RunPaths(run_dir).ticket_write(Path(run_dir).parent)  # = ticket_writer.receipt_path
+    if not path.is_symlink() and not path.exists():
+        return ""
+    text, _refused = read_guarded(path)
+    receipt: object = None
+    if text is not None:
+        receipt, _why = load_json_artifact(text)
+    well_formed = (
+        isinstance(receipt, dict)
+        and isinstance(receipt.get("key"), str)
+        and isinstance(receipt.get("status"), str)
+        and isinstance(receipt.get("ok"), bool)
+        and (receipt.get("url") is None or isinstance(receipt.get("url"), str))
+        and (receipt.get("reason") is None or isinstance(receipt.get("reason"), str))
+    )
+    if not well_formed or not isinstance(receipt, dict):
+        return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
+    cls = "ticket-ok" if receipt["ok"] else "ticket-error"
+    parts = [f'ticket <code>{esc(receipt["key"])}</code>', esc(receipt["status"])]
+    if receipt.get("url"):
+        parts.append(f'<code>{esc(receipt["url"])}</code>')
+    if receipt.get("reason"):
+        parts.append(esc(receipt["reason"]))
+    return f'<p class="ticket-line {cls}">{" — ".join(parts)}</p>'
+
+
+def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+    """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
+    and read from no file in the run dir (the box can write every one of them): only a run that
+    was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
+    planted, shows nothing on a run that never meant to write a ticket."""
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
@@ -549,6 +596,7 @@ def render_runtime_page(run_dir: Path) -> str:
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
     {render_runtime_headline(run_dir, report, health, leads)}
+    {render_ticket_line(run_dir) if update_ticket else ""}
     {_render_policy_denials_section(run_dir)}
     {metrics_html}
     {render_alert_block(run_dir, open_=False)}
@@ -572,17 +620,20 @@ def main(argv: list[str]) -> int:
     from defender import _log
     from defender._run_handle import Run
 
-    if len(argv) != 2:
-        print("usage: visualize_run.py <run_dir>", file=sys.stderr)
+    args = argv[1:]
+    update_ticket = "--update-ticket" in args
+    args = [a for a in args if a != "--update-ticket"]
+    if len(args) != 1:
+        print("usage: visualize_run.py <run_dir> [--update-ticket]", file=sys.stderr)
         return 64
-    run_dir = Path(argv[1]).resolve()
+    run_dir = Path(args[0]).resolve()
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
     run = Run.at(run_dir)
     with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
         try:
-            copy = publish_page(run)
+            copy = publish_page(run, update_ticket=update_ticket)
         except VisualizeFailed:
             _logger.error("the re-render failed", exc_info=True)
             return 1

@@ -14,32 +14,28 @@ import urllib.request
 from typing import Any
 
 from defender.runtime.verbs import VerbContext, verb
-from defender.scripts.adapters import faults
+from defender.scripts.adapters import _stub_transport, faults
 
 SYSTEM = "example"
+#: The prefix this system's `config.env` keys carry: the folder name, upper-cased
+#: (`systems/example/config.env` holds `EXAMPLE_URL_BASE=...`).
+PREFIX = "EXAMPLE"
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:
-    # The run's tenant's settings folder, never the code tree.
-
-    path = ctx.settings_dir / "systems" / SYSTEM / "config.env"
-    config: dict[str, str] = {}
-    if path.exists():
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            config[key.strip()] = val.strip().strip('"').strip("'")
-    return config
+    """This system's settings, from the run's record (`ctx.tenant.systems`) — resolved once when
+    the run began. Never the settings folder as it is now and never the process environment: an
+    adapter reads its configuration from the record, so an exported variable changes nothing a
+    run addresses. (A credentialed system has no secret delivery yet: #1163.)
+    `load_config` strips the prefix and raises `ConfigFault` (infra, exit 2) for a system with no
+    config, one on an unimplemented access method, or a missing or blank required key."""
+    return _stub_transport.load_config(ctx, SYSTEM, PREFIX, ("URL_BASE", "TIMEOUT_SEC"))
 
 
 def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:
     config = _config(ctx)
-    base = config.get("URL_BASE")
-    if not base:
-        raise faults.ConfigFault(f"{SYSTEM}: URL_BASE is not set in config.env.")
-    timeout = float(config.get("TIMEOUT_SEC", "10"))
+    base = config["URL_BASE"]
+    timeout = float(config["TIMEOUT_SEC"])
     url = base.rstrip("/") + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -50,8 +46,8 @@ def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) 
         body = exc.read().decode(errors="replace")
         if exc.code in (401, 403):
             raise faults.TransportFault(
-                f"{SYSTEM}: authentication failed (HTTP {exc.code}). Check "
-                f"AUTH_TYPE and the secret env var it names."
+                f"{SYSTEM}: authentication failed (HTTP {exc.code}). This system needs a "
+                f"credential, and credential delivery is not supported yet (#1163)."
             ) from exc
         raise faults.UpstreamFault(body or f"{SYSTEM}: query rejected (HTTP {exc.code}).") from exc
     except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:

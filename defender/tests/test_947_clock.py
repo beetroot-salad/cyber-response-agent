@@ -43,6 +43,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -63,6 +64,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.tests._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
@@ -255,7 +257,7 @@ def fake_docker(tmp_path: Path) -> Path:
 
 def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
                defender_dir: Path | None = None,
-               settings_dir: Path | None = None) -> VerbContext:
+               tenant: Any = None) -> VerbContext:
     """A `VerbContext` whose env is the whole world the transports fork into.
 
     `as_of` DEFAULTS TO NONE, and that default is the production shape: `query_tool.py` builds
@@ -269,34 +271,37 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
     parameter IS the seam under test."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
+    if tenant is None:
+        tenant = _fixture_tenant(tmp_path)
     return VerbContext(
         defender_dir=defender_dir if defender_dir is not None else tmp_path / "defender",
         run_dir=run_dir,
-        # #1106: the run's tenant settings folder — the committed playground's unless a caller
-        # hands its own (the folder every read resolved before the run had to hand it in).
-        settings_dir=(settings_dir if settings_dir is not None
-                      else _tenants1106.PLAYGROUND_SETTINGS),
+        # #1107: the run's tenant record — a fixture tenant whose every system names the
+        # docker context `spec-947`, unless a caller hands its own.
+        tenant=tenant,
         env={
             "PATH": str(fake_docker(tmp_path)),
             "DOCKER_CALL_LOG": str(tmp_path / DOCKER_LOG),
-            "SOC_PLAYGROUND_DOCKER_CONTEXT": "spec-947",
         },
         as_of=as_of,
     )
 
 
+def _fixture_tenant(tmp_path: Path) -> Any:
+    """The record resolved from a tenant folder planted under `tmp_path`, whose host-state and
+    elastic (this file's indices) config name the docker context `spec-947`."""
+    root = tmp_path / "tenants"
+    texts = S.config_texts("spec947", events_index=EVENTS_INDEX, alerts_index=ALERTS_INDEX)
+    folder = S.plant(root, marker="spec947", configs=texts)
+    S.set_key(folder, "host-state", "HOST_STATE_DOCKER_CONTEXT", "spec-947")
+    S.set_key(folder, "elastic", "ELASTIC_DOCKER_CONTEXT", "spec-947")
+    return S.resolve(root)
+
+
 def elastic_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None) -> VerbContext:
-    """`docker_ctx`, plus the config file `load_config` refuses to run without."""
-    defender_dir = tmp_path / "defender"
-    settings_dir = tmp_path / "settings"
-    config = settings_dir / "systems" / "elastic" / "config.env"
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        f"ELASTICSEARCH_URL=http://elasticsearch:9200\nKIBANA_URL=http://kibana:5601\n"
-        f"ELASTIC_EVENTS_INDEX={EVENTS_INDEX}\nELASTIC_ALERTS_INDEX={ALERTS_INDEX}\n",
-        encoding="utf-8")
-    return docker_ctx(tmp_path, as_of=as_of, defender_dir=defender_dir,
-                      settings_dir=settings_dir)
+    """`docker_ctx`, over a tenant that carries the elastic config `load_config` refuses to run
+    without."""
+    return docker_ctx(tmp_path, as_of=as_of, defender_dir=tmp_path / "defender")
 
 
 def docker_calls(tmp_path: Path) -> list[list[str]]:
@@ -423,12 +428,12 @@ def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
 
     assert names[-2:] == ["world_id", "as_of"], f"the clock did not land last: {names}"
     assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                       settings_dir=Path("/s")).as_of is None
+                       tenant=_tenants1106.playground_run_tenant()).as_of is None
     # The world and the clock are two fields: a context naming a world names no moment. (#1106
-    # made `settings_dir` a REQUIRED field, so every site now builds by keyword and the old
+    # made the tenant a REQUIRED field, so every site now builds by keyword and the old
     # positional spelling — fifth argument the world — is no longer one any site uses.)
     ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                      settings_dir=Path("/s"), capture=None, world_id="w1")
+                      tenant=_tenants1106.playground_run_tenant(), capture=None, world_id="w1")
     assert ctx.world_id == "w1"
     assert ctx.as_of is None
 

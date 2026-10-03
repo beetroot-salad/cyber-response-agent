@@ -57,14 +57,22 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     A `BudgetKill` or `RunAborted` inside `resolve_lead_zero` degrades the section rather than
     ending the run before MAIN's first prompt. Returns `(prompt, ancestor_block, status)`; the
     last two feed item 3's dispatch gate."""
+    from defender import run_common
+
     from .. import lead_zero as lead_zero_mod
 
     ancestor_block = ""
     status = lead_zero_mod.STATUS_FAILED
     try:
+        # The run's env is built HERE, once, and handed to lead-zero (#1107): nothing in the
+        # lead-zero package builds or reads the environment itself.
+        try:
+            env = run_common.run_env(defender_dir, run_dir)
+        except Exception:  # noqa: BLE001 — orientation-adjacent work must never break the run
+            env = {}
         result = lead_zero_mod.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
-            verbs=verbs, limits=limits, run_id=run_id, settings_dir=tenant.settings,
+            verbs=verbs, limits=limits, run_id=run_id, tenant=tenant, env=env,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(
             result, run_dir, correlation_system=tenant.grants.correlation_system,

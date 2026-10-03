@@ -91,16 +91,17 @@ POLICY_DENIALS = "policy_denials.jsonl"
 BUDGET = "budget.json"
 CIRCUIT_BREAKER = "circuit_breaker.json"
 LESSONS_LOADED = "lessons_loaded.jsonl"
-TICKET_WRITE = "ticket_write.json"
 SESSION_POINTER = "session_store_pointer.json"
 RUNTIME_HTML = "runtime.html"
 #: The box startup sentinel.
 BOX_SENTINEL = ".box-sentinel"
 
-#: The three sidecars beside the run dir in the runs base, keyed `<run_id><suffix>`.
+#: The four sidecars beside the run dir in the runs base, keyed `<run_id><suffix>`.
 RUN_END_SIDECAR_SUFFIX = ".run-end.json"
 SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
+#: The case-ticket write's receipt: a host record the box must neither plant nor block (#1107).
+TICKET_WRITE_SUFFIX = ".ticket-write.json"
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"
@@ -184,10 +185,6 @@ class RunLayout:
     @property
     def lessons_loaded(self) -> PurePosixPath:
         return PurePosixPath(LESSONS_LOADED)
-
-    @property
-    def ticket_write(self) -> PurePosixPath:
-        return PurePosixPath(TICKET_WRITE)
 
     @property
     def session_pointer(self) -> PurePosixPath:
@@ -309,9 +306,9 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    19 accessors (a census test checks this count against the set it pins).
+    18 accessors (a census test checks this count against the set it pins).
 
-    Accessors resolve relative to ``run_dir``, except the three sidecars, `sessions_dir` and
+    Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
 
     ``provenance`` may be absent on an arbitrary run dir: read it via ``_provenance.read``
@@ -428,10 +425,6 @@ class RunPaths:
         return self.run_dir / RUN_LAYOUT.lessons_loaded
 
     @property
-    def ticket_write(self) -> Path:
-        return self.run_dir / RUN_LAYOUT.ticket_write
-
-    @property
     def session_pointer(self) -> Path:
         return self.run_dir / RUN_LAYOUT.session_pointer
 
@@ -457,6 +450,9 @@ class RunPaths:
 
     def accounting_failures(self, runs_base: Path) -> Path:
         return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
+
+    def ticket_write(self, runs_base: Path) -> Path:
+        return Path(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
 
     def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory (a sibling of the runs base), from `SessionPaths`."""

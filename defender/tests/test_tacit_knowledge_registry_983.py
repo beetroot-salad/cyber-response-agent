@@ -304,7 +304,7 @@ def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
     (`lint-monkeypatch`)."""
     return VerbContext(
         defender_dir=root, run_dir=tmp_path / "run", env={}, as_of=as_of,
-        settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+        tenant=_tenants1106.playground_run_tenant(),
     )
 
 

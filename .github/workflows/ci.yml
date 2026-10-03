@@ -637,6 +637,12 @@ jobs:
       - name: Monkeypatch-setattr gate (baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_monkeypatch.py
 
+      # A tenant's settings are its settings/ folder, resolved once into the run's record; the
+      # adapters, the estate, the case-history writer and lead-zero never read them (or a
+      # secret) out of the process environment. Empty allow-list: no baseline.
+      - name: Tenant-settings env-read gate (empty allow-list)
+        run: defender/.venv/bin/python scripts/lint/lint_tenant_env_reads.py
+
       # Every defender program sets up logging, or says on its __main__ line why not (a model
       # tool whose stderr the model reads). Without it INFO lines vanish and nothing is JSON.
       - name: Log-setup gate (every program configures logging)

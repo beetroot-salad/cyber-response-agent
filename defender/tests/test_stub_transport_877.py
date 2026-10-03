@@ -25,6 +25,7 @@ from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters import ticket_adapter
 from defender.scripts.adapters.faults import TransportFault
+from defender.tests import _tenants1106
 
 #: curl's three ways of failing before a response exists, as observed against real curl through
 #: a `docker` shim: DNS failure, connection refused, and the `--max-time` timeout. All three
@@ -39,7 +40,7 @@ CURL_FAULTS = [
 @pytest.fixture
 def ctx(tmp_path):
     return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
-                       settings_dir=tmp_path / "settings")
+                       tenant=_tenants1106.playground_run_tenant())
 
 
 @pytest.fixture(autouse=True)

@@ -288,7 +288,7 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+            alert_path=run_dir / "alert.json", tenant=_tenants1106.playground_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         )
         return result, rec, run_dir
@@ -403,7 +403,7 @@ def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_othe
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", settings_dir=_tenants1106.PLAYGROUND_SETTINGS,
+            alert_path=run_dir / "alert.json", tenant=_tenants1106.playground_run_tenant(), env={},
             verbs=elastic_backend(rec, answer=answer_by_index(table)),
         )
         return result, rec
