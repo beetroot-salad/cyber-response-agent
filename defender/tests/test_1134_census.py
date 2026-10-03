@@ -2416,6 +2416,9 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         tuple(("f", "attr", t) for t in (
             "p.is_fifo()", "p.is_socket()", "p.is_mount()", "p.is_block_device()",
             "p.is_char_device()", "p.owner()", "p.lchmod(420)", "p.link_to(q)"))),
+    "path-class-through-a-defender-re-export": (
+        "from defender import _paths\ndef f(p):\n    _paths.Path.unlink(p)\n",
+        (("f", "attr", "_paths.Path.unlink(p)"),)),
     "methodcaller-verb": (
         "import operator\ndef f(p):\n    return operator.methodcaller('read_text')(p)\n",
         (("f", "getattr", "operator.methodcaller('read_text')"),)),
@@ -2748,6 +2751,11 @@ PROVEN: dict[str, str] = {
     "listing-record-fields": (
         _H + "def f(rec, listing, v: Bound):\n    v.under('x')\n"
         "    return rec.entries, (listing.entries or {}).items(), listing.entries is None\n"),
+    "another-classes-own-verb-and-a-records-fields": (
+        "from defender._episode_handle import Episode\n"
+        "class Local:\n    def open(self, p): ...\n"
+        "def f(p, rec):\n    Episode.open(p)\n    Local.open(p)\n"
+        "    return rec.owner, rec.stat, rec.resolve, rec.walk, rec.glob\n"),
 }
 
 

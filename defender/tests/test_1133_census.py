@@ -93,7 +93,6 @@ from __future__ import annotations
 
 import ast
 import builtins
-import dataclasses
 import functools
 import importlib
 import inspect
@@ -151,14 +150,12 @@ RAW_OS = frozenset({
 _RAW_OS_ORIGINS = frozenset(f"os.{op}" for op in RAW_OS)
 OPENERS = frozenset({"builtins.open", "io.open", "codecs.open"})
 #: D6's `Path` methods: the writes and the link-following reads, judged by attribute name on any
-#: receiver but a module (`_path_verb`). A subset of the #1134 census's `Path` verbs.
+#: receiver but a module or a non-`pathlib` class (`_path_verb`). A subset of the #1134 census's
+#: `Path` verbs.
 ATTR_CALLS = frozenset({"open", "mkdir", "write_text", "write_bytes", "unlink", "rmdir", "touch",
                         "symlink_to", "hardlink_to", "link_to", "rename", "replace",
                         "read_text", "read_bytes"})
 assert ATTR_CALLS <= C.ATTRS, sorted(ATTR_CALLS - C.ATTRS)
-#: The `Path` verbs a non-`Path` value may also have under the same name (`str.replace`,
-#: `DataFrame.rename`, `tarfile`'s `open`): on a value, a bare REFERENCE to one does not count.
-_NO_BARE_REF = C.ONE_ARG_ATTRS | {"open"}
 #: The modules a `getattr(<module>, "...")` or `vars(<module>)` may not reach into.
 _GETATTR_MODULES = frozenset({_IO, "os", "shutil"})
 #: The modules a dynamic import may not bind.
@@ -215,86 +212,28 @@ def _astlib() -> Any:
 
 @functools.cache
 def _tree() -> Any:
-    """The #1134 census's view of this checkout: which dotted origins are modules (a `defender`
-    one by its file, any other by the import system), and where a `defender` re-export leads."""
+    """The #1134 census's view of this checkout: which dotted origins are modules, which are
+    classes, and where a `defender` re-export leads."""
     return C.Tree(PACKAGE.parent)
 
 
-def _module_env(tree: ast.Module, module: str) -> Any:
-    """`_astlib`'s scope tree for `module` (dotted, under `defender`), every relative import made
-    absolute (`from .ledger import X` binds `defender.learning.branch.ledger.X`, not `.ledger.X`)
-    so `_is_namespace` can look it up."""
-    env = _astlib().module_env(tree)
-    dotted = f"defender.{module}"
-    f = _tree().module_file(dotted)
-    relative = C.relative_map(tree, C.package_of(dotted, f is not None and f.name == "__init__.py"))
-    if not relative:
-        return env
-    fixed: dict[int, Any] = {}
-
-    def fix(e: Any) -> Any:
-        if id(e) not in fixed:
-            fixed[id(e)] = dataclasses.replace(
-                e, imports={k: C.absolute(v, relative) for k, v in e.imports.items()})
-        return fixed[id(e)]
-
-    root = fix(env)
-    for node, e in env.scope_of.items():
-        env.scope_of[node] = fix(e)
-    return root
+def _scan(rel: str, tree: ast.Module) -> Any:
+    """The #1134 census's resolver for one module (`rel`, a path under `defender/`): its scope
+    tree (`.env`, what `_astlib` resolves against), and the receiver lookup `_path_verb` asks —
+    relative imports made absolute, `defender` re-exports followed, the module's own top-level
+    names resolved."""
+    return C.ModuleScan(_tree(), rel, tree)
 
 
-@functools.cache
-def _is_namespace(origin: str | None) -> bool:
-    """`origin` names a module or a class: its attributes are its own functions and methods
-    (`tarfile.open`, `Episode.open`, `str.replace`), not the methods of a path it holds. A
-    `defender` class is found by its definition in the checkout; any other by importing it."""
-    if origin is None:
-        return False
-    if _tree().is_module(origin):
-        return True
-    owner, _, name = _tree().canonical(origin).rpartition(".")
-    if not owner:
-        return False
-    if owner == "defender" or owner.startswith("defender."):
-        f = _tree().module_file(owner)
-        if f is None:
-            return False
-        _, parsed = _astlib().read_and_parse(f, str(f.relative_to(PACKAGE.parent)))
-        return any(isinstance(n, ast.ClassDef) and n.name == name for n in parsed.body)
-    try:
-        return inspect.isclass(getattr(importlib.import_module(owner), name))
-    except (ImportError, AttributeError, ValueError):
-        return False
-
-
-def _path_verb(node: ast.Attribute, env: Any, verbs: frozenset[str],
+def _path_verb(node: ast.Attribute, scan: Any, verbs: frozenset[str],
                call: ast.Call | None = None) -> str | None:
     """`.<verb>` when `node` is a `Path` method in `verbs` — called (`call`) or only referenced —
-    on a path class or on any value, or `None`. A module's or another class's own function is
-    judged by that namespace's vocabulary (`_is_namespace`); anything else may be a path: an
-    unresolved local, a value a module holds (`_paths.REPO_ROOT`), a value's class
-    (`type(p)`), or `Path` itself (`pathlib.PosixPath`, any import alias).
-
-    On a path class the instance is the first argument and nothing else shares the name, so
-    every shape counts. On a value, the verbs a non-`Path` also has count only in `Path`'s own
-    shape: `.rename` / `.replace` called with one argument (or only `target=`), `.owner` with
-    none, and no bare reference to `.open` / `.rename` / `.replace`."""
-    if node.attr not in verbs:
-        return None
-    receiver = _astlib().origin(node.value, env)
-    if receiver in C.PATH_CLASSES:
-        return f".{node.attr}"
-    if _is_namespace(receiver):
-        return None
-    if call is None:
-        return None if node.attr in _NO_BARE_REF else f".{node.attr}"
-    target_only = not call.args and [k.arg for k in call.keywords] == ["target"]
-    if node.attr in C.ONE_ARG_ATTRS and not target_only and (len(call.args) != 1 or call.keywords):
-        return None
-    if node.attr in C.ZERO_ARG_ATTRS and (call.args or call.keywords):
-        return None
-    return f".{node.attr}"
+    on a path, or `None`: the #1134 census's rule (`ModuleScan.path_verb`), one rule for both.
+    A module's or another class's own function is judged by that namespace's vocabulary;
+    anything else may be a path — an unresolved local, a value a module holds
+    (`_paths.REPO_ROOT`), a value's class (`type(p)`), or `Path` itself (`pathlib.PosixPath`,
+    any alias, a re-export). On the class every shape counts; on a value only the verb's own."""
+    return f".{node.attr}" if scan.path_verb(node, call, verbs) else None
 
 
 def _key_of_origin(origin: str | None) -> str | None:
@@ -327,35 +266,37 @@ def _name_origin(node: ast.Name, env: Any) -> str | None:
     return None
 
 
-def _value_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
+def _value_key(node: ast.expr, scan: Any, aliases: dict[str, str]) -> str | None:
     """The vocabulary entry an expression NAMES (a callee, or a referenced value), or `None`.
-    A module-level alias resolves to what it was bound to; an attribute on anything but a module
-    or a class is judged by its attribute name."""
+    A module-level alias resolves to what it was bound to, where no enclosing def rebinds its
+    name; an attribute on anything but a module or a class is judged by its attribute name."""
+    env = scan.env
     if isinstance(node, ast.Name):
-        if node.id in aliases:
+        if node.id in aliases and scan.module_local(node.id, node) is not None:
             return aliases[node.id]
         return _key_of_origin(_name_origin(node, env))
     if isinstance(node, ast.Attribute):
-        key = _key_of_origin(_astlib().origin(node, env))
+        key = _key_of_origin(scan.origin(node))
         if key is not None:
             return key
-        if not _is_namespace(_astlib().origin(node.value, env)) and (
+        if not scan.is_namespace(scan.origin(node.value)) and (
                 node.attr in PATH_SEAMS or node.attr in IO_WRITERS
                 or node.attr.startswith("rooted_")):
             return node.attr
-        return _path_verb(node, env, ATTR_CALLS)
+        return _path_verb(node, scan, ATTR_CALLS)
     return None
 
 
-def _call_key(call: ast.Call, env: Any, aliases: dict[str, str]) -> str | None:
+def _call_key(call: ast.Call, scan: Any, aliases: dict[str, str]) -> str | None:
     """The vocabulary entry `call` is, or `None`."""
     f = call.func
-    key = _value_key(f, env, aliases)
+    key = _value_key(f, scan, aliases)
     if key is not None:
         return key
+    env = scan.env
     origin = _astlib().callee(call, env)
     if origin in ("builtins.getattr", "builtins.vars") and call.args:
-        target = _astlib().origin(call.args[0], env)
+        target = scan.origin(call.args[0])
         if target in _GETATTR_MODULES:
             return f"{origin.removeprefix('builtins.')}({target})"
     if origin in _DYNAMIC_IMPORTS and call.args:
@@ -363,14 +304,15 @@ def _call_key(call: ast.Call, env: Any, aliases: dict[str, str]) -> str | None:
         if named in _DYNAMIC_MODULES:
             return f"import_module({named})"
     if isinstance(f, ast.Attribute):
-        return _path_verb(f, env, ATTR_CALLS, call)
+        return _path_verb(f, scan, ATTR_CALLS, call)
     return None
 
 
-def module_aliases(tree: ast.Module, env: Any, key: Any = _value_key) -> dict[str, str]:
-    """Module-level `NAME = <entry>` bindings (chains followed), name -> entry. `key(node, env,
-    aliases)` says what entry an expression names: the census vocabulary (`_value_key`) unless
-    another is given (the door scan's `_door_key`)."""
+def module_aliases(tree: ast.Module, resolver: Any, key: Any = _value_key) -> dict[str, str]:
+    """Module-level `NAME = <entry>` bindings (chains followed), name -> entry. `key(node,
+    resolver, aliases)` says what entry an expression names: the census vocabulary
+    (`_value_key`, against a `_scan`) unless another is given (the door scan's `_door_key`,
+    against an `_astlib` env)."""
     aliases: dict[str, str] = {}
     changed = True
     while changed:
@@ -384,7 +326,7 @@ def module_aliases(tree: ast.Module, env: Any, key: Any = _value_key) -> dict[st
                 continue
             if not isinstance(target, ast.Name):
                 continue
-            named = key(value, env, aliases)
+            named = key(value, resolver, aliases)
             if named is not None and aliases.get(target.id) != named:
                 aliases[target.id] = named
                 changed = True
@@ -443,18 +385,20 @@ def _parse(path: Path) -> ast.Module:
         pytest.fail(f"{path} does not parse ({bad}) — an unparseable module passes no census")
 
 
-def census_of(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
-    env = _module_env(tree, module)
-    aliases = module_aliases(tree, env)
+def census_of(rel: str, tree: ast.Module) -> set[tuple[str, str, str]]:
+    """The hits of `tree`, scanned as the module at `rel` (a path under `defender/`)."""
+    module = _module_name(rel)
+    scan = _scan(rel, tree)
+    aliases = module_aliases(tree, scan)
     seen = _Scoped()
     seen.visit(tree)
     out = set()
     for where, call in seen.calls:
-        callee = _call_key(call, env, aliases)
+        callee = _call_key(call, scan, aliases)
         if callee is not None:
             out.add((module, where, callee))
     for where, node in seen.refs:
-        callee = _value_key(node, env, aliases)
+        callee = _value_key(node, scan, aliases)
         if callee is not None:
             out.add((module, where, callee))
     return out
@@ -468,7 +412,7 @@ def _module_name(rel: str) -> str:
 def collect(rels: Iterable[str] = MODULES) -> set[tuple[str, str, str]]:
     found: set[tuple[str, str, str]] = set()
     for rel in rels:
-        found |= census_of(_module_name(rel), _parse(PACKAGE / rel))
+        found |= census_of(rel, _parse(PACKAGE / rel))
     return found
 
 
@@ -613,6 +557,26 @@ def class_function(d):
     return Episode.open(d)
 
 
+class Local:
+    def open(self, p): ...
+
+
+def own_class_function(p):
+    return Local.open(p)
+
+
+def path_reexported(p):
+    _paths.Path.unlink(p)
+
+
+def module_reexported(p):
+    _io.os.unlink(p)
+
+
+def alias_shadowed(_spill):
+    _spill(1)
+
+
 def holds(p, ctx):
     grab(p)
     _io.hold_new(p, "n")
@@ -629,7 +593,7 @@ def shadowed(open, rooted_write, hold):
 
 _os.open("x", 0)
 '''
-    got = census_of("m", ast.parse(source))
+    got = census_of("m.py", ast.parse(source))
     assert got == {
         # Module-level aliases and the references that bind them.
         ("m", "<module>", "write_guarded"), ("m", "<module>", "append_jsonl"),
@@ -657,11 +621,11 @@ _os.open("x", 0)
         # Rev 2's held-root core, bare through an alias, as a module attribute, on any receiver,
         # and as a value.
         ("m", "holds", "hold"), ("m", "holds", "hold_new"),
-        # A `Path` verb counts on any receiver but a module. On the class itself — a call, a
-        # `pathlib.`-qualified call, an alias of the class, a two-argument `rename`, a bare
-        # reference, a module-level alias of a method — and a reference to `open` / `rename`,
-        # which on a value is a `str` look-alike, counts. `Path.cwd`, `Path.exists` (not in this
-        # vocabulary), `Path(p)` and `str.replace` are not.
+        # A `Path` verb counts on any receiver but a module or another class. On the class
+        # itself — a call, a `pathlib.`-qualified call, an alias of the class, a two-argument
+        # `rename`, a bare reference, a module-level alias of a method — and a reference to
+        # `open` / `rename`, which on a value is a `str` look-alike, counts. `Path.cwd`,
+        # `Path.exists` (not in this vocabulary), `Path(p)` and `str.replace` are not.
         ("m", "classy", ".read_text"),
         ("m", "classy", ".unlink"), ("m", "classy", ".write_text"), ("m", "classy", ".mkdir"),
         ("m", "classy", ".rename"), ("m", "classy", ".read_bytes"),
@@ -670,9 +634,12 @@ _os.open("x", 0)
         ("m", "class_rename_ref", ".rename"),
         # A path a module holds is a value, not the module: its verbs count, called or not.
         ("m", "module_held", ".write_text"), ("m", "module_held_ref", ".unlink"),
+        # Through a `defender` re-export: `Path` is still the class, `os` still the module.
+        ("m", "path_reexported", ".unlink"), ("m", "module_reexported", "os.unlink"),
         # Not `value_refs` (a value's `open` / `rename` / `replace` reference may be `str`'s),
-        # nor `module_function` / `class_function` (a module's or another class's own `open` is
-        # judged by that namespace's vocabulary).
+        # nor `module_function` / `class_function` / `own_class_function` (a module's or another
+        # class's own `open`, this module's included, is judged by that namespace's vocabulary),
+        # nor `alias_shadowed` (a parameter that shares a module-level alias's name is not it).
     }, sorted(got)
 
 
@@ -704,7 +671,7 @@ def _io_functions() -> frozenset[str]:
         and not name.startswith("_"))
 
 
-def _is_held_verb(call: ast.Call, env: Any) -> bool:
+def _is_held_verb(call: ast.Call, scan: Any) -> bool:
     """`<value>.mkdir(rel)` / `<value>.unlink(rel)`: a `Held` verb, not `Path` I/O. A first
     positional that is a non-string constant is `Path`'s `mode` / `missing_ok`
     (`p.mkdir(0o755)`, `p.unlink(True)`), not a name."""
@@ -714,14 +681,14 @@ def _is_held_verb(call: ast.Call, env: Any) -> bool:
     first = call.args[0]
     if isinstance(first, ast.Constant) and not isinstance(first.value, str):
         return False
-    return _astlib().callee(call, env) is None
+    return _astlib().callee(call, scan.env) is None
 
 
-def _raw_io(call: ast.Call, env: Any, io_funcs: frozenset[str]) -> str | None:
+def _raw_io(call: ast.Call, scan: Any, io_funcs: frozenset[str]) -> str | None:
     """Beyond the vocabulary: any `os` / `shutil` operation, builtin `open`, an I/O-doing `_io`
     function other than the core, or a filesystem method of a `Path`."""
     f = call.func
-    origin = _astlib().callee(call, env)
+    origin = _astlib().callee(call, scan.env)
     name = (origin.rsplit(".", 1)[-1] if origin is not None
             else f.attr if isinstance(f, ast.Attribute) else None)
     if name is None:
@@ -734,7 +701,7 @@ def _raw_io(call: ast.Call, env: Any, io_funcs: frozenset[str]) -> str | None:
             origin is None or origin.startswith(_io.__name__ + ".")):
         return name
     if isinstance(f, ast.Attribute):
-        return _path_verb(f, env, _PATH_IO, call)
+        return _path_verb(f, scan, _PATH_IO, call)
     return None
 
 
@@ -743,27 +710,27 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
 
     Returns `(violations, core)`: `violations` are `(scope, callee)` pairs, `core` the subset of
     `CORE` the module calls."""
-    env = _module_env(tree, "_episode_handle")
-    aliases = module_aliases(tree, env)
+    scan = _scan("_episode_handle.py", tree)
+    aliases = module_aliases(tree, scan)
     io_funcs = _io_functions()
     seen = _Scoped()
     seen.visit(tree)
     violations: list[tuple[str, str]] = []
     core: set[str] = set()
     for where, call in seen.calls:
-        if _is_held_verb(call, env):
+        if _is_held_verb(call, scan):
             continue
-        key = _call_key(call, env, aliases)
+        key = _call_key(call, scan, aliases)
         if key in CORE:
             core.add(key)
             continue
-        raw = key if key is not None else _raw_io(call, env, io_funcs)
+        raw = key if key is not None else _raw_io(call, scan, io_funcs)
         if raw is not None:
             violations.append((where, raw))
     for where, node in seen.refs:
-        key = _value_key(node, env, aliases)
+        key = _value_key(node, scan, aliases)
         if key is None and isinstance(node, ast.Attribute):
-            key = _path_verb(node, env, _PATH_IO)
+            key = _path_verb(node, scan, _PATH_IO)
         if key is not None and key not in CORE:
             violations.append((where, key))
     return violations, core
@@ -820,6 +787,9 @@ class Episode:
 
     def label(self, text):
         return text.replace("-", "_")
+
+    def fields(self, rec):
+        return rec.owner, self.stat, rec.resolve, rec.walk
 '''
     violations, core = handle_scan(ast.parse(compliant))
     assert violations == [], violations
@@ -896,7 +866,7 @@ class Episode:
         return list(filter(Path.exists, ps))
 
     def v(self, p):
-        check = p.stat
+        check = p.lstat
         return check()
 
     def w(self):
@@ -917,7 +887,7 @@ class Episode:
         ("Episode.j", ".exists"), ("Episode.k", "shutil.rmtree"), ("Episode.l", "read_plain"),
         ("Episode.m", "os.unlink"), ("Episode.n", ".mkdir"), ("Episode.o", ".unlink"),
         ("Episode.q", ".read_text"), ("Episode.r", ".exists"), ("Episode.s", ".replace"),
-        ("Episode.u", ".exists"), ("Episode.v", ".stat"), ("Episode.w", ".exists"),
+        ("Episode.u", ".exists"), ("Episode.v", ".lstat"), ("Episode.w", ".exists"),
         ("Episode.x", ".link_to"), ("Episode.y", ".lchmod"),
     ]), sorted(violations)
 
