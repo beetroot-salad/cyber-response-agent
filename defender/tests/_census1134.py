@@ -26,13 +26,13 @@ Kinds:
                 among them) and any `<module>.open` however it is imported;
                 `_paths.process_defender_dir`.
 - ``attr``      a method call by a Path-verb name (`ATTRS`) whose receiver is neither a module,
-                nor a class other than `pathlib`'s (``Episode.open(d)``, ``str.replace``), nor
-                a provable `Held` / `Bound` that has that verb (`Held.mkdir`, `Held.unlink`;
-                `Bound` has none: #1134 addendum 3, D1, drops `read_bytes`) — in the verb's own
-                shape (`verb_shape`); on a `pathlib` class (``Path.replace(a, b)``, also through
-                a `defender` re-export) at any arity. The same receiver rule judges a value's
-                verb referenced without being called (``load``), except a verb another type
-                shares the name of (`AMBIGUOUS_REFS`: ``rec.owner``, ``rec.stat``).
+                nor a `defender` class whose own body defines the verb (``Episode.open(d)``: a
+                `defender` function, judged as any other), nor a provable `Held` / `Bound` that
+                has that verb (`Held.mkdir`, `Held.unlink`; `Bound` has none: #1134 addendum 3,
+                D1, drops `read_bytes`) — in the verb's own shape (`verb_shape`); on a `pathlib`
+                class (``Path.replace(a, b)``, also through a `defender` re-export) at any
+                arity. The same receiver rule judges a value's verb referenced without being
+                called (``load``).
 - ``load``      a vocabulary function or name, shared reader, constructor or a `pathlib` class's
                 Path verb referenced without being called (``reader = read_text_soft``,
                 ``map(os.unlink, ps)``, ``partial(hold)``, ``filter(Path.is_file, ps)``,
@@ -94,9 +94,8 @@ no filesystem call). A direct `subprocess` call anywhere is a hit: it can name a
 from __future__ import annotations
 
 import ast
-import importlib
+import functools
 import importlib.util
-import inspect
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,9 +207,9 @@ PATH_CLASSES = frozenset({
 })
 PATHS_DISK = frozenset({"defender._paths.process_defender_dir"})
 
-#: Path-verb method names. A receiver that resolves to a module, or to a class other than
-#: `pathlib`'s, is judged by that namespace's own vocabulary instead (`ModuleScan.path_verb`); a
-#: provable `Held` / `Bound` that has the verb is the handle's own.
+#: Path-verb method names. A receiver that resolves to a module, or to a `defender` class that
+#: defines the verb, owns it (`ModuleScan.owns`); a provable `Held` / `Bound` that has the verb
+#: is the handle's own.
 ATTRS = frozenset({
     "is_file", "is_dir", "exists", "is_symlink", "read_text", "read_bytes", "write_text",
     "write_bytes", "unlink", "mkdir", "glob", "rglob", "iterdir", "open", "stat", "lstat",
@@ -231,21 +230,13 @@ ATTRS = frozenset({
 ONE_ARG_ATTRS = frozenset({"replace", "rename"})
 #: `Path.owner()` takes no argument.
 ZERO_ARG_ATTRS = frozenset({"owner"})
-#: Path verbs other types commonly have under the same name — `str.replace`,
-#: `DataFrame.rename`, an object's `open`, a record's `owner` / `stat` field, a resolver's
-#: `resolve`, a tree's `walk` / `glob`: on a value, a bare reference to one is not a path's.
-AMBIGUOUS_REFS = frozenset({"open", "rename", "replace", "owner", "stat", "glob", "resolve",
-                            "walk"})
-
-
 def verb_shape(attr: str, call: ast.Call | None) -> bool:
     """`<value>.<attr>` — called (`call`) or only referenced — in a Path verb's own shape:
-    `rename` / `replace` called with one positional and no keyword (or only `target=`),
-    `owner` called with none, and no bare reference to a verb in `AMBIGUOUS_REFS`. (On a
-    `pathlib` class the instance is the first argument and nothing shares the name: every
-    shape is the verb's.)"""
+    `rename` / `replace` called with one positional and no keyword (or only `target=`), `owner`
+    called with none, any reference. (On a `pathlib` class the instance is the first argument
+    and nothing shares the name: every shape is the verb's.)"""
     if call is None:
-        return attr not in AMBIGUOUS_REFS
+        return True
     target_only = not call.args and [k.arg for k in call.keywords] == ["target"]
     if attr in ONE_ARG_ATTRS and not target_only and (len(call.args) != 1 or call.keywords):
         return False
@@ -873,12 +864,14 @@ class ModuleScan:
 
     # -- resolution -------------------------------------------------------------------------
 
-    def _finish(self, origin: str | None) -> str | None:
+    def resolve(self, origin: str | None) -> str | None:
+        """An `_astlib` origin as this checkout spells it: a relative import made absolute, a
+        `defender` re-export followed to the module that defines the name."""
         if origin is None:
             return None
         return self.tree.canonical(absolute(origin, self.relative))
 
-    def module_local(self, name: str, at: ast.AST) -> str | None:
+    def _module_local(self, name: str, at: ast.AST) -> str | None:
         """`name` as this module's own top-level binding, unless a def around `at` rebinds
         it."""
         if name not in self.module_defs:
@@ -898,17 +891,18 @@ class ModuleScan:
                 while isinstance(base, ast.Attribute):
                     parts.append(base.attr)
                     base = base.value
-                if isinstance(base, ast.Name) and (local := self.module_local(base.id, base)):
+                if isinstance(base, ast.Name) and (local := self._module_local(base.id, base)):
                     got = ".".join([local, *reversed(parts)])
-            self._origins[node] = self._finish(got)
+            self._origins[node] = self.resolve(got)
         return self._origins[node]
 
-    def is_namespace(self, origin: str | None) -> bool:
-        """`origin` (as `origin` returns it) names a module, or a class other than `pathlib`'s:
-        its attributes are its own functions (`tarfile.open`, `Episode.open`, `str.replace`),
-        not the methods of a path. A `defender` class (nested ones too) is found by its
-        definition in the checkout, this module's own included; any other by importing it. A
-        class bound any other way (`Foo = make_class()`) is not seen, and counts as a value."""
+    def owns(self, origin: str | None, attr: str) -> bool:
+        """`<origin>.<attr>` is not a path's method but the namespace's own function: `origin`
+        (as `origin` returns it) is a module, or a `defender` class whose own body defines
+        `attr` (``Episode.open``) — a `defender` function, which the census judges as it judges
+        any other. A class from outside the checkout (``os.DirEntry.stat``), one that inherits
+        `attr` (a `Path` subclass), or one bound any other way (``Foo = make_class()``) is not
+        seen, and its `attr` is judged by name."""
         if origin is None or origin in PATH_CLASSES:
             return False
         if origin == self.dotted or self.tree.is_module(origin):
@@ -916,46 +910,36 @@ class ModuleScan:
         parts = origin.split(".")
         cut = next((i for i in range(len(parts) - 1, 0, -1)
                     if ".".join(parts[:i]) == self.dotted
-                    or self.tree.is_module(".".join(parts[:i]))), None)
+                    or self.tree.module_file(".".join(parts[:i])) is not None), None)
         if cut is None:
             return False
-        module, names = ".".join(parts[:cut]), parts[cut:]
-        if module == "defender" or module.startswith("defender."):
-            scan = self if module == self.dotted else self.tree.scan_of(module)
-            body: list[ast.stmt] = scan.ast.body if scan is not None else []
-            for name in names:
-                cls = next((n for n in body if isinstance(n, ast.ClassDef) and n.name == name),
-                           None)
-                if cls is None:
-                    return False
-                body = cls.body
-            return True
-        try:
-            obj: object = importlib.import_module(module)
-            for name in names:
-                obj = getattr(obj, name)
-        except Exception:  # an import that fails any way leaves the name unknown: a value
-            return False
-        return inspect.isclass(obj)
+        module = ".".join(parts[:cut])
+        scan = self if module == self.dotted else self.tree.scan_of(module)
+        body: list[ast.stmt] = scan.ast.body if scan is not None else []
+        for name in parts[cut:]:
+            cls = next((n for n in body if isinstance(n, ast.ClassDef) and n.name == name), None)
+            if cls is None:
+                return False
+            body = cls.body
+        return any(isinstance(n, _DEFS) and n.name == attr for n in body)
 
     def path_verb(self, node: ast.Attribute, call: ast.Call | None,
                   verbs: frozenset[str] = ATTRS) -> bool:
-        """`node` is a Path verb in `verbs` — called (`call`) or only referenced — on a path:
-        on a `pathlib` class in any shape, or on any value (a local, a value a module holds, a
-        value's class) in the verb's own shape (`verb_shape`); never on a module or another
-        class (`is_namespace`), whose own vocabulary judges it."""
+        """`node` is a Path verb in `verbs` — called (`call`) or only referenced — on what may
+        be a path: on a `pathlib` class in any shape, on anything else the namespace does not
+        own (`owns`) in the verb's own shape (`verb_shape`)."""
         if node.attr not in verbs:
             return False
         receiver = self.origin(node.value)
         if receiver in PATH_CLASSES:
             return True
-        return not self.is_namespace(receiver) and verb_shape(node.attr, call)
+        return not self.owns(receiver, node.attr) and verb_shape(node.attr, call)
 
     def callee(self, call: ast.Call) -> str | None:
         got = _astlib.callee(call, self.env)
         if got is None and isinstance(call.func, (ast.Name, ast.Attribute)):
             return self.origin(call.func)
-        return self._finish(got)
+        return self.resolve(got)
 
     # -- "provably a handle" ----------------------------------------------------------------
 
@@ -1513,8 +1497,8 @@ class ModuleScan:
     def bound_path_verb(self, node: ast.Name | ast.Attribute) -> bool:
         """`<value>.<Path verb>` referenced without being called (`partial(target.unlink)`,
         `map(p.read_text, ...)`): the verb runs later, wherever the reference is called. Not on
-        a module or another class (`path_verb`), nor a provable handle's own verb, nor a verb
-        another type shares the name of (`AMBIGUOUS_REFS`)."""
+        a module or a `defender` class that defines it (`path_verb`), nor a provable handle's
+        own verb."""
         if not isinstance(node, ast.Attribute) or node.attr not in ATTRS:
             return False
         up = self.parent.get(node)
@@ -1542,6 +1526,12 @@ class ModuleScan:
             return True
         return (isinstance(up, ast.Call) and child in up.args[1:2]
                 and self.callee(up) in ("builtins.isinstance", "builtins.issubclass"))
+
+
+@functools.cache
+def tree_of(repo_root: Path) -> Tree:
+    """The one `Tree` of the checkout at `repo_root`, shared by every census in the process."""
+    return Tree(repo_root)
 
 
 def census_source(

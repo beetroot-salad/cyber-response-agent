@@ -270,7 +270,7 @@ _astlib = import_lint_lib("_astlib")
 #: The worktree this file lives in — never `defender.__file__`: the shared venv's editable
 #: install points at the main checkout, so an import-derived root would scan the wrong tree.
 WORKTREE = Path(__file__).resolve().parents[2]
-TREE = C.Tree(WORKTREE)
+TREE = C.tree_of(WORKTREE)
 
 DRAIN = "learning/author/drain.py"
 SHARED = "learning/author/shared.py"
@@ -2416,6 +2416,16 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         tuple(("f", "attr", t) for t in (
             "p.is_fifo()", "p.is_socket()", "p.is_mount()", "p.is_block_device()",
             "p.is_char_device()", "p.owner()", "p.lchmod(420)", "p.link_to(q)"))),
+    "verb-on-a-class-the-checkout-does-not-define": (
+        "import os, zipfile\nfrom pathlib import Path\nclass MyP(Path):\n    pass\n"
+        "def f(e, z, p):\n    os.DirEntry.stat(e)\n    zipfile.Path.read_text(z)\n"
+        "    MyP.unlink(p)\n",
+        (("f", "attr", "os.DirEntry.stat(e)"), ("f", "attr", "zipfile.Path.read_text(z)"),
+         ("f", "attr", "MyP.unlink(p)"))),
+    "value-verb-referenced-by-a-shared-name": (
+        "def f(p):\n    cb = p.open\n    return cb, p.stat, p.resolve, p.replace\n",
+        (("f", "load", "p.open"), ("f", "load", "p.stat"), ("f", "load", "p.resolve"),
+         ("f", "load", "p.replace"))),
     "path-class-through-a-defender-re-export": (
         "from defender import _paths\ndef f(p):\n    _paths.Path.unlink(p)\n",
         (("f", "attr", "_paths.Path.unlink(p)"),)),
@@ -2751,11 +2761,10 @@ PROVEN: dict[str, str] = {
     "listing-record-fields": (
         _H + "def f(rec, listing, v: Bound):\n    v.under('x')\n"
         "    return rec.entries, (listing.entries or {}).items(), listing.entries is None\n"),
-    "another-classes-own-verb-and-a-records-fields": (
+    "a-defender-classes-own-verb": (
         "from defender._episode_handle import Episode\n"
         "class Local:\n    def open(self, p): ...\n"
-        "def f(p, rec):\n    Episode.open(p)\n    Local.open(p)\n"
-        "    return rec.owner, rec.stat, rec.resolve, rec.walk, rec.glob\n"),
+        "def f(p):\n    Episode.open(p)\n    Local.open(p)\n"),
 }
 
 
