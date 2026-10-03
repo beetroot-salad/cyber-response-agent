@@ -205,10 +205,28 @@ def _astlib() -> Any:
     return import_lint_lib("_astlib")
 
 
+#: The `pathlib` classes whose methods touch the filesystem (the pure ones have none).
+_PATH_CLASSES = frozenset({"Path", "PosixPath", "WindowsPath"})
+
+
+def _path_method(origin: str | None) -> str | None:
+    """`read_text` for a resolved `pathlib.Path.read_text` (any concrete class, any alias), the
+    class-qualified spelling of a `Path` method — `Path.read_text(p)`, `map(Path.unlink, ps)` —
+    or `None`."""
+    parts = (origin or "").split(".")
+    if len(parts) == 3 and parts[0] == "pathlib" and parts[1] in _PATH_CLASSES:
+        return parts[2]
+    return None
+
+
 def _key_of_origin(origin: str | None) -> str | None:
     """The vocabulary entry a resolved dotted origin is, or `None`."""
     if origin is None:
         return None
+    # Resolved to `pathlib`, so no `str` look-alike to tell apart: `rename` / `replace` count in
+    # any argument shape, and a bare reference counts for every method.
+    if _path_method(origin) in ATTR_CALLS:
+        return f".{_path_method(origin)}"
     if origin.startswith("shutil.") or origin in _RAW_OS_ORIGINS or origin in OPENERS:
         return origin
     last = origin.rsplit(".", 1)[-1]
@@ -412,11 +430,14 @@ from defender._io import write_guarded as wg, guarded_mkdir, rooted_write, read_
 from defender._io import hold as grab
 from defender import _io
 from defender.runtime.observe import stage_trace_path
+import pathlib
+from pathlib import Path, PosixPath as Posix
 
 _put = wg
 _again = _put
 _raw = _io.append_jsonl
 _reader: object = read_guarded
+_slurp = Path.read_text
 
 
 class Holder:
@@ -479,6 +500,20 @@ def raw(p):
     importlib.import_module("json")
 
 
+def classy(p, ps):
+    Path.read_text(p)
+    Path.unlink(p)
+    pathlib.Path.write_text(p, "x")
+    Posix.mkdir(p)
+    Path.rename(p, p)
+    list(map(Path.read_bytes, ps))
+    _slurp(p)
+    Path.cwd()
+    Path.exists(p)
+    Path(p)
+    str.replace("a-b", "-", "_")
+
+
 def holds(p, ctx):
     grab(p)
     _io.hold_new(p, "n")
@@ -522,6 +557,12 @@ _os.open("x", 0)
         # Rev 2's held-root core, bare through an alias, as a module attribute, on any receiver,
         # and as a value.
         ("m", "holds", "hold"), ("m", "holds", "hold_new"),
+        # The class-qualified `Path` spellings: a call, a `pathlib.`-qualified call, an alias of
+        # the class, a two-argument `rename`, a bare reference, a module-level alias of a method.
+        # `Path.cwd`, `Path.exists` (not in this vocabulary), `Path(p)` and `str.replace` are not.
+        ("m", "<module>", ".read_text"), ("m", "classy", ".read_text"),
+        ("m", "classy", ".unlink"), ("m", "classy", ".write_text"), ("m", "classy", ".mkdir"),
+        ("m", "classy", ".rename"), ("m", "classy", ".read_bytes"),
     }, sorted(got)
 
 
@@ -585,6 +626,8 @@ def _raw_io(call: ast.Call, env: Any, io_funcs: frozenset[str]) -> str | None:
     if origin is None and name in _PATH_IO and not (
             name in _ONE_ARG_ONLY and len(call.args) != 1):
         return f".{name}"
+    if _path_method(origin) in _PATH_IO:
+        return f".{_path_method(origin)}"
     return None
 
 
@@ -675,6 +718,7 @@ class Episode:
 
     violating = '''
 import os
+import pathlib
 import shutil
 from pathlib import Path
 from defender import _io
@@ -726,6 +770,18 @@ class Episode:
 
     def o(self, p):
         p.unlink(True)
+
+    def q(self, p):
+        return Path.read_text(p)
+
+    def r(self, p):
+        return pathlib.Path.exists(p)
+
+    def s(self, p):
+        return Path.replace(p, p)
+
+    def t(self, p):
+        return Path.cwd()
 '''
     violations, core = handle_scan(ast.parse(violating))
     assert core == set(), core
@@ -735,6 +791,7 @@ class Episode:
         ("Episode.g", "os.mkdir"), ("Episode.h", "builtins.open"), ("Episode.i", ".read_text"),
         ("Episode.j", ".exists"), ("Episode.k", "shutil.rmtree"), ("Episode.l", "read_plain"),
         ("Episode.m", "os.unlink"), ("Episode.n", ".mkdir"), ("Episode.o", ".unlink"),
+        ("Episode.q", ".read_text"), ("Episode.r", ".exists"), ("Episode.s", ".replace"),
     ]), sorted(violations)
 
 
