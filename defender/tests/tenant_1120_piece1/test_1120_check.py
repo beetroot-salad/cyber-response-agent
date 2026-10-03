@@ -12,7 +12,9 @@ runs every rule that needs no data root: it never resolves `DEFENDER_DATA_ROOT`,
 `defender_dir`/`box_mounted` containment (that belongs to a process that mounts), and
 grammar-checks `agent/.tenant-id` only when present (M8). Exit status (N17): 0 clean, 1 a
 finding or a refusal, 2 a usage error (`<id>` and `--folder` are mutually exclusive, exactly one
-required). A finding prints through `[tenant.py] …`, never a traceback.
+required). A finding prints through `[tenant.py] …`, never a traceback. A census the running
+checkout cannot take is still a finding, exit 1 (#1159 O2), and its line names that checkout
+as the side that failed and the checked folder as not at fault (#1159 O1).
 
 Driven as the operator runs it, as a process. The tests about WHICH tree the census comes from
 run the command out of a tmp COPY of this checkout (`_spec1120.tmp_checkout`) carrying one more
@@ -34,7 +36,7 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _tenant
+from defender import _tenant, _tenant_census
 from defender import run as run_py
 from defender.runtime import verb_dispositions
 from defender.scripts import tenant as tenant_py
@@ -51,6 +53,16 @@ BROKEN_ADAPTER = "VERBS = {\n    'verb': (\n"
 
 #: The learning-state knob whose overlap with the data root `resolve_data_root` refuses.
 OVERLAP_ENV = H.LEARNING_STATE_ENV
+
+#: #1159 O1's "nothing in the checked folder is at fault", in any reasonable phrasing: a
+#: negation, the folder (or tenant) and "fault"/"blame" inside ONE clause — no `;`, `:` or line
+#: break between them — so "the checkout is not at fault; fix the folder" never passes for it.
+#: Neither `CensusUnavailable` text, nor any finding about the folder itself, matches it.
+NOT_THE_FOLDERS_FAULT = re.compile(
+    r"\b(?:not|nothing|no|never)\b[^;:\n]{0,80}?\b(?:folder|tenant)\b[^;:\n]{0,80}?\b(?:fault|blame)"
+    r"|\b(?:folder|tenant)\b[^;:\n]{0,80}?\b(?:not|never|isn't)\b[^;:\n]{0,40}?\b(?:fault|blame)"
+    r"|\b(?:not|no)\b[^;:\n]{0,20}?\b(?:fault|blame)\b[^;:\n]{0,40}?\b(?:folder|tenant)\b",
+    re.IGNORECASE)
 
 
 # ======================================================================================
@@ -92,6 +104,49 @@ def _check_id(root: Path, *extra: str, **kw: Any):
 def _check_folder(folder: Path, **kw: Any):
     """`tenant.py check --folder <folder>` with `DEFENDER_DATA_ROOT` unset."""
     return H.check(tenant_py, None, "--folder", str(folder), **kw)
+
+
+def _census_unavailable(checkout: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> str:
+    """What the census's owner says when it cannot be taken over the code at `checkout` (a
+    checkout root) in the environment `env`: `take_census`'s own `CensusUnavailable` text — the
+    cause #1159 O1 keeps verbatim on check's census line (the oracle, as `_run_start_refusal`
+    is setup's)."""
+    with monkeypatch.context() as scoped:
+        for key, value in env.items():
+            scoped.setenv(key, value)
+        with pytest.raises(_tenant_census.CensusUnavailable) as blind:
+            _tenant_census.take_census(checkout / "defender", checkout)
+    return str(blind.value)
+
+
+def _census_blind_line(proc: subprocess.CompletedProcess, *, checkout: Path, cause: str,
+                       folder: Path, also: tuple[str, ...] = ()) -> tuple[str, str]:
+    """#1159: `proc` is a `check` over `folder` whose census the running code at `checkout`
+    could not take. It exits EXACTLY 1 (O2) naming each of `also`, and exactly one line carries
+    the owner's `cause` verbatim (O1). THAT line — never the whole output — names `checkout`'s
+    root (the root itself, not a tree under it, and not the folder) and says, without the exit
+    code, that the running product checkout failed and nothing in the checked folder is at
+    fault. Returns `(output, the census line)`."""
+    text = H.assert_refused(proc, cause, *also)
+    lines = [ln for ln in text.splitlines() if cause in ln]
+    assert len(lines) == 1, f"the census cause {cause!r} is not on exactly one line:\n{text}"
+    line = lines[0]
+    rest = line.replace(cause, "<cause>")
+    root = str(checkout.resolve())
+    assert re.search(re.escape(root) + r"(?![\w/])", rest), (
+        f"the census line does not name the running checkout {root} — the side that failed "
+        f"(#1159 O1):\n{line}")
+    for named in {str(folder), str(folder.resolve())}:
+        assert named not in line, (
+            f"the census line names the checked folder {named}; the census is the running "
+            f"checkout's, and the folder is not the side that failed (#1159 O1):\n{line}")
+    words = rest.replace(root, "<root>")
+    assert re.search(r"\bcheckout\b", words, re.IGNORECASE), (
+        f"the census line does not say the running product CHECKOUT failed (#1159 O1):\n{line}")
+    assert NOT_THE_FOLDERS_FAULT.search(words), (
+        f"the census line does not say nothing in the checked folder is at fault "
+        f"(#1159 O1):\n{line}")
+    return text, line
 
 
 @pytest.fixture(scope="module")
@@ -210,21 +265,25 @@ def test_1120_check_takes_the_census_from_the_code_it_runs(
 
 
 def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An adapter module the census cannot read (a source that does not parse) makes `tenant.py
-    check` exit non-zero naming the module's system, never 0 over a census that silently lacks
-    it (M6). Run out of a tmp copy of the checkout holding broken_adapter.py. The positive
-    control: the same copy without that module checks the same folder clean."""
+    check` exit EXACTLY 1 naming the module's system, never 0 over a census that silently lacks
+    it (M6; #1159 O2: a census-blind check is a finding, exit 1, no other code). Run out of a
+    tmp copy of the checkout holding broken_adapter.py, over a sound folder. The census line
+    says which side failed without the exit code (#1159 O1): it names the tmp COPY's root (the
+    running checkout, whose path is neither the cwd the command starts in nor the folder's) and
+    not the folder, says nothing in the checked folder is at fault, and carries the owner's
+    `CensusUnavailable` text verbatim. The positive control: the same copy without that module
+    checks the same folder clean."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     folder = _folder(tmp_path, "tenant")
     script = _copy_script(checkout)
     H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
     H.add_adapter(checkout, BROKEN_SYSTEM, BROKEN_ADAPTER)
-    proc = H.run_script(script, "check", "--folder", str(folder), root=None)
-    H.assert_ran(proc)
-    text = H.output(proc)
-    assert proc.returncode != 0, f"check exited 0 over a census missing a broken adapter:\n{text}"
-    assert BROKEN_SYSTEM in text, f"the failure does not name the broken adapter:\n{text}"
+    cause = _census_unavailable(checkout, monkeypatch)
+    assert BROKEN_SYSTEM in cause, f"precondition: the owner's cause names no {BROKEN_SYSTEM}"
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
+                       checkout=checkout, cause=cause, folder=folder, also=(BROKEN_SYSTEM,))
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(
@@ -868,3 +927,83 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
         repair()
     H.assert_clean(_check_id(root))
     H.assert_clean(_check_folder(knowledge))
+
+
+# ======================================================================================
+# #1159 (human, 2026-10-03): a census the RUNNING checkout cannot take stays a finding — exit
+# EXACTLY 1, every other finding still printed (O2, as V16's "cannot verify" is) — but its line
+# says which side failed (O1): the running checkout's root, nothing in the checked folder at
+# fault, then `CensusUnavailable`'s own text verbatim. The claim is the census line's alone: no
+# finding about the folder carries it, nor V16's line, whose cause can lie on either side. The
+# broken-adapter cell is test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import.
+# ======================================================================================
+
+def test_1159_check_without_git_names_the_running_checkout_and_exits_1(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no git on PATH the running checkout cannot take the grant census (its marker half
+    is a committed-tree read). Over a SOUND plain folder, `tenant.py check --folder` exits
+    exactly 1 with the census line alone (#1159 K1: a plain folder is exempt from V16). Over a
+    SOUND clone committing acme's id (K2), `check --folder <knowledge>` and `check acme` each
+    exit exactly 1 printing BOTH the census line and V16's "cannot verify .tenant-id is
+    committed: git is not available on PATH" line (O2), and V16's line does not carry the
+    not-at-fault claim. Every census line names this checkout's root (the one `tenant.py` runs
+    from), not the folder, says nothing in the checked folder is at fault, and carries the
+    owner's "cannot resolve the declared systems: git is not available on PATH (…)" verbatim
+    (O1). The positive control: git back on PATH, all three checks exit 0 printing nothing."""
+    folder = _folder(tmp_path, "tenant")
+    root = tmp_path / "data"
+    knowledge = H.cloned_tenant(tmp_path / "src", root)
+    H.plant_row(root)
+    env, _reason, _repair = _git_absent(tmp_path, knowledge)
+    cause = _census_unavailable(H.REPO_ROOT, monkeypatch, **env)
+    assert "git is not available on PATH" in cause, f"precondition: the census's cause: {cause!r}"
+
+    text, _line = _census_blind_line(
+        _check_folder(folder, **env), checkout=H.REPO_ROOT, cause=cause, folder=folder)
+    assert H.CANNOT_VERIFY_TENANT_ID not in text, (
+        f"a plain folder (no git work tree) is exempt from the committed-.tenant-id rule:\n{text}")
+
+    for proc in (_check_folder(knowledge, **env), _check_id(root, **env)):
+        text, _line = _census_blind_line(proc, checkout=H.REPO_ROOT, cause=cause,
+                                         folder=knowledge, also=(H.CANNOT_VERIFY_TENANT_ID,))
+        unverified = [ln for ln in text.splitlines() if H.CANNOT_VERIFY_TENANT_ID in ln]
+        assert len(unverified) == 1, f"V16's line is not printed once (#1159 O2):\n{text}"
+        assert cause not in unverified[0], (
+            f"V16's line is not its own line beside the census line (#1159 O2):\n{text}")
+        assert "git is not available on PATH" in unverified[0], (
+            f"V16's line no longer gives git's reason:\n{text}")
+        assert not NOT_THE_FOLDERS_FAULT.search(unverified[0]), (
+            f"V16's line claims the folder is not at fault; its cause can lie on either side "
+            f"(#1159 non-obligation):\n{text}")
+
+    for proc in (_check_folder(folder), _check_folder(knowledge), _check_id(root)):
+        text = H.assert_clean(proc)
+        assert "[tenant.py]" not in text, f"a clean check printed a finding:\n{text}"
+
+
+def test_1159_only_the_census_blind_line_says_the_folder_is_not_at_fault(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The not-at-fault claim names the census line's side and is never pasted onto a finding
+    about the folder. A folder genuinely at fault — its table leaves host-state.passwd undecided
+    and its case-history mapping.yaml does not parse — checked with the census taken: exit 1
+    naming both, and no line says the folder is not at fault. The same folder with no git on
+    PATH (census blind): exit exactly 1, the mapping.yaml finding still printed beside the
+    census line (#1159 O2), and the census line is the ONLY line carrying the claim (O1). The
+    positive control: the folder before the faults checks clean."""
+    folder = _folder(tmp_path, "tenant")
+    H.assert_clean(_check_folder(folder))
+    gap = _grant_gap(folder)
+    mapping = folder / "settings" / "systems" / "case-history" / "mapping.yaml"
+    mapping.write_text("fields: {unclosed: [\n", encoding="utf-8")
+
+    text = H.assert_refused(_check_folder(folder), gap, str(mapping))
+    claimed = [ln for ln in text.splitlines() if NOT_THE_FOLDERS_FAULT.search(ln)]
+    assert claimed == [], f"a finding ABOUT the folder says the folder is not at fault:\n{text}"
+
+    env, _reason, _repair = _git_absent(tmp_path, folder)
+    cause = _census_unavailable(H.REPO_ROOT, monkeypatch, **env)
+    text, line = _census_blind_line(_check_folder(folder, **env), checkout=H.REPO_ROOT,
+                                    cause=cause, folder=folder, also=(str(mapping),))
+    claimed = [ln for ln in text.splitlines() if NOT_THE_FOLDERS_FAULT.search(ln)]
+    assert claimed == [line], (
+        f"the not-at-fault claim is not the census line's alone (#1159 O1):\n{text}")
