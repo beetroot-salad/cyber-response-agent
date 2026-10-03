@@ -546,7 +546,13 @@ class Bound:
 
     def entries(self) -> EntriesRead:
         """What is in the bound directory, each entry judged without following it. For an
-        `under` derivation the walk is the same no-follow walk `read` makes."""
+        `under` derivation the walk is the same no-follow walk `read` makes.
+
+        A directory removed while it is listed (after the walk reached it, before or during the
+        scan; the held root among them) is absent, never present and empty: the kernel lets a
+        dead directory be reopened and the C library ends its listing early, so it is judged
+        by its link count once the scan is done (`st_nlink == 0`: no name holds it). A
+        directory still linked when the scan ends was there for the whole listing."""
         spelling = "/".join(self._prefix)
         if self._absent:
             return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
@@ -565,11 +571,14 @@ class Bound:
         try:
             with self._os.scandir(fd) as it:
                 listed = {entry.name: _entry_kind(entry) for entry in it}
+            dead = self._os.fstat(fd).st_nlink == 0
         except OSError as e:
             return EntriesRead(name=spelling, entries=None, absent=False,
                                reason=(e.strerror or str(e)))
         finally:
             self._os.close(fd)
+        if dead:
+            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
         return EntriesRead(name=spelling, entries=listed, absent=False, reason=None)
 
     def _directory_fd(self, root_fd: int) -> tuple[str, Any]:
