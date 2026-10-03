@@ -448,3 +448,41 @@ def test_an_audited_listing_never_touches_a_device_node(scratch, how):
     assert {top[n] for n in (*DEVICE_NAMES, *(f"d1/{n}" for n in DEVICE_NAMES))} == {OTHER}, top
     assert device_events(control["events"]), (
         f"the hook did not catch read naming a device: {control['events']}")
+
+
+class _FailsMidwayAndFstat(RefusesListing):
+    """`RefusesListing`'s `midway` route on `sub`, whose dead check's `fstat` of the reopened
+    descriptor then fails too (`fstat_err`): the scan's error and the check made on it both
+    fault."""
+
+    def __init__(self, err: int, fstat_err: int) -> None:
+        super().__init__("midway", "sub", err=err)
+        self.fstat_err, self.fstat_failed = fstat_err, 0
+
+    def fstat(self, fd: Any) -> os.stat_result:
+        if fd in self._reopened:
+            self.fstat_failed += 1
+            raise OSError(self.fstat_err, os.strerror(self.fstat_err))
+        return os.fstat(fd)
+
+
+@pytest.mark.parametrize("how", VIEWS)
+@pytest.mark.parametrize("fstat_err", [errno.EIO, errno.EBADF])
+def test_a_scan_fault_whose_dead_check_also_faults_is_still_a_refusal(scratch, how,
+                                                                      fstat_err):
+    """Adversary hole (tests-only commit): a scan that faults mid-way on a live folder, whose
+    dead check's own `fstat` then faults too, is still `stat_entries`' refusal (the scan's
+    error, in `_read_reason`'s words), never a raise, never absent, no descriptor left open.
+    Non-vacuity: the dead check was asked. Control: the sibling lists its file."""
+    base = base_of(how, scratch)
+    put_plain(base / "sub" / "a.md")
+    put_plain(base / "sub" / "b.md")
+    put_plain(base / "peer" / "p.md")
+    seam = _FailsMidwayAndFstat(errno.EACCES, fstat_err)
+    with view_of(how, scratch, seam) as view:
+        got = _io.stat_entries(view.under("sub"))
+        peer = _io.stat_entries(view.under("peer"))
+    assert seam.fstat_failed, "the dead check never asked fstat; the row is void"
+    assert (got.absent, got.reason, got.stats) == (False, os.strerror(errno.EACCES), None), got
+    assert_listed(peer, {"p.md": stat.S_IFREG}, "the unfaulted sibling")
+    assert descriptors_under(scratch.tmp) == []
