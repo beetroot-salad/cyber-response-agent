@@ -837,8 +837,9 @@ def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
     wire = RunPaths(run_dir).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)
     sparse(wire, 64 * MiB + 1)
-    # Imported here, as test_1077_replay does: the visualize modules import each other.
-    from defender.scripts.visualize.visualize_messages import load_messages
+    # Through `visualize_data`, as every other visualizer test: the two modules import each
+    # other, and naming the messages module first fails on a partially initialised module.
+    from defender.scripts.visualize.visualize_data import load_messages
     assert load_messages(run_dir) == []
 
 
