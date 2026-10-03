@@ -34,6 +34,7 @@ import pytest
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender.tests.tenant_1078_pass_a._census_1078 import docstring_ids
 
 TENANT = H.VALID_ID
 
@@ -374,16 +375,6 @@ EXPORTING_FUNCTIONS = {
 ALLOWLIST_MODULES = {"runtime/box_codec.py"}
 
 
-def _docstring_nodes(tree: ast.AST) -> set[int]:
-    out: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            body = getattr(node, "body", [])
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                out.add(id(body[0].value))
-    return out
-
-
 def _is_env_store(parents: list[ast.AST], node: ast.AST) -> bool:
     """`<mapping>["DEFENDER_RUNS_BASE"] = ...` — the one shape an export has."""
     parent = parents[-1] if parents else None
@@ -426,7 +417,7 @@ def runs_base_census(root: Path) -> list[str]:
         if KNOB not in text and RESOLVER not in text:
             continue
         tree = ast.parse(text)
-        docs = _docstring_nodes(tree)
+        docs = docstring_ids(tree)
 
         def visit(node: ast.AST, fn: str, parents: list[ast.AST], rel: str = rel,
                   docs: set[int] = docs) -> None:

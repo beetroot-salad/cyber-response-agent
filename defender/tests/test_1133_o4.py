@@ -51,7 +51,6 @@ upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refus
 """
 from __future__ import annotations
 
-import contextlib
 import errno
 import json
 import logging
@@ -69,6 +68,7 @@ from defender._io import read_jsonl_rows
 from defender.tests import _judge_921 as J
 from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
+from defender.tests._umask import umask
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 
 EPISODE_ID = "ep-1133"
@@ -82,15 +82,6 @@ def roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
-
-
-@contextlib.contextmanager
-def umask(mask: int):
-    old = os.umask(mask)
-    try:
-        yield
-    finally:
-        os.umask(old)
 
 
 def bare_episode(tmp_path: Path) -> tuple[Path, Path]:

@@ -78,7 +78,10 @@ _TENANT_ARG_POS = {"TenantPaths": 1, "create_tenant": 1, "require_tenant": 1,
 _TENANT_KW = {"tenant", "tenant_id", "raw_id"}
 
 
-def _docstring_ids(tree: ast.AST) -> set[int]:
+def docstring_ids(tree: ast.AST) -> set[int]:
+    """The `id`s of the docstring constants in `tree` (the module's, and each class's and
+    function's), so a census over string constants can leave prose out. The #1078 suites'
+    one home for it."""
     ids = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -101,7 +104,7 @@ def o1_python_findings(path: Path, rel: str) -> list[str]:  # noqa: C901, PLR091
     """Every place `path` holds `DEFAULT_TENANT_ID` or passes a string literal as a tenant."""
     text = path.read_text(encoding="utf-8", errors="replace")
     tree = ast.parse(text, filename=rel)
-    docs = _docstring_ids(tree)
+    docs = docstring_ids(tree)
     found: list[str] = []
 
     def hit(node: ast.AST, what: str) -> None:
