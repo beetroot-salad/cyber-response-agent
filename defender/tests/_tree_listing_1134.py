@@ -490,6 +490,11 @@ class SwapsOnStep(RealOs):
 # Answers as JSON rows (the child's, and the in-process runner's)
 # ---------------------------------------------------------------------------------------
 
+def kind_row(got: Any) -> dict[str, Any]:
+    return {"name": got.name, "folder": got.folder, "kind": got.kind, "absent": got.absent,
+            "reason": got.reason}
+
+
 def tree_row(got: Any) -> dict[str, Any]:
     return {"absent": got.absent, "reason": got.reason,
             "entries": None if got.entries is None else [list(r) for r in got.entries.items()],
@@ -521,6 +526,8 @@ def _answer(tl: Any, view: Any, scenario: dict[str, Any]) -> dict[str, Any]:
     op = scenario["op"]
     if op == "list_tree":
         return tree_row(tl.list_tree(view, depth=scenario["depth"]))
+    if op == "entry_kind":
+        return kind_row(tl.entry_kind(view, scenario["name"]))
     if op == "entries":
         return entries_row(view.entries())
     if op == "read":
@@ -531,7 +538,7 @@ def _answer(tl: Any, view: Any, scenario: dict[str, Any]) -> dict[str, Any]:
 
 def run_scenarios(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each scenario (`root`, `how` = bind | held, optional `prefix`, `op` = list_tree |
-    entries | read, and its `depth` or `name`) answered as a JSON row, or
+    entry_kind | entries | read, and its `depth` or `name`) answered as a JSON row, or
     the exception it raised. Runs in whatever process calls it."""
     io, tl = io_module(), tree_listing()
     rows: list[dict[str, Any]] = []

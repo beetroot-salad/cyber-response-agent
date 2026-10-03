@@ -1,32 +1,38 @@
-"""#1134 B2's bounded listing: `defender._tree_listing.list_tree(view, *, depth)`, built only
-from `Bound.entries()` / `Bound.under()`, over step 1's addendum 3 D2 (`Bound.entries()` answers
-a dead folder absent).
+"""#1134 v3 step 1, B2: `defender._tree_listing` — `entry_kind(view, name)` and
+`list_tree(view, *, depth)`, two helpers built only from `Bound.entries()` / `Bound.under()` —
+and addendum 3's D2: `Bound.entries()` answers a dead folder absent.
 
 The contract is #1134's "Design addendum 2" (owner-approved 2026-10-02), B2, as the step-1
 contract settles it, amended by "Addendum 3" (owner-approved 2026-10-03): no `Bound.read_bytes`
 (D1), a folder deleted under a listing is absent (D2), no hand-rolled AST pin and sound test
-helpers (D3). It replaces v2's `Bound.walk`, whose review findings this file dissolves: the core
-gains no walk and no descriptor chain, and `list_tree` is nothing but `entries()` calls, so it
-answers exactly what those listings answer. The helper lands here, with its first consumer
-(the shared readers, step 4); B2's other helper, `entry_kind`, lands with its first consumer
-(the lead-author step), and its rows join this file there (helpers moved to their first
-consumers, 2026-10-03).
+helpers (D3). It replaces v2's `Bound.kind` / `Bound.walk`, whose review findings (#1-#9)
+this file dissolves: the core gains no walk, no kind and no descriptor chain, and each helper is
+nothing but `entries()` calls, so it answers exactly what those listings answer.
 
 What each section pins:
 
-- Record and signature. `TreeListing(absent, reason, entries, refused, gone)` is a frozen
-  dataclass with those fields in that order. `list_tree(view, *, depth)` with `depth` required
-  and keyword-only. The kinds are `_io`'s `ENTRY_FILE` / `ENTRY_DIR` / `ENTRY_OTHER`.
+- Records and signatures. `EntryKind(name, folder, kind, absent, reason)` and
+  `TreeListing(absent, reason, entries, refused, gone)` are frozen dataclasses with those fields
+  in that order. `entry_kind(view, name)`; `list_tree(view, *, depth)` with `depth` required and
+  keyword-only. The kinds are `_io`'s `ENTRY_FILE` / `ENTRY_DIR` / `ENTRY_OTHER`.
 - Adds nothing to the core but D2 (v2's findings #1-#9, #11, #12, #15 dissolve by absence):
   `Bound` has no `walk`, `kind`, `read_bytes` or `_leaf`; `_io` has no `ENTRY_ABSENT`,
   `ENTRY_UNLISTED`, `WalkRead`, `BytesRead`, `_walk_at`, `_kind_at`, `_list_below`,
   `_folder_parts`, `_reopen_dir`, and no `ENTRY_*` but the three.
 - No I/O of its own (no hand-rolled AST pin over the module: step 7's census scans it with
-  `_astlib` resolution; #1140 review finding 15): (b) through a recording `os_` seam,
-  `list_tree`'s I/O equals (as a multiset) the union of the `entries()` calls it is specified
-  to make (the top, and each `"dir"` row above the last level, once); (c) a FIFO at a leaf or
-  at a holding folder is never opened (a writer parked in its open stays parked), and no
-  non-directory entry is ever handed to `os_.open`; (d) no descriptor outlives a call.
+  `_astlib` resolution; #1140 review finding 15): (b) through a recording `os_` seam, `entry_kind`'s I/O EQUALS (as a sequence) that of the one `entries()` call it is
+  specified to make, and `list_tree`'s equals (as a multiset) the union of the `entries()` calls
+  it is specified to make (the top, and each `"dir"` row above the last level, once); (c) a FIFO
+  at a leaf or at a holding folder is never opened (a writer parked in its open stays parked),
+  and no non-directory entry is ever handed to `os_.open`; (d) no descriptor outlives a call.
+- `entry_kind`: the kind of every plant at the name, as `entries()` judged it (a hard link is
+  `"file"`, a link of any sort, FIFO, socket or device `"other"`, a real directory `"dir"`), from
+  exactly one listing of its folder; a linked, file or FIFO holding folder (in the name or in the
+  view's prefix) is that listing's refusal, verbatim; a missing leaf or folder is absent; a root
+  absent at `bind` is absent, one refused there relays its reason (#3); a closed root answers
+  `Bad file descriptor`, never raises. `name` is the POSIX spelling, `folder` the view-relative
+  parent. Exactly one of kind / absent / reason. The name grammar is `Bound.read`'s: `""`, `"."`
+  and every malformed name are `ValueError` before any I/O, in every view state.
 - `list_tree`: depth `0`, negatives, `None`, `True` / `False`, floats and strings are
   `ValueError` before any I/O, in every view state (#6). Depth 1 is exactly `view.entries()`;
   depth N lists exactly N levels and never lists a folder at level N, which is still reported
@@ -34,9 +40,12 @@ What each section pins:
   every character below `/`), and so are `refused` and `gone`. An absent top and an empty top are
   told apart; a top refused at `bind` or closed answers its reason. A plant at a name is its own
   row and is never entered; a plant at the view's own folder refuses the top; a still plant at a
-  nested folder's name is that folder's row (not a refusal), the rest still listed. A hard link
-  is `"file"` to `list_tree` and refused by `read`: kind is the listing's judgement, refusing it
-  is the read's.
+  nested folder's name is that folder's row (not a refusal), the rest still listed.
+- Coherence: on a still tree, for each folder the listing covers (the top and every `"dir"` row
+  above the last level), `entry_kind` of each of its rows answers the listing's kind, of a name
+  it lacks absent; a folder in `refused` is `entry_kind`'s refusal with the same reason; one in
+  `gone` (or an absent top) is `entry_kind`'s absent. A hard link is `"file"` to both helpers and
+  refused by `read`: kind is the listing's judgement, refusing it is the read's.
 - D2 (#1140 review findings 2 and 11), with REAL deletions (`ListingFaults` removes the folder
   with `shutil.rmtree` at a chosen moment, and the real kernel and CPython answer): a folder
   removed after the step into it, before its reopen, between the reopen and the scan, or after
@@ -47,39 +56,41 @@ What each section pins:
   level holding no folder, so `depth=sys.maxsize` answers at once (finding 5).
 - v2's findings, dissolved (each row names its finding): #1 an 1100-deep chain, in a child whose
   soft `RLIMIT_NOFILE` is a few descriptors above what it holds: `list_tree(depth=3)` lists three
-  levels. #2 a non-empty folder REALLY moved out of the tree after its parent's listing (and a
-  file, a FIFO, a symlink to it or nothing put at its name) is `refused` (`Not a directory` / the
-  alias sentence) or `gone`, its `"dir"` row stays and nothing of the moved folder is listed; a
-  writer thread swapping one repeatedly while `list_tree` runs keeps every `"dir"` row above the
-  last level listed XOR refused XOR gone, and a listed one never empty. #3 a bind-time refusal is
-  relayed as the reason. #4 a held root REALLY removed since: `entries()` answers it absent (D2),
-  so does `list_tree`; emptied but not removed, it is present and empty. #5 a REAL permission
-  bit: `list_tree` reports P refused when P cannot be listed (no access, read but no search, or
-  search but no read), and a C below P with no access is refused alone; each row is exactly that
-  folder's own `entries()`. #6 depth 0 is rejected. #7 (a name removed between `getdents` and its
-  judgement on a `DT_UNKNOWN` filesystem lists as `"other"`) is existing `entries()` behaviour,
-  B4, out of scope: no row. #8 any errno, injected on any route of a sub-folder's listing (step,
-  reopen, scandir, midway, entry, fstat), is that folder's own answer: `refused[sub]` is exactly
-  `view.under(sub).entries().reason`, or `sub` is `gone` when that answers absent (ENOENT at the
-  step); the rest is listed, nothing below it is, and it is never a silently empty `"dir"`.
-  ENOENT is injected at the step only: elsewhere the kernel and CPython never raise it (finding
-  11), and the D2 rows drive the real removal instead. #9 `list_tree` writes nothing: the tree's
-  census is unchanged by every call, and a folder moved away is never re-created. #14 a
-  `close()` landing mid-listing never redirects a listing to a reused descriptor number; every
-  later folder answers `Bad file descriptor`.
+  levels and `entry_kind` of the deep leaf answers `"file"`. #2 a non-empty folder REALLY moved out
+  of the tree after its parent's listing (and a file, a FIFO, a symlink to it or nothing put at its
+  name) is `refused` (`Not a directory` / the alias sentence) or `gone`, its `"dir"` row stays and
+  nothing of the moved folder is listed; a writer thread swapping one repeatedly while
+  `list_tree` runs keeps every `"dir"` row above the last level listed XOR refused XOR gone, and
+  a listed one never empty. #3 a bind-time refusal is relayed as the reason. #4 a held root
+  REALLY removed since: `entries()` answers it absent (D2), so do both helpers, and they agree;
+  emptied but not removed, it is present and empty. #5 a REAL permission bit: `entry_kind(P)` is
+  `"dir"` while `list_tree` reports P refused and `entry_kind(P/C)` refused with the same reason; with read but
+  no search P's own listing is refused too; with search but no read P is refused while
+  `entry_kind(P/C/x)` still answers from P/C's own listing. #6 depth 0 is rejected. #7 (a name
+  removed between `getdents` and its judgement on a `DT_UNKNOWN` filesystem lists as `"other"`)
+  is existing `entries()` behaviour, B4, out of scope: no row. #8 any errno, injected on any route
+  of a sub-folder's listing (step, reopen, scandir, midway, entry), is that folder's own answer:
+  `refused[sub]` is exactly `view.under(sub).entries().reason`, or `sub` is `gone` when that
+  answers absent (ENOENT at the step); the rest is listed, nothing below it is, and it is never a
+  silently empty `"dir"`. ENOENT is injected at the step only: elsewhere the kernel and CPython
+  never raise it (finding 11), and the D2 rows drive the real removal instead. #9 neither helper
+  writes: the tree's census is unchanged by every call, and a folder moved away is never re-created. #14 a `close()` landing mid-listing
+  never redirects a listing to a reused descriptor number; every later folder answers `Bad file
+  descriptor`.
 
 Round 2 (the adversary's holes against the first commit, each row red on its exploit and
 green on the honest implementation and on the adversary's own honest baseline):
 
 - H2, independent of the seam (its AST half dropped under addendum 3, D3): in a child
-  interpreter with an audit hook, every audit event raised during a `list_tree` call is a folder
-  step (`O_PATH | O_NOFOLLOW`), a `"."` reopen (`O_RDONLY | O_DIRECTORY`) or an `os.scandir` of
-  a descriptor, and none names a non-folder entry; `read` of a file recorded the same way is
-  caught. (Kills a module that reaches the real `os` through `operator.attrgetter` and opens
-  every `"file"` row.)
+  interpreter with an audit hook, every audit event
+  raised during a helper call is a folder step (`O_PATH | O_NOFOLLOW`), a `"."` reopen
+  (`O_RDONLY | O_DIRECTORY`) or an `os.scandir` of a descriptor, and none names a non-folder
+  entry; `read` of a file recorded the same way is caught. (Kills a module that reaches the real
+  `os` through `operator.attrgetter` and opens every `"file"` row.)
 - H3, (b) on a faulted tree: with folders refused and gone, `list_tree`'s I/O is still one
   listing of each folder it must list, judged on disk; a refused or gone folder is never asked
   again. (Kills a retry of a refused or absent folder.)
+- H7, grammar: an `int` and any other object are `ValueError` too, never spelled by `str()`.
 - H8, order: names that are not valid UTF-8 on disk sort by the code points of their listed
   (surrogate-escaped) `str` names in `entries`, `refused` and `gone`, never by their bytes.
 
@@ -106,10 +117,15 @@ changed by path: modes and owners change through no-follow descriptors (finding 
 monkeypatched; no test forks; every child process runs under a deadline. Device-node plants skip
 where `mknod` is refused (CI's runner).
 
-Red before this step: there is no `defender._tree_listing`, so every row that calls `list_tree`
-fails on `ModuleNotFoundError: No module named 'defender._tree_listing'` (in-process, or
-reported by the child). The core row and step 1's D2 rows through `entries()` alone are green
-on step 1 and must stay so.
+Red before #1134 v3 step 1: there is no `defender._tree_listing`, so every row that calls a
+helper fails on `ModuleNotFoundError: No module named 'defender._tree_listing'` (in-process, or
+reported by the child). One row is green on main and must stay so: `_io` gains no walk, kind,
+byte read or `ENTRY_*` beyond the three.
+
+Red against v3's step 1 (`b0a1e3b9`, before addendum 3): the core row (`read_bytes`, `_leaf`,
+`BytesRead` are there), every D2 row's removal case (present and empty, or the stale names), the
+removed-held-root row (present and empty), the btrfs row's 0-link control, and the huge-depth
+row (it never returns, and the child is killed).
 """
 from __future__ import annotations
 
@@ -200,6 +216,10 @@ def TL() -> Any:  # noqa: N802 — names the module it hands back
     return tree_listing()
 
 
+def entry_kind(view: Any, name: Any) -> Any:
+    return TL().entry_kind(view, name)
+
+
 def list_tree(view: Any, depth: Any) -> Any:
     return TL().list_tree(view, depth=depth)
 
@@ -247,6 +267,16 @@ def to_depth(rows: dict[str, str], depth: int) -> dict[str, str]:
     return {n: k for n, k in rows.items() if level(n) <= depth}
 
 
+def assert_kind(got: Any, *, name: str, folder: str, kind: str | None = None,
+                absent: bool = False, reason: str | None = None) -> None:
+    """`got` is an `EntryKind` with exactly these fields, in exactly one state."""
+    assert type(got) is TL().EntryKind, f"entry_kind answered a {type(got).__name__}"
+    assert sum((got.kind is not None, got.absent, got.reason is not None)) == 1, (
+        f"entry_kind's answer is not in exactly one state: {got!r}")
+    assert (got.name, got.folder, got.kind, got.absent, got.reason) == (
+        name, folder, kind, absent, reason), f"entry_kind({name!r}) answered {got!r}"
+
+
 def listed(got: Any) -> dict[str, str]:
     """A listed `TreeListing`'s entries; its types and orders checked."""
     assert type(got) is TL().TreeListing, f"list_tree answered a {type(got).__name__}"
@@ -284,28 +314,70 @@ def assert_tree_refused(got: Any, reason: str) -> None:
         False, reason, None, {}, ()), f"a refused top answered {got!r}, not {reason!r}"
 
 
+def _probe(view: Any, folder: str) -> Any:
+    """`entry_kind` of a name the folder does not hold."""
+    return entry_kind(view, f"{folder}/no-such-entry-1134" if folder else "no-such-entry-1134")
+
+
+def _folder_incoherence(view: Any, got: Any, folder: str) -> list[str]:
+    """One folder's half of `incoherence`."""
+    children = [n for n in got.entries if parent_of(n) == folder]
+    ek = _probe(view, folder)
+    state = (ek.kind, ek.absent, ek.reason)
+    if folder in got.refused or folder in got.gone:
+        want = (None, False, got.refused[folder]) if folder in got.refused else (None, True, None)
+        out = [] if state == want else [f"{folder}: listed as {want} vs entry_kind {ek!r}"]
+        return out + ([f"{folder}: flagged, yet rows below it: {children}"] if children else [])
+    out = [] if state == (None, True, None) else [f"{folder}: a name it lacks is {ek!r}"]
+    for child in children:
+        ek = entry_kind(view, child)
+        if (ek.kind, ek.folder, ek.absent, ek.reason) != (got.entries[child], folder, False, None):
+            out.append(f"{child}: listed {got.entries[child]!r} vs entry_kind {ek!r}")
+    return out
+
+
+def incoherence(view: Any, got: Any, depth: int) -> list[str]:
+    """Where `entry_kind` disagrees with the listing `got` on a still tree (empty: coherent).
+    For the top and every `"dir"` row above the last level: listed -> each of its rows is
+    `entry_kind`'s kind and a name it lacks is absent; refused -> `entry_kind` below it is that
+    refusal, same reason; gone (or an absent top) -> absent."""
+    if got.absent or got.reason is not None:
+        ek = _probe(view, "")
+        same = (ek.kind, ek.absent, ek.reason) == (None, got.absent, got.reason)
+        return [] if same else [f"top: list_tree {got!r} vs entry_kind {ek!r}"]
+    folders = [""] + [n for n, k in got.entries.items() if k == DIR and level(n) < depth]
+    return [problem for folder in folders for problem in _folder_incoherence(view, got, folder)]
+
+
 # =======================================================================================
 # The records and the signatures
 # =======================================================================================
 
-def test_the_record_is_a_frozen_dataclass_with_the_contracts_fields():
-    """`TreeListing(absent, reason, entries, refused, gone)`, frozen, in that field order. The
-    kinds the helper answers are `_io`'s constants."""
+def test_the_records_are_frozen_dataclasses_with_the_contracts_fields():
+    """`EntryKind(name, folder, kind, absent, reason)` and `TreeListing(absent, reason, entries,
+    refused, gone)`, frozen, in that field order. The kinds the helpers answer are `_io`'s
+    constants."""
     tl = TL()
+    assert dataclasses.is_dataclass(tl.EntryKind)
     assert dataclasses.is_dataclass(tl.TreeListing)
+    assert [f.name for f in dataclasses.fields(tl.EntryKind)] == [
+        "name", "folder", "kind", "absent", "reason"]
     assert [f.name for f in dataclasses.fields(tl.TreeListing)] == [
         "absent", "reason", "entries", "refused", "gone"]
+    ek = tl.EntryKind(name="a/x.md", folder="a", kind=FILE, absent=False, reason=None)
     lt = tl.TreeListing(absent=False, reason=None, entries={"a": DIR}, refused={}, gone=())
-    field = "reason"
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(lt, field, "changed")
+    for record, field in ((ek, "kind"), (lt, "reason")):
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(record, field, "changed")
     assert (_io.ENTRY_FILE, _io.ENTRY_DIR, _io.ENTRY_OTHER) == (FILE, DIR, OTHER)
 
 
-def test_list_tree_takes_a_view_and_a_required_keyword_depth(scratch):
-    """`list_tree(view, *, depth)`: `depth` keyword-only with no default, so omitting it or
-    passing it positionally is Python's own `TypeError`. Control: `depth=1` by keyword lists."""
+def test_entry_kind_takes_a_view_and_a_name_and_list_tree_a_required_keyword_depth(scratch):
+    """`entry_kind(view, name)`; `list_tree(view, *, depth)`: `depth` keyword-only with no
+    default, so omitting it or passing it positionally is Python's own `TypeError`. Control:
+    `depth=1` by keyword lists."""
     tl = TL()
+    assert list(inspect.signature(tl.entry_kind).parameters) == ["view", "name"]
     params = inspect.signature(tl.list_tree).parameters
     assert list(params) == ["view", "depth"]
     assert params["depth"].kind is inspect.Parameter.KEYWORD_ONLY
@@ -342,14 +414,114 @@ def test_v2s_walk_kind_and_their_helpers_are_not_in_the_core():
 
 
 # =======================================================================================
-# The kind a listing gives each plant
+# entry_kind: the leaf's kind, from its folder's one listing
 # =======================================================================================
 
-#: The row `entries()` (and so `list_tree`) has for each plant at a name.
+#: What `entry_kind` answers for each plant at the name: `entries()`'s judgement.
 KIND_OF = {"plain": FILE, "directory": DIR, "empty_directory": DIR, "symlink": OTHER,
            "dangling": OTHER, "dir_link_inside": OTHER, "dir_link_outside": OTHER,
            "hardlink": FILE, "fifo": OTHER, "socket": OTHER, "char_device": OTHER,
            "block_device": OTHER}
+
+
+@pytest.mark.parametrize("how", VIEWS)
+@pytest.mark.parametrize("rel", ["x", "a/b/x"], ids=["top", "nested"])
+@pytest.mark.parametrize("kind", list(KIND_OF))
+def test_entry_kind_answers_each_plant_at_the_name_as_its_folders_listing_judges_it(
+        scratch, kind, rel, how):
+    """A plain file is `"file"`, and so is a hard link (refusing it is the read's job); a real
+    directory (full or empty) is `"dir"`; a symlink (to a file, to a folder inside or outside the
+    root, dangling), a FIFO, a socket or a device node is `"other"`. That is exactly the row
+    `entries()` of the holding folder has for it. `name` is the spelling given (a `str` or a
+    `PurePosixPath`), `folder` the view-relative parent (`""` at the top). Promptly, and nothing
+    changes. Control, same address: the plant replaced by a plain file is `"file"`."""
+    base = base_of(how, scratch)
+    planted = planted_or_skip(base / rel, kind, scratch)
+    folder = parent_of(rel)
+    before = census(scratch.tmp)
+    with view_of(how, scratch) as view:
+        got = in_time(lambda: entry_kind(view, rel), fifo=planted.fifo)
+        spelled = in_time(lambda: entry_kind(view, PurePosixPath(rel)), fifo=planted.fifo)
+        listing = (view.under(folder) if folder else view).entries()
+    assert_kind(got, name=rel, folder=folder, kind=KIND_OF[kind])
+    assert_kind(spelled, name=rel, folder=folder, kind=KIND_OF[kind])
+    assert got.kind == listing.entries[PurePosixPath(rel).name]
+    assert census(scratch.tmp) == before
+
+    planted.remove()
+    put_plain(base / rel)
+    with view_of(how, scratch) as view:
+        assert_kind(entry_kind(view, rel), name=rel, folder=folder, kind=FILE)
+
+
+@pytest.mark.parametrize("how", VIEWS)
+def test_entry_kind_of_a_missing_leaf_or_holding_folder_is_absent(scratch, how):
+    """A name missing from an existing folder's listing, a missing holding folder (one level or
+    two), and any name under a view whose own folder is missing are absent: `absent=True`, no
+    kind, no reason, never a raise, and nothing is created (#9). Control, same names: made real,
+    each answers its kind."""
+    base = base_of(how, scratch)
+    (base / "a").mkdir()
+    before = census(scratch.tmp)
+    asks = [("nothing-here", ""), ("a/missing.md", "a"), ("missing/x.md", "missing"),
+            ("a/missing/deeper/x.md", "a/missing/deeper")]
+    with view_of(how, scratch) as view:
+        for name, folder in asks:
+            assert_kind(entry_kind(view, name), name=name, folder=folder, absent=True)
+        for name in ("x.md", "a/x.md"):
+            assert_kind(entry_kind(view.under("gone-folder"), name), name=name,
+                        folder=parent_of(name), absent=True)
+    assert census(scratch.tmp) == before
+    assert not os.path.lexists(base / "missing")
+    assert not os.path.lexists(base / "gone-folder")
+
+    for name, _folder in asks:
+        put_plain(base / name)
+    put_plain(base / "gone-folder" / "a" / "x.md")
+    with view_of(how, scratch) as view:
+        for name, folder in asks:
+            assert_kind(entry_kind(view, name), name=name, folder=folder, kind=FILE)
+        assert_kind(entry_kind(view.under("gone-folder"), "a"), name="a", folder="", kind=DIR)
+
+
+#: How the name is split between the view's prefix and the name for a holding-folder plant
+#: under `a/b/x.md`: all in the name, `a` in the prefix, or `a/b` in the prefix.
+SPLITS = {"in-the-name": ("", "a/b/x.md"), "partly": ("a", "b/x.md"),
+          "in-the-prefix": ("a/b", "x.md")}
+
+
+@pytest.mark.parametrize("how", VIEWS)
+@pytest.mark.parametrize("split", list(SPLITS))
+@pytest.mark.parametrize("kind", FOLDER_PLANTS)
+@pytest.mark.parametrize("site", ["a", "a/b"])
+def test_entry_kind_through_a_linked_or_non_directory_holding_folder_is_that_listings_refusal(
+        scratch, site, kind, split, how):
+    """A symlinked holding folder (whatever it points at: the rest of the name as a real file,
+    an empty folder, nothing) is refused with the alias sentence; a file or a FIFO there with
+    `Not a directory`; wherever the plant falls (in the name, in the view's prefix, or split
+    across them). The reason is VERBATIM the refusal of the one listing `entry_kind` makes, and
+    the kind a link reaches never comes back. Promptly; nothing changes. Control: the plant
+    replaced by real folders and a plain file, `"file"`."""
+    base = base_of(how, scratch)
+    planted = plant_folder(base, PurePosixPath("a/b/x.md"), PurePosixPath(site), kind,
+                           host=scratch.host)
+    prefix, name = SPLITS[split]
+    folder = parent_of(name)
+    before = census(scratch.tmp)
+    with view_of(how, scratch) as outer:
+        view = outer.under(prefix) if prefix else outer
+        got = in_time(lambda: entry_kind(view, name), fifo=planted.fifo)
+        listing = in_time(lambda: (view.under(folder) if folder else view).entries(),
+                          fifo=planted.fifo)
+    assert listing.reason == FOLDER_REASON[kind], listing
+    assert_kind(got, name=name, folder=folder, reason=FOLDER_REASON[kind])
+    assert census(scratch.tmp) == before
+
+    planted.remove()
+    put_plain(base / "a" / "b" / "x.md")
+    with view_of(how, scratch) as outer:
+        view = outer.under(prefix) if prefix else outer
+        assert_kind(entry_kind(view, name), name=name, folder=folder, kind=FILE)
 
 
 #: Roots `bind` refuses (a plain file, a FIFO) or fails to open through the seam, and the
@@ -372,48 +544,57 @@ def _refused_bind(state: str, s: Scratch) -> Any:
 def test_finding_3_a_root_refused_at_bind_is_relayed_as_the_reason_never_a_kind(scratch, state):
     """v2 finding #3 (kind folded a bind-time failure into `"other"`): a `Bound` whose root
     `bind` refused (a plain file, a FIFO, EACCES, EMFILE, EIO opening it) answers that reason,
-    verbatim, from `list_tree`, for every depth and through `under(...)`: its top is refused.
-    Never a raise, never a hang. Control: the root a real directory, `list_tree` lists it."""
+    verbatim, from both helpers, for every name and depth and through `under(...)`: `entry_kind`
+    has no kind and is not absent, and `list_tree`'s top is refused. Never a raise, never a
+    hang. Control: the root a real directory, both helpers list it."""
     reason = BIND_REFUSALS[state]
     put_plain(scratch.root / "a" / "x.md")
     bound = _refused_bind(state, scratch)
     try:
         for view in (bound, bound.under("a")):
             assert view.entries().reason == reason
+            for name in ("x.md", "a/x.md"):
+                got = in_time(lambda view=view, name=name: entry_kind(view, name))
+                assert_kind(got, name=name, folder=parent_of(name), reason=reason)
             for depth in (1, 3):
                 assert_tree_refused(in_time(lambda view=view, d=depth: list_tree(view, d)), reason)
     finally:
         bound.close()
 
     with _io.bind(scratch.root) as live:
+        assert_kind(entry_kind(live, "a/x.md"), name="a/x.md", folder="a", kind=FILE)
         assert_tree(list_tree(live, 2), {"a": DIR, "a/x.md": FILE})
 
 
 @pytest.mark.parametrize("root", ["no-such-root", "dangling-root"])
-def test_list_tree_through_a_root_absent_at_bind_is_absent(scratch, root):
-    """A `Bound` absent at `bind` (nothing at the root, a dangling root link): `list_tree`'s top
-    is absent, through `under(...)` too. Nothing is created. Control: a real folder made at the
-    spelling, `list_tree` lists it."""
+def test_both_helpers_through_a_root_absent_at_bind_are_absent(scratch, root):
+    """A `Bound` absent at `bind` (nothing at the root, a dangling root link): `entry_kind` of
+    every name is absent and `list_tree`'s top is absent, through `under(...)` too. Nothing is
+    created. Control: a real folder made at the spelling, both helpers list it."""
     at = scratch.tmp / root
     if root == "dangling-root":
         at.symlink_to(scratch.tmp / "made-later", target_is_directory=True)
     before = census(scratch.tmp)
     with _io.bind(at) as bound:
         for view in (bound, bound.under("a")):
+            for name in ("x.md", "a/x.md"):
+                assert_kind(entry_kind(view, name), name=name, folder=parent_of(name),
+                            absent=True)
             assert_tree_absent(list_tree(view, 2))
     assert census(scratch.tmp) == before
 
     put_plain((scratch.tmp / "made-later" if root == "dangling-root" else at) / "a" / "x.md")
     with _io.bind(at) as bound:
+        assert_kind(entry_kind(bound, "a/x.md"), name="a/x.md", folder="a", kind=FILE)
         assert_tree(list_tree(bound, 2), {"a": DIR, "a/x.md": FILE})
 
 
 @pytest.mark.parametrize("how", BINDERS)
-def test_list_tree_after_the_root_is_closed_answers_bad_file_descriptor_never_raises(
+def test_both_helpers_after_the_root_is_closed_answer_bad_file_descriptor_never_raise(
         scratch, how):
     """A closed root (bound or held, and the views derived from it) answers `Bad file
-    descriptor` as the reason: `list_tree`'s top refused. Never an exception. Control: the same
-    views before the close list."""
+    descriptor` as the reason: `entry_kind` refused, `list_tree`'s top refused. Never an
+    exception. Control: the same views before the close list."""
     put_plain(scratch.root / "a" / "x.md")
     if how == "bind":
         owner = _io.bind(scratch.root)
@@ -422,25 +603,30 @@ def test_list_tree_after_the_root_is_closed_answers_bad_file_descriptor_never_ra
         owner = _io.hold(scratch.root)
         views = [owner.view(), owner.view().under("a")]
     assert_tree(list_tree(views[0], 2), {"a": DIR, "a/x.md": FILE})
-    assert_tree(list_tree(views[1], 1), {"x.md": FILE})
+    assert_kind(entry_kind(views[1], "x.md"), name="x.md", folder="", kind=FILE)
     owner.close()
     for view in views:
+        for name in ("x.md", "a/x.md"):
+            assert_kind(in_time(lambda view=view, name=name: entry_kind(view, name)), name=name,
+                        folder=parent_of(name), reason=BAD_FD)
         assert_tree_refused(in_time(lambda view=view: list_tree(view, 3)), BAD_FD)
     assert descriptors_under(scratch.tmp) == []
 
 
 @pytest.mark.parametrize("how", BINDERS)
-def test_finding_4_a_removed_held_root_is_absent_to_entries_and_list_tree(scratch, how):
-    """v2 finding #4 (walk said absent where entries said present-and-empty), settled by
-    addendum 3, D2: a root `bind` or `hold` opened, REALLY removed since (`rmdir`, after its
+def test_finding_4_a_removed_held_root_is_absent_to_entries_and_both_helpers(scratch, how):
+    """v2 finding #4 (kind and walk said absent where entries said present-and-empty), settled
+    by addendum 3, D2: a root `bind` or `hold` opened, REALLY removed since (`rmdir`, after its
     contents), is absent to `view.entries()` itself (the reopened folder is dead), so
-    `list_tree` answers an absent top: both agree. A folder made again at the path is not the
+    `list_tree` answers an absent top, and `entry_kind` of a name at the top, or in a folder
+    that went with it, is absent: all three agree. A folder made again at the path is not the
     held one: the answers stay. Control: before the removal the same view lists the tree, and a
     held root emptied but NOT removed is present and empty (`{}`), never absent."""
     put_plain(scratch.root / "x.md")
     put_plain(scratch.root / "sub" / "y.md")
     with opened(how, scratch.root) as view:
         assert_tree(list_tree(view, 2), {"sub": DIR, "sub/y.md": FILE, "x.md": FILE})
+        assert_kind(entry_kind(view, "x.md"), name="x.md", folder="", kind=FILE)
 
         (scratch.root / "sub" / "y.md").unlink()
         (scratch.root / "sub").rmdir()
@@ -449,19 +635,65 @@ def test_finding_4_a_removed_held_root_is_absent_to_entries_and_list_tree(scratc
         assert (top.absent, top.reason, top.entries) == (False, None, {}), (
             f"a live, emptied root is not present and empty: {top!r}")
         assert_tree(list_tree(view, 2), {})
+        assert_kind(entry_kind(view, "x.md"), name="x.md", folder="", absent=True)
 
         scratch.root.rmdir()
         for _ in range(2):
             top = view.entries()
             assert (top.absent, top.reason, top.entries) == (True, None, None), top
-            assert_tree_absent(list_tree(view, 2))
+            got = list_tree(view, 2)
+            assert_tree_absent(got)
+            assert_kind(entry_kind(view, "x.md"), name="x.md", folder="", absent=True)
+            assert_kind(entry_kind(view, "sub/y.md"), name="sub/y.md", folder="sub",
+                        absent=True)
+            assert incoherence(view, got, 2) == []
             put_plain(scratch.root / "x.md")  # a new folder at the old path: not the held one
     assert descriptors_under(scratch.tmp) == []
 
 
 # =======================================================================================
-# The depth: refused before any I/O, in every state
+# The grammar and the depth: refused before any I/O, in every state
 # =======================================================================================
+
+#: Names outside `Bound.read`'s grammar: `""` and `"."` (the view itself: callers use
+#: `view.entries()`), absolute, climbing, empty components, a NUL, and non-names (bytes,
+#: `None`, an `int`, any other object: never spelled by `str()`; round 2, H7).
+ENTRY_KIND_BAD_NAMES = ["", ".", "..", "../x", "/abs/x", "a/../x", "a//x", "./x", "a/", "x\x00y",
+                        pytest.param(PurePosixPath("."), id="purepath-dot"),
+                        pytest.param(b"x", id="bytes"), pytest.param(None, id="none"),
+                        pytest.param(7, id="int"), pytest.param(object(), id="object")]
+
+#: What `entry_kind(view, "rec.md")` answers in each state (`kind`, `absent`, `reason`).
+STATE_KIND = {"present": (FILE, False, None), "held": (FILE, False, None),
+              "under": (FILE, False, None), "absent_at_bind": (None, True, None),
+              "refused_at_bind": (None, False, NOT_A_DIR),
+              "linked_prefix": (None, False, ALIAS), "closed": (None, False, BAD_FD),
+              "closed_held": (None, False, BAD_FD)}
+
+
+@pytest.mark.parametrize("state", STATES)
+@pytest.mark.parametrize("name", ENTRY_KIND_BAD_NAMES)
+def test_entry_kind_refuses_a_name_outside_the_grammar_before_any_io(scratch, state, name):
+    """`Bound.read`'s grammar: `""`, `"."`, every malformed name and anything that is not a
+    `str` or a `PurePath` are `ValueError`, and the `os_` seam sees no call after the view was
+    made. In every state: present, held, prefixed, absent or refused at `bind`, behind a linked
+    prefix, closed (a `ValueError`, not the closed root's refusal). Nothing changes. Control,
+    same state: `entry_kind(view, "rec.md")` answers that state's kind, absence or reason."""
+    state_tree(scratch)
+    before = census(scratch.tmp)
+    rec = CallRecorder()
+    with bound_in(state, scratch, rec) as view:
+        rec.calls.clear()
+        with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract, not the wording
+            entry_kind(view, name)
+        assert rec.calls == [], f"entry_kind({name!r}) reached the os_ seam: {rec.calls}"
+    assert census(scratch.tmp) == before
+
+    kind, absent, reason = STATE_KIND[state]
+    with bound_in(state, scratch) as view:
+        assert_kind(entry_kind(view, "rec.md"), name="rec.md", folder="", kind=kind,
+                    absent=absent, reason=reason)
+
 
 #: Depths `list_tree` refuses: zero, negatives, and anything that is not a positive `int`
 #: (`True` is an `int` equal to 1 and must still be refused).
@@ -561,11 +793,12 @@ def test_list_tree_lists_exactly_depth_levels_in_path_parts_order(scratch, depth
     """Every entry within `depth` levels of the view's folder, and nothing deeper: names
     relative to the view, kinds as each folder's listing judged them, dict order path-parts
     order. A folder at the last level is still a `"dir"` row. A depth past the tree's own adds
-    nothing. Nothing is refused or gone; nothing changes."""
+    nothing. Nothing is refused or gone; nothing changes; the two helpers agree."""
     build_catalog(base_of(how, scratch))
     before = census(scratch.tmp)
     with view_of(how, scratch) as view:
         got = list_tree(view, depth)
+        assert incoherence(view, got, depth) == []
     assert_tree(got, to_depth(CATALOG_ROWS, depth))
     assert census(scratch.tmp) == before
 
@@ -631,13 +864,14 @@ def test_list_tree_lists_each_plant_as_its_own_kind_and_never_enters_a_link(scra
     link of any sort, FIFO, socket or device `"other"`, a real folder `"dir"`, entered and
     listed if above the last level). Only real folders are entered: a link's target (`inner.md`,
     `keep`) never shows under the link's name. Promptly; nothing refused or gone; nothing
-    changes."""
+    changes; the helpers agree."""
     base = base_of(how, scratch)
     put_plain(base / "box" / "sub" / "deeper.md")
     planted = planted_or_skip(base / "box" / "e", kind, scratch)
     before = census(scratch.tmp)
     with view_of(how, scratch) as view:
         got = in_time(lambda: list_tree(view, 3), fifo=planted.fifo)
+        assert incoherence(view, got, 3) == []
     want = {"box": DIR, "box/e": KIND_OF[kind]}
     if kind == "directory":
         want["box/e/keep"] = FILE
@@ -676,7 +910,9 @@ def test_a_still_plant_at_a_nested_folders_name_is_its_row_and_the_rest_is_liste
     """A link, file or FIFO standing (before any listing) where a holding folder belongs is
     just a row of its parent's listing (`"other"`, or `"file"` for a file): it is never entered,
     is not a refusal (`refused == {}`), and nothing below it is listed, while the rest of the
-    shape is. Control: real folders there, `a/b/x.md` is listed and `"file"`."""
+    shape is. `entry_kind` of a name BELOW it is refused with the reason (the alias sentence, or
+    `Not a directory`): its one listing walks through the plant. Control: real folders there,
+    `a/b/x.md` is listed and `"file"`."""
     base = base_of(how, scratch)
     put_plain(base / "keep" / "k.md")
     put_plain(base / "top.md")
@@ -685,17 +921,21 @@ def test_a_still_plant_at_a_nested_folders_name_is_its_row_and_the_rest_is_liste
     before = census(scratch.tmp)
     with view_of(how, scratch) as view:
         got = in_time(lambda: list_tree(view, 4), fifo=planted.fifo)
+        below = in_time(lambda: entry_kind(view, "a/b/x.md"), fifo=planted.fifo)
+        assert in_time(lambda: incoherence(view, got, 4), fifo=planted.fifo) == []
     want = {"a": FOLDER_PLANT_KIND[kind]} if site == "a" else {
         "a": DIR, "a/b": FOLDER_PLANT_KIND[kind]}
     want.update(_inside_target_rows(kind, site))
     want.update({"keep": DIR, "keep/k.md": FILE, "top.md": FILE})
     assert_tree(got, dict(sorted(want.items(), key=lambda r: tuple(r[0].split("/")))))
+    assert_kind(below, name="a/b/x.md", folder="a/b", reason=FOLDER_REASON[kind])
     assert census(scratch.tmp) == before
 
     planted.remove()
     put_plain(base / "a" / "b" / "x.md")
     with view_of(how, scratch) as view:
         rows = listed(list_tree(view, 4))
+        assert_kind(entry_kind(view, "a/b/x.md"), name="a/b/x.md", folder="a/b", kind=FILE)
     assert (rows["a"], rows["a/b"], rows["a/b/x.md"]) == (DIR, DIR, FILE)
 
 
@@ -874,17 +1114,20 @@ def _mixed_tree(base: Path, s: Scratch) -> None:
 
 @pytest.mark.parametrize("how", VIEWS)
 @pytest.mark.parametrize("depth", [1, 2, 3, 4])
-def test_list_tree_of_a_still_tree_reports_a_refused_folder_at_every_level(scratch, depth, how):
-    """Plants are rows of their own kind, and every folder named `R` (EACCES at its reopen,
-    through one seam) is refused with `Permission denied` at whatever level it stands, `gather/R`
-    at level 2 and `gather/queries/R` at level 3, with nothing listed below it, while the rest is
-    listed (`gather/G/g.md`). (The entry_kind half of this row, coherence with each folder's
-    listing, lands with entry_kind: `test_the_two_helpers_agree_on_a_still_tree`.)"""
+def test_the_two_helpers_agree_on_a_still_tree(scratch, depth, how):
+    """For each folder the listing covers (the top, and every `"dir"` row above the last
+    level): listed -> `entry_kind` of each of its rows is the listed kind (plants included) and
+    of a name it lacks is absent; refused -> `entry_kind` below it is refused with the SAME
+    reason. Run through one seam that refuses every folder named `R` (EACCES at its reopen).
+    (A folder found gone has been removed, so the tree is no longer still: the gone half of
+    coherence is pinned by the removal rows, `test_d2_*`.)"""
     base = base_of(how, scratch)
     _mixed_tree(base, scratch)
 
     with view_of(how, scratch, ListingFaults({"R": errno.EACCES})) as view:
         got = list_tree(view, depth)
+        mismatches = incoherence(view, got, depth)
+    assert mismatches == [], mismatches
     rows = listed(got)
     if depth >= 2:
         assert (rows["gather/hard"], rows["gather/lnk"], rows["gather/dl"], rows["gather/ff"],
@@ -892,26 +1135,23 @@ def test_list_tree_of_a_still_tree_reports_a_refused_folder_at_every_level(scrat
                                                                OTHER)
     if depth >= 3:
         assert got.refused.get("gather/R") == DENIED, got
-        assert "gather/R/r.md" not in rows, got
         assert listed(got)["gather/G/g.md"] == FILE, got
     if depth >= 4:
         assert got.refused.get("gather/queries/R") == DENIED, got
-        assert "gather/queries/R/deep.md" not in rows, got
-        assert rows["gather/queries/elastic/_draft"] == DIR, got
 
 
-def test_a_hard_link_is_a_file_to_list_tree_and_refused_by_read(scratch):
+def test_a_hard_link_is_a_file_to_both_helpers_and_refused_by_read(scratch):
     """Kind is the listing's judgement; refusing an alias is the read's. A hard-linked regular
-    file is `"file"` in `list_tree`, while `read` of the same name refuses it with the alias
-    sentence. Control: a single-linked file is `"file"` and reads back."""
+    file is `"file"` to `entry_kind` and in `list_tree`, while `read` of the same name refuses
+    it with the alias sentence. Control: a single-linked file is `"file"` and reads back."""
     plant_entry(scratch.root / "a" / "hard.md", "hardlink", root=scratch.root, host=scratch.host)
     put_plain(scratch.root / "a" / "plain.md")
     with _io.bind(scratch.root) as bound:
-        rows = listed(list_tree(bound, 2))
-        assert rows["a/hard.md"] == FILE
+        assert_kind(entry_kind(bound, "a/hard.md"), name="a/hard.md", folder="a", kind=FILE)
+        assert listed(list_tree(bound, 2))["a/hard.md"] == FILE
         refused = bound.read("a/hard.md")
         assert (refused.text, refused.absent, refused.reason) == (None, False, ALIAS)
-        assert rows["a/plain.md"] == FILE
+        assert_kind(entry_kind(bound, "a/plain.md"), name="a/plain.md", folder="a", kind=FILE)
         assert bound.read("a/plain.md").text == PLAIN.decode()
 
 
@@ -938,6 +1178,11 @@ def _permission_scenarios(root: Path) -> list[dict[str, Any]]:
         {"root": r, "op": "list_tree", "depth": 3},
         {"root": r, "how": "held", "op": "list_tree", "depth": 3},
         {"root": r, "prefix": "P", "op": "list_tree", "depth": 2},
+        {"root": r, "op": "entry_kind", "name": "P"},
+        {"root": r, "op": "entry_kind", "name": "P/f.md"},
+        {"root": r, "op": "entry_kind", "name": "P/C"},
+        {"root": r, "op": "entry_kind", "name": "P/C/x.md"},
+        {"root": r, "prefix": "P", "op": "entry_kind", "name": "C"},
         {"root": r, "prefix": "P", "op": "entries"},
         {"root": r, "prefix": "P/C", "op": "entries"},
     ]
@@ -946,6 +1191,10 @@ def _permission_scenarios(root: Path) -> list[dict[str, Any]]:
 def _tree(entries: dict[str, str], refused: dict[str, str] | None = None) -> dict[str, Any]:
     return {"absent": False, "reason": None, "entries": [list(r) for r in entries.items()],
             "refused": [list(r) for r in (refused or {}).items()], "gone": []}
+
+
+def _kind(name: str, folder: str, kind: str | None = None, reason: str | None = None) -> dict:
+    return {"name": name, "folder": folder, "kind": kind, "absent": False, "reason": reason}
 
 
 def _entries(name: str, rows: dict[str, str] | None = None, reason: str | None = None) -> dict:
@@ -963,20 +1212,28 @@ def _permission_answers(case: str) -> list[dict[str, Any]]:
     needs READ; stepping into a child needs search on the parent only."""
     p_refused = _tree({"P": DIR, "top.md": FILE}, {"P": DENIED})
     if case in ("P-0o000", "P-read-no-search-0o400"):
-        return [p_refused, p_refused, _refused_top(DENIED),
+        return [p_refused, p_refused, _refused_top(DENIED), _kind("P", "", DIR),
+                _kind("P/f.md", "P", reason=DENIED), _kind("P/C", "P", reason=DENIED),
+                _kind("P/C/x.md", "P/C", reason=DENIED), _kind("C", "", reason=DENIED),
                 _entries("P", reason=DENIED), _entries("P/C", reason=DENIED)]
     if case == "P-search-no-read-0o100":
-        return [p_refused, p_refused, _refused_top(DENIED),
+        return [p_refused, p_refused, _refused_top(DENIED), _kind("P", "", DIR),
+                _kind("P/f.md", "P", reason=DENIED), _kind("P/C", "P", reason=DENIED),
+                _kind("P/C/x.md", "P/C", FILE), _kind("C", "", reason=DENIED),
                 _entries("P", reason=DENIED), _entries("P/C", {"x.md": FILE})]
     if case == "nested-C-0o000":
         rows = {n: k for n, k in FULL_PERMISSION_ROWS.items() if n != "P/C/x.md"}
         return [_tree(rows, {"P/C": DENIED}), _tree(rows, {"P/C": DENIED}),
                 _tree({"C": DIR, "C2": DIR, "C2/y.md": FILE, "f.md": FILE}, {"C": DENIED}),
+                _kind("P", "", DIR), _kind("P/f.md", "P", FILE), _kind("P/C", "P", DIR),
+                _kind("P/C/x.md", "P/C", reason=DENIED), _kind("C", "", DIR),
                 _entries("P", {"C": DIR, "C2": DIR, "f.md": FILE}),
                 _entries("P/C", reason=DENIED)]
     assert case == "control-P-0o500", case
     return [_tree(FULL_PERMISSION_ROWS), _tree(FULL_PERMISSION_ROWS),
             _tree({"C": DIR, "C/x.md": FILE, "C2": DIR, "C2/y.md": FILE, "f.md": FILE}),
+            _kind("P", "", DIR), _kind("P/f.md", "P", FILE), _kind("P/C", "P", DIR),
+            _kind("P/C/x.md", "P/C", FILE), _kind("C", "", DIR),
             _entries("P", {"C": DIR, "C2": DIR, "f.md": FILE}), _entries("P/C", {"x.md": FILE})]
 
 
@@ -1000,18 +1257,19 @@ def owners_and_modes(top: Path) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("case", list(PERMISSION_CASES))
-def test_finding_5_a_real_permission_bit_refuses_that_folder_in_list_tree(tmp_path, case):
+def test_finding_5_a_real_permission_bit_refuses_that_folder_in_both_helpers(tmp_path, case):
     """v2 finding #5 (kind raised where walk said "unlisted"), through REAL permission bits:
     unprivileged and owning the tree (in-process on CI; as root, in a child that drops to
     uid/gid 65534 itself — never skipped). P with no access, or read but no search: the root's
-    listing still says P is `"dir"`, while `list_tree` reports P in `refused` with `Permission
-    denied` (its own listing reopens `.` through P, which needs search) and the rest of the tree
-    listed; `under("P")`'s top is refused with that same reason. P with search but no read: P is
-    refused the same way, yet P/C's own listing answers `x.md` (each listing is one folder's;
-    nothing is claimed about what `list_tree` never listed). C (below P) with no access: only C
-    is refused, its siblings listed. Each row is also exactly what that folder's own `entries()`
-    answers. `list_tree` changes no mode and makes nothing. Control: P readable and searchable
-    (0o500), everything is listed.
+    listing still says P is `"dir"`, and `entry_kind(P)` agrees, while `list_tree` reports P in
+    `refused` with `Permission denied` (its own listing reopens `.` through P, which needs
+    search) and the rest of the tree listed; `entry_kind` of anything in P or below is refused
+    with that same reason, as is `under("P")`'s top. P with search but no read: P is refused
+    the same way, yet `entry_kind(P/C/x.md)` answers `"file"`, from P/C's own listing (each call
+    lists one folder; nothing is claimed about what `list_tree` never listed). C (below P) with
+    no access: only C is refused, its siblings listed. Each row is also exactly what that
+    folder's own `entries()` answers. Neither helper changes a mode or makes anything. Control:
+    P readable and searchable (0o500), everything is listed.
 
     The mode is set through a no-follow descriptor while the tree is still this process's own
     (before `hand_over`), and put back by `owned_tree` through `fwalk`'s descriptors: as root,
@@ -1026,9 +1284,9 @@ def test_finding_5_a_real_permission_bit_refuses_that_folder_in_list_tree(tmp_pa
         rows = run_unprivileged(_permission_scenarios(root))
         after = owners_and_modes(root)
     for row in rows:
-        assert "raised" not in row, f"a listing raised: {row}"
+        assert "raised" not in row, f"a helper raised: {row}"
     assert rows == _permission_answers(case), rows
-    assert after == before, "a listing changed a mode, an owner or the tree"
+    assert after == before, "a helper changed a mode, an owner or the tree"
 
 
 @pytest.mark.parametrize("modes", [{"P": 0o000}, {"P": 0o100}, {"P": 0o200},
@@ -1095,7 +1353,8 @@ def test_finding_2_a_folder_moved_away_after_its_parents_listing_is_refused_or_g
     own listing then answers for what stands there: a file or FIFO `refused[sub] == Not a
     directory`, the symlink `refused[sub] ==` the alias sentence, nothing `sub in gone`. Its
     `"dir"` row stays; nothing of the moved folder (`inner.md`, `deeper/`) is listed under any
-    name; every other folder is listed. #9: nothing is re-created at `sub`'s name, and the moved folder is
+    name; every other folder is listed. After it, `entry_kind` below `sub` answers the same
+    refusal or absence. #9: nothing is re-created at `sub`'s name, and the moved folder is
     untouched. Control: the same tree with no swap is listed whole."""
     base = base_of(how, scratch)
     parent = _swap_tree(base, site)
@@ -1123,6 +1382,12 @@ def test_finding_2_a_folder_moved_away_after_its_parents_listing_is_refused_or_g
         assert stat.S_ISFIFO(os.lstat(at).st_mode)
     else:
         assert os.readlink(at) == str(away)
+    with view_of(how, scratch) as still:
+        after = entry_kind(still, f"{sub}/inner.md")
+    if outcome == "refused":
+        assert_kind(after, name=f"{sub}/inner.md", folder=sub, reason=reason)
+    else:
+        assert_kind(after, name=f"{sub}/inner.md", folder=sub, absent=True)
 
 
 @pytest.mark.parametrize("how", VIEWS)
@@ -1191,7 +1456,8 @@ def test_d2_a_folder_removed_after_its_parents_listing_is_gone_never_an_empty_di
     parent's listing has named the non-empty `sub` a `"dir"`, `sub` is REALLY removed after
     the step into it, at each moment of its own listing. `sub` is in `gone` (its `"dir"` row
     stays), nothing of it is listed, nothing is refused, every other folder is listed whole;
-    never an empty `"dir"` that is neither listed, refused nor gone. Control: the same tree through the same view kind, with no removal,
+    never an empty `"dir"` that is neither listed, refused nor gone. Afterwards `entry_kind`
+    below it is absent. Control: the same tree through the same view kind, with no removal,
     is listed whole, `sub` with everything in it."""
     base = base_of(how, scratch)
     parent = _swap_tree(base, site)
@@ -1202,8 +1468,10 @@ def test_d2_a_folder_removed_after_its_parents_listing_is_gone_never_an_empty_di
     seam = ListingFaults(remove={"sub"}, moment=moment)
     with view_of(how, scratch, seam) as view:
         got = list_tree(view, 4)
+        after = entry_kind(view, f"{sub}/inner.md")
     assert seam.removed == [os.path.realpath(parent / "sub")], seam.removed
     assert_tree(got, _swap_rows(site, with_sub=False), gone=(sub,))
+    assert_kind(after, name=f"{sub}/inner.md", folder=sub, absent=True)
     assert not os.path.lexists(parent / "sub"), "a read-only listing re-created sub"
 
 
@@ -1267,8 +1535,8 @@ def test_d2_the_folder_is_judged_by_its_link_count_once_its_scan_is_done(scratch
 def test_d2_a_live_folder_named_like_a_deleted_one_is_present(scratch, how):
     """Round 3 (adversary H2): `/proc` spells a removed folder's descriptor with a
     `" (deleted)"` suffix, but no name is a dead mark: live folders named `notes (deleted)`
-    (holding a file) and `empty (deleted)` are present to their own `entries()`, and listed by
-    `list_tree` with what they hold, never `gone`."""
+    (holding a file) and `empty (deleted)` are present to their own `entries()`, listed by
+    `list_tree` with what they hold, never `gone`, and `entry_kind` of the file is `"file"`."""
     base = base_of(how, scratch)
     put_plain(base / "notes (deleted)" / "x.md")
     (base / "empty (deleted)").mkdir()
@@ -1276,10 +1544,12 @@ def test_d2_a_live_folder_named_like_a_deleted_one_is_present(scratch, how):
         notes = view.under("notes (deleted)").entries()
         empty = view.under("empty (deleted)").entries()
         tree = list_tree(view, 2)
+        kind = entry_kind(view, "notes (deleted)/x.md")
     assert (notes.absent, notes.reason, notes.entries) == (False, None, {"x.md": FILE}), notes
     assert (empty.absent, empty.reason, empty.entries) == (False, None, {}), empty
     assert_tree(tree, {"empty (deleted)": DIR, "notes (deleted)": DIR,
                        "notes (deleted)/x.md": FILE})
+    assert_kind(kind, name="notes (deleted)/x.md", folder="notes (deleted)", kind=FILE)
 
 
 #: Trees `list_tree` must answer at once whatever its depth: once a level holds no folder,
@@ -1511,20 +1781,24 @@ def test_finding_8_a_fault_on_any_route_of_a_sub_folders_listing_is_that_folders
     `refused["sub"]` is its reason, verbatim, or `sub` is `gone` when it answers absent (ENOENT
     at the step; `_drivable` says why ENOENT is driven nowhere else). Never a silently empty
     `"dir"`: the row stays and is flagged. Nothing below `sub` is listed or even opened; every
-    other folder is listed. Control: no fault, the whole tree is listed."""
+    other folder is listed. `entry_kind` below `sub` answers the same. Control: no fault, the
+    whole tree is listed."""
     _errno_tree(scratch.root)
     seam = RefusesListing(route, "sub", err=err)
     with opened(how, scratch.root, seam) as view:
         got = list_tree(view, 3)
         below_touched = seam.touched("below")
         oracle = view.under("sub").entries()
+        ek = entry_kind(view, "sub/inner.md")
     assert _check_sub_answer(got, oracle) == []
     if want == "gone":
         assert oracle.absent
         assert_tree(got, ERRNO_REST, gone=("sub",))
+        assert_kind(ek, name="sub/inner.md", folder="sub", absent=True)
     else:
         assert oracle.reason == want
         assert_tree(got, ERRNO_REST, refused={"sub": want})
+        assert_kind(ek, name="sub/inner.md", folder="sub", reason=want)
     assert not below_touched, f"list_tree went below the refused sub: {seam.seen}"
 
     with opened(how, scratch.root, RealOs()) as view:
@@ -1560,6 +1834,43 @@ def test_finding_8_every_errno_on_every_route_is_the_folders_own_answer(scratch,
 # =======================================================================================
 # (b) The I/O is exactly the specified listings'
 # =======================================================================================
+
+def _seam_tree(base: Path) -> None:
+    for rel in ("x.md", "a/x.md", "a/b/x.md"):
+        put_plain(base / rel)
+    (base / "linked").symlink_to(base / "a", target_is_directory=True)
+    os.mkfifo(base / "ff")
+
+
+#: Names whose `entry_kind` is compared with its folder's listing: present at several depths,
+#: missing leaf, missing folder, linked folder, FIFO folder, a folder itself.
+SEAM_NAMES = ["x.md", "a/x.md", "a/b/x.md", "a/b/missing.md", "missing/x.md", "linked/x.md",
+              "ff/x.md", "a/b"]
+
+
+@pytest.mark.parametrize("how", VIEWS)
+@pytest.mark.parametrize("name", SEAM_NAMES)
+def test_b_entry_kind_makes_exactly_the_io_of_its_one_listing(scratch, name, how):
+    """Through a seam that logs every `os_` call (descriptors named by what they open), the
+    calls `entry_kind(view, name)` makes EQUAL, in order, those of
+    `view.under(<name's folder>).entries()` (`view.entries()` at the top): one listing, nothing
+    before or after it, nothing opened beyond what it opens. Non-vacuity: that listing does go
+    through the seam."""
+    _seam_tree(base_of(how, scratch))
+    folder = parent_of(name)
+    log = OsCallLog()
+    with view_of(how, scratch, log) as view:
+        log.calls.clear()
+        entry_kind(view, name)
+        made = list(log.calls)
+    log = OsCallLog()
+    with view_of(how, scratch, log) as view:
+        log.calls.clear()
+        (view.under(folder) if folder else view).entries()
+        specified = list(log.calls)
+    assert specified, "the listing made no call through the seam; the check is void"
+    assert made == specified, f"entry_kind's I/O\n  {made}\nis not its listing's\n  {specified}"
+
 
 def list_tree_io(how: str, s: Scratch, depth: int, seam: Any = RealOs) -> tuple[Any, Any]:
     """`list_tree(view, depth)` through an `OsCallLog` over a fresh `seam()`: its answer, and
@@ -1654,7 +1965,7 @@ def test_b_list_tree_lists_a_refused_or_gone_folder_exactly_once_too(scratch, de
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_c_no_non_directory_entry_is_ever_handed_to_os_open(scratch, how):
-    """`list_tree` opens no file, hard link, FIFO, socket, symlink or dangling link, nor
+    """Neither helper opens a file, hard link, FIFO, socket, symlink or dangling link, nor
     anything a link reaches: no such name is ever passed to `os_.open` (kinds come from the
     listing). Non-vacuity: the folders' names do reach `os_.open`."""
     base = base_of(how, scratch)
@@ -1668,20 +1979,25 @@ def test_c_no_non_directory_entry_is_ever_handed_to_os_open(scratch, how):
     log = OsCallLog()
     with view_of(how, scratch, log) as view:
         got = in_time(lambda: list_tree(view, 3), fifo=box / "fifo-e")
+        for name in ("file-e.md", "fifo-e", "sock-e", "hard-e", "link-e", "dangling-e",
+                     "dirlink-e", "sub/deeper.md"):
+            in_time(lambda name=name: entry_kind(view, f"box/{name}"), fifo=box / "fifo-e")
     opened_names = [c[1][0] for c in log.calls if c[0] == "open" and c[1]]
     never = {"file-e.md", "fifo-e", "sock-e", "hard-e", "link-e", "dangling-e", "dirlink-e",
              "deeper.md", "inner.md"}
     assert not never & set(map(str, opened_names)), (
-        f"list_tree opened a non-directory entry: {sorted(never & set(map(str, opened_names)))}")
+        f"a helper opened a non-directory entry: {sorted(never & set(map(str, opened_names)))}")
     assert {"box", "sub"} <= set(map(str, opened_names)), opened_names
     assert listed(got)["box/fifo-e"] == OTHER
 
 
 @pytest.mark.parametrize("how", VIEWS)
-def test_c_list_tree_opens_no_fifo_at_a_leaf_or_at_a_holding_folder(scratch, how):
+def test_c_neither_helper_opens_a_fifo_at_a_leaf_or_at_a_holding_folder(scratch, how):
     """A FIFO at a leaf and a FIFO standing where a holding folder belongs are never opened to
-    read: a writer parked in each FIFO's write open stays parked while `list_tree` lists the
-    tree. Non-vacuity: opening each read end afterwards is what lets its writer go."""
+    read: a writer parked in each FIFO's write open stays parked while `entry_kind` judges the
+    leaf FIFO (`"other"`), the FIFO folder (`"other"`) and a name below it (refused, `Not a
+    directory`), and `list_tree` lists the tree. Non-vacuity: opening each read end afterwards
+    is what lets its writer go."""
     base = base_of(how, scratch)
     put_plain(base / "a" / "keep.md")
     put_plain(base / "top.md")
@@ -1689,20 +2005,31 @@ def test_c_list_tree_opens_no_fifo_at_a_leaf_or_at_a_holding_folder(scratch, how
     os.mkfifo(base / "ff")
     with view_of(how, scratch) as view, ParkedWriter(base / "a" / "leaf-fifo") as leaf, \
             ParkedWriter(base / "ff") as folder:
+        kinds = [in_time(lambda n=n: entry_kind(view, n)) for n in ("a/leaf-fifo", "ff", "ff/x")]
         got = in_time(lambda: list_tree(view, 3))
         parked = (leaf.parked(), folder.parked())
         released = (leaf.release(), folder.release())
-    assert parked == (True, True), f"list_tree opened a FIFO to read (leaf, folder): {parked}"
+    assert parked == (True, True), f"a helper opened a FIFO to read (leaf, folder): {parked}"
     assert released == (True, True), "a writer never parked in its open; the check is void"
+    assert_kind(kinds[0], name="a/leaf-fifo", folder="a", kind=OTHER)
+    assert_kind(kinds[1], name="ff", folder="", kind=OTHER)
+    assert_kind(kinds[2], name="ff/x", folder="ff", reason=NOT_A_DIR)
     assert_tree(got, {"a": DIR, "a/keep.md": FILE, "a/leaf-fifo": OTHER, "ff": OTHER,
                       "top.md": FILE})
 
 
 #: The audited tree's entries that are not folders, and what its links reach: no audit event
-#: during a `list_tree` call may name one.
+#: during a helper call may name one.
 AUDIT_NON_FOLDERS = frozenset({
     "f1.md", "pipe", "sock", "lnk", "dlnk", "hard", "f2.md", "pipe2", "f3.md", "f4.md",
     "link-target-of-lnk", "linked-dir-of-dlnk", "inner.md", "other-name-of-hard"})
+#: The names whose `entry_kind` is audited: every kind at each depth, a folder, missing ones.
+#: (None has a non-folder in a holding position: a name below a plant is the `ParkedWriter`
+#: and plant rows' business.)
+AUDIT_NAMES = ("f1.md", "pipe", "sock", "lnk", "dlnk", "hard", "d1", "missing.md", "d1/f2.md",
+               "d1/pipe2", "d1/d2", "d1/missing/x.md", "d1/d2/f3.md", "d1/d2/d3/f4.md")
+
+
 def _audit_tree(base: Path, s: Scratch) -> None:
     for rel in ("f1.md", "d1/f2.md", "d1/d2/f3.md", "d1/d2/d3/f4.md"):
         put_plain(base / rel)
@@ -1714,7 +2041,7 @@ def _audit_tree(base: Path, s: Scratch) -> None:
 
 
 def audit_violations(events: list[list[Any]]) -> list[str]:
-    """What in one `list_tree` call's audit events is not a listing's I/O. Allowed: an `open` of
+    """What in one helper call's audit events is not a listing's I/O. Allowed: an `open` of
     one folder component as an `O_PATH | O_NOFOLLOW` handle (a step), an `open` of `"."`
     `O_RDONLY | O_DIRECTORY` (the reopen for listing), and an `os.scandir` of a descriptor.
     Nothing else, and no event naming a non-folder entry (or what a link reaches)."""
@@ -1744,14 +2071,14 @@ def audit_violations(events: list[list[Any]]) -> list[str]:
 @pytest.mark.parametrize("how", VIEWS)
 def test_c_an_audit_hook_sees_only_folder_steps_reopens_and_listings(scratch, how):
     """Round 2, H2, independent of the `os_` seam: a child interpreter installs an audit hook
-    (never the test worker) and records every audit event raised during each `list_tree` call,
+    (never the test worker) and records every audit event raised during each helper call,
     whatever `os` the code reached (the seam, the real module through another module's
-    import, a private handle). For `list_tree` at depths 1-4 over every kind of entry at each
-    depth, every event is a folder step (`O_PATH | O_NOFOLLOW` open of one component), a `"."`
-    reopen (`O_RDONLY | O_DIRECTORY`) or an `os.scandir` of a descriptor, and none names a file,
-    FIFO, socket, link, hard link or link target. Non-vacuity, inside the same child: every
-    listing raised events, and `read` of a file through the same view, recorded the same way,
-    is flagged as opening it."""
+    import, a private handle). For `list_tree` at depths 1-4 and `entry_kind` of every kind of
+    entry at each depth, every event is a folder step (`O_PATH | O_NOFOLLOW` open of one
+    component), a `"."` reopen (`O_RDONLY | O_DIRECTORY`) or an `os.scandir` of a descriptor,
+    and none names a file, FIFO, socket, link, hard link or link target. Non-vacuity, inside
+    the same child: every helper call raised events, and `read` of a file through the same
+    view, recorded the same way, is flagged as opening it."""
     base = base_of(how, scratch)
     _audit_tree(base, scratch)
     warm = scratch.tmp / "warm"
@@ -1759,9 +2086,11 @@ def test_c_an_audit_hook_sees_only_folder_steps_reopens_and_listings(scratch, ho
     view = {"root": str(scratch.root), "how": how.removesuffix("-under"),
             "prefix": UNDER if how.endswith("-under") else None}
     scenarios = [*({**view, "op": "list_tree", "depth": d} for d in (1, 2, 3, 4)),
+                 *({**view, "op": "entry_kind", "name": n} for n in AUDIT_NAMES),
                  {**view, "op": "read", "name": "f1.md"}]
     warmup = [{"root": str(warm), "how": view["how"], "op": op, **extra}
-              for op, extra in (("list_tree", {"depth": 2}), ("read", {"name": "w/x.md"}))]
+              for op, extra in (("list_tree", {"depth": 2}), ("entry_kind", {"name": "w/x.md"}),
+                                ("read", {"name": "w/x.md"}))]
     rows = run_child({"mode": "audited", "scenarios": scenarios, "warmup": warmup})["rows"]
 
     *helper_rows, control = rows
@@ -1772,7 +2101,7 @@ def test_c_an_audit_hook_sees_only_folder_steps_reopens_and_listings(scratch, ho
         assert row["events"], f"{what} raised no audit event; the hook saw nothing"
         if audit_violations(row["events"]):
             problems[what] = audit_violations(row["events"])
-    assert not problems, f"list_tree made I/O beyond its listings: {problems}"
+    assert not problems, f"a helper made I/O beyond its listings: {problems}"
     assert control["answer"]["text"] == PLAIN.decode(), control
     flagged = audit_violations(control["events"])
     assert any("'f1.md'" in problem for problem in flagged), (
@@ -1784,18 +2113,19 @@ def test_c_an_audit_hook_sees_only_folder_steps_reopens_and_listings(scratch, ho
 # (d) No descriptor outlives a call
 # =======================================================================================
 
-#: Each outcome `list_tree` can answer, and the call that answers it.
+#: Each outcome a helper can answer, and the call that answers it.
 FD_OUTCOMES = ("listed", "absent-top", "refused-top", "refused-sub", "gone-sub", "closed",
+               "kind-present", "kind-absent", "kind-refused",
                *(f"refused-sub-{route}" for route in ("scandir", "midway", "entry", "fstat")),
                "removed-sub")
 
 
 @pytest.mark.parametrize("outcome", FD_OUTCOMES)
-def test_d_list_tree_leaves_no_descriptor_open(scratch, outcome):
-    """Whatever `list_tree` answers (a listed tree; an absent or refused top; a refused or gone
-    folder below; a closed root), this process holds the same number of descriptors after the
-    call as before it, and none on the tree once the view is closed. Non-vacuity: the scan sees
-    the view's own handle while it is open."""
+def test_d_neither_helper_leaves_a_descriptor_open(scratch, outcome):
+    """Whatever a helper answers (a listed tree; an absent or refused top; a refused or gone
+    folder below; a closed root; a kind, an absence, a refusal), this process holds the same
+    number of descriptors after the call as before it, and none on the tree once the view is
+    closed. Non-vacuity: the scan sees the view's own handle while it is open."""
     build_catalog(scratch.root)
     (scratch.root / "linked").symlink_to(scratch.root / "gather", target_is_directory=True)
     os_ = {"refused-sub": RefusesListing("reopen", "queries", err=errno.EIO),
@@ -1818,6 +2148,9 @@ def test_d_list_tree_leaves_no_descriptor_open(scratch, outcome):
             **{f"refused-sub-{route}": lambda: list_tree(bound, 4)
                for route in ("scandir", "midway", "entry", "fstat")},
             "closed": lambda: list_tree(bound, 3),
+            "kind-present": lambda: entry_kind(bound, "gather/queries/elastic/x.md"),
+            "kind-absent": lambda: entry_kind(bound, "gather/missing/x.md"),
+            "kind-refused": lambda: entry_kind(bound, "linked/queries"),
         }[outcome]
         count = open_fd_count()
         got = call()
@@ -1829,6 +2162,8 @@ def test_d_list_tree_leaves_no_descriptor_open(scratch, outcome):
         assert got.refused == {"gather/queries": os.strerror(errno.EIO)}, got
     elif outcome in ("gone-sub", "removed-sub"):
         assert got.gone == ("gather/queries",)
+    elif outcome == "kind-refused":
+        assert got.reason == ALIAS
 
 
 # =======================================================================================
@@ -1846,18 +2181,21 @@ def test_finding_1_a_deep_chain_is_listed_to_its_depth_under_a_low_descriptor_li
     an 1100-level chain `d/d/.../d/leaf.md`, read in a child interpreter whose soft
     `RLIMIT_NOFILE` is only `FD_MARGIN` descriptors above what it holds (it proves the limit
     bites: it cannot open even twice that many more). `list_tree(depth=3)` (bound and held)
-    lists exactly three `"dir"` levels; a view under the 1099th folder lists the last two
-    levels. No
+    lists exactly three `"dir"` levels; `entry_kind` of the deep leaf answers `"file"` and of the
+    deepest folder `"dir"`; a view under the 1099th folder lists the last two levels. No
     descriptor chain is held: each listing re-walks from the root, stepping one folder at a
     time."""
     base = tmp_path / "chain"
     base.mkdir()
+    deep = "/".join(["d"] * CHAIN)
     above = "/".join(["d"] * (CHAIN - 1))
     try:
         build_chain(base, CHAIN, "leaf.md")
         answer = run_child({"mode": "low_fd_limit", "scenarios": [
             {"root": str(base), "op": "list_tree", "depth": 3},
             {"root": str(base), "how": "held", "op": "list_tree", "depth": 3},
+            {"root": str(base), "op": "entry_kind", "name": f"{deep}/leaf.md"},
+            {"root": str(base), "op": "entry_kind", "name": deep},
             {"root": str(base), "prefix": above, "op": "list_tree", "depth": 2},
         ]})
     finally:
@@ -1867,6 +2205,9 @@ def test_finding_1_a_deep_chain_is_listed_to_its_depth_under_a_low_descriptor_li
     three = _tree({"d": DIR, "d/d": DIR, "d/d/d": DIR})
     assert answer["rows"] == [
         three, three,
+        {"name": f"{deep}/leaf.md", "folder": deep, "kind": FILE, "absent": False,
+         "reason": None},
+        {"name": deep, "folder": above, "kind": DIR, "absent": False, "reason": None},
         _tree({"d": DIR, "d/leaf.md": FILE}),
     ], [str(row)[:300] for row in answer["rows"]]
 
@@ -1891,7 +2232,7 @@ def test_finding_14_a_close_landing_mid_list_tree_never_lists_the_reused_number(
     folder of the same shape then takes. The top listing still answers the ROOT's names (it
     works off its own dup); every later folder's listing answers `Bad file descriptor`
     (`refused["fa"]`), never the decoy's `fa/decoy-only`. A later call answers the closed root's
-    refusal."""
+    refusal; `entry_kind` too."""
     root, decoy = _race_trees(tmp_path)
     spy = S.OsSpy()
     held = S.hold(root, os_=spy)
@@ -1916,6 +2257,8 @@ def test_finding_14_a_close_landing_mid_list_tree_never_lists_the_reused_number(
         assert "decoy_on" in state, "close() released nothing while the listing ran"
         assert_tree(got, {"fa": DIR, "root-marker": FILE}, refused={"fa": BAD_FD})
         assert_tree_refused(in_time(lambda: list_tree(view, 3)), BAD_FD)
+        assert_kind(entry_kind(view, "fa/root-only"), name="fa/root-only", folder="fa",
+                    reason=BAD_FD)
     finally:
         if "decoy_on" in state:
             os.close(state["decoy_on"])
@@ -1927,8 +2270,8 @@ def test_finding_14_a_close_landing_mid_list_tree_never_lists_the_reused_number(
 # =======================================================================================
 
 @pytest.mark.parametrize("how", VIEWS)
-def test_finding_9_list_tree_writes_or_creates_nothing(scratch, how):
-    """`list_tree` writes nothing: across every kind of answer (listed at every depth, a missing
+def test_finding_9_neither_helper_writes_or_creates_anything(scratch, how):
+    """Neither helper writes: across every kind of answer (listed at every depth, a missing
     folder, a missing view folder, a plant at a holding folder, a FIFO, a refused sub-folder),
     the tree's census (content, modes, link counts, mtimes) is unchanged and no missing name is
     created. The logged `os_` calls hold no write: no `mkdir`, no `O_CREAT`, `O_WRONLY` or
@@ -1944,16 +2287,19 @@ def test_finding_9_list_tree_writes_or_creates_nothing(scratch, how):
             list_tree(view, depth)
         list_tree(view.under("missing/deeper"), 2)
         list_tree(view.under("linked"), 2)
+        for name in ("missing/x.md", "a/b/c/x.md", "linked/x.md", "ff/x.md", "ff",
+                     "gather/queries/elastic/_draft/d1.md"):
+            entry_kind(view, name)
     assert census(scratch.tmp) == before
     for missing in ("missing", "a"):
-        assert not os.path.lexists(base / missing), f"list_tree created {missing}"
+        assert not os.path.lexists(base / missing), f"a helper created {missing}"
     writes = os.O_CREAT | os.O_WRONLY | os.O_RDWR
     bad = [c for c in log.calls
            if c[0] in ("mkdir", "makedirs", "unlink", "rename", "replace", "rmdir", "remove",
                        "write", "symlink", "link", "mkfifo", "mknod", "chmod")
            or (c[0] == "open" and len(c[1]) > 1 and isinstance(c[1][1], int)
                and c[1][1] & writes)]
-    assert not bad, f"list_tree made a write call: {bad}"
+    assert not bad, f"a helper made a write call: {bad}"
     assert any(c[0] == "scandir" for c in log.calls), "the log saw no listing; the check is void"
 
 
