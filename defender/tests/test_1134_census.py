@@ -489,20 +489,17 @@ ALLOW: tuple[Allowed, ...] = (
             "resolves the module's own file for the default `cwd` (the checkout); opens nothing"),
     Allowed(GIT, "_run", "load", "subprocess.CompletedProcess", N_A,
             "the return annotation: git's result type"),
+    Allowed(GIT, "<module>", "load", "subprocess.TimeoutExpired", N_A,
+            "the class a bounded git call raises, named `GitTimeout` for the facade's callers; "
+            "opens nothing"),
     Allowed(GIT, "_run", "call",
-            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input)",
+            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input, env=None if env is None else dict(env))",
             N_A, _GIT),
-    Allowed(GIT, "git_unchanged_since", "call",
-            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, check=False, env={**os.environ, 'GIT_ATTR_SOURCE': rev})",
-            N_A, _GIT + " (`diff --name-only` against the before-state's commit: the curator's "
-            "three \"still the before-state?\" checks, addendum 3 D1)"),
     Allowed(GIT, "_run_bytes", "call",
-            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, input=input, check=False)",
-            N_A, _GIT + " (the before-state's `ls-tree` / `cat-file --batch`)"),
-    Allowed(GIT, "git_worktree_files", "call",
-            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, check=False, env={**os.environ, 'GIT_INDEX_FILE': absent_index})",
-            N_A, _GIT + " (`ls-files` against an index file that does not exist: the restore's "
-            "fallback when `git status` fails)"),
+            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, input=input, check=False, env=None if env is None else dict(env), timeout=timeout)",
+            N_A, _GIT + " (raw bytes: the before-state's `ls-tree` / `cat-file --batch`, the "
+            "curator's `diff --name-only` comparison (addendum 3 D1), the restore's `ls-files` "
+            "fallback against an index file that does not exist, and #1120's `cat-file blob`)"),
     # --- the curator channels' run.py ---------------------------------------------------------
     Allowed(LESSONS_RUN, "disposition_for", "attr", "refs.is_file()", N_E,
             "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
@@ -544,7 +541,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 14, N_H: 9, B2: 17, N_A: 5}
+ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 14, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(
@@ -1322,7 +1319,7 @@ _RUN_LOCKED_CATALOG = "lead_neighbors.load_lane_catalog(deps.skills.view(), wher
 #: `_snapshot_corpus`'s return: the before-state, git's blobs at `head` (C1).
 _BEFORE_STATE = (
     "    return {path[len(prefix):]: blob\n"
-    "            for path, blob in _git.git_tree_blobs(repo_root, head, rel).items()}\n")
+    "            for path, blob in _git.git_tree_blobs(repo_root, head, rel, timeout=timeout).items()}\n")
 #: `_restore_corpus`'s two loops: the sweep of `git status`'s names, then the rewrite.
 _SWEEP = ("    for rel in made:\n        name = (repo_root / rel).relative_to(corpus_dir).as_posix()\n")
 #: `_restore_corpus`'s rewrite of each before-state file git does not find unchanged.
@@ -1394,7 +1391,7 @@ REGRESSIONS: dict[str, Regression] = {
     "s5-H4-s5v3-K02-before-state-bytes-from-the-worktree": Regression(DRAIN, (
         (_BEFORE_STATE,
          "    return {path[len(prefix):]: (repo_root / path).read_bytes()\n"
-         "            for path in _git.git_tree_blobs(repo_root, head, rel)\n"
+         "            for path in _git.git_tree_blobs(repo_root, head, rel, timeout=timeout)\n"
          "            if os.lstat(repo_root / path).st_nlink == 1}\n", 1),
     ), (("_snapshot_corpus", "attr", "(repo_root / path).read_bytes()", 1),
         ("_snapshot_corpus", "call", "os.lstat(repo_root / path)", 1))),
@@ -1726,10 +1723,12 @@ REGRESSIONS: dict[str, Regression] = {
     # --- v2 step 7's adversary, third pass (scratchpad s7v2-adv-patches/) ------------------------
     # 02 / 02b: the `TreeFor` slot handed through a `**` mapping, so the keyword is never spelled.
     "s7v2-02-put-back-tree-for-by-double-star": Regression(DRAIN, (
-        ("_put_back(cfg.repo_root, rel, tree_for=cfg.tree_for)",
-         "_put_back(cfg.repo_root, rel, **{\"tree_for\": lambda _p: None})", 1),
+        ("_put_back(cfg.repo_root, rel, tree_for=cfg.tree_for, timeout=cfg.git_timeout)",
+         "_put_back(cfg.repo_root, rel, **{\"tree_for\": lambda _p: None}, timeout=cfg.git_timeout)",
+         1),
     ), (("_revert_non_md_strays", "tree_for",
-         "_put_back(cfg.repo_root, rel, **{'tree_for': lambda _p: None})", 1),)),
+         "_put_back(cfg.repo_root, rel, **{'tree_for': lambda _p: None}, timeout=cfg.git_timeout)",
+         1),)),
     # 02b's site is gone: addendum 3 (D1) takes `tree_for` off the settle's comparison (git
     # compares), so no `TreeFor` slot is left there to evade (NOT_CENSUS_SHAPED). Its plain-read
     # shape is the addendum-3 rows below.
@@ -1762,10 +1761,10 @@ REGRESSIONS: dict[str, Regression] = {
     ), (("_on_disk", "call", "os.walk(corpus_dir)", 1), ("_on_disk", "call", "os.lstat(at)", 1))),
     # A7: `_git.py` revives "absent" paths it finds on disk, by an `os` lookup through `getattr`.
     "s5v3-A7-git-py-probes-the-disk-through-getattr": Regression(GIT, (
-        ("    if present:\n        git([\"add\", \"--\", *present], cwd=cwd)\n",
+        ("    if present:\n        git([\"add\", \"--\", *present], cwd=cwd, env=env)\n",
          "    revived = [p for p in absent if _on_disk(cwd, p)]\n"
          "    present = [*present, *revived]\n"
-         "    if present:\n        git([\"add\", \"--\", *present], cwd=cwd)\n", 1),
+         "    if present:\n        git([\"add\", \"--\", *present], cwd=cwd, env=env)\n", 1),
         ("def git_fetch(cwd: Path) -> None:\n",
          "_PROBE = \"lstat\"\n\n\ndef _on_disk(cwd: Path, path: str) -> bool:\n    try:\n"
          "        getattr(os, _PROBE)(f\"{cwd}/{path}\")\n    except OSError:\n"
@@ -1798,15 +1797,14 @@ REGRESSIONS: dict[str, Regression] = {
         (_REWRITE,
          "        if not os.path.isdir(corpus_dir):\n            continue\n" + _REWRITE, 1),
     ), (("_restore_corpus", "call", "os.path.isdir(corpus_dir)", 1),)),
-    # K13: the fallback's empty index written by a second git child (one more `subprocess` call
-    # on the allow-listed function: the count catches it).
+    # K13: the fallback's empty index written by a second git child (a `subprocess` call in a
+    # function the allow-list grants none: its git runs through `_run_bytes`).
     "s5v3-K13-fallback-writes-an-index": Regression(GIT, (
-        ("    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n"
-         "                          env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n",
+        ("    out = _run_bytes(args, cwd=cwd, env={**os.environ, \"GIT_INDEX_FILE\": absent_index},\n",
          "    subprocess.run([\"git\", \"read-tree\", \"--empty\"], cwd=cwd, check=False,\n"
          "                   capture_output=True, env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n"
-         "    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n"
-         "                          env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n", 1),
+         "    out = _run_bytes(args, cwd=cwd, env={**os.environ, \"GIT_INDEX_FILE\": absent_index},\n",
+         1),
     ), (("git_worktree_files", "call",
          "subprocess.run(['git', 'read-tree', '--empty'], cwd=cwd, check=False, capture_output=True, "
          "env={**os.environ, 'GIT_INDEX_FILE': absent_index})", 1),)),
@@ -1910,7 +1908,7 @@ REGRESSIONS: dict[str, Regression] = {
     # --- #1134 addendum 3 (D1): a "still the before-state?" check that reads the worktree by
     # --- its plain path instead of asking git (each a plain read the census flags) ------------
     "a3-settle-compares-a-plain-read": Regression(DRAIN, (
-        ("    return rel in _git.git_unchanged_since(repo_root, \"HEAD\", rel)\n",
+        ("    return rel in _git.git_unchanged_since(repo_root, \"HEAD\", rel, timeout=timeout)\n",
          "    head = _git.git_show_file(repo_root, \"HEAD\", rel)\n"
          "    return head is not None and (repo_root / rel).read_bytes() == head.encode()\n", 1),
     ), (("_byte_identical_to_head", "attr", "(repo_root / rel).read_bytes()", 1),)),
@@ -1920,8 +1918,8 @@ REGRESSIONS: dict[str, Regression] = {
          "        if not same:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n", 1),
     ), (("_restore_unapproved_files", "call", "open(cfg.corpus_dir / name, 'rb')", 1),)),
     "a3-unchanged-names-filtered-by-a-text-read": Regression(DRAIN, (
-        ("                     for path in _git.git_unchanged_since(repo_root, rev, rel))\n",
-         "                     for path in _git.git_unchanged_since(repo_root, rev, rel)\n"
+        ("                     for path in _git.git_unchanged_since(repo_root, rev, rel, timeout=timeout))\n",
+         "                     for path in _git.git_unchanged_since(repo_root, rev, rel, timeout=timeout)\n"
          "                     if (repo_root / path).read_text(encoding='utf-8'))\n", 1),
     ), (("_unchanged_names", "attr", "(repo_root / path).read_text(encoding='utf-8')", 1),)),
 }
