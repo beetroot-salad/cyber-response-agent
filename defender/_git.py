@@ -41,6 +41,13 @@ def env_for_cwd() -> dict[str, str]:
 GitTimeout = subprocess.TimeoutExpired
 
 
+def unstarted(e: OSError) -> str:
+    """Why git did not start, for a caller that caught the `OSError` a git call raises then:
+    absent from PATH, or there but not runnable (no execute permission)."""
+    return ("git is not available on PATH" if isinstance(e, FileNotFoundError)
+            else "git cannot be run")
+
+
 class GitError(RuntimeError):
 
     def __init__(self, args: Sequence[str], returncode: int, stderr: str) -> None:
