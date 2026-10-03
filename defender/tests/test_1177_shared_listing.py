@@ -601,8 +601,10 @@ def test_a_folder_that_dies_mid_scan_and_then_faults_is_absent_to_both_readers(
 
 
 def _calls_named(node: ast.AST, attr: str) -> list[ast.Call]:
+    """Calls of a method spelled `attr` on any value: `self._os.scandir`, `bound._listing`."""
     return [n for n in ast.walk(node) if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Attribute) and n.func.attr == attr]
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == attr]  # lint-ast-resolve: ok — duck-typed methods on a value (the `os_` seam's `scandir`, `Bound._listing`), which `_astlib` answers None for; the method's spelling is the fact pinned
 
 
 def test_both_readers_reach_the_one_directory_scan_in_io():
