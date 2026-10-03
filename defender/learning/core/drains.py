@@ -506,16 +506,15 @@ def _drain_box_request(
     wt: Path, batch_id: str, label: DrainLabel, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's mounts: ro over the whole worktree leaf (it carries `<wt>/defender` and
-    is both drain roles' cwd_anchor), rw over exactly the leaf's
-    `LoopPaths.drain_writable_trees(label)`, in its order, each at its own path. Nothing
-    outside the leaf.
+    is both drain roles' cwd_anchor), rw over exactly `label.writable_trees` of the leaf's
+    paths, in its order, each at its own path. Nothing outside the leaf.
 
     The rw list is taken whole from its owner, never derived here, so the box's writable
-    mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). An
-    unrecognized label therefore gets no writable tree."""
+    mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). A
+    non-member raises here rather than getting a box."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
-    for d in wt_paths.drain_writable_trees(label):
+    for d in label.writable_trees(wt_paths):
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(
         name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={},
@@ -544,7 +543,7 @@ def _record_pending_delivery(
     record = _pending_delivery_record(paths, branch, batch_id)
     guarded_mkdir(record.parent, base=paths.state_root)
     rewrite_marker(record, {
-        "branch": branch.branch_name(batch_id), "batch_id": batch_id, "label": label.value,
+        "branch": branch.branch_name(batch_id), "batch_id": batch_id, "label": str(label),
         "reason": reason, "at": now_iso(),
     })
 
@@ -673,7 +672,11 @@ def _run_worktree_batch(
     `do_work` may return a `BatchDisposition` (the lead-author lane does; the lessons lane
     returns `None`), applied once the tree has passed the scrub. A push or PR that then fails
     is recorded for next tick's delivery, not re-served. On exits before the apply (taint, box
-    fault, interrupt) the disposition is dropped and the log says what stays for reclaim."""
+    fault, interrupt) the disposition is dropped and the log says what stays for reclaim.
+
+    The label is asked for its trees first: a non-member raises before `_open_batch`, so no
+    delivery, worktree, box, held root or record ever exists for it (#1179 O1')."""
+    label.writable_trees(paths)
     opened = _open_batch(paths, branch, label=label, has_work=has_work)
     if opened is None:
         return 0

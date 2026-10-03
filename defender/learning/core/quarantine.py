@@ -72,7 +72,7 @@ def _manifest(
     return {
         "batch_id": batch_id,
         "branch": branch,
-        "label": label.value,
+        "label": str(label),
         "worktree": str(wt),
         "archive": archive.name,
         "quarantined_at": now_iso(),

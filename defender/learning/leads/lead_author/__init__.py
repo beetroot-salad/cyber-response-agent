@@ -239,7 +239,7 @@ def run(
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
-        if deps.paths.skills_dir not in deps.paths.drain_writable_trees(label):
+        if deps.paths.skills_dir not in label.writable_trees(deps.paths):
             raise LeadAuthorError(
                 f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
             )

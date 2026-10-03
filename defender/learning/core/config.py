@@ -43,21 +43,43 @@ def provenance_field(id_key: str) -> str:
 
 
 class DrainLabel(enum.Enum):
-    """The drain lane labels (#1134, owner decision 2026-09-29; members since #1179). Each lane
-    passes its own to `_run_worktree_batch`, and `LoopPaths.drain_writable_trees` keys the mount
-    list on it.
+    """The drain lanes (#1134, owner decision 2026-09-29; members since #1179). Each lane passes
+    its own to `_run_worktree_batch`, and the member answers its own writable trees.
 
-    A plain `Enum`, never a `str` mixin: no string equals a member, so a label spelled as a
-    string anywhere (a literal, a value built from pieces, a second table keyed by strings)
-    grants nothing. The value is the written form (the pending-delivery record, the quarantine
-    manifest write `.value`); `str()` is the display form, so a log line's `{label}` shows it."""
+    Only a member names a lane (#1179 amendment, O1'): the lane's behaviour lives on the member,
+    so anything else (a string, a member's name, a look-alike enum, an object carrying a value)
+    has no `writable_trees` and raises at its first use, rather than every user of a label
+    coping with a non-member on its own. A plain `Enum`, never a `str` mixin, so no string
+    stands in for one. `str()` is both the display form (a log line's `{label}`) and the written
+    form (the pending-delivery record, the quarantine manifest)."""
 
     AUTHOR = "author_drain"
     LEAD_AUTHOR = "lead_author_drain"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
 
     def __str__(self) -> str:
-        """@owns DrainLabel display form — the value, never `DrainLabel.AUTHOR`."""
+        """@owns DrainLabel display and written form — the value, never `DrainLabel.AUTHOR`."""
         return self.value
+
+    def writable_trees(self, paths: DefenderPaths) -> tuple[Path, ...]:
+        """@owns drain_writable_trees
+
+        The trees under `paths.repo_root` that this lane's drain box mounts read-write, each a
+        mount point in its own right: both lessons corpora for the author lane (its two
+        curators share one box), the whole skills tree for the lead-author lane (the catalog,
+        `skills/gather/queries/`, lies inside it). No two members' trees nest.
+
+        Lexical: read off `paths` as given, nothing resolved or looked up on disk.
+        `_drain_box_request` mounts exactly this list and `lane_trees.open_drain_trees` holds
+        exactly it, so a tree cannot be mounted writable without a held root, nor a root held
+        anywhere but a mount point (#1134 O4). Neither re-derives it."""
+        return tuple(getattr(paths, attr) for attr in _WRITABLE_TREE_ATTRS[self])
+
+
+#: Each lane's writable trees, by the `DefenderPaths` attribute that spells each, in order.
+_WRITABLE_TREE_ATTRS: dict[DrainLabel, tuple[str, ...]] = {
+    DrainLabel.AUTHOR: ("lessons_dir", "lessons_questioner_dir"),
+    DrainLabel.LEAD_AUTHOR: ("skills_dir",),
+}
 
 
 #: Each lane's label, by the name its call sites and the census anchors spell.
@@ -86,28 +108,6 @@ class LoopPaths(DefenderPaths):
 
     def with_repo_root(self, repo_root: Path) -> LoopPaths:
         return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
-
-    def drain_writable_trees(self, label: DrainLabel) -> tuple[Path, ...]:
-        """@owns drain_writable_trees
-
-        The trees under `repo_root` that a drain box of lane `label` mounts read-write, each a
-        mount point in its own right: both lessons corpora for `AUTHOR_DRAIN_LABEL` (its two
-        curators share one box), the whole skills tree for `LEAD_AUTHOR_DRAIN_LABEL` (the
-        catalog, `skills/gather/queries/`, lies inside it), and nothing for any other value.
-        Anything but a `DrainLabel` member, the members' own values as strings included, gets
-        no writable tree rather than a default: the safe answer for a mount grant. No two
-        members nest.
-
-        Lexical: the paths are spelled off `self.repo_root` as given, nothing is resolved or
-        looked up on disk. `_drain_box_request` mounts exactly this list and
-        `lane_trees.open_drain_trees` holds exactly it, so a tree cannot be mounted writable
-        without a held root, nor a root held anywhere but a mount point (#1134 O4). Neither
-        re-derives it."""
-        if label is DrainLabel.AUTHOR:
-            return (self.lessons_dir, self.lessons_questioner_dir)
-        if label is DrainLabel.LEAD_AUTHOR:
-            return (self.skills_dir,)
-        return ()
 
     @property
     def runs_dir(self) -> Path:
