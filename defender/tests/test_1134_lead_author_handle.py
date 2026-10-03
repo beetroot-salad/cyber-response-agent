@@ -1523,7 +1523,12 @@ def test_trees_the_mount_list_grants_skills_to_are_taken_whatever_the_label(tmp_
         assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, "no_such_drain"])
+#: Labels that grant no `skills/`: the author member, an unknown string, and the lead lane's own
+#: value as a bare string (#1179: a string is never a label, however it is spelled).
+NO_SKILLS_LABELS = [AUTHOR_DRAIN_LABEL, "no_such_drain", "lead_author_drain"]
+
+
+@pytest.mark.parametrize("label", NO_SKILLS_LABELS)
 def test_run_consults_the_label_it_is_given(tmp_path: Path, label: str):
     """`run(label=...)` with deps: refused unless the label's mount list holds the deps'
     `skills_dir` (the label is consulted on this path too), before the queue lock or any of the
@@ -1559,11 +1564,11 @@ def test_run_without_deps_refuses_a_lead_mount_that_is_not_skills(tmp_path: Path
     assert not (run_dir / "lead_author").exists()
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, "no_such_drain"])
+@pytest.mark.parametrize("label", NO_SKILLS_LABELS)
 def test_the_drain_seams_consult_the_label(tmp_path: Path, label: str):
     """`_invoke_lead_author` / `_invoke_pitfalls` open the trees of the label they are handed:
-    the author drain's (its two corpora present in the leaf) or an unknown one (nothing held)
-    holds no `skills/`, so each refuses with `LeadAuthorError` and serves nothing. The lead
+    the author drain's (its two corpora present in the leaf), an unknown one, or the lead lane's
+    value as a bare string (nothing held) holds no `skills/`, so each refuses with `LeadAuthorError` and serves nothing. The lead
     label's control is in `test_the_seams_and_entry_points_refuse_...`."""
     paths, repo = _lifetime_paths(tmp_path)
     _lessons(paths)

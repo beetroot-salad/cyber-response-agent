@@ -366,9 +366,11 @@ def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_
     w = world(tmp_path)
     _held_queue(w.paths)
 
-    with pytest.raises(FatalConfigError):
-        drains._maybe_trigger_author(*_trigger_args(w.paths), label="no_such_drain")
-    assert "held_reason" not in pending(w.paths.findings)[0]
+    # The author lane's own value as a bare string is no label either (#1179).
+    for unknown in ("no_such_drain", "author_drain"):
+        with pytest.raises(FatalConfigError):
+            drains._maybe_trigger_author(*_trigger_args(w.paths), label=unknown)
+        assert "held_reason" not in pending(w.paths.findings)[0]
 
     paths = GrantsOnlyAnotherLane(repo_root=w.repo, state_dir=tmp_path / "state")
     drains._maybe_trigger_author(*_trigger_args(paths), label="other_lane")
