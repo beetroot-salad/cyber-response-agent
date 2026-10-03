@@ -50,7 +50,9 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
+import shutil
 import stat
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -414,3 +416,123 @@ def test_owned_tree_puts_every_mode_back_and_removes_the_tree(tmp_path, modes):
         st = os.stat(root / "P", follow_symlinks=False)
         assert stat.S_IMODE(st.st_mode) == modes["P"], oct(st.st_mode)
     assert not os.path.lexists(top), f"owned_tree left {sorted(os.listdir(top))} behind"
+
+
+# =======================================================================================
+# Addendum 3, D2, through `entries()` alone (the move's adversary, 2026-10-03)
+# =======================================================================================
+#
+# When B2's helpers moved to their first consumers, step 1 kept only `entries()`'s rows, and a
+# scoped adversary greened them with dead checks that the helper rows had been catching for
+# them. These rows pin each of those through `entries()` itself, on every step of the stack.
+
+def _entries_state(got: Any) -> tuple[Any, ...]:
+    return got.name, got.absent, got.reason, got.entries
+
+
+@pytest.mark.parametrize("how", VIEWS)
+def test_a3_a_live_folder_holding_a_folder_counted_one_link_is_present(scratch, how):
+    """The dead mark is `st_nlink == 0` and nothing else: on a filesystem counting 1 link for
+    every live directory (btrfs), a folder that HOLDS a folder is still present, and so is its
+    parent (the classic `2 + subfolders` count would call both dead). Through a seam reporting
+    1 link for every listed folder: `full` (holding `inner/` and `x.md`) lists both, the view's
+    own folder lists `full`. Non-vacuity: each listing asked that `fstat` after its scan.
+    Control: the same seam reporting 0 links makes `full` absent."""
+    base = base_of(how, scratch)
+    put_plain(base / "full" / "x.md")
+    (base / "full" / "inner").mkdir()
+    spelled = f"{UNDER}/full" if how.endswith("-under") else "full"
+    one = ReportsLinks(1, 1)
+    with view_of(how, scratch, one) as view:
+        full, top = view.under("full").entries(), view.entries()
+    assert _entries_state(full) == (spelled, False, None, {"inner": DIR, "x.md": FILE}), full
+    assert (top.absent, top.reason, (top.entries or {}).get("full")) == (False, None, DIR), top
+    assert one.asked_after >= 2, one.asked_after
+
+    with view_of(how, scratch, ReportsLinks(0, 0)) as view:
+        assert _entries_state(view.under("full").entries()) == (spelled, True, None, None)
+
+
+@pytest.mark.parametrize("how", BINDERS)
+@pytest.mark.parametrize("folder", ["empty", "full", ""], ids=["empty", "full", "the-root"])
+def test_a3_a_fault_on_the_dead_checks_fstat_is_a_refusal_for_any_folder(scratch, folder, how):
+    """The `fstat` route faulted (EIO) on an EMPTY folder, a full one, and the view's own folder
+    (the root): each is that folder's own refusal, named as the caller spelled it, with the
+    errno's words; never absent, never present (an empty listing is no excuse to skip the
+    check, and the root is no exception). Controls: with no fault each folder lists."""
+    root_name = os.path.basename(scratch.root)
+    put_plain(scratch.root / "full" / "x.md")
+    (scratch.root / "empty").mkdir()
+    rows = {"empty": {}, "full": {"x.md": FILE}, "": {"empty": DIR, "full": DIR}}[folder]
+    seam = RefusesListing("fstat", folder or root_name, err=errno.EIO)
+    with opened(how, scratch.root, seam) as view:
+        got = (view.under(folder) if folder else view).entries()
+    assert _entries_state(got) == (folder, False, os.strerror(errno.EIO), None), got
+    with opened(how, scratch.root, RealOs()) as view:
+        assert _entries_state((view.under(folder) if folder else view).entries()) == (
+            folder, False, None, rows)
+
+
+#: Every way a listing answers absent through the dead check: a REAL removal at each moment
+#: of the folder's own listing, a removed held root, and a link count of 0.
+ABSENT_ANSWERS = (*(f"removed-{moment}" for moment in REMOVAL_MOMENTS), "removed-root",
+                  "zero-links")
+
+
+@pytest.mark.parametrize("answer", ABSENT_ANSWERS)
+def test_a3_no_descriptor_outlives_an_absent_answer(scratch, answer):
+    """Whatever makes `entries()` answer absent, this process holds the same number of
+    descriptors right after the call as before it (one held until the view closes would show
+    here, though `descriptors_under` after the close could not see it), and none on the tree
+    once the view is closed; the answer is absent, named as spelled. Control: a live listing
+    through the real `os` leaves the count unchanged too."""
+    put_plain(scratch.root / "sub" / "inner.md")
+    seam = {"removed-root": RealOs(), "zero-links": ReportsLinks(0, 0)}.get(answer) or (
+        ListingFaults(remove={"sub"}, moment=answer.removeprefix("removed-")))
+    name = "" if answer == "removed-root" else "sub"
+    bound = _io.bind(scratch.root, os_=seam)
+    try:
+        if answer == "removed-root":
+            shutil.rmtree(scratch.root)
+        count = open_fd_count()
+        got = (bound.under(name) if name else bound).entries()
+        assert open_fd_count() == count, f"the {answer} listing changed the descriptor count"
+    finally:
+        bound.close()
+    assert descriptors_under(scratch.tmp) == [], f"the {answer} listing left a descriptor open"
+    assert _entries_state(got) == (name, True, None, None), got
+
+    put_plain(scratch.root / "sub" / "inner.md")
+    with _io.bind(scratch.root) as live:
+        count = open_fd_count()
+        control = live.under("sub").entries()
+        assert open_fd_count() == count
+    assert _entries_state(control) == ("sub", False, None, {"inner.md": FILE})
+
+
+@pytest.mark.parametrize("how", VIEWS)
+def test_a3_through_the_real_os_a_folder_removed_before_its_scan_is_absent(scratch, how):
+    """D2 with no seam at all: the view is bound over the real `os` module itself, and `sub` is
+    REALLY removed the moment its listing calls `os.scandir` (a profile hook on that C call, set
+    only around the one `entries()` call and always reset). `under("sub").entries()` answers
+    absent, never present and empty. Non-vacuity: the hook fired and `sub` is gone. Control:
+    the same call with no hook lists `sub`."""
+    base = base_of(how, scratch)
+    put_plain(base / "sub" / "inner.md")
+    with view_of(how, scratch) as view:
+        assert view.under("sub").entries().entries == {"inner.md": FILE}
+        fired: list[str] = []
+
+        def remove_on_scandir(_frame: Any, event: str, arg: Any) -> None:
+            if event == "c_call" and getattr(arg, "__name__", None) == "scandir" and not fired:
+                fired.append("scandir")
+                shutil.rmtree(base / "sub")
+
+        sys.setprofile(remove_on_scandir)
+        try:
+            got = view.under("sub").entries()
+        finally:
+            sys.setprofile(None)
+    assert fired == ["scandir"], "the listing never called os.scandir; the row is void"
+    assert not os.path.lexists(base / "sub")
+    assert (got.absent, got.reason, got.entries) == (True, None, None), got
