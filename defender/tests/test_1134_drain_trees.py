@@ -115,10 +115,12 @@ Red before #1134 step 2: `defender/learning/core/lane_trees.py` does not exist, 
 fails at import. An adversary pass against v2's first version of this file greened five holes;
 the rows that close each say so: H1 (`mount` or `tree_for` of a mount point re-resolving the
 mount by name), H2 (`tree_for` peeking at the disk), H3 (cleanup skipping a `BaseException`),
-H4 (nesting judged only between neighbours), H5 (mounts held in sorted order). The kind and
-walk rows were retargeted from B2's helpers onto `entries()` when the helpers moved to their
-first consumers (2026-10-03); each keeps its three assertions (nothing reached, the plant left
-in place, the control exact) and the swapped-mount rows still list through the held roots.
+H4 (nesting judged only between neighbours), H5 (mounts held in sorted order). v3's scoped
+adversary pass over the retargeted rows greened one more, closed by its own row: v3-H1 (each
+mount held over its `realpath`, not its spelling). The kind and walk rows were retargeted from
+B2's helpers onto `entries()` when the helpers moved to their first consumers (2026-10-03);
+each keeps its three assertions (nothing reached, the plant left in place, the control exact)
+and the swapped-mount rows still list through the held roots.
 """
 from __future__ import annotations
 
@@ -851,6 +853,29 @@ def test_tree_for_is_lexical_no_link_moves_a_path_into_or_out_of_a_mount(drain):
 # =======================================================================================
 # mount(): the held root of an exact mount point, and nothing else
 # =======================================================================================
+
+def test_a_mount_spelled_through_a_link_is_held_by_that_spelling_through_the_os_given(drain):
+    """Each mount is opened by path exactly as spelled, never by a spelling resolved first:
+    with the mounts spelled through a link to the working copy, the `os_` given sees one open
+    by path per mount, of the linked spelling, in order (v3 step 2's adversary, H1: a holder
+    that `realpath`s each mount before holding it greened every row whose mounts are
+    `tmp_path`, already resolved). Through those handles a write lands in the real folder the
+    link reaches, its folder's listing sees it, and nothing more is opened by path."""
+    d = drain
+    alias = d.tmp / "wc-alias"
+    alias.symlink_to(d.wc, target_is_directory=True)
+    aliased = tuple(alias / m.relative_to(d.wc) for m in d.mounts)
+    spy = S.OsSpy()
+    with DrainTrees.open(aliased, os_=spy) as trees:
+        assert [(o.path, o.dir_fd) for o in spy.opens] == [(str(m), None) for m in aliased]
+        for label, m in zip(LABELS, aliased, strict=True):
+            held, name = trees.tree_for(m / RECORD[label])
+            held.write(name, PAYLOAD, mode="replace")
+            assert_landed(d, label)
+            assert do_verb(held, name, "entries").entries[leaf(name)] == "file"
+        by_path = [o.path for o in spy.opens if o.dir_fd is None]
+        assert by_path == [str(m) for m in aliased], f"a verb re-opened a root: {by_path}"
+
 
 def test_mount_answers_the_held_root_of_an_exact_mount_point_and_nothing_else(drain, trees):
     """For each mount point, however `pathlib` spells it: the `Held` `tree_for` hands out for
