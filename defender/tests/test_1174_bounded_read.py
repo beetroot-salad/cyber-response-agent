@@ -193,6 +193,9 @@ def assert_refused_vanished(reader: str, root: Path, outcome: tuple[str, Any],
                             missing: Any) -> None:
     kind, payload = outcome
     assert kind == "refused", f"{reader}: a read-phase ENOENT answered {outcome}, not a refusal"
+    assert "vanished" in str(payload), f"{reader}: the read-phase reason is not its own: {payload!r}"
+    assert ABSENT_TEXT not in str(payload), (
+        f"{reader}: the read-phase reason reuses the absent words: {payload!r}")
     if reader in FOLDS_ABSENCE:
         assert payload != missing, (
             f"{reader}: the read-phase refusal reads exactly as absent: {payload!r}")
@@ -253,6 +256,7 @@ def test_o1_a_file_growing_past_the_limit_while_read_is_refused(root, reader):
     kind, reason = read(reader, root, os_=FaultOs(read_fault=endless))
     assert open_fds() == before, f"{reader}: a descriptor leaked"
     assert kind == "refused", f"{reader}: {kind} {str(reason)[:80]!r}"
+    assert_path_free(reason, root)
     assert endless.handed <= _io.READ_LIMIT + 1 * MiB, (
         f"{reader}: took in {endless.handed} bytes before refusing — the running bound is "
         "looser than the limit")
@@ -337,13 +341,27 @@ def test_o3_read_plain_raises_a_non_filenotfound_oserror_for_a_read_phase_enoent
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["\ud800", "a/\ud800", "\udfff.md"])
+#: Lone surrogates `os.fsencode` cannot encode: everything in U+D800..U+DFFF except the
+#: surrogateescape range U+DC80..U+DCFF, which spells an undecodable byte.
+UNENCODABLE = ["\ud800", "\udbff", "\udc00", "\udc7f", "\udd00", "\udfff"]
+SURROGATEESCAPE = ["\udc80", "\udcff"]
+
+
+def test_o4_the_samples_are_what_fsencode_says():
+    for ch in UNENCODABLE:
+        with pytest.raises(UnicodeEncodeError):
+            os.fsencode(ch)
+    for ch in SURROGATEESCAPE:
+        assert len(os.fsencode(ch)) == 1
+
+
+@pytest.mark.parametrize("name", [*UNENCODABLE, "a/\ud800", "\udfff.md", "x\udc00y"])
 def test_o4_parse_name_refuses_a_lone_surrogate(name):
     with pytest.raises(ValueError, match="not a valid relative name"):
         _io._parse_name(name)
 
 
-@pytest.mark.parametrize("name", ["\ud800", "dir/\ud800"])
+@pytest.mark.parametrize("name", [*UNENCODABLE, "dir/\ud800"])
 def test_o4_bound_and_rooted_refuse_an_unencodable_name_before_any_io(root, name):
     rec = FaultOs()
     with _io.bind(root, os_=rec) as b:
@@ -357,25 +375,47 @@ def test_o4_bound_and_rooted_refuse_an_unencodable_name_before_any_io(root, name
     assert rec2.calls == [], f"I/O before the name was refused: {rec2.calls}"
 
 
-def test_o4_control_a_surrogateescape_name_is_still_a_name(root):
-    """`\\udc80` is an undecodable byte (0x80) as `os.fsdecode` spells it — a real name."""
-    _io._parse_name("\udc80")
+@pytest.mark.parametrize("name", SURROGATEESCAPE)
+def test_o4_control_a_surrogateescape_name_is_still_a_name(root, name):
+    """`\\udc80`..`\\udcff` are undecodable bytes as `os.fsdecode` spells them — real names,
+    for the name readers and the path readers alike."""
+    _io._parse_name(name)
     with _io.bind(root) as b:
-        assert b.read("\udc80").absent
-    (root / os.fsdecode(b"\x80")).write_text("x")
+        assert b.read(name).absent
+    (root / name).write_text("x")
     with _io.bind(root) as b:
-        assert b.read("\udc80").text == "x"
+        assert b.read(name).text == "x"
+    assert _io.rooted_read(root, name) == ("x", None)
+    assert _io.read_plain(root / name) == "x"
+    assert _io.read_guarded(root / name) == ("x", None)
+    assert _io.read_plain_bytes(root / name) == b"x"
 
 
-@pytest.mark.parametrize("reader", ["read_plain", "read_plain_bytes", "read_guarded",
-                                    "read_bytes_guarded"])
-def test_o4_a_path_reader_refuses_an_unencodable_path_as_a_read_error(root, reader):
+PATH_READERS = ["read_plain", "read_plain_bytes", "read_guarded", "read_bytes_guarded"]
+
+
+@pytest.mark.parametrize("reader", PATH_READERS)
+@pytest.mark.parametrize("ch", UNENCODABLE)
+def test_o4_a_path_reader_refuses_an_unencodable_path_as_a_read_error(root, reader, ch):
     """`read_guarded` promises `(None, reason)`; a `UnicodeEncodeError` (not a
-    `TEXT_READ_ERRORS` member) must not escape it, nor `read_plain`'s contract."""
+    `TEXT_READ_ERRORS` member) must not escape it, nor `read_plain`'s contract. The refusal
+    names no path."""
     rec = FaultOs()
-    kind, reason = read(reader, root, name="x\ud800", os_=rec)
+    kind, reason = read(reader, root, name=f"x{ch}", os_=rec)
     assert kind == "refused", (reader, kind, reason)
     assert "open" not in rec.calls, f"{reader}: opened before refusing: {rec.calls}"
+    assert_path_free(reason, root)
+
+
+@pytest.mark.parametrize("reader", PATH_READERS)
+def test_o4_control_a_path_reader_opens_through_its_seam(root, reader):
+    """The positive control for the row above: on a good path the same seam does see the
+    open, so "no open" there means refused first, not a seam the open never crosses."""
+    (root / NAME).write_text("payload\n")
+    rec = FaultOs()
+    kind, _value = read(reader, root, os_=rec)
+    assert kind == "ok"
+    assert "open" in rec.calls, f"{reader}: the open did not go through os_: {rec.calls}"
 
 
 # ---------------------------------------------------------------------------------------
@@ -411,6 +451,27 @@ def test_o5_a_multi_chunk_mixed_newline_file_reads_as_read_text_would(root, read
     (root / NAME).write_bytes(data)
     kind, value = read(reader, root)
     assert kind == "ok", (reader, kind)
+    if READERS[reader][1]:
+        assert value == data
+    else:
+        assert value == (root / NAME).read_text(encoding="utf-8")
+
+
+def trickle(k: int) -> Callable[[int, int], bytes]:
+    """A descriptor that hands out at most `k` bytes per `read` — a short read is legal at any
+    size, so a reader must loop and stitch whatever the chunking."""
+    return lambda fd, n: os.read(fd, min(n, k))
+
+
+@pytest.mark.parametrize("reader", READERS)
+@pytest.mark.parametrize("k", [7, 4093])
+def test_o5_short_reads_of_any_size_stitch_to_the_same_answer(root, reader, k):
+    """Kills per-chunk decoding or newline translation (a `\\r\\n` or a two-byte character
+    split across two reads) and a single big `read` with no loop."""
+    data = _mixed_content()
+    (root / NAME).write_bytes(data)
+    kind, value = read(reader, root, os_=FaultOs(read_fault=trickle(k)))
+    assert kind == "ok", (reader, kind, str(value)[:80])
     if READERS[reader][1]:
         assert value == data
     else:
@@ -497,6 +558,71 @@ class _NoDataYet:
 
     def read(self, *_a: Any) -> None:
         return None
+
+
+class _Grows:
+    """A rewrite handle over a real small file whose reads hand out far more than its `fstat`
+    said — `flock` is advisory, so a writer that ignores it can grow the file under the lock.
+    `asked` records each `read` size (`None` for an unbounded `read()`)."""
+
+    def __init__(self, f: Any) -> None:
+        self._f = f
+        self.asked: list[int | None] = []
+
+    def fileno(self) -> int:
+        return self._f.fileno()
+
+    def read(self, n: int | None = None, /) -> str:
+        self.asked.append(n)
+        size = _io.READ_LIMIT + 1 * MiB if n is None or n < 0 else min(n, _io.READ_LIMIT + MiB)
+        return "a" * size
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._f, name)
+
+
+def test_m1b_a_rewrite_read_growing_past_the_limit_is_refused(tmp_path):
+    p = tmp_path / "f"
+    p.write_text("{}")
+    with open(p, "r+", encoding="utf-8") as f:
+        g = _Grows(f)
+        with pytest.raises(OSError, match="read limit"):
+            _io.read_locked_whole(g)
+    assert g.asked, "the helper never read"
+    assert all(n is not None and 0 <= n <= _io.READ_LIMIT + 1 for n in g.asked), (
+        f"the rewrite read asked for more than the limit: {g.asked}")
+
+
+class _GrowingIo:
+    """`_io` for a run handle, except its rewrite handle grows under the lock (`_Grows`)."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_io, name)
+
+    @staticmethod
+    def rooted_locked_for_rewrite(*a: Any, **kw: Any) -> Any:
+        import contextlib
+
+        @contextlib.contextmanager
+        def cm() -> Any:
+            with _io.rooted_locked_for_rewrite(*a, **kw) as f:
+                yield _Grows(f)
+        return cm()
+
+
+def test_m1b_the_run_handle_update_refuses_a_record_growing_past_the_limit(tmp_path):
+    runs_base = tmp_path / "data" / "runs"
+    (runs_base / "run-1174").mkdir(parents=True)
+    run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, "run-1174", runs_base=runs_base,
+                           io=_GrowingIo())
+    group = next(g for g, names in H.GROUP_MEMBERS.items() if "budget" in names)
+    h = S.member(run, group, "budget", *S.member_args("budget"))
+    h.path.parent.mkdir(parents=True, exist_ok=True)
+    h.path.write_text('{"seed": 1}')
+    before = h.path.read_bytes()
+    with pytest.raises(OSError, match="read limit"):
+        h.update({"k": 1})
+    assert h.path.read_bytes() == before, "the refused update rewrote the record"
 
 
 def test_m1b_a_rewrite_read_with_no_data_yet_is_blocking_io_error(tmp_path):
