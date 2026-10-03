@@ -415,26 +415,26 @@ def test_the_author_drain_box_mounts_exactly_the_two_lessons_corpora_writable(tm
         "could be satisfied by a request that mounts nothing at all")
 
 
-def test_an_unrecognized_drain_label_mounts_no_lesson_corpus_writable(tmp_path):
-    """An UNRECOGNIZED drain label mounts no lesson corpus writable.
+def test_an_unrecognized_drain_label_gets_no_box_at_all(tmp_path):
+    """An UNRECOGNIZED drain label gets no box at all (#1179 amendment, O1').
 
-    Observably true: a third label — one no branch names — produces a request with no writable
-    lessons corpus at all. Today `_drain_box_request` is a two-way `if/else`, so a naive third
-    label falls into the `else` and gets the DEFENDER corpus rw: a silent misroute of the same
-    failure class as a silent widen.
+    Observably true: a third label (one no member names) makes `_drain_box_request` raise
+    (`AttributeError`: only a `DrainLabel` member answers its writable trees), so no request,
+    and no writable lessons corpus, exists for it. The positive control on the same paths: the
+    author member's request mounts both corpora writable.
 
     What failure looks like: a future drain role is added, spells its label slightly
-    differently, and its box quietly gains write access to the lessons corpus — with the mount
-    set reading as correct in every existing test.
+    differently, and its box quietly gains write access to the lessons corpus, or a box with
+    a default mount set, with the mount set reading as correct in every existing test.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     wt = paths.with_repo_root(paths.repo_root)
 
-    request = drains._drain_box_request(paths.repo_root, "batch-1", "a_third_drain", paths)
+    with pytest.raises(AttributeError):
+        drains._drain_box_request(paths.repo_root, "batch-1", "a_third_drain", paths)
 
-    assert not ({wt.lessons_dir, wt.lessons_questioner_dir} & writable_sources(request)), (
-        f"an unrecognized label got {sorted(map(str, writable_sources(request)))} writable — "
-        "the two-way if/else fell through to the defender corpus")
+    request = drains._drain_box_request(paths.repo_root, "batch-1", AUTHOR_DRAIN_LABEL, paths)
+    assert {wt.lessons_dir, wt.lessons_questioner_dir} <= writable_sources(request)
 
 
 # ---------------------------------------------------------------------------------------
