@@ -1537,9 +1537,12 @@ def _disk_touches(tree: ast.Module) -> list[tuple[int, str]]:
             looked_up = (origin in ("builtins.getattr", "builtins.vars") and node.args
                          and isinstance(node.args[0], ast.Name)
                          and node.args[0].id in {*_DISK_MODULES, "_io", "lane_trees"})
-            if (origin == "builtins.open" or origin.split(".")[0] in _DISK_MODULES
+            # A call on `os.environ` (`os.environ.items()`, as main's `env_for_cwd` makes since
+            # #1120) reads the process's environment, never the disk.
+            environ_call = origin.startswith("os.environ.")
+            if ((origin == "builtins.open" or origin.split(".")[0] in _DISK_MODULES
                     or method in _DISK_METHODS or method.startswith(_DISK_PREFIXES)
-                    or looked_up):
+                    or looked_up) and not environ_call):
                 found.append((node.lineno, ast.unparse(node)))
     return found
 
@@ -1575,8 +1578,13 @@ def test_git_py_makes_no_filesystem_call_and_imports_no_handle():
     lines = {line for line, _ in _disk_touches(planted)}
     assert lines == set(range(1, 12)) - {4}, _disk_touches(planted)
     environ_only = ast.parse("import os\nimport subprocess\n"
-                             "def f():\n    subprocess.run(['git'], env={**os.environ})\n")
+                             "def f():\n    subprocess.run(['git'], env={**os.environ})\n"
+                             "    return {k: v for k, v in os.environ.items()}\n")
     assert _disk_touches(environ_only) == []
+    environ_then_disk = ast.parse("import os\n"
+                                  "def f(p):\n    os.environ.items()\n    os.stat(p)\n")
+    assert {line for line, _ in _disk_touches(environ_then_disk)} == {1, 4}, \
+        _disk_touches(environ_then_disk)
     looked_up = ast.parse("import os\nPROBE = 'lstat'\n"
                           "def f(p):\n    x = os.environ\n    getattr(os, PROBE)(p)\n")
     assert {line for line, _ in _disk_touches(looked_up)} == {1, 5}, _disk_touches(looked_up)
