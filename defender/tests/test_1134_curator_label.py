@@ -142,71 +142,30 @@ def test_nothing_below_the_open_takes_a_label(channel):
 # ---------------------------------------------------------------------------------------
 
 
-class OmitsTheCorpora(LoopPaths):
-    """The author label mounts `skills/` instead of either corpus."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == AUTHOR_DRAIN_LABEL:
-            return (self.skills_dir,)
-        return super().drain_writable_trees(label)
-
-
-class MovesTheCorpora(LoopPaths):
-    """The author label mounts two trees that are not the corpora (moved elsewhere)."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == AUTHOR_DRAIN_LABEL:
-            return (self.repo_root / "moved" / "lessons",
-                    self.repo_root / "moved" / "lessons-questioner")
-        return super().drain_writable_trees(label)
-
-
-class MountsAboveTheCorpora(LoopPaths):
-    """The author label mounts `defender/`, a tree ABOVE both corpora that holds them."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == AUTHOR_DRAIN_LABEL:
-            return (self.defender_dir,)
-        return super().drain_writable_trees(label)
-
-
-class GrantsOnlyAnotherLane(LoopPaths):
-    """Both corpora granted to `other_lane` alone: the author label mounts nothing."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == "other_lane":
-            return (self.lessons_dir, self.lessons_questioner_dir)
-        if label == AUTHOR_DRAIN_LABEL:
-            return ()
-        return super().drain_writable_trees(label)
-
-
 def _refusing_trees(w) -> dict[str, Any]:
     """Each way the trees a curator is handed can fail to hold its corpus exactly, as `(paths,
-    open trees)`: opened for the lead label, for an unknown label, under a mount list that omits
-    the corpora, moves them, or holds only a folder above them, and trees holding only a folder
-    below the corpus."""
-    state = w.tmp / "state"
-    moved = MovesTheCorpora(repo_root=w.repo, state_dir=state)
-    for tree in moved.drain_writable_trees(AUTHOR_DRAIN_LABEL):
+    open trees)`: opened for the lead member, or trees whose mounts omit the corpora (only
+    `skills/`), move them elsewhere, hold only a folder above them (`defender/`), or only a
+    folder below each corpus. Since #1179's amendment a member answers its own trees, so the
+    wrong mount sets are opened directly (`DrainTrees.open`) rather than through a paths double
+    that lies about a member's list."""
+    moved = (w.repo / "moved" / "lessons", w.repo / "moved" / "lessons-questioner")
+    for tree in moved:
         tree.mkdir(parents=True, exist_ok=True)
     (w.corpus_dir / "below").mkdir()
     (w.sibling_dir / "below").mkdir()
-    omits = OmitsTheCorpora(repo_root=w.repo, state_dir=state)
-    above = MountsAboveTheCorpora(repo_root=w.repo, state_dir=state)
     return {
         "lead_label": lambda: (w.paths, open_drain_trees(w.paths, LEAD_AUTHOR_DRAIN_LABEL)),
-        "unknown_label": lambda: (w.paths, open_drain_trees(w.paths, "no_such_drain")),
-        "omits_the_corpora": lambda: (omits, open_drain_trees(omits, AUTHOR_DRAIN_LABEL)),
-        "moves_the_corpora": lambda: (moved, open_drain_trees(moved, AUTHOR_DRAIN_LABEL)),
-        "mount_above": lambda: (above, open_drain_trees(above, AUTHOR_DRAIN_LABEL)),
+        "omits_the_corpora": lambda: (w.paths, DrainTrees.open((w.paths.skills_dir,))),
+        "moves_the_corpora": lambda: (w.paths, DrainTrees.open(moved)),
+        "mount_above": lambda: (w.paths, DrainTrees.open((w.paths.defender_dir,))),
         "mount_below": lambda: (w.paths, DrainTrees.open(
             (w.corpus_dir / "below", w.sibling_dir / "below"))),
     }
 
 
-REFUSALS = ("lead_label", "unknown_label", "omits_the_corpora", "moves_the_corpora",
-            "mount_above", "mount_below")
+REFUSALS = ("lead_label", "omits_the_corpora", "moves_the_corpora", "mount_above",
+            "mount_below")
 
 
 @pytest.mark.parametrize("how", REFUSALS)
@@ -238,16 +197,16 @@ def test_trees_that_do_not_hold_the_corpus_exactly_are_fatal_config(tmp_path, ch
 
 
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
-def test_lane_corpus_is_the_trees_own_mount_whatever_label_granted_it(tmp_path, channel):
-    """The control for the refusals: trees opened under a label the mount list grants the corpora
-    to (`other_lane`, under a `LoopPaths` saying so, where the author label grants nothing) give
-    the very `Held` the trees hold, and the builder takes it; its `tree_for` maps the sibling
-    corpus to the sibling's mount of the same trees."""
+def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, channel):
+    """The control for the refusals: trees holding exactly the two corpora, opened directly
+    (`DrainTrees.open`, not through the author member) give the very `Held` the trees hold, and
+    the builder takes it; its `tree_for` maps the sibling corpus to the sibling's mount of the
+    same trees."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
-    paths = GrantsOnlyAnotherLane(repo_root=w.repo, state_dir=tmp_path / "state")
+    paths = LoopPaths(repo_root=w.repo, state_dir=tmp_path / "state")
 
-    with open_drain_trees(paths, "other_lane") as trees:
+    with DrainTrees.open((paths.lessons_dir, paths.lessons_questioner_dir)) as trees:
         corpus_dir = getattr(paths, attr)
         assert author_shared.lane_corpus(trees, corpus_dir) is trees.mount(corpus_dir)
         cfg = build(paths, trees=trees)
@@ -355,29 +314,34 @@ def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_p
 
 
 def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_path, monkeypatch):
-    """H8: `_maybe_trigger_author` opens the trees of the label IT was handed. A label that mounts
-    nothing opens empty trees, and the builder refuses them (`FatalConfigError` out of the
-    trigger; the row is not served). With both corpora granted to `other_lane` alone, the trigger
-    under `other_lane` serves the queue: the gate holds the row, nothing is stuck.
+    """H8: `_maybe_trigger_author` opens the trees of the label IT was handed. The lead member
+    opens `skills/` alone, and the builder refuses it (`FatalConfigError` out of the trigger;
+    the row is not served). A non-member (the author lane's value or name as a string, an
+    unknown string) raises at its first use (#1179 O1', `AttributeError`), with nothing held
+    and the row not served. The author member serves the queue: the gate holds the row, nothing
+    is stuck.
 
-    Catches: a trigger that shadows its `label` with the author label, which serves the queue
-    under the unknown label and refuses the lane that does grant the corpora."""
+    Catches: a trigger that shadows its `label` with the author label (the lead member would
+    serve the queue), and one that coerces a string into a member."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
     _held_queue(w.paths)
+    w.trees.close()
 
-    # The author lane's own value as a bare string is no label either (#1179).
-    for unknown in ("no_such_drain", "author_drain"):
-        with pytest.raises(FatalConfigError):
-            drains._maybe_trigger_author(*_trigger_args(w.paths), label=unknown)
+    with pytest.raises(FatalConfigError):
+        drains._maybe_trigger_author(*_trigger_args(w.paths), label=LEAD_AUTHOR_DRAIN_LABEL)
+    assert "held_reason" not in pending(w.paths.findings)[0]
+    for non_member in ("no_such_drain", "author_drain", "AUTHOR"):
+        with pytest.raises(AttributeError):
+            drains._maybe_trigger_author(*_trigger_args(w.paths), label=non_member)
         assert "held_reason" not in pending(w.paths.findings)[0]
+        assert descriptors_under(w.repo) == []
 
-    paths = GrantsOnlyAnotherLane(repo_root=w.repo, state_dir=tmp_path / "state")
-    drains._maybe_trigger_author(*_trigger_args(paths), label="other_lane")
+    drains._maybe_trigger_author(*_trigger_args(w.paths), label=AUTHOR_DRAIN_LABEL)
 
-    [row] = pending(paths.findings)
+    [row] = pending(w.paths.findings)
     assert "held_reason" in row, row
-    assert stuck_records(paths.findings) == []
+    assert stuck_records(w.paths.findings) == []
 
 
 def _drive_author_drain(paths: LoopPaths, repo: Path) -> int:
@@ -467,12 +431,11 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
 # ---------------------------------------------------------------------------------------
 
 
-def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *, fault: BaseException | None = None,
-               extra_mount: Path | None = None) -> LoopPaths:
+def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
+               fault: BaseException | None = None) -> LoopPaths:
     """A `LoopPaths` (the seam's `paths`) that records, each time `author_lock_file` is asked for
     (the builders read it after the open), what this process holds under the repo; with `fault`,
-    raises it after recording; with `extra_mount`, the author label mounts it too. A class per
-    call."""
+    raises it after recording. A class per call."""
 
     class Spy(LoopPaths):
         @property
@@ -482,27 +445,19 @@ def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *, fault: BaseExc
                 raise fault
             return super().author_lock_file
 
-        def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-            trees = super().drain_writable_trees(label)
-            if label == AUTHOR_DRAIN_LABEL and extra_mount is not None:
-                return (*trees, extra_mount)
-            return trees
-
     return Spy(repo_root=repo, state_dir=state)
 
 
 def _held_roots(paths: LoopPaths) -> list[str]:
-    return sorted(os.path.realpath(p) for p in paths.drain_writable_trees(AUTHOR_DRAIN_LABEL))
+    return sorted(os.path.realpath(p) for p in AUTHOR_DRAIN_LABEL.writable_trees(paths))
 
 
-@pytest.mark.parametrize("extra", [False, True], ids=["label-mounts", "a-third-mount"])
 def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
-    tmp_path, monkeypatch, caplog, extra,
+    tmp_path, monkeypatch, caplog,
 ):
     """`_maybe_trigger_author(..., label=AUTHOR)` over a queue the gate holds: while the curator's
     batch runs (seen from inside its config build) this process holds exactly the roots of
-    `drain_writable_trees(AUTHOR_DRAIN_LABEL)` of the paths it was HANDED (a third mount that
-    paths adds is held too); once the seam returns it holds nothing under the repo; and no handle
+    `AUTHOR_DRAIN_LABEL.writable_trees(paths)` of the paths it was HANDED; once the seam returns it holds nothing under the repo; and no handle
     was used after a close (no `Bad file descriptor` in the log of a batch whose gate read the
     corpus through it).
 
@@ -513,11 +468,8 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
     w = world(tmp_path)
     put(w.corpus_dir / "seeded.md", "---\nsource_finding_ids:\n- f0\n---\nbody\n")
     w.commit()
-    extra_mount = w.repo / "defender" / "extra-mount" if extra else None
-    if extra_mount is not None:
-        extra_mount.mkdir()
     seen: list[list[str]] = []
-    paths = _spy_paths(w.repo, tmp_path / "state", seen, extra_mount=extra_mount)
+    paths = _spy_paths(w.repo, tmp_path / "state", seen)
     _held_queue(paths)
     w.trees.close()
     assert descriptors_under(w.repo) == []
@@ -526,7 +478,7 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
 
     assert seen, "the curator's batch never built its config"
     assert all(held == _held_roots(paths) for held in seen), (seen, _held_roots(paths))
-    assert len(_held_roots(paths)) == (3 if extra else 2)
+    assert len(_held_roots(paths)) == 2
     assert descriptors_under(w.repo) == [], "a held root outlived the seam"
     assert "held_reason" in pending(paths.findings)[0]
     bad = [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
@@ -558,21 +510,29 @@ def test_the_trigger_releases_the_trees_when_the_batch_raises(tmp_path, monkeypa
 
 
 def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
-    """Under the threshold the seam returns before the open: the label's mount list is never
-    asked for, no batch runs, and nothing is held."""
+    """Under the threshold the seam returns before the open: neither corpus attribute is read
+    after the queue is seeded (the label's trees are never asked for), no batch runs, and
+    nothing is held."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     w = world(tmp_path)
     asked: list[str] = []
     seen: list[list[str]] = []
 
     class CountsTheAsk(LoopPaths):
-        def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-            asked.append(label)
-            return super().drain_writable_trees(label)
+        @property
+        def lessons_dir(self) -> Path:  # type: ignore[override]
+            asked.append("lessons_dir")
+            return super().lessons_dir
+
+        @property
+        def lessons_questioner_dir(self) -> Path:  # type: ignore[override]
+            asked.append("lessons_questioner_dir")
+            return super().lessons_questioner_dir
 
     paths = CountsTheAsk(repo_root=w.repo, state_dir=tmp_path / "state")
     _held_queue(paths)
     w.trees.close()
+    asked.clear()
 
     drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
 

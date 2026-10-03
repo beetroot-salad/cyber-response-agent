@@ -436,8 +436,9 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(LANE_TREES, "DrainTrees.open", "construct", "hold(p, os_=os_)", D3,
             "one `hold` per mount of the list it is handed, at the mount point itself (A3)"),
     Allowed(LANE_TREES, "open_drain_trees", "construct",
-            "DrainTrees.open(wt_paths.drain_writable_trees(label))", D3,
-            "exactly `drain_writable_trees(label)`, the list the box mounts rw (A3/O4)"),
+            "DrainTrees.open(label.writable_trees(wt_paths))", D3,
+            "exactly `label.writable_trees(wt_paths)`, the list the box mounts rw (A3/O4; "
+            "the member owns it since #1179)"),
     Allowed(LANE_TREES, "kind_at", "attr", "full.is_file()", D3, _MISS),
     Allowed(LANE_TREES, "kind_at", "attr", "full.is_dir()", D3, _MISS),
     Allowed(LANE_TREES, "kind_at", "call", "os.path.lexists(full)", D3, _MISS),
@@ -522,11 +523,11 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(DRAINS, "_invoke_pitfalls", "construct", "open_drain_trees(paths, label)", D3,
             "the pitfalls work step's trees, for the label its seam was bound: " + _OPENER),
     Allowed(DRAINS, "_drain_box_request", "construct", "paths.with_repo_root(wt)", D3,
-            "the drain working copy's paths, whose `drain_writable_trees(label)` the box mounts rw "
+            "the drain working copy's paths, whose `label.writable_trees(...)` the box mounts rw "
             "(A3/O4: the one mount list)"),
     Allowed(DRAINS, "_run_worktree_batch", "construct", "paths.with_repo_root(wt)", D3,
             "the drain working copy's paths handed to the work step, whose seam opens exactly "
-            "their `drain_writable_trees(label)` (A3/O4: the one mount list)"),
+            "their `label.writable_trees(...)` (A3/O4: the one mount list)"),
     Allowed(HARNESS, "run_author", "construct", "LoopPaths(repo_root=tmp)", D3,
             "the harness's scratch repo: the paths its opener holds the author trees of "
             "(pinned to `<tmp>` by test_1134_curator_label)"),
@@ -2335,7 +2336,7 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         "from defender._paths import DefenderPaths as DP\ndef f(root):\n    return DP(root).skills_dir\n",
         (("f", "construct", "DP(root)"),)),
     "with-repo-root": (
-        "def f(paths, root):\n    return paths.with_repo_root(root).drain_writable_trees('author_drain')\n",
+        "def f(paths, root):\n    return paths.with_repo_root(root).skills_dir\n",
         (("f", "construct", "paths.with_repo_root(root)"),)),
     "replace-repo-root": (
         "import dataclasses\ndef f(paths, root):\n    return dataclasses.replace(paths, repo_root=root)\n",
@@ -2758,7 +2759,7 @@ def test_a_proven_handle_or_a_look_alike_is_not_a_hit(name: str):
 
 
 @pytest.mark.parametrize("opener", [
-    "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)", "DrainTrees.open(paths.drain_writable_trees(L))",
+    "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)", "DrainTrees.open(L.writable_trees(paths))",
 ])
 def test_a_with_opened_trees_chain_is_proven(opener: str):
     """`with <opener> as trees:` -> `trees.mount(...)` -> `.view().under(...)`: every link is

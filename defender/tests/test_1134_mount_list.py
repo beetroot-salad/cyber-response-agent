@@ -13,20 +13,21 @@ and keeps O4), with the owner's 2026-09-29 decision that each drain label is spe
   `_run_worktree_batch(label=...)` passes its own constant by name, and the name resolves at the
   call (through `_astlib`'s scopes) to `config`'s binding. Nothing in `drains` binds that name
   again (a parameter, a local, a loop target, an import from elsewhere).
-- `LoopPaths.drain_writable_trees(label) -> tuple[Path, ...]` is the one list of trees a drain
-  box may write: `AUTHOR_DRAIN_LABEL` -> `(lessons_dir, lessons_questioner_dir)`, in that order,
-  `LEAD_AUTHOR_DRAIN_LABEL` -> `(skills_dir,)`, and any other label -> `()`, near misses
-  included (a case change, a space, hyphens, a prefix, an extra character, the empty string, a
-  `<lane>:<batch>`-style suffix). It is lexical: built from `self.repo_root` as spelled,
-  nothing resolved, nothing on disk read, so other trees in the leaf (`lessons-actor/`,
-  `lessons-environment/`, `skills-old/`) never join it.
+- `DrainLabel.writable_trees(paths) -> tuple[Path, ...]` (#1179 amendment, M1') is the one list
+  of trees a drain box may write: the author member -> `(lessons_dir, lessons_questioner_dir)`,
+  in that order, the lead member -> `(skills_dir,)`, read off the `paths` it is handed. Only a
+  member names a lane: anything else (a string, a member's name, a look-alike, a near miss)
+  has no `writable_trees` and raises at first use, before anything is held or mounted. It is
+  lexical: built from `paths.repo_root` as spelled, nothing resolved, nothing on disk read, so
+  other trees in the leaf (`lessons-actor/`, `lessons-environment/`, `skills-old/`) never join
+  it.
 - `drains._drain_box_request(wt, batch_id, label, paths)` mounts read-write exactly
-  `paths.with_repo_root(wt).drain_writable_trees(label)`, in order, each at its own path
+  `label.writable_trees(paths.with_repo_root(wt))`, in order, each at its own path
   (target == source), plus the one read-only mount of `wt`, and nothing else. It derives no list
   of its own, asks the list only of the leaf and only for the label it was handed. The leaf
   stays read-only when it is a git checkout (`.git` a file or a folder).
 - `lane_trees.open_drain_trees(wt_paths, label) -> DrainTrees` is exactly
-  `DrainTrees.open(wt_paths.drain_writable_trees(label))`, asked for the label it was handed.
+  `DrainTrees.open(label.writable_trees(wt_paths))`, asked of the label it was handed.
   `DefenderPaths` and `with_repo_root` keep a relative `repo_root` as given, so its list is
   relative, and those mounts are refused with `ValueError` before anything is held. They are
   never joined to the cwd, nor to the checkout this code runs from.
@@ -46,10 +47,10 @@ compares the list with itself. The lexical rows leave `wt` absent on disk and ch
 absent afterwards. `Leaf.build()` and the drives' branch also build decoy trees (`DECOY_TREES`)
 beside the real ones.
 
-Two seams are injected. The first is the `paths` argument: `relisted_paths` (v1's E1) builds a
-`LoopPaths` whose list differs from the shipped one, since a second label table in the box or in
-`open_drain_trees` agrees with the list today and only a different list shows it. It also records
-every `(repo_root, label)` it is asked. The second is the lanes' own seams (`trigger_author=`,
+Two seams are injected. The first is the `paths` argument: `relocated_paths` (v1's E1) builds a
+`LoopPaths` whose trees sit elsewhere than the shipped ones, since a second table in the box or in
+`open_drain_trees` agrees with the member's list today and only different trees show it. It also
+records every `(repo_root, attribute)` tree read. The second is the lanes' own seams (`trigger_author=`,
 `run_lead_author=`, `branch=`, `start_box=`, `stop_box=`, `scrub=`), for the real drives. Nothing
 is monkeypatched (`monkeypatch.chdir` / `setenv` only set the cwd and a threshold). No row forks
 or spawns: the drives' leaf has no `.git`, so the lead lane's reset/clean is skipped, and the
@@ -226,36 +227,76 @@ def refused_value_error(fn: Callable[[], Any], what: str) -> None:
     pytest.fail(f"{what}: answered {got!r}, not ValueError")
 
 
-def relisted_rel(root: Path) -> str:
-    """The extra tree `relisted_paths` lists under `root`. Its name carries the root's own
-    name, so a list asked under one root and rebased onto another names a different tree."""
-    return f"defender/relisted-{root.name}"
+#: Each member's trees, by the `LoopPaths` attribute that names each (and the folder name
+#: `relocated_paths` moves it to).
+TREE_ATTRS: dict[DrainLabel, tuple[tuple[str, str], ...]] = {
+    AUTHOR: (("lessons_dir", "lessons"), ("lessons_questioner_dir", "lessons-questioner")),
+    LEAD: (("skills_dir", "skills"),),
+}
 
 
-def relisted_paths(asked: list[tuple[Path, str]]) -> type[LoopPaths]:
-    """A `LoopPaths` subclass, injected through the `paths` argument, whose mount list is NOT
-    the shipped one: each label's shipped list reversed, plus `relisted_rel(repo_root)`, a
-    sibling of the real trees (`DrainTrees.open` refuses a nested pair). Every call records
-    `(repo_root, label)` in `asked`. `with_repo_root` keeps the subclass (the shipped one returns
-    a plain `LoopPaths`), so `paths.with_repo_root(wt)` still asks this list. A class per call,
-    so each test reads its own `asked` (the instances are frozen)."""
+def relocated_rel(root: Path, name: str) -> str:
+    """Where `relocated_paths` puts the tree `name` under `root`. The folder's name carries the
+    root's own name, so trees named under one root and rebased onto another name different
+    folders."""
+    return f"defender/relocated-{root.name}-{name}"
 
-    class RelistedPaths(LoopPaths):
+
+def relocated_rels(label: DrainLabel, root: Path) -> list[str]:
+    """`label`'s trees under `relocated_paths` rooted at `root`, in the member's order."""
+    return [relocated_rel(root, name) for _attr, name in TREE_ATTRS[label]]
+
+
+def all_relocated(root: Path) -> list[str]:
+    return [rel for label in KNOWN for rel in relocated_rels(label, root)]
+
+
+def relocated_paths(asked: list[tuple[Path, str]]) -> type[LoopPaths]:
+    """A `LoopPaths` subclass, injected through the `paths` argument, whose three drain trees
+    are NOT where the shipped paths put them: each is `relocated_rel(repo_root, name)`, a
+    sibling of the real trees. Every read of a tree attribute records `(repo_root, attribute)`
+    in `asked`. `with_repo_root` keeps the subclass (the shipped one returns a plain
+    `LoopPaths`), so `paths.with_repo_root(wt)` still relocates. A class per call, so each test
+    reads its own `asked` (the instances are frozen)."""
+
+    class RelocatedPaths(LoopPaths):
         def with_repo_root(self, repo_root: Path) -> LoopPaths:
             return type(self)(repo_root=repo_root, state_dir=self.state_root)
 
-        def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-            asked.append((self.repo_root, label))
-            shipped = super().drain_writable_trees(label)
-            return (*reversed(shipped), self.repo_root / relisted_rel(self.repo_root))
+        def _moved(self, attr: str, name: str) -> Path:
+            asked.append((self.repo_root, attr))
+            return self.repo_root / relocated_rel(self.repo_root, name)
 
-    return RelistedPaths
+        @property
+        def lessons_dir(self) -> Path:  # type: ignore[override]
+            return self._moved("lessons_dir", "lessons")
+
+        @property
+        def lessons_questioner_dir(self) -> Path:  # type: ignore[override]
+            return self._moved("lessons_questioner_dir", "lessons-questioner")
+
+        @property
+        def skills_dir(self) -> Path:  # type: ignore[override]
+            return self._moved("skills_dir", "skills")
+
+    return RelocatedPaths
 
 
-def assert_asked_only(asked: list[tuple[Path, str]], wt: Path, label: str, who: str) -> None:
-    """`who` asked the list, and every time of the leaf `wt` for exactly `label`."""
-    assert asked, f"{who} never asked drain_writable_trees"
-    assert set(asked) == {(wt, label)}, f"{who} asked {asked}, not ({wt}, {label!r})"
+def assert_asked_of(asked: list[tuple[Path, str]], wt: Path, label: DrainLabel, who: str) -> None:
+    """`who` read `label`'s tree attributes, and every tree read was of the leaf `wt`."""
+    assert asked, f"{who} never read a tree attribute"
+    assert {root for root, _attr in asked} == {wt}, f"{who} read trees of {asked}, not of {wt}"
+    wanted = {attr for attr, _name in TREE_ATTRS[label]}
+    assert wanted <= {attr for _root, attr in asked}, (who, asked, wanted)
+
+
+def assert_raises_non_member(fn: Callable[[], Any], what: str) -> None:
+    """`fn()` raises `AttributeError`: a non-member has no `writable_trees` (O1')."""
+    try:
+        got = fn()
+    except AttributeError:
+        return
+    pytest.fail(f"{what}: answered {got!r} for a non-member, not AttributeError")
 
 
 # ---------------------------------------------------------------------------------------
@@ -384,67 +425,45 @@ def test_the_drains_pass_a_constant_to_the_worktree_batch():
 
 
 # ---------------------------------------------------------------------------------------
-# drain_writable_trees: the one list
+# DrainLabel.writable_trees: the one list
 # ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("on_disk", ["absent", "built_with_decoys"])
 @pytest.mark.parametrize("label", KNOWN)
-def test_drain_writable_trees_is_each_labels_mount_points_in_order(
-        tmp_path: Path, label: str, on_disk: str):
-    """`drain_writable_trees(label)` is the label's mount points, a tuple in the contract's
-    order, under the `LoopPaths` it is asked on, whatever else the checkout holds.
+def test_each_members_writable_trees_are_its_mount_points_in_order(
+        tmp_path: Path, label: DrainLabel, on_disk: str):
+    """`label.writable_trees(paths)` (`@owns drain_writable_trees`, #1179 M1') is the member's
+    mount points, a tuple in the contract's order, under the `LoopPaths` it is handed, whatever
+    else the checkout holds.
 
-    True: under the leaf, `author_drain` gives `(lessons_dir, lessons_questioner_dir)` and
-    `lead_author_drain` gives `(skills_dir,)`, equal to the literal spellings
-    `wt / "defender/..."` (a tuple: a list never equals one). The main checkout's `paths` gives
-    the same shape under its own root, so the list follows `repo_root`. `absent`: neither root
-    is made on disk. `built_with_decoys`:
-    both roots carry every tree plus `lessons-actor/`, `lessons-environment/` and `skills-old/`,
-    and the list is unchanged.
+    True: under the leaf, the author member gives `(lessons_dir, lessons_questioner_dir)` and
+    the lead member `(skills_dir,)`, equal to the literal spellings `wt / "defender/..."` (a
+    tuple: a list never equals one). The main checkout's `paths` gives the same shape under its
+    own root, so the list follows `repo_root`. `absent`: neither root is made on disk.
+    `built_with_decoys`: both roots carry every tree plus `lessons-actor/`,
+    `lessons-environment/` and `skills-old/`, and the list is unchanged.
 
     Catches: a missing tree, an extra one (the catalog, or the whole `defender/`), a swapped
-    order, a list, a list built from a fixed root rather than `self`, a list that makes its
-    folders, and one that globs the checkout for more corpora (round 2's H5)."""
+    order, a list, a list built from a fixed root rather than the paths handed in, a list that
+    makes its folders, and one that globs the checkout for more corpora (round 2's H5)."""
     lf = _leaf(tmp_path)
     if on_disk == "built_with_decoys":
         lf.build()
         Leaf(lf.paths, lf.paths.repo_root).build()
-    got = lf.wt_paths.drain_writable_trees(label)
+    got = label.writable_trees(lf.wt_paths)
 
     assert got == tuple(lf.wt / rel for rel in EXPECTED_MOUNTS[label])
     assert got == MOUNTS_BY_ATTRIBUTE[label](lf.wt_paths)
-    assert lf.wt_paths.drain_writable_trees(LABEL_VALUES[label]) == (), (
-        "the label's value, as a bare string, got a tree")
-    assert lf.paths.drain_writable_trees(label) == tuple(
+    assert label.writable_trees(lf.paths) == tuple(
         lf.paths.repo_root / rel for rel in EXPECTED_MOUNTS[label])
     if on_disk == "absent":
-        assert not lf.wt.exists(), "drain_writable_trees touched the disk: it is lexical"
-        assert not lf.paths.repo_root.exists(), "drain_writable_trees touched the disk"
+        assert not lf.wt.exists(), "writable_trees touched the disk: it is lexical"
+        assert not lf.paths.repo_root.exists(), "writable_trees touched the disk"
     else:
         for root in (lf.wt, lf.paths.repo_root):
             for rel in DECOY_TREES:
                 assert (root / rel).is_dir(), f"the decoy {root / rel} is not there to find"
-
-
-@pytest.mark.parametrize("label", UNKNOWN_LABELS)
-def test_an_unknown_label_has_no_writable_tree(tmp_path: Path, label: str):
-    """An unknown label, near misses included, lists nothing.
-
-    True: `drain_writable_trees(label) == ()`, on the leaf and on the main checkout. The
-    positive control on the same `LoopPaths`: both known labels list their trees.
-
-    Catches: an unknown label that falls through to a default tree (the old `else` shape), and a
-    label matched by prefix, by case, after stripping whitespace (v1's E5) or up to a separator
-    (`label.partition(":")[0]`, round 2's H7)."""
-    lf = _leaf(tmp_path)
-
-    assert lf.wt_paths.drain_writable_trees(label) == ()
-    assert lf.paths.drain_writable_trees(label) == ()
-    for owner in KNOWN:
-        assert lf.wt_paths.drain_writable_trees(owner) == tuple(
-            lf.wt / rel for rel in EXPECTED_MOUNTS[owner])
-    assert not lf.wt.exists()
 
 
 def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
@@ -459,7 +478,7 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
     Catches: a list that grows a nested mount (the catalog beside `skills/`, or `defender/`
     beside a corpus)."""
     w = _leaf(tmp_path).wt_paths
-    trees = [t for label in KNOWN for t in w.drain_writable_trees(label)]
+    trees = [t for label in KNOWN for t in label.writable_trees(w)]
 
     assert len(trees) == len(set(trees)) == 3
     for a in trees:
@@ -474,27 +493,28 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("label", [*KNOWN, *UNKNOWN_LABELS])
-def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: str):
-    """The real `_drain_box_request` mounts exactly the leaf's `drain_writable_trees(label)`
-    read-write, each at its own path, plus `wt` read-only, and nothing else.
+@pytest.mark.parametrize("label", KNOWN)
+def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: DrainLabel):
+    """The real `_drain_box_request` mounts exactly the leaf's `label.writable_trees(wt_paths)`
+    read-write, each at its own path, plus `wt` read-only, and nothing else. (A non-member
+    raises: `test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held`.)
 
-    True, for both known labels, the unknown (empty) label and every near miss:
+    True, for both members:
     - the rw mounts, in order, are `(m, m)` for each `m` of the literal list under `wt`, which
-      is `wt_paths.drain_writable_trees(label)`;
+      is `label.writable_trees(wt_paths)`;
     - the only read-only mount is `wt` at `wt`, and there is no other mount;
     - the workdir is still `wt` and the name still carries the batch id (unchanged);
     - the leaf is not made on disk.
 
     Catches: the box mounting the main checkout's trees rather than the leaf's, a duplicate or
-    extra mount, a mount whose target differs from its source, the lost ro mount of the leaf, a
-    near-miss label that gets a tree, and an unknown label that falls through to a default."""
+    extra mount, a mount whose target differs from its source, and the lost ro mount of the
+    leaf."""
     lf = _leaf(tmp_path)
 
     request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
 
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS.get(label, ())]
-    assert lf.wt_paths.drain_writable_trees(label) == tuple(expected)
+    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
+    assert label.writable_trees(lf.wt_paths) == tuple(expected)
     assert rw_mounts(request) == [(m, m) for m in expected]
     assert ro_mounts(request) == [(lf.wt, lf.wt)]
     assert len(request.mounts) == 1 + len(expected)
@@ -504,9 +524,9 @@ def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: str
 
 
 @pytest.mark.parametrize("dot_git", ["file", "folder"])
-@pytest.mark.parametrize("label", [*KNOWN, "a_third_drain"])
+@pytest.mark.parametrize("label", KNOWN)
 def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
-        tmp_path: Path, label: str, dot_git: str):
+        tmp_path: Path, label: DrainLabel, dot_git: str):
     """A real drain leaf is a git worktree (`.git` is a file naming the main repository's
     worktree dir), or a clone (`.git` a folder). Either way the box mounts the leaf read-only,
     its own trees read-write, and nothing else (round 2's H6).
@@ -529,7 +549,7 @@ def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
 
     request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
 
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS.get(label, ())]
+    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
     assert ro_mounts(request) == [(lf.wt, lf.wt)], "the git leaf is not mounted read-only"
     assert rw_mounts(request) == [(m, m) for m in expected]
     assert len(request.mounts) == 1 + len(expected)
@@ -618,37 +638,34 @@ def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves
 
 
 @pytest.mark.parametrize("label", UNKNOWN_LABELS)
-def test_an_unknown_label_mounts_nothing_writable_and_holds_nothing(tmp_path: Path, label: str):
-    """The empty case of O4: an unknown label, or a near miss, has no rw mount and its trees
-    hold nothing, over a leaf that is not even on disk.
+def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
+        tmp_path: Path, label: object):
+    """O1': only a member names a lane. A non-member (the members' values and names as strings,
+    a look-alike enum's member, an object carrying a member's value, a near miss) raises at
+    `_drain_box_request` and at `open_drain_trees`, over a leaf that is not even on disk, and
+    nothing is held or made.
 
-    True: the box's rw list is empty and its ro mount is `wt`. `open_drain_trees` succeeds with
-    `wt` absent, `.mounts == ()`, no descriptor is held, every known mount point is no mount of
-    it (`mount` is `ValueError`, `tree_for` of a path below is `None`), and `wt` stays absent.
-    The positive control at the same address: each known label over that absent leaf reaches
-    for it (`FileNotFoundError`, nothing left held), and once the leaf is built it opens and
-    holds its literal list.
+    True: both raise `AttributeError` (a non-member has no `writable_trees`); no descriptor is
+    held under the tmp dir; `wt` stays absent. The positive control at the same address: each
+    member over that absent leaf builds its box request and reaches for the leaf in the holder
+    (`FileNotFoundError`, nothing left held), and once the leaf is built it opens and holds its
+    literal list.
 
-    Catches: a holder with a label table of its own that falls through to a default (or
-    matches a near miss, or strips a `:<batch>` suffix: round 2's H7), and one that answers the
-    empty list without asking the label."""
+    Catches: a box or a holder with a label table of its own (a string, a name or a `.value`
+    matched, a near miss normalised, a `:<batch>` suffix stripped: round 2's H7), one that
+    coerces a string into a member, and one that answers a non-member with an empty list
+    instead of refusing it."""
     lf = _leaf(tmp_path)
 
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
-    assert rw_mounts(request) == []
-    assert ro_mounts(request) == [(lf.wt, lf.wt)]
-
-    with open_drain_trees(lf.wt_paths, label) as trees:
-        assert type(trees) is DrainTrees
-        assert trees.mounts == ()
-        assert held_roots(tmp_path) == []
-        for rel in ALL_TREES:
-            m = lf.wt / rel
-            refused_value_error(lambda m=m: trees.mount(m), str(m))
-            assert trees.tree_for(m / PROBE) is None, str(m)
+    assert_raises_non_member(
+        lambda: drains._drain_box_request(lf.wt, "batch-1", label, lf.paths), "the box")
+    assert_raises_non_member(lambda: open_drain_trees(lf.wt_paths, label), "the holder")
+    assert held_roots(tmp_path) == []
     assert not lf.wt.exists()
 
     for owner in KNOWN:
+        request = drains._drain_box_request(lf.wt, "batch-1", owner, lf.paths)
+        assert rw_mounts(request) == [(lf.wt / rel, lf.wt / rel) for rel in EXPECTED_MOUNTS[owner]]
         with pytest.raises(FileNotFoundError):
             open_drain_trees(lf.wt_paths, owner)
         assert held_roots(tmp_path) == []
@@ -686,45 +703,40 @@ def test_a_tree_missing_from_the_leaf_is_refused_never_skipped(tmp_path: Path):
     assert held_roots(tmp_path) == []
 
 
-@pytest.mark.parametrize("label", [*KNOWN, *UNKNOWN_LABELS])
-def test_the_box_and_the_held_trees_both_follow_whatever_list_paths_names(
-        tmp_path: Path, label: str):
+@pytest.mark.parametrize("label", KNOWN)
+def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
+        tmp_path: Path, label: DrainLabel):
     """`_drain_box_request` and `open_drain_trees` both take their list from
-    `drain_writable_trees` on the `LoopPaths` they are handed, asked of the leaf for exactly
-    the label they were handed, never from a label table of their own (v1's E1).
+    `label.writable_trees` over the `LoopPaths` they are handed, asked of the leaf, never from a
+    table of their own (v1's E1).
 
-    True: given `relisted_paths`, whose list is the shipped one reversed plus
-    `defender/relisted-<root name>`:
-    - the box mounts exactly that list rw under `wt`, in that order (`relisted-wt-leaf`), and ro
-      is still `wt` alone;
+    True: given `relocated_paths`, whose trees are `defender/relocated-<root name>-<tree>`:
+    - the box mounts exactly the member's relocated trees rw under `wt`, in the member's order,
+      and ro is still `wt` alone;
     - `open_drain_trees(paths.with_repo_root(wt), label)` holds exactly the same list in the same
       order: one descriptor per tree, and a write through each `mount(m)` lands at `m / name`;
-    - each side asked the list, and only ever as `(wt, label)`.
+    - each side read the member's tree attributes, and only ever of `wt`.
 
-    For an unknown label or a near miss, the injected list is only the extra tree, and both
-    sides follow it. The leaf also carries the decoys and `defender/relisted-main`, the extra
-    tree the main checkout's list names.
+    The leaf also carries the shipped trees, the decoys, and the relocated trees the main
+    checkout's paths name.
 
-    Catches: a box or a holder that keeps its own `if label == ...` list beside the method.
-    That second list agrees with the first today, so the equality rows above cannot see it, but
-    it lets the mounts and the held roots drift apart (O4's "one list"). Also a box or holder
-    that normalises the label before asking (round 2's H7), and a box that asks the main
-    checkout's list and rebases it onto the leaf (R3: it mounts `relisted-main`)."""
+    Catches: a box or a holder that keeps its own list beside the member's (it mounts the
+    shipped `defender/lessons` rather than the relocated tree), and a box that asks the main
+    checkout's paths and rebases the list onto the leaf (R3: it mounts `relocated-main-...`)."""
     asked: list[tuple[Path, str]] = []
-    paths = relisted_paths(asked)(repo_root=tmp_path / MAIN,
-                                  state_dir=tmp_path / "learning-state")
+    paths = relocated_paths(asked)(repo_root=tmp_path / MAIN,
+                                   state_dir=tmp_path / "learning-state")
     lf = Leaf(paths, tmp_path / "wt-leaf")
     wt = lf.wt
-    lf.build(*ALL_TREES, *DECOY_TREES, relisted_rel(wt), relisted_rel(paths.repo_root))
-    expected = [*(wt / rel for rel in reversed(EXPECTED_MOUNTS.get(label, ()))),
-                wt / "defender" / "relisted-wt-leaf"]
+    lf.build(*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(paths.repo_root))
+    expected = [wt / rel for rel in relocated_rels(label, wt)]
 
     request = drains._drain_box_request(wt, "batch-1", label, paths)
 
     assert rw_mounts(request) == [(m, m) for m in expected]
     assert ro_mounts(request) == [(wt, wt)]
     assert len(request.mounts) == 1 + len(expected)
-    assert_asked_only(asked, wt, label, "the box")
+    assert_asked_of(asked, wt, label, "the box")
     asked.clear()
 
     wt_paths = paths.with_repo_root(wt)
@@ -736,20 +748,20 @@ def test_the_box_and_the_held_trees_both_follow_whatever_list_paths_names(
             trees.mount(m).write(PROBE, PAYLOAD, mode="create")
             assert (m / PROBE).read_bytes() == PAYLOAD, str(m)
     assert held_roots(tmp_path) == []
-    assert_asked_only(asked, wt, label, "the holder")
+    assert_asked_of(asked, wt, label, "the holder")
 
 
 def test_the_list_keeps_the_leafs_spelling_and_the_held_roots_are_the_folders_it_names(
         tmp_path: Path):
     """The list is lexical end to end: a leaf spelled through a link keeps that spelling in
-    `drain_writable_trees`, in the box's rw mounts and in the holder's `.mounts`, and the held
+    `writable_trees`, in the box's rw mounts and in the holder's `.mounts`, and the held
     roots are the folders that spelling names.
 
     True, with `leaf-link -> real-leaf`, for each known label: all three lists are the literal
     `leaf-link/defender/...`; the descriptors held are the real-leaf folders; a write through
     each `mount(m)` lands in `real-leaf`; the resolved spelling is no mount point of the trees.
 
-    Catches: `resolve()` in `drain_writable_trees`, in the box, or in the holder. Each turns
+    Catches: `resolve()` in `writable_trees`, in the box, or in the holder. Each turns
     the list into a spelling the box was never given, so the box's mounts and the held mount
     points stop comparing equal."""
     real_leaf = tmp_path / "real-leaf"
@@ -762,7 +774,7 @@ def test_the_list_keeps_the_leafs_spelling_and_the_held_roots_are_the_folders_it
 
     for label in KNOWN:
         expected = tuple(link / rel for rel in EXPECTED_MOUNTS[label])
-        assert w.drain_writable_trees(label) == expected
+        assert label.writable_trees(w) == expected
         request = drains._drain_box_request(link, "batch-1", label, paths)
         assert rw_mounts(request) == [(m, m) for m in expected]
         assert ro_mounts(request) == [(link, link)]
@@ -829,7 +841,7 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
     listed = tuple(rel_root / rel for rel in EXPECTED_MOUNTS[label])
 
     assert relative.repo_root == rel_root
-    assert relative.drain_writable_trees(label) == listed
+    assert label.writable_trees(relative) == listed
     request = drains._drain_box_request(
         rel_root, "batch-1", label, LoopPaths(repo_root=tmp_path / MAIN))
     assert rw_mounts(request) == [(m, m) for m in listed]
@@ -875,7 +887,7 @@ def test_a_relative_root_is_anchored_neither_at_the_cwd_nor_at_this_checkout(
         assert not (tmp_path / rel).exists(), f"precondition: the cwd holds no {rel}"
     dot = relative_paths(how, Path("."), tmp_path)
 
-    assert dot.drain_writable_trees(label) == tuple(Path(rel) for rel in EXPECTED_MOUNTS[label])
+    assert label.writable_trees(dot) == tuple(Path(rel) for rel in EXPECTED_MOUNTS[label])
     before = {tree: sorted(descriptors_under(tree)) for tree in checkout_trees}
     with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees' mount refusal; the type is the contract
         open_drain_trees(dot, label)
@@ -901,7 +913,7 @@ LANE_PREFIX = {AUTHOR: "lessons/", LEAD: "lead-author/"}
 class CheckoutBranch(B.RecordingBranch):
     """`_box665.RecordingBranch` (the recorded worktree lifecycle), whose leaf carries the three
     drain trees as the real worktree, a checkout of the repo, does, plus the decoys,
-    `relisted_paths`' extra tree for this leaf, and the one it names for the main checkout. The
+    `relocated_paths`' trees for this leaf, and the ones it names for the main checkout. The
     leaf sits under its own base, never at `paths.repo_root`, and is kept after the drive
     (`destroy_on_cleanup` off)."""
 
@@ -911,7 +923,7 @@ class CheckoutBranch(B.RecordingBranch):
 
     def start_batch(self, batch_id: str) -> Path:
         wt = super().start_batch(batch_id)
-        for rel in (*ALL_TREES, *DECOY_TREES, relisted_rel(wt), relisted_rel(Path(MAIN))):
+        for rel in (*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(Path(MAIN))):
             (wt / rel).mkdir(parents=True, exist_ok=True)
         self.leaves.append(wt)
         return wt
@@ -951,7 +963,7 @@ class WorkStep:
 @dataclasses.dataclass
 class Drive:
     """One lane drive's inputs and recorders: the lane's label, the `paths` kind it was handed
-    (`shipped`, or `relisted` with its `asked` log), the box recorder, the branch and the work
+    (`shipped`, or `relocated` with its `asked` log), the box recorder, the branch and the work
     step."""
 
     label: str
@@ -967,7 +979,7 @@ def start_drive(tmp_path: Path, label: str, kind: str, prefix: str) -> Drive:
     """The drive's `paths` (`kind`), and a branch whose prefix is the lane's own or the other
     lane's (`prefix`)."""
     asked: list[tuple[Path, str]] = []
-    cls = LoopPaths if kind == "shipped" else relisted_paths(asked)
+    cls = LoopPaths if kind == "shipped" else relocated_paths(asked)
     paths = cls(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
     other = LEAD if label == AUTHOR else AUTHOR
     rec = B.BoxLifecycleRecorder()
@@ -983,7 +995,7 @@ def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive)
     assert leaf != d.paths.repo_root
     request = d.rec.only_request()
     shipped = list(EXPECTED_MOUNTS[d.label])
-    rels = shipped if d.kind == "shipped" else [*reversed(shipped), relisted_rel(leaf)]
+    rels = shipped if d.kind == "shipped" else relocated_rels(d.label, leaf)
     expected = [leaf / rel for rel in rels]
 
     assert rw_mounts(request) == [(m, m) for m in expected], (
@@ -1005,12 +1017,13 @@ def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive)
     assert step.mounts == rw, "the trees the work step holds are not the box's rw mounts"
     assert step.held == real(*rw), "the held roots are not the box's rw mounts"
     assert step.landed == dict.fromkeys(rw, PAYLOAD)
-    if d.kind == "relisted":
-        assert_asked_only(d.asked, wt, d.label, "the lane")
+    if d.kind == "relocated":
+        assert {attr for root, attr in d.asked if root == wt} >= {
+            attr for attr, _name in TREE_ATTRS[d.label]}, d.asked
 
 
 @pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relisted"])
+@pytest.mark.parametrize("kind", ["shipped", "relocated"])
 def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_them(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
     """Driven through the real `drains.author_drain`: the box request the lane composes mounts
@@ -1023,8 +1036,8 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
     (`trigger_author=`, called for both curators) is handed `paths.with_repo_root(wt)`, of
     `paths`' own type, with `wt` the request's ro mount. Inside it, with the box up and the leaf
     live, `open_drain_trees(that paths, author_drain)` holds exactly the rw mounts, by
-    descriptor, and a write through each lands in it. Over `relisted_paths` the same holds for
-    its list (`lessons-questioner`, `lessons`, `relisted-<leaf>`), and every ask was of the leaf
+    descriptor, and a write through each lands in it. Over `relocated_paths` the same holds for
+    its relocated trees (`relocated-<leaf>-lessons`, `...-lessons-questioner`), read of the leaf
     for `author_drain`: the box and the work step both follow the `paths` the lane was handed.
     All of it holds with the branch's prefix the lead lane's (`lead-author/`).
 
@@ -1054,7 +1067,7 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
 
 
 @pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relisted"])
+@pytest.mark.parametrize("kind", ["shipped", "relocated"])
 def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
         tmp_path: Path, kind: str, prefix: str):
     """Driven through the real `drains.lead_author_drain` with one queued case: the box request
@@ -1066,8 +1079,8 @@ def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
     `leaf/defender/skills` at its own path; its ro mount is the leaf alone. The work step
     (`run_lead_author=`, the claim's serve) is handed `paths.with_repo_root(wt)`, of `paths`'
     own type, and inside it `open_drain_trees(that paths, lead_author_drain)` holds exactly
-    `skills/`, by descriptor, and a write through it lands there. Over `relisted_paths` the same
-    holds for its list (`skills`, `relisted-<leaf>`), every ask of the leaf for
+    `skills/`, by descriptor, and a write through it lands there. Over `relocated_paths` the same
+    holds for its relocated tree (`relocated-<leaf>-skills`), read of the leaf for
     `lead_author_drain`. All of it holds with the branch's prefix the author lane's
     (`lessons/`). The queue is the real one (`markers.enqueue_case_for_curation`, what
     `test_queue_drains_852._queued_run` wraps), so the lane's own wake gate opens. That
