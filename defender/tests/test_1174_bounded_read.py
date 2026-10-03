@@ -21,9 +21,11 @@ reader's `os_=` seam (`FaultOs`), never `monkeypatch.setattr`.
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import os
 import stat
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -876,3 +878,331 @@ def test_o5_a_procfs_file_reporting_size_zero_reads_in_full():
     assert reason is None
     assert text
     assert text.splitlines()[0] == proc.read_text().splitlines()[0]
+
+
+# ---------------------------------------------------------------------------------------
+# The independent adversary's second pass over amendment 2 (H1-H13)
+# ---------------------------------------------------------------------------------------
+
+
+class OpenerFaultOs(FaultOs):
+    """`os`, except `open` or `fstat` (by `fail`) raises `EIO` — a fault inside the opener."""
+
+    def __init__(self, fail: str) -> None:
+        super().__init__()
+        self._fail = fail
+
+    def open(self, *a: Any, **kw: Any) -> int:
+        self.calls.append("open")
+        if self._fail == "open":
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        return os.open(*a, **kw)
+
+    def fstat(self, fd: int) -> os.stat_result:
+        self.calls.append("fstat")
+        if self._fail == "fstat":
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        return os.fstat(fd)
+
+
+class ShortWriteOs(FaultOs):
+    """`os`, except each `write` writes at most `k` bytes — a short write is legal."""
+
+    def __init__(self, k: int) -> None:
+        super().__init__()
+        self._k = k
+
+    def write(self, fd: int, data: Any) -> int:
+        self.calls.append("write")
+        return os.write(fd, bytes(data[:self._k]))
+
+
+def in_thread(fn: Callable[[], Any], *, deadline: float = 10.0) -> Any:
+    """`fn()` on a thread, or fail when it has not answered by `deadline` seconds."""
+    out: list[Any] = []
+    t = threading.Thread(target=lambda: out.append(fn()), daemon=True)
+    t.start()
+    t.join(deadline)
+    assert not t.is_alive(), f"no answer within {deadline}s: the call hangs"
+    return out[0]
+
+
+# -- H1: the read opener --------------------------------------------------------------------
+
+
+def test_h1_a_fifo_at_the_budget_path_reads_as_empty_and_does_not_hang(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    os.mkfifo(RunPaths(run_dir).budget)
+    assert in_thread(lambda: BE.read_budget(run_dir)) == {}
+
+
+def test_h1_a_hard_linked_budget_reads_as_empty(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    RunPaths(run_dir).budget.write_text('{"tool_calls": 3}')
+    os.link(RunPaths(run_dir).budget, tmp_path / "elsewhere")
+    assert BE.read_budget(run_dir) == {}
+
+
+def test_h1_the_read_opener_takes_a_shared_lock(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("{}")
+    with _io.locked_for_read(p):
+        other = os.open(p, os.O_RDONLY)
+        try:
+            fcntl.flock(other, fcntl.LOCK_SH | fcntl.LOCK_NB)  # shared: a second reader enters
+            fcntl.flock(other, fcntl.LOCK_UN)
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)  # a writer waits
+        finally:
+            os.close(other)
+
+
+# -- H3: the breaker's readers are bounded ---------------------------------------------------
+
+
+def test_h3_a_1tib_breaker_state_reads_as_tripped(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    sparse(RunPaths(run_dir).circuit_breaker, 1 << 40)
+    assert CB.is_tripped(run_dir, "elastic") is True
+    assert CAP._breaker_failures(run_dir) == 0
+
+
+def test_h3_a_valid_state_padded_past_the_limit_reads_as_tripped(tmp_path):
+    """Valid JSON — `{"systems": {}}`, healthy if read — padded with spaces past the limit: a
+    bounded reader refuses it (tripped); an unbounded one would read it as healthy."""
+    run_dir = run_dir_at(tmp_path)
+    body = b'{"systems": {}}'
+    RunPaths(run_dir).circuit_breaker.write_bytes(body + b" " * (64 * MiB + 1 - len(body)))
+    assert CB.is_tripped(run_dir, "elastic") is True
+
+
+# -- H2, H12: limit=None reads the whole file ------------------------------------------------
+
+
+def _rows_around_a_hole(path: Path) -> None:
+    """A row, a sparse hole past the limit, then another row on its own line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"n": 1}\n')
+    with open(path, "r+b") as f:  # lint-text-io: ok — test plant of a sparse hole
+        f.truncate(64 * MiB + 1)
+        f.seek(0, os.SEEK_END)
+        f.write(b'\n{"n": 2}\n')
+
+
+def test_h2_the_wire_log_reads_every_row_past_the_default_limit(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    _rows_around_a_hole(RunPaths(run_dir).wire_log)
+    from defender.scripts.visualize.visualize_data import load_messages
+    assert load_messages(run_dir) == [{"n": 1}, {"n": 2}]
+    assert _io.read_jsonl_rows(RunPaths(run_dir).wire_log, limit=None) == [{"n": 1}, {"n": 2}]
+
+
+def test_h12_the_text_wrappers_read_past_the_default_limit_with_no_limit(tmp_path):
+    p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
+    text = _io.read_text_utf8(p, limit=None)
+    assert len(text) == 64 * MiB + 1
+    del text
+    soft, reason = _io.read_text_soft(p, limit=None)
+    assert reason is None
+    assert soft is not None
+    assert len(soft) == 64 * MiB + 1
+
+
+# -- H4, H5: a size-0 descriptor (a pipe) reads to EOF, bounded as it goes -------------------
+
+
+def _feed_fifo(path: Path, payload: bytes) -> threading.Thread:
+    def write() -> None:
+        try:
+            fd = os.open(path, os.O_WRONLY)
+            try:
+                view = memoryview(payload)
+                while view:
+                    view = view[os.write(fd, view):]
+            finally:
+                os.close(fd)
+        except BrokenPipeError:
+            pass  # the reader refused and closed — expected for the over-limit feed
+    t = threading.Thread(target=write, daemon=True)
+    t.start()
+    return t
+
+
+@pytest.mark.parametrize("wrapper", ["read_text_utf8", "read_text_soft"])
+def test_h4_a_pipe_fed_past_the_limit_is_refused_by_the_wrappers(tmp_path, wrapper):
+    """`fstat` says 0 for a pipe, so only a running bound can refuse it."""
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    feeder = _feed_fifo(fifo, b"x" * (1 * MiB))
+
+    def read() -> Any:
+        if wrapper == "read_text_utf8":
+            try:
+                return _io.read_text_utf8(fifo, limit=4096)
+            except OSError as e:
+                return e
+        return _io.read_text_soft(fifo, limit=4096)
+
+    got = in_thread(read)
+    feeder.join(10)
+    if wrapper == "read_text_utf8":
+        assert isinstance(got, OSError), f"read {len(got)} chars past a 4096-byte limit"
+        assert "read limit" in str(got)
+    else:
+        assert got[0] is None, f"read {len(got[0])} chars past a 4096-byte limit"
+
+
+def test_h5_a_pipe_with_a_multi_chunk_payload_reads_in_full(tmp_path):
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    data = _mixed_content()
+    feeder = _feed_fifo(fifo, data)
+    text = in_thread(lambda: _io.read_text_utf8(fifo))
+    feeder.join(10)
+    plain = tmp_path / "plain"
+    plain.write_bytes(data)
+    assert text == plain.read_text(encoding="utf-8")
+
+
+def test_h5_a_procfs_file_reads_to_the_same_full_content():
+    proc = Path("/proc/self/mountinfo")
+    with open(proc, encoding="utf-8") as f:  # lint-text-io: ok — the independent full read
+        want = f.read()
+    assert _io.read_text_soft(proc) == (want, None)
+
+
+# -- H6: the run handle's update does not heal from a read fault -----------------------------
+
+
+class _EioUpdateIo:
+    """`_io` for a run handle, except its `locked_json_update` reads through an `os_` whose
+    `read` raises `EIO`."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_io, name)
+
+    @staticmethod
+    def locked_json_update(open_locked: Any, mutate: Any, *, default: Any = dict) -> dict:
+        return _io.locked_json_update(open_locked, mutate, default=default,
+                                      os_=FaultOs(read_fault=eio))
+
+
+def test_h6_the_run_handle_update_raises_on_a_read_fault_and_changes_nothing(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    h = _budget_handle(run_dir, io=_EioUpdateIo())
+    h.path.parent.mkdir(parents=True, exist_ok=True)
+    h.path.write_text('{"keep": true}')
+    with pytest.raises(OSError, match="Input/output"):
+        h.update({"k": 1})
+    assert h.path.read_text() == '{"keep": true}'
+
+
+@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
+def test_h6_update_json_locked_propagates_a_read_fault_through_its_seam(tmp_path, fault):
+    """The hooks entry point `open_budget`, `update_budget_locked` and `record_outcome` share
+    takes `os_`, so O7 is pinned there, not only on `_io`."""
+    p = tmp_path / "budget.json"
+    p.write_text('{"keep": true}')
+    with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
+        _run_dir.update_json_locked(p, lambda d: d.update(k=1), os_=FaultOs(read_fault=fault))
+    assert p.read_text() == '{"keep": true}'
+
+
+def test_h6_read_json_locked_answers_empty_on_a_read_fault_through_its_seam(tmp_path):
+    p = tmp_path / "budget.json"
+    p.write_text('{"keep": true}')
+    assert _run_dir.read_json_locked(p, os_=FaultOs(read_fault=eio)) == {}
+    assert _run_dir.read_json_locked(p, os_=FaultOs()) == {"keep": True}
+
+
+# -- H7: a fault inside the read opener -------------------------------------------------------
+
+
+@pytest.mark.parametrize("fail", ["open", "fstat"])
+def test_h7_a_fault_in_the_read_opener_answers_empty(tmp_path, fail):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = OpenerFaultOs(fail)
+    assert _io.locked_json_read(_io.locked_for_read(p, os_=f), os_=f) == {}
+    assert fail in f.calls
+
+
+# -- H8, H9: the breaker's readers on falsy, linked and overflowing state ---------------------
+
+
+@pytest.mark.parametrize("doc", ["null", "[]", "0", "false", '""', "[1, 2]"])
+def test_h8_a_falsy_or_non_object_breaker_state_reads_as_tripped(tmp_path, doc):
+    run_dir = run_dir_at(tmp_path)
+    RunPaths(run_dir).circuit_breaker.write_text(doc)
+    assert CB.is_tripped(run_dir, "elastic") is True
+    assert CAP._breaker_failures(run_dir) == 0
+
+
+def test_h9_breaker_failures_does_not_follow_a_link(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"systems": {ITEM1_SYSTEM: {"failures": 3}}, "total_failures": 3}))
+    RunPaths(run_dir).circuit_breaker.symlink_to(real)
+    assert CAP._breaker_failures(run_dir) == 0
+
+
+def test_h9_breaker_failures_survives_an_overflowing_count(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    RunPaths(run_dir).circuit_breaker.write_text(
+        f'{{"systems": {{"{ITEM1_SYSTEM}": {{"failures": 1e999}}}}, "total_failures": 1}}')
+    assert CAP._breaker_failures(run_dir) == 0
+
+
+# -- H10: the rewrite goes through the seam, whole -------------------------------------------
+
+
+def test_h10_the_rewrite_goes_through_the_seam(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    f = FaultOs()
+    _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: (d.clear(), d.update(k=1)),
+                           default=dict, os_=f)
+    for verb in ("lseek", "ftruncate", "write"):
+        assert verb in f.calls, f"the rewrite's {verb} did not go through os_: {f.calls}"
+
+
+@pytest.mark.parametrize("k", [1, 7])
+def test_h10_short_writes_still_leave_the_whole_document(tmp_path, k):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    f = ShortWriteOs(k)
+    state = _io.locked_json_update(_io.locked_for_rewrite(p, os_=f),
+                                   lambda d: d.update(k=list(range(50))), default=dict, os_=f)
+    assert p.read_bytes() == json.dumps(state, indent=2).encode()
+
+
+# -- H11: the nesting bound is exactly JSON_NESTING_LIMIT -------------------------------------
+
+
+def test_h11_a_document_at_exactly_the_nesting_limit_is_merged(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_bytes(_deep(_io.JSON_NESTING_LIMIT - 1))  # the outer object makes it LIMIT deep
+    assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT
+    state = _run_dir.update_json_locked(p, lambda d: d.update(k=1))
+    assert "a" in state
+    assert state["k"] == 1
+
+
+def test_h11_one_past_the_nesting_limit_heals(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_bytes(_deep(_io.JSON_NESTING_LIMIT))
+    assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT + 1
+    assert _run_dir.update_json_locked(p, lambda d: d.update(k=1)) == {"k": 1}
+
+
+# -- H13: one indent setting on both former paths ---------------------------------------------
+
+
+def test_h13_both_update_paths_write_the_same_form(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    h = _budget_handle(run_dir)
+    h.update({"a": 1, "b": [1, 2]})
+    assert h.path.read_bytes() == json.dumps({"a": 1, "b": [1, 2]}, indent=2).encode()
+    p = tmp_path / "state.json"
+    state = _run_dir.update_json_locked(p, lambda d: d.update(a=1, b=[1, 2]))
+    assert p.read_bytes() == json.dumps(state, indent=2).encode()
