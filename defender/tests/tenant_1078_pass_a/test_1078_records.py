@@ -7,8 +7,9 @@ reads it back and refuses on disagreement — never overwrites. `_parse_record` 
 
 §7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES) is pinned here as an OBSERVABLE, never as a
 mechanism: a reader that catches a create-lane writer mid-write sees the name absent or the file
-complete, never empty or partial; the file has one name throughout; mode 0644 and the writer's
-owner; a crash leaves no stray entry. Every fault is the REAL one:
+complete, never empty or partial; the file has one name throughout; mode 0644 under umask 022
+(the umask is honoured like every other lane, #1144) and the writer's owner; a crash leaves no
+stray entry. Every fault is the REAL one:
 
 * the create race — N `threading.Barrier`-released callers on a fresh base — is claim C-P2's own
   probe shape (47-probes.md: on the old one-open lane a loser read the winner's EMPTY record in
@@ -39,6 +40,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._umask import umask
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
 T_ID = H.VALID_ID
@@ -131,6 +133,9 @@ class _Bystander:
 
 
 def _assert_single_plain_0644(path: Path) -> None:
+    """A plain, single-named file of mode 0644, owned by this process. Every caller writes it
+    under a pinned umask 022: the create lane honours the umask (#1144), so 0644 is its mode
+    under THAT umask only."""
     st = os.lstat(path)
     assert stat.S_ISREG(st.st_mode), f"{path} is not a regular file"
     assert st.st_nlink == 1, f"{path} has {st.st_nlink} names, not one"
@@ -278,13 +283,16 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
     """A reader that catches a create-lane writer (ensure_runs_base_record's runs-base record,
     create_tenant's tenant row) mid-write sees the name absent or the file complete, never
     empty or partial; the file has exactly one name throughout (no two-named alias window),
-    mode 0644 (and the writing process's owner), and a crash before the write completes leaves
-    no stray entry in the directory. N racing ensure_runs_base_record calls on one base all
-    succeed, leave one record, and every caller carries the winner's base_world_id.
+    mode 0644 under umask 022 (and the writing process's owner), and a crash before the write
+    completes leaves no stray entry in the directory. N racing ensure_runs_base_record calls on
+    one base all succeed, leave one record, and every caller carries the winner's
+    base_world_id.
 
     Four observations, each against the REAL lane: (1) the record race with a bystander
     reader; (2) the row race with a bystander reader; (3) mode, owner and name count of what
-    each leaves; (4) a real SIGKILL of a child looping over each lane.
+    each leaves; (4) a real SIGKILL of a child looping over each lane. All four run under a
+    pinned umask 022, so (3)'s 0644 never rides the host's ambient umask: the umask is
+    process-wide, so the racing threads share it and the killed children inherit it.
 
     PLATFORM-NEUTRAL BY CONSTRUCTION (phase F RC1): the harness uses only POSIX primitives —
     threads, `os.lstat`/`os.listdir`, `os.geteuid`, a child process and SIGKILL — and asserts
@@ -292,62 +300,63 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
     implementer's per-platform choice). So it runs, and means the same thing, on any POSIX
     host; nothing here is Linux-only, so nothing is skipped. Which platforms the guarantee is
     REQUIRED on is RC1's open §7 question, not this test's."""
-    # (1) + (3) the runs-base record
-    record_fields = ("tenant_id", "base_world_id", "created_at")
-    for trial in range(40):
-        base = tmp_path / "records" / f"b{trial}"
-        base.mkdir(parents=True)
-        with _Bystander(base / H.RECORD_NAME, record_fields) as reader:
-            results, errors = _race(8, lambda b=base: H.ensure_runs_base_record(b, T_ID))
-        assert errors == [], (
-            f"trial {trial}: a racing ensure_runs_base_record raised {errors[0]!r} — the "
-            "empty-window read C-P2 measured on the old lane")
-        assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
-        assert os.listdir(base) == [H.RECORD_NAME], f"trial {trial}: {os.listdir(base)}"
-        on_disk = json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
-        assert on_disk["tenant_id"] == T_ID
-        assert {r.base_world_id for r in results} == {on_disk["base_world_id"]}
-        _assert_single_plain_0644(base / H.RECORD_NAME)
+    with umask(0o022):
+        # (1) + (3) the runs-base record
+        record_fields = ("tenant_id", "base_world_id", "created_at")
+        for trial in range(40):
+            base = tmp_path / "records" / f"b{trial}"
+            base.mkdir(parents=True)
+            with _Bystander(base / H.RECORD_NAME, record_fields) as reader:
+                results, errors = _race(8, lambda b=base: H.ensure_runs_base_record(b, T_ID))
+            assert errors == [], (
+                f"trial {trial}: a racing ensure_runs_base_record raised {errors[0]!r} — the "
+                "empty-window read C-P2 measured on the old lane")
+            assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
+            assert os.listdir(base) == [H.RECORD_NAME], f"trial {trial}: {os.listdir(base)}"
+            on_disk = json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
+            assert on_disk["tenant_id"] == T_ID
+            assert {r.base_world_id for r in results} == {on_disk["base_world_id"]}
+            _assert_single_plain_0644(base / H.RECORD_NAME)
 
-    # (2) + (3) the tenant row
-    row_fields = ("tenant_id", "created_at")
-    for trial in range(20):
-        root = tmp_path / "rows" / f"d{trial}"
-        root.parent.mkdir(parents=True, exist_ok=True)
-        with _Bystander(root / T_ID / H.ROW_NAME, row_fields) as reader:
-            results, errors = _race(6, lambda r=root: H.create_tenant(r, T_ID))
-        assert len(results) == 1, f"trial {trial}: {len(results)} creates of one row succeeded"
-        assert all(isinstance(e, H.tenant().TenantRefused) for e in errors), (
-            f"trial {trial}: a losing create escaped with {[type(e).__name__ for e in errors]}")
-        assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
-        assert os.listdir(root) == [T_ID], f"trial {trial}: stray entries in the root"
-        assert os.listdir(root / T_ID) == [H.ROW_NAME], f"trial {trial}: stray beside the row"
-        _assert_single_plain_0644(root / T_ID / H.ROW_NAME)
+        # (2) + (3) the tenant row
+        row_fields = ("tenant_id", "created_at")
+        for trial in range(20):
+            root = tmp_path / "rows" / f"d{trial}"
+            root.parent.mkdir(parents=True, exist_ok=True)
+            with _Bystander(root / T_ID / H.ROW_NAME, row_fields) as reader:
+                results, errors = _race(6, lambda r=root: H.create_tenant(r, T_ID))
+            assert len(results) == 1, f"trial {trial}: {len(results)} creates of one row succeeded"
+            assert all(isinstance(e, H.tenant().TenantRefused) for e in errors), (
+                f"trial {trial}: a losing create escaped with {[type(e).__name__ for e in errors]}")
+            assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
+            assert os.listdir(root) == [T_ID], f"trial {trial}: stray entries in the root"
+            assert os.listdir(root / T_ID) == [H.ROW_NAME], f"trial {trial}: stray beside the row"
+            _assert_single_plain_0644(root / T_ID / H.ROW_NAME)
 
-    # (4) the crash
-    crash_root = tmp_path / "crash"
-    env = H.setup_env(None)
-    torn: list[str] = []
-    for lane, kills in (("record", 24), ("row", 8)):
-        for kill in range(kills):
-            root = crash_root / f"{lane}-{kill}"
-            root.mkdir(parents=True)
-            child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-                [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                assert child.stdout.readline().strip() == "ready", child.stderr.read()
-                time.sleep(random.uniform(0.02, 0.25))
-                if child.poll() is not None:
-                    pytest.fail(f"the {lane} create-lane child died on its own: "
-                                f"{child.stderr.read()}")
-                child.send_signal(signal.SIGKILL)
-            finally:
-                child.wait(timeout=30)
-                child.stdout.close()
-                child.stderr.close()
-            torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
-    assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
+        # (4) the crash
+        crash_root = tmp_path / "crash"
+        env = H.setup_env(None)
+        torn: list[str] = []
+        for lane, kills in (("record", 24), ("row", 8)):
+            for kill in range(kills):
+                root = crash_root / f"{lane}-{kill}"
+                root.mkdir(parents=True)
+                child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
+                    [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    assert child.stdout.readline().strip() == "ready", child.stderr.read()
+                    time.sleep(random.uniform(0.02, 0.25))
+                    if child.poll() is not None:
+                        pytest.fail(f"the {lane} create-lane child died on its own: "
+                                    f"{child.stderr.read()}")
+                    child.send_signal(signal.SIGKILL)
+                finally:
+                    child.wait(timeout=30)
+                    child.stdout.close()
+                    child.stderr.close()
+                torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
+        assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
 
 
 def _no_unnamed_files(errno_: int):
@@ -364,7 +373,8 @@ def test_create_falls_back_where_no_unnamed_file_can_be_made(tmp_path, unsupport
     """`write_guarded(mode="create")` on a filesystem that cannot make an unnamed file still
     creates the file, once: the fallback is the one-open exclusive create, and a second create
     of the same name is the ordinary race (`FileExistsError`, unmarked). The control is the
-    real lane on this host, which writes the same bytes with one name and mode 0644."""
+    real lane on this host, which writes the same bytes with one name and mode 0644 under
+    umask 022."""
     io_mod = H.mod("_io")
     target = tmp_path / "x.json"
     io_mod.write_guarded(target, "{}\n", mode="create", open_unnamed=_no_unnamed_files(unsupported))
@@ -375,7 +385,8 @@ def test_create_falls_back_where_no_unnamed_file_can_be_made(tmp_path, unsupport
     assert not getattr(again.value, "write_guarded_alias", False), "the race read as an alias"
 
     control = tmp_path / "y.json"
-    io_mod.write_guarded(control, "{}\n", mode="create")
+    with umask(0o022):
+        io_mod.write_guarded(control, "{}\n", mode="create")
     _assert_single_plain_0644(control)
 
 

@@ -79,6 +79,7 @@ from defender._artifact_schema import INVESTIGATION_FILE_MAX
 from defender._provenance import RunProvenance
 from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests import _spec1077 as S
+from defender.tests._umask import umask
 
 RUN_ID = "run-1111"
 #: How long one call may take before O3 calls it hung. A right answer takes milliseconds; the
@@ -1210,6 +1211,8 @@ def test_rooted_mkdir_refuses_a_name_outside_the_grammar_and_creates_nothing(scr
 # -- rooted_write -----------------------------------------------------------------------
 
 def _assert_single_plain_0644(path: Path) -> None:
+    """A plain, single-named file of mode 0644. Every caller writes it under a pinned umask
+    022: the lanes honour the umask (#1144), so 0644 is the mode under THAT umask only."""
     st = os.lstat(path)
     assert stat.S_ISREG(st.st_mode), f"{path} is not a regular file"
     assert st.st_nlink == 1, f"{path} has {st.st_nlink} names, not one"
@@ -1217,11 +1220,12 @@ def _assert_single_plain_0644(path: Path) -> None:
 
 
 def test_rooted_write_create_lands_once_single_linked_and_a_second_create_is_unmarked(scratch):
-    """`create`: the record lands whole, single-linked, mode 0644 (#1078's lane). A second
-    create of the same name is the ordinary race: `FileExistsError`, unmarked, the first
-    content standing."""
+    """`create`: the record lands whole, single-linked, mode 0644 under umask 022 (#1078's
+    lane). A second create of the same name is the ordinary race: `FileExistsError`, unmarked,
+    the first content standing."""
     target = scratch.real_folders()
-    _io.rooted_write(scratch.root, DEEP, "first\n", mode="create")
+    with umask(0o022):
+        _io.rooted_write(scratch.root, DEEP, "first\n", mode="create")
     assert target.read_text(encoding="utf-8") == "first\n"
     _assert_single_plain_0644(target)
     with pytest.raises(FileExistsError) as again:
@@ -1234,8 +1238,8 @@ def test_rooted_write_create_links_the_unnamed_file_it_opened_off_the_parent_des
         scratch):
     """The addendum's lane 1: `open_unnamed(dir_fd)` gets a descriptor of the record's own
     parent folder, reached by the walk, not a path. The name is then linked to exactly that
-    unnamed file (same inode), which has one name and mode 0644. A reader sees the name
-    absent or complete, never partial."""
+    unnamed file (same inode), which has one name and mode 0644 under umask 022. A reader sees
+    the name absent or complete, never partial."""
     target = scratch.real_folders()
     seen: dict[str, Any] = {}
 
@@ -1247,7 +1251,8 @@ def test_rooted_write_create_links_the_unnamed_file_it_opened_off_the_parent_des
         seen["file"] = os.dup(fd)
         return fd
 
-    _io.rooted_write(scratch.root, DEEP, "body\n", mode="create", open_unnamed=open_unnamed)
+    with umask(0o022):
+        _io.rooted_write(scratch.root, DEEP, "body\n", mode="create", open_unnamed=open_unnamed)
     try:
         parent = os.stat(target.parent)
         assert seen["dir"] == (parent.st_dev, parent.st_ino, True), (
@@ -1892,10 +1897,11 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
     it). The record's name comes into being in one `link` from a `/proc/self/fd/` source,
     relative to the parent's descriptor, at a moment it did not exist; the name itself is never
     opened with `O_CREAT` (a named create would expose it empty while the body is written).
-    The record lands whole, single-linked, 0644."""
+    The record lands whole, single-linked, 0644 under umask 022."""
     target = scratch.real_folders()
     recorder = _RecordsCreate(target)
-    _io.rooted_write(scratch.root, DEEP, "body\n", mode="create", os_=recorder)
+    with umask(0o022):
+        _io.rooted_write(scratch.root, DEEP, "body\n", mode="create", os_=recorder)
 
     assert recorder.creating_opens == [], (
         f"the default create opened the record's name with O_CREAT: {recorder.creating_opens}")
