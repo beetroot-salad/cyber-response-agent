@@ -32,8 +32,9 @@ folder with no data root at all (tenant CI).
 `migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
 its settings committed in the product repo until #1120 deleted them): it builds the knowledge
 folder acceptance now requires from the last copy in the checkout's history, as a new repo
-exactly like scaffold's, and the operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding or a refusal, 2 a
-usage error. Every refusal is printed as `[tenant.py] <message>`.
+exactly like scaffold's, and the operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding
+or a refusal — a finding includes a check that could not judge (the grant census untakeable, `.tenant-id`
+unverifiable), which `check` reports as one more finding, not a separate code — 2 a usage error. Every refusal is printed as `[tenant.py] <message>`.
 """
 from __future__ import annotations
 
@@ -171,7 +172,9 @@ def _findings(knowledge: Path) -> list[str]:
     try:
         census = _tenant_census.take_census(_DEFENDER_DIR, _REPO_ROOT)
     except _tenant_census.CensusUnavailable as blind:
-        findings.append(f"the grant census could not be taken: {blind}")
+        findings.append(
+            f"the grant census could not be taken — the running product checkout {_REPO_ROOT} "
+            f"failed, and nothing in the folder being checked is at fault: {blind}")
     else:
         table = dispositions_path(settings)
         try:
