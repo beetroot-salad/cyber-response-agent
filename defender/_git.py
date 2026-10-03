@@ -132,18 +132,6 @@ def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
     return proc.stdout
 
 
-def git_show_file_bytes(cwd: Path, rev: str, path: str) -> bytes | None:
-    """The raw bytes a path carries at `rev`, or `None` when it is not there. Use for
-    byte-identity checks: `git_show_file` decodes with universal newlines, so CRLF and LF
-    compare equal there."""
-    proc = subprocess.run(
-        ["git", "show", f"{rev}:{path}"], cwd=cwd, capture_output=True, check=False,
-    )
-    if proc.returncode != 0:
-        return None
-    return proc.stdout
-
-
 def git_blob_bytes(cwd: Path, sha: str, *, env: Mapping[str, str] | None = None,
                    timeout: float | None = None) -> bytes:
     """The raw bytes of the blob `sha` (`cat-file blob`): no filter, no line-ending
@@ -172,15 +160,12 @@ def _run_bytes(args: Sequence[str], *, cwd: Path, input: bytes | None = None) ->
     return proc.stdout
 
 
-def git_tree_blobs(cwd: Path, rev: str, pathspec: str) -> dict[str, bytes]:
-    """Every regular-file blob under `pathspec` at `rev`, nested folders included, by its
-    repo-relative path, with its exact stored bytes (`ls-tree -r` then one `cat-file --batch`):
-    git's own read of a commit (#1134 addendum 2 correction, C1), which no worktree entry can
-    redirect. A symlink (mode 120000) or submodule entry is left out, so nothing restores it as a
-    file. A `pathspec` `rev` does not carry answers `{}`; an unknown `rev` or a missing object
-    raises `GitError`. The bytes are the blob's, unfiltered, as `git_show_file_bytes` gives
-    them."""
-    listing = _run_bytes(["ls-tree", "-r", "-z", "--full-name", rev, "--", pathspec], cwd=cwd)
+def _regular_blobs(cwd: Path, rev: str, pathspec: str) -> list[tuple[str, str]]:
+    """`(oid, repo-relative path)` of every regular-file blob under `pathspec` at `rev`, nested
+    folders included (`ls-tree -r -z`, the pathspec taken literally); a symlink or submodule
+    entry is left out. An unknown `rev` raises `GitError`."""
+    listing = _run_bytes(["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev,
+                          "--", pathspec], cwd=cwd)
     wanted: list[tuple[str, str]] = []
     for record in listing.split(b"\0"):
         if not record:
@@ -189,6 +174,17 @@ def git_tree_blobs(cwd: Path, rev: str, pathspec: str) -> dict[str, bytes]:
         mode, kind, oid = meta.decode("ascii").split(" ")
         if kind == "blob" and mode in _REGULAR_BLOB_MODES:
             wanted.append((oid, raw_path.decode("utf-8", "surrogateescape")))
+    return wanted
+
+
+def git_tree_blobs(cwd: Path, rev: str, pathspec: str) -> dict[str, bytes]:
+    """Every regular-file blob under `pathspec` at `rev`, nested folders included, by its
+    repo-relative path, with its exact stored bytes (`ls-tree -r` then one `cat-file --batch`):
+    git's own read of a commit (#1134 addendum 2 correction, C1), which no worktree entry can
+    redirect. A symlink (mode 120000) or submodule entry is left out, so nothing restores it as a
+    file. A `pathspec` `rev` does not carry answers `{}`; an unknown `rev` or a missing object
+    raises `GitError`. The bytes are the blob's, unfiltered."""
+    wanted = _regular_blobs(cwd, rev, pathspec)
     if not wanted:
         return {}
     batch_args = ["cat-file", "--batch"]
@@ -204,6 +200,37 @@ def git_tree_blobs(cwd: Path, rev: str, pathspec: str) -> dict[str, bytes]:
         blobs[path] = out[end + 1:end + 1 + size]
         pos = end + 1 + size + 1
     return blobs
+
+
+#: `git diff`'s options for a comparison of raw bytes: the executable bit ignored (a mode-only
+#: change is no content change), no end-of-line conversion from config, a symlink kept a symlink,
+#: and the stat-dirty but identical file re-hashed rather than reported.
+_RAW_COMPARE = ("-c", "core.fileMode=false", "-c", "core.autocrlf=false",
+                "-c", "core.symlinks=true", "-c", "diff.autoRefreshIndex=true",
+                "--literal-pathspecs")
+
+
+def git_unchanged_since(cwd: Path, rev: str, pathspec: str) -> frozenset[str]:
+    """The repo-relative paths of the regular files `rev` carries under `pathspec` (nested
+    included) that git still finds unchanged in the working tree: still a regular file, with the
+    same bytes. Git's own comparison (#1134 addendum 3, D1; N-a): it lstats each entry, so a
+    symlink is a type change and a FIFO, a folder or nothing at the name is a change, none of them
+    followed or opened; it hashes a regular file's content, a hard link's included. The executable
+    bit is ignored, and attributes come from `rev`'s tree (`GIT_ATTR_SOURCE`, git 2.42+), never
+    from a `.gitattributes` in the worktree, so no end-of-line conversion makes changed bytes
+    compare equal. A path `rev` does not carry as a regular file is never in the answer. A git
+    failure (an unknown `rev`, an unreadable index, no repository) raises `GitError`."""
+    carried = {path for _oid, path in _regular_blobs(cwd, rev, pathspec)}
+    if not carried:
+        return frozenset()
+    args = [*_RAW_COMPARE, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff",
+            "--no-textconv", rev, "--", pathspec]
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False,
+                          env={**os.environ, "GIT_ATTR_SOURCE": rev})
+    if proc.returncode != 0:
+        raise GitError(args, proc.returncode, proc.stderr.decode("utf-8", "surrogateescape"))
+    changed = {p.decode("utf-8", "surrogateescape") for p in proc.stdout.split(b"\0") if p}
+    return frozenset(carried - changed)
 
 
 def git_worktree_files(cwd: Path, pathspec: str) -> list[str]:
