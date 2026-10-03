@@ -11,6 +11,12 @@ from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.core.config import QueueChannel, source_first_party_key
 from defender.learning.core.lane_trees import TreeFor
 
+#: How long one curator git call over the worktree may take, in seconds, before the tick treats
+#: it as a git failure (`CorpusAuthorConfig.git_timeout`). Each is a local status, lookup or
+#: compare, the slowest a status of the whole worktree: one still running after this is blocked
+#: (a FIFO the agent left where git opens a file), not slow.
+GIT_TIMEOUT_SECONDS = 60.0
+
 
 @model(frozen=True)
 class BucketSpec:
@@ -75,6 +81,9 @@ class CorpusAuthorConfig:
     #: The attempt ceiling, bound once here so a malformed value fails the tick before any
     #: row is read and a mid-batch environment change can't move it.
     max_attempts: int
+    #: The bound on each git read the tick runs over the worktree, from the pre-agent capture
+    #: through the fault undo (#1134): past it the read is a git failure, never a hung tick.
+    git_timeout: float = GIT_TIMEOUT_SECONDS
     #: Optional hook run after both the corpus commit and the queue rotation (the lessons
     #: channel's held report).
     post_rotate: Callable[..., None] | None = None

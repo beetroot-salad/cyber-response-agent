@@ -4,7 +4,7 @@ import contextlib
 import json
 import random
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -153,20 +153,26 @@ def partition_committed(
 
 
 
-def git_head_sha(repo_root: Path) -> str:
-    return _git.git_head_sha(repo_root)
+def git_head_sha(repo_root: Path, *, timeout: float | None = None) -> str:
+    return _git.git_head_sha(repo_root, timeout=timeout)
 
 
-def changes_outside(repo_root: Path, prefix: str) -> list[str]:
+def changes_outside(
+    repo_root: Path, prefix: str, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
     return [
         path
-        for _xy, path in _git.git_status(repo_root)
+        for _xy, path in _git.git_status(repo_root, timeout=timeout, env=env)
         if not (path.startswith(prefix) and path.endswith(".md"))
     ]
 
 
-def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
-    return not _git.git_status(repo_root, pathspec=corpus_dir)
+def corpus_dir_clean(
+    repo_root: Path, corpus_dir: Path, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    return not _git.git_status(repo_root, pathspec=corpus_dir, timeout=timeout, env=env)
 
 
 def assert_clean_corpus_dir(
@@ -306,7 +312,8 @@ def commit_corpus_paths(
     paths = sorted(set(approved_paths) | set(deletion_paths))
     present = [p for p in paths if kind_at(cfg.repo_root, cfg.tree_for, p) != KIND_ABSENT]
     absent = [p for p in paths if p not in present]
-    return _git.git_commit_paths(cfg.repo_root, present, absent, message)
+    return _git.git_commit_paths(cfg.repo_root, present, absent, message,
+                                 env=_git.committed_view_env())
 
 
 def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
@@ -358,11 +365,15 @@ def verify_agent_state(
     verify_agent_report(repo_root, result, corpus_dir, corpus_dir_rel, noun)
 
 
-def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
+def assert_no_new_stray(
+    repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str], *,
+    timeout: float | None = None, env: Mapping[str, str] | None = None,
+) -> None:
     """A change outside `<corpus>/*.md` beyond what was already dirty at tick start refuses
     the tick — the spawn wrote where it was not asked to."""
     new_stray = sorted(
-        set(changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
+        set(changes_outside(repo_root, corpus_dir_rel, timeout=timeout, env=env))
+        - set(baseline_stray)
     )
     if new_stray:
         raise AuthorError(
@@ -372,12 +383,13 @@ def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: li
 
 
 def verify_agent_report(
-    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str,
+    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str, *,
+    timeout: float | None = None, env: Mapping[str, str] | None = None,
 ) -> None:
     """Refuse a spawn whose report and tree disagree: `committed` non-empty with a clean
     corpus, or empty with a dirty one."""
     committed = result_list(result, "committed")
-    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
+    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir, timeout=timeout, env=env)
     if committed and not corpus_dirty:
         raise AuthorError(
             f"author reported committed {noun} but left {corpus_dir_rel} "
