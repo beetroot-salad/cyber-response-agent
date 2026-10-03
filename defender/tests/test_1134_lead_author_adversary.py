@@ -98,7 +98,9 @@ OTHER = "other_lane"
 
 def _head_mode(repo: Path, rel: str) -> str:
     """The git mode `rel` is committed with at HEAD (`100644` a file, `120000` a link)."""
-    return _git.git(["ls-tree", "HEAD", "--", rel], cwd=repo).split(" ", 1)[0]
+    # The code under test (the pitfalls / lead commit) runs no `ls-tree`: the query shape this
+    # shares is tenant.py's committed-id read (#1120), which no test here exercises.
+    return _git.git(["ls-tree", "HEAD", "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
 
 
 # ---------------------------------------------------------------------------------------
