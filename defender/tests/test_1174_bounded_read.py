@@ -9,8 +9,8 @@ The design (issue comment on #1174): every plain-file reader in `_io` — `Bound
   that grows past it while read is refused too; no `MemoryError`.
 - O2: a read that gets no data on the non-blocking descriptor (`EAGAIN`) is a refusal.
 - O3: absent means absent at the walk or the open only; an `ENOENT` after the descriptor was
-  judged plain (the step's `fstat`, or a `read`) is a refusal whose reason differs from the
-  absent answer word for word.
+  judged plain (a `read`, or any `fstat` after the plainness one) is never absent, and a
+  refusal's reason differs from the absent answer word for word.
 - O4: a name or path that does not encode is refused before any I/O; a surrogateescape name
   (an undecodable byte) is still a name.
 - O5: a successful read is unchanged — universal newlines, `errors=`, exact bytes.
@@ -48,7 +48,8 @@ ABSENT_TEXT = os.strerror(errno.ENOENT)
 class FaultOs:
     """`os`, except: `read_fault(fd, n)` replaces `read`; `vanish_on_second_reg_fstat` makes the
     second `fstat` that sees a regular file on the same descriptor raise ENOENT (the first is
-    the open's plainness judgement, the second the read step's own); `calls` records names."""
+    the open's plainness judgement; a second would be a reader asking again); `calls` records
+    names."""
 
     def __init__(self, *, read_fault: Callable[[int, int], bytes] | None = None,
                  vanish_on_second_reg_fstat: bool = False) -> None:
@@ -204,7 +205,7 @@ def assert_refused_vanished(reader: str, root: Path, outcome: tuple[str, Any],
 
 
 def test_the_read_limit_is_64_mib():
-    assert _io.READ_LIMIT == 64 * MiB
+    assert 64 * MiB == _io.READ_LIMIT
 
 
 @pytest.mark.parametrize("reader", READERS)
@@ -228,7 +229,7 @@ def test_o1_a_sparse_file_over_the_limit_is_refused_before_any_read(root, reader
 def test_o1_the_raising_readers_refuse_with_efbig(root, reader):
     sparse(root / NAME, 64 * MiB + 1)
     fn = _io.read_plain_bytes if reader == "read_plain_bytes" else _io.read_plain
-    with pytest.raises(OSError) as ei:
+    with pytest.raises(OSError, match="read limit") as ei:
         fn(root / NAME)
     assert ei.value.errno == errno.EFBIG
     assert not isinstance(ei.value, FileNotFoundError)
@@ -297,20 +298,26 @@ def test_o3_enoent_from_read_is_a_refusal_not_absent(root, reader):
 
 
 @pytest.mark.parametrize("reader", READERS)
-def test_o3_enoent_from_the_read_steps_fstat_is_a_refusal_not_absent(root, reader):
-    """After the open judged the descriptor plain, the read step's own `fstat` (the size check)
-    raising ENOENT is the same read-phase refusal."""
+def test_o3_enoent_from_an_fstat_after_the_plainness_judgement_never_answers_absent(root, reader):
+    """After the open judged the descriptor plain, an `fstat` raising ENOENT never answers
+    absent. The read step takes the size from the open's own `fstat` (#1049 pins one `fstat`
+    per opened handle), so it asks no second one, and the read succeeds; any second `fstat`
+    an implementation adds must refuse, not answer absent."""
     missing = absent_reason(reader, root)
     (root / NAME).write_text("payload\n")
-    outcome = read(reader, root, os_=FaultOs(vanish_on_second_reg_fstat=True))
-    assert_refused_vanished(reader, root, outcome, missing)
+    kind, payload = read(reader, root, os_=FaultOs(vanish_on_second_reg_fstat=True))
+    if kind == "ok":
+        assert payload in ("payload\n", b"payload\n")
+    else:
+        assert_refused_vanished(reader, root, (kind, payload), missing)
 
 
 @pytest.mark.parametrize("reader", READERS)
 def test_o3_control_a_really_missing_file_is_still_absent(root, reader):
     kind, payload = read(reader, root)
     if reader in FOLDS_ABSENCE:
-        assert kind == "refused" and ABSENT_TEXT in payload, (reader, payload)
+        assert kind == "refused", (reader, payload)
+        assert ABSENT_TEXT in payload, (reader, payload)
     else:
         assert kind == "absent", (reader, kind, payload)
 
@@ -320,7 +327,7 @@ def test_o3_read_plain_raises_a_non_filenotfound_oserror_for_a_read_phase_enoent
     """`read_plain`'s `FileNotFoundError` means absent to its caller (`_document.py` reads it as
     an empty companion), so a read-phase ENOENT must raise some other `OSError`."""
     (root / NAME).write_text("payload\n")
-    with pytest.raises(OSError) as ei:
+    with pytest.raises(OSError, match="vanished") as ei:
         fn(root / NAME, os_=FaultOs(read_fault=vanishing_read))
     assert not isinstance(ei.value, FileNotFoundError), type(ei.value)
 
@@ -332,7 +339,7 @@ def test_o3_read_plain_raises_a_non_filenotfound_oserror_for_a_read_phase_enoent
 
 @pytest.mark.parametrize("name", ["\ud800", "a/\ud800", "\udfff.md"])
 def test_o4_parse_name_refuses_a_lone_surrogate(name):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a valid relative name"):
         _io._parse_name(name)
 
 
@@ -341,11 +348,11 @@ def test_o4_bound_and_rooted_refuse_an_unencodable_name_before_any_io(root, name
     rec = FaultOs()
     with _io.bind(root, os_=rec) as b:
         rec.calls.clear()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not a valid relative name"):
             b.read(name)
         assert rec.calls == [], f"I/O before the name was refused: {rec.calls}"
     rec2 = FaultOs()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a valid relative name"):
         _io.rooted_read(root, name, os_=rec2)
     assert rec2.calls == [], f"I/O before the name was refused: {rec2.calls}"
 
@@ -419,14 +426,14 @@ def test_o5_errors_replace_and_strict_are_unchanged(root):
     with _io.bind(root) as b:
         assert b.read(NAME, errors="replace").text == expected
         strict = b.read(NAME)
-    assert strict.text is None and not strict.absent
+    assert strict.text is None
+    assert not strict.absent
     with pytest.raises(UnicodeDecodeError) as ei:
         _io.read_plain(root / NAME)
-    try:
+    with pytest.raises(UnicodeDecodeError) as want:
         data.decode("utf-8")
-    except UnicodeDecodeError as want:
-        assert (ei.value.start, ei.value.end, ei.value.reason) == (
-            want.start, want.end, want.reason)
+    assert (ei.value.start, ei.value.end, ei.value.reason) == (
+        want.value.start, want.value.end, want.value.reason)
 
 
 @pytest.mark.parametrize("reader", READERS)
@@ -451,7 +458,7 @@ def _budget(tmp_path: Path) -> Any:
 def test_m1b_the_run_handle_update_refuses_a_huge_record_and_leaves_it_whole(tmp_path):
     h = _budget(tmp_path)
     sparse(h.path, 1 << 40)
-    with pytest.raises(OSError) as ei:
+    with pytest.raises(OSError, match="read limit") as ei:
         h.update({"k": 1})
     assert ei.value.errno == errno.EFBIG
     assert h.path.stat().st_size == 1 << 40, "the refused update truncated the record"
@@ -466,7 +473,7 @@ def test_m1b_control_the_run_handle_update_still_merges(tmp_path):
 
 def test_m1b_update_json_locked_refuses_a_huge_document_and_leaves_it_whole(tmp_path):
     p = sparse(tmp_path / "state.json", 1 << 40)
-    with pytest.raises(OSError) as ei:
+    with pytest.raises(OSError, match="read limit") as ei:
         _run_dir.update_json_locked(p, lambda d: d.update(k=1))
     assert ei.value.errno == errno.EFBIG
     assert p.stat().st_size == 1 << 40, "the refused update truncated the document"
