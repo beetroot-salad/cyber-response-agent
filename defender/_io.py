@@ -835,8 +835,8 @@ _NO_UNNAMED_FILES = frozenset({errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL})
 def _create_unnamed(
     path: Path, text: str | bytes, open_unnamed: Callable[[Path], int],
 ) -> bool:
-    """`create`'s complete-or-absent lane (#1078 J16/J63): the body is written in full, synced
-    and set to 0644 on an unnamed file, which is then given `path`'s name in one `linkat`. No
+    """`create`'s complete-or-absent lane (#1078 J16/J63): the body is written in full and
+    synced on an unnamed file, which is then given `path`'s name in one `linkat`. No
     reader ever sees the name absent-then-empty or partial, the file never has two names (its
     link count goes 0 -> 1), and a crash before the link leaves nothing in the directory.
 
@@ -867,9 +867,9 @@ def _link_unnamed(
     fd: int, dir_fd: int, leaf: str, text: str | bytes, *, os_: Any = os,
 ) -> bool:
     """The body of `create`'s unnamed lane, shared by the path and rooted seams: write `text`
-    in full to the unnamed `fd`, sync it, set 0644, then name it `leaf` in `dir_fd`. False when
-    the host has no `/proc` to link through. The caller owns both descriptors."""
-    os_.fchmod(fd, 0o644)
+    in full to the unnamed `fd`, sync it, then name it `leaf` in `dir_fd`. False when the host
+    has no `/proc` to link through. The caller owns both descriptors. The file keeps the mode
+    its open gave it, 0644 under the process umask, as every other lane's (#1144)."""
     data = text if isinstance(text, (bytes, bytearray)) else text.encode("utf-8")
     # Buffered: the file object loops over a short `os.write` until every byte has landed.
     with os_.fdopen(fd, "wb", closefd=False) as f:

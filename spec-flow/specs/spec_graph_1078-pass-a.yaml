@@ -2707,13 +2707,13 @@ demands:
   seed_docstring: >-
     A reader that catches a create-lane writer (ensure_runs_base_record's runs-base record, create_tenant's
     tenant row) mid-write sees the name absent or the file complete, never empty or partial; the file
-    has exactly one name throughout (no two-named alias window), mode 0644 (and the writing process's
-    owner), and a crash before the write completes leaves no stray entry in the directory. N racing ensure_runs_base_record
+    has exactly one name throughout (no two-named alias window), mode 0644 under umask 022 — the umask
+    is honoured like every other lane (#1144) — (and the writing process's owner), and a crash before the write completes leaves no stray entry in the directory. N racing ensure_runs_base_record
     calls on one base all succeed, leave one record, and every caller carries the winner's base_world_id.
   source: 70-resolutions.md J16 + J63 (human, COMPLETE-OR-ABSENT WRITES) (§7)
   note: >-
     The OBSERVABLE is pinned, not a mechanism. REFUTED, DO NOT RETRY: the named-temp-file + hard-link
-    mechanism (C-R4, C-R5, C-R6, C-R20). One mechanism that meets it: O_TMPFILE + fchmod + os.link with
+    mechanism (C-R4, C-R5, C-R6, C-R20). One mechanism that meets it: O_TMPFILE (+ fchmod, dropped by #1144) + os.link with
     dst_dir_fd (C-R22, C-R23, C-R24); a bare os.link without dir_fd raises EXDEV (C-R21). _refuse_unless_plain
     stays as the precheck (C-R23). Mode and ownership are asserted nowhere today (C-R3c). Dissolves J10,
     J15, J17; corrects settled s032.
@@ -2733,7 +2733,7 @@ demands:
     - C-R33
   implementer_note: >-
     PLATFORM (phase F RC1, auto): the observable is platform-neutral; do not narrow it to Linux. The only
-    probed mechanism, O_TMPFILE + fchmod + os.link with dst_dir_fd (linkat), is Linux-only (C-R22..C-R24).
+    probed mechanism, O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd (linkat), is Linux-only (C-R22..C-R24).
     The shared write_guarded(mode='create') also writes every run's alert and provenance files, so an
     unguarded O_TMPFILE there breaks every macOS run. Provide a per-platform path (the macOS path is NOT
     probed here). Do not retry the refuted named-temp + hard-link route (C-R4..C-R6, C-R21).
@@ -5883,7 +5883,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R5
   kind: behavior
@@ -5915,7 +5915,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R6
   kind: behavior
@@ -5938,7 +5938,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R7
   kind: primitive
@@ -6299,7 +6299,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R22
   kind: primitive
@@ -6321,6 +6321,8 @@ claims:
     the real _io.read_guarded(final) returns the full text with reason=None.
   verdict: holds
   verdict_note: >-
+    #1144: the fchmod is needed only because this probe opened with 0o600; opened with 0o644, as _io
+    does, the file lands 0644 masked by the umask with no fchmod, and _io no longer calls it.
     passing dst_dir_fd (any dir fd, even the target directory's own, uninvolved fd) makes CPython route
     through linkat()+AT_SYMLINK_FOLLOW and it works cleanly on both this box's filesystems; the resulting
     file is indistinguishable from one written by today's lane to every real guarded reader
@@ -8175,7 +8177,7 @@ handoff:
     RC1 J16 platform (phase F, 92-reconciliation.md; spine deviations.md 'Phase F §7 items') — the human
     decided the OBSERVABLE (complete-or-absent: one name throughout, 0644, no stray entry after a crash)
     with no platform caveat, so s7_j16_create_lane_complete_or_absent stays platform-neutral and is NOT
-    narrowed to 'Linux only'. The only probed mechanism (O_TMPFILE + fchmod + os.link with dst_dir_fd,
+    narrowed to 'Linux only'. The only probed mechanism (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd,
     C-R22..C-R24) is Linux-only, and the probed fallback shape (named temp + hard link) is refuted (C-R4..C-R6,
     C-R21); the macOS mechanism is the implementer's, recorded as `implementer_note` on s7_j16_create_lane_complete_or_absent;
     Linux CI enforces the observable. resolved_by: auto
@@ -8263,7 +8265,7 @@ handoff:
     executed probes C-R4, C-R5, C-R6 (72-resolution-probes.md) and C-R21 (73-mechanism-probes.md): a named
     temp file hard-linked onto the target gives it two names (st_nlink==2), which this tree's alias guard
     refuses (EMLINK), permanently if a crash lands in the window; mkstemp regresses 0644 to 0600; bare
-    os.link raises EXDEV. DO NOT RETRY. The mechanism that meets the observable is O_TMPFILE + fchmod
+    os.link raises EXDEV. DO NOT RETRY. The mechanism that meets the observable is O_TMPFILE (+ fchmod, dropped by #1144)
     + os.link with dst_dir_fd (C-R22..C-R24), keeping _refuse_unless_plain as the precheck (C-R23).
   - >-
     Settled #32 (s032), #106 (s106) and #8 (s008) — CORRECTED at §7 (70-resolutions.md): #32's 'an empty
