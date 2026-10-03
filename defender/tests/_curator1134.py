@@ -48,7 +48,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold
+from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests._tree_listing_1134 import RealOs, fd_path, last_component
@@ -387,7 +387,7 @@ class JournalHeld(Held):
 
     def __init__(self, root: Path, log: list, *, refuse: tuple[str, ...] = (),
                  extra: dict[str, str] | None = None) -> None:
-        super().__init__(os, os.open(root, _ROOT_FLAGS), root)
+        super().__init__(os, os.open(root, _ROOT_FLAGS), root, open_unnamed=open_unnamed_at)
         self.log, self.refuse, self.extra = log, frozenset(refuse), dict(extra or {})
 
     def view(self) -> Bound:
