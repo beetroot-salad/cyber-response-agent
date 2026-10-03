@@ -2713,7 +2713,7 @@ demands:
   source: 70-resolutions.md J16 + J63 (human, COMPLETE-OR-ABSENT WRITES) (§7)
   note: >-
     The OBSERVABLE is pinned, not a mechanism. REFUTED, DO NOT RETRY: the named-temp-file + hard-link
-    mechanism (C-R4, C-R5, C-R6, C-R20). One mechanism that meets it: O_TMPFILE (+ fchmod, dropped by #1144) + os.link with
+    mechanism (C-R4, C-R5, C-R6, C-R20). One mechanism that meets it: O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with
     dst_dir_fd (C-R22, C-R23, C-R24); a bare os.link without dir_fd raises EXDEV (C-R21). _refuse_unless_plain
     stays as the precheck (C-R23). Mode and ownership are asserted nowhere today (C-R3c). Dissolves J10,
     J15, J17; corrects settled s032.
@@ -2733,7 +2733,7 @@ demands:
     - C-R33
   implementer_note: >-
     PLATFORM (phase F RC1, auto): the observable is platform-neutral; do not narrow it to Linux. The only
-    probed mechanism, O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd (linkat), is Linux-only (C-R22..C-R24).
+    probed mechanism, O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd (linkat), is Linux-only (C-R22..C-R24).
     The shared write_guarded(mode='create') also writes every run's alert and provenance files, so an
     unguarded O_TMPFILE there breaks every macOS run. Provide a per-platform path (the macOS path is NOT
     probed here). Do not retry the refuted named-temp + hard-link route (C-R4..C-R6, C-R21).
@@ -5883,7 +5883,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R5
   kind: behavior
@@ -5915,7 +5915,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R6
   kind: behavior
@@ -5938,7 +5938,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R7
   kind: primitive
@@ -6299,7 +6299,7 @@ claims:
     the recorded observation)
   note: >-
     DO NOT RETRY: this is the refuted part of the hard-link create mechanism. The mechanism that meets
-    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd),
+    the complete-or-absent observable is C-R22..C-R24 (O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd),
     with _refuse_unless_plain kept as the precheck (C-R23).
 - id: C-R22
   kind: primitive
@@ -6321,8 +6321,10 @@ claims:
     the real _io.read_guarded(final) returns the full text with reason=None.
   verdict: holds
   verdict_note: >-
-    #1144: the fchmod is needed only because this probe opened with 0o600; opened with 0o644, as _io
-    does, the file lands 0644 masked by the umask with no fchmod, and _io no longer calls it.
+    #1144: the fchmod stays, but sets 0644 masked by the process umask (read from /proc/self/status),
+    not a flat 0644. This probe needed it because it opened with 0o600; _io opens with 0o644, which a
+    Linux 6.0+ kernel masks by the umask, but kernels before 6.0 (ac6800e279a2) skip the umask on
+    O_TMPFILE, so _io sets the masked mode itself.
     passing dst_dir_fd (any dir fd, even the target directory's own, uninvolved fd) makes CPython route
     through linkat()+AT_SYMLINK_FOLLOW and it works cleanly on both this box's filesystems; the resulting
     file is indistinguishable from one written by today's lane to every real guarded reader
@@ -7449,7 +7451,7 @@ handoff:
     and the judge's recommended (b) bounded loser-branch re- read ("dissolve rather than patch") and chose
     COMPLETE-OR-ABSENT WRITES, stated as the OBSERVABLE, not a mechanism: a reader that catches a create-lane
     writer mid-write sees the name absent or the file complete, never empty or partial; the file has exactly
-    one name throughout (no alias/two-named window), today's mode (0644, unregressed), and a crash leaves
+    one name throughout (no alias/two-named window), today's mode (0644 under umask 022 (#1144), unregressed), and a crash leaves
     no stray entry behind. Applies to any create-lane artifact (runs-base record, tenant row). The implementer
     chooses the mechanism against this observable; it is not pinned here. Demand: minted — a demand that
     a concurrent reader never sees an empty or partial record, for any create-lane artifact; binds `runs_base_record`
@@ -7459,7 +7461,7 @@ handoff:
     the implementer picks against the stated observable) and `d1_create_exclusive`. The observable's "today's
     mode" clause is itself a new assertion, not a restatement of an existing one: 72's C-R3c found file
     mode and ownership asserted NOWHERE in the current suite for either real `mode="create"` call site
-    — this demand's test pins mode (0644) and, where the process already runs as the intended owner, ownership,
+    — this demand's test pins mode (0644 under umask 022 (#1144)) and, where the process already runs as the intended owner, ownership,
     so phase E does not inherit that blind spot. resolved_by: human
   - >-
     J17 (45-dispositions.md cluster C, 'The create-window empty record'; premise #31 `test_ensure_runs_base_record_reads_a_record_mid_write_by_the_create_race_loser`;
@@ -8175,9 +8177,9 @@ handoff:
     resolved_by: auto
   - >-
     RC1 J16 platform (phase F, 92-reconciliation.md; spine deviations.md 'Phase F §7 items') — the human
-    decided the OBSERVABLE (complete-or-absent: one name throughout, 0644, no stray entry after a crash)
+    decided the OBSERVABLE (complete-or-absent: one name throughout, 0644 under umask 022 (#1144), no stray entry after a crash)
     with no platform caveat, so s7_j16_create_lane_complete_or_absent stays platform-neutral and is NOT
-    narrowed to 'Linux only'. The only probed mechanism (O_TMPFILE (+ fchmod, dropped by #1144) + os.link with dst_dir_fd,
+    narrowed to 'Linux only'. The only probed mechanism (O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE) + os.link with dst_dir_fd,
     C-R22..C-R24) is Linux-only, and the probed fallback shape (named temp + hard link) is refuted (C-R4..C-R6,
     C-R21); the macOS mechanism is the implementer's, recorded as `implementer_note` on s7_j16_create_lane_complete_or_absent;
     Linux CI enforces the observable. resolved_by: auto
@@ -8265,7 +8267,7 @@ handoff:
     executed probes C-R4, C-R5, C-R6 (72-resolution-probes.md) and C-R21 (73-mechanism-probes.md): a named
     temp file hard-linked onto the target gives it two names (st_nlink==2), which this tree's alias guard
     refuses (EMLINK), permanently if a crash lands in the window; mkstemp regresses 0644 to 0600; bare
-    os.link raises EXDEV. DO NOT RETRY. The mechanism that meets the observable is O_TMPFILE (+ fchmod, dropped by #1144)
+    os.link raises EXDEV. DO NOT RETRY. The mechanism that meets the observable is O_TMPFILE + fchmod (#1144: to 0644 masked by the process umask, read from /proc/self/status; pre-6.0 kernels skip the umask on O_TMPFILE)
     + os.link with dst_dir_fd (C-R22..C-R24), keeping _refuse_unless_plain as the precheck (C-R23).
   - >-
     Settled #32 (s032), #106 (s106) and #8 (s008) — CORRECTED at §7 (70-resolutions.md): #32's 'an empty
