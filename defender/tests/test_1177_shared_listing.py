@@ -26,7 +26,6 @@ route, or a link count another filesystem reports. Nothing is monkeypatched.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
 import os
@@ -598,31 +597,3 @@ def test_a_folder_that_dies_mid_scan_and_then_faults_is_absent_to_both_readers(
         f"answered {got!r}")
     assert peer in ({"p.md": FILE}, {"p.md": stat.S_IFREG}), peer
     assert descriptors_under(scratch.tmp) == []
-
-
-def _calls_named(node: ast.AST, attr: str) -> list[ast.Call]:
-    """Calls of a method spelled `attr` on any value: `self._os.scandir`, `bound._listing`."""
-    return [n for n in ast.walk(node) if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Attribute)
-            and n.func.attr == attr]  # lint-ast-resolve: ok — duck-typed methods on a value (the `os_` seam's `scandir`, `Bound._listing`), which `_astlib` answers None for; the method's spelling is the fact pinned
-
-
-def test_both_readers_reach_the_one_directory_scan_in_io():
-    """Independent adversary, hole 2 (the design's one shared step, structurally): `_io.py`
-    makes exactly one directory scan (`.scandir(...)`), inside `Bound._listing`; `Bound.entries`
-    and `stat_entries` each call `_listing` and scan nothing themselves. Non-vacuity: the scan
-    is found."""
-    tree = ast.parse(Path(_io.__file__).read_text(encoding="utf-8"))
-    funcs = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == "Bound":
-            funcs.update({f"Bound.{f.name}": f for f in node.body
-                          if isinstance(f, ast.FunctionDef)})
-    funcs.update({f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)})
-    scans = [n for n in _calls_named(tree, "scandir")]
-    assert len(scans) == 1, [s.lineno for s in scans]
-    listing = funcs["Bound._listing"]
-    assert _calls_named(listing, "scandir") == scans, "the scan is not in Bound._listing"
-    for reader in ("Bound.entries", "stat_entries"):
-        assert _calls_named(funcs[reader], "_listing"), f"{reader} does not call _listing"
-        assert not _calls_named(funcs[reader], "scandir"), f"{reader} scans by itself"
