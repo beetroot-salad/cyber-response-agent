@@ -349,7 +349,9 @@ def test_the_drains_pass_a_constant_to_the_worktree_batch():
         assert value is not None, ast.dump(call)
         assert isinstance(value, (ast.Name, ast.Attribute)), (call.lineno, ast.dump(value))
 
-    for lane, constant in ((AUTHOR, "AUTHOR_DRAIN_LABEL"), (LEAD, "LEAD_AUTHOR_DRAIN_LABEL")):
+    # Each lane is found by its drain function's name, which is its label's value.
+    for lane, constant in (("author_drain", "AUTHOR_DRAIN_LABEL"),
+                           ("lead_author_drain", "LEAD_AUTHOR_DRAIN_LABEL")):
         [fn] = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == lane]
         [call] = _batch_calls(fn)
         value = _label_kw(call)
