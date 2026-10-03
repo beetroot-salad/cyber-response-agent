@@ -36,13 +36,25 @@ tuple first (mypy rejects a star-unpack in an ``except`` display)::
 _FILE_MODE = 0o644
 
 
-def read_text_utf8(path: Path) -> str:
-    return path.read_text(encoding="utf-8")  # lint-text-io: ok — the canonical pinned reader
+#: The most a whole-file read takes in by default (#1174): a planted sparse file
+#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. Nothing
+#: read through `_io` comes near it but the wire log, whose one reader (an operator tool over a
+#: host-written log) passes `limit=None`.
+READ_LIMIT = 64 * 1024 * 1024
 
 
-def read_text_soft(path: Path) -> tuple[str | None, str | None]:
+def read_text_utf8(path: Path, *, limit: int | None = READ_LIMIT) -> str:
+    """The canonical text read: UTF-8 with universal newlines, as `Path.read_text` reads, and
+    opened as it opens (following links, blocking). Bounded (#1174): a file over `limit`
+    (`None` for none) raises an `OSError`, before reading or once it grows past it."""
+    return _read_followed(path, limit=limit, errors="strict")
+
+
+def read_text_soft(
+    path: Path, *, limit: int | None = READ_LIMIT,
+) -> tuple[str | None, str | None]:
     try:
-        return read_text_utf8(path), None
+        return read_text_utf8(path, limit=limit), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
@@ -137,18 +149,22 @@ def read_bytes_guarded(path: Path, *, os_: Any = os) -> tuple[bytes | None, str 
         return None, str(e)
 
 
-#: The most a whole-file read of a guarded plain file takes in (#1174): a planted sparse file
-#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. No caller
-#: reads anything near it; the one file kind that large, the wire log, none of them reads.
-READ_LIMIT = 64 * 1024 * 1024
-
 #: One `read(2)` of the read step: a typical record (investigation.md is capped at 64 KiB) is
 #: one read plus the empty one that says EOF.
 _READ_CHUNK = 256 * 1024
 
-_TOO_LARGE = f"larger than the {READ_LIMIT // (1024 * 1024)} MiB read limit"
 _VANISHED = "the file vanished while it was being read"
 _NOT_A_PATH = "not an encodable path"
+
+
+class _TooLarge(OSError):
+    """The read step's own size refusal (`EFBIG`): over the limit by `fstat`, or grown past it
+    while read. Its own type, so a caller that heals from oversize content (the run-state JSON
+    update, #1174 amendment 2) never heals from an unrelated `EFBIG` a fault raised."""
+
+
+def _too_large(limit: int) -> _TooLarge:
+    return _TooLarge(errno.EFBIG, f"larger than the read limit ({limit} bytes)")
 
 
 class _ReadVanished(OSError):
@@ -159,58 +175,118 @@ class _ReadVanished(OSError):
 
 def _read_plain_fd(
     os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
+    limit: int | None = READ_LIMIT,
 ) -> str | bytes:
-    """The one place a guarded plain file's bytes are read: every whole-file read comes here.
+    """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
+    comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
 
-    The whole content of `fd`, an open descriptor already judged a plain file, or the refusal
-    that stopped it: `EFBIG` when `size` (the `st_size` of the open's own plainness `fstat`,
-    not asked again: one `fstat` per opened handle, #1049) is over :data:`READ_LIMIT`, before
-    any byte is read, or when the reads run past it (it grew); `BlockingIOError` when the
-    non-blocking descriptor has no data yet; `_ReadVanished` for an `ENOENT` from a `read`.
-    Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
-    `Path.read_text` would. The descriptor stays the caller's to close.
-    """
-    if size > READ_LIMIT:
-        raise OSError(errno.EFBIG, _TOO_LARGE)
+    The whole content of `fd`, an open descriptor, or the refusal that stopped it:
+    `_TooLarge` when `size` (the `st_size` of the open's own `fstat`, not asked again: one
+    `fstat` per opened handle, #1049) is over `limit`, before any byte is read, or when the
+    reads run past it (it grew); `BlockingIOError` when a non-blocking descriptor has no data
+    yet; `_ReadVanished` for an `ENOENT` from a `read`. `limit=None` reads with no bound.
+
+    The first read asks for `size + 1`, so a file whose size `fstat` tells reads in one call
+    plus the empty one that says EOF; the step keeps reading until a read returns nothing,
+    whatever `fstat` said, so a file that grew, or a procfs file reporting `st_size` 0, reads
+    in full. Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
+    `Path.read_text` would (translated only when a `\\r` is there). The descriptor stays the
+    caller's to close."""
+    if limit is not None and size > limit:
+        raise _too_large(limit)
+    buf = bytearray()
+    want = size + 1 if size > 0 else _READ_CHUNK
     try:
-        chunks: list[bytes] = []
-        total = 0
-        while chunk := os_.read(fd, _READ_CHUNK):
-            total += len(chunk)
-            if total > READ_LIMIT:
-                raise OSError(errno.EFBIG, _TOO_LARGE)
-            chunks.append(chunk)
+        while chunk := os_.read(fd, want):
+            buf += chunk
+            if limit is not None and len(buf) > limit:
+                raise _too_large(limit)
+            want = _READ_CHUNK
     except FileNotFoundError:
         raise _ReadVanished(errno.ENOENT, _VANISHED) from None
-    data = b"".join(chunks)
     if binary:
-        return data
-    text = data.decode("utf-8", errors)
+        return bytes(buf)
+    text = buf.decode("utf-8", errors)
     if "\r" in text:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
 
 
-def read_locked_whole(f: Any) -> Any:
-    """The whole content of a rewrite handle (:func:`locked_for_rewrite`,
-    :func:`rooted_locked_for_rewrite`) from its current position, bounded as every guarded read
-    is (#1174): `EFBIG` when `fstat` says the file is over :data:`READ_LIMIT`, and `EFBIG` too
-    when the read runs past it anyway. The lock is advisory, so a writer that ignores it can
-    grow the file after the `fstat`; the read asks for one unit more than the limit, never for
-    "everything". On a text handle the unit is a character (at most four bytes each).
+def _read_followed(path: Path, *, limit: int | None, errors: str) -> str:
+    """The canonical wrappers' read: opened as `Path.read_text` opens (following links,
+    blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        text = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=False, errors=errors,
+                              limit=limit)
+    finally:
+        os.close(fd)
+    assert isinstance(text, str)
+    return text
 
-    A `None` read (a raw handle that finds no data yet on a non-blocking descriptor) is
-    `BlockingIOError`, never a `None` handed on to a parser. Today's callers hold buffered
-    text handles, whose read raises `BlockingIOError` itself, so this branch guards the
-    helper's own contract for any raw handle passed in."""
-    if os.fstat(f.fileno()).st_size > READ_LIMIT:
-        raise OSError(errno.EFBIG, _TOO_LARGE)
-    raw = f.read(READ_LIMIT + 1)
-    if raw is None:
-        raise BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN))
-    if len(raw) > READ_LIMIT:
-        raise OSError(errno.EFBIG, _TOO_LARGE)
-    return raw
+
+def _json_object(raw: bytes) -> dict | None:
+    """`raw` as a JSON object, or `None` when it is not usable as one: undecodable, not JSON,
+    nested past :data:`JSON_NESTING_LIMIT` (judged before decoding, :func:`load_json_artifact`),
+    or not an object."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    doc, reason = load_json_artifact(text)
+    return doc if reason is None and isinstance(doc, dict) else None
+
+
+def _rewrite_fd(os_: Any, fd: int, data: bytes) -> None:
+    """Replace the whole content of the locked, open `fd` with `data`, in place: back to 0,
+    truncate, then write until every byte is down."""
+    os_.lseek(fd, 0, os.SEEK_SET)
+    os_.ftruncate(fd, 0)
+    view = memoryview(data)
+    while view:
+        view = view[os_.write(fd, view):]
+
+
+def locked_json_update(
+    open_locked: Any, mutate: Callable[[dict], Any], *,
+    default: Callable[[], dict] = dict, os_: Any = os,
+) -> dict:
+    """The locked read-modify-write of a run-state JSON object (#1174 amendment 2): callers get
+    contents, never a handle to read.
+
+    `open_locked` is a context manager yielding the locked record's descriptor and its `fstat`
+    (:func:`locked_for_rewrite`, :func:`rooted_locked_for_rewrite`). The whole record is read
+    through the shared step; content unusable as state (over :data:`READ_LIMIT`, undecodable,
+    not JSON, too deep, not an object) starts over from `default()` (O6). Any other read fault
+    propagates and nothing is written (O7). `mutate` changes the state in place; it is written
+    back whole, and returned."""
+    with open_locked as (fd, st):
+        try:
+            raw = _read_plain_fd(os_, fd, st.st_size, binary=True)
+        except _TooLarge:
+            state = None
+        else:
+            assert isinstance(raw, bytes)
+            state = _json_object(raw)
+        if state is None:
+            state = default()
+        mutate(state)
+        _rewrite_fd(os_, fd, json.dumps(state, indent=2).encode())
+    return state
+
+
+def locked_json_read(open_locked: Any, *, os_: Any = os) -> dict:
+    """The locked read of a run-state JSON object (#1174 O8): `open_locked` is
+    :func:`locked_for_read`'s context manager. `{}` when the record is absent, refused, or
+    unreadable (every `TEXT_READ_ERRORS` member, the size limit among them), and when its
+    content is unusable as state."""
+    try:
+        with open_locked as (fd, st):
+            raw = _read_plain_fd(os_, fd, st.st_size, binary=True)
+    except TEXT_READ_ERRORS:
+        return {}
+    assert isinstance(raw, bytes)
+    return _json_object(raw) or {}
 
 
 def _open_plain_fd(path: Path, os_: Any = os) -> tuple[int, os.stat_result]:
@@ -522,8 +598,8 @@ def _read_reason(e: BaseException) -> str:
     if isinstance(e, OSError) and e.errno:
         if e.errno in (errno.ELOOP, errno.EMLINK):
             return ALIAS_READ_REFUSAL
-        if e.errno in (errno.EFBIG, errno.EINVAL) and e.strerror in (_TOO_LARGE, _NOT_A_PATH):
-            return e.strerror
+        if isinstance(e, _TooLarge) or (e.errno == errno.EINVAL and e.strerror == _NOT_A_PATH):
+            return str(e.strerror)
         return os.strerror(e.errno)
     return str(e)
 
@@ -842,18 +918,20 @@ def parse_jsonl_row(line: str) -> dict | None:
     return obj if reason is None and isinstance(obj, dict) else None
 
 
-def read_jsonl_rows(path: Path) -> list[dict]:
-    return read_jsonl_rows_report(path)[0]
+def read_jsonl_rows(path: Path, *, limit: int | None = READ_LIMIT) -> list[dict]:
+    return read_jsonl_rows_report(path, limit=limit)[0]
 
 
-def read_jsonl_rows_report(path: Path) -> tuple[list[dict], int]:
+def read_jsonl_rows_report(
+    path: Path, *, limit: int | None = READ_LIMIT,
+) -> tuple[list[dict], int]:
     """JSONL rows plus the number of non-blank lines that were not rows, for callers that must
-    account for lost evidence.
+    account for lost evidence. Bounded like :func:`read_text_utf8` (`limit`, #1174): a file
+    over it raises an `OSError`.
     """
     if not path.is_file():
         return [], 0
-    text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
-    return _jsonl_rows_of(text)
+    return _jsonl_rows_of(_read_followed(path, limit=limit, errors="replace"))
 
 
 def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
@@ -1182,17 +1260,42 @@ def open_nofollow_fd(path: Path, flags: int, *, os_: Any = os) -> int:
 
 
 @contextlib.contextmanager
-def locked_for_rewrite(path: Path, *, binary: bool = False) -> Iterator[Any]:
+def locked_for_rewrite(path: Path, *, os_: Any = os) -> Iterator[tuple[int, os.stat_result]]:
     """The locked read-modify-write prefix: refuse a non-plain target, open with
-    `O_NOFOLLOW`, then take the exclusive lock — in that order, so refusal precedes any lock or
-    write. Yields the locked handle at position 0."""
+    `O_NOFOLLOW` (creating it when absent), judge the descriptor plain on its own `fstat` (a
+    hard link planted after the precheck, #1174 O11), then take the exclusive lock — in that
+    order, so refusal precedes any lock or write. Yields the locked descriptor, at position 0,
+    and that `fstat`; never a file object (callers get contents, #1174 amendment 2)."""
     path = Path(path)
     _refuse_unless_plain(path)
-    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
-    opener = os.fdopen(fd, "r+b") if binary else os.fdopen(fd, "r+", encoding="utf-8")
-    with opener as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        yield f
+    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, os_=os_)
+    try:
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, path)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd, st
+    finally:
+        os_.close(fd)
+
+
+@contextlib.contextmanager
+def locked_for_read(path: Path, *, os_: Any = os) -> Iterator[tuple[int, os.stat_result]]:
+    """The locked read's opener (#1174 O8): no-follow, non-blocking, read-only — it creates
+    nothing — judged plain on its descriptor, under a shared lock. Yields the descriptor and
+    its `fstat`. An absent record raises `FileNotFoundError`; a link or other non-plain entry,
+    its refusal."""
+    path = Path(path)
+    try:
+        fd = os_.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as e:
+        raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
+    try:
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, path)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        yield fd, st
+    finally:
+        os_.close(fd)
 
 
 def write_guarded(
@@ -1256,10 +1359,8 @@ def write_guarded(
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(text)
     elif mode == "update":
-        with locked_for_rewrite(path, binary=isinstance(text, (bytes, bytearray))) as f:
-            f.seek(0)
-            f.truncate()
-            f.write(text)
+        with locked_for_rewrite(path) as (fd, _st):
+            _rewrite_fd(os, fd, text.encode("utf-8") if isinstance(text, str) else bytes(text))
     else:
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
 
@@ -1533,24 +1634,21 @@ def _replace_at(
 
 @contextlib.contextmanager
 def rooted_locked_for_rewrite(
-    root: Path, name: str | PurePath, *, binary: bool = False, os_: Any = os,
-) -> Iterator[Any]:
+    root: Path, name: str | PurePath, *, os_: Any = os,
+) -> Iterator[tuple[int, os.stat_result]]:
     """:func:`locked_for_rewrite` for `name` under `root`: the folders walked (never made), the
     record judged, opened (created when absent) and judged again on its descriptor, then the
-    exclusive lock. Yields the locked handle at position 0."""
+    exclusive lock. Yields the locked descriptor, at position 0, and its `fstat`."""
     _spelling, parts = _parse_name(name)
     where = Path(root, *parts)
     with _rooted(os_, root, parts[:-1]) as dir_fd:
         _leaf_present(os_, dir_fd, parts[-1], where)
-        fd = _open_leaf(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
+        fd, st = _open_leaf_stat(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
     try:
-        opener = os_.fdopen(fd, "r+b") if binary else os_.fdopen(fd, "r+", encoding="utf-8")
-    except BaseException:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd, st
+    finally:
         os_.close(fd)
-        raise
-    with opener as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        yield f
 
 
 # The held root (#1133): an `Episode`'s one open handle on its episode dir. Every verb works
