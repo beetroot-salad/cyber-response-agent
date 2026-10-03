@@ -8,9 +8,14 @@
     tenant. Thread-pool workers do not inherit it — bind inside the worker or submit through
     `contextvars.copy_context().run`. `log_context` restores the previous binding on exit.
 
-`print` remains right for a command's own stdout output and for text a model reads back as a
-tool result. Argparse usage errors, `sys.exit("…")` refusals and crash tracebacks stay plain
-text; a program that must tie its crash to a run logs it inside the run's context (`run.main`).
+`print` remains right for a command's own stdout output — results a caller consumes, never a
+refusal — and for text a model reads back as a tool result. A refusal, or a checker's findings,
+is a value the code returns to its front end, and a command-line front end prints it as plain
+text on stderr with the exit code carrying the verdict (`sys.exit("…")` is the one-line form);
+it is not a log line, so no log level can hide it. A service front end answers the same value
+with an error response instead (#1083). Argparse usage errors and crash tracebacks stay plain
+text too; a program that must tie its crash to a run logs it inside the run's context
+(`run.main`).
 """
 from __future__ import annotations
 
