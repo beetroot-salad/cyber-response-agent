@@ -635,18 +635,26 @@ def _audited() -> Iterator[list[tuple[str, tuple]]]:
 
 
 def _plain_opens_under(seen: list[tuple[str, tuple]], root: Path) -> list[Any]:
-    """Each `open` of a path spelled absolute and under `root` outside its git dir: a read (or
-    write) by plain path. The held corpus opens a leaf by its name below a held descriptor, a
-    relative spelling, so it never appears here."""
+    """Each `open` of a path that lies under `root` outside its git dir, however spelled —
+    absolute, or relative to the process's working directory (`os.path.relpath`, adversary
+    A1′): a read (or write) by plain path. The held corpus opens a leaf by its bare name below a
+    held descriptor (`dir_fd`), which this cannot tell from a cwd-relative spelling, so a row
+    that lets the held corpus write uses `_opens` == [] on a step that writes nothing instead."""
     out = []
     for event, args in seen:
         if event != "open" or not args or not isinstance(args[0], str | bytes | os.PathLike):
             continue
         spelled = os.fsdecode(args[0])
-        if os.path.isabs(spelled) and Path(spelled).is_relative_to(root) \
-                and not Path(spelled).is_relative_to(root / ".git"):
+        at = Path(os.path.abspath(spelled))
+        if at.is_relative_to(root) and not at.is_relative_to(root / ".git"):
             out.append(spelled)
     return out
+
+
+def _opens(seen: list[tuple[str, tuple]]) -> list[Any]:
+    """Every `open` audit event of a path (any spelling) — descriptors (`fdopen`) aside."""
+    return [args[0] for event, args in seen
+            if event == "open" and args and isinstance(args[0], str | bytes | os.PathLike)]
 
 
 def _spawned_not_git(seen: list[tuple[str, tuple]]) -> list[Any]:
@@ -708,17 +716,57 @@ def test_no_comparison_opens_a_worktree_path_or_runs_anything_but_git(tmp_path):
 
 
 def test_the_audit_watch_sees_a_plain_read_and_a_foreign_process(tmp_path):
-    """The positive control for the watch: a `Path.read_bytes()` of a repo file and a `cat` of
-    it inside the block are both caught."""
+    """The positive control for the watch: a `Path.read_bytes()` of a repo file, the same file
+    opened by a spelling relative to the working directory (adversary A1′), and a `cat` of it
+    inside the block are all caught."""
     import subprocess
 
     w = world(tmp_path)
     put(w.corpus_dir / "a.md", b"x\n")
+    relative = os.path.relpath(w.corpus_dir / "a.md")
     with _audited() as seen:
         (w.corpus_dir / "a.md").read_bytes()
+        os.close(os.open(relative, os.O_RDONLY | os.O_NOFOLLOW))
         subprocess.run(["cat", str(w.corpus_dir / "a.md")], capture_output=True, check=True)
-    assert _plain_opens_under(seen, w.repo) == [str(w.corpus_dir / "a.md")]
+    assert _plain_opens_under(seen, w.repo) == [str(w.corpus_dir / "a.md"), relative]
+    assert len(_opens(seen)) == 2
     assert len(_spawned_not_git(seen)) == 1
+
+
+def test_a_comparison_that_writes_nothing_opens_nothing_at_all(tmp_path):
+    """Adversary A1′ (closed): with nothing to write back — a file left alone, one chmod-ed only,
+    a hard link holding the exact committed bytes — each check makes no `open` at all, of any
+    spelling, absolute, cwd-relative or below a descriptor: the settle's comparison of each
+    name, `_unchanged_names`, the settle restore and the fault restore. Only git reads. And the
+    answer is still git's: all three names unchanged, nothing written (each inode as it was).
+
+    Catches: a comparison that calls git for show (keeping the routing and the AST pins) but
+    decides from its own read of the worktree, through a helper the AST rows do not see and by a
+    spelling the plain-path filter misses (`os.open(os.path.relpath(...))` after an `lstat`)."""
+    w = world(tmp_path)
+    names = ("same.md", "mode.md", "hard.md")
+    for name in names:
+        put(w.corpus_dir / name, lesson_text("f0", mark=name))
+    w.commit()
+    head = w.head()
+    snapshot = _snap(w)
+    cfg = w.cfg()
+    os.chmod(w.corpus_dir / "mode.md", 0o755)
+    target = w.target("hard-target.md", snapshot["hard.md"])
+    plant_hardlink(w.corpus_dir / "hard.md", target)
+    inodes = {n: os.stat(w.corpus_dir / n).st_ino for n in names}
+    rels = {_rel(n) for n in names}
+
+    with _audited() as seen:
+        identical = {n: drain._byte_identical_to_head(w.repo, _rel(n)) for n in names}
+        unchanged = drain._unchanged_names(w.repo, w.corpus_dir, head)
+        drain._restore_unapproved_files(cfg, snapshot, rels, head_before=head)
+        _restore(w, snapshot, head_before=head)
+
+    assert _opens(seen) == [], _opens(seen)
+    assert identical == dict.fromkeys(names, True)
+    assert set(names) <= unchanged
+    assert {n: os.stat(w.corpus_dir / n).st_ino for n in names} == inodes
 
 
 #: What reads bytes or text: the handle's and the plain path's read verbs, the drain's own
