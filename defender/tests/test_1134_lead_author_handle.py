@@ -130,6 +130,7 @@ from defender.tests._spec791 import (
 )
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.test_1111_rooted_io import census, in_time
+from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -1492,17 +1493,18 @@ def test_trees_holding_skills_exactly_are_taken_whatever_opened_them(tmp_path: P
         assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
 
 
-#: Non-members (#1179 O1'): the members' values and a name as strings, an unknown string. Each
-#: raises `AttributeError` at its first use; the author member, which is a label, is refused
-#: for holding no `skills/` (`LeadAuthorError`).
-NON_MEMBERS = ["no_such_drain", "lead_author_drain", "author_drain", "LEAD_AUTHOR"]
+#: Non-members (#1179 O1'), as `test_1134_mount_list.UNKNOWN_LABELS` spells them: the members'
+#: values and names as strings, a look-alike enum's members, `.value` carriers, near misses.
+#: Each raises `AttributeError` at its first use; the author member, which is a label, is
+#: refused for holding no `skills/` (`LeadAuthorError`).
+NON_MEMBERS = list(UNKNOWN_LABELS)
 
 
 def _refusal_for(label: object) -> type[Exception]:
     return LeadAuthorError if label is AUTHOR_DRAIN_LABEL else AttributeError
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS])
+@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
 def test_run_consults_the_label_it_is_given(tmp_path: Path, label: object):
     """`run(label=...)` with deps: refused unless the label's trees hold the deps' `skills_dir`
     (the author member: `LeadAuthorError`), and a non-member raises at its first use
@@ -1527,7 +1529,7 @@ def test_run_consults_the_label_it_is_given(tmp_path: Path, label: object):
     assert spawn.calls, "the control never reached the agent"
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS])
+@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
 def test_the_drain_seams_consult_the_label(tmp_path: Path, label: object):
     """`_invoke_lead_author` / `_invoke_pitfalls` open the trees of the label they are handed:
     the author member's (its two corpora present in the leaf) hold no `skills/`, so each refuses

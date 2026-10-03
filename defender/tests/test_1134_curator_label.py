@@ -71,6 +71,7 @@ from defender.tests._drain719 import finding_row, make_repo, pending, seed, stuc
 from defender.tests.e2e import _box665 as B
 from defender.tests.e2e.test_922_spine import RepoBranch
 from defender.tests._tree_listing_1134 import descriptors_under
+from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
 
 BUILDERS = {
     "lessons": (lessons_run.build_author_config, "lessons_dir"),
@@ -316,8 +317,8 @@ def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_p
 def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_path, monkeypatch):
     """H8: `_maybe_trigger_author` opens the trees of the label IT was handed. The lead member
     opens `skills/` alone, and the builder refuses it (`FatalConfigError` out of the trigger;
-    the row is not served). A non-member (the author lane's value or name as a string, an
-    unknown string) raises at its first use (#1179 O1', `AttributeError`), with nothing held
+    the row is not served). A non-member (every `UNKNOWN_LABELS` entry: the values and names
+    as strings, a look-alike enum's members, `.value` carriers, near misses) raises at its first use (#1179 O1', `AttributeError`), with nothing held
     and the row not served. The author member serves the queue: the gate holds the row, nothing
     is stuck.
 
@@ -331,7 +332,7 @@ def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_
     with pytest.raises(FatalConfigError):
         drains._maybe_trigger_author(*_trigger_args(w.paths), label=LEAD_AUTHOR_DRAIN_LABEL)
     assert "held_reason" not in pending(w.paths.findings)[0]
-    for non_member in ("no_such_drain", "author_drain", "AUTHOR"):
+    for non_member in UNKNOWN_LABELS:
         with pytest.raises(AttributeError):
             drains._maybe_trigger_author(*_trigger_args(w.paths), label=non_member)
         assert "held_reason" not in pending(w.paths.findings)[0]

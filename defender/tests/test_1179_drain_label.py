@@ -33,7 +33,7 @@ from typing import Any
 
 import pytest
 
-from defender.learning.author.branch import AuthorBranch
+from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core import drains, markers
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
@@ -41,6 +41,7 @@ from defender.learning.core.config import (
 from defender.learning.core.quarantine import preserve_tainted_tree
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
+from defender.learning.leads.lead_author._handoff import acquire_queue_lock, release_queue_lock
 from defender.runtime import scrub as scrub_mod
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.e2e import _box665 as B
@@ -196,15 +197,21 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["lead_author_drain", "author_drain", "LEAD_AUTHOR"])
+@pytest.mark.parametrize("value", NON_MEMBERS, ids=repr)
 def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
-        tmp_path: Path, value: str):
-    """`lead_author.run(deps=..., label="lead_author_drain")`, the lead lane's value (or name) as
-    a bare string, raises at its first use (`AttributeError`) before the queue lock. The control
-    is the lead member, above (it reaches the lock).
+        tmp_path: Path, value: object):
+    """`lead_author.run(label=<non-member>)` raises at its first use (`AttributeError`) before
+    the queue lock, on both paths:
+    - with deps, the deps' lock seam is never called;
+    - without deps, the real queue lock is already held by this test, so a run that took the
+      lock before using the label would answer the skip code instead of raising.
 
-    Catches: a `str`-mixin enum, and a check that coerces a string into a member
-    (`DrainLabel(label)`, `DrainLabel[label]`)."""
+    The controls: the lead member reaches the deps' lock (above), and without deps the same
+    held lock makes the lead member answer the skip code.
+
+    Catches: a `str`-mixin enum, a check that coerces a string, a name or a look-alike into a
+    member (`DrainLabel(label)`, `DrainLabel[label]`, `.value` lookups), and a run that takes
+    the queue lock before it uses the label."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     paths = _paths(tmp_path)
@@ -215,6 +222,16 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
     deps = SimpleNamespace(paths=paths, acquire_queue_lock=lock)
     with pytest.raises(AttributeError):
         lead_author.run(run_dir, label=value, deps=deps)  # type: ignore[arg-type]
+
+    held = acquire_queue_lock(paths)
+    assert held is not None, "precondition: the test holds the queue lock"
+    try:
+        assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == \
+            lead_author.QUEUE_LOCK_SKIP_RC, "control: the held lock makes a member skip"
+        with pytest.raises(AttributeError):
+            lead_author.run(run_dir, label=value, paths=paths)  # type: ignore[arg-type]
+    finally:
+        release_queue_lock(held)
 
 
 # ---------------------------------------------------------------------------------------
@@ -229,15 +246,18 @@ def _writable(request: Any) -> list[Path]:
 @pytest.mark.parametrize("label", NON_MEMBERS, ids=repr)
 def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path, label: object):
     """The real `_run_worktree_batch(label=<non-member>)` raises `AttributeError` before
-    `_open_batch`: `has_work` is never asked, the branch records no event and makes no worktree,
-    no box is started, nothing is held, and no pending-delivery record is written.
+    `_open_batch`, over a lane that has a retained delivery from an earlier tick: the retained
+    batch is NOT delivered (its record stays on disk, `deliver` is never called), `has_work` is
+    never asked, the branch records no event and makes no worktree, no box is started, and
+    nothing is held.
 
-    The positive control, each member over a fresh drive: the batch asks `has_work`, starts one
-    box, and that box mounts the member's trees writable.
+    The positive control, each member over a fresh drive with the same retained record: the
+    batch delivers it (one `deliver`, the record removed), asks `has_work`, starts one box, and
+    that box mounts the member's trees writable.
 
     Catches: a string, a name or a look-alike coerced into a member at the batch entry, and a
-    batch that only meets the label late (at the box, or at a record writer), after a worktree
-    and a box exist."""
+    batch that only meets the label late (inside `_open_batch` after the delivery pushed and
+    dropped the record, at the box, or at a record writer)."""
     asked: list[LoopPaths] = []
 
     def has_work(paths: LoopPaths) -> bool:
@@ -247,23 +267,108 @@ def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path
     root = tmp_path / "non-member"
     root.mkdir()
     rec = B.BoxLifecycleRecorder()
+    branch = _DeliveringBranch(root / "wt", events=rec.events)
+    retained = _retain(root, branch)
     with pytest.raises(AttributeError):
         B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, has_work=has_work,
-                               label=label)
+                               branch=branch, label=label)
+    assert branch.delivered == [], "a non-member's batch delivered a retained branch"
+    assert retained.is_file(), "a non-member's batch dropped the retained delivery's record"
     assert asked == [], "the batch reached _open_batch with a non-member"
     assert rec.requests == []
     assert rec.events == []
     assert not (root / "wt").exists(), "a worktree was made for a non-member"
-    assert not B.loop_paths(root).pending_delivery_dir.exists()
     assert descriptors_under(root) == []
 
     for member, rels in ((AUTHOR_DRAIN_LABEL, ("defender/lessons", "defender/lessons-questioner")),
                          (LEAD_AUTHOR_DRAIN_LABEL, ("defender/skills",))):
         asked.clear()
+        root = tmp_path / member.value
+        root.mkdir()
         rec = B.BoxLifecycleRecorder()
-        B.drive_worktree_batch(tmp_path / member.value, rec, do_work=lambda *_a, **_k: None,
-                               has_work=has_work, label=member)
+        branch = _DeliveringBranch(root / "wt", events=rec.events)
+        retained = _retain(root, branch)
+        B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, has_work=has_work,
+                               branch=branch, label=member)
+        assert branch.delivered == ["retained-1"]
+        assert not retained.exists()
         assert len(asked) == 1
         request = rec.only_request()
         [leaf] = [Path(m.source) for m in request.mounts if not m.writable]
         assert _writable(request) == [leaf / rel for rel in rels]
+
+
+class _DeliveringBranch(B.RecordingBranch):
+    """`_box665.RecordingBranch` that can deliver a retained batch (`deliver`), recording each,
+    and whose `finish_batch` can fail like a rejected push."""
+
+    def __init__(self, *a: Any, fail_push: bool = False, **kw: Any) -> None:
+        super().__init__(*a, **kw)
+        self.delivered: list[str] = []
+        self.fail_push = fail_push
+
+    def deliver(self, batch_id: str) -> str:
+        self.delivered.append(batch_id)
+        return f"https://example/pr/{batch_id}"
+
+    def finish_batch(self, batch_id: str, wt: Path) -> str | None:
+        if self.fail_push:
+            self.events.append(f"finish_batch:{batch_id}")
+            raise BranchError("push rejected")
+        return super().finish_batch(batch_id, wt)
+
+
+def _retain(root: Path, branch: Any) -> Path:
+    """A retained delivery from an earlier tick, under the lane's branch prefix, as the real
+    writer leaves it (the label written is irrelevant to delivery)."""
+    paths = B.loop_paths(root)
+    drains._record_pending_delivery(paths, branch, "retained-1", label=AUTHOR_DRAIN_LABEL,
+                                    reason="push rejected")
+    [record] = sorted(paths.pending_delivery_dir.glob("*.json"))
+    return record
+
+
+# ---------------------------------------------------------------------------------------
+# O2 by lane: each member's own batch writes its own value into both records
+# ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
+def test_each_lanes_batch_writes_its_own_label_into_both_records(tmp_path: Path, label: DrainLabel):
+    """Driven through the real `_run_worktree_batch` for each member: a rejected push records
+    a pending delivery whose `"label"` is that member's value, and a tainted tree (a real link
+    planted, the real scrub) leaves a quarantine manifest whose `"label"` is that member's value.
+
+    Catches: a lane constant (or the other lane's label) handed to `_land_batch` or
+    `preserve_tainted_tree` instead of the batch's own label: each path driven for one lane
+    only would stay green."""
+    root = tmp_path / "push"
+    root.mkdir()
+    rec = B.BoxLifecycleRecorder()
+    branch = _DeliveringBranch(root / "wt", events=rec.events, fail_push=True)
+    assert B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, branch=branch,
+                                  label=label) == 0
+    [record] = sorted(B.loop_paths(root).pending_delivery_dir.glob("*.json"))
+    assert json.loads(record.read_text(encoding="utf-8"))["label"] == VALUES[label]
+
+    root = tmp_path / "taint"
+    root.mkdir()
+    rec = B.BoxLifecycleRecorder()
+    branch = _DeliveringBranch(root / "wt", events=rec.events, destroy_on_cleanup=True)
+
+    def tainting_scrub(tree: Path) -> None:
+        os.symlink("/etc/passwd", tree / "stolen.md")
+        scrub_mod.scrub(tree)
+
+    rec.scrub = tainting_scrub
+    with pytest.raises(scrub_mod.RunTainted):
+        B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, branch=branch,
+                               label=label)
+    [manifest] = sorted(branch.quarantine_dir.glob("*.json"))
+    assert json.loads(manifest.read_text(encoding="utf-8"))["label"] == VALUES[label]
+
+
+def test_the_paths_carry_no_label_table():
+    """`LoopPaths` has no `drain_writable_trees` (#1179 M1'): the member owns its trees, so no
+    second, string-keyed table can sit behind it on the paths."""
+    assert not hasattr(LoopPaths, "drain_writable_trees")
