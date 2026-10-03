@@ -15,11 +15,18 @@ and the lead-author step's `lane_trees.kind_at` in their place; the curator call
   tracked symlink (120000) is left out, never restored as a file; a git failure raises. What
   the agent made comes from `git status --untracked-files=all` over the corpus, so a name git
   does not report (gitignored, a FIFO, a socket) survives the fault undo (C2).
-- `drain._restore_corpus(repo_root, corpus_dir, snapshot, *, corpus: Held)` (fault path),
-  `_restore_unapproved_files` / `_restore_from_snapshot` through `cfg.corpus`,
-  `_put_back(repo_root, rel, *, tree_for)`, `_revert_strays(..., *, tree_for)`,
-  `_byte_identical_to_head(repo_root, rel, *, tree_for)` (bytes via `lane_trees.read_bytes_at`),
+- `drain._restore_corpus(repo_root, corpus_dir, snapshot, *, corpus: Held, head_before)` (fault
+  path), `_restore_unapproved_files(cfg, snapshot, rels, *, head_before)` /
+  `_restore_from_snapshot` through `cfg.corpus`, `_put_back(repo_root, rel, *, tree_for)`,
+  `_revert_strays(..., *, tree_for)`, `_byte_identical_to_head(repo_root, rel)`,
   `_cited_ids(view, name, field)`, `_read_or_empty(view, name)`.
+- Addendum 3 (2026-10-03, D1): the three "is this file still its before-state?" checks (the
+  settle's `_byte_identical_to_head`, `_restore_unapproved_files`, `_restore_corpus`) ask git
+  (`_git.git_unchanged_since`), never the handle and never a plain-path read: there is no
+  `Bound.read_bytes` and no `lane_trees.read_bytes_at`. Writes, restores and deletes still go
+  through the corpus `Held`. Declared: git hashes a hard link's content (its own read, N-a), so
+  a hard link holding the before-state's exact bytes is judged unchanged — never committed,
+  never restored from its target — while a symlink is a type change, never unchanged.
 - O5.3, inside `_undo_agent_edits` only: a per-entry `NotPlainEntry` (symlink, hard link, FIFO,
   folder AT the name) is logged at WARNING naming the entry and the loop goes on; anything else
   (a linked holding folder's plain `ELOOP`, EACCES, ENOSPC, EIO) propagates.
@@ -29,7 +36,7 @@ and the lead-author step's `lane_trees.kind_at` in their place; the curator call
   (..., *, corpus: Bound, corpus_dir: Path, ...)`, `commit_corpus_paths` split by
   `lane_trees.kind_at(cfg.repo_root, cfg.tree_for, p) != lane_trees.KIND_ABSENT`,
   `_git.git_commit_paths(cwd, present, absent, message)` with no filesystem test (and `_git.py`
-  free of any), and `lane_trees.read_bytes_at(repo_root, tree_for, path)`.
+  free of any).
 
 What the handle buys, per call site: a symlink, hard link, FIFO or folder at a lesson name (or a
 link at a folder holding it) is never followed, never read, never written through and never
@@ -37,14 +44,18 @@ deleted. Every plant is REAL (`os.symlink`, `os.link`, `os.mkfifo`, a folder mov
 linked back); link targets live outside the repo (under the test's tmp dir, so a hard link shares
 a filesystem) and carry `OUT_MARK`, so following one would change the answer. "Not read" rows hold
 `kernel_watch` (inotify, below Python) on the target: `opens=` for a symlink or folder plant (no
-open either), `reads=` for a hard link (its shared inode is opened before `fstat` refuses it).
+open either), `reads=` for a hard link (its shared inode is opened before `fstat` refuses it) —
+except where git compares the hard link with the before-state (addendum 3, N-a): there git reads
+its content, and the row pins instead that nothing is written through it or copied from it.
 FIFO rows run under `test_1111`'s deadline. Faults no root process can make for real (EACCES,
 EIO, ENOSPC) enter through the `os_` seam of `hold` / `DrainTrees.open` only.
 
 Red before the step: the drain helpers still take paths (`_snapshot_corpus` takes the corpus
 folder alone, and `_git.git_tree_blobs` does not exist), the new keywords (`corpus=`,
 `tree_for=`, `trees=`) do not exist, and `lane_trees.read_bytes_at` is missing; each test fails
-on its own line.
+on its own line. Red before addendum 3 (`5dbb880c`): the restores take no `head_before`,
+`_byte_identical_to_head` still takes `tree_for` and refuses a hard link, and `_git` has no
+`git_unchanged_since`.
 """
 from __future__ import annotations
 
@@ -69,7 +80,6 @@ from defender.learning.author import drain
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
-from defender.learning.core import lane_trees
 from defender.tests._by_path import import_lint_lib
 from defender.tests._curator1134 import (
     LESSONS_REL,
@@ -78,7 +88,6 @@ from defender.tests._curator1134 import (
     FailsOn,
     JournalHeld,
     RecordingOs,
-    SwapsAfterRead,
     alias_left,
     clear,
     corpus_view,
@@ -404,9 +413,12 @@ def _baseline(w) -> dict[str, bytes]:
     return snapshot
 
 
-def _restore(w, snapshot, corpus=None) -> None:
+def _restore(w, snapshot, corpus=None, head_before=None) -> None:
+    """The fault path's `_restore_corpus` over the world's corpus; the before-state's commit is
+    HEAD unless the row names another."""
     drain._restore_corpus(w.repo, w.corpus_dir, snapshot,
-                          corpus=corpus if corpus is not None else w.corpus)
+                          corpus=corpus if corpus is not None else w.corpus,
+                          head_before=head_before if head_before is not None else w.head())
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
@@ -444,9 +456,12 @@ def test_the_restore_leaves_an_alias_at_a_snapshot_name_and_restores_the_rest(
     tmp_path, kind, caplog,
 ):
     """O5.3 at `_restore_corpus`: the agent replaced snapshot name `a.md` by a link (or a hard
-    link) to an outside file and rewrote `b.md`. The alias is refused, logged by name and left;
-    the loop carries on and `b.md` is restored byte for byte (the positive control, same call);
-    the outside file is neither read nor written."""
+    link) to an outside file holding other bytes, and rewrote `b.md`. Git judges both changed;
+    the alias's rewrite is refused, logged by name and left; the loop carries on and `b.md` is
+    restored byte for byte (the positive control, same call); the outside file is never written
+    and its bytes are copied into no other corpus file. The symlink's target is never opened
+    (git compares the link itself); the hard link's content git reads to compare it (addendum 3,
+    declared, N-a), so for it the watch is not the witness."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -463,8 +478,10 @@ def test_the_restore_leaves_an_alias_at_a_snapshot_name_and_restores_the_rest(
     assert (w.corpus_dir / "b.md").read_bytes() == snapshot["b.md"]
     assert alias_left(kind, at, target)
     assert warnings_naming(caplog, "a.md"), caplog.text
-    assert seen == []
+    if kind == "symlink":
+        assert seen == []
     assert census(w.outside) == before
+    assert [n for n in _corpus_holds_mark(w.corpus_dir) if n != "a.md"] == []
 
 
 def test_the_restore_control_rewrites_a_changed_and_a_deleted_snapshot_file(tmp_path):
@@ -716,7 +733,9 @@ def test_a_restore_git_cannot_answer_at_all_sweeps_nothing_but_still_rewrites(tm
     """Git cannot answer at all during the restore (the working copy is no repository any more:
     both `git status` and the worktree listing fail): one WARNING naming both (not the host
     path), no sweep (a stray is left: nothing is deleted on an answer the restore never got),
-    and each changed or removed snapshot file is still written back through the held corpus.
+    and each changed or removed snapshot file is still written back through the held corpus —
+    git cannot compare either (addendum 3: the comparison is git's), so a second WARNING names
+    the failed `git diff` and every snapshot file is written back.
 
     Catches: a restore that lets the git failure replace the fault, or one that skips the
     rewrite with the sweep."""
@@ -726,9 +745,10 @@ def test_a_restore_git_cannot_answer_at_all_sweeps_nothing_but_still_rewrites(tm
     put(w.corpus_dir / "a.md", b"rewritten by the agent\n")
     clear(w.corpus_dir / "b.md")
     put(w.corpus_dir / "stray.md", b"new\n")
+    head = w.head()
     shutil.move(str(w.repo / ".git"), str(w.tmp / "git-moved-away"))
 
-    exc = raised_by(lambda: _restore(w, snapshot))
+    exc = raised_by(lambda: _restore(w, snapshot, head_before=head))
 
     assert exc is None, repr(exc)
     assert (w.corpus_dir / "stray.md").read_bytes() == b"new\n"
@@ -737,6 +757,7 @@ def test_a_restore_git_cannot_answer_at_all_sweeps_nothing_but_still_rewrites(tm
     said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(re.search(r"git status\D*rc=\d+", m) and re.search(r"ls-files\D*rc=\d+", m)
                for m in said), said
+    assert any(re.search(r"git diff\D*rc=\d+", m) for m in said), said
     assert not any(str(w.tmp) in m for m in said), said
 
 
@@ -751,6 +772,11 @@ def test_the_restore_does_nothing_without_a_snapshot(tmp_path):
 # ---------------------------------------------------------------------------------------
 # _restore_unapproved_files / _restore_from_snapshot: through cfg.corpus, refusals propagate
 # ---------------------------------------------------------------------------------------
+
+
+def _unapproved(w, cfg, snapshot, *rels: str) -> None:
+    """The settle restore over `rels`, the before-state's commit being HEAD."""
+    drain._restore_unapproved_files(cfg, snapshot, set(rels), head_before=w.head())
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
@@ -771,7 +797,7 @@ def test_an_unapproved_new_name_holding_a_link_is_refused_and_the_refusal_propag
     at = w.corpus_dir / PLANTED
     plant_alias(kind, at, target)
 
-    exc = raised_by(lambda: drain._restore_unapproved_files(cfg, snapshot, {_rel(PLANTED)}))
+    exc = raised_by(lambda: _unapproved(w, cfg, snapshot, _rel(PLANTED)))
 
     assert leaf_refusal(exc), repr(exc)
     assert alias_left(kind, at, target)
@@ -786,7 +812,7 @@ def test_an_unapproved_new_name_holding_a_fifo_is_refused(tmp_path):
     at = w.corpus_dir / PLANTED
     plant_fifo(at)
 
-    exc = raised_by(lambda: drain._restore_unapproved_files(cfg, snapshot, {_rel(PLANTED)}),
+    exc = raised_by(lambda: _unapproved(w, cfg, snapshot, _rel(PLANTED)),
                     fifo=at)
 
     assert leaf_refusal(exc), repr(exc)
@@ -801,17 +827,19 @@ def test_an_unapproved_new_name_holding_a_folder_keeps_todays_is_a_directory_err
     snapshot = _snap(w)
     plant_folder(w.corpus_dir / PLANTED)
 
-    exc = raised_by(lambda: drain._restore_unapproved_files(cfg, snapshot, {_rel(PLANTED)}))
+    exc = raised_by(lambda: _unapproved(w, cfg, snapshot, _rel(PLANTED)))
 
     assert type(exc) is IsADirectoryError, repr(exc)
     assert (w.corpus_dir / PLANTED).is_dir()
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
-def test_an_unapproved_changed_name_holding_a_link_is_refused_unread(tmp_path, kind):
-    """A snapshot name the agent replaced by a link (or a hard link) to an outside file: the
-    read of it is refused (nothing read through it), the rewrite refuses (`NotPlainEntry`) and
-    the refusal propagates; the link and its target are left as they are."""
+def test_an_unapproved_changed_name_holding_a_link_is_refused_and_copied_nowhere(tmp_path, kind):
+    """A snapshot name the agent replaced by a link (or a hard link) to an outside file holding
+    other bytes: git judges it changed, the rewrite refuses (`NotPlainEntry`) and the refusal
+    propagates; the link and its target are left as they are, nothing is written through it and
+    its bytes are copied nowhere. The symlink's target is never opened; the hard link's content
+    is git's to read for the comparison (addendum 3, declared, N-a)."""
     w = world(tmp_path)
     cfg = w.cfg()
     put(w.corpus_dir / PLANTED, lesson_text("f0"))
@@ -823,13 +851,15 @@ def test_an_unapproved_changed_name_holding_a_link_is_refused_unread(tmp_path, k
     before = census(w.outside)
 
     with _watch_for(kind, target) as events:
-        exc = raised_by(lambda: drain._restore_unapproved_files(cfg, snapshot, {_rel(PLANTED)}))
+        exc = raised_by(lambda: _unapproved(w, cfg, snapshot, _rel(PLANTED)))
         seen = events()
 
     assert leaf_refusal(exc), repr(exc)
-    assert seen == []
+    if kind == "symlink":
+        assert seen == []
     assert alias_left(kind, at, target)
     assert census(w.outside) == before
+    assert [n for n in _corpus_holds_mark(w.corpus_dir) if n != PLANTED] == []
 
 
 def test_the_unapproved_restore_control_removes_new_and_rewrites_changed_plain_files(tmp_path):
@@ -845,8 +875,7 @@ def test_the_unapproved_restore_control_removes_new_and_rewrites_changed_plain_f
     put(w.corpus_dir / "old.md", b"changed\n")
     clear(w.corpus_dir / "gone.md")
 
-    drain._restore_unapproved_files(
-        cfg, snapshot, {_rel(PLANTED), _rel("old.md"), _rel("gone.md")})
+    _unapproved(w, cfg, snapshot, _rel(PLANTED), _rel("old.md"), _rel("gone.md"))
 
     assert not (w.corpus_dir / PLANTED).exists()
     assert (w.corpus_dir / "old.md").read_bytes() == snapshot["old.md"]
@@ -859,7 +888,11 @@ LANDING_CALLS = {"rename"}
 
 
 def _settle(step: str, cfg, snapshot, rel: str) -> None:
-    getattr(drain, step)(cfg, snapshot, {rel} if step == "_restore_unapproved_files" else [rel])
+    if step == "_restore_unapproved_files":
+        head = _git.git_head_sha(cfg.repo_root)
+        drain._restore_unapproved_files(cfg, snapshot, {rel}, head_before=head)
+    else:
+        drain._restore_from_snapshot(cfg, snapshot, [rel])
 
 
 def _recording_cfg(w):
@@ -899,7 +932,7 @@ def test_the_unapproved_restore_deletes_a_new_file_through_the_configs_held_corp
     put(w.corpus_dir / PLANTED, lesson_text("f1"))
     seam, _trees, cfg = _recording_cfg(w)
 
-    drain._restore_unapproved_files(cfg, snapshot, {_rel(PLANTED)})
+    _unapproved(w, cfg, snapshot, _rel(PLANTED))
 
     assert not os.path.lexists(w.corpus_dir / PLANTED)
     assert PLANTED in seam.touched("unlink"), seam.trace
@@ -965,45 +998,71 @@ def test_the_repair_deletion_restore_refuses_a_link_at_the_name(tmp_path, kind):
 
 
 # ---------------------------------------------------------------------------------------
-# _byte_identical_to_head: worktree bytes through tree_for; a link is never "identical"
+# _byte_identical_to_head: git compares (addendum 3, D1); a symlink is never "identical"
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["symlink", "hard link"])
-def test_a_lesson_aliased_to_head_identical_bytes_is_not_byte_identical(tmp_path, kind):
-    """A tracked lesson replaced by a link (or hard link) to an outside file holding HEAD's exact
-    bytes is NOT byte-identical to HEAD: the read through the held mount is refused, so the
-    comparison fails, and the target is not read.
+def test_a_symlink_holding_head_identical_bytes_is_never_byte_identical(tmp_path):
+    """A tracked lesson replaced by a symlink to an outside file holding HEAD's exact bytes is
+    NOT byte-identical to HEAD: git sees a type change (a link where a file was), and compares
+    the link itself, so its target is never opened.
 
-    Catches: today's `(repo_root / rel).read_bytes()`, which follows the link and answers True —
+    Catches: main's `(repo_root / rel).read_bytes()`, which follows the link and answers True —
     and then `git checkout` papers over the plant."""
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
     put(w.corpus_dir / "t.md", body)
     w.commit()
     target = w.target("same-bytes.md", body)
-    plant_alias(kind, w.corpus_dir / "t.md", target)
+    plant_link(w.corpus_dir / "t.md", target)
 
-    with _watch_for(kind, target) as events:
-        got = drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=w.tree_for)
+    with kernel_watch(opens=[target]) as events:
+        got = drain._byte_identical_to_head(w.repo, _rel("t.md"))
         seen = events()
 
     assert got is False
     assert seen == []
+    assert is_link_to(w.corpus_dir / "t.md", target)
+
+
+@pytest.mark.parametrize("bytes_held", ["head's", "other"])
+def test_a_hard_link_is_compared_by_its_content_as_git_hashes_it(tmp_path, bytes_held):
+    """Addendum 3, declared (N-a): git hashes a hard-linked file's content where the handle
+    refused it. A tracked lesson replaced by a hard link to an outside file holding HEAD's exact
+    bytes is judged byte-identical (it is: same bytes, still a regular file); one holding other
+    bytes is not. Either way the comparison changes nothing: the hard link stays, its target's
+    bytes, mode and link count are as they were.
+
+    Catches: a comparison still made through the held mount (which refuses the hard link, so
+    the identical one reads as changed) — the handle is not git."""
+    w = world(tmp_path)
+    body = lesson_text("f0")
+    put(w.corpus_dir / "t.md", body)
+    w.commit()
+    target = w.target("hard.md", body if bytes_held == "head's" else lesson_text("f9"))
+    plant_hardlink(w.corpus_dir / "t.md", target)
+    before = census(w.outside)
+
+    got = drain._byte_identical_to_head(w.repo, _rel("t.md"))
+
+    assert got is (bytes_held == "head's")
+    assert os.stat(w.corpus_dir / "t.md").st_ino == os.stat(target).st_ino
+    assert census(w.outside) == before
 
 
 def test_a_mode_only_change_is_byte_identical_and_a_content_change_is_not(tmp_path):
-    """The positive control at the same name: a chmod-only change reads through the held mount
-    as byte-identical; a one-byte change does not; an untracked name has no HEAD bytes."""
+    """The positive control at the same name: a chmod-only change is byte-identical (git is
+    asked to ignore the executable bit); a one-byte change is not; an untracked name has no
+    HEAD bytes, so it is never identical (git's diff alone would report nothing for it)."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
     os.chmod(w.corpus_dir / "t.md", 0o755)
-    assert drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=w.tree_for) is True
+    assert drain._byte_identical_to_head(w.repo, _rel("t.md")) is True
     put(w.corpus_dir / "t.md", lesson_text("f0") + " ")
-    assert drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=w.tree_for) is False
+    assert drain._byte_identical_to_head(w.repo, _rel("t.md")) is False
     put(w.corpus_dir / "u.md", lesson_text("f0"))
-    assert drain._byte_identical_to_head(w.repo, _rel("u.md"), tree_for=w.tree_for) is False
+    assert drain._byte_identical_to_head(w.repo, _rel("u.md")) is False
 
 
 def _crlf(text: str) -> bytes:
@@ -1012,16 +1071,17 @@ def _crlf(text: str) -> bytes:
 
 def test_a_crlf_only_rewrite_of_a_tracked_lesson_is_not_byte_identical(tmp_path):
     """E02: a tracked lesson INSIDE `lessons/` rewritten with CRLF line ends and nothing else is
-    not byte-identical to HEAD: the comparison is of raw bytes read through the held mount (the
-    docstring's own reason — text decoding's universal newlines would call it equal).
+    not byte-identical to HEAD: git compares raw bytes (no newline translation — the docstring's
+    own reason: text decoding's universal newlines would call it equal).
 
-    Catches: an in-mount comparison that reads text (`read_at`) and re-encodes it."""
+    Catches: a comparison that reads text (`read_at`) and re-encodes it, or a git comparison
+    that lets an end-of-line conversion apply."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
     put(w.corpus_dir / "t.md", _crlf(lesson_text("f0")))
 
-    assert drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=w.tree_for) is False
+    assert drain._byte_identical_to_head(w.repo, _rel("t.md")) is False
 
 
 @pytest.mark.parametrize("change", ["crlf only", "mode only"])
@@ -1057,18 +1117,24 @@ def test_the_settle_keeps_a_crlf_only_rewrite_as_changed_and_puts_back_a_mode_on
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
-def test_the_settle_never_judges_a_link_at_a_modified_lesson_byte_identical(tmp_path, kind):
+def test_the_settle_judges_a_link_at_a_modified_lesson_as_git_sees_it(tmp_path, kind):
     """Step 4 of the settle (`_settle_tree`), at its own call site: after the pre-state is taken,
     tracked `t.md` is replaced by a symlink (or a hard link) to an outside file holding HEAD's
     exact bytes. Git reports it modified — a typechange; for the hard link the shared inode is
-    made executable, a mode change, since identical bytes alone report nothing. The settle asks
-    the config's `tree_for`, whose held mount refuses the link: `t.md` stays CHANGED (content to
-    judge), the plant is left where it stands, and the target is never read (for the symlink,
-    never opened).
+    made executable, a mode change, since identical bytes alone report nothing.
 
-    Catches (#1134 v2 step 7 adversary, 02b): the settle handing `_byte_identical_to_head` a
-    `tree_for` that misses every path — `**{"tree_for": lambda _p: None}` — so the plain
-    fallback reads through the link, answers True, and `git checkout` papers over the plant."""
+    - The symlink is never judged identical (git sees a type change): `t.md` stays CHANGED
+      (content to judge), the plant is left where it stands, its target is never opened.
+    - The hard link holds HEAD's exact bytes, so git judges it unchanged (addendum 3, declared,
+      N-a) and the settle puts it back with `git checkout` — from HEAD's blob, never from the
+      target: `t.md` is then a plain file of its own (not the target's inode) holding HEAD's
+      bytes, not in `changed` (so never judged, approved or committed), and the target keeps
+      its bytes and its mode.
+
+    Catches (#1134 v2 step 7 adversary, 02b, retargeted): a settle comparison that reads the
+    worktree by its plain path, which follows the symlink, answers True, and `git checkout`
+    papers over the plant; and one still asking the held mount, which refuses the hard link and
+    leaves an unchanged lesson to be judged."""
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
     put(w.corpus_dir / "t.md", body)
@@ -1080,111 +1146,37 @@ def test_the_settle_never_judges_a_link_at_a_modified_lesson_byte_identical(tmp_
     if kind == "hard link":
         os.chmod(target, 0o755)
     w.git("status")  # git refreshes its index once, before the watch is armed
+    before = census(w.outside)
 
-    with _watch_for(kind, target) as events:
+    with kernel_watch(opens=[target]) as events:
         tree = drain._settle_tree(cfg, state, honoured_deletions=None)
         seen = events()
 
-    assert seen == [], f"the plant's target was read through: {seen}"
-    assert tree.changed == (_rel("t.md"),)
-    assert alias_left(kind, w.corpus_dir / "t.md", target)
+    assert tree.deleted == ()
+    if kind == "symlink":
+        assert seen == [], f"the symlink's target was opened: {seen}"
+        assert tree.changed == (_rel("t.md"),)
+        assert alias_left(kind, w.corpus_dir / "t.md", target)
+        assert census(w.outside) == before
+        return
+    assert tree.changed == ()
+    st = os.lstat(w.corpus_dir / "t.md")
+    assert stat.S_ISREG(st.st_mode)
+    assert st.st_ino != os.stat(target).st_ino
+    assert (w.corpus_dir / "t.md").read_bytes() == body.encode()
+    assert target.read_bytes() == body.encode()
+    assert os.stat(target).st_mode & 0o777 == 0o755
 
 
-def test_byte_identity_keeps_the_bytes_its_read_saw_when_the_lesson_is_swapped_after(tmp_path):
-    """E06 at `_byte_identical_to_head`: tracked `t.md` is read through the held mount, and the
-    moment that read closes, it is swapped for a symlink to an outside file holding other bytes.
-    The comparison is of the bytes the mount read (HEAD's: True), and the outside file is never
-    opened. The seam firing is the positive control that the read went through the trees.
-
-    Catches: a comparison that asks the mount and then reads `repo_root / rel` by its plain
-    path, which follows the fresh link."""
-    w = world(tmp_path)
-    put(w.corpus_dir / "t.md", lesson_text("f0"))
-    w.commit()
-    target = w.target("secret.md")
-    seam = SwapsAfterRead(w.corpus_dir / "t.md", lambda: plant_link(w.corpus_dir / "t.md", target))
-    trees = seamed_trees(w.paths, seam)
-
-    with kernel_watch(opens=[target]) as events:
-        got = drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=trees.tree_for)
-        seen = events()
-
-    assert seam.fired, "t.md was never read through the trees' seam"
-    assert got is True
-    assert seen == [], f"the swapped-in link's target was opened: {seen}"
-    assert is_link_to(w.corpus_dir / "t.md", target)
-
-
-def test_a_path_outside_the_lanes_mounts_keeps_its_plain_read(tmp_path):
-    """`f.txt` at the repo root lies outside every author mount (the box's read-only area, D3):
-    it is read by its plain path, identical and CRLF-changed alike."""
+def test_a_path_outside_the_lanes_mounts_is_compared_by_git_too(tmp_path):
+    """`f.txt` at the repo root lies outside every author mount: git compares it like any other
+    path (v3 read it by its plain path, D3) — identical, then CRLF-changed."""
     w = world(tmp_path)
     (w.repo / "f.txt").write_bytes(b"line\n")
     w.commit()
-    assert drain._byte_identical_to_head(w.repo, "f.txt", tree_for=w.tree_for) is True
+    assert drain._byte_identical_to_head(w.repo, "f.txt") is True
     (w.repo / "f.txt").write_bytes(b"line\r\n")
-    assert drain._byte_identical_to_head(w.repo, "f.txt", tree_for=w.tree_for) is False
-
-
-def test_byte_identity_asks_the_tree_for_it_is_handed(tmp_path):
-    """The worktree bytes come through the `tree_for` handed in: over trees whose `os_` records
-    its calls, a lesson's comparison reads through them.
-
-    Catches: `_byte_identical_to_head` taking `tree_for` and reading `repo_root / rel` anyway."""
-    w = world(tmp_path)
-    put(w.corpus_dir / "t.md", lesson_text("f0"))
-    w.commit()
-    seam = RecordingOs()
-    trees = seamed_trees(w.paths, seam)
-    seam.clear()
-
-    assert drain._byte_identical_to_head(w.repo, _rel("t.md"), tree_for=trees.tree_for) is True
-    assert "t.md" in seam.touched("open"), seam.trace
-
-
-# ---------------------------------------------------------------------------------------
-# lane_trees.read_bytes_at: the byte-exact read beside read_at
-# ---------------------------------------------------------------------------------------
-
-
-def test_read_bytes_at_reads_a_mount_path_through_its_held_mount_and_a_plain_path_outside(
-    tmp_path,
-):
-    """`lane_trees.read_bytes_at(repo_root, tree_for, path)`: inside a mount (relative as git
-    status spells it, or absolute), a plain file's exact bytes as `(data, None)`; a symlink, a
-    hard link or a FIFO is `(None, reason)`, its target never read and the FIFO never blocking;
-    nothing there is no data. Outside the mounts the plain path is read (`Path.read_bytes()`, an
-    `OSError` folded into `(None, reason)`)."""
-    w = world(tmp_path)
-    raw = b"\xff\xfe binary\r\n\x00"
-    put(w.corpus_dir / "raw.bin", raw)
-    target = w.target("secret.md", lesson_text("f1", mark=OUT_MARK))
-    plant_link(w.corpus_dir / "linked.md", target)
-    plant_hardlink(w.sibling_dir / "hard.md", target)
-    plant_fifo(w.corpus_dir / "pipe.md")
-    put(w.repo / "defender" / "notes.bin", raw)
-
-    def read(path):
-        return lane_trees.read_bytes_at(w.repo, w.tree_for, path)
-
-    assert read(_rel("raw.bin")) == (raw, None)
-    assert read(w.corpus_dir / "raw.bin") == (raw, None)
-    with kernel_watch(reads=[target]) as events:
-        for rel in (_rel("linked.md"), f"{SIBLING_REL}hard.md"):
-            data, reason = read(rel)
-            assert data is None, rel
-            assert reason, rel
-        seen = events()
-    assert seen == []
-    data, reason = in_time(lambda: read(_rel("pipe.md")), fifo=w.corpus_dir / "pipe.md")
-    assert data is None
-    assert reason
-    assert read(_rel("absent.md"))[0] is None
-
-    assert read("defender/notes.bin") == (raw, None)
-    data, reason = read("defender/absent.bin")
-    assert data is None
-    assert reason
+    assert drain._byte_identical_to_head(w.repo, "f.txt") is False
 
 
 # ---------------------------------------------------------------------------------------
@@ -1632,20 +1624,32 @@ def _callees(node: ast.AST) -> list[str]:
     (drain, "_restore_unapproved_files", "entry_kind"),
     (drain, "_put_back", "kind_at"),
     (author_shared, "commit_corpus_paths", "kind_at"),
-], ids=["snapshot", "restore_corpus", "restore_unapproved", "put_back", "commit_split"])
+    (drain, "_byte_identical_to_head", "git_unchanged_since"),
+    (drain, "_unchanged_names", "git_unchanged_since"),
+    (drain, "_restore_corpus", "_unchanged_names"),
+    (drain, "_restore_unapproved_files", "_unchanged_names"),
+], ids=["snapshot", "restore_corpus", "restore_unapproved", "put_back", "commit_split",
+        "settle_compare", "restore_compare", "restore_corpus_compare",
+        "restore_unapproved_compare"])
 def test_each_curator_name_source_and_kind_check_has_one_owner(module, name, helper):
     """Addendum 2's correction (C1), in the lead-author step's V3-H7 shape: the before-state is
     git's read of the tick-start commit (`_git.git_tree_blobs`); the fault sweep asks `git
     status` which names the agent made; the settle restore's folder test asks `entry_kind`;
-    `_put_back` and the commit's present / absent split ask `kind_at`. None lists a folder
+    `_put_back` and the commit's present / absent split ask `kind_at`; the settle's and both
+    restores' "still the before-state?" question asks git (`_git.git_unchanged_since`, addendum
+    3, D1 — the restores through the drain's one `_unchanged_names`). None lists a folder
     (`list_tree`, `entries()`, `scandir`, ...) or tests existence on its own.
 
     Catches: a before-state or sweep built from a folder listing (a depth-limited one misses
     #773's nested lessons, and the settle restore then deletes a tracked one), a hand-rolled
     `view.entries()` lister, and a plain `exists()` / `lexists()` / `is_file()` existence
     test."""
-    calls = _callees(_function(module, name))
-    assert helper in calls, (name, calls)
+    fn = _function(module, name)
+    calls = _callees(fn)
+    # A helper handed to a wrapper that runs it (`_git_read(what, helper, ...)`) is reached too.
+    handed = [a.id for c in ast.walk(fn) if isinstance(c, ast.Call)
+              for a in c.args if isinstance(a, ast.Name)]
+    assert helper in calls + handed, (name, calls, handed)
     assert not _LISTERS & set(calls), (name, sorted(_LISTERS & set(calls)))
 
 
@@ -1653,8 +1657,8 @@ def test_each_curator_name_source_and_kind_check_has_one_owner(module, name, hel
 def test_no_curator_module_lists_a_folder(label):
     """No function in the curator modules calls `list_tree`, `.entries()` or `.under()` on
     anything, and none imports `list_tree` (C1: git decides which names to touch, the handle how;
-    `list_tree` stays the catalog reader's). Every read goes through the view's `read` /
-    `read_bytes` by name. Positive control: the same scan finds each in a snippet that makes
+    `list_tree` stays the catalog reader's). Every read goes through the view's `read` by name
+    (addendum 3: there is no byte read; the comparisons are git's). Positive control: the same scan finds each in a snippet that makes
     them."""
     tree = ast.parse(inspect.getsource(_CURATOR_MODULES[label]))
     banned = {"list_tree", "entries", "under"}

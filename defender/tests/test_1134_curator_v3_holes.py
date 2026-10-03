@@ -64,14 +64,15 @@ def test_an_empty_before_state_still_sweeps_and_removes_the_agents_files(tmp_pat
     agent's files to wedge the next tick's clean gate."""
     w = world(tmp_path)
     put(w.corpus_dir / "made.md", b"the agent's own\n")
-    drain._restore_corpus(w.repo, w.corpus_dir, None, corpus=w.corpus)
+    drain._restore_corpus(w.repo, w.corpus_dir, None, corpus=w.corpus, head_before=w.head())
     assert (w.corpus_dir / "made.md").exists()
 
-    drain._restore_corpus(w.repo, w.corpus_dir, {}, corpus=w.corpus)
+    drain._restore_corpus(w.repo, w.corpus_dir, {}, corpus=w.corpus, head_before=w.head())
     assert not os.path.lexists(w.corpus_dir / "made.md")
 
     put(w.corpus_dir / "made2.md", b"the agent's own\n")
-    drain._restore_unapproved_files(w.cfg(), {}, {f"{LESSONS_REL}made2.md"})
+    drain._restore_unapproved_files(w.cfg(), {}, {f"{LESSONS_REL}made2.md"},
+                                    head_before=w.head())
     assert not os.path.lexists(w.corpus_dir / "made2.md")
 
 
@@ -111,7 +112,8 @@ def test_a_tracked_lesson_with_an_odd_name_is_in_the_before_state_and_restored(t
     assert snapshot.get("plain.md") == lesson_text("f1").encode()
 
     put(w.corpus_dir / name, b"the agent's unapproved edit\n")
-    drain._restore_unapproved_files(w.cfg(), snapshot, {f"{LESSONS_REL}{name}"})
+    drain._restore_unapproved_files(w.cfg(), snapshot, {f"{LESSONS_REL}{name}"},
+                                    head_before=w.head())
     assert (w.corpus_dir / name).read_text() == lesson_text("f0")
 
     put(w.corpus_dir / name, b"the agent's edit before a fault\n")
@@ -178,7 +180,7 @@ def test_the_fault_sweep_makes_no_folder_listing_and_meets_a_linked_folder(tmp_p
     plant_link(w.corpus_dir / "dirlink", outdir)
 
     with _listings() as seen:
-        drain._restore_corpus(w.repo, w.corpus_dir, snapshot, corpus=held)
+        drain._restore_corpus(w.repo, w.corpus_dir, snapshot, corpus=held, head_before=w.head())
 
     assert seen == [], seen
     assert not os.path.lexists(w.corpus_dir / "stray.md")
@@ -222,7 +224,7 @@ def test_a_created_name_below_a_linked_folder_propagates_on_the_settle(tmp_path)
     put(moved / "new.md", lesson_text("f1"))
 
     exc = raised_by(lambda: drain._restore_unapproved_files(
-        w.cfg(), snapshot, {f"{LESSONS_REL}sub/new.md"}))
+        w.cfg(), snapshot, {f"{LESSONS_REL}sub/new.md"}, head_before=w.head()))
 
     assert isinstance(exc, OSError), repr(exc)
     assert exc.errno == errno.ELOOP, repr(exc)
@@ -246,7 +248,7 @@ def test_a_link_to_a_folder_at_a_created_name_is_the_leaf_refusal_on_the_settle(
     plant_link(w.corpus_dir / "dirlink.md", outdir)
 
     exc = raised_by(lambda: drain._restore_unapproved_files(
-        w.cfg(), snapshot, {f"{LESSONS_REL}dirlink.md"}))
+        w.cfg(), snapshot, {f"{LESSONS_REL}dirlink.md"}, head_before=w.head()))
 
     assert leaf_refusal(exc), repr(exc)
     assert is_link_to(w.corpus_dir / "dirlink.md", outdir)

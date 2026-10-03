@@ -276,7 +276,7 @@ def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel
     target = w.target("secret.md")
     body = target.read_bytes()
     plant_link(root / "linked.md", target)
-    assert cfg.corpus.view().read_bytes("linked.md").data is None
+    assert cfg.corpus.view().read("linked.md").text is None
     with pytest.raises(OSError) as wrote:  # noqa: PT011 — the exact class is the assertion below
         cfg.corpus.write("linked.md", b"rewritten\n", mode="replace")
     assert leaf_refusal(wrote.value), repr(wrote.value)
@@ -287,7 +287,7 @@ def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel
     assert target.read_bytes() == body
 
     put(root / "plain.md", body)
-    assert cfg.corpus.view().read_bytes("plain.md").data == body
+    assert cfg.corpus.view().read("plain.md").text == body.decode()
     cfg.corpus.write("plain.md", b"rewritten\n", mode="replace")
     assert (root / "plain.md").read_bytes() == b"rewritten\n"
 

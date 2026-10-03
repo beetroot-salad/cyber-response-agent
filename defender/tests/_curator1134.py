@@ -27,11 +27,8 @@ open:
   exactly as long as that object is referenced and are released when it is collected (CPython's
   refcount; `_io._Handle.__del__` closes each).
 
-`lane_tree_for(repo)` is always the REAL `trees.tree_for` over the repo it is asked about, never a
-stand-in (that would send every call down the plain-path fallback, D3, and test nothing).
-
 Fakes for the new tests enter only through injection seams: the `os_` of `DrainTrees.open` /
-`hold` (`RecordingOs`, `FailsOn`, `SwapsAfterRead`, and `_shared_readers_1134.RefusesFolder`), or a `Held` handed in
+`hold` (`RecordingOs`, `FailsOn`, and `_shared_readers_1134.RefusesFolder`), or a `Held` handed in
 with `dataclasses.replace(cfg, corpus=...)` (`JournalHeld`, a real `Held` subclass: the config is
 a strict pydantic model, so anything else is refused at the replace). Nothing is monkeypatched.
 
@@ -51,7 +48,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import Bound, BytesRead, Held, NotPlainEntry, RecordRead, hold
+from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests._tree_listing_1134 import RealOs, fd_path, last_component
@@ -87,12 +84,6 @@ def seamed_trees(paths: LoopPaths, os_: Any) -> DrainTrees:
     (EACCES, EIO, ENOSPC) reaches the drain."""
     make_mount_points(paths)
     return DrainTrees.open(paths.drain_writable_trees(AUTHOR_DRAIN_LABEL), os_=os_)
-
-
-def lane_tree_for(repo: Path) -> TreeForFn:
-    """The author drain's `trees.tree_for` over the repo at `repo` (the root git-status names are
-    relative to). The trees stay open while the returned bound method is referenced."""
-    return author_trees(LoopPaths(repo_root=repo)).tree_for
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,
@@ -333,67 +324,6 @@ class RecordingOs(RealOs):
         del self.trace[:]
 
 
-class _ClosesThen:
-    """A file object that runs `after` once it is closed (by `close()` or by leaving its `with`)."""
-
-    def __init__(self, fh: Any, after: Callable[[], None]) -> None:
-        self._fh, self._after = fh, after
-
-    def __enter__(self) -> Any:
-        self._fh.__enter__()
-        return self
-
-    def __exit__(self, *exc: Any) -> Any:
-        try:
-            return self._fh.__exit__(*exc)
-        finally:
-            self._after()
-
-    def close(self) -> None:
-        try:
-            self._fh.close()
-        finally:
-            self._after()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._fh, name)
-
-
-class SwapsAfterRead(RealOs):
-    """The real `os` as a handle's `os_` seam that runs `swap` once, the moment a descriptor of
-    `victim` that was READ through it is closed (its `fdopen`ed file closed, or the descriptor
-    passed to `read` then to `close`): a box process replacing the entry right after the read
-    finished. `fired` says the swap ran — the positive control that the read went through this
-    seam at all. A descriptor that is only opened or `fstat`ed (no read) never fires it."""
-
-    def __init__(self, victim: Path, swap: Callable[[], None]) -> None:
-        self.victim, self.swap = os.path.realpath(victim), swap
-        self.fired = False
-        self._read: set[int] = set()
-
-    def _after(self) -> None:
-        if not self.fired:
-            self.fired = True
-            self.swap()
-
-    def fdopen(self, fd: int, *a: Any, **k: Any) -> Any:
-        named = fd_path(fd)
-        fh = os.fdopen(fd, *a, **k)
-        return _ClosesThen(fh, self._after) if named == self.victim else fh
-
-    def read(self, fd: int, n: int) -> bytes:
-        if fd_path(fd) == self.victim:
-            self._read.add(fd)
-        return os.read(fd, n)
-
-    def close(self, fd: int) -> None:
-        was_read = fd in self._read
-        self._read.discard(fd)
-        os.close(fd)
-        if was_read:
-            self._after()
-
-
 class FailsOn(RealOs):
     """The real `os` as a handle's `os_` seam, except that a call to `verb` (on the leaf `leaf`
     when given, else on any) raises the plain `OSError(code)` a failing disk gives: `ENOSPC` on
@@ -443,14 +373,6 @@ class JournalBound(Bound):
         if key in self.extra and got.text is not None:
             return dataclasses.replace(got, text=got.text + self.extra[key])
         return got
-
-    def read_bytes(self, name: Any) -> BytesRead:
-        key = str(name)
-        self.log.append(("read_bytes", key))
-        if key in self.refuse:
-            return BytesRead(name=key, absent=False, reason="refused by the test's view",
-                             data=None)
-        return super().read_bytes(name)
 
     def entries(self) -> Any:
         self.log.append(("entries", "."))

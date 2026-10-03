@@ -435,8 +435,15 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name(
     assert set(_stuck_classes(sc)) <= {"AuthorError"}
     assert _plant_left(kind, sc.corpus / SEEDED, target)
     assert warnings_naming(caplog, SEEDED), caplog.text
-    assert seen == []
+    if kind != "hard link":
+        # Addendum 3 (D1, declared): the restore asks git whether `SEEDED` still holds its
+        # before-state bytes, and git hashes a hard link's content (its own read, N-a). What
+        # still holds for it: nothing written through it, nothing copied into the corpus.
+        assert seen == []
     assert _unwritten(census(target.parent)) == _unwritten(before)
+    assert not [n for n, row in census(sc.corpus).items()
+                if row[0] == "file" and OUT_MARK.encode() in row[1]
+                and (kind != "hard link" or n != SEEDED)], "the target's bytes were copied in"
 
 
 @pytest.mark.parametrize("kind", PLANTS)
@@ -770,31 +777,36 @@ def _journal(sc, log: list, **kw) -> None:
 
 
 def test_the_snapshot_attribution_and_fault_restore_use_cfg_corpus(tmp_path):
-    """The curator leaves `PLANTED` citing nothing from the batch, so the tick faults
-    (unattributable) and retires. Over a `cfg.corpus` that journals its calls, with the agent's
-    own mark in the same log: before the agent ran, no byte read and no listing went through it
-    for the before-state (that is git's, C1); after, the attribution read `PLANTED` through it,
-    and the fault restore swept `PLANTED` with its `unlink` and compared `SEEDED`'s bytes through
-    it.
+    """The curator leaves `PLANTED` citing nothing from the batch and rewrites `SEEDED`, so the
+    tick faults (unattributable) and retires. Over a `cfg.corpus` that journals its calls, with
+    the agent's own mark in the same log: after the agent ran, the attribution read `PLANTED`
+    through it, and the fault restore swept `PLANTED` with its `unlink` and wrote `SEEDED` back
+    with its `write`. The restore's "is it still the before-state?" question is git's (addendum 3, D1): from the sweep
+    on, no read of `SEEDED` went through the view.
 
     Catches: an attribution read or a fault restore made through a `Held` of its own on the same
     root — the same answers on a plain tree, but not the handle the lane's trees hold — and a
-    before-state read through the mount."""
+    restore comparison that reads the worktree bytes through the view instead of asking git.
+    (The before-state is git's read of the tick-start commit, C1: v3 pinned it here as "no
+    `read_bytes` before the agent", a verb addendum 3 removes; it is pinned by
+    `test_1134_curator_handle.test_the_before_state_reads_no_worktree_entry`.)"""
     log: list = []
     sc = _scene(tmp_path, curator=S.FakeCurator(
-        writes={PLANTED: lesson_text("not-this-batch")},
+        writes={PLANTED: lesson_text("not-this-batch"),
+                SEEDED: "the agent rewrote the seeded lesson\n"},
         also=lambda *_a: log.append(("agent",))))
     _journal(sc, log)
 
     assert _run(sc) == ("rc", 2)
 
-    agent = log.index(("agent",))
-    before, after = log[:agent], log[agent + 1:]
-    assert not [e for e in before if e[0] == "read_bytes"], before
-    assert {("read", PLANTED), ("read_bytes", PLANTED)} & set(after), after
+    after = log[log.index(("agent",)) + 1:]
+    assert ("read", PLANTED) in after, after
     assert ("unlink", PLANTED) in after, after
-    assert ("read_bytes", SEEDED) in after, after
+    restore = after[after.index(("unlink", PLANTED)):]
+    assert ("write", SEEDED) in restore, restore
+    assert ("read", SEEDED) not in restore, restore
     assert not os.path.lexists(sc.corpus / PLANTED)
+    assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
 
 
 @pytest.mark.parametrize("refused", [True, False], ids=["refused", "control"])

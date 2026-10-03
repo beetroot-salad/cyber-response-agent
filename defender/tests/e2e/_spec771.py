@@ -1336,6 +1336,8 @@ def drive_drain_restore(worktree: Path, corpus: Path, snapshot: dict[str, bytes]
     from defender._io import hold
     from defender.learning.author import drain
 
-    # The second positional is the corpus's spelling (git pathspec); `corpus=` is its held mount.
+    # The second positional is the corpus's spelling (git pathspec); `corpus=` is its held mount;
+    # `head_before` names the commit the snapshot was taken at (the worktree here is no
+    # repository, so git answers nothing and every snapshot file is written back).
     with hold(corpus) as held:
-        drain._restore_corpus(worktree, corpus, snapshot, corpus=held)
+        drain._restore_corpus(worktree, corpus, snapshot, corpus=held, head_before="HEAD")
