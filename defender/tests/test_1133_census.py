@@ -22,10 +22,14 @@ CALL to and every other REFERENCE to a write-capable callee:
 * `shutil.<anything>`;
 * `getattr(<_io, os or shutil>, ...)`, `vars(<the same>)`, and `importlib.import_module` /
   `__import__` of one of those modules (or `io`, `codecs`);
-* the `Path` attribute calls `.open`, `.mkdir`, `.write_text`, `.write_bytes`, `.unlink`,
-  `.rmdir`, `.touch`, `.symlink_to`, `.hardlink_to`, on any receiver, and `.rename` /
-  `.replace` called with ONE argument;
-* the link-following reads `.read_text` and `.read_bytes` on any receiver.
+* the `Path` methods `.open`, `.mkdir`, `.write_text`, `.write_bytes`, `.unlink`, `.rmdir`,
+  `.touch`, `.symlink_to`, `.hardlink_to`, `.link_to`, `.rename`, `.replace`, and the
+  link-following reads `.read_text` and `.read_bytes`, on any receiver that is not a module
+  or a class other than `pathlib`'s — a value of any kind (a local, a path a module holds),
+  or the `Path` class itself (`Path.unlink(p)`, `map(Path.read_text, ps)`). On a value, the
+  names a `str` or another type also has count only in `Path`'s shape: `.rename` /
+  `.replace` called with ONE argument, and no bare reference to `.open` / `.rename` /
+  `.replace`.
 
 A reference is anything that is not a call's callee (a module-level alias, a keyword or default
 value, a branch of an expression) and is keyed exactly as a call is. Each hit is keyed
@@ -42,7 +46,8 @@ back — `held.mkdir(rel)` / `held.unlink(rel)` (a call carrying the name positi
 `Held` verb; `Path.mkdir()` / `Path.unlink()` take no positional name, and their positional
 `mode` / `missing_ok` is a non-string constant) and `read` / `write` /
 `view` / `close`, none of which is vocabulary. No `rooted_*`, no path seam, no raw `os` /
-`shutil` / builtin `open`, no `Path` I/O method, no other I/O-doing `_io` function; and it does
+`shutil` / builtin `open`, no `Path` method that touches the filesystem (the #1134 census's
+list, called or referenced, by the same receiver rule), no other I/O-doing `_io` function; and it does
 call `hold` and `hold_new`, so the check is not vacuous.
 
 **The O5 scan** (D6') covers every function, public or private, of the same modules:
@@ -88,6 +93,8 @@ from __future__ import annotations
 
 import ast
 import builtins
+import dataclasses
+import functools
 import importlib
 import inspect
 from collections.abc import Iterable
@@ -97,6 +104,7 @@ from typing import Any
 import pytest
 
 from defender import _io
+from defender.tests import _census1134 as C
 
 #: The `defender` package's own directory (a namespace package: located through a module in it).
 PACKAGE = Path(_io.__file__).resolve().parent
@@ -142,14 +150,15 @@ RAW_OS = frozenset({
 })
 _RAW_OS_ORIGINS = frozenset(f"os.{op}" for op in RAW_OS)
 OPENERS = frozenset({"builtins.open", "io.open", "codecs.open"})
-#: `Path` I/O methods, judged by attribute name on any receiver.
+#: D6's `Path` methods: the writes and the link-following reads, judged by attribute name on any
+#: receiver but a module (`_path_verb`). A subset of the #1134 census's `Path` verbs.
 ATTR_CALLS = frozenset({"open", "mkdir", "write_text", "write_bytes", "unlink", "rmdir", "touch",
-                        "symlink_to", "hardlink_to", "rename", "replace",
+                        "symlink_to", "hardlink_to", "link_to", "rename", "replace",
                         "read_text", "read_bytes"})
-#: Of those, the ones a `str` also has: a call counts only with `Path`'s one-argument shape.
-_ONE_ARG_ONLY = frozenset({"rename", "replace"})
-#: Of those, the ones whose bare REFERENCE (`cb = p.unlink`) is unambiguous enough to count.
-_ATTR_REFS = ATTR_CALLS - _ONE_ARG_ONLY - {"open"}
+assert ATTR_CALLS <= C.ATTRS, sorted(ATTR_CALLS - C.ATTRS)
+#: The `Path` verbs a non-`Path` value may also have under the same name (`str.replace`,
+#: `DataFrame.rename`, `tarfile`'s `open`): on a value, a bare REFERENCE to one does not count.
+_NO_BARE_REF = C.ONE_ARG_ATTRS | {"open"}
 #: The modules a `getattr(<module>, "...")` or `vars(<module>)` may not reach into.
 _GETATTR_MODULES = frozenset({_IO, "os", "shutil"})
 #: The modules a dynamic import may not bind.
@@ -184,10 +193,9 @@ RESIDUE = frozenset({
 _IO_PURE = frozenset({"json_nesting_depth", "load_json_artifact", "parse_jsonl_row",
                       "json_safe", "staged_leaf", "stage_name", "is_hard_linked",
                       "is_plain_entry"})
-#: `pathlib.Path` methods that touch the filesystem, beyond D6's attribute calls.
-_PATH_IO = frozenset({"read_text", "read_bytes", "exists", "is_file", "is_dir", "is_symlink",
-                      "iterdir", "glob", "rglob", "stat", "lstat", "resolve", "symlink_to",
-                      "hardlink_to", "rename", "replace", "chmod", "samefile", "readlink"})
+#: Every `pathlib.Path` method that touches the filesystem: the #1134 census's list, one list
+#: for both censuses.
+_PATH_IO = C.ATTRS
 #: `os` functions that touch no file.
 _OS_PURE = frozenset({"os.fspath", "os.fsdecode", "os.fsencode"})
 #: The `Held` verbs that share a name with a `Path` I/O method: a call carrying the name
@@ -205,28 +213,94 @@ def _astlib() -> Any:
     return import_lint_lib("_astlib")
 
 
-#: The `pathlib` classes whose methods touch the filesystem (the pure ones have none).
-_PATH_CLASSES = frozenset({"Path", "PosixPath", "WindowsPath"})
+@functools.cache
+def _tree() -> Any:
+    """The #1134 census's view of this checkout: which dotted origins are modules (a `defender`
+    one by its file, any other by the import system), and where a `defender` re-export leads."""
+    return C.Tree(PACKAGE.parent)
 
 
-def _path_method(origin: str | None) -> str | None:
-    """`read_text` for a resolved `pathlib.Path.read_text` (any concrete class, any alias), the
-    class-qualified spelling of a `Path` method — `Path.read_text(p)`, `map(Path.unlink, ps)` —
-    or `None`."""
-    parts = (origin or "").split(".")
-    if len(parts) == 3 and parts[0] == "pathlib" and parts[1] in _PATH_CLASSES:
-        return parts[2]
-    return None
+def _module_env(tree: ast.Module, module: str) -> Any:
+    """`_astlib`'s scope tree for `module` (dotted, under `defender`), every relative import made
+    absolute (`from .ledger import X` binds `defender.learning.branch.ledger.X`, not `.ledger.X`)
+    so `_is_namespace` can look it up."""
+    env = _astlib().module_env(tree)
+    dotted = f"defender.{module}"
+    f = _tree().module_file(dotted)
+    relative = C.relative_map(tree, C.package_of(dotted, f is not None and f.name == "__init__.py"))
+    if not relative:
+        return env
+    fixed: dict[int, Any] = {}
+
+    def fix(e: Any) -> Any:
+        if id(e) not in fixed:
+            fixed[id(e)] = dataclasses.replace(
+                e, imports={k: C.absolute(v, relative) for k, v in e.imports.items()})
+        return fixed[id(e)]
+
+    root = fix(env)
+    for node, e in env.scope_of.items():
+        env.scope_of[node] = fix(e)
+    return root
+
+
+@functools.cache
+def _is_namespace(origin: str | None) -> bool:
+    """`origin` names a module or a class: its attributes are its own functions and methods
+    (`tarfile.open`, `Episode.open`, `str.replace`), not the methods of a path it holds. A
+    `defender` class is found by its definition in the checkout; any other by importing it."""
+    if origin is None:
+        return False
+    if _tree().is_module(origin):
+        return True
+    owner, _, name = _tree().canonical(origin).rpartition(".")
+    if not owner:
+        return False
+    if owner == "defender" or owner.startswith("defender."):
+        f = _tree().module_file(owner)
+        if f is None:
+            return False
+        _, parsed = _astlib().read_and_parse(f, str(f.relative_to(PACKAGE.parent)))
+        return any(isinstance(n, ast.ClassDef) and n.name == name for n in parsed.body)
+    try:
+        return inspect.isclass(getattr(importlib.import_module(owner), name))
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def _path_verb(node: ast.Attribute, env: Any, verbs: frozenset[str],
+               call: ast.Call | None = None) -> str | None:
+    """`.<verb>` when `node` is a `Path` method in `verbs` — called (`call`) or only referenced —
+    on a path class or on any value, or `None`. A module's or another class's own function is
+    judged by that namespace's vocabulary (`_is_namespace`); anything else may be a path: an
+    unresolved local, a value a module holds (`_paths.REPO_ROOT`), a value's class
+    (`type(p)`), or `Path` itself (`pathlib.PosixPath`, any import alias).
+
+    On a path class the instance is the first argument and nothing else shares the name, so
+    every shape counts. On a value, the verbs a non-`Path` also has count only in `Path`'s own
+    shape: `.rename` / `.replace` called with one argument (or only `target=`), `.owner` with
+    none, and no bare reference to `.open` / `.rename` / `.replace`."""
+    if node.attr not in verbs:
+        return None
+    receiver = _astlib().origin(node.value, env)
+    if receiver in C.PATH_CLASSES:
+        return f".{node.attr}"
+    if _is_namespace(receiver):
+        return None
+    if call is None:
+        return None if node.attr in _NO_BARE_REF else f".{node.attr}"
+    target_only = not call.args and [k.arg for k in call.keywords] == ["target"]
+    if node.attr in C.ONE_ARG_ATTRS and not target_only and (len(call.args) != 1 or call.keywords):
+        return None
+    if node.attr in C.ZERO_ARG_ATTRS and (call.args or call.keywords):
+        return None
+    return f".{node.attr}"
 
 
 def _key_of_origin(origin: str | None) -> str | None:
     """The vocabulary entry a resolved dotted origin is, or `None`."""
     if origin is None:
         return None
-    # Resolved to `pathlib`, so no `str` look-alike to tell apart: `rename` / `replace` count in
-    # any argument shape, and a bare reference counts for every method.
-    if _path_method(origin) in ATTR_CALLS:
-        return f".{_path_method(origin)}"
     if origin.startswith("shutil.") or origin in _RAW_OS_ORIGINS or origin in OPENERS:
         return origin
     last = origin.rsplit(".", 1)[-1]
@@ -255,8 +329,8 @@ def _name_origin(node: ast.Name, env: Any) -> str | None:
 
 def _value_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
     """The vocabulary entry an expression NAMES (a callee, or a referenced value), or `None`.
-    A module-level alias resolves to what it was bound to; an attribute on a value (not a
-    module) is judged by its attribute name."""
+    A module-level alias resolves to what it was bound to; an attribute on anything but a module
+    or a class is judged by its attribute name."""
     if isinstance(node, ast.Name):
         if node.id in aliases:
             return aliases[node.id]
@@ -265,10 +339,11 @@ def _value_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
         key = _key_of_origin(_astlib().origin(node, env))
         if key is not None:
             return key
-        if _astlib().origin(node.value, env) is None and (
+        if not _is_namespace(_astlib().origin(node.value, env)) and (
                 node.attr in PATH_SEAMS or node.attr in IO_WRITERS
                 or node.attr.startswith("rooted_")):
             return node.attr
+        return _path_verb(node, env, ATTR_CALLS)
     return None
 
 
@@ -287,23 +362,8 @@ def _call_key(call: ast.Call, env: Any, aliases: dict[str, str]) -> str | None:
         named = _astlib().str_value(call.args[0], env)
         if named in _DYNAMIC_MODULES:
             return f"import_module({named})"
-    if isinstance(f, ast.Attribute) and origin is None and f.attr in ATTR_CALLS:
-        if f.attr in _ONE_ARG_ONLY and not (
-                (len(call.args) == 1 and not call.keywords)
-                or (not call.args and [k.arg for k in call.keywords] == ["target"])):
-            return None
-        return f".{f.attr}"
-    return None
-
-
-def _ref_key(node: ast.expr, env: Any, aliases: dict[str, str]) -> str | None:
-    """The vocabulary entry a non-call reference names, or `None`."""
-    key = _value_key(node, env, aliases)
-    if key is not None:
-        return key
-    if (isinstance(node, ast.Attribute) and node.attr in _ATTR_REFS
-            and _astlib().origin(node, env) is None):
-        return f".{node.attr}"
+    if isinstance(f, ast.Attribute):
+        return _path_verb(f, env, ATTR_CALLS, call)
     return None
 
 
@@ -384,7 +444,7 @@ def _parse(path: Path) -> ast.Module:
 
 
 def census_of(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
-    env = _astlib().module_env(tree)
+    env = _module_env(tree, module)
     aliases = module_aliases(tree, env)
     seen = _Scoped()
     seen.visit(tree)
@@ -394,7 +454,7 @@ def census_of(module: str, tree: ast.Module) -> set[tuple[str, str, str]]:
         if callee is not None:
             out.add((module, where, callee))
     for where, node in seen.refs:
-        callee = _ref_key(node, env, aliases)
+        callee = _value_key(node, env, aliases)
         if callee is not None:
             out.add((module, where, callee))
     return out
@@ -417,9 +477,10 @@ def test_d6_the_scanner_sees_every_vocabulary_spelling_including_aliases():
     an attribute of any receiver, through an `import ... as` or `from ... import ... as` alias,
     through a module-level assignment alias, as a non-call reference (a keyword or default
     value, a branch of an expression), as a `getattr` / `vars` on `_io` or `os`, through a
-    dynamic import, rev 2's `hold` / `hold_new` — is collected with its enclosing scope; a
-    non-vocabulary call is not, nor `str.replace`'s two-argument shape, nor a local value that
-    shadows an imported name."""
+    dynamic import, rev 2's `hold` / `hold_new`, a `Path` method on the class or on a path a
+    module holds — is collected with its enclosing scope; a non-vocabulary call is not, nor
+    `str.replace`'s two-argument shape, nor a module's or another class's own `open`, nor a
+    local value that shadows an imported name."""
     source = '''
 import codecs
 import importlib
@@ -428,16 +489,18 @@ import shutil as sh
 from os import replace as swap
 from defender._io import write_guarded as wg, guarded_mkdir, rooted_write, read_guarded
 from defender._io import hold as grab
-from defender import _io
+from defender import _io, _paths
 from defender.runtime.observe import stage_trace_path
 import pathlib
+import tarfile
 from pathlib import Path, PosixPath as Posix
+from defender._episode_handle import Episode
 
 _put = wg
 _again = _put
 _raw = _io.append_jsonl
 _reader: object = read_guarded
-_slurp = Path.read_text
+_spill = Path.write_bytes
 
 
 class Holder:
@@ -488,6 +551,7 @@ def raw(p):
     codecs.open(p, "w")
     p.symlink_to(p)
     p.hardlink_to(p)
+    p.link_to(p)
     p.rename(p)
     p.replace(target=p)
     "a-b".replace("-", "_")
@@ -507,11 +571,46 @@ def classy(p, ps):
     Posix.mkdir(p)
     Path.rename(p, p)
     list(map(Path.read_bytes, ps))
-    _slurp(p)
     Path.cwd()
     Path.exists(p)
     Path(p)
     str.replace("a-b", "-", "_")
+
+
+def via_method_alias(p):
+    _spill(p, b"x")
+
+
+def class_open(p):
+    return Path.open(p)
+
+
+def class_open_ref():
+    return Path.open
+
+
+def class_rename_ref():
+    return Path.rename
+
+
+def module_held(p):
+    _paths.REPO_ROOT.write_text("x")
+
+
+def module_held_ref():
+    return _paths.REPO_ROOT.unlink
+
+
+def value_refs(p):
+    return p.open, p.rename, p.replace
+
+
+def module_function(p):
+    return tarfile.open(p)
+
+
+def class_function(d):
+    return Episode.open(d)
 
 
 def holds(p, ctx):
@@ -551,18 +650,29 @@ _os.open("x", 0)
         ("m", "raw", "os.open"), ("m", "raw", "os.write"), ("m", "raw", "os.fdopen"),
         ("m", "raw", "os.link"), ("m", "raw", "os.symlink"), ("m", "raw", "os.rmdir"),
         ("m", "raw", "codecs.open"), ("m", "raw", ".symlink_to"), ("m", "raw", ".hardlink_to"),
+        ("m", "raw", ".link_to"),
         ("m", "raw", ".rename"), ("m", "raw", ".replace"), ("m", "raw", "rooted_write"),
         ("m", "raw", "getattr(defender._io)"), ("m", "raw", "vars(os)"),
         ("m", "raw", "_io._replace_at"), ("m", "raw", "import_module(shutil)"),
         # Rev 2's held-root core, bare through an alias, as a module attribute, on any receiver,
         # and as a value.
         ("m", "holds", "hold"), ("m", "holds", "hold_new"),
-        # The class-qualified `Path` spellings: a call, a `pathlib.`-qualified call, an alias of
-        # the class, a two-argument `rename`, a bare reference, a module-level alias of a method.
-        # `Path.cwd`, `Path.exists` (not in this vocabulary), `Path(p)` and `str.replace` are not.
-        ("m", "<module>", ".read_text"), ("m", "classy", ".read_text"),
+        # A `Path` verb counts on any receiver but a module. On the class itself — a call, a
+        # `pathlib.`-qualified call, an alias of the class, a two-argument `rename`, a bare
+        # reference, a module-level alias of a method — and a reference to `open` / `rename`,
+        # which on a value is a `str` look-alike, counts. `Path.cwd`, `Path.exists` (not in this
+        # vocabulary), `Path(p)` and `str.replace` are not.
+        ("m", "classy", ".read_text"),
         ("m", "classy", ".unlink"), ("m", "classy", ".write_text"), ("m", "classy", ".mkdir"),
         ("m", "classy", ".rename"), ("m", "classy", ".read_bytes"),
+        ("m", "<module>", ".write_bytes"), ("m", "via_method_alias", ".write_bytes"),
+        ("m", "class_open", ".open"), ("m", "class_open_ref", ".open"),
+        ("m", "class_rename_ref", ".rename"),
+        # A path a module holds is a value, not the module: its verbs count, called or not.
+        ("m", "module_held", ".write_text"), ("m", "module_held_ref", ".unlink"),
+        # Not `value_refs` (a value's `open` / `rename` / `replace` reference may be `str`'s),
+        # nor `module_function` / `class_function` (a module's or another class's own `open` is
+        # judged by that namespace's vocabulary).
     }, sorted(got)
 
 
@@ -623,11 +733,8 @@ def _raw_io(call: ast.Call, env: Any, io_funcs: frozenset[str]) -> str | None:
     if name in io_funcs and name not in _IO_PURE and name not in CORE and (
             origin is None or origin.startswith(_io.__name__ + ".")):
         return name
-    if origin is None and name in _PATH_IO and not (
-            name in _ONE_ARG_ONLY and len(call.args) != 1):
-        return f".{name}"
-    if _path_method(origin) in _PATH_IO:
-        return f".{_path_method(origin)}"
+    if isinstance(f, ast.Attribute):
+        return _path_verb(f, env, _PATH_IO, call)
     return None
 
 
@@ -636,7 +743,7 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
 
     Returns `(violations, core)`: `violations` are `(scope, callee)` pairs, `core` the subset of
     `CORE` the module calls."""
-    env = _astlib().module_env(tree)
+    env = _module_env(tree, "_episode_handle")
     aliases = module_aliases(tree, env)
     io_funcs = _io_functions()
     seen = _Scoped()
@@ -654,7 +761,9 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
         if raw is not None:
             violations.append((where, raw))
     for where, node in seen.refs:
-        key = _ref_key(node, env, aliases)
+        key = _value_key(node, env, aliases)
+        if key is None and isinstance(node, ast.Attribute):
+            key = _path_verb(node, env, _PATH_IO)
         if key is not None and key not in CORE:
             violations.append((where, key))
     return violations, core
@@ -721,7 +830,7 @@ import os
 import pathlib
 import shutil
 from pathlib import Path
-from defender import _io
+from defender import _io, _paths
 from defender._io import rooted_write
 
 
@@ -782,6 +891,22 @@ class Episode:
 
     def t(self, p):
         return Path.cwd()
+
+    def u(self, ps):
+        return list(filter(Path.exists, ps))
+
+    def v(self, p):
+        check = p.stat
+        return check()
+
+    def w(self):
+        return _paths.REPO_ROOT.exists()
+
+    def x(self, p):
+        Path.link_to(p, p)
+
+    def y(self, p):
+        p.lchmod(0o600)
 '''
     violations, core = handle_scan(ast.parse(violating))
     assert core == set(), core
@@ -792,6 +917,8 @@ class Episode:
         ("Episode.j", ".exists"), ("Episode.k", "shutil.rmtree"), ("Episode.l", "read_plain"),
         ("Episode.m", "os.unlink"), ("Episode.n", ".mkdir"), ("Episode.o", ".unlink"),
         ("Episode.q", ".read_text"), ("Episode.r", ".exists"), ("Episode.s", ".replace"),
+        ("Episode.u", ".exists"), ("Episode.v", ".stat"), ("Episode.w", ".exists"),
+        ("Episode.x", ".link_to"), ("Episode.y", ".lchmod"),
     ]), sorted(violations)
 
 
