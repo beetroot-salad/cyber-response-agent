@@ -40,10 +40,12 @@ from defender.tests._dispositions995 import (
 #: folder it sits in).
 _SETTINGS_NAMES = ("config.env", "verb-grants.yaml", "lead-zero.yaml")
 
-#: The seven systems that carried a `config.env` before the move — conservation, not a rule:
-#: host-state and tacit-knowledge need none, which is why D3 does not require one at start.
+#: The systems that carry a `config.env` — the seven that did before the move, and host-state
+#: since #1107 (its access method is the tenant's to name). tacit-knowledge needs none, which is
+#: why D3 does not require one at start.
 _CONFIGURED_SYSTEMS = frozenset({
-    "case-history", "change-mgmt", "cmdb", "elastic", "identity", "threat-intel", "ticket",
+    "case-history", "change-mgmt", "cmdb", "elastic", "host-state", "identity", "threat-intel",
+    "ticket",
 })
 
 
@@ -132,7 +134,8 @@ def test_the_moved_lead_zero_and_mapping_carry_the_retired_values():
     lz = T.mod("runtime.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) == \
         T.SHIPPED_CORRELATION_TEMPLATE
-    predicate = T.mod("scripts.case_history.case_ticket").release_predicate(T.FIXTURE_SETTINGS)
+    predicate = T.mod("scripts.case_history.case_ticket").release_predicate(
+        T.fixture_run_tenant().ticket_mapping)
     assert predicate.released_status == "closed"
 
 

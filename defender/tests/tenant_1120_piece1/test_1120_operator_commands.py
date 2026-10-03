@@ -1,8 +1,7 @@
 """#1120 piece 1 — D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy.
 
 After piece 1 a tenant's settings live under `<data root>/<T>/knowledge/settings/`, and every
-operator command that takes `--tenant` (`policy_cli gather`, `ticket_adapter`,
-`validate_scaffold`) resolves the data root once and accepts its tenant through
+operator command that takes `--tenant` (`policy_cli gather`, `validate_scaffold`) resolves the data root once and accepts its tenant through
 `accept_tenant` — never through the checkout's `knowledge/tenants/`, and never from a root
 derived off `$DEFENDER_DIR` (C11). A refusal is `accept_tenant`'s `TenantRefused`, surfaced in
 each command's own idiom (M7: `validate_scaffold` is advisory and prints it as a WARN), never a
@@ -13,11 +12,11 @@ The checkout's lab is retired (human, PR #1157: #1158 folded in), so the scenari
 "which copy was read" use the id `playground` in the data root with settings that DIFFER from
 the committed fixture's (the lab's frozen copy): a gather grant, a `config.env` marker, a
 missing config key, and assert nothing under the checkout's `knowledge/` was reported.
-Commands with no argv parameter (`ticket_adapter`, `validate_scaffold`, the census lint) run as
-processes; `policy_cli`, `run.main` and the launcher are driven in-process through their own
-seams. No transport ever leaves the
-host: every `ticket_adapter` leg either stops at a named config fault or runs against a docker
-context that does not exist. See `_spec1120.py` for the coined names.
+Commands with no argv parameter (`validate_scaffold`, the census lint) run as processes;
+`policy_cli`, `run.main` and the launcher are driven in-process through their own seams.
+`ticket_adapter` is no operator command: #1107 removed its command line (fork
+TICKET-ADAPTER-CLI-REMOVED-BY-1107), so the legs that drove it are gone. See `_spec1120.py`
+for the coined names.
 """
 from __future__ import annotations
 
@@ -38,19 +37,16 @@ from defender.runtime import box_codec, lead_zero_config, verb_dispositions
 from defender.runtime.verbs import VerbContext
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
-from defender.scripts.adapters import _stub_transport, elastic_adapter, ticket_adapter
+from defender.scripts.adapters import _stub_transport, elastic_adapter
 from defender.scripts.case_history import case_ticket
 from defender.skills.connect import validate_scaffold
+from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T947
 from defender.tests.tenant_1078_pass_a import _spec1078 as H78
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 #: The census lint, a repo script outside `defender/` (driven by path).
 CENSUS_LINT = H.REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
-
-#: A docker context no host has: a `ticket_adapter` leg that ever reaches its transport fails
-#: fast on it instead of reaching a network.
-NO_SUCH_DOCKER_CONTEXT = {"SOC_PLAYGROUND_DOCKER_CONTEXT": "spec1120-no-such-context"}
 
 #: A table that loads but grants gather no query verb — a table that DIFFERS from the fixture's
 #: (the fixture grants gather dozens of query verbs), so a command that builds gather's grant from
@@ -84,8 +80,7 @@ def _ticket_config(settings: Path) -> Path:
 def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) -> Path:
     """Give a tenant's ticket `config.env` an inline-secret MARKER line (a key
     `validate_scaffold` FAILs by name) and, with `drop_timeout`, lose the required
-    `TICKET_TIMEOUT_SEC` (so `ticket_adapter` stops at a config fault naming the file, before
-    any transport)."""
+    `TICKET_TIMEOUT_SEC`."""
     path = _ticket_config(settings)
     lines = [ln for ln in path.read_text(encoding="utf-8").splitlines(keepends=True)
              if not (drop_timeout and ln.startswith("TICKET_TIMEOUT_SEC"))]
@@ -104,12 +99,6 @@ def _other_tree(tmp_path: Path, tenant_id: str, marker_key: str) -> Path:
     shutil.copytree(H.FIXTURE, folder)
     _mark_ticket_config(folder / "settings", marker_key, drop_timeout=True)
     return other / "defender"
-
-
-def _ticket_adapter(root: Path | None, tenant_id: str, **kw: Any) -> Any:
-    """`ticket_adapter.py --tenant <id> health-check`, as the operator runs it."""
-    return H.run_script(H.script_of(ticket_adapter), "--tenant", tenant_id, "health-check",
-                        root=root, **{**NO_SUCH_DOCKER_CONTEXT, **kw})
 
 
 def _validate_scaffold(root: Path | None, tenant_id: str, **kw: Any) -> Any:
@@ -150,9 +139,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     carrying a distinct marker key and lacking TICKET_TIMEOUT_SEC. In that setup policy_cli
     gather --tenant playground builds gather's grant from the data-root table (refused naming
     <root>/playground/knowledge/settings/verb-grants.yaml, where the fixture's table would build a
-    policy; with the fixture's table put back it builds one); ticket_adapter --tenant
-    playground health-check addresses the data-root config.env (its config fault names that
-    file); and validate_scaffold ticket --tenant playground checks the data-root config.env (it
+    policy; with the fixture's table put back it builds one); and validate_scaffold ticket --tenant playground checks the data-root config.env (it
     FAILs the data-root marker key). None of them reads the checkout's knowledge/, and none
     derives a root from DEFENDER_DIR: with DEFENDER_DIR exported naming another tree that holds
     its own playground folder, the other tree's marker is never reported."""
@@ -160,7 +147,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
     (settings / "verb-grants.yaml").write_text(HEALTH_CHECK_ONLY_TABLE, encoding="utf-8")
-    config = _mark_ticket_config(settings, "TICKET_SPEC1120_DATA_ROOT_TOKEN", drop_timeout=True)
+    _mark_ticket_config(settings, "TICKET_SPEC1120_DATA_ROOT_TOKEN", drop_timeout=True)
     other_defender = _other_tree(tmp_path, tid, "TICKET_SPEC1120_OTHER_TREE_TOKEN")
     table = settings / "verb-grants.yaml"
 
@@ -176,13 +163,6 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
 
     for defender_dir_env in ({}, {"DEFENDER_DIR": str(other_defender)}):
         unset = ("DEFENDER_DIR",) if not defender_dir_env else ()
-        # ticket_adapter: the config fault names the data-root config.env, and only it.
-        out = H.output(_ticket_adapter(data_root, tid, unset=unset, **defender_dir_env))
-        assert "Traceback (most recent call last)" not in out, out
-        assert str(config) in out, (
-            f"ticket_adapter did not address the data-root config ({defender_dir_env}):\n{out}")
-        assert str(H.KNOWLEDGE_ROOT) not in out, out
-        assert "OTHER_TREE" not in out, out
         # validate_scaffold: the data-root config.env is the one checked.
         out = H.output(_validate_scaffold(data_root, tid, unset=unset, **defender_dir_env))
         assert "Traceback (most recent call last)" not in out, out
@@ -193,32 +173,26 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
         assert str(H.KNOWLEDGE_ROOT) not in out, out
 
 
-def test_1120_ticket_adapter_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
+def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
         data_root: Path, tmp_path: Path) -> None:
-    """ticket_adapter, validate_scaffold and the census lint catch TenantRefused (not only the
-    removed TenantDirError) and surface its message in their own idiom, never a traceback.
-    For a tenant whose knowledge/ is a symlink to a complete folder elsewhere, ticket_adapter
-    --tenant acme health-check exits non-zero printing accept_tenant's refusal verbatim, and
-    validate_scaffold ticket --tenant acme prints that refusal as a WARN and skips the tenant's
+    """validate_scaffold and the census lint catch TenantRefused (not only the removed
+    TenantDirError) and surface its message in their own idiom, never a traceback. For a tenant
+    whose knowledge/ is a symlink to a complete folder elsewhere, validate_scaffold ticket
+    --tenant acme prints accept_tenant's refusal verbatim as a WARN and skips the tenant's
     config check (M7). The census lint, over a tmp repo whose knowledge/tenant-fixture/agent/
     holds a symlink, exits non-zero naming the fixture folder and the link. Positive controls:
-    with the real folder in place, ticket_adapter gets past acceptance (its config fault names
-    the tenant's config.env) and validate_scaffold checks that config.env; the lint over the
-    unplanted repo exits 0."""
+    with the real folder in place, validate_scaffold checks that config.env; the lint over the
+    unplanted repo exits 0. (ticket_adapter's leg is gone with its command line, #1107.)"""
     elsewhere = tmp_path / "elsewhere" / "knowledge"
     shutil.copytree(H.FIXTURE, elsewhere)
     H.write_tenant_id_file(elsewhere, H.TID, "id")
-    config = _mark_ticket_config(elsewhere / "settings", "TICKET_SPEC1120_CONTROL_TOKEN",
-                                 drop_timeout=True)
+    _mark_ticket_config(elsewhere / "settings", "TICKET_SPEC1120_CONTROL_TOKEN",
+                        drop_timeout=True)
     H.plant_row(data_root)
     link = H.knowledge_dir(data_root)
     link.symlink_to(elsewhere, target_is_directory=True)
     owner = H.accept_refusal(_tenant, data_root, H.TID)
 
-    ticket = _ticket_adapter(data_root, H.TID)
-    H.assert_ran(ticket)
-    assert ticket.returncode != 0, H.output(ticket)
-    H.assert_verbatim(H.output(ticket), owner, entry="ticket_adapter")
     scaffold = _validate_scaffold(data_root, H.TID)
     H.assert_ran(scaffold)
     warned = _rows(H.output(scaffold), WARN_ROW)
@@ -232,10 +206,6 @@ def test_1120_ticket_adapter_validate_scaffold_and_the_census_lint_surface_tenan
     # The positive control: the same folder, placed for real.
     link.unlink()
     shutil.move(str(elsewhere), str(link))
-    placed_config = H.settings_dir(data_root) / config.relative_to(elsewhere / "settings")
-    ticket = _ticket_adapter(data_root, H.TID)
-    H.assert_ran(ticket)
-    assert str(placed_config) in H.output(ticket), H.output(ticket)
     scaffold = _validate_scaffold(data_root, H.TID)
     H.assert_ran(scaffold)
     assert "TICKET_SPEC1120_CONTROL_TOKEN" in H.output(scaffold), H.output(scaffold)
@@ -292,21 +262,14 @@ def test_1120_s6_validate_scaffold_env_mutation_persists_across_calls(
 
 def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """With DEFENDER_DATA_ROOT unset, ticket_adapter --tenant, validate_scaffold --tenant and
-    policy_cli gather --tenant each report resolve_data_root's refusal naming the variable.
-    None falls back to the checkout — the id used, playground, is the lab's own. ticket_adapter
-    and policy_cli exit non-zero; validate_scaffold is advisory (M7): it prints the refusal as
+    """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant
+    each report resolve_data_root's refusal naming the variable. Neither falls back to the
+    checkout — the id used, playground, is the lab's own. policy_cli exits non-zero; validate_scaffold is advisory (M7): it prints the refusal as
     a WARN, never a FAIL, and checks no config.env. The positive controls: with the data root
     set, validate_scaffold checks the tenant's config.env and policy_cli builds the policy."""
     tid = "playground"
     H.adopted(data_root, tid)
 
-    ticket = _ticket_adapter(None, tid)
-    H.assert_ran(ticket)
-    assert ticket.returncode != 0, H.output(ticket)
-    assert H.DATA_ROOT_ENV in H.output(ticket), (
-        f"ticket_adapter did not report the refusal naming {H.DATA_ROOT_ENV}:\n"
-        f"{H.output(ticket)}")
     scaffold = _validate_scaffold(None, tid)
     H.assert_ran(scaffold)
     out = H.output(scaffold)
@@ -372,16 +335,15 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     exits 1 naming verb-grants.yaml (M6: a malformed table is a named finding, never a
     traceback). run.main (before anything is spent), the branch launcher, policy_cli gather
     and tenant.py setup (NF1: "the settings tables load") each refuse naming the file, and
-    setup writes nothing. ticket_adapter and validate_scaffold never load the table and
-    accept the tenant: each proceeds past acceptance to its own work, and neither mentions
-    verb-grants.yaml. (held_out takes no tenant and generate_case is removed — human, PR
+    setup writes nothing. validate_scaffold never loads the table and accepts the tenant: it
+    proceeds past acceptance to its own work and does not mention verb-grants.yaml. (held_out takes no tenant and generate_case is removed — human, PR
     #1157.)"""
     # rejected: an all-withheld table as a finding (M6, human).
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
-    config = _mark_ticket_config(H.settings_dir(data_root), "TICKET_SPEC1120_UNLOADABLE_TOKEN",
-                                 drop_timeout=True)
+    _mark_ticket_config(H.settings_dir(data_root), "TICKET_SPEC1120_UNLOADABLE_TOKEN",
+                        drop_timeout=True)
 
     H.assert_refused(H.check(tenant_py, data_root, H.TID), "verb-grants.yaml")
 
@@ -410,11 +372,8 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     H.assert_refused(H.setup(tenant_py, setup_root), "verb-grants.yaml")
     assert H.census_diff(before, H.tree_census(setup_root)) == [], "the refused setup wrote"
 
-    # The consumers that never load the table accept the tenant.
+    # The consumer that never loads the table accepts the tenant.
     capsys.readouterr()
-    out = H.output(_ticket_adapter(data_root, H.TID))
-    assert str(config) in out, f"ticket_adapter did not get past acceptance to its config:\n{out}"
-    assert "verb-grants.yaml" not in out, out
     out = H.output(_validate_scaffold(data_root, H.TID))
     assert "TICKET_SPEC1120_UNLOADABLE_TOKEN" in out, (
         f"validate_scaffold did not check the tenant's config:\n{out}")
@@ -556,12 +515,14 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     Tenant's settings folder, <root>/acme/knowledge/settings, and reads the file there — never
     a checkout copy: verb_dispositions.run_grants (the data-root table's extra
     cmdb.list-roles grant) and dispositions_path; lead_zero_config.lead_zero_config_path;
-    case_ticket._mapping_path; elastic_adapter.config_path (the data-root cluster marker);
-    _stub_transport._config_path and load_config for a VerbContext carrying that folder (the
-    data-root ticket marker); the elastic stager's configured_patterns (the data-root index
-    markers); staging.write_door_from_env over staging.host_context (the data-root cluster
-    marker as the door's base URL); and validate_scaffold.check_config (it FAILs the data-root
-    marker key). A loader that resolves anywhere else is the R7 escape this pins."""
+    case_ticket._mapping_path; and validate_scaffold.check_config (it FAILs the data-root
+    marker key). The system configs are read once, into the run's tenant record (#1107), from
+    that same folder: elastic_adapter.load_config (the data-root cluster marker) and
+    _stub_transport.load_config (the data-root ticket marker) for a VerbContext carrying the
+    record; the elastic stager's configured_patterns over the record's Elastic view (the
+    data-root index markers); staging.write_door_from_env over staging.host_context (the
+    data-root cluster marker as the door's base URL). A loader that resolves anywhere else is
+    the R7 escape this pins."""
     for key in ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY", "ELASTIC_EVENTS_INDEX",
                 "ELASTIC_ALERTS_INDEX", "TICKET_URL_BASE", "TICKET_BASTION_HOST",
                 "TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"):
@@ -578,13 +539,19 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
         'ELASTICSEARCH_URL="https://spec1120-acme-cluster:9200"\n'
         'ELASTIC_EVENTS_INDEX="spec1120-acme-events-*"\n'
         'ELASTIC_ALERTS_INDEX="spec1120-acme-alerts-*"\n'
-        'ELASTIC_SSL_VERIFY="false"\n', encoding="utf-8")
+        'ELASTIC_SSL_VERIFY="false"\n'
+        'KIBANA_URL="http://spec1120-acme-kibana:5601"\n'
+        'ELASTIC_TRANSPORT="docker-exec"\n'
+        'ELASTIC_DOCKER_CONTEXT="spec1120-acme-context"\n'
+        'ELASTIC_ES_CONTAINER="spec1120-acme-es"\n'
+        'ELASTIC_KIBANA_CONTAINER="spec1120-acme-kibana"\n', encoding="utf-8")
     _mark_ticket_config(expected, "TICKET_SPEC1120_LOADER_TOKEN", drop_timeout=False)
     ticket = _ticket_config(expected)
     ticket.write_text(ticket.read_text(encoding="utf-8").replace(
         "http://ticket-server:8080", "http://spec1120-acme-ticket:8080"), encoding="utf-8")
 
-    settings = H.accept(_tenant, data_root).settings
+    tenant = H.accept(_tenant, data_root)
+    settings = tenant.settings
     assert Path(settings) == expected, f"the accepted tenant's settings are {settings}"
 
     grants = verb_dispositions.run_grants(settings)
@@ -595,19 +562,16 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     assert lead_zero_config.lead_zero_config_path(settings) == expected / "lead-zero.yaml"
     assert case_ticket._mapping_path(settings) == (
         expected / "systems" / "case-history" / "mapping.yaml")
-    assert elastic_adapter.config_path(settings) == elastic
-    assert elastic_adapter.config_from(elastic_adapter.config_path(settings), {})[
+    record = T1106.run_tenant(tenant)
+    ctx = VerbContext(defender_dir=H.DEFENDER, run_dir=tmp_path / "run", env={}, tenant=record)
+    assert elastic_adapter.load_config(ctx)[
         "ELASTICSEARCH_URL"] == "https://spec1120-acme-cluster:9200"
-
-    ctx = VerbContext(defender_dir=H.DEFENDER, run_dir=tmp_path / "run", env={},
-                      settings_dir=settings)
-    assert _stub_transport._config_path(ctx, "ticket") == ticket
     loaded = _stub_transport.load_config(ctx, "ticket", "TICKET")
     assert loaded["URL_BASE"] == "http://spec1120-acme-ticket:8080", loaded
 
-    assert elastic_stager.configured_patterns(settings) == (
+    assert elastic_stager.configured_patterns(record.elastic) == (
         "spec1120-acme-events-*", "spec1120-acme-alerts-*")
-    door = staging.write_door_from_env(staging.host_context(settings))
+    door = staging.write_door_from_env(staging.host_context(record, {}))
     assert door.base_url == "https://spec1120-acme-cluster:9200", door
 
     report = validate_scaffold.Report()

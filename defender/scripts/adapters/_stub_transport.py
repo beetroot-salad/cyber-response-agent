@@ -1,33 +1,42 @@
 """Shared transport for the stub adapters (cmdb, identity, change-mgmt, threat-intel, ticket).
 
-All five are auth-less FastAPI services reached by shelling out to
-`docker --context soc-playground exec <bastion> curl ...`. Host-state has no HTTP and keeps its
-own transport in host_state_adapter.py.
+All five stubs are auth-less FastAPI services on the compose network, reached by
+shelling out to `docker --context <the system's own context> exec <bastion> curl ...` — the same
+transport elastic_adapter.py uses for Kibana detection-rule installs. Host-state has
+a different shape (docker exec → command output, no HTTP) and keeps its own transport
+in host_state_adapter.py.
 
 Two rules the family obeys:
 
-  - **A transport raises, never exits.** `SystemExit` is a `BaseException`, so it would unwind
-    out of `agent.iter()` and end the run without writing a row for the failure. The fault
-    classes in `faults.py` carry the exit code and diagnosis instead.
-  - **The tree and the env are parameters** (a `VerbContext`), never module constants read at
-    import. An import-time value freezes to the driver's env (so a worktree or eval run would
-    read the main checkout's config), and a child forked without `env=` inherits the driver's
-    `os.environ`, provider keys included.
+  - **A transport RAISES, it never exits.** `SystemExit` is a `BaseException`, so it
+    unwinds straight out of `agent.iter()` and takes the run with it, writing no row
+    for the very failure the taxonomy exists to record. The fault classes in
+    `faults.py` carry the exit code AND the upstream diagnosis instead.
+  - **The record and the env are PARAMETERS** (a `VerbContext`), never module constants
+    read at import, and nothing is looked up in the env. Settings come from the run's
+    tenant record (#1107), built once when the run began; a child forked with no `env=`
+    inherits the driver's `os.environ`, provider keys included, so every child is handed
+    the run's scrubbed env explicitly.
 
 House conventions (auth posture, config keys, exit codes) are in `README.md` here.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import shlex
 import subprocess
-import sys
 import urllib.parse
-from pathlib import Path
 from typing import Any
 
+from defender.runtime.tenant_settings import (
+    DOCKER_EXEC,
+    NOT_CONFIGURED,
+    SystemConfig,
+    config_pointer,
+    is_blank,
+    system_prefix,
+)
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters.confinement import guard_outbound
 from defender.scripts.adapters.faults import (
@@ -40,13 +49,10 @@ from defender.scripts.adapters.faults import (
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
-DEFAULT_DOCKER_CONTEXT = "soc-playground"
-
 __all__ = [
-    "AdapterArgumentParser",
-    "DEFAULT_DOCKER_CONTEXT",
     "REQUIRED_CONFIG_KEYS_TEMPLATE",
     "USAGE_EXIT_CODE",
+    "access_context",
     "docker_context",
     "docker_exec_curl",
     "docker_exec_raw",
@@ -57,88 +63,113 @@ __all__ = [
     "http_post",
     "load_config",
     "split_status",
+    "system_entry",
 ]
 
 
-class AdapterArgumentParser(argparse.ArgumentParser):
-    """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of 2.
+def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
+    """`system`'s `config.env` as the RUN's record holds it (parsed once at resolve), or the
+    `ConfigFault` for why there is none: a folder with no usable file keeps its own fault, and a
+    system with no folder gets "this tenant's settings do not configure this system". A fresh
+    instance each call, so a stored fault is never handed a second traceback."""
+    entry = ctx.tenant.systems.get(system)
+    if entry is None:
+        raise ConfigFault(f"config file not found: {config_pointer(system)} — {NOT_CONFIGURED}")
+    if isinstance(entry, ConfigFault):
+        raise ConfigFault(str(entry))
+    return entry
 
-    That keeps a bad flag structurally distinct from a connectivity failure (exit 2), so the
-    circuit breaker keys on the exit code alone. Subparsers inherit the class, so their errors
-    exit 64 too. Only `ticket_cli` still has a CLI; its subprocess caller (``verify_forward``)
-    pins these exit codes.
-    """
 
-    def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)
-        self.print_usage(sys.stderr)
-        self.exit(USAGE_EXIT_CODE, f"{self.prog}: error: {message}\n")
+def access_context(ctx: VerbContext, system: str) -> str:
+    """The docker context `system` is reached on — its `<PREFIX>_DOCKER_CONTEXT` — or
+    `ConfigFault` (that system down, the run goes on). THE ONE CHECK of how a system is reached
+    (D2): `<PREFIX>_TRANSPORT` must be `docker-exec` exactly, and the context must be named and
+    not blank. There is NO default for either: an absent or empty context would be handed to
+    docker as `--context ''`, which docker defers to its own `DOCKER_CONTEXT` or current context,
+    re-opening the very steering this record removed (MF-3).
+
+    Called first by every adapter's `load_config` and by every transport entry, so a system that
+    is down for its access method faults naming that key before any URL is confined or any
+    timeout parsed.
+
+    The two keys are named after the system FOLDER (`system_prefix`: `case-history` →
+    `CASE_HISTORY_TRANSPORT`), whatever prefix an adapter uses for its other keys. One derivation,
+    the same the resolver's warning and the connect validator use, so `load_config` and the
+    transport can never judge two different keys."""
+    entry = system_entry(ctx, system)
+    prefix = system_prefix(system)
+    method = entry.get(f"{prefix}_TRANSPORT")
+    if method is None or is_blank(method):
+        raise ConfigFault(
+            f"{prefix}_TRANSPORT is not set — name this system's access method "
+            f"({DOCKER_EXEC!r}) in its config.env; there is no default")
+    if method != DOCKER_EXEC:
+        raise ConfigFault(
+            f"{prefix}_TRANSPORT={method!r} names an access method that is not implemented — "
+            f"only {DOCKER_EXEC!r} is")
+    context = entry.get(f"{prefix}_DOCKER_CONTEXT")
+    if context is None or is_blank(context):
+        raise ConfigFault(
+            f"{prefix}_DOCKER_CONTEXT is not set — name the docker context this system is "
+            "reached on in its config.env; there is no default")
+    return context
 
 
-def docker_context(ctx: VerbContext) -> str:
-    """The docker context every adapter's transport runs against, from the run's env (the
-    module outlives any one run), so one override moves the whole stack."""
-    return ctx.env.get("SOC_PLAYGROUND_DOCKER_CONTEXT", DEFAULT_DOCKER_CONTEXT)
+def docker_context(ctx: VerbContext, system: str) -> str:
+    """The docker context `system`'s transport runs against, from the run's record (D2)."""
+    return access_context(ctx, system)
 
 
 def _child_env(ctx: VerbContext) -> dict[str, str]:
-    """The env a transport hands its child: the run's scrubbed env, never the driver's
-    `os.environ` (which holds provider API keys)."""
+    """The environment a transport hands the child it forks: the RUN's SCRUBBED env passed
+    through whole (docker needs PATH, HOME, its own config), never the driver's `os.environ`
+    (which holds the provider API keys). Nothing is LOOKED UP in it (N4)."""
     return dict(ctx.env)
-
-
-def _config_path(ctx: VerbContext, system: str) -> Path:
-    """`<the run's tenant settings>/systems/<system>/config.env`, from `ctx.settings_dir`."""
-    return Path(ctx.settings_dir) / "systems" / system / "config.env"
-
-
-def _parse_env_file(path: Path) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        out[key.strip()] = val.strip().strip('"').strip("'")
-    return out
 
 
 def load_config(
     ctx: VerbContext, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
-    """Load `{ctx.settings_dir}/systems/{system}/config.env` — the run's own tenant config.
+    """`system`'s settings from the run's record: its `config.env`, prefix stripped.
 
-    `prefix` namespaces the file's keys (e.g. CMDB_URL_BASE); they come back stripped
-    (URL_BASE, BASTION_HOST, TIMEOUT_SEC). A missing file or key is a `ConfigFault` — infra
-    (exit 2), since a system with no config is down, and only exit 2 trips the breaker.
+    The record is the one resolved when the run began (`run_tenant.resolve_run_tenant`), not the
+    file as it is now and not the process environment: an edit mid-run and an exported variable
+    change nothing a run addresses (O1, O2). The prefix namespaces the file's keys
+    (CMDB_URL_BASE, IDENTITY_BASTION_HOST); caller-friendly stripped keys come back as URL_BASE /
+    BASTION_HOST / TIMEOUT_SEC. A system with no usable config, an unimplemented access method, or
+    a missing, blank or malformed required key is a `ConfigFault` — infra (exit 2), because a
+    system with no config is definitionally down, and only exit 2 trips the breaker.
 
-    `required` defaults to the transport template; a system needing more passes its own tuple
-    (e.g. `ticket_adapter.REQUIRED_CONFIG_KEYS`). There are no optional keys with defaults: a
-    caller wanting a fallback must spell it out rather than let a missing fact resolve
-    silently.
+    The access method is checked FIRST (`access_context`), ahead of the required keys and the
+    timeout: a system whose method is not `docker-exec` is down for that reason, whatever else
+    its file says.
+
+    `required` is the key set THIS system needs — the three-key transport template by default,
+    which is what the five docker-exec-curl stubs declare. A system needing more passes its own
+    tuple (`ticket_adapter.REQUIRED_CONFIG_KEYS` adds KEY_PATTERN, its key grammar). There is
+    deliberately no optional-with-default lane: every value read here is required, absent or
+    blank means down, and a caller wanting a fallback must say so in its own code rather than
+    have a missing environment fact resolve silently.
     """
-    path = _config_path(ctx, system)
-    if not path.exists():
-        raise ConfigFault(
-            f"config file not found: {path} — this tenant's settings do not configure "
-            "this system"
-        )
-
-    raw = _parse_env_file(path)
+    entry = system_entry(ctx, system)
+    access_context(ctx, system)
     cfg: dict[str, str] = {}
     for key in required:
-        prefixed = f"{prefix}_{key}"
-        # The RUN's env overrides the file for ops convenience (CI, per-run overrides).
-        val = ctx.env.get(prefixed) or raw.get(prefixed)
-        if val:
+        val = entry.get(f"{prefix}_{key}")
+        if val is not None and not is_blank(val):
             cfg[key] = val
 
-    missing = [k for k in required if not cfg.get(k)]
+    missing = [k for k in required if k not in cfg]
     if missing:
         raise ConfigFault(
-            f"missing required config keys in {path}: "
+            f"missing required config keys in {config_pointer(system)}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}"
         )
+    timeout = cfg.get("TIMEOUT_SEC")
+    if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
+        raise ConfigFault(
+            f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
     return cfg
 
 
@@ -153,18 +184,23 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     timeout_sec: int = 10,
     insecure: bool = False,
     auth: str | None = None,
+    system: str,
 ) -> tuple[int, str, str]:
-    """Run curl inside `container` over the run's docker context.
+    """Run curl inside `container` over `system`'s docker context.
 
     Returns (returncode, stdout, stderr); stdout carries the response body
     followed by ``\\n<http_code>`` (recover with `split_status`). Raises
     `TransportFault` when the docker exec itself fails (CLI missing / timeout),
     so a reachable-but-erroring service still returns its status + body.
 
+    `system` is required: it names the tenant system the call is for, so its OWN docker context
+    is used. A docker context is a per-system fact and is never guessed from the URL.
+
     `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
     container's shell so the ``${VAR}`` secret expands *there*, against the
     container's own env, never on this host; None = no ``-u`` (the auth-less
-    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS.
+    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS. A tenant credential has no
+    lane here yet (#1163).
     """
     flags = ["-sS"] + (["-k"] if insecure else [])
     args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
@@ -175,7 +211,7 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     # Status on its own trailing line so `split_status` can recover it from stdout.
     args += ["-w", "\n%{http_code}", url]
 
-    context = docker_context(ctx)
+    context = docker_context(ctx, system)
     if auth:
         # Static flags live in the in-container shell so ${VAR} expands there;
         # everything dynamic is forwarded as argv after `--` (so a JSON body with
@@ -253,7 +289,7 @@ def http_get_obj(
 
 
 def _raise_on_transport_failure(
-    ctx: VerbContext, bastion: str, rc: int, stderr: str
+    ctx: VerbContext, bastion: str, rc: int, stderr: str, system: str,
 ) -> None:
     """Raise `TransportFault` (exit 2) when curl did not exit cleanly, so the queries row and
     the circuit breaker see a down system. Covers a missing/stopped bastion and curl's own
@@ -267,7 +303,7 @@ def _raise_on_transport_failure(
     if "No such container" in hint or "is not running" in hint:
         raise TransportFault(
             f"bastion container {bastion!r} unreachable: {hint} — confirm "
-            f"`docker --context {docker_context(ctx)} ps` lists {bastion} as running."
+            f"`docker --context {docker_context(ctx, system)} ps` lists {bastion} as running."
         )
     raise TransportFault(f"docker exec failed (rc={rc}): {hint}")
 
@@ -322,10 +358,10 @@ def _request(
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     rc, stdout, stderr = docker_exec_curl(
-        ctx, bastion, url, method=method, body=body, timeout_sec=timeout
+        ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=system
     )
 
-    _raise_on_transport_failure(ctx, bastion, rc, stderr)
+    _raise_on_transport_failure(ctx, bastion, rc, stderr, system)
     body_text, code = _parse_status_code(stdout, stderr, url, rc)
     _raise_on_http_error(code, body_text, url)
 
@@ -351,13 +387,16 @@ def docker_exec_raw(
     argv: list[str],
     *,
     timeout_sec: int = 10,
+    system: str,
 ) -> tuple[int, str, str]:
-    """Run `docker --context <ctx's context> exec <bastion> <argv...>`.
+    """Run `docker --context <system's context> exec <bastion> <argv...>`.
 
-    For host_state_adapter.py: same docker context as the HTTP stubs, but not curl. Returns
-    (rc, stdout, stderr); raises `TransportFault` when the exec never ran.
+    Exposed for host_state_adapter.py, which runs a command rather than curl. `system` is
+    required, as on every lane: the context is that system's, never a default's. Returns (rc,
+    stdout, stderr); raises `TransportFault` when the exec itself never ran (CLI missing /
+    timeout).
     """
-    cmd = ["docker", "--context", docker_context(ctx), "exec", bastion, *argv]
+    cmd = ["docker", "--context", docker_context(ctx, system), "exec", bastion, *argv]
     try:
         # Lossy utf-8: filenames and cmdlines may carry odd bytes, and a decode error would
         # escape every guard downstream.
@@ -381,14 +420,15 @@ def docker_inspect_raw(
     *,
     fmt: str | None = None,
     timeout_sec: int = 10,
+    system: str,
 ) -> tuple[int, str, str]:
-    """Run `docker --context <ctx's context> inspect [--format <fmt>] <target>`.
+    """Run `docker --context <system's context> inspect [--format <fmt>] <target>`.
 
     Daemon-level inspection, unlike `docker_exec_raw`. For host_state_adapter.py's
     container-inspect verb (Falco alerts carry a container id, not a host name). Returns
     (rc, stdout, stderr).
     """
-    cmd = ["docker", "--context", docker_context(ctx), "inspect"]
+    cmd = ["docker", "--context", docker_context(ctx, system), "inspect"]
     if fmt is not None:
         cmd += ["--format", fmt]
     cmd.append(target)

@@ -300,7 +300,8 @@ def test_1120_the_1077_rename_proof_holds_with_tenant_in_the_renamed_set(
 
 #: The systems the lab configures, and so the fixture (test_1106_layout's literal).
 CONFIGURED_SYSTEMS = frozenset({
-    "case-history", "change-mgmt", "cmdb", "elastic", "identity", "threat-intel", "ticket",
+    "case-history", "change-mgmt", "cmdb", "elastic", "host-state", "identity", "threat-intel",
+    "ticket",
 })
 
 
@@ -341,7 +342,8 @@ def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_d
     mapping = settings / "systems" / "case-history" / "mapping.yaml"
     assert mapping.read_bytes() == (
         H.TEMPLATE / "settings" / "systems" / "case-history" / "mapping.yaml").read_bytes()
-    predicate = H.mod("scripts.case_history.case_ticket").release_predicate(settings)
+    case_ticket = H.mod("scripts.case_history.case_ticket")
+    predicate = case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
     assert predicate.released_status == "closed"
     configured = {p.parent.name for p in (settings / "systems").glob("*/config.env")}
     assert configured == CONFIGURED_SYSTEMS, configured

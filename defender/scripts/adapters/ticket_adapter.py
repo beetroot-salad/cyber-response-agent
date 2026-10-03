@@ -1,45 +1,27 @@
-#!/usr/bin/env python3
-"""Ticket-server stub adapter — the `ticket` verb registry and the one surviving CLI.
+"""Ticket-server stub adapter — the `ticket` VERBS registry.
 
-Read-only. Unlike the other adapters it keeps an argparse entry point, because
-`learning/author/verify_forward/forward.py` runs it as a subprocess and pins its exit codes.
-Both surfaces call the same verbs; `main()` is the only place in this package allowed to exit,
-mapping a raised fault back to its exit code.
-
-Usage (the CLI surface):
-    ticket_adapter.py health-check
-    ticket_adapter.py list-tickets [--status open] [--label brute-force] [--q sshd]
-    ticket_adapter.py get-ticket SOC-1042 [--require-closed]
-
-Exit codes:
-    0 — success
-    1 — query error (404, bad arg, --require-closed on a non-closed ticket)
-    2 — connectivity / docker / config / upstream 5xx
-    64 — usage error (bad flag / unknown subcommand)
+Wraps the v2 ticket-server (the v1 FastAPI app reused under playground-v2's compose),
+read-only. The adapter is a verbs registry only: the query tool dispatches `list-tickets`,
+`get-ticket` and `key-pattern` through the verb registry, with the run's tenant record on its
+`VerbContext` (#1107). It has no command-line mode (D7): nothing in the tree ran it as a program,
+and a CLI had to find its own settings, which no code outside a process entry point may do.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sys
 import urllib.parse
-from pathlib import Path
 
-# Workspace root on sys.path so `defender.*` imports resolve when the verb registry loads this
-# module by path, or the CLI runs it directly.
+# Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
+# loads this module BY PATH.
 import sys as _sys
 from pathlib import Path as _Path
 
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender._paths import process_defender_dir
-from defender import _tenant
-from defender._tenants import add_tenant_arguments
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters.faults import AdapterFault, TransportFault, UpstreamFault
+from defender.scripts.adapters.faults import TransportFault, UpstreamFault
 
 SYSTEM = "ticket"
 PREFIX = "TICKET"
@@ -149,88 +131,3 @@ VERBS = {
     "key-pattern": key_pattern,
     "case-opened-at": case_opened_at,
 }
-
-
-# the CLI surface
-
-
-def build_parser():
-    p = transport.AdapterArgumentParser(
-        description="Ticket-server stub CLI — read-only ticket lookups.",
-    )
-    # An entry point, so it is handed the tenant whose config it reads.
-    add_tenant_arguments(p, reads="systems/ticket/config.env addresses the store")
-    sub = p.add_subparsers(dest="subcommand", required=True)
-
-    sub.add_parser("health-check", help="GET /health and exit.")
-
-    lt = sub.add_parser("list-tickets", help="All tickets (filterable).")
-    lt.add_argument("--status")
-    lt.add_argument("--label")
-    lt.add_argument("--q", help="Substring on summary or description.")
-    lt.add_argument(
-        "--require-closed", action="store_true",
-        help="Pin status=closed (scoped closed-only list); overrides any other --status.",
-    )
-
-    gt = sub.add_parser("get-ticket", help="Full ticket record incl. comments.")
-    gt.add_argument("key")
-    gt.add_argument(
-        "--require-closed", action="store_true",
-        help="Exit non-zero unless the ticket is closed (scoped closed-only read).",
-    )
-
-    return p
-
-
-def _cli_context(defender_dir: Path, settings_dir: Path) -> VerbContext:
-    """The CLI's own VerbContext: as a process, it uses the ambient `os.environ` (right for a
-    subprocess caller; the in-process driver passes the run's scrubbed env instead).
-    `settings_dir` is the settings half of the tenant `main` accepted."""
-    run_dir = Path(os.environ.get("DEFENDER_RUN_DIR", Path.cwd()))
-    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=dict(os.environ),
-                       settings_dir=Path(settings_dir))
-
-
-def _accepted_settings(tenant_id: str | None, defender_dir: Path) -> Path:
-    """The `--tenant`'s settings half, accepted under `$DEFENDER_DATA_ROOT` as a run accepts it
-    — never a folder found through `$DEFENDER_DIR` or the checkout — and held outside
-    `defender_dir`, the code tree this command serves the verb against."""
-    requested = _tenant.requested_tenant_id(tenant_id)
-    return _tenant.accept_tenant(
-        _tenant.resolve_data_root(), requested, defender_dir=defender_dir).settings
-
-
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    defender_dir = process_defender_dir()
-    try:
-        settings_dir = _accepted_settings(args.tenant, defender_dir)
-    except _tenant.TenantRefused as refusal:
-        print(f"error: {refusal}", file=sys.stderr)
-        sys.exit(2)
-    ctx = _cli_context(defender_dir, settings_dir)
-    payload: dict | list
-    try:
-        if args.subcommand == "health-check":
-            payload = health_check(ctx)
-        elif args.subcommand == "list-tickets":
-            payload = list_tickets(
-                ctx, status=args.status, label=args.label, q=args.q,
-                require_closed=args.require_closed,
-            )
-        else:
-            payload = get_ticket(ctx, key=args.key, require_closed=args.require_closed)
-    except AdapterFault as e:
-        # The fault's exit code is the CLI's: subprocess callers and the circuit breaker key
-        # on it.
-        print(f"error: {e.detail}", file=sys.stderr)
-        sys.exit(e.exit_code)
-    print(json.dumps(payload))
-
-
-if __name__ == "__main__":
-    from defender._log import configure_from_env
-    configure_from_env()
-    main()

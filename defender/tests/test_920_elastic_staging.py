@@ -54,7 +54,7 @@ from defender.tests import _tenants1106
 #: collection — and every importer's — on a `VerbContext` the tree cannot yet build.
 def _ctx() -> VerbContext:
     return VerbContext(defender_dir=PATHS.defender_dir, run_dir=PATHS.defender_dir, env={},
-                       settings_dir=_tenants1106.FIXTURE_SETTINGS)
+                       tenant=_tenants1106.fixture_run_tenant())
 
 
 #: The committed elastic catalog: 15 templates, 12 of them ES|QL. Both numbers are asserted

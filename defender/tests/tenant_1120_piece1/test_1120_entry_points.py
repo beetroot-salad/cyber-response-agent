@@ -42,7 +42,6 @@ from defender.runtime import session_store
 from defender.runtime.driver import _prompts as driver_prompts
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
-from defender.scripts.adapters import ticket_adapter
 from defender.skills.connect import validate_scaffold
 from defender.tests import _dispositions995 as D995
 from defender.tests import _judge_921 as J
@@ -201,13 +200,11 @@ CELLS_OF = {
     "branch.cli.main": ALL_CELLS,
     "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree", "learning-state-overlap"),
     "tenant.check": ALL_CELLS,
-    "ticket_adapter.main": ALL_CELLS,
     "tenant.scaffold": ("bad-id",),
     "policy_cli.main": ALL_CELLS,
     "validate_scaffold.main": ALL_CELLS,
 }
-PROCESS_ENTRIES = {"tenant.setup", "tenant.check", "tenant.scaffold", "ticket_adapter.main",
-                   "validate_scaffold.main"}
+PROCESS_ENTRIES = {"tenant.setup", "tenant.check", "tenant.scaffold", "validate_scaffold.main"}
 
 
 @dataclass
@@ -312,7 +309,6 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         "tenant.setup": (tenant_py, ["setup", cell.tenant_id]),
         "tenant.check": (tenant_py, ["check", cell.tenant_id]),
         "tenant.scaffold": (tenant_py, ["scaffold", cell.tenant_id, str(base / "scaffold-target")]),
-        "ticket_adapter.main": (ticket_adapter, ["--tenant", cell.tenant_id, "health-check"]),
         "validate_scaffold.main": (validate_scaffold, ["cmdb", "--tenant", cell.tenant_id]),
     }[entry]
     if entry == "tenant.scaffold":
@@ -361,9 +357,9 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
 def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses(
         entry: str, tmp_path: Path, monkeypatch, capsys) -> None:
     """Each entry point that takes a tenant after piece 1 — run.py, the branch launcher,
-    tenant.py setup and check, ticket_adapter, policy_cli, validate_scaffold (held_out takes
-    none: an evaluation tool, outside the application; generate_case is removed — human, PR
-    #1157) —
+    tenant.py setup and check, policy_cli, validate_scaffold (held_out takes none: an
+    evaluation tool, outside the application; generate_case is removed — human, PR #1157;
+    ticket_adapter's command line was removed by #1107) —
     and tenant.py scaffold for its bad-id cell, is driven over each cell:
     a bad id ('A'); a data root with no row for the id; a knowledge folder that is a symlink;
     settings inside a mounted tree (through policy_cli's own defender-dir option, and for the
@@ -691,7 +687,7 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     episode = tmp_path / "episode"
     episode.mkdir()
     adapters = branch_seams.adapter_seam(episode, run_tenant, runs_base=tenant.runs)
-    assert Path(adapters.ctx.settings_dir) == H.settings_dir(data_root) == tenant.settings
+    assert Path(adapters.ctx.tenant.settings) == H.settings_dir(data_root) == tenant.settings
 
     # driver._prompts — lead zero resolves from the Tenant's settings; no fault degrades it.
     run_dir = tmp_path / "prompt-run"

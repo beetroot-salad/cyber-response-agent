@@ -5,13 +5,13 @@ import json
 import urllib.parse
 
 import sys as _sys
-from collections.abc import Mapping, Sequence
 from pathlib import Path as _Path
 
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
+from defender.runtime.tenant_settings import config_pointer
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_index, guard_outbound
@@ -26,9 +26,6 @@ REQUIRED_CONFIG_KEYS = [
     "ELASTIC_EVENTS_INDEX",
     "ELASTIC_ALERTS_INDEX",
 ]
-
-DEFAULT_ES_CONTAINER = "elasticsearch"
-DEFAULT_KIBANA_CONTAINER = "kibana"
 
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
@@ -65,111 +62,84 @@ class OutboundBody:
 
 
 
-#: This deployment's elastic config, relative to a tenant's `settings/` folder. Named once
-#: because one of its three readers has no `VerbContext`.
-CONFIG_RELPATH = ("systems", "elastic", "config.env")
-
-
-def config_path(settings_dir: _Path) -> _Path:
-    """The config file under a tenant's `settings_dir`, for callers without a verb context."""
-    return _Path(settings_dir).joinpath(*CONFIG_RELPATH)
-
-
-def _config_path(ctx: VerbContext) -> _Path:
-    return config_path(ctx.settings_dir)
-
-
-def config_from(
-    path: _Path, env: Mapping[str, str], *, expected: Sequence[str] = (),
-) -> dict[str, str]:
-    """This deployment's elastic config: the file, with the environment over it.
-
-    The single parser for all three readers (this adapter, the staging seam, its write door),
-    so one `config.env` cannot describe different clusters to different readers. An absent file
-    is empty here; only `load_config` must refuse.
-
-    The environment overrides any key the file carries or the caller lists in `expected`, not
-    only keys present in the file — otherwise a missing or trimmed file would ignore an
-    operator-set `ELASTICSEARCH_URL`.
-
-    One matched pair of surrounding quotes is trimmed; `.strip('"')` would also eat a quote
-    that legitimately ends a password or URL.
-    """
-    values: dict[str, str] = {}
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, _, val = stripped.partition("=")
-            raw = val.strip()
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
-                raw = raw[1:-1]
-            values[key.strip()] = raw
-    for key in (*values, *expected):
-        env_val = env.get(key)
-        if env_val is not None:
-            values[key] = env_val
-    return values
+PREFIX = "ELASTIC"
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
-    path = _config_path(ctx)
-    if not path.exists():
-        raise ConfigFault(
-            f"config file not found: {path} — this tenant's settings do not configure "
-            "this system"
-        )
-    config = config_from(path, ctx.env, expected=REQUIRED_CONFIG_KEYS)
-    missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
+    """This deployment's elastic config from the run's record (#1107): the keys of
+    `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
+    unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch
+    down, the run goes on. The record's `elastic` view judges the keys platform code reads; this
+    reader judges the ones IT needs, so each reports its own view (MF-7 c).
+
+    Nothing is looked up in the environment, and the file is not re-read: the values are those
+    of the run's start (O1, O2)."""
+    entry = transport.system_entry(ctx, SYSTEM)
+    transport.access_context(ctx, SYSTEM)
+    config = dict(entry)
+    missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
     if missing:
         raise ConfigFault(
-            f"missing required config keys in {path}: {', '.join(missing)}"
-        )
+            f"missing required config keys in {config_pointer(SYSTEM)}: {', '.join(missing)}")
     return config
 
 
+def _configured(ctx: VerbContext, key: str) -> str | None:
+    """The container named by `key` in the tenant's file, or None when it is absent or blank."""
+    value = transport.system_entry(ctx, SYSTEM).get(key)
+    return None if value is None or not value.strip() else value
+
+
+def _container(ctx: VerbContext, key: str) -> str:
+    """The container named by `key` (`ELASTIC_ES_CONTAINER` / `ELASTIC_KIBANA_CONTAINER`) in the
+    tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
+    `elasticsearch` or `kibana` would address whatever container the host happens to hold of that
+    name."""
+    value = _configured(ctx, key)
+    if value is None:
+        raise ConfigFault(
+            f"{key} is not set — name the container this system is reached through in its "
+            "config.env; there is no default")
+    return value
 
 
 def _es_container(ctx: VerbContext) -> str:
-    return ctx.env.get("SOC_PLAYGROUND_ES_CONTAINER", DEFAULT_ES_CONTAINER)
+    return _container(ctx, "ELASTIC_ES_CONTAINER")
 
 
 def _kibana_container(ctx: VerbContext) -> str:
-    return ctx.env.get("SOC_PLAYGROUND_KIBANA_CONTAINER", DEFAULT_KIBANA_CONTAINER)
+    return _container(ctx, "ELASTIC_KIBANA_CONTAINER")
 
 
 def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> TransportFault:
-    context = transport.docker_context(ctx)
+    context = transport.docker_context(ctx, SYSTEM)
+    entry = transport.system_entry(ctx, SYSTEM)
+    containers = "|".join(
+        entry[k] for k in ("ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER") if k in entry)
     return TransportFault(
-        f"{target} unreachable: {exc} — the playground stack is reached via "
+        f"{target} unreachable: {exc} — the stack is reached via "
         f"`docker --context {context} exec`; confirm it is up: "
-        f"docker --context {context} ps | grep -E "
-        f"'{_es_container(ctx)}|{_kibana_container(ctx)}'"
+        f"docker --context {context} ps | grep -E '{containers}'"
     )
 
 
 
 
-def _container_for(ctx: VerbContext, url: str, config: dict) -> str:
-    kibana_base = (config.get("KIBANA_URL") or "").rstrip("/")
-    if kibana_base and url.startswith(kibana_base):
-        return _kibana_container(ctx)
-    return _es_container(ctx)
-
-
-def _http_json(
+def _http_json(  # noqa: PLR0913 — one request's per-call state
     ctx, method, url, config, headers=None, body: OutboundBody | None = None, timeout=None,
+    *, kibana: bool = False,
 ):
-    """The one door to Elasticsearch. `body` is typed rather than a bare dict for the reason
-    `OutboundBody` gives."""
+    """The one door to Elasticsearch — and, with `kibana=True`, to Kibana. The caller says which
+    service it addresses; the container is never guessed from the URL (an Elasticsearch URL that
+    happens to start with KIBANA_URL is still Elasticsearch's). `body` is typed rather than a
+    bare dict for the reason `OutboundBody` gives."""
     guard_outbound(ctx, SYSTEM, url, method=method)
-    container = _container_for(ctx, url, config)
+    container = _kibana_container(ctx) if kibana else _es_container(ctx)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
     rc, stdout, stderr = transport.docker_exec_curl(
         ctx, container, url, method=method, headers=headers,
         body=None if body is None else body.payload,
-        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}",
+        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}", system=SYSTEM,
     )
     body_text, status_str = transport.split_status(stdout)
     try:
@@ -362,10 +332,16 @@ def health_check(ctx: VerbContext) -> dict:
         "nodes": body.get("number_of_nodes"),
     }
 
+    # Kibana is optional to this adapter (MF-7 c: an Elasticsearch-only tenant keeps answering),
+    # so a missing container is a RESULT here — asked before the call, never a ConfigFault that
+    # would discard the Elasticsearch answer above and charge the breaker.
+    if _configured(ctx, "ELASTIC_KIBANA_CONTAINER") is None:
+        out["kibana"] = "not configured (ELASTIC_KIBANA_CONTAINER is not set)"
+        return out
     kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
     try:
         kb_status, kb_body = _http_json(
-            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10
+            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10, kibana=True,
         )
     except TransportFault as e:
         out["kibana"] = f"unreachable ({e.detail})"

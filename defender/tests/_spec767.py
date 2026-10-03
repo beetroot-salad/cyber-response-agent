@@ -15,13 +15,14 @@ comment's `author` — whatever the posting client chose to send — decides not
 THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile forbids
 `monkeypatch.setattr`, and CI ratchets new sites):
 
-  * the writer's collaborators — `TicketWriterDeps{load_config, request}`, the frozen
-    dataclass threaded as the second parameter of both writers (g16: there is no third);
-  * the mapping file — the SETTINGS FOLDER every mapping reader is handed (#1106 D2: no
-    reader finds it itself, so `$DEFENDER_DIR` is no longer a seam). `use_mapping` plants a
-    mapping under `<root>/settings/` and returns that folder; the helpers below hand the
-    folder the test planted (or, with none planted, the committed playground tenant's) to
-    the real writer and screen, so a hostile-mapping control still needs no new seam;
+  * the writer's collaborator — `TicketWriterDeps{request}`, the frozen dataclass threaded as
+    the second parameter of both writers (g16: there is no third); the store's address is
+    the tenant record's, never a seam of its own (#1107);
+  * the mapping file — the tenant's `settings/` folder, resolved into the run's record (#1107:
+    `ticket_mapping`). `use_mapping` plants a complete tenant whose mapping is the test's and
+    returns its settings folder; the helpers below resolve the record of the tenant the test
+    planted (or, with none planted, the committed fixture tenant's) and hand it to the real
+    writer and screen, so a hostile-mapping control still needs no new seam;
   * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
     `tests/_spec791.py` already implements (g10).
 
@@ -38,6 +39,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from defender.tests import _tenants1106 as T1106
+from defender.tests.tenant_1107_settings import _spec1107 as S1107
 
 # --------------------------------------------------------------------------------------
 # The vendor spellings this lane introduces. Every one of them lives in the MAPPING (O5) —
@@ -71,8 +75,7 @@ COMMENTS_SUFFIX = "/comments"
 TRANSITIONS_SUFFIX = "/transitions"
 TICKETS_PATH = "/tickets"
 
-#: A config the writer's `load_config` seam can answer with — the three keys `_load_config`
-#: itself requires.
+#: A case-history config the planted tenant carries — the three keys the writer itself requires.
 CONFIG: dict[str, str] = {
     "URL_BASE": "http://case-history.test",
     "BASTION_HOST": "bastion.test",
@@ -90,6 +93,10 @@ COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
 
 #: The mapping's home BELOW a tenant's settings folder (#1106: `<tenants root>/<id>/settings/`).
 MAPPING_RELPATH = "systems/case-history/mapping.yaml"
+CONFIG_RELPATH = "systems/case-history/config.env"
+
+#: The tenant `use_mapping` plants under the test's root.
+TENANT_ID = "t767"
 
 
 def require(obj: Any, name: str, why: str) -> Any:
@@ -156,36 +163,43 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     return doc
 
 
+def tenant_of(root: Path) -> Path:
+    """The data root `plant_tenant` sets `TENANT_ID` up under (#1120)."""
+    return Path(root)
+
+
 def settings_of(root: Path) -> Path:
-    """The settings folder `write_mapping` plants under `root`."""
-    return Path(root) / "settings"
+    """The settings folder `write_mapping` plants under `root` — the settings half of the
+    tenant's knowledge folder (#1120: `<root>/<T>/knowledge/settings`)."""
+    return Path(root) / TENANT_ID / "knowledge" / "settings"
 
 
 def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
-    """Write a mapping into `settings_of(root)` and return the mapping file's path."""
+    """Write a mapping into `settings_of(root)` (planting the rest of the tenant first, if the
+    folder is new) and return the mapping file's path."""
     import yaml
 
-    path = settings_of(root) / MAPPING_RELPATH
-    path.parent.mkdir(parents=True, exist_ok=True)
+    settings = settings_of(root)
+    if not (settings / "verb-grants.yaml").exists():
+        S1107.plant(Path(root), TENANT_ID, marker=TENANT_ID)
+    path = settings / MAPPING_RELPATH
     text = doc if isinstance(doc, str) else yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
     path.write_text(text, encoding="utf-8")
     return path
 
 
 #: The settings folder THIS test planted its mapping into, recorded through `monkeypatch`
-#: (`setitem`, undone after every test) so the helpers below hand the same folder to the
-#: writer and the screen. The test's own bookkeeping — production is handed the folder
-#: explicitly by every one of these helpers; nothing in it reads this dict.
+#: (`setitem`, undone after every test) so the helpers below hand the same tenant to the writer
+#: and the screen. The test's own bookkeeping — nothing in production reads this dict.
 _PLANTED: dict[str, Path] = {}
 
 
 def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
     """Plant a mapping of this test's choosing and return its SETTINGS FOLDER.
 
-    #1106: the folder is handed to the ONE loader by every caller (`release_predicate(
-    settings)`, `settings_dir=` on the writer and the screen) — the writer and the screen still
-    read the same file through the same function, which is what
-    `o5_no_vendor_literals_in_code` observes."""
+    #1107: the record the writer and the screen are handed is resolved from this folder at the
+    moment of the call (`current_record`), so a test that plants a second mapping is handing the
+    next call a record built from it — and a record taken before keeps the first."""
     write_mapping(root, mapping_doc() if doc is None else doc)
     monkeypatch.setitem(_PLANTED, "settings", settings_of(root))
     return settings_of(root)
@@ -193,10 +207,46 @@ def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None
 
 def current_settings() -> Path:
     """The settings folder the running test planted (`use_mapping`), else the committed
-    playground tenant's — the file a driven run resolves when nothing repoints it."""
-    from defender.tests import _tenants1106
+    fixture tenant's."""
+    return _PLANTED.get("settings", T1106.FIXTURE_SETTINGS)
 
-    return _PLANTED.get("settings", _tenants1106.FIXTURE_SETTINGS)
+
+#: `config` distinguishes THREE states across `current_record`/`record`/`open_ticket`: omitted
+#: (the planted tenant carries the fixture's own `CONFIG`), explicitly `None` (a run with no
+#: case-history config at all — the tenant has no `config.env` for it), or an explicit dict.
+#: Python gives both the first two the same spelling if the default is `None` itself, so the
+#: default is this sentinel instead — never `None`.
+_CONFIG_UNSET = object()
+
+
+def _write_case_history_config(settings: Path, config: dict[str, str] | None) -> None:
+    path = settings / CONFIG_RELPATH
+    if config is None:
+        path.unlink(missing_ok=True)
+        return
+    lines = [f'CASE_HISTORY_{key}="{value}"' for key, value in config.items()]
+    lines += [f'CASE_HISTORY_TRANSPORT="{S1107.DOCKER_EXEC}"',
+              f'CASE_HISTORY_DOCKER_CONTEXT="{S1107.context_name(TENANT_ID, "case-history")}"']
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) -> Any:
+    """The run record of the tenant the running test planted (else the committed fixture
+    tenant, set up under the test's data root), resolved NOW through the real resolver.
+
+    `config` states the planted tenant's case-history store: omitted, the fixture's `CONFIG`;
+    `None`, no `config.env` at all (a run with no case-history config); a dict, those keys."""
+    if "settings" not in _PLANTED:
+        return T1106.fixture_run_tenant()
+    settings = current_settings()
+    _write_case_history_config(settings, CONFIG if config is _CONFIG_UNSET else config)
+    return T1106.run_tenant(T1106.accept(settings.parents[2], TENANT_ID))
+
+
+def current_mapping() -> Any:
+    """The `ticket_mapping` of `current_record()` — a `CaseMapping`, or the `CaseTicketError`
+    the record kept when the planted mapping could not stand."""
+    return current_record().ticket_mapping
 
 
 def shipped_released_status_and_author() -> tuple[str, str]:
@@ -219,7 +269,7 @@ def shipped_released_status_and_author() -> tuple[str, str]:
 
 
 def shipped_mapping_doc() -> dict[str, Any]:
-    """The repo's own checked-in mapping (the committed playground tenant's), read off the
+    """The repo's own checked-in mapping (the committed fixture tenant's), read off the
     real file."""
     import yaml
 
@@ -341,7 +391,7 @@ class FakeStore:
         self.calls: list[OutboundCall] = []
 
     def __call__(self, config: dict[str, str], method: str, path: str,
-                 body: Any = None, *, settings_dir: Path) -> tuple[str | None, str]:
+                 body: Any = None, *, ctx: Any) -> tuple[str | None, str]:
         self.calls.append(OutboundCall(method=method, path=path, body=body))
         if self.transport_fault_on and path.endswith(self.transport_fault_on):
             from defender.scripts.adapters.faults import TransportFault
@@ -395,24 +445,21 @@ class FakeStore:
         return body
 
 
-#: `config` distinguishes THREE states across `writer_deps`/`record`/`open_ticket`: omitted
-#: (use the fixture's own `CONFIG`), explicitly `None` (a run with no case-history config at
-#: all — `deps.load_config(settings)` must answer `None`), or an explicit dict. Python gives both the
-#: first two the same spelling if the default is `None` itself, so the default is this
-#: sentinel instead — never `None` — and `None` is left free to mean what the writer's own
-#: `TicketWriterDeps.load_config` contract says it means.
-_CONFIG_UNSET = object()
 
 
-def writer_deps(store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET):
+def writer_deps(store: FakeStore):
     """Bind the fake into the writer's real injection seam (g16)."""
     from defender.scripts.case_history import ticket_writer
 
-    resolved = CONFIG if config is _CONFIG_UNSET else config
-    return ticket_writer.TicketWriterDeps(
-        load_config=(lambda _settings_dir: None if resolved is None else dict(resolved)),
-        request=store,
-    )
+    return ticket_writer.TicketWriterDeps(request=store)
+
+
+def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, Any]:
+    """What run.py hands both legs: the record, the code tree and the run's env."""
+    from defender import run_common
+
+    return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
+            "env": run_common.run_env(T1106.DEFENDER, Path(run_dir))}
 
 
 def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
@@ -425,8 +472,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
         "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
         "/tickets/{key}/comments, no transition",
     )
-    kw.setdefault("settings_dir", current_settings())
-    return fn(run_dir, writer_deps(store, config=config), **kw)
+    return fn(run_dir, writer_deps(store), **_handed(run_dir, config), **kw)
 
 
 def open_ticket(
@@ -434,13 +480,18 @@ def open_ticket(
 ) -> Any:
     from defender.scripts.case_history import ticket_writer
 
-    return ticket_writer.open_case_ticket(
-        run_dir, writer_deps(store, config=config), settings_dir=current_settings())
+    return ticket_writer.open_case_ticket(run_dir, writer_deps(store), **_handed(run_dir, config))
+
+
+def receipt_path(run_dir: Path) -> Path:
+    """The receipt's location: a sidecar beside the run dir, keyed by the run's name (#1107
+    moved it out of the box-writable run dir; it was `run_dir/ticket_write.json`)."""
+    return run_dir.parent / f"{run_dir.name}.ticket-write.json"
 
 
 def receipt(run_dir: Path) -> dict[str, Any]:
-    path = run_dir / "ticket_write.json"
-    assert path.is_file(), "no `ticket_write.json` receipt was written"
+    path = receipt_path(run_dir)
+    assert path.is_file(), "no ticket receipt was written"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -493,7 +544,7 @@ def screen(payload: Any, *, verb: str, self_key: str = SELF_KEY) -> tuple[Any, i
     from defender.runtime import query_tool
 
     return query_tool._screen_ticket_payload(
-        self_key, "ticket", verb, payload, settings_dir=current_settings())
+        self_key, "ticket", verb, payload, tenant=current_record())
 
 
 def screen_list(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:

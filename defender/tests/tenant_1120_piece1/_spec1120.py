@@ -505,7 +505,7 @@ class RunRecorder:
         self.lifecycle_calls.append(kw)
         return {"output": "spec1120", "requests": 0, "truncated_by": None}
 
-    def visualize(self, _run: Any) -> None:
+    def visualize(self, _run: Any, **_kw: Any) -> None:
         self.order.append("visualize")
 
     def enqueue(self, *_a: Any, **_kw: Any) -> bool:

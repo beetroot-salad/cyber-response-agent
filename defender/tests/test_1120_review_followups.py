@@ -1,8 +1,9 @@
 """#1120 piece 1 — the small follow-ups from the code review on PR #1157.
 
-  * Finding 10: `ticket_adapter` and `validate_scaffold` serve against `$DEFENDER_DIR` when it
-    is set, so step 7 holds the tenant's settings outside THAT tree — not only outside the
-    package's own `defender/`, which the command may not be running against.
+  * Finding 10: `validate_scaffold` serves against `$DEFENDER_DIR` when it is set, so step 7
+    holds the tenant's settings outside THAT tree — not only outside the package's own
+    `defender/`, which the command may not be running against. (The finding also named
+    `ticket_adapter`, whose command line #1107 has since removed.)
   * Finding 12: the census lint reports a clean table from the rows it judged; it does not
     load the table a second time to count the gather grants.
 """
@@ -11,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender import _tenant_census
-from defender.scripts.adapters import ticket_adapter
 from defender.skills.connect import validate_scaffold
 from defender.tests._by_path import load_lint_gate
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
@@ -24,25 +24,6 @@ def _data_root_inside_another_code_tree(tmp_path: Path) -> tuple[Path, Path]:
     root = code / "data"
     H.adopted(root)
     return root, code
-
-
-def test_ticket_adapter_holds_settings_outside_the_tree_it_serves(tmp_path: Path) -> None:
-    """`DEFENDER_DIR=<code>` with the data root inside `<code>`: the adapter exits 2 naming
-    the settings as inside that tree. Control: the same tenant under a data root outside it
-    passes acceptance (any later failure is the fake tree's, not containment's)."""
-    root, code = _data_root_inside_another_code_tree(tmp_path)
-    proc = H.run_script(H.script_of(ticket_adapter), "--tenant", H.TID, "health-check",
-                        root=root, DEFENDER_DIR=str(code))
-    H.assert_ran(proc)
-    text = H.output(proc)
-    assert proc.returncode == 2, text
-    assert f"inside {code}" in text, text
-
-    outside = tmp_path / "outside"
-    H.adopted(outside)
-    proc = H.run_script(H.script_of(ticket_adapter), "--tenant", H.TID, "health-check",
-                        root=outside, DEFENDER_DIR=str(code))
-    assert "which a box mounts" not in H.output(proc), H.output(proc)
 
 
 def test_validate_scaffold_holds_settings_outside_the_tree_it_checks(tmp_path: Path) -> None:

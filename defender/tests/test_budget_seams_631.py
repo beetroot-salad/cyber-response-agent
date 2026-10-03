@@ -223,7 +223,7 @@ def _drive_gather_query(run_dir: Path, registry):
     )
     deps = replace(bind(gather_def, run_dir,
                         defender_dir=DEFENDER), lead_id="l-001",
-                   settings_dir=T1106.FIXTURE_SETTINGS)
+                   tenant=T1106.fixture_run_tenant())
 
     async def _go():
         with override_allow_model_requests(False):

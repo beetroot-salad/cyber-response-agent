@@ -113,7 +113,8 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
     ep = episodes / T.EPISODE_ID
     if not (ep / "family.yaml").exists():
         T.episode(episodes.parent, doc=T.family_doc(source_run_dir=str(src)), root=episodes)
-    world = H.run_py().resume_world(Episode.open(ep), label, settings=lambda: H.T1106.FIXTURE_SETTINGS)
+    world = H.run_py().resume_world(
+        Episode.open(ep), label, tenant=lambda: H.T1106.run_tenant(H.accept(root, TID)))
     run_dir = H.run_common().materialize_run(
         src / "alert.json", world.run_id, tenant=H.accept(root, TID), world=world).run_dir
     return ep, Path(run_dir), world
@@ -615,7 +616,7 @@ def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
 
     runs_base = H.runs_base_for(d9_tenant)
     ctx = H.mod("learning.branch.review").verb_context(
-        ep, H.T1106.FIXTURE_SETTINGS, runs_base=runs_base)
+        ep, H.T1106.run_tenant(H.accept(current_data_root(), d9_tenant)), runs_base=runs_base)
     assert ctx.env[T.RUNS_BASE_ENV] == str(runs_base)
     assert runs_base == current_data_root().resolve() / d9_tenant / "runs"
     assert ctx.env[T.RUNS_BASE_ENV] != str(ep.parent)

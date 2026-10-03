@@ -448,7 +448,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, defender_dir: Path | None = None,
-        tenant: Any = None, grants: Any = None, orient_shim: Any = None):
+        tenant: Any = None, orient_shim: Any = None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -468,10 +468,11 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     needs no provider settings). `override_allow_model_requests(False)` makes any real
     provider call raise, so the run is provably hermetic.
 
-    `tenant` / `grants` (#1106) are the run's accepted `Tenant` and per-run `RunGrants`;
-    omitted, the committed fixture tenant set up under this test's own data root and accepted
-    through the real `accept_tenant` (#1120 H2), and its own table. They are handed to the
-    driver as one `RunTenant` (`_tenants1106.run_tenant`).
+    `tenant` (#1106) is the run's accepted `Tenant`; omitted, the committed fixture tenant set
+    up under this test's own data root and accepted through the real `accept_tenant` (#1120
+    H2). A scenario's grants are its tenant folder's `verb-grants.yaml`: it plants a tenant
+    whose table says what it needs (#1107). The tenant is handed to the driver as one
+    `RunTenant` (`_tenants1106.run_tenant`, i.e. `resolve_run_tenant`).
 
     `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
     `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
@@ -594,7 +595,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
     run_tenant = _tenants1106.run_tenant(
         tenant if tenant is not None else _default_tenant(),
-        grants=grants, defender_dir=tree,
+        defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
     with override_allow_model_requests(False):

@@ -46,7 +46,7 @@ record are the two comment kinds, told apart by their body (`S.TicketCall.is_not
   `unresolved` off a payload that does not exist.
 * **F-L (auto)** — a failed note call never breaks the run, and its outcome is written into
   `ticket_write.json` either way.
-* **F-R (auto)** — an unconfigured lane stays silent for every exit class, aborted included: an
+* **F-R (auto)** — an unconfigured lane calls nothing for every exit class, aborted included: an
   operator with no ticket config has already opted out, and inventing a side channel for one
   arm would override that choice.
 * **F-A reading B (human, §7 round 2)** — the leave-open arms DEFER to a genuine model close.
@@ -425,18 +425,27 @@ def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(
 
 
 def test_an_unconfigured_ticket_lane_stays_silent_for_every_exit_class(tmp_path):
-    """An operator with no case-history configuration gets today's silence for EVERY exit
-    class, `aborted` included: no call, no receipt, no side channel (fork F-R, auto).
+    """An operator with no case-history configuration makes NO call for any exit class,
+    `aborted` included, and (#1107 O6) a run that reached the config says so in an `error`
+    receipt naming no store: configuring no ticket system is no longer silent on the run page.
+    The two no-verdict exits stay silent — their no-verdict check runs BEFORE the config is
+    read, so those runs write no receipt whatever their tenant says (#1047).
 
-    Configuring no ticket system is already an opt-out; inventing a channel for one arm would
-    override that choice. Positive control: the same run and exit class with a configured lane
-    makes its call."""
+    Positive control: the same run and exit class with a configured lane makes its call."""
+    no_verdict = ("budget", "store")
     for exit_class in (*S.vocabulary(), None):
         run_dir = S.closed_run_dir(tmp_path / f"unconfigured-{exit_class}")
         fake = S.record_ticket(run_dir, ticket=S.FakeTicketSystem(configured=False),
                               truncated_by=exit_class)
         assert fake.calls == [], f"{exit_class}: an unconfigured lane called out anyway"
-        assert S.receipt(run_dir) is None, f"{exit_class}: an unconfigured lane wrote a receipt"
+        got = S.receipt(run_dir)
+        if exit_class in no_verdict:
+            assert got is None, f"{exit_class}: a no-verdict exit wrote a receipt: {got!r}"
+            continue
+        assert got is not None, f"{exit_class}: an unconfigured lane left no receipt"
+        assert got.get("ok") is False, got
+        assert got.get("status") == "error", got
+        assert got.get("url") is None, f"{exit_class}: the receipt names a store: {got!r}"
     configured = S.record_ticket(
         S.closed_run_dir(tmp_path / "configured", report=False), truncated_by="aborted")
     assert len(configured.notes) == 1, (
@@ -511,17 +520,18 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(
         tmp_path):
-    """A ticket_write.json forged to claim a prior closure suppresses nothing: the genuine
+    """A ticket receipt forged to claim a prior closure suppresses nothing: the genuine
     record/note call is issued regardless, because nothing in this design reads the receipt
     back as an input.
 
-    The receipt is an OUTPUT — the lane's own record of what it did — and the run dir it sits
-    in is the box's rw bind, so treating it as an input would let the graded subject suppress
-    its own record. Both arms are driven: the record arm and the note arm."""
+    The receipt is an OUTPUT — the lane's own record of what it did — and it used to sit in the
+    box's rw bind (#1107 moved it beside the run dir), so treating it as an input would have let
+    the graded subject suppress its own record. Both arms are driven: the record arm and the note arm."""
     for exit_class, expect in (("request-limit", "records"), ("aborted", "notes")):
         run_dir = S.closed_run_dir(tmp_path / exit_class, disposition="unresolved",
                                    report=expect == "records")
-        (run_dir / "ticket_write.json").write_text(
+        # #1107 moved the receipt beside the run dir; forged at its name there.
+        S.receipt_path(run_dir).write_text(
             json.dumps({"key": run_dir.name, "status": "closed", "ok": True,
                         "url": "http://tickets.test/tickets/forged"}), encoding="utf-8")
         fake = S.record_ticket(run_dir, truncated_by=exit_class)

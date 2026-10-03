@@ -69,8 +69,8 @@ and each fake's fault content cites the ledger claim that observed it:
   `ticket_writer._request`; the "no/malformed response" arm is `status=None`, the shape a
   `TransportFault` already produces there (claim n4's namespace probe, round-2 item 2,
   EXECUTED, drove exactly this stand-in against the real writer and the real mapping.yaml).
-* `FakeTicketSystem(configured=False)` — `_load_config` returning `None`, the unconfigured
-  lane F-R resolved to today's silence.
+* `FakeTicketSystem(configured=False)` — a tenant whose settings carry no case-history
+  `config.env`, the unconfigured lane (#1107: its record has no store to name).
 
 Fakes enter through the entry point's INJECTION SEAMS — `deps=` on `record_case_ticket`,
 `run_dirs=` on `archive_episode`, the `agent`/`store` arguments on `_drive_agent` — never by
@@ -247,15 +247,6 @@ def world_facts(episode_dir: Path, label: str) -> Any:
 # The ticket lane.
 # --------------------------------------------------------------------------------------
 
-#: The config `_load_config` returns on a configured lane. Three keys, because
-#: `ticket_writer._load_config` refuses anything short of them and `_request` reads all three.
-TICKET_CONFIG = {
-    "URL_BASE": "http://tickets.test",
-    "BASTION_HOST": "bastion.test",
-    "TIMEOUT_SEC": "10",
-}
-
-
 #: The words the two comment kinds are told apart by on the wire. `ESCALATION_MARK` is a
 #: phrase of the host's fixed escalation sentence; `UNREADABLE_MARK` is the fixed sentence the
 #: record carries when the report yields no disposition (#767 §7 R10) — a record with no
@@ -320,8 +311,8 @@ class FakeTicketSystem:
 
     It injects faults only; it classifies nothing. `status=None` is `_request`'s own
     transport-error answer (`ticket_writer.py:70-75`: a `TransportFault` returns
-    `(None, "transport error: …")`), and `configured=False` is `_load_config` returning `None`,
-    the unconfigured lane F-R resolved to today's silence. No other fault is induced here,
+    `(None, "transport error: …")`), and `configured=False` is a tenant record with no
+    case-history config, the unconfigured lane. No other fault is induced here,
     because no claim in the ledger observes one on this dependency.
     """
 
@@ -329,13 +320,8 @@ class FakeTicketSystem:
     configured: bool = True
     calls: list[TicketCall] = field(default_factory=list)
 
-    def load_config(self, _settings_dir: Path) -> dict[str, str] | None:
-        # #1106: the writer hands its config loader the run's settings folder; this fake
-        # answers the lane's config whichever folder that is.
-        return dict(TICKET_CONFIG) if self.configured else None
-
     def request(self, _config: dict[str, str], method: str, path: str,
-                body: dict | None = None, *, settings_dir: Path) -> tuple[str | None, str]:
+                body: dict | None = None, *, ctx: Any) -> tuple[str | None, str]:
         self.calls.append(TicketCall(method, path, body))
         if method == "GET":
             # The writer's courtesy read-back before it comments (#767): an open, unreleased
@@ -349,7 +335,7 @@ class FakeTicketSystem:
 
     def deps(self) -> Any:
         return sym("scripts.case_history.ticket_writer", "TicketWriterDeps")(
-            load_config=self.load_config, request=self.request)
+            request=self.request)
 
     @property
     def writes(self) -> list[TicketCall]:
@@ -377,11 +363,8 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
-    # #1106: the writer is handed the run's settings folder (its mapping); this lane reads the
-    # committed playground tenant's, as it read the checkout's own mapping before the move.
-    kw.setdefault("settings_dir", _playground_settings())
     mod("scripts.case_history.ticket_writer").record_case_ticket(
-        Path(run_dir), fake.deps(), **kw)
+        Path(run_dir), fake.deps(), **_handed(run_dir, fake), **kw)
     return fake
 
 
@@ -390,21 +373,40 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
     mod("scripts.case_history.ticket_writer").open_case_ticket(
-        Path(run_dir), fake.deps(), settings_dir=_playground_settings())
+        Path(run_dir), fake.deps(), **_handed(run_dir, fake))
     return fake
 
 
-def _playground_settings() -> Path:
-    from defender.tests import _tenants1106
+def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
+    """What `run.py` hands both legs (#1107): the run's record, the code tree and the run's env.
 
-    return _tenants1106.FIXTURE_SETTINGS
+    The record is the committed fixture tenant's (set up under the test's data root), as this
+    lane read the checkout's own mapping before the move; an unconfigured fake gets a tenant
+    planted beside the run with no case-history `config.env`."""
+    from defender.tests import _tenants1106
+    from defender.tests.tenant_1107_settings import _spec1107
+
+    if fake.configured:
+        record = _tenants1106.fixture_run_tenant()
+    else:
+        root = Path(run_dir).parent / "unconfigured-tenants"
+        _spec1107.plant(root, "t1047", configs={})
+        record = _spec1107.resolve(root, "t1047")
+    return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
+            "env": mod("run_common").run_env(_tenants1106.DEFENDER, Path(run_dir))}
+
+
+def receipt_path(run_dir: Path) -> Path:
+    """The ticket receipt's location: a sidecar beside the run dir, keyed by the run's name
+    (#1107 moved it out of the box-writable run dir; it was `run_dir/ticket_write.json`)."""
+    return Path(run_dir).parent / f"{Path(run_dir).name}.ticket-write.json"
 
 
 def receipt(run_dir: Path) -> dict | None:
-    """`ticket_write.json`, the lane's own record of what it did — or `None` when the lane
+    """The ticket receipt, the lane's own record of what it did — or `None` when the lane
     wrote none. Demand #0b's stated observable, and F-L's resolution puts the note call's
     outcome here too."""
-    path = Path(run_dir) / "ticket_write.json"
+    path = receipt_path(run_dir)
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8"))

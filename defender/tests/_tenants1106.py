@@ -116,27 +116,21 @@ def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
     return mod("_tenant").accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER, **kw)
 
 
-def run_tenant(tenant: Any, *, grants: Any = None, defender_dir: Path | None = None,
+def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
                dispatches_lead_zero: bool = False) -> Any:
-    """The driver's `RunTenant` for `tenant` (an accepted `Tenant`).
-
-    Its grants are the tenant's own table's unless a scenario hands others in; its lead-zero
-    dispatch identity is resolved through the real check (`run_tenant.correlation_dispatch`,
-    over `defender_dir`'s catalog, default this checkout) only when `dispatches_lead_zero` —
-    the harness says so for exactly the runs the driver dispatches the lead on. Built from the
-    run-start pieces rather than `resolve_run_tenant`, so a scenario's own grants are used as
-    handed (that function also refuses a grant gather can query nothing under, which is the
-    run start's refusal, not the driver's)."""
+    """The driver's `RunTenant` for `tenant` (an accepted `Tenant`), built from the real
+    pieces and nothing else (#1107): run start's readiness function (`resolve_run_tenant`: the
+    same grants, the lead-zero dispatch identity checked over `defender_dir`'s catalog, default
+    this checkout, only when `dispatches_lead_zero` — the harness says so for exactly the runs
+    the driver dispatches the lead on — and the same refusals, raised as run start raises them),
+    then `resolved_settings` (systems, Elastic view, ticket mapping). A scenario that wants
+    other grants plants a tenant whose `verb-grants.yaml` says so."""
     rt = mod("runtime.run_tenant")
-    grants = grants if grants is not None else run_grants(tenant.settings)  # lint-default: ok — test helper: omitted, the tenant's own table (derived from `tenant`, so no signature default can hold it)
-    correlation = (
-        rt.correlation_dispatch(
-            tenant.settings,
-            rt.catalog_templates(defender_dir if defender_dir is not None else DEFENDER),
-            grants.correlation)
-        if dispatches_lead_zero else None
-    )
-    return rt.RunTenant(tenant=tenant, grants=grants, correlation=correlation)
+    ready = rt.resolve_run_tenant(
+        tenant.settings, defender_dir=defender_dir if defender_dir is not None else DEFENDER,
+        dispatches_lead_zero=dispatches_lead_zero)
+    return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
+                        **rt.resolved_settings(tenant))
 
 
 def fixture_run_tenant(**kw: Any) -> Any:
@@ -145,11 +139,21 @@ def fixture_run_tenant(**kw: Any) -> Any:
 
 
 def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
-                 settings_dir: Path = FIXTURE_SETTINGS, **kw: Any) -> Any:
-    """A `VerbContext` carrying `settings_dir` (the required field #1106 adds)."""
+                 tenant: Any = None, settings_dir: Path | None = None, **kw: Any) -> Any:
+    """A `VerbContext` carrying the run's tenant record (the required field #1107 adds).
+
+    `tenant` is a `RunTenant`; omitted, it is the fixture tenant's record, or the record of the
+    accepted tenant whose `settings/` is `settings_dir` (`<root>/<id>/knowledge/settings`, kept
+    as the spelling the pre-#1107 callers used, so a caller names WHICH folder and gets the
+    real record for it)."""
+    if tenant is None:
+        if settings_dir is None or Path(settings_dir) == FIXTURE_SETTINGS:
+            tenant = fixture_run_tenant()
+        else:
+            knowledge = Path(settings_dir).parent
+            tenant = run_tenant(accept(knowledge.parent.parent, knowledge.parent.name))
     return mod("runtime.verbs").VerbContext(
-        defender_dir=Path(defender_dir), run_dir=Path(run_dir), env=env,
-        settings_dir=Path(settings_dir), **kw)
+        defender_dir=Path(defender_dir), run_dir=Path(run_dir), env=env, tenant=tenant, **kw)
 
 
 # ---------------------------------------------------------------------------------------------

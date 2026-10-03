@@ -261,10 +261,11 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
     """A read-only `MappingProxyType` (or the live `os.environ`) must reach the adapter as
     itself, not as a writable snapshot pydantic copied on every `query` call."""
     from defender.runtime.verbs import VerbContext
+    from defender.tests import _tenants1106
 
     env = MappingProxyType({"A": "1"})
     ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env=env,
-                      settings_dir=Path("/s"))
+                      tenant=_tenants1106.fixture_run_tenant())
     assert ctx.env is env
 
 

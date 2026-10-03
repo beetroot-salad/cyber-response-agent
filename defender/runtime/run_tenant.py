@@ -11,14 +11,22 @@ passes is one a run can start with.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from defender._corpus import QueryTemplate, iter_query_templates, query_catalog_dir
 from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
+from defender.runtime import tenant_settings
+from defender.runtime.tenant_settings import (
+    ElasticSettings,
+    SystemConfig,
+)
+from defender.scripts.adapters.faults import ConfigFault
+from defender.scripts.case_history import case_ticket
+from defender.scripts.case_history.case_ticket import CaseMapping, CaseTicketError
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch
@@ -44,7 +52,8 @@ class RunReadiness:
 
 @dataclasses.dataclass(frozen=True)
 class RunTenant:
-    """One run's tenant: the accepted `Tenant`, its grants, and item 3's dispatch identity.
+    """One run's tenant: the accepted `Tenant`, its grants, item 3's dispatch identity, and what
+    its settings say (#1107).
 
     `correlation` is `None` for a run that dispatches no lead zero (a resumed sibling),
     otherwise the checked `CorrelationDispatch`, whose `system` is `None` when the table
@@ -53,6 +62,16 @@ class RunTenant:
     tenant: Tenant
     grants: RunGrants
     correlation: CorrelationDispatch | None
+    #: One entry per folder under `settings/systems/`, each `config.env` parsed ONCE here,
+    #: verbatim (keys as written, prefix included): a `SystemConfig`, or the `ConfigFault` for why
+    #: there is none. A fault is kept, never raised at resolve — that system is down, the run is
+    #: not refused (O5). Asking for a system with no folder gets the "not configured" fault.
+    systems: Mapping[str, SystemConfig | ConfigFault]
+    #: The named view of the corpus engine's system folder — the one place platform code interprets
+    #: its config keys. `None` when the tenant has no such folder.
+    elastic: ElasticSettings | ConfigFault | None  # lint-shippable: ok — the record's field name (#1107)
+    #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
+    ticket_mapping: CaseMapping | CaseTicketError
 
     @property
     def tenant_id(self) -> TenantId:
@@ -127,7 +146,8 @@ def run_tenant_for(
     ready = resolve_run_tenant_or_refuse(
         tenant.settings, tenant_id=tenant.id, defender_dir=defender_dir,
         dispatches_lead_zero=dispatches_lead_zero)
-    return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation)
+    return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
+                     **resolved_settings(tenant))
 
 
 def resolve_run_tenant_or_refuse(
@@ -162,9 +182,34 @@ def resolve_run_tenant(
     return RunReadiness(grants=grants, correlation=correlation)
 
 
+def resolved_settings(tenant: Tenant) -> dict[str, Any]:
+    """The three parts of the record built from the accepted tenant's settings folder — each
+    system's `config.env` (`systems`), the corpus-engine view and the case-history mapping
+    (`ticket_mapping`) — as the keyword arguments `RunTenant` takes. Read ONCE, here, when a run
+    (or a launch) begins; nothing ever raises for a part's content (O5): a part that cannot
+    stand is carried as the fault that says why."""
+    systems = tenant_settings.read_systems(tenant.settings)
+    tenant_settings.warn_missing_access_method(tenant.id, systems)
+    try:
+        ticket_mapping: CaseMapping | CaseTicketError = case_ticket.load_case_mapping(
+            tenant.settings)
+    except CaseTicketError as error:
+        # The text only: the caught error's traceback and cause (the OSError, with its host
+        # path) must not ride the record.
+        ticket_mapping = CaseTicketError(str(error))
+    return {
+        "systems": systems,
+        "elastic": tenant_settings.elastic_view(systems),  # lint-shippable: ok — the record's field name (#1107)
+        "ticket_mapping": ticket_mapping,
+    }
+
+
 __all__ = [
+    "CaseMapping",
+    "ElasticSettings",
     "RunReadiness",
     "RunTenant",
+    "SystemConfig",
     "TenantRefused",
     "resolve_tenant",
     "catalog_templates",
@@ -172,6 +217,7 @@ __all__ = [
     "refusals",
     "resolve_run_tenant",
     "resolve_run_tenant_or_refuse",
+    "resolved_settings",
     "run_tenant_for",
     "table_pointer",
 ]

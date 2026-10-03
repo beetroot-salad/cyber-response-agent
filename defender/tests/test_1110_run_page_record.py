@@ -155,10 +155,10 @@ class _FailingRender(SpecTail):
     """The tail, with a render step that records what it was handed and then fails the way
     the real step reports a failed render."""
 
-    def visualize(self, run: Any) -> None:
+    def visualize(self, run: Any, *, update_ticket: bool = False) -> None:
         from defender import run_common
 
-        super().visualize(run)
+        super().visualize(run, update_ticket=update_ticket)
         raise run_common.VisualizeFailed(f"page for {run.run_dir} not rendered (#1110 O7)")
 
 

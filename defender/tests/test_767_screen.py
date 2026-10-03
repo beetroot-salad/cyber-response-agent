@@ -61,6 +61,7 @@ from defender.tests._spec767 import (
     served_comments,
     served_tickets,
     ticket,
+    current_mapping,
     use_mapping,
 )
 
@@ -614,12 +615,13 @@ def test_767_release_predicate_lives_in_the_mapper(tmp_path, monkeypatch):
     predicate must reach it as an injected value rather than as an import back into it."""
     is_released = require(case_ticket, "is_released", "D4's predicate lives in the mapper")
 
-    settings = _mapping(monkeypatch, tmp_path, released_status="resolved")
+    _mapping(monkeypatch, tmp_path, released_status="resolved")
+    mapping = current_mapping()
     resolved = ticket("SOC-CUSTOM", status="resolved", comments=[comment(AGENT_TEXT)])
 
-    assert is_released(resolved, settings_dir=settings) is True
-    assert is_released(_unreleased(), settings_dir=settings) is False
-    assert is_released(_released(), settings_dir=settings) is False, (
+    assert is_released(resolved, mapping=mapping) is True
+    assert is_released(_unreleased(), mapping=mapping) is False
+    assert is_released(_released(), mapping=mapping) is False, (
         f"the previous released status {RELEASED_STATUS!r} still releases after the mapping "
         "named another — the predicate is keyed on a code literal, not on the mapping"
     )
@@ -670,15 +672,15 @@ def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monk
     )
     root = tmp_path / "dfn"
 
-    settings = use_mapping(monkeypatch, root, mapping_doc())
-    built = build(settings)
+    use_mapping(monkeypatch, root, mapping_doc())
+    built = build(current_mapping())
     assert built.is_released(_released()) is True, "the control failed: a valid mapping builds"
 
     use_mapping(monkeypatch, root, mapping_doc(released_status=f"  {RELEASED_STATUS} "))
-    assert build(settings).is_released(_released()) is True, (
+    assert build(current_mapping()).is_released(_released()) is True, (
         "a quoted, padded `released.status` configured a state no ticket can carry"
     )
-    assert build(settings).is_released(_unreleased(status=f"  {RELEASED_STATUS} ")) is False, (
+    assert build(current_mapping()).is_released(_unreleased(status=f"  {RELEASED_STATUS} ")) is False, (
         "the ticket's own status was trimmed — the store's vocabulary is canonical"
     )
 
@@ -695,7 +697,7 @@ def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monk
     for why, doc in unsafe.items():
         use_mapping(monkeypatch, root, doc)
         with pytest.raises(case_ticket.CaseTicketError):
-            build(settings)
+            build(current_mapping())
 
         # FK20's read-side half: the screen degrades, it does not raise into the turn and it
         # does not refuse the whole call.
@@ -711,7 +713,7 @@ def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monk
             assert t["summary"] == "a prior case", f"{why}: a record lost its other fields"
 
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{disposition}"))
-    assert build(settings).is_released(_released()) is True, (
+    assert build(current_mapping()).is_released(_released()) is True, (
         "the control failed after the loop: a valid mapping must still build"
     )
 
@@ -732,7 +734,7 @@ def test_767_an_unreadable_mapping_file_degrades_the_screen(tmp_path, monkeypatc
     path.write_bytes(b"released:\n  status: \xff\xfe not utf-8\n")
 
     with pytest.raises(case_ticket.CaseTicketError, match="UTF-8"):
-        case_ticket.release_predicate(settings)
+        case_ticket.release_predicate(current_mapping())
 
     capsys.readouterr()
     payload, code, detail = screen_list(listing(_released(), _unreleased()))

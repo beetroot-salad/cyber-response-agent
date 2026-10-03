@@ -50,7 +50,9 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
     episode_dir = episodes_root / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(Episode.open(manifest.parent), "b", settings=lambda: H.T1106.FIXTURE_SETTINGS)
+    world = H.run_py().resume_world(
+        Episode.open(manifest.parent), "b",
+        tenant=lambda: H.T1106.run_tenant(H.accept(H.resolve_data_root(), TENANT)))
     run_dir = H.run_common().materialize_run(
         src / "alert.json", world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
         world=world).run_dir

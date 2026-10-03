@@ -11,7 +11,7 @@ authoring against the #611/#617 migration.
 **RED BY CONSTRUCTION.** Every import here resolves against HEAD (only existing corpus machinery
 is imported), but the *assertions* describe the POST-migration content. Today the templates still
 fence bare argv, ``SCHEMA.md`` still names the deleted ``shell/SQL-shaped`` category, the connect
-skill still teaches ``AdapterArgumentParser``/the shim, and the docs still cite the dead CLI
+skill still teaches ``AdapterArgumentParser``/the shim, and the docs still cite the dead CLI  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
 contract — so these tests are RED against current file content and go GREEN once
 write-code-from-spec edits the files. That is the correct red.
 
@@ -410,7 +410,7 @@ def test_connect_teaches_the_registry_contract_not_the_shim():
     """
     text = _connect_skill_text()
 
-    assert "AdapterArgumentParser" not in text, "connect/ still teaches AdapterArgumentParser"
+    assert "AdapterArgumentParser" not in text, "connect/ still teaches AdapterArgumentParser"  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
     assert "EXIT_USAGE" not in text, "connect/ still teaches the EXIT_* / die() adapter contract"
     assert "resolve_auth" not in text, "connect/ still routes credentials through _adapter.resolve_auth"
     assert not re.search(r"[Rr]egister the shim", text), "connect/ still tells the author to register a shim"
@@ -432,7 +432,7 @@ def test_connect_examples_compile_against_the_live_tree():
 
     ``connect/examples/`` modules import/compile against the current tree and instantiate the
     LIVE shape (a ``VERBS`` mapping, ``VerbContext``, ``faults.py``, a health-check that RETURNS
-    a dict) — not ``AdapterArgumentParser`` / ``build_parser`` / ``main()`` / ``die()`` /
+    a dict) — not ``AdapterArgumentParser`` / ``build_parser`` / ``main()`` / ``die()`` /  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
     ``EXIT_*`` / a bash shim, none of which any shipped adapter imports.
     """
     for py in sorted(_EXAMPLES.glob("*.py")):
@@ -460,7 +460,7 @@ def test_connect_examples_compile_against_the_live_tree():
         if not (_EXAMPLES / f"{name}.py").exists():
             continue
         mod = _load_example(name)
-        for dead in ("AdapterArgumentParser", "build_parser", "main", "die", "resolve_auth",
+        for dead in ("AdapterArgumentParser", "build_parser", "main", "die", "resolve_auth",  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
                      "EXIT_USAGE"):
             assert not hasattr(mod, dead), f"examples/{name}.py still defines the dead symbol {dead!r}"
 
@@ -472,7 +472,7 @@ def test_dead_contract_docs_rehomed():
     ``scripts/adapters/README.md``, ``docs/system-skill-shape.md``,
     ``docs/state-surface-adapters.md``, ``docs/lead-author-failure-pitfalls.md:70`` (mis-cites
     ``examples/_adapter.py`` as the exit taxonomy — it is ``faults.py``), and the handbook name
-    the query-tool/VERBS contract and NOT the dead shim/AdapterArgumentParser/
+    the query-tool/VERBS contract and NOT the dead shim/AdapterArgumentParser/  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
     ``print(json.dumps(payload))``/register-the-shim one — the new-contract text is PRESENT, not
     merely the old absent. (lint_stale_refs cannot gate this, so these assertions ARE the gate.)
 
@@ -481,7 +481,7 @@ def test_dead_contract_docs_rehomed():
     """
     cases = [
         (_DEFENDER / "scripts" / "adapters" / "README.md",
-         ["AdapterArgumentParser", "print(json.dumps(payload))"],
+         ["AdapterArgumentParser", "print(json.dumps(payload))"],  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
          ["VERBS", "query tool"]),
         (_DOCS / "system-skill-shape.md",
          ["Adapter CLI invocation pattern", "Flag conventions"],

@@ -122,10 +122,12 @@ greenfield tree there's nothing cached yet, so ask all four.
    Freeform — "host inventory and trust edges", "who is authorized on a
    host", "auth events", "IoC reputation". You need this for the
    Visibility surface; refine it after the sample query.
-4. **What env vars hold the credentials, if any?** Names, not values. Some
+4. **What credentials does it need, if any?** Names, not values. Some
    read sources are auth-less. You never ask for a secret value, token, or
-   auth-bearing cURL — if one is offered, refuse and say it belongs in an
-   env var. This is the credential boundary; it is non-negotiable.
+   auth-bearing cURL — if one is offered, refuse it: it never goes in a file you
+   write or in this conversation. This is the credential boundary; it is
+   non-negotiable. A system that needs a credential cannot be connected yet:
+   there is no credential delivery until #1163 lands — say so and stop.
 
 ### 3. Route and build
 
@@ -174,10 +176,11 @@ everything here grows post-merge.
 
 `settings/systems/{system}/config.env` in the connected tenant's OWN repo (deployed as
 `$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in this repo) — the tenant's non-secret
-config (endpoint, timeout, `AUTH_TYPE`, the *names* of secret env vars). Also add a
-`CHANGE-ME` placeholder copy at `knowledge/tenant-template/settings/systems/{system}/config.env`
-in this repo, so a tenant scaffolded from the template knows the keys.
-Track it in the tenant's repo when it holds no secrets. Secrets are always env vars.
+config (endpoint, timeout, `AUTH_TYPE`, the access lines `<PREFIX>_TRANSPORT=docker-exec`
+and `<PREFIX>_DOCKER_CONTEXT`). Also add a `CHANGE-ME` placeholder copy at
+`knowledge/tenant-template/settings/systems/{system}/config.env` in this repo, so a tenant
+scaffolded from the template knows the keys.
+Track it in the tenant's repo when it holds no secrets. A secret is never in this file.
 
 `defender/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
@@ -268,8 +271,7 @@ stage them there the same way, and run `python3 defender/scripts/tenant.py check
 <that repo>` to see the census over them.
 
 **You do not merge or push.** Present a summary: files touched,
-health-check result, one line of sample output, env vars the maintainer
-must set, open items, and what to expect next (the first runs will hit
+health-check result, one line of sample output, open items, and what to expect next (the first runs will hit
 query-composition friction; the catalog fills in post-merge via the
 offline lead-author). Tell them: "Review the diff and merge when ready."
 Then stop. `/ship` can open the PR.
@@ -279,10 +281,9 @@ Then stop. `/ship` can open the PR.
 ### Hard limits (non-negotiable)
 
 - **Never handle credential values.** Tokens, passwords, API keys, pasted
-  auth-bearing cURL — all forbidden. If offered one, stop and redirect it
-  to an env var. Secrets live only in env vars; `config.env` holds the
-  *names*, and the transport reads the value from the run's scrubbed
-  `ctx.env` — the skill never sees a value.
+  auth-bearing cURL — all forbidden. If offered one, stop and refuse it.
+  `config.env` holds no secret and no reference to one: credential delivery is
+  #1163, and the skill never sees a value.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
   `skills/{system}/`, that system's `config.env`, its seed templates, and
   its rows in every tenant's and the template's `settings/verb-grants.yaml`

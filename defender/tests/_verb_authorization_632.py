@@ -36,8 +36,8 @@ The surface this suite pins
                    RS14, recorded because it hollows deny-by-default's reach over newly
                    scaffolded SYSTEMS (a new verb on a system the role already holds is
                    still denied, which is what keeps that obligation non-vacuous).
-    `VerbContext(defender_dir, run_dir, env, settings_dir, capture=None)` (`settings_dir` since
-    #1106: the run's tenant settings folder) — `capture` is the transport
+    `VerbContext(defender_dir, run_dir, env, tenant, capture=None)` (`tenant` since
+    #1107: the run's tenant record) — `capture` is the transport
     capture seam (phase F, finding 6): a `TransportCapture` sink each adapter records its
     resolved outbound request into, before sending.
 

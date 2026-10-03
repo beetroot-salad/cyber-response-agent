@@ -56,8 +56,7 @@ def _setup_state(run: Run) -> str:
     extra = sorted(set(listing.entries or {}) - setup_names)
     # The scrub verdict is written at box start, so even a box that died before writing into
     # the tree leaves a sidecar.
-    sidecars = (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path)
-    if extra or any(_io.entry_present(p) for p in sidecars):
+    if extra or any(_io.entry_present(p) for p in _sidecars(run)):
         return "ran"
     return "setup"
 
@@ -144,12 +143,17 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
     return run_id
 
 
+def _sidecars(run: Run) -> tuple[Path, ...]:
+    """The four files beside the run dir, keyed by its run id: the run-end record, the scrub
+    verdict, the accounting failures and the ticket receipt (#1107 moved it out of the tree)."""
+    return (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
+            run.observability.ticket_write.path)
+
+
 def _clear_stale_sidecars(run: Run) -> None:
     """Remove sidecars a previous attempt under this reused run id left beside its removed dir
     — exact-run-id-keyed, never a glob. Only called when the dir is absent."""
-    for sidecar in (
-        run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
-    ):
+    for sidecar in _sidecars(run):
         try:
             sidecar.unlink()
         except FileNotFoundError:
@@ -200,12 +204,22 @@ def _stamp(
                       "nothing downstream can prove which code it ran")
 
 
-def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+def provider_scrubbed_environ() -> dict[str, str]:
+    """The process's environment as a copy, with every registered provider's API-key variable removed — the base of
+    every host child's environment (`run_env` adds a run's variables on top; the branch
+    launcher's write door, which has no run yet, takes it as is). The ONE scrub, so no host
+    child is handed a registered provider's key by a caller that forgot to drop it (other
+    credential variables are not this scrub's to know)."""
     from defender.runtime import providers
 
     env = dict(os.environ)
     for var in providers.api_key_vars():
         env.pop(var, None)
+    return env
+
+
+def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+    env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
@@ -221,11 +235,13 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
-def visualize(run: Run) -> None:
+def visualize(run: Run, *, update_ticket: bool = False) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
     been scrubbed, so the model never had a chance to rewrite its own report.
+
+    `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), passed on as an argument.
 
     Only the load is decided here. The renderer is imported lazily — it reads its stylesheet at
     import time, and nothing but this step needs it — and inside the `try`, so a renderer that
@@ -236,7 +252,7 @@ def visualize(run: Run) -> None:
         from defender.scripts.visualize import visualize_run as vr
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
-    vr.publish_page(run)
+    vr.publish_page(run, update_ticket=update_ticket)
 
 
 def cross_check_tables(run_dir: Path) -> None:

@@ -65,6 +65,11 @@ EXCLUDED_PREFIXES = (
     "defender/docs/",
     # Per-vendor adapters live under scripts/adapters/ — by design vendor-named.
     "defender/scripts/adapters/",
+    # The record's settings parts (#1107): the ONE module that reads each system's `config.env`
+    # into the run's record and names the corpus engine's keys (`ElasticSettings`), so that no
+    # other platform module interprets them (the census test `d4_elastic_keys_one_place` holds
+    # that). A file, not a directory: the carve-out is this module and nothing beside it.
+    "defender/runtime/tenant_settings.py",
     # Per-vendor corpus stagers, the read-side twin of scripts/adapters/: how an index is
     # addressed is irreducibly per-vendor. One directory deep so `estate/registry.py` beside
     # it stays inside the gate.

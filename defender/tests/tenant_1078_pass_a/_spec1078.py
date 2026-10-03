@@ -409,7 +409,7 @@ class Recorder:
         self.order.append("lifecycle")
         return {"output": "spec1078", "requests": 0, "truncated_by": None}
 
-    def visualize(self, run_dir: Path) -> None:
+    def visualize(self, run_dir: Path, **_kw: Any) -> None:
         self.order.append("visualize")
 
     def enqueue(self, *_a: Any, **_kw: Any) -> bool:

@@ -12,7 +12,7 @@ through the same injected `io=` seam as every read.
 Every read and write goes through the rooted seam (`_io.rooted_read`, `rooted_mkdir`,
 `rooted_write`, `rooted_locked_for_rewrite`): the record's trust root, whose spelling is
 followed, and its name relative to that root, which never is (#1111). The trust root is the run
-dir; the runs base for the three sidecars; `SessionPaths(runs_base).trust_root` for the session
+dir; the runs base for the four sidecars; `SessionPaths(runs_base).trust_root` for the session
 db. The session db itself is opened through `session_store.open_store`. The two model-authored documents are validated against
 `_artifact_schema` at every write, so no writer bypasses the schema.
 """
@@ -78,10 +78,11 @@ MEMBER_VERB: dict[str, str | None] = {
     "session_db": "open",
 }
 UPWARD_ACCESSORS = (
-    "run_end_sidecar", "scrub_verdict", "accounting_failures", "sessions_dir", "session_db")
-#: The three sidecars sit directly in the runs base, so they are anchored there. (The session
+    "run_end_sidecar", "scrub_verdict", "accounting_failures", "ticket_write", "sessions_dir",
+    "session_db")
+#: The four sidecars sit directly in the runs base, so they are anchored there. (The session
 #: db's `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting")
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting", "ticket_write")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict and accounting counter are facts too but are rewritten, so they use `replace` like
 #: every other `write`.

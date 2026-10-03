@@ -186,7 +186,7 @@ def run_ctx(tmp_path: Path) -> VerbContext:
     run_dir = tmp_path / "sibling-run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={},
-                       settings_dir=_tenants1106.FIXTURE_SETTINGS)
+                       tenant=_tenants1106.fixture_run_tenant())
 
 
 # 1. what a primed row is

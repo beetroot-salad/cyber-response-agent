@@ -224,7 +224,7 @@ demands:
   # from-import alias and a module-attribute call count; getattr/importlib by string is the floor.
   - {id: o3_resolve_data_root_only_from_entry_points, kind: negative, form: test,
      binds: [resolve_data_root, run.main, branch.cli.main, held_out.main, tenant.setup,
-             tenant.check, policy_cli.main, ticket_adapter.main, validate_scaffold.main, materialize_run,
+             tenant.check, policy_cli.main, validate_scaffold.main, materialize_run,
              tenant_of_run_dir],
      discharged_by: test_1120_resolve_data_root_is_called_once_and_only_from_entry_points}
   # §7 fold (47 row 15; DC2, M7 decided, MF1 Q2 rules-first): F8 closed by correction 3 — the 8
@@ -240,7 +240,7 @@ demands:
   - {id: o3_entry_point_refusal_matrix, kind: parity, form: test,
      binds: ["accept_tenant.access[run.main]", "accept_tenant.access[branch.cli.main]",
              "accept_tenant.access[tenant.setup]", "accept_tenant.access[tenant.check]",
-             "accept_tenant.access[ticket_adapter.main]", "accept_tenant.access[tenant.scaffold]",
+             "accept_tenant.access[tenant.scaffold]",
              "accept_tenant.access[policy_cli.main]", "accept_tenant.access[validate_scaffold.main]",
              "DEFENDER_DATA_ROOT.domain.distinguished[learning-state-overlap]"],
      discharged_by: test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses}
@@ -267,7 +267,7 @@ demands:
              "tenants_root.access[add_tenant_arguments]", "tenants_root.access[sibling_argv]", template_dir],
      discharged_by: test_1120_the_tenants_root_surface_is_gone_and_template_dir_stays}
   - {id: d1_operator_commands_read_data_root_settings, kind: coherence, form: test,
-     binds: ["interacts(policy_cli.main->settings_half)", "interacts(ticket_adapter.main->settings_half)",
+     binds: ["interacts(policy_cli.main->settings_half)",
              "interacts(validate_scaffold.main->settings_half)"],
      discharged_by: test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts}
   # F17 (auto): Tenant.id; RunTenant.tenant_id stays as a delegating property.
@@ -640,12 +640,12 @@ demands:
      discharged_by: test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_running_catalog}
   # §7 fold (47 row 64; M6 (b)+(x) decided, human): the clause becomes a TEST. check exits 1 naming
   # verb-grants.yaml; run, the launcher, policy_cli gather and setup (NF1's "tables load") refuse it
-  # naming the file; ticket_adapter and validate_scaffold never load it and
-  # accept. `# rejected: an all-withheld table as a finding` (M6).
+  # naming the file; validate_scaffold never loads it and accepts (ticket_adapter's leg went with
+  # its command line: TICKET-ADAPTER-CLI-REMOVED-BY-1107). `# rejected: an all-withheld table as a finding` (M6).
   - {id: d7_check_refuses_an_unloadable_table, kind: domain-outcome, form: test,
      binds: [tenant.check, "grant_census.domain.distinguished[unloadable-table]", "grant_census.access[setup]",
              run.main, branch.cli.main, policy_cli.main, tenant.setup,
-             ticket_adapter.main, validate_scaffold.main],
+             validate_scaffold.main],
      discharged_by: test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table}
   # §7 fold (47 row 65; M6 decided, human): the clause becomes a TEST. An adapter import failure while
   # the census is built makes `tenant.py check` exit non-zero naming the module, never 0.
@@ -660,13 +660,13 @@ demands:
      binds: ["accept_tenant.access[validate_scaffold.main]", "accept_tenant.access[policy_cli.main]",
              "DEFENDER_DATA_ROOT.domain.distinguished[learning-state-overlap]"],
      discharged_by: test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses}
-  # §7 fold (47 row 67; M7 decided, human): the clause becomes a TEST. ticket_adapter, validate_scaffold
-  # and the census lint catch TenantRefused (not only the removed TenantDirError, G24) and surface its
+  # §7 fold (47 row 67; M7 decided, human): the clause becomes a TEST. validate_scaffold and the
+  # census lint (ticket_adapter's command line is gone: TICKET-ADAPTER-CLI-REMOVED-BY-1107) catch TenantRefused (not only the removed TenantDirError, G24) and surface its
   # message in their own idiom, never a traceback.
   - {id: d1_refusal_catchers_take_tenant_refused, kind: survival, form: test,
-     binds: [TenantDirError, TenantRefused, ticket_adapter.main, validate_scaffold.main,
+     binds: [TenantDirError, TenantRefused, validate_scaffold.main,
              lint_verb_disposition_census],
-     discharged_by: test_1120_ticket_adapter_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback}
+     discharged_by: test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback}
   # §7 fold (47 row 68; M8 (a) decided, human): the clause becomes a TEST. accept_tenant and check <id>
   # accept agent/.tenant-id holding exactly the id plus at most one LF or CRLF, read bounded (at most 128
   # bytes), and refuse every listed variant naming the file (another id, uppercase, BOM, trailing space,
@@ -921,7 +921,7 @@ demands:
   # validate_scaffold's exit status: M7 decided (advisory WARN, human). The test pins the named refusal,
   # no checkout fallback, and validate_scaffold's advisory status.
   - {id: s071, kind: domain-outcome, form: test,
-     binds: ["DEFENDER_DATA_ROOT.domain.distinguished[unset]", ticket_adapter.main, validate_scaffold.main, policy_cli.main],
+     binds: ["DEFENDER_DATA_ROOT.domain.distinguished[unset]", validate_scaffold.main, policy_cli.main],
      discharged_by: test_1120_s6_operator_tools_in_a_shell_without_the_data_root}
   - {id: s083, kind: behavior, form: test, binds: [Tenant],
      discharged_by: test_1120_s8_tenant_layout_members_with_no_production_reader}
@@ -1493,7 +1493,6 @@ structure:
     - {id: branch.cli.main, frame: composition, provenance: code}  # fans the siblings (drives run.main, concurrent)
     - {id: held_out.main, frame: leg, provenance: code}
     - {id: policy_cli.main, frame: leg, provenance: code}        # gather role only today (G20)
-    - {id: ticket_adapter.main, frame: leg, provenance: code}
     - {id: validate_scaffold.main, frame: leg, provenance: code} # advisory today (G19)
     - {id: create_tenant, frame: leg, provenance: code}
     - {id: require_tenant, frame: leg, provenance: code}
@@ -1541,7 +1540,6 @@ structure:
             branch.cli.main:     {trust: derived,  constraints: [runs-base-record-id, accept-tenant-checks, episodes-base-refusal]}
             tenant.setup:        {trust: operator, constraints: [one-tenant-guard, accept-tenant-checks, settings-files-parse, run-start-readiness]}   # V18 (human, 73 round 4): setup = run start's own readiness function (V14) + the folder rules (accept-tenant-checks: links and special files, .tenant-id presence + match, the top-level allow-list; settings-files-parse: mapping.yaml included, which run start does not read); never check's census; rules first, then the row (MF1 Q2). Was [one-tenant-guard, accept-tenant-checks, tables-load] (DC1/NF1, pre-V1)
             tenant.check:        {trust: operator, constraints: [accept-tenant-checks, grant-census]}
-            ticket_adapter.main: {trust: operator, constraints: [accept-tenant-checks]}
             tenant.scaffold:     {trust: operator, constraints: [tenant-id-grammar]}
             # M7 DECIDED at §7 (human, 70-resolutions: "keep as they are"; was `unknown`, correction 3):
             policy_cli.main:        {trust: operator, constraints: [accept-tenant-checks, gather-role-only]}
@@ -1759,7 +1757,6 @@ structure:
     - {from: tenant.setup, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: tenant.check, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: policy_cli.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
-    - {from: ticket_adapter.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
     - {from: validate_scaffold.main, to: accept_tenant, mode: invoke, via: api, provenance: design}
     # ---- accept_tenant's seven checks, in order (D1)
     - {from: accept_tenant, to: tenant_id, mode: read, via: argv, provenance: design}
@@ -1775,7 +1772,6 @@ structure:
     - {from: run.main, to: settings_half, mode: read, via: fs, provenance: design}
     - {from: branch.cli.main, to: settings_half, mode: read, via: fs, provenance: design}
     - {from: policy_cli.main, to: settings_half, mode: read, via: fs, provenance: design}
-    - {from: ticket_adapter.main, to: settings_half, mode: read, via: fs, provenance: design}
     - {from: validate_scaffold.main, to: settings_half, mode: read, via: fs, provenance: design}
     - {from: verb_dispositions.run_grants, to: settings_half, mode: read, via: fs, provenance: code}
     - {from: verb_dispositions.dispositions_path, to: settings_half, mode: read, via: fs, provenance: code}
@@ -1802,7 +1798,6 @@ structure:
     - {from: resolve_data_root, to: DEFENDER_DATA_ROOT, mode: read, via: env, provenance: code}
     - {from: episodes_root, to: DEFENDER_EPISODES_BASE, mode: read, via: env, provenance: code}
     - {from: episodes_root, to: Tenant, mode: read, via: api, provenance: design}
-    - {from: ticket_adapter.main, to: DEFENDER_DIR, mode: read, via: env, provenance: code}
     - {from: validate_scaffold.main, to: DEFENDER_DIR, mode: read, via: env, provenance: code}
     # ---- setup (D7 as revised by DC2, DC1, MF1, V14, V18): the guard, then the folder rules (links and
     #      special files, .tenant-id presence + match, the top-level allow-list, the settings files parse —
@@ -1857,7 +1852,6 @@ structure:
     - {from: run_tenant.resolve_tenant, to: tenant_dir, mode: remove, via: api, provenance: design}
     - {from: run_tenant.resolve_tenant, to: TenantDir, mode: remove, via: api, provenance: design}
     - {from: run_tenant.resolve_tenant, to: TenantDirError, mode: remove, via: api, provenance: design}
-    - {from: ticket_adapter.main, to: entry_tenant, mode: remove, via: api, provenance: design}
     - {from: validate_scaffold.main, to: entry_tenant, mode: remove, via: api, provenance: design}
     - {from: policy_cli.main, to: entry_tenant_args, mode: remove, via: api, provenance: design}
     - {from: run.main, to: request_tenant, mode: remove, via: api, provenance: design}
@@ -1866,7 +1860,6 @@ structure:
     - {from: branch.cli.main, to: tenants_root, mode: remove, via: argv, provenance: design}
     - {from: sibling_argv, to: tenants_root, mode: remove, via: argv, provenance: design}
     - {from: policy_cli.main, to: tenants_root, mode: remove, via: argv, provenance: design}
-    - {from: ticket_adapter.main, to: tenants_root, mode: remove, via: argv, provenance: design}
     - {from: validate_scaffold.main, to: tenants_root, mode: remove, via: argv, provenance: design}
     # ---- LIVE dependents of removed surfaces at a1c65801 — R5 asks each for its survival
     - {from: lint_run_records, to: TenantPaths, mode: read, via: api, provenance: code}           # _accessor_names imports it; _OWNER_CLASS_ORIGINS names it (C9, F7)
@@ -1875,7 +1868,6 @@ structure:
     - {from: lint_verb_disposition_census, to: tenant_dir, mode: read, via: api, provenance: code}
     - {from: lint_verb_disposition_census, to: TenantDir, mode: read, via: api, provenance: code}
     - {from: lint_verb_disposition_census, to: TenantDirError, mode: read, via: api, provenance: code}        # G24
-    - {from: ticket_adapter.main, to: TenantDirError, mode: read, via: api, provenance: code}                 # G24 (catches only it)
     - {from: validate_scaffold.main, to: TenantDirError, mode: read, via: api, provenance: code}              # G24
     - {from: replay_harness, to: tenant_dir, mode: read, via: api, provenance: code}                           # F19, the largest chokepoint (H2)
     - {from: path_only_tests, to: tenants_root, mode: remove, via: fs, provenance: design}                         # G7's 58; exempt until D9 step 7 (H2)
@@ -1891,7 +1883,6 @@ structure:
     - {from: branch.cli.main, to: tenant_of_run_dir, provenance: code, multiplicity: serial}
     - {from: branch.cli.main, to: episodes_root, provenance: code, multiplicity: serial}
     - {from: policy_cli.main, to: resolve_data_root, provenance: design, multiplicity: serial}   # NEW: operator commands resolve the root (D1)
-    - {from: ticket_adapter.main, to: resolve_data_root, provenance: design, multiplicity: serial}
     - {from: validate_scaffold.main, to: resolve_data_root, provenance: design, multiplicity: serial}
     - {from: run.main, to: materialize_run, provenance: code, multiplicity: serial}
     - {from: run.main, to: tenant_of_run_dir, provenance: code, multiplicity: serial}          # under --resume
@@ -3182,7 +3173,6 @@ gate:
   - {rule: R3, element: 'accept_tenant.access[held_out.main]', by: o3_entry_point_refusal_matrix, cites: [GT1]}
   - {rule: R3, element: 'accept_tenant.access[tenant.setup]', by: o3_entry_point_refusal_matrix, cites: [GT1]}
   - {rule: R3, element: 'accept_tenant.access[tenant.check]', by: o3_entry_point_refusal_matrix, cites: [GT1]}
-  - {rule: R3, element: 'accept_tenant.access[ticket_adapter.main]', by: o3_entry_point_refusal_matrix, cites: [GT1]}
   - {rule: R3, element: 'accept_tenant.access[tenant.scaffold]', by: o3_entry_point_refusal_matrix, cites: [GT1]}
   - {rule: R3, element: 'accept_tenant.access[policy_cli.main]', by: [o3_entry_point_refusal_matrix, o3_matrix_fork_dependent_cells], cites: [GT1]}
   - {rule: R3, element: 'accept_tenant.access[validate_scaffold.main]', by: [o3_entry_point_refusal_matrix, o3_matrix_fork_dependent_cells], cites: [GT1]}
@@ -3310,7 +3300,7 @@ gate:
   - rule: R5
     element: 'tenants_root'
     witness: >-
-      six tenants_root access cells are removed (run.main, branch.cli.main, sibling_argv, policy_cli.main, ticket_adapter.main, validate_scaffold.main) and the live dependent path_only_tests (the 58 path-only lab readers, G7) is bound by no demand. H2 exempts them until D9 step 7: the survival is the lab staying readable by path.
+      six tenants_root access cells are removed (run.main, branch.cli.main, sibling_argv, policy_cli.main, ticket_adapter.main — since withdrawn with its command line, TICKET-ADAPTER-CLI-REMOVED-BY-1107 — validate_scaffold.main) and the live dependent path_only_tests (the 58 path-only lab readers, G7) is bound by no demand. H2 exempts them until D9 step 7: the survival is the lab staying readable by path.
     discharged_by: h2_path_only_tests_keep_the_lab_by_path
   - rule: R7
     element: 'interacts(branch.cli.main->RunTenant)'
@@ -3442,6 +3432,8 @@ handoff:
     - "ONE-OFF-MIGRATION (PR #1157, after the third code review; finding 2): a data root made before #1120 (row, runs/, sessions/, no knowledge/) is refused at step 3, and its remedy 'clone the tenant repo' cannot be followed for a tenant whose settings lived in the checkout's knowledge/tenants/<id>/. The human: '2. one-off migration'. Adds `tenant.py migrate <id> <folder>`: builds the folder as a new repo committing the checkout's HEAD copy plus agent/.tenant-id (scaffold's copy-and-commit), resolves no data root (the resolve_data_root census is unchanged), writes no row; the operator then runs setup, which judges it. The no-knowledge refusal names it. Not modelled as an actor or demand: one-off, retired with the checkout's copies (#1158); pinned by defender/tests/test_1120_migrate.py outside the spec suite. resolved_by: human"
     - "LAB-RETIRED (PR #1157; #1158 option 1 folded in): the human: 'The product repo should be clean, everything else should move to an external directory', then 'Fold'. H2 kept knowledge/tenants/playground committed for the path-only test readers until D9 step 7; piece 1 now takes that step. The ~40 readers move to knowledge/tenant-fixture (byte-identical to the lab), _tenants1106's PLAYGROUND/PLAYGROUND_SETTINGS/PLAYGROUND_AGENT/TENANTS_ROOT and _spec1120's LAB go, the lab is deleted, o10's census (test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants) loses the path-only exemption and flags the constants and any non-prose knowledge/tenants string, R5's test becomes test_1120_the_lab_is_retired_from_the_checkout, and the spec tests that used the lab as a decoy (O1's run lane, D1's operator commands) set the data root against the fixture instead. migrate (ONE-OFF-MIGRATION) now reads the lab's last copy from git history. The agent half's lessons (defender/lessons/) stay: #1108. resolved_by: human"
     - "GENERATE-CASE-REMOVED (PR #1157): defender/evals/oracle_golden/generate_case.py refused every call since #922 retired its assembler; it was the last tenant-taking evaluation tool besides held_out. The human: 'Remove generate_case'. The file and its tests go. Graph: the generate_case.main actor and its four edges are withdrawn, with every bind naming it (O3's matrix, the resolve census, the child-process demand, the unloadable-table demand); o3_no_row_only_acceptance -> form: waiver (no subject left); pass-A's d4_generate_case_tenant, s7_generate_case_parent_child_roots and s7_generate_case_no_row demands -> form: waiver, s7_generate_case_held_out_migrated keeps its held_out --help leg; #872's d75 keeps its test (it pins the re-executed run.py child, which the launcher's siblings still are). Recruiting new calibration cases has no tool until the estate replay harness. resolved_by: human"
+    - "TICKET-ADAPTER-CLI-REMOVED-BY-1107 (PR #1157, merging main after #1156): #1107 deleted defender/scripts/adapters/ticket_adapter.py's command line (no main, no --tenant), while O3 named ticket_adapter.main a tenant-taking entry point (the refusal matrix, the resolve_data_root census, D1's operator-command coherence, D7's unloadable-table consumers, M7's catchers, s071's unset-data-root cell, the review follow-up on DEFENDER_DIR containment). #1107 merged first, so the code has no entry point to test. Taken: the ticket_adapter.main actor, its access cell, its seven edges and the R3 waiver row are withdrawn, every bind naming it is narrowed to the remaining entry points, and the legs that drove it are removed from the tests (d1_refusal_catchers_take_tenant_refused's test renamed test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback). Nothing is lost on the run path: the adapter reads its settings from the run's tenant record (#1107), which run start builds over accept_tenant. resolved_by: auto (cross-spec; awaiting the human's review on PR #1157)"
+    - "MF13-RUNS-BASE-ARM-MOOT (PR #1157, merging main after #1156): #1107's test_s7_mf13_launcher_refuses_box_mounted_tenants_root drove the launcher over a --tenants-root placed inside (a) the episodes base and (b) the source's runs base, expecting a refusal before spend. Under #1120 there is no tenants root: settings live at <data root>/<T>/knowledge/settings and the runs base is <data root>/<T>/runs, so arm (b) is circular, and acceptance's step 7 already holds every tenant's settings out of its own runs base (test_1120_tenant_link_loops::test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree). Taken: arm (a) is ported (the data root inside the episodes base; the launcher refuses naming 'which a box mounts', before spend); arm (b) is dropped. resolved_by: auto (cross-spec; awaiting the human's review on PR #1157)"
     - "H2 (closes 20-demands F16 and brief R2): piece 1 re-homes the ~98 lab-reaching test files onto knowledge/tenant-fixture under a tmp data root through their ~10 helper chokepoints (replay harness drive first); no test-only survival of tenant_dir / default_tenants_root / entry_tenant* / --tenants-root; O3's census strict; the 58 path-only files may read the lab by path until D9 step 7. Graph: o10_tests_need_no_tenant_repo narrowed; replay_harness -> tenant_fixture edge. resolved_by: human"
     - "H3 (closes 20-demands F3 and brief R4): absorb TenantPaths fully; the four pre-acceptance sites get owners that are not Tenant (HOW decided at §7 as M4: a private layout class); J03 and O11a survive in its constructor; the pass-A demands binding TenantPaths (and J44's discharging test) are re-bound by explicit superseding entries — the 21 x1078_* clauses (20 + x1078_s7_j08_rowless_own_folder). resolved_by: human"
     - "DC1 (design change adopted at §7 by root-cause questioning; 70-resolutions; issue #1120 issuecomment-5873851696; claim DC1): setup applies only folder-intrinsic rules, never the version-relative grant-gap rule; a clean re-run is silent and writes nothing; check, tenant CI and (later) run start report the gap; drops A1's 'setup refuses a gap'. Dissolves M2 (and M1 with DC2). Graph: grant_census.access[setup] = [tables-load]; d7_setup_runs_acceptance_and_check's gap cell flips (setup exit 0, check exit 1); d7_setup_rerun_is_silent_and_writes_nothing gains the DC1 cell; setup -> tenant.check edge withdrawn. resolved_by: human REFINED by V1 (human, §7-verify, 73-resolutions-verify): setup refuses anything that would make a run refuse — the lead-zero agreement joins tables-load in setup (first run and re-run); a grant gap still passes (runs proceed with it). grant_census.access[setup] = [tables-load, lead-zero-agreement]. EXTENDED by V10 (human, 73 round 2): an all-withheld table (gather granted nothing) is setup's refusal too; grant_census.access[setup] = [tables-load, lead-zero-agreement, gather-granted]; check keeps accepting it (M6). SUPERSEDED IN FORM by V14 (human, 73 round 3): setup carries no rule list of its own — it calls run start's own readiness function (grant_census.access[setup] = [run-start-readiness]), so a table granting gather only health-check rows (92r2 #1) is setup's refusal too; the gap stays check's. STATED by V18 (human, 73 round 4): setup = run start's own readiness function + the folder rules, the settings files' parse (mapping.yaml included) among them — DC1's folder-intrinsic 'tables load' survives there for the file run start does not read."

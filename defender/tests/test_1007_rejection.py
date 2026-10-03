@@ -60,7 +60,7 @@ def test_injected_retrieved_is_the_envelopes_own_hits_and_present_is_the_door_co
             adapters=W.FakeAdapters({("elastic", "esql"): {"hits": [injected[0]]},
                                      ("elastic", "query"): {"hits": [injected[0]]}}),
             door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 3}),
-            invoke=W.FakeAgent("same"), settings_dir=_tenants1106.FIXTURE_SETTINGS,
+            invoke=W.FakeAgent("same"), tenant=_tenants1106.fixture_run_tenant(),
             runs_base=ep.parent / "runs-base")
 
     block = record["worlds"]["b"]["reachability"]
@@ -185,7 +185,7 @@ def test_the_review_admits_a_world_that_is_unreachable_by_capture(tmp_path, monk
             adapters=W.FakeAdapters({("elastic", "query"): {"hits": [{"_id": "i1"}]},
                                      ("elastic", "esql"): {"hits": [{"_id": "i1"}]}}),
             door=W.FakeDoor(counts={f"wv-{W.world_token('b')}-logs": 1}),
-            invoke=W.FakeAgent("same"), settings_dir=_tenants1106.FIXTURE_SETTINGS,
+            invoke=W.FakeAgent("same"), tenant=_tenants1106.fixture_run_tenant(),
             runs_base=ep.parent / "runs-base")
 
     entry = record["worlds"]["b"]

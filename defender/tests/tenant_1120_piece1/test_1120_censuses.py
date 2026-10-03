@@ -205,13 +205,13 @@ def test_1120_tenant_is_constructed_only_inside_accept_tenant(
 #: The O3 entry modules that take a tenant in piece 1 (correction 3 / F8), each allowed ONE
 #: call site; `tenant.py` one per subcommand that resolves the root (`setup`, `check <id>`).
 #: Not held_out: an evaluation tool outside the application takes no tenant (human, PR #1157),
-#: so a call there is one outside the entry points.
+#: so a call there is one outside the entry points. Not ticket_adapter: #1107 removed its command
+#: line (fork TICKET-ADAPTER-CLI-REMOVED-BY-1107), so it is no entry point.
 _ENTRY_MODULES = {
     "defender/run.py": 1,
     "defender/learning/branch/cli.py": 1,
     "defender/scripts/tenant.py": 2,
     "defender/scripts/policy_cli.py": 1,
-    "defender/scripts/adapters/ticket_adapter.py": 1,
     "defender/skills/connect/validate_scaffold.py": 1,
 }
 
@@ -260,9 +260,9 @@ def test_1120_resolve_data_root_is_called_once_and_only_from_entry_points(
         tmp_path: Path) -> None:
     """A resolved-reference census of defender/ (excluding tests/) and scripts/ finds calls to
     resolve_data_root in the entry points that take a tenant (O3's list as correction 3 scopes
-    it: run.py, the branch launcher, tenant.py's setup and check, policy_cli, ticket_adapter,
-    validate_scaffold — not held_out, which takes no tenant, nor generate_case, removed: human
-    on PR #1157) and nowhere else: not in defender/_tenant.py beyond the definition itself, and not inside runs_base_for, tenant_of_run_dir or
+    it: run.py, the branch launcher, tenant.py's setup and check, policy_cli, validate_scaffold —
+    not held_out, which takes no tenant, nor generate_case, removed: human on PR #1157, nor
+    ticket_adapter, whose command line #1107 removed) and nowhere else: not in defender/_tenant.py beyond the definition itself, and not inside runs_base_for, tenant_of_run_dir or
     materialize_run, which take a Tenant or the data root instead (C8). Each calling entry
     module holds exactly one call site (tenant.py at most one per subcommand that resolves the
     root). The census finding run.py's call is its positive control, and a call planted in a

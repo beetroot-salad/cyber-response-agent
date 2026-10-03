@@ -145,7 +145,7 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
         DONE,
     ])
     R.drive(run_dir, run_id="o1-1120-data-root", main=main, gather=gather,
-            tenant=run_tenant.tenant, grants=run_tenant.grants)
+            tenant=run_tenant.tenant)
     after = "\n".join(_lead_prompts(gather))
     assert 'query(system="change-mgmt", verb="active-changes"' in after, (
         "positive control: list_verbs did not publish a verb the data-root table grants")
@@ -184,7 +184,7 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
             verbs=R.FakeVerbs({"cmdb": {"get-host": get_host}}))
     assert main.calls == 2, f"the replay did not complete: {main.calls} main turns"
 
-    handed = Path(rec.only().ctx.settings_dir)
+    handed = Path(rec.only().ctx.tenant.settings)
     assert not _under(handed, H.KNOWLEDGE_ROOT), (
         f"the replay ran as a tenant whose settings live in the checkout ({handed}) — the "
         "harness still resolves the lab, not the fixture under the data root")
