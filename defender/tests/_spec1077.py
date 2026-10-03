@@ -731,7 +731,10 @@ def _recorded_path(op: str, args: tuple, kwargs: dict) -> Path:
     if op.startswith("rooted_"):
         b = bound_arguments(op, args, kwargs)
         return Path(b["root"]) / PurePosixPath(b.get("name", b.get("folder_name")))
-    return Path(args[0] if args else next(iter(kwargs.values())))
+    first = args[0] if args else next(iter(kwargs.values()))
+    # An op over an already-open record (`locked_json_update` takes the opener, #1174) is about
+    # no path of its own; the opener's own call carries the record's path.
+    return Path(first) if isinstance(first, (str, os.PathLike)) else Path()
 
 
 class RecordingIo:

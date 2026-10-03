@@ -408,6 +408,13 @@ def _locked(cm: Any) -> None:
         f.write(BODY)
 
 
+def _locked_fd(cm: Any) -> None:
+    """A locked rewrite opener yields the record's descriptor and its `fstat` (#1174
+    amendment 2), never a file object."""
+    with cm as (fd, _st):
+        os.write(fd, BODY.encode())
+
+
 def _held_write(root: Path, name: str, **kw: Any) -> None:
     with _io.hold(root) as held:
         held.write(name, BODY, **kw)
@@ -419,7 +426,7 @@ OTHER_LANES: dict[str, Callable[[Path, str], None]] = {
     "path-replace": lambda root, name: _io.write_guarded(root / name, BODY, mode="replace"),
     "path-append": lambda root, name: _io.write_guarded(root / name, BODY, mode="append"),
     "path-update": lambda root, name: _io.write_guarded(root / name, BODY, mode="update"),
-    "path-locked_for_rewrite": lambda root, name: _locked(_io.locked_for_rewrite(root / name)),
+    "path-locked_for_rewrite": lambda root, name: _locked_fd(_io.locked_for_rewrite(root / name)),
     "path-open_guarded-append": lambda root, name: _locked(_io.open_guarded(root / name, "a")),
     "path-open_guarded-truncate": lambda root, name: _locked(_io.open_guarded(root / name, "w")),
     "path-append_jsonl": lambda root, name: _io.append_jsonl(root / name, BODY_ROWS),
@@ -427,7 +434,7 @@ OTHER_LANES: dict[str, Callable[[Path, str], None]] = {
     "rooted-append": lambda root, name: _io.rooted_write(root, name, BODY, mode="append"),
     "rooted-append-durable": lambda root, name: _io.rooted_write(
         root, name, BODY, mode="append", durable=True),
-    "rooted-locked_for_rewrite": lambda root, name: _locked(
+    "rooted-locked_for_rewrite": lambda root, name: _locked_fd(
         _io.rooted_locked_for_rewrite(root, name)),
     "held-replace": lambda root, name: _held_write(root, name, mode="replace"),
     "held-append": lambda root, name: _held_write(root, name, mode="append"),
