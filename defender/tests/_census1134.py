@@ -27,7 +27,8 @@ Kinds:
                 `_paths.process_defender_dir`.
 - ``attr``      a method call by a Path-verb name (`ATTRS`) whose receiver is neither a module
                 nor a provable `Held` / `Bound` that has that verb (`Held.mkdir`,
-                `Held.unlink`, `Bound.read_bytes`); on a `pathlib` class
+                `Held.unlink`; `Bound` has none: #1134 addendum 3, D1, drops `read_bytes`); on a
+                `pathlib` class
                 (``Path.replace(a, b)``) at any arity.
 - ``load``      a vocabulary function or name, shared reader, constructor or a `pathlib` class's
                 Path verb referenced without being called (``reader = read_text_soft``,
@@ -63,8 +64,8 @@ Kinds:
                 (`passes_through`): that def's own calls are judged by this same rule.
 - ``tree_for``  a ``tree_for=`` keyword argument (any callee), or a `TreeFor` slot of the
                 callee — every parameter annotated exactly `TreeFor` (or `TreeFor | None`) of a
-                top-level def in the scanned tree, `lane_trees.kind_at` / `read_at` /
-                `read_bytes_at`'s positional 1 among them (`TREE_FOR_TAKERS`), also through
+                top-level def in the scanned tree, `lane_trees.kind_at` / `read_at`'s positional 1
+                among them (`TREE_FOR_TAKERS`), also through
                 ``functools.partial(<def>, ...)`` — not handed a provable `TreeFor`
                 (``tree_for=lambda _p: None`` sends every path to the D3 plain fallback): handed
                 something else, not handed at all, or hidden by a ``*`` argument at or before it
@@ -150,7 +151,6 @@ IO_PURE = frozenset({
     "staged_leaf",          # leaf str -> a staged leaf str
     "EntriesRead",          # a listing's result record
     "RecordRead",           # a read's result record
-    "BytesRead",            # a byte-exact read's result record
     "NotPlainEntry",        # the leaf refusal's exception class (`except NotPlainEntry:`)
     "JsonTooDeep",          # `json_safe`'s refusal, an exception class (a `ValueError`)
 })
@@ -255,7 +255,6 @@ READERS: dict[str, tuple[int, str, str]] = {
 TREE_FOR_TAKERS: dict[str, tuple[int, str]] = {
     "defender.learning.core.lane_trees.kind_at": (1, "tree_for"),
     "defender.learning.core.lane_trees.read_at": (1, "tree_for"),
-    "defender.learning.core.lane_trees.read_bytes_at": (1, "tree_for"),
 }
 
 #: Calls whose value is a lane's whole-mount `Held` — `trees.mount(...)` behind a raise on a
@@ -1136,8 +1135,7 @@ class ModuleScan:
         """The `(positional index or -1, keyword)` slots of `origin` that take a `TreeFor`: each
         parameter annotated exactly `TreeFor` (or `TreeFor | None`: a `None` there sends every
         path to the plain fallback, as `tree_for=None` would) of the top-level def it names in
-        the scanned tree (`lane_trees.kind_at` / `read_at` / `read_bytes_at`'s `tree_for` among
-        them)."""
+        the scanned tree (`lane_trees.kind_at` / `read_at`'s `tree_for` among them)."""
         found = self.def_of(origin)
         if found is None:
             return set()

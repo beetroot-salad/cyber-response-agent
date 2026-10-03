@@ -60,8 +60,9 @@ functions (with `os.path.lexists`), walks, xattrs, `chdir` / `chroot` / `pathcon
                 `.rename` only in `Path`'s one-argument or `target=` shape and `.owner` only with
                 none; on a `pathlib` class, `Path.replace(a, b)`, at any arity) on a receiver
                 that is neither a module nor a provable `Held` / `Bound` whose class has that
-                verb (`Held.mkdir`, `Held.unlink`, `Bound.read_bytes`; `Bound` has no `kind`
-                or `walk`, addendum 2 B1, so `.walk()` on a view is a Path-verb hit).
+                verb (`Held.mkdir`, `Held.unlink`; `Bound` has no `kind` or `walk`, addendum 2
+                B1, and no `read_bytes`, addendum 3 D1, so `.walk()` or `.read_bytes()` on a view
+                is a Path-verb hit).
 - ``load``      any of the above, a shared reader or a constructor referenced without being
                 called (`reader = read_text_soft`, `map(os.unlink, ps)`, `partial(hold)`,
                 `filter(Path.is_file, ps)`, `_io._NOT_PLAIN`); a def with a tree slot or a
@@ -104,8 +105,8 @@ functions (with `os.path.lexists`), walks, xattrs, `chdir` / `chroot` / `pathcon
                 a nested def's or a `*args` parameter does not pass through.
 - ``tree_for``  a `tree_for=` keyword argument (any callee), or a `TreeFor` slot — every
                 parameter annotated exactly `TreeFor` (or `TreeFor | None`) of the top-level def
-                the call resolves to in the scanned tree (`lane_trees.kind_at` / `read_at` /
-                `read_bytes_at`'s positional 1 among them, pinned), also through
+                the call resolves to in the scanned tree (`lane_trees.kind_at` / `read_at`'s
+                positional 1 among them, pinned), also through
                 `functools.partial(<def>, ...)` — not handed a provable `TreeFor`
                 (`tree_for=lambda _p: None` sends every path to the D3 plain fallback: s6v2
                 E1, E2a, E2b): handed something else, not handed at all (a partial that leaves
@@ -441,7 +442,6 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(LANE_TREES, "kind_at", "attr", "full.is_dir()", D3, _MISS),
     Allowed(LANE_TREES, "kind_at", "call", "os.path.lexists(full)", D3, _MISS),
     Allowed(LANE_TREES, "read_at", "call", "read_text_soft(full)", D3, _MISS),
-    Allowed(LANE_TREES, "read_bytes_at", "attr", "full.read_bytes()", D3, _MISS),
     # --- B2's listings (#1134 addendum 2): the owner, and the sanctioned listers ---------------
     Allowed(TREE_LISTING, "entry_kind", "listing",
             "(view.under(folder) if folder else view).entries()", B2,
@@ -492,9 +492,10 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(GIT, "_run", "call",
             "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input)",
             N_A, _GIT),
-    Allowed(GIT, "git_show_file_bytes", "call",
-            "subprocess.run(['git', 'show', f'{rev}:{path}'], cwd=cwd, capture_output=True, check=False)",
-            N_A, _GIT),
+    Allowed(GIT, "git_unchanged_since", "call",
+            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, check=False, env={**os.environ, 'GIT_ATTR_SOURCE': rev})",
+            N_A, _GIT + " (`diff --name-only` against the before-state's commit: the curator's "
+            "three \"still the before-state?\" checks, addendum 3 D1)"),
     Allowed(GIT, "_run_bytes", "call",
             "subprocess.run(['git', *args], cwd=cwd, capture_output=True, input=input, check=False)",
             N_A, _GIT + " (the before-state's `ls-tree` / `cat-file --batch`)"),
@@ -543,7 +544,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 24, N_D: 14, N_H: 9, B2: 17, N_A: 5}
+ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 14, N_H: 9, B2: 17, N_A: 5}
 
 
 def judge(
@@ -743,7 +744,6 @@ def test_judge_counts_anchors_and_reports_stale_entries():
 #: `tree_for` — a structural pin, not a proof of the branch.
 TREE_FOR_FALLBACKS = frozenset({
     (DRAIN, "_put_back"), (LANE_TREES, "kind_at"), (LANE_TREES, "read_at"),
-    (LANE_TREES, "read_bytes_at"),
     (RULES, "_template_in_tree"), (RULES, "_skills_content_rule"),
     (RULES, "_answered_after_batch"), (RULES, "_catalog_drafts"),
     # `_answered_after_batch`' and `_catalog_drafts`' plain path is `_catalog_in_tree`'s: its
@@ -835,8 +835,10 @@ def _d3_fallback_touches(module: str, source: str) -> tuple[list[str], int]:
 
 def test_each_d3_fallback_touch_sits_behind_its_tree_for_miss():
     """An anchor cannot see the branch in front of it, so each `D3` fallback's plain touch is
-    also pinned to run only on its `tree_for` miss (s7v3 E: `read_bytes_at` keeping `tree_for`
-    but reading every path by `full.read_bytes()`). Every such entry's node is found and judged."""
+    also pinned to run only on its `tree_for` miss (s7v3 E: v3's `read_bytes_at` keeping
+    `tree_for` but reading every path by `full.read_bytes()`; addendum 3 drops that function, so
+    the row re-applies the same shape to `read_at`). Every such entry's node is found and
+    judged."""
     seen = 0
     for module in sorted({m for m, _q in TREE_FOR_FALLBACKS}):
         off, judged = _d3_fallback_touches(module, _source(module))
@@ -848,11 +850,13 @@ def test_each_d3_fallback_touch_sits_behind_its_tree_for_miss():
 
 #: Fallbacks moved off their miss, each on this base's text: the anchors stay as they were.
 OFF_THE_MISS = {
-    # s7v3 E: the handle branch skipped; every path read by its plain spelling.
-    "s7v3-E-read-bytes-at-skips-its-handle-branch": (LANE_TREES, (
-        ("    if hit is None:\n        try:\n            return full.read_bytes(), None\n",
-         "    if hit is not None:\n        pass\n    if True:\n        try:\n"
-         "            return full.read_bytes(), None\n", 1),)),
+    # s7v3 E: the handle branch skipped; every path read by its plain spelling. Its site,
+    # `read_bytes_at`, is gone (#1134 addendum 3, D1): the same shape on `read_at`, the one
+    # read fallback left.
+    "s7v3-E-read-at-skips-its-handle-branch": (LANE_TREES, (
+        ("    if hit is None:\n        return read_text_soft(full)\n",
+         "    if hit is not None:\n        pass\n    if True:\n        return read_text_soft(full)\n",
+         1),)),
     # The leaving guard that does not leave: `kind_at`'s plain stats after a non-returning branch.
     "kind-at-handle-branch-falls-through": (LANE_TREES, (
         ("        return KIND_ABSENT if got.absent else str(got.kind)\n    if full.is_file():\n",
@@ -1036,9 +1040,11 @@ def test_a_handle_verb_is_exempt_only_on_its_own_class():
     """The Path-verb names among each handle class's public methods, read off the scanned
     `_io.py`: a new one changes what a provable receiver may call without an `attr` hit."""
     assert TREE.verbs["held"] & C.ATTRS == {"mkdir", "unlink"}
-    assert TREE.verbs["bound"] & C.ATTRS == {"read_bytes"}
-    # No `Bound.kind` / `Bound.walk` (#1134 addendum 2, B1): a `.walk()` on a view is a Path verb.
-    assert not {"kind", "walk"} & TREE.verbs["bound"]
+    # No `Bound.read_bytes` (#1134 addendum 3, D1: the curator's comparisons ask git), so a
+    # view has no Path-verb method at all and `.read_bytes()` on one is a Path-verb hit; no
+    # `Bound.kind` / `Bound.walk` (addendum 2, B1): nor is `.walk()`.
+    assert TREE.verbs["bound"] & C.ATTRS == frozenset()
+    assert not {"kind", "walk", "read_bytes"} & TREE.verbs["bound"]
 
 
 def _class_field(module: str, cls: str, field: str) -> ast.AnnAssign:
@@ -1309,7 +1315,7 @@ _PUT_BACK_HANDLE = "    held, name = hit\n    if kind in (ENTRY_FILE, ENTRY_OTHE
 _PUT_BACK_TAIL = (
     "    kind = kind_at(repo_root, tree_for, rel)\n    hit = tree_for(target)\n    if hit is None:\n"
     "        if kind == ENTRY_FILE:\n            target.unlink()\n        return\n" + _PUT_BACK_HANDLE)
-_RESTORE_WRITE = "        if view.read_bytes(name).data != pre:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n"
+_RESTORE_WRITE = "        if name not in unchanged:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n"
 _SNAPSHOT_TAIL = "        cfg.corpus.write(name, pre, mode=\"replace\")\n\n\ndef _append_terminal_block("
 _IO_IMPORT_TAIL = "    read_jsonl_rows_report,\n)\n"
 _RUN_LOCKED_CATALOG = "lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)"
@@ -1319,7 +1325,8 @@ _BEFORE_STATE = (
     "            for path, blob in _git.git_tree_blobs(repo_root, head, rel).items()}\n")
 #: `_restore_corpus`'s two loops: the sweep of `git status`'s names, then the rewrite.
 _SWEEP = ("    for rel in made:\n        name = (repo_root / rel).relative_to(corpus_dir).as_posix()\n")
-_REWRITE = "        if view.read_bytes(name).data != blob:\n"
+#: `_restore_corpus`'s rewrite of each before-state file git does not find unchanged.
+_REWRITE = "        if name not in unchanged:\n            _left_for_scrub("
 _PROMPT_ARGS = "corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir,"
 
 REGRESSIONS: dict[str, Regression] = {
@@ -1354,7 +1361,7 @@ REGRESSIONS: dict[str, Regression] = {
     "s5-H3-settle-restores-plain-write": Regression(DRAIN, (
         (_IO_IMPORT_TAIL, "    read_jsonl_rows_report,\n    write_guarded,\n)\n", 1),
         (_RESTORE_WRITE,
-         "        if view.read_bytes(name).data != pre:\n            target = cfg.corpus_dir / name\n"
+         "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            target.parent.mkdir(parents=True, exist_ok=True)\n"
          "            write_guarded(target, pre)\n", 1),
         (_SNAPSHOT_TAIL,
@@ -1369,7 +1376,7 @@ REGRESSIONS: dict[str, Regression] = {
     "s5-H3b-settle-restores-legacy-guarded-write": Regression(DRAIN, (
         (_IO_IMPORT_TAIL, "    read_jsonl_rows_report,\n    guarded_mkdir,\n    write_guarded,\n)\n", 1),
         (_RESTORE_WRITE,
-         "        if view.read_bytes(name).data != pre:\n            target = cfg.corpus_dir / name\n"
+         "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            guarded_mkdir(target.parent, base=cfg.corpus_dir)\n"
          "            write_guarded(target, pre)\n", 1),
         (_SNAPSHOT_TAIL,
@@ -1398,7 +1405,7 @@ REGRESSIONS: dict[str, Regression] = {
         ("return _read_or_empty(self.cfg.corpus.view(), ",
          "return _read_or_empty(hold(self.cfg.corpus_dir).view(), ", 1),
         ("if not (_cited_ids(cfg.corpus.view(), ", "if not (_cited_ids(hold(cfg.corpus_dir).view(), ", 1),
-        ("snapshot, corpus=cfg.corpus)", "snapshot, corpus=hold(cfg.corpus_dir))", 1),
+        ("snapshot, corpus=cfg.corpus,", "snapshot, corpus=hold(cfg.corpus_dir),", 1),
     ), (("_Judgement.read", "construct", "hold(self.cfg.corpus_dir)", 1),
         ("_assert_corpus_attributable", "construct", "hold(cfg.corpus_dir)", 1),
         ("_undo_agent_edits", "construct", "hold(cfg.corpus_dir)", 1))),
@@ -1546,10 +1553,12 @@ REGRESSIONS: dict[str, Regression] = {
          "        cfg.corpus_dir, warn_label=lambda p: f\"finding-id pre-flight: {p.name}\",\n", 1),
     ), (("existing_finding_ids", "reader",
          "iter_lessons(cfg.corpus_dir, warn_label=lambda p: f'finding-id pre-flight: {p.name}')", 1),)),
-    # 06, retargeted (v3's snapshot is git's, C1): the fault-path rewrite compares the held
-    # mount's spelling, read by plain path, instead of the view's bytes.
+    # 06, retargeted (v3's snapshot is git's, C1; addendum 3's comparison is git's, D1): the
+    # fault-path rewrite compares the held mount's spelling, read by plain path, instead of
+    # asking git.
     "s5v2-06-restore-reads-the-held-spelling": Regression(DRAIN, (
-        (_REWRITE, "        if Path(corpus._where, name).read_bytes() != blob:\n", 1),
+        (_REWRITE, "        if Path(corpus._where, name).read_bytes() != blob:\n"
+         "            _left_for_scrub(", 1),
     ), (("_restore_corpus", "attr", "Path(corpus._where, name).read_bytes()", 1),
         ("_restore_corpus", "private", "corpus._where", 1))),
     # 07: each channel's prompt manifest rebinds the corpus by its spelling.
@@ -1721,11 +1730,9 @@ REGRESSIONS: dict[str, Regression] = {
          "_put_back(cfg.repo_root, rel, **{\"tree_for\": lambda _p: None})", 1),
     ), (("_revert_non_md_strays", "tree_for",
          "_put_back(cfg.repo_root, rel, **{'tree_for': lambda _p: None})", 1),)),
-    "s7v2-02b-byte-identity-tree-for-by-double-star": Regression(DRAIN, (
-        ("_byte_identical_to_head(cfg.repo_root, rel, tree_for=cfg.tree_for)",
-         "_byte_identical_to_head(cfg.repo_root, rel, **{\"tree_for\": lambda _p: None})", 1),
-    ), (("_settle_tree.<locals>.settle", "tree_for",
-         "_byte_identical_to_head(cfg.repo_root, rel, **{'tree_for': lambda _p: None})", 1),)),
+    # 02b's site is gone: addendum 3 (D1) takes `tree_for` off the settle's comparison (git
+    # compares), so no `TreeFor` slot is left there to evade (NOT_CENSUS_SHAPED). Its plain-read
+    # shape is the addendum-3 rows below.
     # 03: `_corpus`'s private reader handed the catalog's spelling.
     "s7v2-03-private-corpus-reader-templates": Regression(RULES, (
         ("    return answered_identities(lead_neighbors.load_catalog(view, where=where))\n",
@@ -1789,16 +1796,17 @@ REGRESSIONS: dict[str, Regression] = {
     # K11: the rewrite skips a gone name when the corpus folder's spelling is no folder.
     "s5v3-K11-rewrite-asks-the-corpus-spelling": Regression(DRAIN, (
         (_REWRITE,
-         "        rec = view.read_bytes(name)\n        if rec.absent and not os.path.isdir(corpus_dir):\n"
-         "            continue\n        if rec.data != blob:\n", 1),
+         "        if not os.path.isdir(corpus_dir):\n            continue\n" + _REWRITE, 1),
     ), (("_restore_corpus", "call", "os.path.isdir(corpus_dir)", 1),)),
     # K13: the fallback's empty index written by a second git child (one more `subprocess` call
     # on the allow-listed function: the count catches it).
     "s5v3-K13-fallback-writes-an-index": Regression(GIT, (
-        ("    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n",
+        ("    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n"
+         "                          env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n",
          "    subprocess.run([\"git\", \"read-tree\", \"--empty\"], cwd=cwd, check=False,\n"
          "                   capture_output=True, env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n"
-         "    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n", 1),
+         "    proc = subprocess.run([\"git\", *args], cwd=cwd, capture_output=True, check=False,\n"
+         "                          env={**os.environ, \"GIT_INDEX_FILE\": absent_index})\n", 1),
     ), (("git_worktree_files", "call",
          "subprocess.run(['git', 'read-tree', '--empty'], cwd=cwd, check=False, capture_output=True, "
          "env={**os.environ, 'GIT_INDEX_FILE': absent_index})", 1),)),
@@ -1899,6 +1907,23 @@ REGRESSIONS: dict[str, Regression] = {
     ), (("_templates", "listing", "list_tree(view, depth=3)", 1),
         ("_templates", "reader", "list_tree(view, depth=3)", 1),
         ("_templates", "listing", "view.under(name).entries()", 1))),
+    # --- #1134 addendum 3 (D1): a "still the before-state?" check that reads the worktree by
+    # --- its plain path instead of asking git (each a plain read the census flags) ------------
+    "a3-settle-compares-a-plain-read": Regression(DRAIN, (
+        ("    return rel in _git.git_unchanged_since(repo_root, \"HEAD\", rel)\n",
+         "    head = _git.git_show_file(repo_root, \"HEAD\", rel)\n"
+         "    return head is not None and (repo_root / rel).read_bytes() == head.encode()\n", 1),
+    ), (("_byte_identical_to_head", "attr", "(repo_root / rel).read_bytes()", 1),)),
+    "a3-settle-restore-compares-by-open": Regression(DRAIN, (
+        (_RESTORE_WRITE,
+         "        with open(cfg.corpus_dir / name, 'rb') as fh:\n            same = fh.read() == pre\n"
+         "        if not same:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n", 1),
+    ), (("_restore_unapproved_files", "call", "open(cfg.corpus_dir / name, 'rb')", 1),)),
+    "a3-unchanged-names-filtered-by-a-text-read": Regression(DRAIN, (
+        ("                     for path in _git.git_unchanged_since(repo_root, rev, rel))\n",
+         "                     for path in _git.git_unchanged_since(repo_root, rev, rel)\n"
+         "                     if (repo_root / path).read_text(encoding='utf-8'))\n", 1),
+    ), (("_unchanged_names", "attr", "(repo_root / path).read_text(encoding='utf-8')", 1),)),
 }
 
 
@@ -1952,7 +1977,11 @@ NOT_CENSUS_SHAPED: dict[str, tuple[str, str]] = {
         "widens an `except`; no touch"),
     "s5v2-02 byte identity reads text": (
         "test_1134_curator_handle.py::test_a_crlf_only_rewrite_of_a_tracked_lesson_is_not_byte_identical",
-        "`read_at` for `read_bytes_at`, both through the held mount"),
+        "a text read through the held mount (`read_at`) for git's comparison: no plain touch"),
+    "s7v2-02b byte identity tree_for by double star": (
+        "test_1134_curator_handle.py::test_the_settle_judges_a_link_at_a_modified_lesson_as_git_sees_it",
+        "site gone in addendum 3 (D1): the settle's comparison takes no `TreeFor`, git compares; "
+        "a plain read there is a3-settle-compares-a-plain-read"),
     "s5v2-04 snapshot opens every non-folder entry": (
         "test_1134_curator_handle.py::test_the_before_state_reads_no_worktree_entry",
         "site gone in v3: the before-state is git's blobs (C1), and no worktree entry is opened"),
@@ -2200,6 +2229,11 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
     "held-verb-on-a-view": (
         _H + "def f(v: Bound, name):\n    v.unlink(name)\n",
         (("f", "attr", "v.unlink(name)"),)),
+    # #1134 addendum 3 (D1): `Bound` has no `read_bytes`, so a provable view's is a Path verb.
+    "read-bytes-on-a-provable-view": (
+        _H + "def f(v: Bound, h: Held, name):\n    v.read_bytes(name)\n"
+        "    return h.view().read_bytes(name)\n",
+        (("f", "attr", "v.read_bytes(name)"), ("f", "attr", "h.view().read_bytes(name)"))),
     "trees-open-on-an-instance": (
         _LT + "def f(trees: DrainTrees, p):\n    return trees.open((p,))\n",
         (("f", "attr", "trees.open((p,))"),)),
@@ -2317,8 +2351,8 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         (("f", "tree_for", "g(p, tree_for=lambda _p: None)"),)),
     "tree-for-positional-to-kind-at": (
         "from defender.learning.core import lane_trees\n"
-        "def f(root, p):\n    return lane_trees.read_bytes_at(root, lambda _p: None, p)\n",
-        (("f", "tree_for", "lane_trees.read_bytes_at(root, lambda _p: None, p)"),)),
+        "def f(root, p):\n    return lane_trees.kind_at(root, lambda _p: None, p)\n",
+        (("f", "tree_for", "lane_trees.kind_at(root, lambda _p: None, p)"),)),
     "tree-for-positional-to-a-typed-def": (
         "from defender.learning.leads.lead_author import _rules\n"
         "def f(root, p):\n    return _rules._still_there(root, dict.get, p)\n",
@@ -2402,9 +2436,9 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
     "tree-for-double-star-to-a-typed-def": (
         "from defender.learning.author import drain\n"
         "def f(root, rel, kw):\n    drain._put_back(root, rel, **{'tree_for': lambda _p: None})\n"
-        "    return drain._byte_identical_to_head(root, rel, **kw)\n",
+        "    return drain._revert_strays(root, 'x', [], **kw)\n",
         (("f", "tree_for", "drain._put_back(root, rel, **{'tree_for': lambda _p: None})"),
-         ("f", "tree_for", "drain._byte_identical_to_head(root, rel, **kw)"))),
+         ("f", "tree_for", "drain._revert_strays(root, 'x', [], **kw)"))),
     "double-star-to-a-callee-outside-the-tree": (
         "import dataclasses\nfrom defender.learning.leads.lead_author import LeadAuthorDeps\n"
         "def f(g, deps, over, p):\n    g(p, **{'tree_for': lambda _p: None})\n"
@@ -2597,7 +2631,7 @@ _SOURCES = (
 PROVEN: dict[str, str] = {
     "exact-parameters": (
         _OPT + "def f(corpus: Held, view: Bound):\n    corpus.mkdir('.')\n    corpus.unlink('x')\n"
-        "    view.read_bytes('x')\n    return list(iter_lessons(corpus.view())), list(iter_lessons(view))\n"),
+        "    view.read('x')\n    return list(iter_lessons(corpus.view())), list(iter_lessons(view))\n"),
     "string-annotation": (
         _OPT + "def f(corpus: 'Held'):\n    return list(iter_lessons(corpus.view()))\n"),
     "held-verb-as-callback": (
@@ -2734,7 +2768,7 @@ def test_a_with_opened_trees_chain_is_proven(opener: str):
     source = (_OPT + _LT + "from defender.learning.core.config import AUTHOR_DRAIN_LABEL\n"
               f"def f(paths, d, L, g):\n    with {opener} as trees:\n"
               "        held = trees.mount(d)\n        view = held.view().under('gather/queries')\n"
-              "        view.read_bytes('x.md')\n        held.unlink('x.md')\n"
+              "        view.read('x.md')\n        held.unlink('x.md')\n"
               "        g(tree_for=trees.tree_for)\n"
               "        return list(iter_lessons(view)), list(iter_lessons(trees.mount(d).view()))\n")
     hits = C.census_source(WORKTREE, FIXTURE_MODULE, source, tree=TREE)
