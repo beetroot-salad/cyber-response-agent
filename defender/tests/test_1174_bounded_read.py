@@ -32,7 +32,12 @@ import pytest
 
 from defender import _io
 from defender import _run_handle as H
+from defender._run_paths import RunPaths
 from defender.hooks import _run_dir
+from defender.hooks import budget_enforcer as BE
+from defender.runtime import circuit_breaker as CB
+from defender.runtime.lead_zero import _capture as CAP
+from defender.runtime.lead_zero._spec import ITEM1_SYSTEM
 from defender.tests import _spec1077 as S
 
 MiB = 1024 * 1024
@@ -504,133 +509,369 @@ def test_o5_an_empty_file_is_an_empty_read(root, reader):
 
 
 # ---------------------------------------------------------------------------------------
-# The rewrite reads (M1b)
+# Amendment 2 — the locked JSON update and read (M4/M7), the wrappers (M5), the breaker (M6)
 # ---------------------------------------------------------------------------------------
+#
+# Callers get contents, never a handle to read. Unusable run-state content — too big,
+# undecodable, not JSON, nested past `JSON_NESTING_LIMIT`, not an object — heals to the default
+# on the update (O6) and reads as `{}` (O8) or, for the breaker, as tripped (O10). A read fault
+# that is not about the content propagates out of the update (O7).
 
 
-def _budget(tmp_path: Path) -> Any:
+def _deep(depth: int) -> bytes:
+    return ('{"a": ' + "[" * depth + "]" * depth + "}").encode()
+
+
+#: Each unusable shape, planted by `plant_unusable`. The sparse one is above the limit; the
+#: real one is 65 MiB of bytes on disk.
+UNUSABLE = ("too_big_sparse", "too_big_real", "undecodable", "not_json", "too_deep",
+            "unclosed_deep", "not_object")
+
+
+def plant_unusable(path: Path, kind: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "too_big_sparse":
+        sparse(path, 64 * MiB + 1)
+    elif kind == "too_big_real":
+        path.write_bytes(b"x" * (65 * MiB))
+    else:
+        path.write_bytes({
+            "undecodable": b'{"a": "\xff\xfe"}',
+            "not_json": b"{nope",
+            "too_deep": _deep(_io.JSON_NESTING_LIMIT + 50),
+            "unclosed_deep": b"[" * 200_000,
+            "not_object": b"[1, 2]",
+        }[kind])
+
+
+def run_dir_at(tmp_path: Path) -> Path:
     runs_base = tmp_path / "data" / "runs"
-    (runs_base / "run-1174").mkdir(parents=True)
-    run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, "run-1174", runs_base=runs_base, io=_io)
+    run_dir = runs_base / "run-1174"
+    run_dir.mkdir(parents=True)
+    return run_dir
+
+
+def load(path: Path) -> Any:
+    return json.loads(path.read_bytes())
+
+
+# -- O6: the update heals ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o6_open_budget_heals_unusable_content_to_the_default_with_the_change(tmp_path, kind):
+    """`open_budget` runs outside any `try` at a resumed run's start; on unusable content it
+    starts from the default, applies its change and writes, rather than raising."""
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).budget, kind)
+    state = BE.open_budget(run_dir, "run-1174")
+    assert state["run_id"] == "run-1174"
+    assert state["tool_calls"] == 0
+    assert load(RunPaths(run_dir).budget) == state
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o6_update_budget_locked_heals(tmp_path, kind):
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).budget, kind)
+    state = BE.update_budget_locked(run_dir, "run-1174", "gather")
+    assert state["run_id"] == "run-1174"
+    assert state["tool_calls"] == 1
+    assert state["subagent_spawns"] == 1
+    assert load(RunPaths(run_dir).budget) == state
+
+
+def _infra_exit() -> int:
+    return min(CB.INFRA_EXIT_CODES)
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o6_record_outcome_heals_and_counts(tmp_path, kind):
+    """Before, a too-big or too-deep state made `record_outcome` stop counting for the rest of
+    the run (its `except` logs and returns `{}`). Now it starts over and counts."""
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
+    state = CB.record_outcome(run_dir, "elastic", _infra_exit())
+    assert state["systems"]["elastic"]["failures"] == 1
+    assert state["total_failures"] == 1
+    assert load(RunPaths(run_dir).circuit_breaker) == state
+
+
+def _budget_handle(run_dir: Path, io: Any = _io) -> Any:
+    run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=run_dir.parent, io=io)
     group = next(g for g, names in H.GROUP_MEMBERS.items() if "budget" in names)
     return S.member(run, group, "budget", *S.member_args("budget"))
 
 
-def test_m1b_the_run_handle_update_refuses_a_huge_record_and_leaves_it_whole(tmp_path):
-    h = _budget(tmp_path)
-    sparse(h.path, 1 << 40)
-    with pytest.raises(OSError, match="read limit") as ei:
-        h.update({"k": 1})
-    assert ei.value.errno == errno.EFBIG
-    assert h.path.stat().st_size == 1 << 40, "the refused update truncated the record"
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o6_the_run_handle_update_heals(tmp_path, kind):
+    run_dir = run_dir_at(tmp_path)
+    h = _budget_handle(run_dir)
+    plant_unusable(h.path, kind)
+    h.update({"k": 1})
+    assert load(h.path) == {"k": 1}
 
 
-def test_m1b_control_the_run_handle_update_still_merges(tmp_path):
-    h = _budget(tmp_path)
+def test_o6_control_valid_documents_are_merged_not_reset(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    BE.open_budget(run_dir, "run-1174")
+    BE.update_budget_locked(run_dir, "run-1174", "x")
+    BE.update_budget_locked(run_dir, "run-1174", "x")
+    assert load(RunPaths(run_dir).budget)["tool_calls"] == 2
+    CB.record_outcome(run_dir, "elastic", _infra_exit())
+    CB.record_outcome(run_dir, "elastic", _infra_exit())
+    assert load(RunPaths(run_dir).circuit_breaker)["systems"]["elastic"]["failures"] == 2
+    h = _budget_handle(run_dir)
     h.update({"a": 1})
     h.update({"b": 2})
-    assert json.loads(h.path.read_text()) == {"a": 1, "b": 2}
+    assert load(h.path)["a"] == 1
+    assert load(h.path)["b"] == 2
 
 
-def test_m1b_update_json_locked_refuses_a_huge_document_and_leaves_it_whole(tmp_path):
-    p = sparse(tmp_path / "state.json", 1 << 40)
-    with pytest.raises(OSError, match="read limit") as ei:
-        _run_dir.update_json_locked(p, lambda d: d.update(k=1))
-    assert ei.value.errno == errno.EFBIG
-    assert p.stat().st_size == 1 << 40, "the refused update truncated the document"
-
-
-def test_m1b_control_update_json_locked_still_merges(tmp_path):
+def test_o6_the_rewrite_leaves_exactly_the_new_document(tmp_path):
+    """`lseek` 0, `ftruncate` 0, then the whole write: a long old document shrinking to a short
+    one leaves no tail and no leading NULs, byte for byte."""
     p = tmp_path / "state.json"
-    _run_dir.update_json_locked(p, lambda d: d.update(a=1))
-    _run_dir.update_json_locked(p, lambda d: d.update(b=2))
-    assert json.loads(p.read_text()) == {"a": 1, "b": 2}
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    _run_dir.update_json_locked(p, lambda d: (d.clear(), d.update(k=1)))
+    assert load(p) == {"k": 1}
+    assert not p.read_bytes().startswith(b"\x00")
+    assert p.read_bytes() == json.dumps({"k": 1}, indent=2).encode()
 
 
-class _NoDataYet:
-    """A rewrite handle whose read finds no data yet (`FileIO.readall` → `None` on EAGAIN)."""
-
-    def __init__(self, fd: int) -> None:
-        self._fd = fd
-
-    def fileno(self) -> int:
-        return self._fd
-
-    def read(self, *_a: Any) -> None:
-        return None
+def test_o6_the_shared_update_heals_a_file_growing_past_the_limit(tmp_path):
+    """Too big while growing is too big: it heals too (the step's own size refusal, by type)."""
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = FaultOs(read_fault=Endless())
+    state = _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                                   default=dict, os_=f)
+    assert state == {"k": 1}
+    assert load(p) == {"k": 1}
 
 
-class _Grows:
-    """A rewrite handle over a real small file whose reads hand out far more than its `fstat`
-    said — `flock` is advisory, so a writer that ignores it can grow the file under the lock.
-    `asked` records each `read` size (`None` for an unbounded `read()`)."""
-
-    def __init__(self, f: Any) -> None:
-        self._f = f
-        self.asked: list[int | None] = []
-
-    def fileno(self) -> int:
-        return self._f.fileno()
-
-    def read(self, n: int | None = None, /) -> str:
-        self.asked.append(n)
-        size = _io.READ_LIMIT + 1 * MiB if n is None or n < 0 else min(n, _io.READ_LIMIT + MiB)
-        return "a" * size
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._f, name)
+# -- O7: a read fault that is not about the content propagates ------------------------------
 
 
-def test_m1b_a_rewrite_read_growing_past_the_limit_is_refused(tmp_path):
-    p = tmp_path / "f"
-    p.write_text("{}")
-    with open(p, "r+", encoding="utf-8") as f:
-        g = _Grows(f)
-        with pytest.raises(OSError, match="read limit"):
-            _io.read_locked_whole(g)
-    assert g.asked, "the helper never read"
-    assert all(n is not None and 0 <= n <= _io.READ_LIMIT + 1 for n in g.asked), (
-        f"the rewrite read asked for more than the limit: {g.asked}")
+def eio(_fd: int, _n: int) -> bytes:
+    raise OSError(errno.EIO, os.strerror(errno.EIO))
 
 
-class _GrowingIo:
-    """`_io` for a run handle, except its rewrite handle grows under the lock (`_Grows`)."""
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(_io, name)
-
-    @staticmethod
-    def rooted_locked_for_rewrite(*a: Any, **kw: Any) -> Any:
-        import contextlib
-
-        @contextlib.contextmanager
-        def cm() -> Any:
-            with _io.rooted_locked_for_rewrite(*a, **kw) as f:
-                yield _Grows(f)
-        return cm()
+def efbig_fault(_fd: int, _n: int) -> bytes:
+    raise OSError(errno.EFBIG, os.strerror(errno.EFBIG))
 
 
-def test_m1b_the_run_handle_update_refuses_a_record_growing_past_the_limit(tmp_path):
-    runs_base = tmp_path / "data" / "runs"
-    (runs_base / "run-1174").mkdir(parents=True)
-    run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, "run-1174", runs_base=runs_base,
-                           io=_GrowingIo())
-    group = next(g for g, names in H.GROUP_MEMBERS.items() if "budget" in names)
-    h = S.member(run, group, "budget", *S.member_args("budget"))
-    h.path.parent.mkdir(parents=True, exist_ok=True)
-    h.path.write_text('{"seed": 1}')
-    before = h.path.read_bytes()
+@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read, efbig_fault],
+                         ids=["EIO", "EAGAIN", "vanished", "EFBIG-from-a-fault"])
+@pytest.mark.parametrize("opener", ["path", "rooted"])
+def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(
+        tmp_path, fault, opener):
+    """Healing is decided by type: only the step's own size refusal heals, so an unrelated
+    `EFBIG` raised by a fault propagates like `EIO`."""
+    p = tmp_path / "state.json"
+    p.write_text('{"keep": true}')
+    f = FaultOs(read_fault=fault)
+    cm = (_io.locked_for_rewrite(p, os_=f) if opener == "path"
+          else _io.rooted_locked_for_rewrite(tmp_path, "state.json", os_=f))
+    with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
+        _io.locked_json_update(cm, lambda d: d.update(k=1), default=dict, os_=f)
+    assert p.read_text() == '{"keep": true}'
+
+
+# -- O8: the locked read is bounded and creates nothing --------------------------------------
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o8_read_budget_answers_empty_for_unusable_content(tmp_path, kind):
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).budget, kind)
+    assert BE.read_budget(run_dir) == {}
+
+
+@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
+def test_o8_the_locked_read_answers_empty_for_any_read_error(tmp_path, fault):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = FaultOs(read_fault=fault)
+    assert _io.locked_json_read(_io.locked_for_read(p, os_=f), os_=f) == {}
+
+
+def test_o8_control_the_locked_read_answers_the_document(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    assert _io.locked_json_read(_io.locked_for_read(p)) == {"a": 1}
+    assert _run_dir.read_json_locked(p) == {"a": 1}
+
+
+def test_o8_reading_creates_neither_budget_nor_sidecar(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    assert BE.read_budget(run_dir) == {}
+    assert not RunPaths(run_dir).budget.exists()
+    assert BE.accounting_failure_state(run_dir) == {
+        "consecutive_failures": 0, "first_failure_at": None}
+    assert not BE._accounting_failure_path(run_dir).exists()
+
+
+def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"secret": 1}')
+    p = tmp_path / "state.json"
+    p.symlink_to(target)
+    assert _run_dir.read_json_locked(p) == {}
+
+
+def test_o8_a_sparse_sidecar_reads_as_no_failures(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    sparse(BE._accounting_failure_path(run_dir), 1 << 40)
+    assert BE.accounting_failure_state(run_dir) == {
+        "consecutive_failures": 0, "first_failure_at": None}
+
+
+def test_o8_account_call_survives_a_sparse_budget(tmp_path):
+    """`account_call` reads through `read_budget` before every tool call: a sparse plant there
+    reads as no state, never `MemoryError`."""
+    run_dir = run_dir_at(tmp_path)
+    sparse(RunPaths(run_dir).budget, 1 << 40)
+    state = BE.account_call(run_dir, "run-1174", "x", limits=BE.DEFAULT_LIMITS, tier="main")
+    assert state["tool_calls"] == 1
+
+
+# -- O11: the path update judges plainness on the descriptor ---------------------------------
+
+
+class HardLinkBeforeOpen(FaultOs):
+    """Plants a hard link to `target` between the precheck and the open (the race window)."""
+
+    def __init__(self, target: Path, other: Path) -> None:
+        super().__init__()
+        self._target, self._other = target, other
+
+    def open(self, path: Any, *a: Any, **kw: Any) -> int:
+        self.calls.append("open")
+        if Path(path) == self._target and not self._other.exists():
+            os.link(self._target, self._other)
+        return os.open(path, *a, **kw)
+
+
+def test_o11_a_hard_link_planted_after_the_precheck_is_refused_on_the_descriptor(tmp_path):
+    p = tmp_path / "budget.json"
+    p.write_text('{"keep": true}')
+    f = HardLinkBeforeOpen(p, tmp_path / "other")
+    with pytest.raises(OSError, match="non-plain") as ei:
+        _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                               default=dict, os_=f)
+    assert ei.value.errno == errno.EMLINK
+    assert p.read_text() == '{"keep": true}'
+
+
+def test_o11_control_without_the_plant_the_update_lands(tmp_path):
+    p = tmp_path / "budget.json"
+    p.write_text('{"keep": true}')
+    f = FaultOs()
+    _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                           default=dict, os_=f)
+    assert load(p) == {"keep": True, "k": 1}
+
+
+# -- O10: the breaker reads fail closed on any unusable content ------------------------------
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o10_the_breaker_reads_unusable_state_as_tripped(tmp_path, kind):
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
+    assert CB._load(run_dir).get("_unreadable") is True
+    assert CB.is_tripped(run_dir, "elastic") is True
+    assert CB.is_tripped(run_dir, "any_other_system") is True
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o10_breaker_failures_degrades_without_raising(tmp_path, kind):
+    """`_breaker_failures` reads through `_load`: unusable state degrades only this read (0),
+    never `MemoryError` or `RecursionError`."""
+    run_dir = run_dir_at(tmp_path)
+    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
+    assert CAP._breaker_failures(run_dir) == 0
+
+
+def test_o10_control_a_valid_state_reads_as_before(tmp_path):
+    run_dir = run_dir_at(tmp_path)
+    RunPaths(run_dir).circuit_breaker.write_text(json.dumps(
+        {"systems": {ITEM1_SYSTEM: {"failures": 2}}, "total_failures": 2}))
+    assert CAP._breaker_failures(run_dir) == 2
+    assert CB._load(run_dir).get("_unreadable") is None
+    assert CB.is_tripped(run_dir, "never_failed") is False
+
+
+# -- O1 widened, O9: the canonical wrappers ---------------------------------------------------
+
+
+def test_o1_the_wrappers_refuse_a_file_over_their_limit(tmp_path):
+    p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
     with pytest.raises(OSError, match="read limit"):
-        h.update({"k": 1})
-    assert h.path.read_bytes() == before, "the refused update rewrote the record"
+        _io.read_text_utf8(p)
+    text, reason = _io.read_text_soft(p)
+    assert text is None
+    assert reason
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows_report(p)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(p)
 
 
-def test_m1b_a_rewrite_read_with_no_data_yet_is_blocking_io_error(tmp_path):
-    p = tmp_path / "f"
-    p.write_text("{}")
-    fd = os.open(p, os.O_RDONLY)
-    try:
-        with pytest.raises(BlockingIOError):
-            _io.read_locked_whole(_NoDataYet(fd))
-    finally:
-        os.close(fd)
+def test_o1_the_wrappers_take_a_per_caller_limit(tmp_path):
+    p = tmp_path / "small.txt"
+    p.write_text("x" * 100)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p, limit=10)
+    assert _io.read_text_soft(p, limit=10)[0] is None
+    assert _io.read_text_utf8(p, limit=100) == "x" * 100
+    big = sparse(tmp_path / "big.jsonl", 64 * MiB + 1)
+    assert _io.read_jsonl_rows_report(big, limit=None) == ([], 1)
+
+
+def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
+    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) and passes
+    `limit=None`: an operator tool over a host-written log."""
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    sparse(wire, 64 * MiB + 1)
+    # Imported here, as test_1077_replay does: the visualize modules import each other.
+    from defender.scripts.visualize.visualize_messages import load_messages
+    assert load_messages(run_dir) == []
+
+
+def test_o9_the_wrappers_still_follow_links(tmp_path):
+    target = tmp_path / "real.jsonl"
+    target.write_text('{"a": 1}\n')
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(target)
+    assert _io.read_text_soft(link) == ('{"a": 1}\n', None)
+    assert _io.read_text_utf8(link) == '{"a": 1}\n'
+    assert _io.read_jsonl_rows(link) == [{"a": 1}]
+
+
+def test_o5_the_wrappers_read_as_before(tmp_path):
+    p = tmp_path / "mixed.txt"
+    data = _mixed_content()
+    p.write_bytes(data)
+    want = p.read_text(encoding="utf-8")
+    assert _io.read_text_utf8(p) == want
+    assert _io.read_text_soft(p) == (want, None)
+    bad = tmp_path / "rows.jsonl"
+    bad.write_bytes(b'{"a": 1}\r\n\xff\xfe\n{"b": 2}\rnot json\n')
+    expected = _io._jsonl_rows_of(bad.read_text(encoding="utf-8", errors="replace"))
+    assert _io.read_jsonl_rows_report(bad) == expected
+    assert expected[0] == [{"a": 1}, {"b": 2}]
+
+
+def test_o5_a_procfs_file_reporting_size_zero_reads_in_full():
+    """`/proc/self/mountinfo` reports `st_size` 0; the step reads to EOF whatever `fstat` says
+    (`runtime/box/_docker.py` reads it through `read_text_soft`)."""
+    proc = Path("/proc/self/mountinfo")
+    assert os.stat(proc).st_size == 0
+    text, reason = _io.read_text_soft(proc)
+    assert reason is None
+    assert text
+    assert text.splitlines()[0] == proc.read_text().splitlines()[0]
