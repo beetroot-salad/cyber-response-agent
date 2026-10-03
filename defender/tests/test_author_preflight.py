@@ -72,12 +72,14 @@ def test_clean_scope_check_refuses_dirty_lessons(tmp_repo):
     cfg = tmp_repo.cfg
     (tmp_repo.paths.lessons_dir / "drift.md").write_text("uncommitted\n")
     with pytest.raises(shared.AuthorError, match="uncommitted changes"):
-        shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/")
+        shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/",
+                                       corpus=cfg.corpus)
 
 
 def test_clean_scope_passes_when_clean(tmp_repo):
     cfg = tmp_repo.cfg
-    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/")
+    shared.assert_clean_corpus_dir(cfg.repo_root, cfg.corpus_dir, "defender/lessons/",
+                                   corpus=cfg.corpus)
 
 
 def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):

@@ -51,6 +51,7 @@ from defender.tests._repo import (  # noqa: E402
     seed_adapter_stubs,
     seed_repo,
 )
+from defender.tests._lead_author_1134 import lane_tree_for  # noqa: E402
 
 
 #: The systems the probe trees declare. Two is the minimum that shows the lanes are an
@@ -376,7 +377,8 @@ def _commit_scopes_admit_lead_author(repo_root: Path, path: str) -> bool:
     """The LEAD AUTHOR's path rule alone — the union helper above answers for either role, and
     the point here is the one path where the two roles disagree."""
     try:
-        lead_author._skills_path_rule(repo_root, "M", path, systems=frozenset(_SYSTEMS))
+        lead_author._skills_path_rule(repo_root, "M", path, systems=frozenset(_SYSTEMS),
+                                      tree_for=lane_tree_for(repo_root))
     except LeadAuthorError:
         return False
     return True
@@ -392,7 +394,7 @@ def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
     """
     for rule in (
         lambda: lead_author._skills_path_rule(
-            repo_root, "M", path, systems=frozenset(_SYSTEMS)
+            repo_root, "M", path, systems=frozenset(_SYSTEMS), tree_for=lane_tree_for(repo_root)
         ),
         lambda: pitfalls_curator._pitfalls_path_rule(
             "M", path, systems=frozenset(_SYSTEMS)

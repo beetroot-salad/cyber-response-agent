@@ -75,6 +75,7 @@ from defender.tests.test_1017_row_schema import (  # noqa: E402
     _table,
 )
 from defender.tests.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
+from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -711,7 +712,7 @@ def test_o3_a_denial_leaves_no_pitfalls_row(tmp_path):
     def own_pitfalls(run_dir: Path) -> list[dict]:
         leads = [lead for lead in lead_extraction.extract_from_joined(joined(run_dir))
                  if lead.lead_id == LEAD]
-        return [p for p in collect_general_failures(leads, run_dir)
+        return [p for p in collect_general_failures(leads, run_dir, **repo_skills())
                 if p.get("pitfall_id", "").split(":")[1:2] == [LEAD]]
 
     rec = VerbRecorder()

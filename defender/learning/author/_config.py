@@ -5,9 +5,17 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
+from defender._io import Held
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.core.config import QueueChannel, source_first_party_key
+from defender.learning.core.lane_trees import TreeFor
+
+#: How long one curator git call over the worktree may take, in seconds, before the tick treats
+#: it as a git failure (`CorpusAuthorConfig.git_timeout`). Each is a local status, lookup or
+#: compare, the slowest a status of the whole worktree: one still running after this is blocked
+#: (a FIFO the agent left where git opens a file), not slow.
+GIT_TIMEOUT_SECONDS = 60.0
 
 
 @model(frozen=True)
@@ -41,7 +49,17 @@ class CorpusAuthorConfig:
     repo_root: Path
     runs_dir: Path
     pending_dir: Path
+    #: The corpus folder's spelling: git pathspecs, the readers' `where=`, the forward check's
+    #: and the curator engine's path checks. Never opened: every host read, write, delete and
+    #: listing of the corpus goes through `corpus` (#1134).
     corpus_dir: Path
+    #: The corpus mount, held by the lane's open trees (`shared.lane_corpus`): writes through it,
+    #: reads through its `view()`. Lives only as long as the `DrainTrees` it came from.
+    corpus: Held
+    #: The lane's `DrainTrees.tree_for`: a working-copy path (a git-status name joined to
+    #: `repo_root`) to its held mount and name, the sibling corpus included, or `None` outside
+    #: the lane's mounts.
+    tree_for: TreeFor
     corpus_dir_rel: str
     channel: QueueChannel
     repo_lock_file: Path
@@ -63,6 +81,9 @@ class CorpusAuthorConfig:
     #: The attempt ceiling, bound once here so a malformed value fails the tick before any
     #: row is read and a mid-batch environment change can't move it.
     max_attempts: int
+    #: The bound on each git read the tick runs over the worktree, from the pre-agent capture
+    #: through the fault undo (#1134): past it the read is a git failure, never a hung tick.
+    git_timeout: float = GIT_TIMEOUT_SECONDS
     #: Optional hook run after both the corpus commit and the queue rotation (the lessons
     #: channel's held report).
     post_rotate: Callable[..., None] | None = None

@@ -43,6 +43,8 @@ from defender.tests._declared869 import (
     write,
     write_adapter,
 )
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, lead_trees
 
 
 def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> ExecutedLead:
@@ -69,7 +71,7 @@ def _lead_author_deps(paths: LoopPaths, spawn: LeadAuthorSpawn):
     own suite. `systems` is NOT replaced — the value this lane resolves at its boundary is
     the thing under test."""
     return dataclasses.replace(
-        lead_author.build_lead_author_deps(paths),
+        lead_deps(paths),
         invoke_agent=spawn,
         extract=lambda _run_dir: ([], []),
         acquire_queue_lock=lambda: object(),
@@ -143,7 +145,7 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
 
     spawn = Spawn(edit)
     capsys.readouterr()
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
 
     assert spawn.systems_seen == ["elastic"]
     assert "late" in declared_systems(repo)     # the tree DOES declare it, by the end
@@ -188,7 +190,8 @@ def test_lead_author_resolves_systems_before_the_agent_is_spawned(tmp_path, monk
     assert "mcpsys" in resolved, "this lane is handed the UNION, not the adapter half"
     assert "late" not in resolved
 
-    assert lead_author.run(_run_dir(tmp_path), paths=paths, deps=deps) == 0
+    assert lead_author.run(_run_dir(tmp_path), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths,
+                           deps=deps) == 0
     assert spawn.calls, "the agent was never spawned, so the ordering claim is vacuous"
     assert deps.systems == resolved
     assert "late" in declared_systems(repo)
@@ -228,9 +231,10 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
             [pitfall_row("r:0", "mcpsys")], systems=contradicts)
     ] == ["mcpsys"]
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/mcpsys/SKILL.md", systems=contradicts) is None
+        repo, "A ", "defender/skills/mcpsys/SKILL.md", systems=contradicts,
+        tree_for=lane_tree_for(repo)) is None
     assert synthesize_drafts(
-        [_lead("mcpsys.new-verb", system="mcpsys")], catalog_dir=cat, catalog=[],
+        [_lead("mcpsys.new-verb", system="mcpsys")], **drafts_under(cat), catalog=[],
         systems=contradicts,
     ) == [cat / "mcpsys" / "_draft" / f"{_draft_basename('mcpsys.new-verb')}.md"]
 
@@ -244,9 +248,10 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
         [pitfall_row("r:1", "elastic")], systems=empty) == []
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/elastic/SKILL.md", systems=empty)
+            repo, "A ", "defender/skills/elastic/SKILL.md", systems=empty,
+            tree_for=lane_tree_for(repo))
     assert synthesize_drafts(
-        [_lead("elastic.other-verb")], catalog_dir=cat, catalog=[], systems=empty) == []
+        [_lead("elastic.other-verb")], **drafts_under(cat), catalog=[], systems=empty) == []
 
 
 def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsys):
@@ -271,7 +276,7 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
     spawn = Spawn(lambda root: write(marker_file(root, "wtonly"), "# pitfalls\n- x\n"))
     capsys.readouterr()
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.systems_seen == ["wtonly"]
     assert spawn.handoffs[0]["path"] == "defender/skills/wtonly/execution.md"
     assert persist.read_pitfalls(paths) == []
@@ -321,7 +326,8 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
     before = head_sha(repo)
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(land_an_adapter_then_plant))
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(land_an_adapter_then_plant),
+                                      trees=lead_trees(paths))
     # The tree agrees ON THIS LANE'S OWN VALUE by the end of the tick — the TICK does not.
     assert "mcpsys" in adapter_declared_systems(repo)
     assert "mcpsys" in declared_systems(repo)
@@ -344,7 +350,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     deps = _lead_author_deps(lane2, LeadAuthorSpawn(plant_adapter))
     assert "mcpsys" not in deps.systems
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        lead_author.run(_run_dir(tmp_path), paths=lane2, deps=deps)
+        lead_author.run(_run_dir(tmp_path), label=LEAD_AUTHOR_DRAIN_LABEL, paths=lane2, deps=deps)
     assert "mcpsys" in declared_systems(other)
 
 
@@ -389,6 +395,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
             paths=_paths, invoke=Spawn(
                 lambda root: write(marker_file(root, "elastic"), "# e\n## Common pitfalls\n- x\n")
             ),
+            trees=lead_trees(_paths),
         )
 
     capsys.readouterr()
@@ -442,16 +449,18 @@ def test_the_pitfalls_lane_is_handed_the_adapter_half_and_the_gates_the_union(
         pitfalls_curator.run_pitfalls(
             paths=paths,
             invoke=Spawn(lambda root: write(marker_file(root, "mcpsys"), "# curated\n")),
+            trees=lead_trees(paths),
         )
     log = loop_log(capsys)
     assert "mcpsys" in log, "the dropped row must be reported by name"
 
-    deps = lead_author.build_lead_author_deps(paths)
+    deps = lead_deps(paths)
     assert "mcpsys" in deps.systems
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/mcpsys/SKILL.md", systems=deps.systems) is None
+        repo, "A ", "defender/skills/mcpsys/SKILL.md", systems=deps.systems,
+        tree_for=lane_tree_for(repo)) is None
     cat = repo / "defender" / "skills" / "gather" / "queries"
     assert synthesize_drafts(
-        [_lead("mcpsys.new-verb", system="mcpsys")], catalog_dir=cat, catalog=[],
+        [_lead("mcpsys.new-verb", system="mcpsys")], **drafts_under(cat), catalog=[],
         systems=deps.systems,
     ) == [cat / "mcpsys" / "_draft" / f"{_draft_basename('mcpsys.new-verb')}.md"]

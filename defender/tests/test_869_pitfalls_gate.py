@@ -33,6 +33,7 @@ from defender.tests._declared869 import (
     skill_md,
     write,
 )
+from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
 
 DECLARED = frozenset({"elastic"})
 
@@ -131,7 +132,8 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
         pitfalls_curator._verify_pitfalls_state(
-            repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
+            repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
+            tree_for=lane_tree_for(repo))
     assert head_files(repo) == before
 
 
@@ -168,7 +170,7 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
     ))
     capsys.readouterr()
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.systems_seen == ["ticket"]
     assert spawn.handoffs[0]["path"] == "defender/skills/ticket/execution.md"
     assert "defender/skills/ticket/execution.md" in head_files(repo)

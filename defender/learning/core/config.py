@@ -41,6 +41,12 @@ def provenance_field(id_key: str) -> str:
     return f"source_{id_key}s"
 
 
+#: The drain lane labels, spelled once (#1134, owner decision 2026-09-29). Each lane passes its
+#: own to `_run_worktree_batch`, and `LoopPaths.drain_writable_trees` keys the mount list on it.
+AUTHOR_DRAIN_LABEL = "author_drain"
+LEAD_AUTHOR_DRAIN_LABEL = "lead_author_drain"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+
+
 #: The quarantine directory's name under `worktree_base`, spelled once for both sides
 #: (`LoopPaths.quarantine_dir` reads it, `AuthorBranch.quarantine_dir` writes under it).
 QUARANTINE_DIRNAME = "quarantine"
@@ -62,6 +68,27 @@ class LoopPaths(DefenderPaths):
 
     def with_repo_root(self, repo_root: Path) -> LoopPaths:
         return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
+
+    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
+        """@owns drain_writable_trees
+
+        The trees under `repo_root` that a drain box of lane `label` mounts read-write, each a
+        mount point in its own right: both lessons corpora for `AUTHOR_DRAIN_LABEL` (its two
+        curators share one box), the whole skills tree for `LEAD_AUTHOR_DRAIN_LABEL` (the
+        catalog, `skills/gather/queries/`, lies inside it), and nothing for any other label.
+        An unrecognized label, a near miss included, gets no writable tree rather than a
+        default: the safe answer for a mount grant. No two members nest.
+
+        Lexical: the paths are spelled off `self.repo_root` as given, nothing is resolved or
+        looked up on disk. `_drain_box_request` mounts exactly this list and
+        `lane_trees.open_drain_trees` holds exactly it, so a tree cannot be mounted writable
+        without a held root, nor a root held anywhere but a mount point (#1134 O4). Neither
+        re-derives it."""
+        if label == AUTHOR_DRAIN_LABEL:
+            return (self.lessons_dir, self.lessons_questioner_dir)
+        if label == LEAD_AUTHOR_DRAIN_LABEL:
+            return (self.skills_dir,)
+        return ()
 
     @property
     def runs_dir(self) -> Path:

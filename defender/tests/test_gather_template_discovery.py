@@ -44,6 +44,7 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.scripts import workspace_map as wsm  # noqa: E402
+from defender.tests._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 _REAL_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
@@ -981,7 +982,7 @@ def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
         "## Query\n\n```esql\nFROM logs\n## a comment, not a heading\n| LIMIT 5\n```\n\n"
         "## Pitfalls\n\n- none\n"
     )
-    rendered = lead_render.render_query(q, {})
+    rendered = lead_render.render_query(skills_view(q.parent), q.name, {})
 
     assert "LIMIT 5" in rendered, "lead_render truncated the query at the fenced `## ` line"
     assert "Pitfalls" not in rendered, "lead_render leaked the next section into the query"

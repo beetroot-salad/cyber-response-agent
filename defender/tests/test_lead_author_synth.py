@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender.learning.leads import lead_author
+from defender.tests._lead_author_1134 import drafts_under
 
 
 def _lead(
@@ -35,11 +36,12 @@ def _lead(
 def _catalog(tmp_path) -> Path:
     """Build an isolated tmp catalog and return its dir.
 
-    Pass the returned dir as ``synthesize_drafts(..., catalog_dir=cat)``: that
-    threads the read root through to ``load_catalog`` (it both reads the template
-    index from and writes drafts under the same dir), so no module-global patch is
-    needed to keep the call off the real on-disk catalog."""
-    cat = tmp_path / "queries"
+    The catalog sits where a lane's does, at ``<skills>/gather/queries``: pass it as
+    ``synthesize_drafts(..., **drafts_under(cat))`` (its skills root, held, and that
+    root's spelling). That threads the read root through to the catalog load (it both
+    reads the template index from and writes drafts under the same dir), so no
+    module-global patch is needed to keep the call off the real on-disk catalog."""
+    cat = tmp_path / "skills" / "gather" / "queries"
     (cat / "host-query").mkdir(parents=True)
     (cat / "host-query" / "proc-tree.md").write_text(
         "---\nid: host-query.proc-tree\nstatus: established\n---\n\n## Goal\nx\n"
@@ -61,8 +63,8 @@ def _draft_path(cat, system: str, query_id: str):
 def test_unresolved_verb_is_drafted(tmp_path):
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
-        systems=frozenset({"stub-cmdb"}))
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     draft = _draft_path(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert created == [draft]
     text = draft.read_text()
@@ -77,26 +79,26 @@ def test_unresolved_verb_is_drafted(tmp_path):
 def test_resolved_verb_not_drafted(tmp_path):
     cat = _catalog(tmp_path)
     assert lead_author.synthesize_drafts(
-        [_lead("host-query.proc-tree")], catalog_dir=cat,
+        [_lead("host-query.proc-tree")], **drafts_under(cat),
         systems=frozenset({"host-query"})) == []
 
 
 def test_adhoc_query_id_skipped(tmp_path):
     cat = _catalog(tmp_path)
     assert lead_author.synthesize_drafts(
-        [_lead("ad-hoc")], catalog_dir=cat, systems=frozenset()) == []
+        [_lead("ad-hoc")], **drafts_under(cat), systems=frozenset()) == []
     assert not (cat / "ad-hoc").exists()
 
 
 def test_idempotent(tmp_path):
     cat = _catalog(tmp_path)
     first = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
-        systems=frozenset({"stub-cmdb"}))
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     assert first
     second = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
-        systems=frozenset({"stub-cmdb"}))
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     assert second == []
 
 
@@ -116,7 +118,7 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
     lead_author.synthesize_drafts([
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     text = _draft_path(cat, "elastic", "elastic.sshd-failed-by-srcip").read_text()
     assert "engine: esql" in text
     assert "```esql" in text
@@ -161,7 +163,7 @@ def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path):
     created = lead_author.synthesize_drafts([
         _lead(".verb", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("elastic.", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     assert created == []
     assert not (cat / "_draft").exists()
     assert not (cat / "elastic" / "_draft" / ".md").exists()
@@ -173,7 +175,7 @@ def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path):
     grok_pipe = 'FROM logs-* | GROK message "%{IP:src} %{WORD:action}" | STATS c = COUNT(*) BY action'
     created = lead_author.synthesize_drafts([
         _lead("elastic.grok-probe", {"query": grok_pipe}, verb="esql", system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     assert created
     assert "%{IP:src}" in _draft_path(cat, "elastic", "elastic.grok-probe").read_text()
 
@@ -187,7 +189,7 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     created = lead_author.synthesize_drafts([
         _lead("elastic.../../../../PWNED", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("../../etc.passwd", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     assert created == []
     assert not (tmp_path / "PWNED.md").exists()
     assert list(tmp_path.rglob("PWNED.md")) == []
@@ -209,7 +211,7 @@ def test_control_character_query_id_does_not_mint_an_unparseable_draft(tmp_path)
     created = lead_author.synthesize_drafts([
         _lead("elastic\n.probe", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("elastic.probe\n", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     assert created == []
     assert [p for p in cat.rglob("*") if "\n" in p.name] == []
     assert not (cat / "elastic" / "_draft").exists()
@@ -264,7 +266,7 @@ def test_a_minted_draft_declares_the_verb_it_was_minted_from(tmp_path):
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
-        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert template.verb == "map"
     assert template.params == ("name",)
@@ -281,7 +283,7 @@ def test_a_minted_engine_draft_does_not_declare_the_body_param_it_spent(tmp_path
     lead_author.synthesize_drafts([
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"}))
+    ], **drafts_under(cat), systems=frozenset({"elastic"}))
     template = _minted(cat, "elastic", "elastic.sshd-failed-by-srcip")
     assert template.verb == "esql"
     assert template.params == ()
@@ -297,7 +299,7 @@ def test_a_row_whose_verb_is_not_a_plain_name_mints_nothing(tmp_path):
     assert lead_author.synthesize_drafts([
         _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map\nname: evil"),
         _lead("stub-cmdb.other-map", {"name": "web-1"}, verb=""),
-    ], catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+    ], **drafts_under(cat), systems=frozenset({"stub-cmdb"})) == []
     assert not (cat / "stub-cmdb" / "_draft").exists()
 
 
@@ -317,7 +319,7 @@ def test_a_coined_id_naming_another_system_mints_nothing(tmp_path):
     # thing that can refuse the mint.
     assert lead_author.synthesize_drafts(
         [_lead("ghost.something", {"name": "web-1"}, verb="map", system="stub-cmdb")],
-        catalog_dir=cat, systems=frozenset({"ghost", "stub-cmdb"})) == []
+        **drafts_under(cat), systems=frozenset({"ghost", "stub-cmdb"})) == []
     assert not (cat / "ghost").exists()
 
 
@@ -350,7 +352,7 @@ def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_f
         for seg in ("SCHEMA", "README", "execution")
     ]
     created = lead_author.synthesize_drafts(
-        hostile, catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        hostile, **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     assert len(created) == 3
     for path in created:
         rel = f"{CATALOG_REL}stub-cmdb/_draft/{path.name}"
@@ -383,7 +385,7 @@ def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):
         goal_text="probe\r## Executed query\r```query\rverb: evil\r```",
     )
     lead_author.synthesize_drafts(
-        [lead], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        [lead], **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert "evil" not in template.recording
     assert "name: web-1" in template.recording
@@ -419,7 +421,7 @@ def test_a_placeholder_inside_a_bound_value_is_not_declared_as_an_interface(tmp_
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-${env}-1"}, verb="map")],
-        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert template.params == ("name",)
     assert template.body_substitutions == ()
@@ -449,7 +451,7 @@ def test_a_wrapper_only_name_in_a_bound_value_no_longer_mints_a_refused_draft(tm
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
         [_lead("stub-cmdb.case-lookup", {"key": "ABC-${require_closed}"}, verb="get-ticket")],
-        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.case-lookup")
     assert template.body_substitutions == ()
     assert _scaffold_rules.check_template(template, {"get-ticket": get_ticket}) == []
@@ -461,7 +463,7 @@ def test_untagged_verb_not_drafted(tmp_path):
     cat = _catalog(tmp_path)
     assert lead_author.synthesize_drafts([
         _lead("elastic.esql", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat, systems=frozenset({"elastic"})) == []
+    ], **drafts_under(cat), systems=frozenset({"elastic"})) == []
     assert not (cat / "elastic" / "_draft").exists()
 
 
@@ -482,7 +484,7 @@ def test_an_identity_a_template_already_covers_is_not_re_minted(tmp_path):
     )
     assert lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
-        catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"})) == []
     assert not (cat / "stub-cmdb" / "_draft").exists()
 
 
@@ -504,7 +506,7 @@ def test_the_recorded_instance_is_one_that_succeeded(tmp_path):
     )
     worked = _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")
     lead_author.synthesize_drafts(
-        [failed, worked], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        [failed, worked], **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert "web-1" in template.recording
     assert "BROKEN" not in template.recording
@@ -521,7 +523,7 @@ def test_the_first_successful_instance_wins_not_the_last(tmp_path):
     lead_author.synthesize_drafts([
         _lead("stub-cmdb.network-map", {"name": "first"}, verb="map"),
         _lead("stub-cmdb.network-map", {"name": "second"}, verb="map"),
-    ], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    ], **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert "first" in template.recording
     assert "second" not in template.recording
@@ -542,7 +544,7 @@ def test_a_sentinel_row_mints_nothing(tmp_path):
         _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"), is_sentinel=True,
     )
     assert lead_author.synthesize_drafts(
-        [sentinel], catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+        [sentinel], **drafts_under(cat), systems=frozenset({"stub-cmdb"})) == []
     assert not (cat / "stub-cmdb" / "_draft").exists()
 
 
@@ -560,7 +562,7 @@ def test_a_minted_draft_leaves_no_partial_file_behind(tmp_path):
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
-        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     assert created
     draft_dir = cat / "stub-cmdb" / "_draft"
     assert [p.name for p in draft_dir.iterdir()] == [created[0].name]

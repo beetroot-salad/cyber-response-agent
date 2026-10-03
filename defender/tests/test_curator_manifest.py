@@ -24,6 +24,7 @@ import defender.learning.author.shared as _shared  # noqa: E402
 import defender.learning.author.lessons.run as _lessons_run  # noqa: E402
 from defender.learning.author.shared import build_curator_user_prompt  # noqa: E402
 from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
+from defender.tests._curator1134 import corpus_view  # noqa: E402
 
 _REAL_SLUG = "auth-log-scope-does-not-cover-post-auth-behavior"
 
@@ -257,7 +258,8 @@ def test_p1_prompt_splices_manifest_and_keeps_the_rest(tmp_path):
     corpus.mkdir()
     _findings_lesson(corpus, "manifest-lesson")
     prompt = build_curator_user_prompt(
-        _ROWS, "batch-9", corpus_dir=corpus, corpus_dir_rel="defender/lessons/", label="findings",
+        _ROWS, "batch-9", corpus=corpus_view(corpus), corpus_dir=corpus,
+        corpus_dir_rel="defender/lessons/", label="findings",
     )
     assert "## manifest-lesson" in prompt
     assert "batch-9" in prompt
@@ -274,7 +276,8 @@ def test_p2_manifest_disjoint_from_queued_rows(tmp_path):
     _findings_lesson(corpus, "existing-lesson")
     rows = [{"id": "f-QUEUED", "run_id": "run-1", "direction": "adversarial"}]
     prompt = build_curator_user_prompt(
-        rows, "batch-1", corpus_dir=corpus, corpus_dir_rel="rel", label="findings",
+        rows, "batch-1", corpus=corpus_view(corpus), corpus_dir=corpus, corpus_dir_rel="rel",
+        label="findings",
     )
     assert "existing-lesson" in _headers(prompt)
     assert "f-QUEUED" not in _headers(prompt)
@@ -289,7 +292,7 @@ def test_p3_manifest_from_abs_dir_rel_is_display_only(tmp_path):
     corpus.mkdir()
     _findings_lesson(corpus, "abs-lesson")
     prompt = build_curator_user_prompt(
-        _ROWS, "batch-1", corpus_dir=corpus,
+        _ROWS, "batch-1", corpus=corpus_view(corpus), corpus_dir=corpus,
         corpus_dir_rel="nonexistent/display/path", label="findings",
     )
     assert "## abs-lesson" in prompt

@@ -13,7 +13,9 @@ from typing import Any
 from collections.abc import Callable
 
 from defender.learning.core.config import (
+    AUTHOR_DRAIN_LABEL,
     DEFAULT_PATHS,
+    LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     QueueChannel,
     author_max_attempts,
@@ -30,6 +32,7 @@ from defender.learning.author import drain
 from defender.learning.author import shared as _author_shared
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
+from defender.learning.core.lane_trees import open_drain_trees
 from defender.learning.core.markers import (
     ClaimedMarker,
     claim_markers,
@@ -54,21 +57,26 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, run_dir: Path, *, box: Any = None,
+    paths: LoopPaths, run_dir: Path, *, label: str, box: Any = None,
     on_done: Callable[[str | None], None],
 ) -> None:
+    """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
+    `lead_author_drain`): the held roots of its writable mounts are opened here, with the box up,
+    and closed when the claim's serve returns or raises (#1134 A3). A fault holding them
+    propagates as itself, never as a swallowed transient."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
     # The drain holds the per-author queue lock for the whole tick (`lead_author_drain`), so
     # the curator is entered past its own acquisition and its done sentinel is deferred to
     # `on_done`.
-    rc = _run_curator_module(
-        "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        lambda mod: mod.run_under_held_queue_lock(
-            run_dir, paths=paths, box=box, on_done=on_done,
-        ),
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            lambda mod: mod.run_under_held_queue_lock(
+                run_dir, paths=paths, trees=trees, box=box, on_done=on_done,
+            ),
+        )
     if rc not in (0, None):
         raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
     if rc is None:
@@ -82,8 +90,14 @@ def _maybe_trigger_author(
     module_name: str,
     pending_label: str,
     *,
+    label: str,
     box: Any = None,
 ) -> None:
+    """The author lane's default work step for one curator. `label` is the lane's (bound in by
+    `author_drain`): when the curator's queue is at threshold, the held roots of the lane's
+    writable mounts are opened here, with the box up, and closed when the curator's batch
+    returns or raises (#1134 A3). Each curator opens its own. A fault holding them propagates
+    out of this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash."""
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
@@ -98,9 +112,11 @@ def _maybe_trigger_author(
         f"step={module_name} {pending_label}={pending_count} held={held_count} "
         f"threshold={threshold}"
     )
-    rc = _run_curator_module(
-        module_name, lambda mod: mod.run_batch(hold_committed=True, paths=paths, box=box)
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            module_name,
+            lambda mod: mod.run_batch(hold_committed=True, paths=paths, trees=trees, box=box),
+        )
     if rc not in (0, None):
         _logger.warning(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
 
@@ -350,7 +366,7 @@ def _drain_lead_author_markers(
     # `case_id`: this queue's live writer (`enqueue_case_for_curation`) mints the filename
     # from the case, so that is what an unreadable row's dead letter is keyed on.
     claims = claim_markers(
-        qdir, identity_key="case_id", label="lead_author_drain", noun="lead-author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        qdir, identity_key="case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
     )
     served: list[ServedMarker] = []
     for claim in claims:
@@ -404,16 +420,21 @@ def _drain_lead_author_markers(
 
 
 def _invoke_pitfalls(
-    paths: LoopPaths, *, box: Any = None,
+    paths: LoopPaths, *, label: str, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
 ) -> int:
+    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
+    of the `label` lane's writable mounts are opened here and closed when the curation returns
+    or raises (#1134 A3)."""
     _logger.info("step=pitfalls-curation")
-    rc = _run_curator_module(
-        "pitfalls_curator",
-        lambda mod: mod.run_pitfalls(
-            paths=paths, box=box, on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-        ),
-    )
+    with open_drain_trees(paths, label) as trees:
+        rc = _run_curator_module(
+            "pitfalls_curator",
+            lambda mod: mod.run_pitfalls(
+                paths=paths, trees=trees, box=box, on_curated=on_curated,
+                lock_wait_seconds=lock_wait_seconds,
+            ),
+        )
     return rc if rc is not None else 0
 
 
@@ -484,22 +505,16 @@ def _drain_box_request(
     wt: Path, batch_id: str, label: str, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
     """The drain box's mounts: ro over the whole worktree leaf (it carries `<wt>/defender` and
-    is both drain roles' cwd_anchor), rw only over what this batch needs — both lessons corpora
-    for `author_drain` (its two curators share one box), `<wt>/defender/skills` for
-    `lead_author_drain`. Nothing outside the leaf.
+    is both drain roles' cwd_anchor), rw over exactly the leaf's
+    `LoopPaths.drain_writable_trees(label)`, in its order, each at its own path. Nothing
+    outside the leaf.
 
-    An unrecognized label gets no writable corpus rather than falling through to a default,
-    the safe answer for a mount grant."""
+    The rw list is taken whole from its owner, never derived here, so the box's writable
+    mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). An
+    unrecognized label therefore gets no writable tree."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
-    rw_dirs: tuple[Path, ...]
-    if label == "lead_author_drain":  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        rw_dirs = (wt_paths.skills_dir,)
-    elif label == "author_drain":
-        rw_dirs = (wt_paths.lessons_dir, wt_paths.lessons_questioner_dir)
-    else:
-        rw_dirs = ()
-    for d in rw_dirs:
+    for d in wt_paths.drain_writable_trees(label):
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(
         name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={},
@@ -751,8 +766,10 @@ def author_drain(
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
     _validate_merge_mode()
+    # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
+    # keeps its call shape (#1134).
     if trigger_author is None:
-        trigger_author = _maybe_trigger_author
+        trigger_author = functools.partial(_maybe_trigger_author, label=AUTHOR_DRAIN_LABEL)
     if branch is None:
         branch = AuthorBranch(repo_root=paths.repo_root)
 
@@ -761,7 +778,7 @@ def author_drain(
             _logger.warning("author_drain: another drainer holds the lock — exiting")
             return 0
         return _run_worktree_batch(
-            paths, branch, label="author_drain",
+            paths, branch, label=AUTHOR_DRAIN_LABEL,
             has_work=_has_curator_work,
             do_work=lambda wt_paths, *, box=None: _drain_curators(
                 wt_paths, trigger_author, box=box
@@ -784,10 +801,14 @@ def lead_author_drain(
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
+    # The lane's label reaches its work steps bound into the DEFAULT seams, so an injected seam
+    # keeps its call shape (#1134).
     if run_lead_author is None:
-        run_lead_author = _invoke_lead_author
+        run_lead_author = functools.partial(_invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL)
     if run_pitfalls is None:
-        run_pitfalls = functools.partial(_invoke_pitfalls, lock_wait_seconds=lock_wait_seconds)
+        run_pitfalls = functools.partial(
+            _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
+        )
     if branch is None:
         branch = AuthorBranch(
             repo_root=paths.repo_root,
@@ -812,7 +833,7 @@ def lead_author_drain(
             return 0
         try:
             return _run_worktree_batch(
-                paths, branch, label="lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+                paths, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, run_lead_author, run_pitfalls, box=box,

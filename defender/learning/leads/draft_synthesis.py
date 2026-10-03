@@ -12,9 +12,10 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _yaml
-from defender._io import guarded_mkdir, write_atomic
+from defender._io import ENTRY_DIR, ENTRY_FILE, Held
+from defender._tree_listing import entry_kind
 from defender.learning.leads import lead_neighbors
-from defender.learning.leads.path_validation import CATALOG_DIR
+from defender.learning.leads.path_validation import CATALOG_FOLDER
 from defender.runtime.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
@@ -216,11 +217,19 @@ def _draft_candidate_segments(
 
 
 def synthesize_drafts(
-    executed: list[ExecutedLead], *, catalog_dir: Path = CATALOG_DIR,
+    executed: list[ExecutedLead], *, skills: Held, where: Path,
     catalog: list | None = None, systems: frozenset[str],
 ) -> list[Path]:
+    """Mint a catalog draft for each uncatalogued coined `query_id`; return the drafts written,
+    each spelled `where / name`.
+
+    `skills` is the lane's held `skills/` mount and `where` the Path it is spelled as (never
+    opened). A draft is written at `gather/queries/<system>/_draft/<hex>.md` below the mount point,
+    so a link planted anywhere below it (the catalog folder included) is refused, never followed
+    (#1134 O3, O5.4). A refused draft — a link at its name or at a holding folder, or a holding
+    folder that cannot be listed — is logged and skipped, and the claim goes on (O5.5)."""
     if catalog is None:
-        catalog = lead_neighbors.load_catalog(catalog_dir)
+        catalog = lead_neighbors.load_lane_catalog(skills.view(), where=where)
     # Includes `covers:`, or every promoted or discarded draft is re-minted when a run next
     # coins its id.
     by_id = answered_identities(catalog)
@@ -245,21 +254,29 @@ def synthesize_drafts(
             continue
         # No containment check needed: `suffix` is a hex digest and `system` passed both
         # `_SAFE_ID_SEGMENT` and the declared set.
-        draft = catalog_dir / system / "_draft" / f"{suffix}.md"
-        if draft.exists() or draft in created:
+        name = f"{CATALOG_FOLDER}/{system}/_draft/{suffix}.md"
+        draft = where / name
+        if draft in created:
             continue
         record = _executed_query(lead) or "# (no command captured for this query)"
         engine = engine_for(lead.system, lead.verb)
         try:
-            # Atomic, so a crash can't leave a truncated draft; both calls refuse a planted
-            # symlink, and `write_atomic` stages under an unpredictable name.
-            guarded_mkdir(draft.parent, base=catalog_dir)
-            write_atomic(
-                draft,
+            # A plain file or folder at the name is the draft already there. Anything else falls
+            # through to the write, which refuses what is not plain: a link at the name, or a
+            # holding folder whose listing was refused (linked, not a directory). The probe never
+            # raises; a refused write is this draft's, never the claim's.
+            if entry_kind(skills.view(), name).kind in (ENTRY_FILE, ENTRY_DIR):
+                continue
+            # Replace stages beside the name and renames onto it, so a crash can't leave a
+            # truncated draft; the held mount makes each missing holding folder and follows no
+            # link below the mount point.
+            skills.write(
+                name,
                 _draft_skeleton(
                     qid, f"{system}.{suffix}", lead.verb, _draft_params(lead),
                     lead.goal_text, record, engine,
                 ),
+                mode="replace",
             )
             created.append(draft)
             by_id.add(qid)

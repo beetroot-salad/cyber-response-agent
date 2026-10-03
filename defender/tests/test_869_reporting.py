@@ -33,6 +33,7 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
+from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
 
 DECLARED = frozenset({"elastic"})
 
@@ -105,7 +106,7 @@ def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, capsys):
         marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
     ))
     capsys.readouterr()
-    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
+    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
 
     log = loop_log(capsys)
     named = log_lines_naming(log, "gather", "fakesys", repo / ADAPTERS_REL)
@@ -122,7 +123,8 @@ def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, capsys):
     # the NAME and the registry reason, not the deletion complaint.
     with pytest.raises(LeadAuthorError) as refusal:
         lead_author._skills_path_rule(
-            repo, "D ", "defender/skills/fakesys/SKILL.md", systems=DECLARED)
+            repo, "D ", "defender/skills/fakesys/SKILL.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
     assert "fakesys" in str(refusal.value)
     assert "deleted" not in str(refusal.value), (
         "the undeclared name was absorbed into a deletion complaint about a directory that "
@@ -134,7 +136,8 @@ def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, capsys):
     # rather than having lost the deletion complaint altogether.
     with pytest.raises(LeadAuthorError, match="deleted"):
         lead_author._skills_path_rule(
-            repo, "D ", "defender/skills/elastic/SKILL.md", systems=DECLARED)
+            repo, "D ", "defender/skills/elastic/SKILL.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
 
     # Site 1 keeps its arm too — already ordered this way at this base, so it certifies rather
     # than decides, and it is here so the two sites cannot silently diverge.
@@ -162,7 +165,7 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
     carry the category and the sha, so a rotation that stamped nothing would not pass.
     """
     repo, paths, spawn = _mixed_batch(tmp_path, monkeypatch)
-    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
+    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
 
     consumed = {r["pitfall_id"]: r for r in read_rows(paths.pitfalls.consumed)}
     assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
@@ -196,7 +199,7 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     undeclared row stuck.
     """
     repo, paths, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
-    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
+    pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
 
     consumed = {r["pitfall_id"]: r for r in read_rows(paths.pitfalls.consumed)}
     assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
@@ -236,7 +239,7 @@ def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
 
     with pytest.raises(LeadAuthorError):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
 
     assert spawn.calls == [], "the curator must not be spawned against an empty set"
     assert len(persist.read_pitfalls(paths)) == 2

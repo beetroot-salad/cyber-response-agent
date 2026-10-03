@@ -4,7 +4,7 @@ import contextlib
 import json
 import random
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -13,16 +13,36 @@ from typing import Any
 from defender import _yaml
 
 from defender import _flock, _git
+from defender._io import Bound, Held
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender._clock import now_iso
 from defender._corpus import PROVENANCE_KEYS, iter_lessons
+from defender.learning.core.lane_trees import KIND_ABSENT, DrainTrees, kind_at
 
 
 
 class AuthorError(Exception):
     pass
+
+
+def lane_corpus(trees: DrainTrees, corpus_dir: Path) -> Held:
+    """@owns corpus — the curator's corpus mount (`CorpusAuthorConfig.corpus`): the `Held`
+    the lane's open trees hold at `corpus_dir` exactly (`trees.mount`), never a handle built here.
+
+    Trees that hold no mount at `corpus_dir` itself (opened for another lane's label or an
+    unknown one, or over a mount list that moved or omits the corpus, or holds only a folder
+    above it) are fatal config, never a fall-back to plain paths (#1134)."""
+    from defender.learning.core.config import FatalConfigError
+
+    try:
+        return trees.mount(corpus_dir)
+    except ValueError:
+        raise FatalConfigError(
+            f"refused: the lane's held trees {[str(m) for m in trees.mounts]} hold no mount at "
+            f"{corpus_dir}"
+        ) from None
 
 
 def acquire_repo_lock(lock_file: Path, *, timeout_seconds: int) -> Any:
@@ -110,7 +130,8 @@ def existing_finding_ids(cfg: Any) -> set[str]:
     ids: set[str] = set()
     field = provenance_field(cfg.channel.id_key)
     for lesson in iter_lessons(
-        cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
+        cfg.corpus.view(), where=cfg.corpus_dir,
+        warn_label=lambda p: f"finding-id pre-flight: {p.name}",
     ):
         sids = lesson.fm.get(field) or []
         if isinstance(sids, list):
@@ -132,24 +153,35 @@ def partition_committed(
 
 
 
-def git_head_sha(repo_root: Path) -> str:
-    return _git.git_head_sha(repo_root)
+def git_head_sha(repo_root: Path, *, timeout: float | None = None) -> str:
+    return _git.git_head_sha(repo_root, timeout=timeout)
 
 
-def changes_outside(repo_root: Path, prefix: str) -> list[str]:
+def changes_outside(
+    repo_root: Path, prefix: str, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
     return [
         path
-        for _xy, path in _git.git_status(repo_root)
+        for _xy, path in _git.git_status(repo_root, timeout=timeout, env=env)
         if not (path.startswith(prefix) and path.endswith(".md"))
     ]
 
 
-def corpus_dir_clean(repo_root: Path, corpus_dir: Path) -> bool:
-    return not _git.git_status(repo_root, pathspec=corpus_dir)
+def corpus_dir_clean(
+    repo_root: Path, corpus_dir: Path, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    return not _git.git_status(repo_root, pathspec=corpus_dir, timeout=timeout, env=env)
 
 
-def assert_clean_corpus_dir(repo_root: Path, corpus_dir: Path, corpus_dir_rel: str) -> None:
-    corpus_dir.mkdir(parents=True, exist_ok=True)
+def assert_clean_corpus_dir(
+    repo_root: Path, corpus_dir: Path, corpus_dir_rel: str, *, corpus: Held,
+) -> None:
+    """Refuse the tick on any uncommitted change under the corpus. `corpus` is its held mount
+    (#1134): its root is held open, so it stands; `corpus_dir` is that root's spelling, the git
+    pathspec only."""
+    corpus.mkdir(".")
     records = _git.git_status(repo_root, pathspec=corpus_dir)
     if records:
         listing = "\n".join(f"{xy} {path}" for xy, path in records)
@@ -270,9 +302,18 @@ def commit_corpus_paths(
 
     @owns committed_paths — the one function that decides which paths land in this tick's
     corpus commit; other consumers read it off HEAD afterward.
+
+    Which paths still stand in the worktree is asked of the lane's held mounts
+    (`cfg.tree_for`, through `kind_at`: its folder's listing, addendum 2 B3), never followed
+    through a link: anything but `KIND_ABSENT` — a file, a link, a dangling link, an entry below
+    a linked or unreadable folder — is staged as present, and git is handed the two lists
+    (#1134).
     """
     paths = sorted(set(approved_paths) | set(deletion_paths))
-    return _git.git_commit_paths(cfg.repo_root, paths, message)
+    present = [p for p in paths if kind_at(cfg.repo_root, cfg.tree_for, p) != KIND_ABSENT]
+    absent = [p for p in paths if p not in present]
+    return _git.git_commit_paths(cfg.repo_root, present, absent, message,
+                                 env=_git.committed_view_env())
 
 
 def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
@@ -324,11 +365,15 @@ def verify_agent_state(
     verify_agent_report(repo_root, result, corpus_dir, corpus_dir_rel, noun)
 
 
-def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str]) -> None:
+def assert_no_new_stray(
+    repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str], *,
+    timeout: float | None = None, env: Mapping[str, str] | None = None,
+) -> None:
     """A change outside `<corpus>/*.md` beyond what was already dirty at tick start refuses
     the tick — the spawn wrote where it was not asked to."""
     new_stray = sorted(
-        set(changes_outside(repo_root, corpus_dir_rel)) - set(baseline_stray)
+        set(changes_outside(repo_root, corpus_dir_rel, timeout=timeout, env=env))
+        - set(baseline_stray)
     )
     if new_stray:
         raise AuthorError(
@@ -338,12 +383,13 @@ def assert_no_new_stray(repo_root: Path, corpus_dir_rel: str, baseline_stray: li
 
 
 def verify_agent_report(
-    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str,
+    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str, *,
+    timeout: float | None = None, env: Mapping[str, str] | None = None,
 ) -> None:
     """Refuse a spawn whose report and tree disagree: `committed` non-empty with a clean
     corpus, or empty with a dirty one."""
     committed = result_list(result, "committed")
-    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir)
+    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir, timeout=timeout, env=env)
     if committed and not corpus_dirty:
         raise AuthorError(
             f"author reported committed {noun} but left {corpus_dir_rel} "
@@ -360,11 +406,19 @@ def verify_agent_report(
 
 
 
-def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
+def build_corpus_manifest(
+    corpus: Bound | Path, *, where: Path | None = None, seed: str | None = None,
+) -> str:
+    """The curator's frontmatter manifest of the corpus. A shared reader (#1134 A4): the drain
+    hands its corpus mount's view with `where`, that folder's spelling; a caller outside the
+    drain hands a `Path` (no `where`), opened for the call. A lesson that cannot be read (a link
+    or hard link at its name included) or parsed keeps its stem under an "unavailable"
+    placeholder."""
     sections: list[str] = []
     skipped: list[Path] = []
     for lesson in iter_lessons(
-        corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}", on_skip=skipped.append
+        corpus, where=where, warn_label=lambda p: f"corpus manifest: {p.name}",
+        on_skip=skipped.append,
     ):
         kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}
         rendered = _yaml.safe_dump(
@@ -385,12 +439,17 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
 
 
 def build_curator_user_prompt(
-    rows: list[dict], batch_id: str, *, corpus_dir: Path, corpus_dir_rel: str, label: str,
+    rows: list[dict], batch_id: str, *, corpus: Bound, corpus_dir: Path, corpus_dir_rel: str,
+    label: str,
     manifest_seed: str | None = None,
     salt: str | None = None,
 ) -> str:
+    """The curator spawn's user turn. The manifest is read through `corpus`, the corpus mount's
+    view (#1134); `corpus_dir` is that folder's spelling only."""
     seed = manifest_seed if manifest_seed is not None else batch_id
-    manifest = build_corpus_manifest(corpus_dir, seed=seed) or "(none — the corpus is empty)"
+    manifest = build_corpus_manifest(
+        corpus, where=corpus_dir, seed=seed,
+    ) or "(none — the corpus is empty)"
     manifest_stems = "\n".join(
         line.removeprefix("## ")
         for line in manifest.splitlines()

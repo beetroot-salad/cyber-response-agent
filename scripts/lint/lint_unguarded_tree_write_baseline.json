@@ -17,9 +17,8 @@
     "evals/oracle_golden/story_from_run.py:main": "",
     "learning/author/branch.py:revert_lesson_pr": "",
     "learning/author/branch.py:start_batch": "",
-    "learning/author/lessons/run.py:invoke_agent": "",
-    "learning/author/lessons/run.py:write_held_report": "",
-    "learning/author/shared.py:assert_clean_corpus_dir": "",
+    "learning/author/lessons/run.py:invoke_agent": "intentional (#1134 N-e): mkdir of the host-side `_pending` queue dir, outside every box mount; the corpus itself is written only through its held mount",
+    "learning/author/shared.py:assert_clean_corpus_dir": "false positive (#1134): `corpus.mkdir(\".\")` is `Held.mkdir` on the corpus's held mount (descriptor-rooted, follows nothing); the lint matches `.mkdir` by name. The D6 census proves the receiver a `Held`",
     "learning/core/markers.py:_enqueue_marker": "",
     "learning/core/markers.py:claim_markers": "intentional: mkdir of the queue's own inflight/ claim dir. Replaces the baselined copies in learning/core/drains.py and in the retired per-case cycle.",
     "learning/core/markers.py:enqueue_case_for_curation": "",
@@ -33,9 +32,8 @@
     "learning/frontend/build.py:main": "",
     "learning/frontend/serialize.py:main": "",
     "learning/lead_repository.py:stage_tables": "",
-    "learning/leads/_lead_spine.py:_spawn_author_agent": "",
-    "learning/leads/draft_synthesis.py:synthesize_drafts": "",
-    "learning/leads/lead_author/__init__.py:_write_state": "",
+    "learning/leads/_lead_spine.py:_spawn_author_agent": "intentional (#1134 N-e): mkdir of the host-side lead-pending state dir (`PENDING_DIR`), outside every box mount",
+    "learning/leads/lead_author/__init__.py:_write_state": "intentional (#1134 N-e): the run dir's `lead_author/` state (mkdir + write), outside the drain's writable trees",
     "run_common.py:materialize_run": "",
     "runtime/verb_roster.py:generate_roster": ""
   }

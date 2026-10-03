@@ -36,6 +36,7 @@ from defender.tests._declared869 import (
     write,
     write_template,
 )
+from defender.tests._lead_author_1134 import lane_tree_for
 
 #: The six directories under `defender/skills/` that no source declares — the ones FK-1
 #: refuses all writes to. `judge` carries no `SKILL.md` today; the rule is a path rule, so it
@@ -80,9 +81,11 @@ def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
 
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/fakesys2/SKILL.md", systems=DECLARED)
+            repo, "A ", "defender/skills/fakesys2/SKILL.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
     with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
     assert phantom.is_file(), "the refusal is the gate's, not the filesystem's"
     assert "defender/skills/fakesys2/SKILL.md" not in head_files(repo)
@@ -99,11 +102,11 @@ def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
             repo, "A ", "defender/skills/gather/queries/fakesys/hunt-creds.md",
-            systems=DECLARED)
+            systems=DECLARED, tree_for=lane_tree_for(repo))
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
             repo, "A ", "defender/skills/gather/queries/fakesys/_draft/hunt-creds.md",
-            systems=DECLARED)
+            systems=DECLARED, tree_for=lane_tree_for(repo))
 
 
 def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
@@ -121,10 +124,10 @@ def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
     assert "gather" not in DECLARED
     assert lead_author._skills_path_rule(
         repo, "A ", "defender/skills/gather/queries/elastic/auth-events.md",
-        systems=DECLARED) is None
+        systems=DECLARED, tree_for=lane_tree_for(repo)) is None
     assert lead_author._skills_path_rule(
         repo, "A ", "defender/skills/gather/queries/elastic/_draft/new-verb.md",
-        systems=DECLARED) is None
+        systems=DECLARED, tree_for=lane_tree_for(repo)) is None
 
     real = _real_adapter_systems()
     catalog_paths = [
@@ -135,7 +138,8 @@ def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
     for path in catalog_paths:
         assert path.split("/")[2] == "gather"
         assert lead_author._skills_path_rule(
-            _git.REPO_ROOT, "A ", path, systems=real) is None
+            _git.REPO_ROOT, "A ", path, systems=real,
+            tree_for=lane_tree_for(_git.REPO_ROOT)) is None
 
 
 def test_skills_path_rule_refuses_an_undeclared_system_draft(tmp_path):
@@ -149,9 +153,11 @@ def test_skills_path_rule_refuses_an_undeclared_system_draft(tmp_path):
     repo = _gate_repo(tmp_path)
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/fakesys/_draft/hunt-creds.md", systems=DECLARED)
+            repo, "A ", "defender/skills/fakesys/_draft/hunt-creds.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/elastic/_draft/hunt-creds.md", systems=DECLARED) is None
+        repo, "A ", "defender/skills/elastic/_draft/hunt-creds.md", systems=DECLARED,
+        tree_for=lane_tree_for(repo)) is None
 
 
 def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
@@ -175,18 +181,20 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
         path = f"defender/skills/{name}/SKILL.md"
         assert _is_in_scope(path), f"{path} is in scope today, which is why it needs refusing"
         with pytest.raises(LeadAuthorError):
-            lead_author._skills_path_rule(repo, "A ", path, systems=DECLARED)
+            lead_author._skills_path_rule(repo, "A ", path, systems=DECLARED,
+                                          tree_for=lane_tree_for(repo))
 
     # Driven through the composed gate over the file G4 actually committed at this base.
     write(repo / SKILLS_REL / "gather" / "SKILL.md",
           "---\nname: defender-gather\n---\n# gather\nedited by the lane\n")
     with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
     # The live edge FK-10 leaves open, stated: declare `gather` and the refusal lifts.
     assert lead_author._skills_path_rule(
         repo, "A ", "defender/skills/gather/SKILL.md",
-        systems=DECLARED | {"gather"}) is None
+        systems=DECLARED | {"gather"}, tree_for=lane_tree_for(repo)) is None
 
 
 def test_the_gather_subagent_still_loads_its_own_prompt():
@@ -211,7 +219,7 @@ def test_the_gather_subagent_still_loads_its_own_prompt():
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
             _git.REPO_ROOT, "A ", "defender/skills/gather/SKILL.md",
-            systems=_real_adapter_systems())
+            systems=_real_adapter_systems(), tree_for=lane_tree_for(_git.REPO_ROOT))
 
 
 def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
@@ -254,7 +262,8 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
         "defender/skills/gather/queries/elastic/x.md",
         "defender/skills/gather/queries/elastic/_draft/x.md",
     ):
-        assert lead_author._skills_path_rule(repo, "A ", admitted, systems=DECLARED) is None
+        assert lead_author._skills_path_rule(repo, "A ", admitted, systems=DECLARED,
+                                             tree_for=lane_tree_for(repo)) is None
 
     # The control for the depth half: the SAME nested directories, one basename over, for the
     # same declared system — still admitted, id-less so RF2's rule spares them.
@@ -263,7 +272,8 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
         "defender/skills/gather/queries/elastic/mcpsys/notes.md",
     ):
         write(repo / sibling, "# a nested note, carrying no id\n")
-        assert lead_author._skills_path_rule(repo, "A ", sibling, systems=DECLARED) is None
+        assert lead_author._skills_path_rule(repo, "A ", sibling, systems=DECLARED,
+                                             tree_for=lane_tree_for(repo)) is None
 
     # The base-state fact the depth half is about, re-measured rather than remembered: the
     # two-segment form is refused today only as OUT OF SCOPE, while every nested form is IN
@@ -275,12 +285,14 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
 
     for refused in ("defender/skills/elastic/execution.md", *nested_forms):
         with pytest.raises(LeadAuthorError):
-            lead_author._skills_path_rule(repo, "A ", refused, systems=DECLARED)
+            lead_author._skills_path_rule(repo, "A ", refused, systems=DECLARED,
+                                          tree_for=lane_tree_for(repo))
 
     write(repo / SKILLS_REL / "elastic" / "execution.md", "# elastic\n## Common pitfalls\n- x\n")
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
     assert head_files(repo) == before
 
     # And through the composed gate on the NESTED form, which is the one an agent can write
@@ -289,7 +301,8 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     nested = write(repo / NESTED_MARKER_RELS[0], "# mcpsys\n")
     assert nested.is_file(), "the refusal is the gate's, not the filesystem's"
     with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
     assert head_files(repo) == before
 
 
@@ -324,7 +337,8 @@ def test_the_marker_write_is_admitted_and_still_never_lands(tmp_path):
     assert marker.is_file()
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
     assert head_files(repo) == before
 
 
@@ -346,21 +360,25 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
     write_template(repo, "elastic", "x", tid="fakesys.x")
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/gather/queries/elastic/x.md", systems=DECLARED)
+            repo, "A ", "defender/skills/gather/queries/elastic/x.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
 
     # The agreeing id, on the same address, is admitted.
     write_template(repo, "elastic", "y")
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/gather/queries/elastic/y.md", systems=DECLARED) is None
+        repo, "A ", "defender/skills/gather/queries/elastic/y.md", systems=DECLARED,
+        tree_for=lane_tree_for(repo)) is None
 
     # Ordering: the delete-prohibition still owns a `D` record on the disagreeing file …
     with pytest.raises(LeadAuthorError, match="deleted"):
         lead_author._skills_path_rule(
-            repo, "D ", "defender/skills/gather/queries/elastic/x.md", systems=DECLARED)
+            repo, "D ", "defender/skills/gather/queries/elastic/x.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
     # … and the protected-surface branch still owns SCHEMA.md, whose frontmatter has no id.
     with pytest.raises(LeadAuthorError, match="protected"):
         lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/gather/queries/SCHEMA.md", systems=DECLARED)
+            repo, "A ", "defender/skills/gather/queries/SCHEMA.md", systems=DECLARED,
+            tree_for=lane_tree_for(repo))
 
 
 def test_the_id_rule_still_admits_every_committed_id():
@@ -395,7 +413,8 @@ def test_the_id_rule_still_admits_every_committed_id():
     for path in with_id:
         if _is_draft_readme(path) or _is_schema_md(path):
             continue
-        assert lead_author._skills_path_rule(root, "A ", path, systems=real) is None
+        assert lead_author._skills_path_rule(root, "A ", path, systems=real,
+                                             tree_for=lane_tree_for(root)) is None
 
 
 def test_the_id_rule_spares_the_idless_surfaces(tmp_path):
@@ -421,7 +440,8 @@ def test_the_id_rule_spares_the_idless_surfaces(tmp_path):
     assert declared_skill_mds, "no declared system carries a SKILL.md, so this is vacuous"
     for path in declared_skill_mds:
         assert _frontmatter_id(root / path) is None
-        assert lead_author._skills_path_rule(root, "A ", path, systems=real) is None
+        assert lead_author._skills_path_rule(root, "A ", path, systems=real,
+                                             tree_for=lane_tree_for(root)) is None
 
     # NF3's crossing, CONSTRUCTED rather than hunted for: the two committed `SKILL.md` files
     # whose `name:` does not follow `defender-<dir>` (`advisory`, `connect`) belong to
@@ -433,7 +453,8 @@ def test_the_id_rule_spares_the_idless_surfaces(tmp_path):
     assert _frontmatter_name(repo / SKILLS_REL / "elastic" / "SKILL.md") != "defender-elastic"
     assert _frontmatter_id(repo / SKILLS_REL / "elastic" / "SKILL.md") is None
     assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/elastic/SKILL.md", systems=DECLARED) is None
+        repo, "A ", "defender/skills/elastic/SKILL.md", systems=DECLARED,
+        tree_for=lane_tree_for(repo)) is None
 
 
 def _frontmatter(path: Path) -> dict:

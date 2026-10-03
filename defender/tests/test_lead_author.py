@@ -21,6 +21,8 @@ import pytest
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests._repo import query_template, seed_skills_repo
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._lead_author_1134 import lane_tree_for, lead_deps, repo_skills, skills_view
 
 
 def _ensure_declarable(repo_root: Path) -> None:
@@ -50,7 +52,7 @@ def _deps(tmp_path: Path, **overrides):
     """Production lead-author deps rooted at a tmp tree, with leaf collaborators
     overridden by keyword — replaces monkeypatching lead_author's own functions."""
     _ensure_declarable(tmp_path)
-    return replace(lead_author.build_lead_author_deps(LoopPaths(repo_root=tmp_path)), **overrides)
+    return replace(lead_deps(LoopPaths(repo_root=tmp_path)), **overrides)
 
 
 def _executed_lead(**kw):
@@ -132,9 +134,10 @@ def catalog(tmp_path: Path) -> Path:
     """Self-contained query catalog so build_handoff resolves ids without
     depending on the live, environment-specific on-disk catalog (v2 ships an
     elastic/host-state/cmdb catalog; main ships wazuh). Returns the catalog dir;
-    tests pass it as ``build_handoff(..., repo_root=catalog.parent, catalog_dir=catalog)``
+    tests pass it as ``build_handoff(..., repo_root=catalog.parent,
+    skills=skills_view(catalog.parents[1]), where=catalog.parents[1])``
     (the read root + the relative-path anchor), so no module-global patch is needed."""
-    cat = tmp_path / "queries"
+    cat = tmp_path / "skills" / "gather" / "queries"
     (cat / "elastic").mkdir(parents=True)
     (cat / "host-state").mkdir(parents=True)
     (cat / "elastic" / "auth-events.md").write_text(
@@ -224,7 +227,8 @@ def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
                      payload_digest=f"call-{i}")
     _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
+        where=catalog.parents[1]
     )
     assert len(handoffs) == 1
     h = handoffs[0]
@@ -248,7 +252,8 @@ def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog
     )
     _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
+        where=catalog.parents[1]
     )
     assert len(handoffs) == 1
     inv = handoffs[0]["invocations"][0]
@@ -269,7 +274,8 @@ def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path)
     _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"query": pipe}, verb="esql")
     _, leads = lead_author.extract(run_dir)
     inv = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
+        where=catalog.parents[1]
     )[0]["invocations"][0]
     assert inv["executed_query"] == pipe
 
@@ -283,7 +289,8 @@ def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
     _, leads = lead_author.extract(run_dir)
     assert len(leads) == 2
     handoffs = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
+        where=catalog.parents[1]
     )
     assert len(handoffs) == 1
     assert handoffs[0]["query_id"] == "elastic.auth-events"
@@ -293,7 +300,7 @@ def test_build_handoff_drops_ad_hoc_empty_query_id(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "ad-hoc")
     _write_query(run_dir, "l-001", 0, "")
     _, leads = lead_author.extract(run_dir)
-    handoffs = lead_author.build_handoff(run_dir, leads)
+    handoffs = lead_author.build_handoff(run_dir, leads, **repo_skills())
     assert handoffs == []
 
 
@@ -304,7 +311,8 @@ def test_build_handoff_one_handoff_per_template_cross_system(run_dir: Path, cata
     _write_query(run_dir, "l-001", 1, "host-state.process-list", {"pattern": "x"})
     _, leads = lead_author.extract(run_dir)
     handoffs = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, catalog_dir=catalog
+        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
+        where=catalog.parents[1]
     )
     assert len(handoffs) == 2
     by_id = {h["query_id"]: h for h in handoffs}
@@ -319,7 +327,7 @@ def _claude_should_not_be_called(*args, **kwargs):
 
 
 def test_run_missing_run_dir(tmp_path: Path):
-    assert lead_author.run(tmp_path / "nope") == 2
+    assert lead_author.run(tmp_path / "nope", label=LEAD_AUTHOR_DRAIN_LABEL) == 2
 
 
 def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
@@ -334,7 +342,7 @@ def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
         acquire_queue_lock=lambda: None,
         invoke_agent=_claude_should_not_be_called,
     )
-    rc = lead_author.run(run_dir, deps=deps)
+    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert rc == lead_author.QUEUE_LOCK_SKIP_RC
     assert rc != 0
 
@@ -349,7 +357,7 @@ def test_run_done_sentinel_short_circuits(run_dir: Path):
         release_queue_lock=lambda fh: None,
         invoke_agent=_claude_should_not_be_called,
     )
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
 
 
 
@@ -407,7 +415,7 @@ def test_discover_system_drafts_finds_files_excluding_readme(tmp_path):
     (skills / "cmdb" / "_draft" / "_TEMPLATE.md").write_text("template\n")
 
     found = lead_author.discover_system_drafts(
-        skills_dir=skills, systems=frozenset({"elastic", "wazuh", "cmdb"}))
+        skills=skills_view(skills), where=skills, systems=frozenset({"elastic", "wazuh", "cmdb"}))
     rel = [str(p.relative_to(tmp_path)) for p in found]
     assert rel == ["defender/skills/elastic/_draft/real-draft.md"]
 
@@ -463,7 +471,8 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_git_repo: Path):
     skill.write_text(skill.read_text() + "\n## Falco quirk\nworkaround\n")
     (repo / "defender" / "skills" / "elastic" / "_draft" / "falco-na.md").unlink()
 
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
     assert "defender/skills/gather/queries/wazuh/newthing.md" in changed
     assert "defender/skills/elastic/SKILL.md" in changed
@@ -473,7 +482,8 @@ def test_verify_skills_state_rejects_stray_outside_skills(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def _append(path: Path, text: str) -> None:
@@ -527,7 +537,8 @@ def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
     identity — and each is refused by the rule that owns it."""
     mutate(tmp_git_repo)
     with pytest.raises(lead_author.LeadAuthorError, match=match):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_git_repo: Path):
@@ -537,7 +548,8 @@ def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_git_repo: Path):
     more specific reason (`marker_is_not_agent_committable`), asserted separately."""
     (tmp_git_repo / "defender" / "skills" / "elastic" / "notes.md").write_text("x")
     with pytest.raises(lead_author.LeadAuthorError, match="out-of-scope"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def test_verify_skills_state_rejects_execution_md(tmp_git_repo: Path):
@@ -545,7 +557,8 @@ def test_verify_skills_state_rejects_execution_md(tmp_git_repo: Path):
     committed (#869 C32/F1) — under NF1 the commit gate IS the marker's integrity."""
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("x")
     with pytest.raises(lead_author.LeadAuthorError, match="execution.md"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def _stage_covered_draft(repo: Path, query_id: str) -> Path:
@@ -577,7 +590,8 @@ def test_a_promote_that_carries_covers_is_accepted(tmp_git_repo: Path):
     )
     draft.unlink()
 
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
 
 
@@ -593,7 +607,8 @@ def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path
     )
     draft.unlink()
 
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
 
 
@@ -608,7 +623,8 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
     draft.unlink()
 
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
 
 def _mint_uncommitted_draft(repo: Path, query_id: str) -> Path:
@@ -634,12 +650,13 @@ def test_a_bare_discard_of_a_draft_minted_this_tick_is_refused(tmp_git_repo: Pat
     captured between the mint and the agent instead."""
     repo = tmp_git_repo
     draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
-    minted = lead_author._minted_identities([draft])
+    minted = lead_author._minted_identities(
+        skills_view(repo / "defender" / "skills"), [draft], where=repo / "defender" / "skills")
     draft.unlink()
 
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
         lead_author._verify_skills_state(
-            repo, baseline_stray=[], systems=DECLARED, minted=minted
+            repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
         )
 
 
@@ -648,7 +665,8 @@ def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
     nothing and the batch commits."""
     repo = tmp_git_repo
     draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
-    minted = lead_author._minted_identities([draft])
+    minted = lead_author._minted_identities(
+        skills_view(repo / "defender" / "skills"), [draft], where=repo / "defender" / "skills")
     (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
         query_template("wazuh.auth-failure-rate", "established",
                        covers=[draft.stem.join(("wazuh.", "")), "wazuh.hunt-failed-logins"])
@@ -656,7 +674,7 @@ def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
     draft.unlink()
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
     )
     assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
 
@@ -666,10 +684,11 @@ def test_a_draft_minted_this_tick_and_left_alone_is_not_a_departure(tmp_git_repo
     nowhere — the rule must fire on the `rm`, never on the file still being there."""
     repo = tmp_git_repo
     draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
-    minted = lead_author._minted_identities([draft])
+    minted = lead_author._minted_identities(
+        skills_view(repo / "defender" / "skills"), [draft], where=repo / "defender" / "skills")
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
     )
     assert changed == [draft.relative_to(repo).as_posix()]
 
@@ -691,7 +710,8 @@ def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
     )
     # …and no `rm` of the draft.
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
 
 def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
@@ -712,7 +732,8 @@ def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
     subprocess.run(["git", "commit", "-q", "-m", "widened last tick"], cwd=repo, check=True)
 
     draft.unlink()
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/"
                        f"{lead_author._draft_basename('wazuh.hunt-failed-logins')}.md"]
 
@@ -735,7 +756,8 @@ def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
     subprocess.run(["git", "commit", "-q", "-m", "a mismatched id"], cwd=repo, check=True)
 
     broken.write_text(query_template("wazuh.auth-events", "established"))
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
 
 
@@ -750,7 +772,9 @@ def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
     repo = tmp_git_repo
     narrow = _mint_uncommitted_draft(repo, "wazuh.narrow-probe")
     wide = _mint_uncommitted_draft(repo, "wazuh.wide-probe")
-    minted = lead_author._minted_identities([narrow, wide])
+    minted = lead_author._minted_identities(
+        skills_view(repo / "defender" / "skills"), [narrow, wide],
+        where=repo / "defender" / "skills")
 
     # The survivor absorbs the narrow one's identities; the narrow one goes.
     wide.write_text(query_template(
@@ -763,7 +787,7 @@ def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
     narrow.unlink()
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
     )
     assert wide.relative_to(repo).as_posix() in changed
 
@@ -775,7 +799,8 @@ def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
     on it staying discardable."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/_draft/newthing.md" in changed
 
 
@@ -797,7 +822,8 @@ def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_r
 
     established.write_text(query_template("wazuh.auth-events", "established"))
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.old-probe"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
 
 def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Path):
@@ -814,19 +840,22 @@ def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Pat
         query_template("wazuh.something-else", "established")
     )
     with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
 
 def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
     schema = tmp_git_repo / _CATALOG / "SCHEMA.md"
     schema.write_text(schema.read_text() + "\nstomped\n")
     with pytest.raises(lead_author.LeadAuthorError, match="protected surface"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def test_verify_skills_state_accepts_draft_discard(tmp_git_repo: Path):
     (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
-    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(tmp_git_repo))
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/newthing.md"]
 
 
@@ -850,7 +879,8 @@ def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_para
     )
     (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="mystery"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(repo))
 
 
 def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
@@ -868,7 +898,8 @@ def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
             body="```query\nverb: search\nparams:\n  index: ${mystery}\n```",
         )
     )
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(repo))
     assert "defender/skills/gather/queries/wazuh/_draft/rough.md" in changed
 
 
@@ -919,6 +950,7 @@ def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved"):
         lead_author._verify_skills_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED | {"ghost"},
+            tree_for=lane_tree_for(tmp_git_repo),
         )
 
 
@@ -935,7 +967,8 @@ def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_gi
     adapters = tmp_git_repo / "defender" / "scripts" / "adapters"
     shutil.rmtree(adapters)
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved") as exc:
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
     assert str(adapters) in str(exc.value), f"the refusal does not name the directory: {exc.value}"
     assert "refusing to commit" in str(exc.value)
 
@@ -950,6 +983,7 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
     assert "defender/other/preexisting.md" in baseline
     changed = lead_author._verify_skills_state(
         tmp_git_repo, baseline_stray=baseline, systems=DECLARED,
+        tree_for=lane_tree_for(tmp_git_repo),
     )
     assert changed == []
 
@@ -963,7 +997,7 @@ def _bypass_tables():
     touches the corpus."""
     return dict(
         extract=lambda rd: ([], [_executed_lead()]),
-        synthesize=lambda executed, catalog_dir=None, catalog=None, systems=None: [],
+        synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
     )
 
 
@@ -991,7 +1025,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
         release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     head_after = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     assert head_after != head_before, "the loop should have committed"
     changed = _run_git(repo, "diff", "--name-only", "HEAD~1", "HEAD").stdout.split()
@@ -1027,7 +1061,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError):
-        lead_author.run(run_dir, deps=deps)
+        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
@@ -1049,7 +1083,7 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
         release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert lead_author.run(run_dir, deps=deps) == 2
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 2
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
     assert not (run_dir / "lead_author" / "failure.txt").exists()
@@ -1091,7 +1125,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
     )
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     assert not promoted_draft.exists()
     assert not discarded_draft.exists()
     assert promoted_est.is_file()
@@ -1128,7 +1162,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
-        lead_author.run(run_dir, deps=deps)
+        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
@@ -1164,14 +1198,14 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
         return 0
 
     deps = replace(
-        lead_author.build_lead_author_deps(LoopPaths(repo_root=repo, state_dir=tmp_path / "st")),
+        lead_deps(LoopPaths(repo_root=repo, state_dir=tmp_path / "st")),
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
         invoke_agent=fake_agent,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
-        lead_author.run(run_dir, deps=deps)
+        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
@@ -1337,7 +1371,9 @@ def test_collect_general_failures_residue_only(tmp_path: Path, catalog: Path):
         _executed_lead(lead_id="l-004", query_id="elastic.esql", error_class="infra"),
         _executed_lead(lead_id="l-005", query_id="elastic.esql", error_class=None),
     ]
-    out = lead_author.collect_general_failures(leads, run_dir, catalog_dir=catalog)
+    out = lead_author.collect_general_failures(leads, run_dir,
+                                               skills=skills_view(catalog.parents[1]),
+    where=catalog.parents[1])
     assert [r["query_id"] for r in out] == ["elastic.esql"]
     r = out[0]
     assert r["pitfall_id"] == "run-abc:l-001:0"
@@ -1359,7 +1395,9 @@ def test_collect_and_synthesize_partition_disjointly(tmp_path: Path, catalog: Pa
                if lead_author._draft_candidate_segments(
                    ld.query_id, ld.verb, by_id, row_system=ld.system) is not None}
     collected = {r["query_id"]
-                 for r in lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)}
+                 for r in lead_author.collect_general_failures(
+                     leads, tmp_path / "r", skills=skills_view(catalog.parents[1]),
+                     where=catalog.parents[1])}
     assert drafted == {"elastic.new-thing"}
     assert collected == {"elastic.esql"}
     assert drafted.isdisjoint(collected)
@@ -1373,7 +1411,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     resolves to an out-of-repo state dir."""
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     deps = replace(
-        lead_author.build_lead_author_deps(paths),
+        lead_deps(paths),
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
         invoke_agent=lambda *a, **k: 0,
@@ -1383,7 +1421,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     _write_lead_meta(run_dir, "l-001", "probe")
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     queue = deps.paths.pitfalls.file
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
@@ -1391,7 +1429,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
     (run_dir / "lead_author" / "done").unlink()
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert len(rows2) == 1
 
@@ -1409,7 +1447,7 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     seen: dict = {}
     deps = replace(
-        lead_author.build_lead_author_deps(paths),
+        lead_deps(paths),
         acquire_queue_lock=lambda: object(),
         release_queue_lock=lambda fh: None,
         invoke_agent=lambda rd, handoffs, pending, **_kw: seen.update(handoffs=handoffs) or 0,
@@ -1419,7 +1457,7 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     _write_lead_meta(run_dir, "l-001", "probe a brand-new verb")
     _write_query(run_dir, "l-001", 0, "wazuh.brandnew", verb="lookup", payload_status="ok")
 
-    assert lead_author.run(run_dir, deps=deps) == 0
+    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     minted = lead_author._draft_basename("wazuh.brandnew")
     assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / f"{minted}.md").is_file()
     # The row still resolves, through `covers:` rather than through a matching `id:`. The
@@ -1436,7 +1474,9 @@ def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path
         _executed_lead(lead_id="l-001", query_id="elastic.esql", system="",
                        error_class="agent-fixable"),
     ]
-    out = lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)
+    out = lead_author.collect_general_failures(leads, tmp_path / "r",
+                                               skills=skills_view(catalog.parents[1]),
+    where=catalog.parents[1])
     assert out == []
 
 
@@ -1452,7 +1492,8 @@ def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                         tree_for=lane_tree_for(tmp_git_repo))
 
 
 def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
@@ -1469,7 +1510,8 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
         "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"
     )
-    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
+                                               tree_for=lane_tree_for(tmp_git_repo))
     assert changed == [
         "defender/skills/elastic/_draft/aa-new.md",
         "defender/skills/gather/queries/wazuh/auth-events.md",

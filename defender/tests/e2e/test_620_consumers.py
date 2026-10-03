@@ -70,6 +70,7 @@ from defender.runtime.verbs import (  # noqa: E402
     engine_of,
     verb,
 )
+from defender.tests._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -300,7 +301,8 @@ def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
     assert row["raw_command"] not in record, "the record leaked the shlex audit string"
 
     drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), catalog_dir=tmp_path / "catalog", catalog=[],
+        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
+        where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     assert "```esql\n" in text, "the engine body was not fenced in its declared engine language"
@@ -318,7 +320,8 @@ def test_canonical_record_param_only_is_structured_call(tmp_path):
     ])
     row = r.row()
     drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), catalog_dir=tmp_path / "catalog", catalog=[],
+        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
+        where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"cmdb"}))
     text = drafts[0].read_text(encoding="utf-8")
 
@@ -406,7 +409,8 @@ def test_handoff_executed_query_and_params_agree(tmp_path):
     row = r.row()
     joined, executed = lead_extraction.extract(r.run_dir)
     handoffs = lead_author.build_handoff(
-        r.run_dir, executed, joined, repo_root=tmp_path, catalog=catalog)
+        r.run_dir, executed, joined, repo_root=tmp_path,
+        skills=skills_view(catalog_dir.parents[1]), where=catalog_dir.parents[1], catalog=catalog)
     inv = handoffs[0]["invocations"][0]
 
     assert inv["params"] == row["params"] == {"host": "db 1"}
@@ -505,7 +509,8 @@ def test_draft_from_elastic_lucene_is_fenced_lucene_not_esql(tmp_path):
     ])
     assert r.row()["verb"] == "query"
     drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), catalog_dir=tmp_path / "catalog", catalog=[],
+        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
+        where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     assert "engine: esql" not in text, "a Lucene verb was stamped engine: esql"
@@ -529,7 +534,8 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
         q("elastic", "esql", {"query": _FENCE_BREAKER}, query_id="elastic.evilquery"), DONE,
     ])
     drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), catalog_dir=tmp_path / "catalog", catalog=[],
+        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
+        where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
@@ -551,7 +557,8 @@ def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
         q("elastic", "esql", {"query": pipe}, query_id="elastic.benign"), DONE,
     ])
     drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), catalog_dir=tmp_path / "catalog", catalog=[],
+        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
+        where=tmp_path / "catalog", catalog=[],
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
@@ -641,7 +648,8 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
     r_untagged = run_gather(tmp_path / "u", verbs=_elastic_registry(rec), turns=[
         q("elastic", "alerts", {"native_query": "x"}), DONE], run_id="q620-nc-u")
     drafts_u = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_untagged.run_dir), catalog_dir=tmp_path / "cu", catalog=[],
+        _executed_leads(r_untagged.run_dir), skills=held_skills(tmp_path / "cu"),
+        where=tmp_path / "cu", catalog=[],
         systems=frozenset({"elastic"}))
     assert drafts_u == [], "an untagged declared-verb id (elastic.alerts) was drafted"
 
@@ -649,7 +657,8 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
         q("elastic", "query", {"native_query": "x"}, query_id="elastic.sshd-by-srcip"), DONE,
     ], run_id="q620-nc-c")
     drafts_c = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_coined.run_dir), catalog_dir=tmp_path / "cc", catalog=[],
+        _executed_leads(r_coined.run_dir), skills=held_skills(tmp_path / "cc"),
+        where=tmp_path / "cc", catalog=[],
         systems=frozenset({"elastic"}))
     assert [p.name for p in drafts_c] == [
         f"{_draft_basename('elastic.sshd-by-srcip')}.md"
@@ -667,7 +676,8 @@ def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
     assert r_a.row()["query_id"] == "elastic.foo"
     assert r_a.row()["verb"] == "foo"
     drafts_a = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_a.run_dir), catalog_dir=tmp_path / "ca", catalog=[],
+        _executed_leads(r_a.run_dir), skills=held_skills(tmp_path / "ca"), where=tmp_path / "ca",
+        catalog=[],
         systems=frozenset({"elastic"}))
     assert drafts_a == [], "row whose verb equals its query_id suffix was drafted"
 
@@ -677,7 +687,8 @@ def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
     assert r_b.row()["query_id"] == "elastic.foo"
     assert r_b.row()["verb"] == "query"
     drafts_b = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_b.run_dir), catalog_dir=tmp_path / "cb", catalog=[],
+        _executed_leads(r_b.run_dir), skills=held_skills(tmp_path / "cb"), where=tmp_path / "cb",
+        catalog=[],
         systems=frozenset({"elastic"}))
     assert any(p.name == f"{_draft_basename('elastic.foo')}.md" for p in drafts_b), \
         "candidacy did not follow the row's recorded verb"
@@ -704,7 +715,9 @@ def test_render_query_binds_the_elastic_body(tmp_path):
     ], run_id="q620-rq-e")
     joined, executed = lead_extraction.extract(r.run_dir)
     inv = lead_author.build_handoff(
-        r.run_dir, executed, joined, repo_root=tmp_path, catalog=catalog)[0]["invocations"][0]
+        r.run_dir, executed, joined, repo_root=tmp_path,
+        skills=skills_view(catalog_dir.parents[1]), where=catalog_dir.parents[1],
+        catalog=catalog)[0]["invocations"][0]
     assert "${host}" not in inv["rendered_query"], \
         "rendered_query returned the static skeleton with an unbound ${host}"
     assert pipe in inv["rendered_query"], "rendered_query does not reflect the executed body"
@@ -715,7 +728,9 @@ def test_render_query_binds_the_elastic_body(tmp_path):
     ], run_id="q620-rq-c")
     joined2, executed2 = lead_extraction.extract(r2.run_dir)
     inv2 = lead_author.build_handoff(
-        r2.run_dir, executed2, joined2, repo_root=tmp_path, catalog=catalog)[0]["invocations"][0]
+        r2.run_dir, executed2, joined2, repo_root=tmp_path,
+        skills=skills_view(catalog_dir.parents[1]), where=catalog_dir.parents[1],
+        catalog=catalog)[0]["invocations"][0]
     assert inv2["rendered_query"] == "get-host host=db-1"
 
 
@@ -799,7 +814,8 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
                      "## Exit codes\n\n- 64: a param mistake\n\n## Common pitfalls\n\n- proc\n")
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator)
+    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
+                                       trees=lead_trees(paths))
     assert rc == 0
     assert exec_md.is_file(), "the curator's created execution.md was rejected — dead-end"
     text = exec_md.read_text(encoding="utf-8")

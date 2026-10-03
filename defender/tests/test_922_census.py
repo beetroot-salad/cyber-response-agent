@@ -254,9 +254,10 @@ def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_o
     """
     from defender.learning.author.lessons.run import build_author_config
     from defender.learning.core.config import LoopPaths
+    from defender.tests._curator1134 import author_trees
 
     paths = LoopPaths(repo_root=DEFENDER.parent, state_dir=DEFENDER.parent / "___absent___")
-    gate = build_author_config(paths).gate
+    gate = build_author_config(paths, trees=author_trees(paths)).gate
     assert gate is not None, "the findings channel's config carries no gate"
 
     family = {"schema_version": 1, "finding_id": "ep/b/0/0", "run_id": "ep",
@@ -265,7 +266,8 @@ def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_o
               "subject_topic": "t", "source_run_dir": "episodes/ep/worlds/b"}
     caught = dict(family, finding_id="ep/b/0/1", judge_outcome="caught")
 
-    held, consumed, to_author = gate([family, caught], build_author_config(paths))
+    held, consumed, to_author = gate([family, caught],
+                                     build_author_config(paths, trees=author_trees(paths)))
     assert [r["finding_id"] for r in to_author] == ["ep/b/0/0"], (
         f"the shipped gate did not admit the `survived` family row for authoring: "
         f"{[r['finding_id'] for r in to_author]}")

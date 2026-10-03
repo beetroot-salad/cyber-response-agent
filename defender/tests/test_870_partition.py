@@ -57,6 +57,7 @@ from defender.tests._declared870 import (
     write,
     write_reducer_surface,
 )
+from defender.tests._lead_author_1134 import lead_trees
 
 ELASTIC_MD = "defender/skills/elastic/execution.md"
 
@@ -107,7 +108,7 @@ def test_a_taught_reducer_row_is_consumed_not_retired(scene):
     spawn = Spawn(curate_reducer_surface())
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert by_surface(spawn.handoffs)["reducer"], "no reducer handoff, so the arm is vacuous"
     # THIS TICK's commit, not HEAD's file list: the fixture seeds the reducer surface in its
     # own commit, so `REDUCER_REL in head_files(repo)` is true from the seed whenever the tick
@@ -162,7 +163,7 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     spawn = Spawn(None)
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert by_surface(spawn.handoffs)["reducer"], "the offer was never made"
 
     assert queue_ids(paths) == ids, "the rows were consumed on a tick that taught nothing"
@@ -176,7 +177,8 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
     # literal is absent from its changed set.
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
     taught_elsewhere = Spawn(curate_execution_md("elastic"))
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=taught_elsewhere) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=taught_elsewhere,
+                                         trees=lead_trees(paths)) == 0
 
     surfaces = by_surface(taught_elsewhere.handoffs)
     assert surfaces["reducer"], "the reducer entry was never offered on the mixed tick"
@@ -225,7 +227,7 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
     overreach = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
 
     with pytest.raises(LeadAuthorError, match="offered no reducer handoff"):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=overreach)
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=overreach, trees=lead_trees(paths))
 
     assert not by_surface(overreach.handoffs)["reducer"], (
         "the batch offered the reducer surface after all, so the demand is vacuous"
@@ -242,7 +244,7 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
     # Positive control: one shim row makes the offer, and the identical edit now commits.
     _shim_batch(paths, n=1)
     offered = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=offered) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=offered, trees=lead_trees(paths)) == 0
     assert by_surface(offered.handoffs)["reducer"]
     assert REDUCER_REL in head_files(repo), "the offered edit was refused too"
 
@@ -272,14 +274,16 @@ def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
     ids = _shim_batch(paths)
 
     for tick in (1, 2):
-        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None),
+                                             trees=lead_trees(paths)) == 0
         assert queue_ids(paths) == ids, f"the hold did not survive tick {tick}"
         assert [
             r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
         ] == [tick] * len(ids), f"the declined offer was not counted on tick {tick}"
         assert graveyard_by_id(paths) == {}, f"the row retired early, on tick {tick}"
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None),
+                                         trees=lead_trees(paths)) == 0
     assert queue_ids(paths) == [], "the queue never drains, so the curator re-spawns forever"
     grave = graveyard_by_id(paths)
     assert set(grave) == set(ids)
@@ -330,14 +334,16 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
     # The row now gets its FULL complement of declines — the third is what retires it, not the
     # first riding on two unrelated faults.
     for tick in (1, 2):
-        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None),
+                                             trees=lead_trees(paths)) == 0
         assert queue_ids(paths) == ids, f"the row retired on decline {tick} of 3"
         assert [
             r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
         ] == [tick]
         assert graveyard_by_id(paths) == {}
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None),
+                                         trees=lead_trees(paths)) == 0
     assert queue_ids(paths) == [], "the offer ceiling stopped bounding the hold"
     assert set(graveyard_by_id(paths)) == set(ids)
 
@@ -357,7 +363,7 @@ def test_a_reducer_only_batch_still_reaches_the_curator(scene):
     ids = _shim_batch(paths)
     spawn = Spawn(curate_reducer_surface())
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.calls, "the curator was never spawned for a batch that had a lesson"
     assert [e["surface"] for e in spawn.handoffs] == ["reducer"]
     assert set(consumed_by_id(paths)) == set(ids)
@@ -390,7 +396,7 @@ def test_no_row_leaves_the_queue_without_a_record(scene):
     every_id = {"r:l-000:0", "r:l-001:0", "r:l-002:0", "r:l-003:0", "r:l-004:0"}
     spawn = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
 
     consumed, graveyard = consumed_by_id(paths), graveyard_by_id(paths)
     assert queue_ids(paths) == []
@@ -436,7 +442,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
     spawn = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
 
     message = git(repo, "log", "-1", "--pretty=%B").stdout
     named = sorted(
@@ -457,7 +463,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     ))
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(LeadAuthorError) as exc:
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=stray)
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=stray, trees=lead_trees(paths))
     assert "outside" in str(exc.value)
     assert "notes.txt" in str(exc.value)
     assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
@@ -486,7 +492,8 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     capsys.readouterr()
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_reducer_surface())) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_reducer_surface()),
+                                         trees=lead_trees(paths)) == 0
 
     log = loop_log(capsys)
     named = [ln for ln in log.splitlines() if REDUCER_REL in ln or "defender-sql.md" in ln]
@@ -508,7 +515,8 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
 
 def _leg(paths, spawn):
     """`_invoke_pitfalls`' shape, so the drain drives the REAL curation leg."""
-    return lambda p, box=None, **_kw: pitfalls_curator.run_pitfalls(paths=p, invoke=spawn, box=box)
+    return lambda p, box=None, **_kw: pitfalls_curator.run_pitfalls(paths=p, invoke=spawn, box=box,
+                                                                    trees=lead_trees(p))
 
 
 def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):

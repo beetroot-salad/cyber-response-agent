@@ -22,6 +22,7 @@ from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
 from defender.learning.core.config import (
+    AUTHOR_DRAIN_LABEL,
     DEFAULT_PATHS,
     LoopPaths,
     StageContext,
@@ -33,6 +34,7 @@ from defender.learning.core.config import (
     author_max_attempts,
     author_timeout as _author_timeout,
 )
+from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 
 
 
@@ -61,8 +63,12 @@ class AuthorConfig(CorpusAuthorConfig):
 
 
 def build_author_config(
-    paths: LoopPaths = DEFAULT_PATHS, *, manifest_seed: str | None = None, box: Any = None,
+    paths: LoopPaths = DEFAULT_PATHS, *, trees: DrainTrees, manifest_seed: str | None = None,
+    box: Any = None,
 ) -> AuthorConfig:
+    """This channel's config over `paths`, reading and writing its corpus through `trees`, the
+    lane's open trees (`open_drain_trees`): they must hold `paths.lessons_dir` itself
+    (`shared.lane_corpus`, else `FatalConfigError`). The config must not outlive `trees`."""
     from defender.learning.author import shared as _shared
     from defender.learning.author.verify_forward.checks import (
         FINDINGS_CHECK,
@@ -72,6 +78,8 @@ def build_author_config(
     return AuthorConfig(
         repo_root=paths.repo_root,
         corpus_dir=paths.lessons_dir,
+        corpus=_shared.lane_corpus(trees, paths.lessons_dir),
+        tree_for=trees.tree_for,
         corpus_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
         pending_dir=paths.pending_dir,
@@ -126,7 +134,7 @@ def build_user_prompt(
     findings: list[dict], batch_id: str, cfg: AuthorConfig, *, salt: str | None = None
 ) -> str:
     return _shared.build_curator_user_prompt(
-        findings, batch_id, corpus_dir=cfg.corpus_dir,
+        findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir,
         corpus_dir_rel=cfg.corpus_dir_rel, label="findings",
         manifest_seed=cfg.manifest_seed,
         salt=salt,
@@ -228,12 +236,18 @@ def run_batch(
     *,
     hold_committed: bool = False,
     paths: LoopPaths = DEFAULT_PATHS,
+    trees: DrainTrees | None = None,
     cfg: AuthorConfig | None = None,
     box: Any = None,
 ) -> int:
-    """The findings direction's entry point. The batch body is `drain.run_batch`."""
-    if cfg is None:
-        cfg = build_author_config(paths, box=box)
+    """This channel's entry point; the batch body is `drain.run_batch`. Exactly one of `trees`
+    (the lane's open trees: the drain's work step and `main` open them for their label, #1134)
+    and `cfg` (a config already built over such trees) is given."""
+    if (trees is None) == (cfg is None):
+        raise TypeError("run_batch takes exactly one of trees= and cfg=")
+    if trees is not None:
+        cfg = build_author_config(paths, trees=trees, box=box)
+    assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
 
@@ -343,7 +357,8 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: author.py", file=sys.stderr)
         return 64
-    return run_batch()
+    with open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL) as trees:
+        return run_batch(trees=trees)
 
 
 if __name__ == "__main__":

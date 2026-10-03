@@ -12,13 +12,15 @@ may not name such a param either, since it exempts a `${name}` from checking.
 from __future__ import annotations
 
 import asyncio
+import errno
+import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from defender._corpus import QueryTemplate
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import read_text_soft
+from defender._io import Bound, RecordRead, bind
 from defender._model import model
 from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL
@@ -171,14 +173,32 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
     return out
 
 
-def check_system_skill(skill_md: Path, system: str) -> list[Finding]:
+def check_system_skill(
+    source: Bound | Path, system: str, name: str | PurePath | None = None,
+) -> list[Finding]:
     """The per-system `SKILL.md` frontmatter identity. (`execution.md` shape is authoring advice,
-    left to `connect` as a warning.)"""
-    text, reason = read_text_soft(skill_md)
-    if text is None:
+    left to `connect` as a warning.)
+
+    `check_system_skill(view, system, name)`: `name` read through the `Bound` `view` — the drain
+    passes its held `skills/` mount's view (#1134 A4). `check_system_skill(path, system)`: today's
+    form, `path.name` read under `bind(path.parent)`, so it roots wherever it points and drain
+    code never uses it (N-h). Either way a link or any non-plain entry is refused, never
+    followed."""
+    if isinstance(source, Bound):
+        if name is None:
+            raise ValueError("check_system_skill(view, system, name): a Bound needs the name")
+        rec, spelled = source.read(name), str(name)
+    else:
+        if name is not None:
+            raise ValueError("check_system_skill(path, system): a Path names its own file")
+        path = Path(source)
+        with bind(path.parent) as view:
+            rec, spelled = view.read(path.name), str(path)
+    if rec.text is None:
         # Its own finding: "frontmatter name is not …" would point at a line that may be fine.
+        reason = _unreadable_reason(rec, spelled)
         return [Finding("skill-unreadable", f"could not be read ({reason})")]
-    front = parse_frontmatter_or_none(text)
+    front = parse_frontmatter_or_none(rec.text)
     if front is not None and front.get("name") == f"defender-{system}":
         return []
     return [
@@ -187,6 +207,14 @@ def check_system_skill(skill_md: Path, system: str) -> list[Finding]:
             f"frontmatter name is not 'defender-{system}'",
         )
     ]
+
+
+def _unreadable_reason(rec: RecordRead, spelled: str) -> str:
+    """Why `rec` holds no text: the view's refusal, or, for a file that is not there, today's
+    `FileNotFoundError` words for `spelled`."""
+    if rec.reason is not None:
+        return rec.reason
+    return str(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), spelled))
 
 
 class VerbResolver:

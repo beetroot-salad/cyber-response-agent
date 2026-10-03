@@ -47,6 +47,7 @@ from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize  # noqa: 
 from defender.tests.e2e.test_pitfalls_input_823 import _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._lead_author_1134 import lead_trees  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -114,7 +115,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     # the curation tick: the handoff names the surface, and the commit carries it
     spawn = Spawn(curate_reducer_surface("keep the unnest argument a LIST"))
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
 
     reducer = by_surface(spawn.handoffs)["reducer"]
     assert len(reducer) == 1

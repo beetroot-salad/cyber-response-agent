@@ -7,6 +7,7 @@ commit".
 from __future__ import annotations
 
 import functools
+import posixpath
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,6 +19,8 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender import _corpus
 from defender import _git
 from defender import _scaffold_rules
+from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
+from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
@@ -69,13 +72,30 @@ def _membership_segment(path: str) -> str:
     return rest.split("/", 1)[0]
 
 
-def _frontmatter_id(repo_root: Path, path: str) -> str | None:
+def _template_in_tree(
+    repo_root: Path, tree_for: TreeFor, path: str,
+) -> tuple[_corpus.QueryTemplate | None, str]:
+    """`read_query_template` of the working-copy `path`, through the lane's held mount when
+    `tree_for` places it in one (#1134), its `path` spelled `repo_root / path` as today; outside
+    the lane's mounts, its plain path (the box's read-only area, D3)."""
+    full = repo_root / path
+    hit = tree_for(full)
+    if hit is None:
+        return _corpus.read_query_template(full)
+    held, name = hit
+    folder, leaf = posixpath.split(name)
+    return _corpus.read_query_template(view_at(held, folder or "."), leaf, where=full.parent)
+
+
+def _frontmatter_id(repo_root: Path, path: str, *, tree_for: TreeFor) -> str | None:
     from defender._frontmatter import parse_frontmatter_or_none
 
-    full = repo_root / path
-    if not full.is_file():
+    if kind_at(repo_root, tree_for, path) != ENTRY_FILE:
         return None
-    fm = parse_frontmatter_or_none(full.read_text(encoding="utf-8"))
+    text, _reason = read_at(repo_root, tree_for, path)
+    if text is None:
+        return None
+    fm = parse_frontmatter_or_none(text)
     if not fm:
         return None
     value = fm.get("id")
@@ -92,7 +112,7 @@ def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
 
 
 def _check_promoted_template(
-    repo_root: Path, resolver: _scaffold_rules.VerbResolver, path: str,
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver, path: str, *, tree_for: TreeFor,
 ) -> None:
     """The content half of the promotion gate: `connect`'s invariants (e.g. every
     `${placeholder}` is a param its verb declares), which `validate_scaffold` doesn't reach
@@ -102,7 +122,7 @@ def _check_promoted_template(
     really ran, and refusing the batch over one would discard signal. The minter emits a
     conformant skeleton, so a promotion starts from a file that already passes.
     """
-    template, reason = _corpus.read_query_template(repo_root / path)
+    template, reason = _template_in_tree(repo_root, tree_for, path)
     if template is None:
         raise LeadAuthorError(
             f"agent wrote {path}, which is not a readable query template ({reason}); "
@@ -119,34 +139,52 @@ def _check_promoted_template(
     _refuse(path, _scaffold_rules.check_template(template, verbs))
 
 
+def _still_there(repo_root: Path, tree_for: TreeFor, path: str) -> bool:
+    """Does an entry the content rule must read still stand at `path`: anything but absent or a
+    folder. Today's `is_file()` answered true for a link to a file and so checked what it
+    pointed at; judged without following, a link is still there and its check refuses it."""
+    return kind_at(repo_root, tree_for, path) not in (KIND_ABSENT, ENTRY_DIR)
+
+
 def _skills_content_rule(
     repo_root: Path, resolver: _scaffold_rules.VerbResolver, xy: str, path: str,
+    *, tree_for: TreeFor,
 ) -> None:
     """The content half of the gate: is what the agent wrote well-formed? Runs only on paths
-    the path half admitted.
+    the path half admitted. Every probe and read goes through the lane's held mount
+    (`tree_for`), so nothing below the mount point is followed (#1134).
     """
     if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
         twin = _draft_twin(path)
-        if (repo_root / twin).exists():
+        # Anything standing at the twin's name — a file, a folder, a link — is a twin left behind.
+        if kind_at(repo_root, tree_for, twin) != KIND_ABSENT:
             raise LeadAuthorError(
                 f"half-promote: established template {path} was written but its draft "
                 f"twin {twin} still exists; refusing to commit (the promote's `rm` "
                 "didn't happen — established + draft would both land)"
             )
-        # Only on a file still there; the path half already refused deletes.
+        # Only on an entry still there (not absent, not a folder); the path half already refused
+        # deletes. Whatever else stands at the name — a plain file, or a link the box left —
+        # reaches the read, which refuses anything but a plain file (#1134 O5.1): a link is
+        # refused, never committed unchecked and never followed.
         #
         # `_is_catalog_template`, not `_is_catalog_path`: the catalog also holds non-template
         # files (a `{system}/README.md`, a root note) that the template rule would wrongly refuse.
-        if "D" not in xy and (repo_root / path).is_file() and _is_catalog_template(path):
-            _check_promoted_template(repo_root, resolver, path)
-    if _is_system_skill_md(path) and "D" not in xy and (repo_root / path).is_file():
+        if "D" not in xy and _still_there(repo_root, tree_for, path) and _is_catalog_template(path):
+            _check_promoted_template(repo_root, resolver, path, tree_for=tree_for)
+    if _is_system_skill_md(path) and "D" not in xy and _still_there(repo_root, tree_for, path):
+        system = Path(path).parent.name
+        hit = tree_for(repo_root / path)
         _refuse(
             path,
-            _scaffold_rules.check_system_skill(repo_root / path, Path(path).parent.name),
+            _scaffold_rules.check_system_skill(repo_root / path, system) if hit is None
+            else _scaffold_rules.check_system_skill(hit[0].view(), system, hit[1]),
         )
 
 
-def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset[str]) -> None:
+def _skills_path_rule(
+    repo_root: Path, xy: str, path: str, *, systems: frozenset[str], tree_for: TreeFor,
+) -> None:
     # `execution.md` is never committable by this lane at any depth, so this keys on the
     # basename rather than on which in-scope form owns the path.
     if Path(path).name == "execution.md":
@@ -176,7 +214,7 @@ def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset
         )
     # The frontmatter `id:` prefix must agree with the directory; idless in-scope files (a
     # system `SKILL.md`, `SCHEMA.md`) are spared.
-    ident = _frontmatter_id(repo_root, path)
+    ident = _frontmatter_id(repo_root, path, tree_for=tree_for)
     if ident is not None and ident.split(".", 1)[0] != system:
         raise LeadAuthorError(
             f"agent wrote {path} with id {ident!r} disagreeing with its directory "
@@ -191,10 +229,11 @@ def _skills_rule(
     path: str,
     *,
     systems: frozenset[str],
+    tree_for: TreeFor,
 ) -> None:
     """The whole per-path gate: the path half, then the content half on what it admitted."""
-    _skills_path_rule(repo_root, xy, path, systems=systems)
-    _skills_content_rule(repo_root, resolver, xy, path)
+    _skills_path_rule(repo_root, xy, path, systems=systems, tree_for=tree_for)
+    _skills_content_rule(repo_root, resolver, xy, path, tree_for=tree_for)
 
 
 def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | None:
@@ -214,32 +253,74 @@ def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | Non
 _NO_MINTED: Mapping[Path, tuple[str, ...]] = MappingProxyType({})
 
 
-def _minted_identities(created: list[Path]) -> Mapping[Path, tuple[str, ...]]:
+def _minted_identities(
+    skills: Bound, created: list[Path], *, where: Path,
+) -> Mapping[Path, tuple[str, ...]]:
     """`{draft path -> the identities it records}` for the drafts this tick's mint wrote.
 
     Read between the mint and the agent: a just-minted draft is untracked, so if the agent
     deletes it git has neither a porcelain record nor a HEAD pre-image. That is the common case
     `_covers_rule`'s transfer half must catch.
+
+    `created` is `synthesize_drafts`' return, each spelled `where / name`; each is read through
+    the held `skills/` mount's view `skills` (#1134).
     """
     out: dict[Path, tuple[str, ...]] = {}
     for path in created:
-        template = _corpus.read_query_template(path)[0]
+        template = _corpus.read_query_template(
+            skills, path.relative_to(where).as_posix(), where=where,
+        )[0]
         if template is not None and template.covers:
             out[path] = template.covers
     return out
 
 
-def _answered_after_batch(repo_root: Path) -> set[str]:
+def _catalog_in_tree(repo_root: Path, tree_for: TreeFor) -> tuple[Bound | None, Path]:
+    """The working copy's catalog: the view of it under the lane's held mount (`None` outside
+    the lane's mounts, the box's read-only area, D3) and the Path it is spelled as."""
+    where = repo_root / CATALOG_REL
+    hit = tree_for(where)
+    if hit is None:
+        return None, where
+    held, name = hit
+    return view_at(held, name), where
+
+
+def _answered_after_batch(repo_root: Path, *, tree_for: TreeFor) -> set[str]:
     """Every identity the catalog answers once this batch lands, through the mint's own reader.
 
-    Read off the working tree. The transfer rule asks "will this identity be re-minted next
-    run?", so it must use the mint's `answered_identities` (ids plus `covers:`, drafts
-    included); a narrower set would refuse harmless deletes.
+    Read off the working tree, through the lane's held mount (#1134). The transfer rule asks
+    "will this identity be re-minted next run?", so it must use the mint's `answered_identities`
+    (ids plus `covers:`, drafts included); a narrower set would refuse harmless deletes.
     """
-    return answered_identities(lead_neighbors.load_catalog(repo_root / CATALOG_REL))
+    view, where = _catalog_in_tree(repo_root, tree_for)
+    if view is None:
+        return answered_identities(lead_neighbors.load_catalog(where))
+    return answered_identities(lead_neighbors.load_catalog(view, where=where))
 
 
-def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
+def _catalog_drafts(repo_root: Path, tree_for: TreeFor) -> list[_corpus.QueryTemplate]:
+    """Every readable `<system>/_draft/*.md` template in the working copy's catalog, in path
+    order; one that does not read or parse is passed over.
+
+    Listed and read through the lane's held mount, by the catalog readers' own selection
+    (`_corpus._template_names`, the catalog's fixed three-level listing): a link is never
+    entered or read, a linked, non-directory or refused `<sys>` or `_draft` folder is skipped and
+    warned exactly as they skip it, and one found gone is passed over silently (#1134 O5.5).
+    Outside the lane's mounts, the plain path's glob (D3)."""
+    view, where = _catalog_in_tree(repo_root, tree_for)
+    if view is None:
+        found = [_corpus.read_query_template(p)[0] for p in sorted(where.glob("*/_draft/*.md"))]
+    else:
+        names = [
+            name for name in _corpus._template_names(view, where)
+            if len(parts := name.split("/")) == 3 and parts[1] == "_draft"
+        ]
+        found = [_corpus.read_query_template(view, name, where=where)[0] for name in names]
+    return [t for t in found if t is not None]
+
+
+def _refuse_half_promote(repo_root: Path, taken_over: set[str], *, tree_for: TreeFor) -> None:
     """The other side of transfer: an identity may not land on an established template while the
     draft that recorded it is still on disk.
 
@@ -249,12 +330,9 @@ def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
     """
     if not taken_over:
         return
-    for path in sorted((repo_root / CATALOG_REL).glob("*/_draft/*.md")):
-        template = _corpus.read_query_template(path)[0]
-        if template is None:
-            continue
+    for template in _catalog_drafts(repo_root, tree_for):
         if stranded := sorted(set(template.covers) & taken_over):
-            rel = path.relative_to(repo_root).as_posix()
+            rel = template.path.relative_to(repo_root).as_posix()
             raise LeadAuthorError(
                 f"half-promote: draft {rel} still exists, but the identities it records "
                 f"({stranded}) were taken over by an established template in this batch; "
@@ -268,6 +346,8 @@ def _departed_drafts(
     repo_root: Path,
     minted: Mapping[Path, tuple[str, ...]],
     records: list[tuple[str, str]],
+    *,
+    tree_for: TreeFor,
 ) -> list[tuple[str, tuple[str, ...]]]:
     """`(path, identities)` for every draft no longer in the tree.
 
@@ -288,7 +368,9 @@ def _departed_drafts(
     # `draft_path` is the absolute `Path` the mint returned, not the repo-relative `str` git
     # reports.
     for draft_path, identities in minted.items():
-        if draft_path.exists():
+        # Departed only when nothing at all stands at its name: a link or a folder planted there
+        # is not the draft, but it is not a departure either (#1134).
+        if kind_at(repo_root, tree_for, draft_path) != KIND_ABSENT:
             continue
         rel = (
             draft_path.relative_to(repo_root).as_posix()
@@ -302,6 +384,8 @@ def _covers_rule(
     repo_root: Path,
     minted: Mapping[Path, tuple[str, ...]],
     records: list[tuple[str, str]],
+    *,
+    tree_for: TreeFor,
 ) -> None:
     """The two whole-batch invariants on `covers:` — the identities a template accounts for.
 
@@ -325,7 +409,7 @@ def _covers_rule(
     # half-promote probe fires only on a takeover.
     taken_over: set[str] = set()
     for path in established:
-        after = _corpus.read_query_template(repo_root / path)[0]
+        after = _template_in_tree(repo_root, tree_for, path)[0]
         if after is None:
             # Already refused by `_check_promoted_template` on the per-path pass.
             continue
@@ -334,8 +418,8 @@ def _covers_rule(
         taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
 
     # `_answered_after_batch` parses the whole catalog, so only pay for it when a draft left.
-    if departed := _departed_drafts(repo_root, minted, records):
-        covered = _answered_after_batch(repo_root)
+    if departed := _departed_drafts(repo_root, minted, records, tree_for=tree_for):
+        covered = _answered_after_batch(repo_root, tree_for=tree_for)
         for path, identities in departed:
             if orphaned := sorted(set(identities) - covered):
                 raise LeadAuthorError(
@@ -346,7 +430,7 @@ def _covers_rule(
                     "SKIP, because deleting it here only means minting it again next run)"
                 )
 
-    _refuse_half_promote(repo_root, taken_over)
+    _refuse_half_promote(repo_root, taken_over, tree_for=tree_for)
 
 
 def _repairs_the_id(
@@ -390,7 +474,7 @@ def _refuse_lost_provenance(
 
 def _verify_skills_state(
     repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
-    minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
+    tree_for: TreeFor, minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
 ) -> list[str]:
     # One resolver for the batch, built on the tree being committed rather than the process's
     # own checkout: the drain runs this against a `lead-author/<id>` worktree, and
@@ -406,8 +490,10 @@ def _verify_skills_state(
         ) from e
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="agent",
-        rule=functools.partial(_skills_rule, repo_root, resolver, systems=systems),
-        batch_rule=functools.partial(_covers_rule, repo_root, minted),
+        rule=functools.partial(
+            _skills_rule, repo_root, resolver, systems=systems, tree_for=tree_for,
+        ),
+        batch_rule=functools.partial(_covers_rule, repo_root, minted, tree_for=tree_for),
     )
 
 

@@ -37,6 +37,9 @@ class AuthorRun:
 def materialize(scenario: Path, tmp: Path) -> None:
     (tmp / "defender" / "learning" / "_pending").mkdir(parents=True)
     (tmp / "defender" / "lessons").mkdir(parents=True)
+    # The author lane's other mount: a working copy always has it, and the lane's trees hold
+    # both corpora (`open_drain_trees`, #1134).
+    (tmp / "defender" / "lessons-questioner").mkdir(parents=True)
 
     learning_dir = tmp / "defender" / "learning"
 
@@ -57,18 +60,20 @@ def materialize(scenario: Path, tmp: Path) -> None:
 
 def run_author(tmp: Path) -> tuple[AuthorRun, float]:
     from defender.learning.author.lessons import run as author
-    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
+    from defender.learning.core.lane_trees import open_drain_trees
 
     paths = LoopPaths(repo_root=tmp)
-    cfg = author.build_author_config(paths, manifest_seed=MANIFEST_SEED)
-    out, err = io.StringIO(), io.StringIO()
-    t0 = time.monotonic()
-    try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = author.run_batch(paths=paths, cfg=cfg)
-    except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
-        rc = 1
-        err.write(f"\n{type(e).__name__}: {e}\n")
+    with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
+        cfg = author.build_author_config(paths, trees=trees, manifest_seed=MANIFEST_SEED)
+        out, err = io.StringIO(), io.StringIO()
+        t0 = time.monotonic()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = author.run_batch(paths=paths, cfg=cfg)
+        except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
+            rc = 1
+            err.write(f"\n{type(e).__name__}: {e}\n")
     return AuthorRun(rc, out.getvalue(), err.getvalue()), time.monotonic() - t0
 
 

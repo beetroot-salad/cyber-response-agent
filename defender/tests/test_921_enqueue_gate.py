@@ -35,6 +35,7 @@ import pytest
 
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
+from defender.tests._curator1134 import author_trees
 
 
 @pytest.fixture(autouse=True)
@@ -700,7 +701,7 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
 
     lessons_run = J.mod("learning.author.lessons.run")
     paths2 = D.make_paths(tmp_path / "cfg")
-    cfg = lessons_run.build_author_config(paths2)
+    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2))
     assert cfg.exempt is checks.skips_forward_check
 
 

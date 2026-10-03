@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _world_1007 as W
+from defender.tests._curator1134 import author_trees
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
@@ -217,7 +218,7 @@ def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
     """
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
-    cfg = author.build_author_config(paths)
+    cfg = author.build_author_config(paths, trees=author_trees(paths))
 
     with pytest.raises(W.refusals()):
         author._gate_findings([queue_row(direction=W.SUBJECT_WORLD, subject=W.SUBJECT_WORLD)],
@@ -237,7 +238,7 @@ def test_lessons_gate_still_passes_a_family_row(tmp_path):
     """
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
-    cfg = author.build_author_config(paths)
+    cfg = author.build_author_config(paths, trees=author_trees(paths))
 
     to_author, held, consumed = author._gate_findings([queue_row()], cfg)
 
@@ -311,8 +312,8 @@ def test_a_defender_family_row_is_gated_exactly_as_today(tmp_path):
 
     assert enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir) == 1
     landed = W.queue_rows(paths.findings)[0]
-    to_author, held, consumed = author._gate_findings([landed],
-                                                      author.build_author_config(paths))
+    to_author, held, consumed = author._gate_findings(
+        [landed], author.build_author_config(paths, trees=author_trees(paths)))
 
     assert landed["direction"] == "family"
     assert len(to_author) + len(held) + len(consumed) == 1
