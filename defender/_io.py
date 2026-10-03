@@ -108,9 +108,9 @@ def read_plain(path: Path, *, errors: str = "strict", os_: Any = os) -> str:
     """
     # `_open_plain_fd` opens with `O_NONBLOCK`: a planted FIFO would otherwise block the open
     # forever before `fstat` could refuse it.
-    fd = _open_plain_fd(path, os_)
+    fd, st = _open_plain_fd(path, os_)
     try:
-        text = _read_plain_fd(os_, fd, binary=False, errors=errors)
+        text = _read_plain_fd(os_, fd, st.st_size, binary=False, errors=errors)
     finally:
         os_.close(fd)
     assert isinstance(text, str)
@@ -120,9 +120,9 @@ def read_plain(path: Path, *, errors: str = "strict", os_: Any = os) -> str:
 def read_plain_bytes(path: Path, *, os_: Any = os) -> bytes:
     """:func:`read_plain` without newline translation, for records whose exact bytes matter
     (e.g. the alert's content hash)."""
-    fd = _open_plain_fd(path, os_)
+    fd, st = _open_plain_fd(path, os_)
     try:
-        data = _read_plain_fd(os_, fd, binary=True)
+        data = _read_plain_fd(os_, fd, st.st_size, binary=True)
     finally:
         os_.close(fd)
     assert isinstance(data, bytes)
@@ -158,20 +158,21 @@ class _ReadVanished(OSError):
 
 
 def _read_plain_fd(
-    os_: Any, fd: int, *, binary: bool, errors: str = "strict",
+    os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
 ) -> str | bytes:
-    """@owns the bytes of a guarded plain file — every whole-file read of one comes here.
+    """The one place a guarded plain file's bytes are read: every whole-file read comes here.
 
     The whole content of `fd`, an open descriptor already judged a plain file, or the refusal
-    that stopped it: `EFBIG` when `fstat` says it is over :data:`READ_LIMIT` (before any byte
-    is read) or the reads run past it (it grew); `BlockingIOError` when the non-blocking
-    descriptor has no data yet; `_ReadVanished` for an `ENOENT` from the `fstat` or a `read`.
+    that stopped it: `EFBIG` when `size` (the `st_size` of the open's own plainness `fstat`,
+    not asked again: one `fstat` per opened handle, #1049) is over :data:`READ_LIMIT`, before
+    any byte is read, or when the reads run past it (it grew); `BlockingIOError` when the
+    non-blocking descriptor has no data yet; `_ReadVanished` for an `ENOENT` from a `read`.
     Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
     `Path.read_text` would. The descriptor stays the caller's to close.
     """
+    if size > READ_LIMIT:
+        raise OSError(errno.EFBIG, _TOO_LARGE)
     try:
-        if os_.fstat(fd).st_size > READ_LIMIT:
-            raise OSError(errno.EFBIG, _TOO_LARGE)
         chunks: list[bytes] = []
         total = 0
         while chunk := os_.read(fd, _READ_CHUNK):
@@ -204,9 +205,10 @@ def read_locked_whole(f: Any) -> Any:
     return raw
 
 
-def _open_plain_fd(path: Path, os_: Any = os) -> int:
-    """The guarded open both plain readers share; the caller owns the returned fd. A path that
-    does not encode is refused (`EINVAL`) before any open (#1174 O4)."""
+def _open_plain_fd(path: Path, os_: Any = os) -> tuple[int, os.stat_result]:
+    """The guarded open both plain readers share, and the descriptor's one `fstat`; the caller
+    owns the returned fd. A path that does not encode is refused (`EINVAL`) before any open
+    (#1174 O4)."""
     try:
         os.fsencode(path)
     except UnicodeEncodeError:
@@ -232,7 +234,7 @@ def _open_plain_fd(path: Path, os_: Any = os) -> int:
     except BaseException:
         os_.close(fd)
         raise
-    return fd
+    return fd, st
 
 
 def _leaf_is_link(path: Path, os_: Any = os) -> bool:
@@ -469,17 +471,26 @@ def _open_refusal(e: OSError, where: Path) -> OSError:
 def _open_leaf(os_: Any, dir_fd: int, leaf: str, flags: int, where: Path) -> int:
     """Open `leaf` off `dir_fd` no-follow and non-blocking, then judge the descriptor. The
     caller owns the returned fd."""
+    return _open_leaf_stat(os_, dir_fd, leaf, flags, where)[0]
+
+
+def _open_leaf_stat(
+    os_: Any, dir_fd: int, leaf: str, flags: int, where: Path,
+) -> tuple[int, os.stat_result]:
+    """:func:`_open_leaf`, also answering the descriptor's one `fstat` (the plainness
+    judgement), so a reader takes the size from it rather than asking again."""
     try:
         fd = os_.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, _FILE_MODE,
                       dir_fd=dir_fd)
     except OSError as e:
         raise _open_refusal(e, where) from None
     try:
-        _refuse_unless_plain_stat(os_.fstat(fd), where)
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, where)
     except BaseException:
         os_.close(fd)
         raise
-    return fd
+    return fd, st
 
 
 def _read_leaf(
@@ -488,9 +499,9 @@ def _read_leaf(
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
     `FileNotFoundError` when absent at the open, else a member of `TEXT_READ_ERRORS` (the read
     step's refusals among them, :func:`_read_plain_fd`)."""
-    fd = _open_leaf(os_, dir_fd, leaf, os.O_RDONLY, where)
+    fd, st = _open_leaf_stat(os_, dir_fd, leaf, os.O_RDONLY, where)
     try:
-        return _read_plain_fd(os_, fd, binary=binary, errors=errors)
+        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors)
     finally:
         os_.close(fd)
 
