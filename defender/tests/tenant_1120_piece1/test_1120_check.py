@@ -60,8 +60,7 @@ OVERLAP_ENV = H.LEARNING_STATE_ENV
 #: Neither `CensusUnavailable` text, nor any finding about the folder itself, matches it.
 NOT_THE_FOLDERS_FAULT = re.compile(
     r"\b(?:not|nothing|no|never)\b[^;:\n]{0,80}?\b(?:folder|tenant)\b[^;:\n]{0,80}?\b(?:fault|blame)"
-    r"|\b(?:folder|tenant)\b[^;:\n]{0,80}?\b(?:not|never|isn't)\b[^;:\n]{0,40}?\b(?:fault|blame)"
-    r"|\b(?:not|no)\b[^;:\n]{0,20}?\b(?:fault|blame)\b[^;:\n]{0,40}?\b(?:folder|tenant)\b",
+    r"|\b(?:folder|tenant)\b[^;:\n]{0,80}?\b(?:not|never|isn't)\b[^;:\n]{0,40}?\b(?:fault|blame)",
     re.IGNORECASE)
 
 
@@ -106,6 +105,12 @@ def _check_folder(folder: Path, **kw: Any):
     return H.check(tenant_py, None, "--folder", str(folder), **kw)
 
 
+def _claims_folder_blameless(line: str) -> bool:
+    """Whether `line`, read as the finding's own words (the program's `[tenant.py] ` prefix
+    removed — its `tenant` is not the finding's claim), says the folder is not at fault."""
+    return bool(NOT_THE_FOLDERS_FAULT.search(line.removeprefix("[tenant.py] ")))
+
+
 def _census_unavailable(checkout: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> str:
     """What the census's owner says when it cannot be taken over the code at `checkout` (a
     checkout root) in the environment `env`: `take_census`'s own `CensusUnavailable` text — the
@@ -140,10 +145,15 @@ def _census_blind_line(proc: subprocess.CompletedProcess, *, checkout: Path, cau
         assert named not in line, (
             f"the census line names the checked folder {named}; the census is the running "
             f"checkout's, and the folder is not the side that failed (#1159 O1):\n{line}")
-    words = rest.replace(root, "<root>")
+    words = rest.removeprefix("[tenant.py] ").replace(root, "<root>")
+    assert words.rstrip().endswith("<cause>"), (
+        f"the owner's cause does not FOLLOW the framing (#1159 M1):\n{line}")
+    assert not NOT_THE_FOLDERS_FAULT.search(cause), (
+        f"the owner's cause carries the not-at-fault claim itself, so the claim is not "
+        f"`check`'s own framing and the lint would say it too (#1159 M1):\n{cause}")
     assert re.search(r"\bcheckout\b", words, re.IGNORECASE), (
         f"the census line does not say the running product CHECKOUT failed (#1159 O1):\n{line}")
-    assert NOT_THE_FOLDERS_FAULT.search(words), (
+    assert NOT_THE_FOLDERS_FAULT.search(words.removesuffix("<cause>")), (
         f"the census line does not say nothing in the checked folder is at fault "
         f"(#1159 O1):\n{line}")
     return text, line
@@ -284,6 +294,13 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
     assert BROKEN_SYSTEM in cause, f"precondition: the owner's cause names no {BROKEN_SYSTEM}"
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
                        checkout=checkout, cause=cause, folder=folder, also=(BROKEN_SYSTEM,))
+    # O2: the census being blind never costs the other findings — a folder whose
+    # case-history mapping.yaml does not parse still has that finding printed beside it.
+    mapping = folder / "settings" / "systems" / "case-history" / "mapping.yaml"
+    mapping.write_text("fields: {unclosed: [\n", encoding="utf-8")
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
+                       checkout=checkout, cause=cause, folder=folder,
+                       also=(BROKEN_SYSTEM, str(mapping)))
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(
@@ -997,13 +1014,31 @@ def test_1159_only_the_census_blind_line_says_the_folder_is_not_at_fault(
     mapping.write_text("fields: {unclosed: [\n", encoding="utf-8")
 
     text = H.assert_refused(_check_folder(folder), gap, str(mapping))
-    claimed = [ln for ln in text.splitlines() if NOT_THE_FOLDERS_FAULT.search(ln)]
+    claimed = [ln for ln in text.splitlines() if _claims_folder_blameless(ln)]
     assert claimed == [], f"a finding ABOUT the folder says the folder is not at fault:\n{text}"
 
     env, _reason, _repair = _git_absent(tmp_path, folder)
     cause = _census_unavailable(H.REPO_ROOT, monkeypatch, **env)
     text, line = _census_blind_line(_check_folder(folder, **env), checkout=H.REPO_ROOT,
                                     cause=cause, folder=folder, also=(str(mapping),))
-    claimed = [ln for ln in text.splitlines() if NOT_THE_FOLDERS_FAULT.search(ln)]
+    claimed = [ln for ln in text.splitlines() if _claims_folder_blameless(ln)]
     assert claimed == [line], (
         f"the not-at-fault claim is not the census line's alone (#1159 O1):\n{text}")
+
+
+def test_1159_check_names_the_cause_when_head_cannot_be_resolved(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The third cause O1 names: the running checkout is a copy whose `.git` is gone, so the
+    declared systems are not resolvable at HEAD. `check --folder` over a sound folder exits
+    EXACTLY 1 and the census line keeps the owner's `CensusUnavailable` text verbatim (never
+    a generic "census unavailable") under the checkout-failed framing. The positive control:
+    the same copy before `.git` was removed checks the folder clean."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    folder = _folder(tmp_path, "tenant")
+    script = _copy_script(checkout)
+    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
+    shutil.rmtree(checkout / ".git")
+    cause = _census_unavailable(checkout, monkeypatch)
+    assert "resolv" in cause, f"precondition: the owner's cause is not about HEAD:\n{cause}"
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
+                       checkout=checkout, cause=cause, folder=folder)
