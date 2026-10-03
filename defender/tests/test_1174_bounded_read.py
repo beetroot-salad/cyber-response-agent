@@ -85,9 +85,16 @@ def vanishing_read(_fd: int, _n: int) -> bytes:
     raise FileNotFoundError(errno.ENOENT, ABSENT_TEXT)
 
 
-def endless(_fd: int, n: int) -> bytes:
-    """A file that never reaches EOF — one that keeps growing while it is read."""
-    return b"a" * n
+class Endless:
+    """A file that never reaches EOF — one that keeps growing while it is read. `handed` counts
+    the bytes it gave out, so a bound looser than the limit shows."""
+
+    def __init__(self) -> None:
+        self.handed = 0
+
+    def __call__(self, _fd: int, n: int) -> bytes:
+        self.handed += n
+        return b"a" * n
 
 
 # ---------------------------------------------------------------------------------------
@@ -241,9 +248,13 @@ def test_o1_a_file_growing_past_the_limit_while_read_is_refused(root, reader):
     the limit is the same refusal, not an unbounded buffer."""
     (root / NAME).write_bytes(b"small\n")
     before = open_fds()
+    endless = Endless()
     kind, reason = read(reader, root, os_=FaultOs(read_fault=endless))
     assert open_fds() == before, f"{reader}: a descriptor leaked"
     assert kind == "refused", f"{reader}: {kind} {str(reason)[:80]!r}"
+    assert endless.handed <= _io.READ_LIMIT + 1 * MiB, (
+        f"{reader}: took in {endless.handed} bytes before refusing — the running bound is "
+        "looser than the limit")
 
 
 # ---------------------------------------------------------------------------------------
@@ -366,19 +377,25 @@ def test_o4_a_path_reader_refuses_an_unencodable_path_as_a_read_error(root, read
 
 
 def _mixed_content() -> bytes:
-    """~300 KiB: `\\r\\n`, lone `\\r` and `\\n`, with a `\\r\\n` and a two-byte UTF-8 character
-    straddling every 64 KiB boundary, so a chunked read must stitch both."""
+    """~600 KiB: `\\r\\n`, lone `\\r` and `\\n`, with a `\\r\\n` and a two-byte UTF-8 character
+    straddling every 64 KiB boundary, so a chunked read must stitch both. The filler is ASCII,
+    so the planted sequences never split a character of their own; `é` also recurs elsewhere."""
     out = bytearray()
     line = 0
-    while len(out) < 300 * 1024:
-        out += f"line {line} é ".encode() + (b"\r\n", b"\r", b"\n")[line % 3]
+    while len(out) < 600 * 1024:
+        out += f"line {line} ".encode() + (b"\r\n", b"\r", b"\n")[line % 3]
         line += 1
-    for k in range(1, 5):
+    e_acute = "é".encode()
+    for k in range(1, 9):
         at = k * 64 * 1024
-        out[at - 1:at + 1] = b"\r\n"
-        out[at + 7:at + 9] = "é".encode()
-    out[64 * 1024 * 2 - 1:64 * 1024 * 2 + 1] = "é".encode()
-    return bytes(out)
+        # Both shapes straddle 64, 128 and 256 KiB multiples alike: `\r\n` at 64k·{1,3,4,5,7},
+        # `é` at 64k·{2,6,8} — so 256 KiB carries `\r\n` and 512 KiB carries `é`.
+        out[at - 1:at + 1] = e_acute if k in (2, 6, 8) else b"\r\n"
+        out[at + 100:at + 102] = e_acute
+    out[1000:1002] = e_acute
+    data = bytes(out)
+    data.decode("utf-8")  # the fixture itself is valid UTF-8
+    return data
 
 
 @pytest.mark.parametrize("reader", READERS)
