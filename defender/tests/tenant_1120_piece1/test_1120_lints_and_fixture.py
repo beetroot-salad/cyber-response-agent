@@ -906,17 +906,17 @@ def test_1120_dockerignore_keeps_the_devcontainer_data_root_out_of_the_build_con
 
 def test_1159_the_census_lint_keeps_exit_2_and_its_own_framing_when_the_census_is_blind(
         tmp_path: Path) -> None:
-    """#1159 non-obligation: the lint is unchanged. Over a tmp checkout whose adapter does not
-    parse (the census was never taken) it exits EXACTLY 2 — "the gate could not run" — naming
-    the broken system, and its line carries none of `tenant.py check`'s claim that the folder
-    is not at fault (that framing is built only in tenant.py). The positive control: the same
-    checkout before the broken adapter exits 0."""
+    """#1159 non-obligation: the lint's exit scheme is unchanged. Over a tmp checkout whose
+    adapter does not parse (the census was never taken) it exits EXACTLY 2 — "the gate could
+    not run" — naming the broken system, and never `tenant.py check`'s framing that a table
+    went unchecked (that line is built only in tenant.py; the lint checks no table at all
+    then). The positive control: the same checkout before the broken adapter exits 0."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     rc, out = _census(checkout)
     assert rc == 0, f"the control checkout is not clean:\n{out}"
-    H.add_adapter(checkout, "broken", "VERBS = {\n    'verb': (\n")
+    H.add_adapter(checkout, H.BROKEN_SYSTEM, H.BROKEN_ADAPTER)
     rc, out = _census(checkout)
     assert rc == 2, f"the census-blind lint exited {rc}, not 2:\n{out}"
-    assert "broken" in out, f"the lint does not name the broken adapter:\n{out}"
-    assert not re.search(r"at fault|to blame|not the folder", out, re.IGNORECASE), (
-        f"the lint's output carries the check command's folder-blameless framing:\n{out}")
+    assert H.BROKEN_SYSTEM in out, f"the lint does not name the broken adapter:\n{out}"
+    assert "was not checked" not in out, (
+        f"the lint's output carries the check command's unchecked-table framing:\n{out}")
