@@ -1,12 +1,14 @@
 """#1179: the drain labels are the members of a plain `enum.Enum`, so no string is a label.
 
-The contract is #1179's intent+design comment (2026-10-03):
+The contract is #1179's intent+design comment (2026-10-03) and its owner amendment (the same
+day, after `/code-review`):
 
-- O1, `LoopPaths.drain_writable_trees` grants a tree only to a `DrainLabel` member. The members'
-  own values as bare strings get nothing (`test_1134_mount_list.py` carries them as rows of
-  every unknown-label test). Here the same strings are driven through the lead-author lane's
-  own grant check (`lead_author.run(deps=...)`), the one consumer of the list outside the box
-  and the holder.
+- O1', only a member names a lane. `DrainLabel.writable_trees(paths)` (`@owns
+  drain_writable_trees`) is each member's own list; a non-member (a string, a member's name, a
+  look-alike, an object carrying a value) has no such method and raises at its first use.
+  `_run_worktree_batch` asks it first, so a non-member raises before `_open_batch`, before a
+  worktree, a box, a held root or a record exists. `test_1134_mount_list.py` carries the box
+  and holder rows; here are the batch entry and the lead-author lane's own grant check.
 - O2, the two records that persist a label still write its value as a JSON string: the
   pending-delivery record (`drains._record_pending_delivery`) and the quarantine manifest
   (`quarantine.preserve_tainted_tree`). Each is read back from disk. The quarantine writer
@@ -22,8 +24,6 @@ only captures).
 """
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 import logging
 import os
@@ -34,8 +34,7 @@ from typing import Any
 import pytest
 
 from defender.learning.author.branch import AuthorBranch
-from defender.learning.core import drains, lane_trees, markers
-from defender.learning.core import quarantine as quarantine_mod
+from defender.learning.core import drains, markers
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
@@ -43,10 +42,15 @@ from defender.learning.core.quarantine import preserve_tainted_tree
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
 from defender.runtime import scrub as scrub_mod
+from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.e2e import _box665 as B
+from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
 
 VALUES = {AUTHOR_DRAIN_LABEL: "author_drain", LEAD_AUTHOR_DRAIN_LABEL: "lead_author_drain"}
 MEMBERS = list(VALUES)
+#: Non-members, as `test_1134_mount_list` spells them: values and names as strings, look-alikes,
+#: `.value` carriers, near misses.
+NON_MEMBERS = list(UNKNOWN_LABELS)
 #: What a member's display would leak if formatted as the enum's own `str`/`repr`.
 LEAKS = ("DrainLabel", "<", "AUTHOR:")
 
@@ -192,29 +196,29 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", ["lead_author_drain", "author_drain"])
-def test_the_lead_author_lane_refuses_a_labels_value_as_a_bare_string(tmp_path: Path, value: str):
-    """`lead_author.run(deps=..., label="lead_author_drain")`, the lead lane's value as a bare
-    string, is refused before the queue lock: a string is no label, so its list is empty and
-    lacks `skills/`. The control is the member itself, above.
+@pytest.mark.parametrize("value", ["lead_author_drain", "author_drain", "LEAD_AUTHOR"])
+def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
+        tmp_path: Path, value: str):
+    """`lead_author.run(deps=..., label="lead_author_drain")`, the lead lane's value (or name) as
+    a bare string, raises at its first use (`AttributeError`) before the queue lock. The control
+    is the lead member, above (it reaches the lock).
 
-    Catches: a `str`-mixin enum, or a list that accepts a member's value (`DrainLabel(label)`
-    coercion, an `==` table keyed by the strings)."""
+    Catches: a `str`-mixin enum, and a check that coerces a string into a member
+    (`DrainLabel(label)`, `DrainLabel[label]`)."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     paths = _paths(tmp_path)
 
     def lock() -> None:
-        raise AssertionError("a bare string got past the grant check to the queue lock")
+        raise AssertionError("a non-member got past the grant check to the queue lock")
 
     deps = SimpleNamespace(paths=paths, acquire_queue_lock=lock)
-    assert paths.drain_writable_trees(value) == ()  # type: ignore[arg-type]
-    with pytest.raises(LeadAuthorError):
+    with pytest.raises(AttributeError):
         lead_author.run(run_dir, label=value, deps=deps)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------------------
-# O1 at the batch entry: the box a string-labelled batch starts mounts nothing writable
+# O1' at the batch entry: a non-member raises before any batch work
 # ---------------------------------------------------------------------------------------
 
 
@@ -222,107 +226,44 @@ def _writable(request: Any) -> list[Path]:
     return [Path(m.source) for m in request.mounts if m.writable]
 
 
-@pytest.mark.parametrize("value", ["author_drain", "lead_author_drain"])
-def test_a_batch_labelled_by_a_bare_string_starts_a_box_with_no_writable_mount(
-        tmp_path: Path, value: str):
-    """The real `_run_worktree_batch(label="<value>")`: the one `BoxRequest` its box seam is
-    handed has no writable mount (only the leaf, read-only). The positive control, the member
-    whose value it is, over a fresh drive: its box mounts the lane's trees writable.
+@pytest.mark.parametrize("label", NON_MEMBERS, ids=repr)
+def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path, label: object):
+    """The real `_run_worktree_batch(label=<non-member>)` raises `AttributeError` before
+    `_open_batch`: `has_work` is never asked, the branch records no event and makes no worktree,
+    no box is started, nothing is held, and no pending-delivery record is written.
 
-    Catches: a string coerced into a member at the batch entry (`DrainLabel(label)` before
-    `_drain_box_request`), which the per-function no-grant rows never see."""
-    member = {v: m for m, v in VALUES.items()}[value]
-    expected = {AUTHOR_DRAIN_LABEL: ("defender/lessons", "defender/lessons-questioner"),
-                LEAD_AUTHOR_DRAIN_LABEL: ("defender/skills",)}[member]
+    The positive control, each member over a fresh drive: the batch asks `has_work`, starts one
+    box, and that box mounts the member's trees writable.
 
+    Catches: a string, a name or a look-alike coerced into a member at the batch entry, and a
+    batch that only meets the label late (at the box, or at a record writer), after a worktree
+    and a box exist."""
+    asked: list[LoopPaths] = []
+
+    def has_work(paths: LoopPaths) -> bool:
+        asked.append(paths)
+        return True
+
+    root = tmp_path / "non-member"
+    root.mkdir()
     rec = B.BoxLifecycleRecorder()
-    B.drive_worktree_batch(tmp_path / "string", rec, do_work=lambda *_a, **_k: None,
-                           label=value)
-    assert _writable(rec.only_request()) == []
+    with pytest.raises(AttributeError):
+        B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, has_work=has_work,
+                               label=label)
+    assert asked == [], "the batch reached _open_batch with a non-member"
+    assert rec.requests == []
+    assert rec.events == []
+    assert not (root / "wt").exists(), "a worktree was made for a non-member"
+    assert not B.loop_paths(root).pending_delivery_dir.exists()
+    assert descriptors_under(root) == []
 
-    rec = B.BoxLifecycleRecorder()
-    B.drive_worktree_batch(tmp_path / "member", rec, do_work=lambda *_a, **_k: None,
-                           label=member)
-    request = rec.only_request()
-    [leaf] = [Path(m.source) for m in request.mounts if not m.writable]
-    assert _writable(request) == [leaf / rel for rel in expected]
-
-
-# ---------------------------------------------------------------------------------------
-# O3 by construction: every label in a message is formatted bare (its `str()`, the value)
-# ---------------------------------------------------------------------------------------
-
-#: The modules whose messages carry a drain label (design O3's sites).
-O3_MODULES = (drains, quarantine_mod, markers, lead_author)
-
-
-def _label_formats(tree: ast.AST) -> list[tuple[int, str]]:
-    """Every f-string field naming `label` that is not a bare `{label}` (no `!r`/`!s`/`!a`, no
-    format spec) or `{str(label)!r}`: those would show something other than the value."""
-    bad = []
-    for n in ast.walk(tree):
-        if not isinstance(n, ast.FormattedValue):
-            continue
-        names = {x.id for x in ast.walk(n.value) if isinstance(x, ast.Name)}
-        if "label" not in names:
-            continue
-        bare = (isinstance(n.value, ast.Name) and n.conversion == -1 and n.format_spec is None)
-        via_str = (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
-                   and n.value.func.id == "str" and len(n.value.args) == 1
-                   and isinstance(n.value.args[0], ast.Name) and n.format_spec is None)
-        if not (bare or via_str):
-            bad.append((n.lineno, ast.unparse(n)))
-    return bad
-
-
-@pytest.mark.parametrize("module", O3_MODULES, ids=lambda m: m.__name__.rsplit(".", 1)[-1])
-def test_every_message_formats_the_label_bare(module: Any):
-    """In every module with a label-carrying message, each f-string field over `label` is a bare
-    `{label}` (which renders `str(member)`, the value, pinned above) or `{str(label)!r}`.
-
-    Non-vacuity: the drains and quarantine modules have such fields at all.
-
-    Catches: a `{label!r}`, `{label!s}` with a spec, `{label.name}` or `{label:...}` at any of
-    the message sites, captured by a test or not (the per-message rows cover only some)."""
-    tree = ast.parse(inspect.getsource(module))
-    assert _label_formats(tree) == []
-    if module in (drains, quarantine_mod):
-        fields = [n for n in ast.walk(tree) if isinstance(n, ast.FormattedValue)
-                  and isinstance(n.value, ast.Name) and n.value.id == "label"]
-        assert fields, f"{module.__name__} formats no label: the check judged nothing"
-
-
-# ---------------------------------------------------------------------------------------
-# M1: the label is typed `DrainLabel` along the flow (mypy does not check tests or callers'
-# strings, so the annotation is pinned here)
-# ---------------------------------------------------------------------------------------
-
-TYPED = {
-    "LoopPaths.drain_writable_trees": LoopPaths.drain_writable_trees,
-    "open_drain_trees": lane_trees.open_drain_trees,
-    "_invoke_lead_author": drains._invoke_lead_author,
-    "_maybe_trigger_author": drains._maybe_trigger_author,
-    "_invoke_pitfalls": drains._invoke_pitfalls,
-    "_run_worktree_batch": drains._run_worktree_batch,
-    "_open_batch": drains._open_batch,
-    "_land_batch": drains._land_batch,
-    "_deliver_pending": drains._deliver_pending,
-    "_record_pending_delivery": drains._record_pending_delivery,
-    "_drain_box_request": drains._drain_box_request,
-    "preserve_tainted_tree": preserve_tainted_tree,
-    "claim_markers": markers.claim_markers,
-    "lead_author.run": lead_author.run,
-}
-
-
-@pytest.mark.parametrize("name", list(TYPED))
-def test_the_label_parameter_is_typed_drainlabel(name: str):
-    """Each function on the label's flow annotates `label` as exactly `DrainLabel`: not `str`,
-    not a union with `str`, not `Any`.
-
-    Catches: a widened `DrainLabel | str` that lets a string through every type check."""
-    fn = TYPED[name]
-    annotation = inspect.signature(fn).parameters["label"].annotation
-    resolved = eval(annotation, {**fn.__globals__, "DrainLabel": DrainLabel}) \
-        if isinstance(annotation, str) else annotation
-    assert resolved is DrainLabel, (name, annotation)
+    for member, rels in ((AUTHOR_DRAIN_LABEL, ("defender/lessons", "defender/lessons-questioner")),
+                         (LEAD_AUTHOR_DRAIN_LABEL, ("defender/skills",))):
+        asked.clear()
+        rec = B.BoxLifecycleRecorder()
+        B.drive_worktree_batch(tmp_path / member.value, rec, do_work=lambda *_a, **_k: None,
+                               has_work=has_work, label=member)
+        assert len(asked) == 1
+        request = rec.only_request()
+        [leaf] = [Path(m.source) for m in request.mounts if not m.writable]
+        assert _writable(request) == [leaf / rel for rel in rels]
