@@ -19,7 +19,9 @@ top is now that one folder's refusal (EIO at a `<sys>` costs that system and one
 the rest still yields); the walk's depth is now `list_tree`'s, so a folder below it is never
 entered, not merely ignored. New in v3: a folder found gone by its own listing (the listing's
 `gone`) is silent, and a folder REALLY swapped between its parent's listing and its own ends
-up refused or gone and is never listed through.
+up refused or gone and is never listed through. Addendum 3 (D2): a `<sys>` folder REALLY
+removed while it is being listed is the listing's `gone` (`entries()` answers a dead folder
+absent), so it is silent too, never a folder listed with stale names.
 
 The tree. One tmp dir holds `t/`, the tree the readers are pointed at, `host/` beside it, where an
 outside link points and every hard link keeps its other name, and `decoy/`, where a lying `where`
@@ -207,7 +209,13 @@ from defender.tests._shared_readers_1134 import (
     project_record,
     run_readers,
 )
-from defender.tests._tree_listing_1134 import CHILD_DEADLINE, CallRecorder, descriptors_under
+from defender.tests._tree_listing_1134 import (
+    CHILD_DEADLINE,
+    REMOVAL_MOMENTS,
+    CallRecorder,
+    ListingFaults,
+    descriptors_under,
+)
 from defender.tests.test_1111_rooted_io import Planted, census, in_time, plant_leaf
 
 # ---------------------------------------------------------------------------------------
@@ -2130,6 +2138,35 @@ def test_several_folder_faults_warn_once_each_in_path_order(scene, reader, case,
     assert got == reader.expected(where, [r for r in shape.records
                                           if not any(under(r, f) for f in faulted)])
     assert said(caplog) == warnings
+
+
+@pytest.mark.parametrize("form", BOUND_FORMS)
+@pytest.mark.parametrize("moment", REMOVAL_MOMENTS)
+@pytest.mark.parametrize("site", [".dotsys", "wazuh"])
+@pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
+def test_a_sys_folder_really_removed_during_its_listing_is_gone_and_silent(
+        scene, reader, site, moment, form, caplog):
+    """Addendum 3, D2 at the readers: a `<sys>` folder REALLY removed (`shutil.rmtree`) after
+    `list_tree` stepped into it (before its reopen, before its scan, or after the scan's first
+    entry) is absent to its own listing, so it is the listing's `gone`: its records (its
+    `_draft` among them) are not yielded, NO warning is logged (a missing folder never warned),
+    and every other system yields exactly. Never a raise. Control: before the removal the same
+    form yields the whole catalog, silently."""
+    shape = TREES["catalog"]
+    where = scene.t / shape.top
+    caplog.clear()
+    with called_as(scene, "catalog", form) as (arg, kw):
+        assert in_time(lambda: reader.run(arg, kw)) == reader.expected(where, shape.records)
+    assert said(caplog) == []
+
+    seam = ListingFaults(remove={site}, moment=moment)
+    caplog.clear()
+    with called_as(scene, "catalog", form, os_=seam) as (arg, kw):
+        got = in_time(lambda: reader.run(arg, kw))
+    assert seam.removed == [os.path.realpath(where / site)], seam.removed
+    assert got == reader.expected(
+        where, [r for r in shape.records if not under(r, f"{CATALOG}/{site}")])
+    assert said(caplog) == [], "a folder found gone was warned"
 
 
 #: Per tree, `(a folder below the listing's depth, a folder the listing must list)`, relative
