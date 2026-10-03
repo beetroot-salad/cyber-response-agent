@@ -1003,8 +1003,7 @@ def _unparseable_table(folder: Path) -> str:
 
 
 def _absent_lead_zero_template(folder: Path) -> str:
-    _write_lead_zero(folder / "settings", ABSENT_TEMPLATE)
-    return ABSENT_TEMPLATE
+    return _lead_zero_disagreement(folder)[1]
 
 
 def _mapping_fault(folder: Path) -> str:
@@ -1043,8 +1042,8 @@ def test_1159_a_census_not_taken_still_judges_what_needs_none(
     text, line = _census_blind_line(_check_folder(folder, **env), folder=folder,
                                     cause=GIT_ABSENT_CAUSE, also=(named,))
     assert _findings_of(text) - {line} == sighted, (
-        f"with the census not taken, check does not print exactly the findings that need no "
-        f"census:\nsighted:\n" + "\n".join(sorted(sighted)) + f"\nblind:\n{text}")
+        "with the census not taken, check does not print exactly the findings that need no "
+        "census:\nsighted:\n" + "\n".join(sorted(sighted)) + f"\nblind:\n{text}")
 
 
 def test_1159_check_names_the_running_checkout_when_head_cannot_be_resolved(

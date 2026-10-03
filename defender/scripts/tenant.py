@@ -32,9 +32,11 @@ folder with no data root at all (tenant CI).
 `migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
 its settings committed in the product repo until #1120 deleted them): it builds the knowledge
 folder acceptance now requires from the last copy in the checkout's history, as a new repo
-exactly like scaffold's, and the operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding
-or a refusal — a finding includes a check that could not judge (the grant census untakeable, `.tenant-id`
-unverifiable), which `check` reports as one more finding, not a separate code — 2 a usage error. Every refusal is printed as `[tenant.py] <message>`.
+exactly like scaffold's, and the operator then runs `setup <tenant-id>`.
+
+Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
+grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
+the checks that need no census still run. Every refusal is printed as `[tenant.py] <message>`.
 """
 from __future__ import annotations
 
@@ -161,26 +163,30 @@ def check_folder(folder: Path) -> int:
 
 def _findings(knowledge: Path) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
-    settings files load, the grant census both ways and the lead-zero agreement against the
-    running checkout, and the committed `.tenant-id`."""
+    settings files load, the grant table loads, the lead-zero agreement against the running
+    catalog, the grant census both ways against the running checkout, and the committed
+    `.tenant-id`. A census that cannot be taken costs only the census: its finding says the
+    table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
     try:
         _settings_files_parse(settings)
     except _tenant.TenantRefused as bad:
         findings.append(str(bad))
+    table = dispositions_path(settings)
+    census: _tenant_census.Census | None = None
     try:
         census = _tenant_census.take_census(_DEFENDER_DIR, _REPO_ROOT)
     except _tenant_census.CensusUnavailable as blind:
         findings.append(
-            f"the grant census could not be taken — the running product checkout {_REPO_ROOT} "
-            f"failed, and nothing in the folder being checked is at fault: {blind}")
-    else:
-        table = dispositions_path(settings)
-        try:
-            findings += _tenant_census.table_findings(settings, census).lines(table)
-        except DispositionError as unloadable:
-            findings.append(str(unloadable))
+            f"{table} was not checked against the running checkout's adapters (for verbs nobody "
+            f"decides, or rows no adapter declares): the grant census could not be taken — {blind}")
+    try:
+        findings += (_tenant_census.table_findings(settings, census).lines(table)
+                     if census is not None
+                     else _tenant_census.folder_findings(settings, _DEFENDER_DIR).lines())
+    except DispositionError as unloadable:
+        findings.append(str(unloadable))
     committed = _tenant_id_committed(knowledge)
     if committed is not None:
         findings.append(committed)
@@ -223,8 +229,8 @@ def _tenant_id_committed(folder: Path) -> str | None:
                      if listed else None)
     except subprocess.TimeoutExpired:
         return f"{_CANNOT_VERIFY}: git did not answer within {bound}s over {folder / '.git'}"
-    except FileNotFoundError as absent:
-        return f"{_CANNOT_VERIFY}: git is not available on PATH ({absent})"
+    except OSError as unstarted:
+        return f"{_CANNOT_VERIFY}: {_git.unstarted(unstarted)} ({unstarted})"
     except _git.GitError as failed:
         return f"{_CANNOT_VERIFY}: git could not read {folder}'s repository: {failed.stderr}"
     if committed is None:
