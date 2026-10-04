@@ -145,10 +145,14 @@ def test_gate_reports_nothing_inside_the_owner_modules(tmp_path: Path):
         "def resolve(run_dir: Path) -> Path:\n"
         "    return run_dir / EXECUTED_QUERIES\n")
     assert set(S.gate().OWNER_MODULES) == set(S.OWNER_MODULE_FILES), (
-        f"D6(a)'s exempt owner set is {sorted(S.gate().OWNER_MODULES)}; it must be the four "
-        "owner modules and nothing else")
+        f"D6(a)'s exempt owner set is {sorted(S.gate().OWNER_MODULES)}; it must be the owner "
+        "modules (every runs-repository file, by path, plus _episode_paths.py and _tenant.py) "
+        "and nothing else")
     for owner in S.OWNER_MODULE_FILES:
-        found = S.gate_findings(tmp_path / owner.replace(".", "_"), owner, source)
+        # An owner under `run_repository/` carries a '/': the scratch root is one flat folder
+        # per owner, and `plant` makes the owner's own parent inside it.
+        scratch = tmp_path / owner.replace("/", "__").replace(".", "_")
+        found = S.gate_findings(scratch, owner, source)
         assert found == [], f"{owner} is an owner and reported {S.displays(found)}"
     outside = S.gate_findings(tmp_path / "outside", "runtime/copy.py", source)
     assert outside, "positive control: the same source outside the owner set IS reported"
@@ -284,7 +288,7 @@ def test_gate_flags_a_literal_free_join_onto_an_owner_derived_value(tmp_path: Pa
     found = S.gate_findings(tmp_path, "scripts/gather_tools/record_query.py", '''
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 
 def direct(run_dir: Path, lead_id: str) -> Path:
@@ -341,7 +345,7 @@ def test_the_session_store_owner_is_traced_like_any_instance_owner(tmp_path: Pat
     admitted = S.gate_findings(tmp_path / "a", "runtime/session_store.py", '''
 from pathlib import Path
 
-from defender._run_paths import SessionPaths
+from defender.run_repository import SessionPaths
 
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
@@ -356,14 +360,14 @@ def store_path_for(case_id: str, *, runs_base: Path) -> Path:
             ("through a local", "    sd = SessionPaths(runs_base).sessions_dir\n"
                                 "    return sd / name\n")):
         joined = S.gate_findings(tmp_path / label.replace(" ", "_"), "runtime/beside.py", (
-            "from pathlib import Path\n\nfrom defender._run_paths import SessionPaths\n\n\n"
+            "from pathlib import Path\n\nfrom defender.run_repository import SessionPaths\n\n\n"
             "def beside_the_store(runs_base: Path, name: str) -> Path:\n" + body))
         assert "literal-free join" in S.displays(joined), (
             f"a join onto the sessions dir ({label}) carries no literal, so only the accessor "
             f"pass can see it — and it did not:\n{S.displays(joined)}")
 
     class_read = S.gate_findings(tmp_path / "c", "runtime/beside.py", '''
-from defender._run_paths import SessionPaths
+from defender.run_repository import SessionPaths
 
 
 def the_accessor_itself():
@@ -389,7 +393,7 @@ def test_the_shared_ast_pass_seen_from_its_other_consumer(tmp_path: Path):
     # The same source, the same answer, from the second consumer.
     import ast
     tree = ast.parse(
-        "from defender._run_paths import RunPaths\n"
+        "from defender.run_repository import RunPaths\n"
         "def f(run_dir, lead_id):\n"
         "    return RunPaths(run_dir).gather_raw / lead_id\n")
     env = astlib.module_env(tree)
@@ -489,10 +493,10 @@ def test_the_owner_stays_importable_from_tests_and_the_sweep_skips_them(tmp_path
 
     NEGATIVE. Positive control inline (and demand d1): the same sweep DOES report outside tests.
     """
-    from defender._run_paths import RunPaths  # noqa: F401 — the import IS the assertion (N3)
+    from defender.run_repository import RunPaths  # noqa: F401 — the import IS the assertion (N3)
     importers = [
         p.relative_to(DEFENDER).as_posix() for p in (DEFENDER / "tests").rglob("*.py")
-        if "_run_paths" in p.read_text(encoding="utf-8", errors="replace")]
+        if "defender.run_repository" in p.read_text(encoding="utf-8", errors="replace")]
     assert len(importers) > 20, (
         f"claim C6: 48 test files import the owner and N3 says 'private' means LINT-FENCED, not "
         f"Python-private; only {len(importers)} found")
@@ -586,7 +590,7 @@ def test_one_package_migrated_while_another_still_spells_the_name(tmp_path: Path
     unmigrated literal still sitting in the allow-list."""
     gate = S.gate()
     S.plant(tmp_path, "runtime/migrated.py",
-            "from defender._run_handle import Run\n\n\n"
+            "from defender.run_repository import Run\n\n\n"
             "def write(run):\n    run.tables.queries.append([{'a': 1}])\n")
     S.plant(tmp_path, "learning/unmigrated.py",
             f'def read(run_dir):\n    return (run_dir / "{NAME_LITERAL}").read_text()\n')

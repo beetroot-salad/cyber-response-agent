@@ -537,7 +537,7 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
 
     body = (
         "import sys\n"
-        "import defender._run_paths as rp\n"
+        "import defender.run_repository as rp\n"  # the door (#1105); the layout loads alone
         "import pathlib\n"
         "o = rp.RunPaths(pathlib.Path('/tmp/x'))\n"
         "print('ANSWERED', o.session_db(pathlib.Path('/tmp/runs'), 'good').name)\n"

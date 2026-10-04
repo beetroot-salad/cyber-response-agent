@@ -38,7 +38,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = REPO_ROOT / "defender"
-OWNER_MODULES = ("_run_paths.py", "_episode_paths.py", "_tenant.py")
+#: By path under `defender/`: #1105 moved the run-layout owner into the runs repository (D1.1).
+OWNER_MODULES = ("run_repository/_layout.py", "_episode_paths.py", "_tenant.py")
 
 #: The token every renamed record gains. Arbitrary — what matters is that no module anywhere
 #: could have guessed it.
@@ -96,6 +97,13 @@ def _rewrite_owner(source: str, *, only: frozenset[str] | None = None) -> tuple[
     return "".join(lines), len(edits)
 
 
+def _owner_text(owner: Path) -> str:
+    """The owner module's source. A stale owner path fails here by name, not as a bare
+    `FileNotFoundError` deep in a rewrite."""
+    assert owner.is_file(), f"no owner module at {owner.relative_to(PACKAGE)} — a stale owner path"
+    return owner.read_text(encoding="utf-8")
+
+
 def _mirror(src: Path, dst: Path, *, replace: dict[Path, str]) -> None:
     """`dst` mirrors `src`: a symlink per entry, except the ones `replace` supplies text for,
     which become real files (and whose parent directories become real too)."""
@@ -123,7 +131,7 @@ def _renamed_tree(tmp_path: Path, *, sabotage: str | None = None) -> Path:
     replace: dict[Path, str] = {}
     total = 0
     for name in OWNER_MODULES:
-        text, count = _rewrite_owner((PACKAGE / name).read_text(encoding="utf-8"))
+        text, count = _rewrite_owner(_owner_text(PACKAGE / name))
         replace[PACKAGE / name] = text
         total += count
     assert total >= 30, f"the rewrite found only {total} record names — it is not exercising"
@@ -246,11 +254,11 @@ def _with_function_replaced(source: str, name: str, replacement: str) -> str:
 def _session_renamed_tree(tmp_path: Path, names: tuple[str, ...], *,
                           hand_compose_store_path: bool = False) -> Path:
     root = tmp_path / ("sabotaged" if hand_compose_store_path else "renamed")
-    owner = PACKAGE / "_run_paths.py"
-    text, count = _rewrite_owner(owner.read_text(encoding="utf-8"), only=frozenset(names))
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text, count = _rewrite_owner(_owner_text(owner), only=frozenset(names))
     assert count == len(names), (
-        f"the rewrite renamed {count} of {names} in _run_paths.py — the owner no longer "
-        "spells them as plain module constants, so this proof is not exercising")
+        f"the rewrite renamed {count} of {names} in run_repository/_layout.py — the owner no "
+        "longer spells them as plain module constants, so this proof is not exercising")
     replace = {owner: text}
     if hand_compose_store_path:
         store = PACKAGE / "runtime" / "session_store.py"
@@ -332,8 +340,8 @@ def test_the_session_store_follows_the_owners_method_not_just_its_constants(tmp_
     """Change what `SessionPaths.sessions_dir` answers without touching a constant, and a real
     run's store still lands where the owner says and the resume door finds it. This is what
     tells "asks the owner" apart from "composes from the owner's constants"."""
-    owner = PACKAGE / "_run_paths.py"
-    text = owner.read_text(encoding="utf-8")
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text = _owner_text(owner)
     assert text.count(_SESSIONS_DIR_RETURN) == 1, (
         "`SessionPaths.sessions_dir` no longer returns the spelling this proof rewrites — update "
         "the anchor, or this case exercises nothing")
@@ -367,8 +375,8 @@ _OPEN_ONE_STORE = (
 
 
 def _root_moved_tree(tmp_path: Path, *, hand_composed_mkdir: bool) -> Path:
-    owner = PACKAGE / "_run_paths.py"
-    text = owner.read_text(encoding="utf-8")
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text = _owner_text(owner)
     assert text.count(_TRUST_ROOT_RETURN) == 1, (
         "`SessionPaths.trust_root` no longer returns the spelling this proof rewrites — update "
         "the anchor, or this case exercises nothing")

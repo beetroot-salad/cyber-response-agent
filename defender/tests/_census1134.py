@@ -17,13 +17,15 @@ Kinds:
                 public `defender._io` callable that is not in `IO_PURE` and not a constructor,
                 and every underscore name of `defender._io` (its private disk helpers —
                 `_create_named`, `_open_plain_fd`, `_ensure_dir_component`, ... — classes and
-                constants, `io_private_names`); every public `defender._run_paths` function not
-                in `RUN_PATHS_PURE`; `os` / `os.path` filesystem, xattr, cwd and process
-                functions; any `shutil`, `glob`, `tempfile`, `subprocess`, `filecmp`,
-                `linecache`, `fileinput`, `dbm`, `shelve`, `sqlite3`, `pty`, `py_compile`,
-                `compileall` or `zipimport` function; the openers (`OPENERS`: the compressed-file
-                classes, file-backed logging handlers, module loaders, `asyncio`'s children
-                among them) and any `<module>.open` however it is imported;
+                constants, `io_private_names`); every public function of the run layout
+                (`defender.run_repository._layout`, however it is reached: the door
+                `defender.run_repository` or the submodule) not in `RUN_PATHS_PURE`; `os` /
+                `os.path` filesystem, xattr, cwd and process functions; any `shutil`, `glob`,
+                `tempfile`, `subprocess`, `filecmp`, `linecache`, `fileinput`, `dbm`, `shelve`,
+                `sqlite3`, `pty`, `py_compile`, `compileall` or `zipimport` function; the
+                openers (`OPENERS`: the compressed-file classes, file-backed logging handlers,
+                module loaders, `asyncio`'s children among them) and any `<module>.open` however
+                it is imported;
                 `_paths.process_defender_dir`.
 - ``attr``      a method call by a Path-verb name (`ATTRS`) whose receiver is neither a module
                 nor a provable `Held` / `Bound` that has that verb (`Held.mkdir`,
@@ -375,15 +377,22 @@ def io_private_names(io_source: ast.Module) -> frozenset[str]:
     return frozenset(name for name in out if name.startswith("_"))
 
 
-#: The public `_run_paths` functions that touch nothing on disk. Every other public top-level
-#: function there is in the vocabulary (`artifact_file`, `artifact_dir`, `plain_file` lstat the
-#: entry; `contained_payload` resolves it); `test_1134_census` checks the split against each
-#: body. Its classes (`RunPaths`, ...) only compose names and are not vocabulary.
+#: The public run-layout (`run_repository/_layout.py`) functions that touch nothing on disk.
+#: Every other public top-level function there is in the vocabulary (`artifact_file`,
+#: `artifact_dir`, `plain_file` lstat the entry; `contained_payload` resolves it);
+#: `test_1134_census` checks the split against each body. Its classes (`RunPaths`, ...) only
+#: compose names and are not vocabulary.
 RUN_PATHS_PURE = frozenset({"is_case_answer_key", "gather_summaries_shape", "resolve_run_bundle"})
 
 
+#: The run layout's file under `defender/`, and the module names its functions are reached by:
+#: the door, which re-exports them, and the submodule itself (#1105).
+LAYOUT_MODULE = "run_repository/_layout.py"
+LAYOUT_SPELLINGS = frozenset({"defender.run_repository", "defender.run_repository._layout"})
+
+
 def run_paths_vocabulary(source: ast.Module) -> frozenset[str]:
-    """Every public top-level function of `_run_paths`' source, minus `RUN_PATHS_PURE`."""
+    """Every public top-level function of the run layout's source, minus `RUN_PATHS_PURE`."""
     names = {n.name for n in source.body
              if isinstance(n, _DEFS) and not n.name.startswith("_")}
     return frozenset(names - RUN_PATHS_PURE)
@@ -421,7 +430,7 @@ def module_dotted(module: str) -> str:
 
 
 class Tree:
-    """One scanned checkout: its `_io` / `_run_paths` vocabularies, its handle classes' private
+    """One scanned checkout: its `_io` / run-layout vocabularies, its handle classes' private
     attributes and verbs, and the static re-export map of its modules."""
 
     def __init__(self, repo_root: Path) -> None:
@@ -429,11 +438,17 @@ class Tree:
         _, io_tree = _astlib.read_and_parse(repo_root / "defender" / "_io.py", "defender/_io.py")
         self.io_vocab = io_vocabulary(io_tree)
         self.io_private = io_private_names(io_tree)
-        run_paths = repo_root / "defender" / "_run_paths.py"
+        layout = repo_root / "defender" / LAYOUT_MODULE
         self.run_paths_vocab: frozenset[str] = frozenset()
-        if run_paths.is_file():
-            _, rp_tree = _astlib.read_and_parse(run_paths, "defender/_run_paths.py")
+        if layout.is_file():
+            _, rp_tree = _astlib.read_and_parse(layout, f"defender/{LAYOUT_MODULE}")
             self.run_paths_vocab = run_paths_vocabulary(rp_tree)
+        # #1105 NM-01: a layout moved or renamed under the census would empty this set, and every
+        # `artifact_file(...)` would then scan clean. An empty vocabulary is a broken census.
+        if not self.run_paths_vocab:
+            raise LookupError(
+                f"{layout}: no public disk-touching function found there; the census would flag "
+                "no run-layout call. Point `LAYOUT_MODULE` at the run layout's file")
         #: Each handle class's origin -> its class body in this checkout (absent: skipped).
         classes: dict[str, ast.ClassDef] = {}
         for origin, cls in ((HELD, _class_def(io_tree, "Held")),
@@ -533,7 +548,7 @@ class Tree:
             or (mod == "os" and leaf.startswith(OS_PREFIXES))
             or origin.split(".")[0] in WHOLE_MODULES
             or (mod == "defender._io" and (leaf in self.io_vocab or leaf.startswith("_")))
-            or (mod == "defender._run_paths" and leaf in self.run_paths_vocab)
+            or (mod in LAYOUT_SPELLINGS and leaf in self.run_paths_vocab)
             # `<module>.open` however it is spelled: `from gzip import open as g; g(p)`.
             or (leaf == "open" and bool(mod) and self.is_module(mod))
         )

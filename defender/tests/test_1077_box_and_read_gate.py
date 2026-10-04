@@ -110,7 +110,7 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     assert permission.decide_read(
         run_dir / "alert.json", run_dir=run_dir, defender_dir=worktree, policy=main).allow, (
         "positive control: the alert is deliberately NOT in the answer key "
-        "(`_run_paths.py:197-198`) and stays readable")
+        "(`run_repository/_layout.py`'s answer-key names) and stays readable")
     well_shaped = owner.payload("l-abc123", 0)
     well_shaped.parent.mkdir(parents=True, exist_ok=True)
     well_shaped.write_text("{}\n", encoding="utf-8")
@@ -196,8 +196,18 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
 
 
 def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
-    """The name owner the box entrypoint imports the sentinel from (`defender._run_paths`)
-    imports with no third-party package installed, and `RunPaths` is a stdlib dataclass (D1).
+    """The layout owner, served by the runs repository's door `defender.run_repository` since
+    #1105, imports with no third-party package installed and names the sentinel, and `RunPaths`
+    is a stdlib dataclass (D1).
+
+    The box entrypoint itself loads no layout module: `python3 -m defender.runtime.bash_exec`
+    loads only `defender`, `defender.runtime`, `bash_exec` and `box_codec` (#1105's A80-8), so
+    this test's name predates that finding and is kept as #1077's pin id. Why the door must stay
+    pydantic-free is this pin and its twin in test_1077_name_owners.py (R4-7's two child pins)
+    plus the production modules that import the layout with the stdlib alone: five at import
+    (A80-7: `_episode_paths`, `hooks.budget_enforcer`, `hooks.record_lead`,
+    `runtime.circuit_breaker`, `runtime.scrub`) and `learning.author.verify_forward.forward`'s
+    `load_run_context`, which loads it at call time once PR 1 moves that import inside it (FR-1).
 
     The `defender.runtime.box` package itself is NOT held to this any more: #1092 (O2/M7)
     retired the stdlib-only rule for the package door — `BoxSpec` is a `@model` dataclass and
@@ -208,7 +218,7 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
 
     done = run_blocked(
         "import sys\n"
-        "import defender._run_paths as rp\n"
+        "import defender.run_repository as rp\n"
         "assert rp.BOX_SENTINEL, 'the owner does not name the sentinel'\n"
         "import dataclasses\n"
         "assert dataclasses.is_dataclass(rp.RunPaths), 'RunPaths is not a stdlib dataclass'\n"

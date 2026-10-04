@@ -223,7 +223,8 @@ class Tree:
         return self.root(m) / m.rel
 
     def run(self, io: Any = _io) -> Any:
-        """The handle as application code builds it (no tenant record: none is needed)."""
+        """The handle as application code builds it, over a runs base holding its tenant record
+        (#1105 NH-3: `Run.for_tenant` refuses a runs base with no `_tenant.json`)."""
         return H.Run.for_tenant(S.DEFAULT_TENANT_ID, RUN_ID, runs_base=self.runs_base, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
@@ -237,6 +238,7 @@ class Tree:
 def tree(tmp_path: Path) -> Tree:
     runs_base = tmp_path / "data" / "runs"
     (runs_base / RUN_ID).mkdir(parents=True)
+    S.plant_tenant_record(runs_base)  # #1105 NH-3: the record run setup writes first
     world = tmp_path / "worlds" / "overlay_a"
     world.mkdir(parents=True)
     host = tmp_path / "host"
@@ -831,6 +833,7 @@ def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_w
     writable one writes, through the followed spelling."""
     real = tmp_path / "real-data"
     (real / "runs" / RUN_ID).mkdir(parents=True)
+    S.plant_tenant_record(real / "runs")  # #1105 NH-3: the record run setup writes first
     data = tmp_path / "data"
     if aliased == "data_root":
         data.symlink_to(real, target_is_directory=True)
@@ -862,23 +865,39 @@ def test_o5_an_archived_world_at_a_symlinked_world_dir_reads_every_member(tree, 
 
 @pytest.mark.parametrize("m", WRITABLE, ids=str)
 def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m):
-    """O5 (C23): a write under a root that does not exist yet (here neither the runs base nor
-    the run dir) creates it, following the links in its spelling as `guarded_mkdir` does. The
-    data root is a symlink, and the record lands in the folder it points at."""
+    """O5 (C23): a write under a root that does not exist yet creates it, following the links in
+    its spelling as `guarded_mkdir` does. The data root is a symlink, and the record lands in the
+    folder it points at. Since #1105 (NH-3) `Run.for_tenant` needs the runs base's record, so the
+    runs base and its record are planted after the precondition: for a member rooted at the run
+    dir the missing root is the run dir alone, and a member rooted at the runs base is written
+    under the existing runs base (reached through the data root's link), so its missing-root
+    case is no longer reachable through `Run.for_tenant`."""
     real = tmp_path / "real-data"
     real.mkdir()
     (tmp_path / "data").symlink_to(real, target_is_directory=True)
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "unused-world", tmp_path)
     assert not tree.root(m).exists()
 
+    # #1105 NH-3: a `Run.for_tenant` handle exists only over a runs base holding its record, so
+    # the record is planted (through the data root's link) after the precondition is seen.
+    if m.root != "world_dir":
+        tree.runs_base.mkdir()
+        S.plant_tenant_record(tree.runs_base)
     verb_call(tree.handle(m), m, "created")()
     assert_landed(real / tree.path(m).relative_to(tmp_path / "data"), m, "created")
 
 
 @pytest.mark.parametrize("m", READABLE, ids=str)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
-    """O5: a read under a root that does not exist is absent: `None`, and nothing is made."""
+    """O5: a read under a root that does not exist is absent: `None`, and nothing is made. Since
+    #1105 (NH-3) the runs base and its record are planted first for every member not rooted at
+    the world dir: a member rooted at the run dir still reads under a missing run dir, and a
+    member rooted at the runs base reads under the existing runs base with no member file
+    (still `None`, nothing made), no longer under a missing root."""
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
+    if m.root != "world_dir":  # #1105 NH-3: the handle needs its runs base's record
+        tree.runs_base.mkdir(parents=True)
+        S.plant_tenant_record(tree.runs_base)
     before = census(tmp_path)
     assert tree.handle(m).read() is None
     assert census(tmp_path) == before, f"{m}: a read under a missing root made something"

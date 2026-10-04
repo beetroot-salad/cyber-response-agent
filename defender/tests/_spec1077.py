@@ -79,8 +79,14 @@ NOT_ROOT = pytest.mark.skipif(
 HANDLE_MODULE = "_run_handle"
 TENANT_MODULE = "_tenant"
 EPISODE_MODULE = "_episode_paths"
-OWNER_MODULE_FILES = (
-    "_run_paths.py", "_episode_paths.py", "_tenant.py", f"{HANDLE_MODULE}.py")
+#: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
+#: repository package — which absorbed the layout (`_layout.py`, was `_run_paths.py`) and the
+#: handle (`_handle.py`, was `_run_handle.py`) — plus the two owners that stay outside it.
+RUN_REPOSITORY_FILES = tuple(
+    f"run_repository/{name}" for name in (
+        "__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py", "_id.py",
+        "_errors.py"))
+OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_tenant.py")
 
 
 def handle() -> Any:
