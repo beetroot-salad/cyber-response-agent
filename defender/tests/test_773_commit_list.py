@@ -73,7 +73,7 @@ def test_the_pitfalls_and_lead_author_commits_are_unchanged_773(tmp_path):
     """The three sibling lanes N4 declares untouched — questioner, lead-author, pitfalls —
     never reference the new function's name at all; the questioner still reaches
     `shared.commit_corpus` with its own trailers. (#1175 moved the lead-author and pitfalls
-    commits to `leads/_worktree_git.commit_admitted`, its own explicit-path commit; they still
+    commits to `_claim_git.ClaimGit.commit`, their claim session's index commit; they still
     never reach this lane's `commit_corpus_paths`.)
 
     §7 FK-1 makes this SAFE BY CONSTRUCTION rather than merely observed: a source census
