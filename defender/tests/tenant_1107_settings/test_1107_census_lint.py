@@ -77,6 +77,7 @@ def _has(findings: list[str], rel: str, line: int) -> bool:
 # D4 — the Elastic keys are interpreted in one place.
 # ======================================================================================
 
+@pytest.mark.gate
 def test_d4_elastic_keys_one_place():
     """Outside the ElasticSettings view and the elastic adapter, no platform module (runtime/,
     learning/, run.py) reads an ELASTIC_* or ELASTICSEARCH_URL key out of a SystemConfig or a config
@@ -126,6 +127,7 @@ def test_d4_keys_census_detects_planted(tmp_path):
 # S3 — nothing copies settings/ into a run or an episode.
 # ======================================================================================
 
+@pytest.mark.gate
 def test_s3_no_settings_copy_census():
     """No production code copies a file or its bytes from a tenant's settings/ folder into a run dir
     or an episode dir. A census over every copy and write call whose source derives from
@@ -239,6 +241,7 @@ def test_n3_census_detects_planted(tmp_path):
 # D2 — no SOC_PLAYGROUND_* setting is read from an environment.
 # ======================================================================================
 
+@pytest.mark.gate
 def test_d2_soc_playground_not_read(tmp_path):
     """No production module under defender/ reads a SOC_PLAYGROUND_* name from any environment,
     whether os.environ or ctx.env."""

@@ -165,6 +165,7 @@ def _planted_type_call(tenant):
 '''
 
 
+@pytest.mark.gate
 def test_1120_tenant_is_constructed_only_inside_accept_tenant(
         data_root: Path, tmp_path: Path) -> None:
     """An AST census of defender/ (excluding tests/) and scripts/ finds exactly one
@@ -447,6 +448,7 @@ _VULTURE_BASELINE = H.REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.js
 _NEW_TENANT_FINDING = re.compile(r"defender/_tenant\.py:\d+: unused property '(\w+)'")
 
 
+@pytest.mark.gate
 def test_1120_s8_tenant_layout_members_with_no_production_reader(data_root: Path) -> None:
     """Tenant carries all nine D1 path properties (dir, runs, sessions, episodes, learning,
     worktrees, knowledge, settings, agent) and the row file's path property, each a Path on an

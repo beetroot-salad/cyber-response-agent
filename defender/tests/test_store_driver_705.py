@@ -42,7 +42,7 @@ from pydantic_ai.messages import (  # noqa: E402
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.runtime import circuit_breaker, driver  # noqa: E402
+from defender.runtime import challenge_gate, circuit_breaker, driver  # noqa: E402
 from defender.tests._session_store_705 import (
     CLOSED_LOOP_INVLANG,
     FaultStore,
@@ -524,16 +524,30 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
         "the store append alone")
 
 
+#: The request-limit run's base ceiling: a few rounds, far under the shipped
+#: `DEFAULT_REQUEST_LIMIT`, so the run that ends by `UsageLimitExceeded` gets there quickly.
+_SHORT_BASE_REQUEST_LIMIT = 4
+
+
 @pytest.fixture(scope="module")
 def request_limit_run(tmp_path_factory):
     """ONE run that ends by `UsageLimitExceeded` (a `NeverEndsModel` over `GOLDEN_AB3`), shared
     by the two tests that read its store read-only: the run-end flush's (1) exit and the
-    projection-order test. Driven once instead of twice; neither test writes to it."""
+    projection-order test. Driven once instead of twice; neither test writes to it.
+
+    Its ceiling is a short one handed in through the gate's bounds (`drive(bounds=…)`): what
+    the two tests read is HOW the run ended, which is the same at any ceiling, and the shipped
+    one (`DEFAULT_REQUEST_LIMIT` plus the forced turns) is
+    `e2e/test_replay_error_paths.py::test_request_limit_writes_partial_trace`'s to drive. The
+    model's call count shows the injected ceiling, not the shipped one, is what ended it."""
     base = tmp_path_factory.mktemp("request-limit")
     rd = materialize(base, GOLDEN_AB3)
     opened: list = []
-    drive(rd, run_id="flush-limit", main=NeverEndsModel(rd),
+    bounds = challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT)
+    model = NeverEndsModel(rd)
+    drive(rd, run_id="flush-limit", main=model, bounds=bounds,
           store_factory=store_factory(base, sink=opened))
+    assert model.calls == challenge_gate.raised_request_limit(bounds), model.calls
     return rd, opened[0]
 
 

@@ -76,9 +76,11 @@ from defender.tests._curator1134 import lesson_text, plant_fifo, put, questioner
 from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _scene
 
 #: The bound a scene sets (`git_timeout`) or a `_git` call passes (`timeout=`) when a git call is
-#: meant to time out: small, so a scene with three or four timed-out reads stays a few seconds.
-#: Not a whole number, so the message naming it (H2) is checked however a float is spelled.
-BOUND = 2.5
+#: meant to time out: small, so a scene with three or four timed-out reads stays a few seconds,
+#: and no shorter than `STALL_BOUND`, which the census scenes show every answering git call (shim
+#: included) meets eight scenes at a time. Not a whole number, so the message naming it (H2) is
+#: checked however a float is spelled.
+BOUND = 1.5
 #: How long a scene or a call may take before the test fails, generous for a loaded box: a
 #: scene here answers in a few seconds once nothing blocks.
 DEADLINE = 40.0

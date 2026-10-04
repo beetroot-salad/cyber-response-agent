@@ -105,6 +105,7 @@ SETTINGS_LOADER_MODULES = (
 )
 
 
+@pytest.mark.gate
 def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_settings_or_agent(
         tmp_path: Path) -> None:
     """Run over a swept module whose functions take a parameter annotated as Tenant,
@@ -512,6 +513,7 @@ VIOLATIONS = [
 ]
 
 
+@pytest.mark.gate
 def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
         tmp_path: Path) -> None:
     """For each of a folder missing settings/, one with a symlink in agent/ reaching outside
@@ -679,6 +681,7 @@ def lab_reach_census(root: Path, *, exclude: tuple[Path, ...] = ()) -> list[str]
     return found
 
 
+@pytest.mark.gate
 def test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants(tmp_path: Path) -> None:
     """Narrowed per H2 (human), then widened when the lab was retired (human, PR #1157: #1158
     folded in): no file under defender/tests/, scripts/lint/ or .github/workflows/ reaches the

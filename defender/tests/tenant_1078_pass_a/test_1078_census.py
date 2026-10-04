@@ -9,6 +9,8 @@ census is a floor, never a proof of absence below it.
 from __future__ import annotations
 
 import functools
+
+import pytest
 from pathlib import Path
 
 from defender.tests.tenant_1078_pass_a import _census_1078 as C
@@ -25,6 +27,7 @@ def _plant(root: Path, rel: str, text: str) -> Path:
 # O1 — every run names its tenant; code holds no default and no literal
 # ======================================================================================
 
+@pytest.mark.gate
 def test_o1_no_default_tenant_census():
     """DEFAULT_TENANT_ID appears nowhere in defender/ production code nor under scripts/lint/,
     and no production module outside evals/ and the tests passes a string literal (such as
@@ -119,6 +122,7 @@ def _writer_fn(entry: str) -> tuple[str, str]:
     return rel, rest.rsplit(":", 1)[0]
 
 
+@pytest.mark.gate
 def test_o2_row_single_writer_census(tmp_path):
     """A writer census over production code finds no writer of the row name or of
     TenantPaths.row other than create_tenant.
@@ -148,6 +152,7 @@ def test_o2_row_single_writer_census(tmp_path):
         "\n  ".join(rogue)
 
 
+@pytest.mark.gate
 def test_o2_census_finds_create_tenant():
     """The same writer census reports create_tenant as the row's writer (the census's
     positive control)."""
@@ -197,6 +202,7 @@ def _unclassified(entries: list[str]) -> list[str]:
     return bad
 
 
+@pytest.mark.gate
 def test_u6_defender_tree_writer_census(tmp_path, monkeypatch):
     """A writer census over production code finds no write of tenant data into the
     box-mounted defender/ tree except the queue page (build.py:543-546) and the shared-corpus
@@ -228,6 +234,7 @@ def test_u6_defender_tree_writer_census(tmp_path, monkeypatch):
         f"the run-page mirror resolves inside the box-mounted defender/ tree: {mirror}")
 
 
+@pytest.mark.gate
 def test_u6_census_finds_queue_page():
     """The same census reports build.py's queue-page write (its positive control)."""
     found = _real_u6_writes()
