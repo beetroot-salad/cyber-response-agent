@@ -26,9 +26,11 @@ from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
+    GateStep,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
+    commit_judged,
     lane_skills,
 )
 from defender.learning.leads.declared_systems import (
@@ -416,6 +418,7 @@ def _pitfalls_rule(
 def _verify_pitfalls_state(
     repo_root: Path, baseline_stray: list[str], *,
     systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
+    records: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """`reducer_offered` is required: either default ("every tick may write the reducer
     surface" or "no tick may") is wrong for a caller that forgot it."""
@@ -425,6 +428,7 @@ def _verify_pitfalls_state(
             _pitfalls_rule, repo_root,
             systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
         ),
+        records=records,
     )
 
 
@@ -551,6 +555,7 @@ def run_pitfalls(
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
+    gate_step: GateStep | None = None,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -641,17 +646,21 @@ def run_pitfalls(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
-    changed = _verify_pitfalls_state(
-        repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-        tree_for=trees.tree_for,
-    )
-    sha = None
-    if changed:
-        sha = _author_shared.commit_corpus(
-            repo_root, repo_root / "defender" / "skills",
-            _pitfalls_commit_message(changed),
+    # The gate, then the commit of exactly what it judged (#1178), as the lead author's.
+    def judge(tree_for: TreeFor, records: list[tuple[str, str]] | None) -> list[str]:
+        return _verify_pitfalls_state(
+            repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
+            tree_for=tree_for, records=records,
         )
-    else:
+
+    changed, sha = commit_judged(
+        repo_root,
+        judge,
+        trees.tree_for,
+        _pitfalls_commit_message,
+        step=gate_step,
+    )
+    if not changed:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only
     # `changed` carries.

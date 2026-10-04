@@ -475,6 +475,7 @@ def _refuse_lost_provenance(
 def _verify_skills_state(
     repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
     tree_for: TreeFor, minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
+    records: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     # One resolver for the batch, built on the tree being committed rather than the process's
     # own checkout: the drain runs this against a `lead-author/<id>` worktree, and
@@ -494,6 +495,7 @@ def _verify_skills_state(
             _skills_rule, repo_root, resolver, systems=systems, tree_for=tree_for,
         ),
         batch_rule=functools.partial(_covers_rule, repo_root, minted, tree_for=tree_for),
+        records=records,
     )
 
 

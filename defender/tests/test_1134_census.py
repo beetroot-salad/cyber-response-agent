@@ -334,6 +334,8 @@ _FINDING_IDS = ("the finding-id pre-flight reads the corpus's lessons through `i
 _MANIFEST = ("the curator prompt's corpus manifest reads the lessons through `iter_lessons` over the "
              "held view (A4); it names no file to touch")
 _GIT = "git's own read or write (a `git` child process), never a path opened here"
+_SNAPSHOT = ("#1178's snapshot of the staged tree: a fresh host-private temp folder outside the "
+             "worktree and every box mount, so a path outside the lane's mounts")
 
 #: Every host filesystem touch the migrated modules keep at base 87f013fe (the v3 curator head),
 #: re-derived by reading each function (seeded from the v3 step log's "plain-path lines" lists
@@ -410,6 +412,13 @@ ALLOW: tuple[Allowed, ...] = (
     # --- learning/leads/_lead_spine.py --------------------------------------------------------
     Allowed(SPINE, "_spawn_author_agent", "attr", "PENDING_DIR.mkdir(parents=True, exist_ok=True)", N_E,
             "the host-side lead-pending state dir"),
+    # #1178: the gate's second pass reads a host-private copy of the staged `skills/` tree, a
+    # folder no box mount covers, opened, held and removed by `_staged_snapshot` alone.
+    Allowed(SPINE, "_staged_snapshot", "call", "tempfile.mkdtemp(prefix='lead-gate-')", D3, _SNAPSHOT),
+    Allowed(SPINE, "_staged_snapshot", "call", "guarded_mkdir(snap_skills, base=snap)", D3, _SNAPSHOT),
+    Allowed(SPINE, "_staged_snapshot", "construct", "DrainTrees.open((snap_skills,))", D3,
+            _SNAPSHOT + "; its one held root, the snapshot's `skills/`"),
+    Allowed(SPINE, "_staged_snapshot", "call", "shutil.rmtree(snap, ignore_errors=True)", D3, _SNAPSHOT),
     # --- learning/leads/lead_author/__init__.py: run-dir state, and the CLI's opener ----------
     Allowed(LEAD_AUTHOR, "_write_state", "attr", "path.parent.mkdir(parents=True, exist_ok=True)", N_E,
             "the run dir's lead_author/ state"),
@@ -542,7 +551,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 14, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 27, N_D: 14, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(
@@ -762,7 +771,9 @@ def _asks_tree_for(module: str, source: str, qualname: str) -> bool:
 
 def test_a_d3_fallback_still_asks_tree_for_first():
     d3 = {(e.module, e.qualname) for e in ALLOW if e.reason == D3 and e.kind != "construct"}
-    assert d3 - TREE_FOR_FALLBACKS == {(DRAIN, "_spawn_repair")}, (
+    # The two D3 entries that are no `tree_for` fallback: a checked-in file outside the mounts
+    # (`_spawn_repair`), and #1178's host-private snapshot of the staged tree.
+    assert d3 - TREE_FOR_FALLBACKS == {(DRAIN, "_spawn_repair"), (SPINE, "_staged_snapshot")}, (
         "a new D3 entry: is it a fallback behind a `tree_for` miss (add it to "
         "TREE_FOR_FALLBACKS), or a checked-in file outside the mounts?")
     silent = [f for f in sorted(TREE_FOR_FALLBACKS) if not _asks_tree_for(f[0], _source(f[0]), f[1])]
@@ -1645,17 +1656,19 @@ REGRESSIONS: dict[str, Regression] = {
          "partial(_pitfalls_rule, repo_root, systems=systems, reducer_offered=reducer_offered, "
          "tree_for=lambda _p: None)", 1))),
     # E2a / E2b: the commit gates read every path by its plain spelling.
+    # Re-spelt for #1178: the gates now run inside `commit_judged`, handed the lane's tree_for.
     "s6v2-E2a-run-locked-plain-tree-for": Regression(LEAD_AUTHOR, (
-        ("minted=minted, tree_for=deps.tree_for,", "minted=minted, tree_for=lambda _path: None,", 1),
+        ("        deps.tree_for,\n        lambda paths: _loop_commit_message(",
+         "        lambda _path: None,\n        lambda paths: _loop_commit_message(", 1),
     ), (("_run_locked", "tree_for",
-         "_verify_skills_state(repo_root, baseline_stray, systems=deps.systems, minted=minted, "
-         "tree_for=lambda _path: None)", 1),)),
+         "commit_judged(repo_root, judge, lambda _path: None, lambda paths: "
+         "_loop_commit_message(run_dir, paths), step=deps.gate_step)", 1),)),
     "s6v2-E2b-run-pitfalls-plain-tree-for": Regression(PITFALLS, (
-        ("        tree_for=trees.tree_for,\n    )\n    sha = None\n",
-         "        tree_for=lambda _path: None,\n    )\n    sha = None\n", 1),
+        ("        trees.tree_for,\n        _pitfalls_commit_message,",
+         "        lambda _path: None,\n        _pitfalls_commit_message,", 1),
     ), (("run_pitfalls", "tree_for",
-         "_verify_pitfalls_state(repo_root, baseline_stray, systems=systems, "
-         "reducer_offered=reducer_offered, tree_for=lambda _path: None)", 1),)),
+         "commit_judged(repo_root, judge, lambda _path: None, _pitfalls_commit_message, "
+         "step=gate_step)", 1),)),
     # E4: `where` stat'ed (following) and trusted over the view.
     "s6v2-E4-where-statted-discover": Regression(HANDOFF, (
         ("    listed = list_tree(skills, depth=3)\n",
