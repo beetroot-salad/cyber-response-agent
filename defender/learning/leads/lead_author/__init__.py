@@ -35,6 +35,8 @@ from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_tr
 from defender.learning.core import persist as _loop_persist
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
+from defender.learning.leads import _worktree_git
+from defender.learning.leads._worktree_git import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
 
@@ -177,10 +179,14 @@ class LeadAuthorDeps:
     skills: Held
     #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
     tree_for: TreeFor
+    #: The bound on each git call over the worktree (`_worktree_git`, #1175): one that overruns
+    #: raises `GitOverran`, a systemic `GitError`.
+    git_timeout: float = GIT_TIMEOUT_SECONDS
 
 
 def build_lead_author_deps(
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS, *, trees: DrainTrees,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> LeadAuthorDeps:
     """The lane's seams over `paths`, reading and writing `skills/` through `trees`, the lane's
     held mounts (`open_drain_trees`): `trees` must hold `paths.skills_dir` itself, else
@@ -207,6 +213,7 @@ def build_lead_author_deps(
         release_queue_lock=release_queue_lock,
         skills=skills,
         tree_for=trees.tree_for,
+        git_timeout=git_timeout,
     )
 
 
@@ -266,7 +273,7 @@ def run(
 
 def run_under_held_queue_lock(
     run_dir: Path, *, paths: _loop_config.LoopPaths, trees: DrainTrees, box: Any = None,
-    on_done: DoneSink,
+    on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
@@ -275,7 +282,8 @@ def run_under_held_queue_lock(
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
     return _run_locked(
-        run_dir, build_lead_author_deps(paths, trees=trees), box=box, on_done=on_done,
+        run_dir, build_lead_author_deps(paths, trees=trees, git_timeout=git_timeout), box=box,
+        on_done=on_done,
     )
 
 
@@ -330,7 +338,7 @@ def _run_locked(
         _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
     repo_root = deps.paths.repo_root
-    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
+    baseline_stray = _worktree_git.changes_outside_skills(repo_root, timeout=deps.git_timeout)
 
     if synth:
         catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
@@ -351,10 +359,11 @@ def _run_locked(
 
     changed = _verify_skills_state(
         repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
+        git_timeout=deps.git_timeout,
     )
-    sha = _author_shared.commit_corpus(
-        repo_root, repo_root / "defender" / "skills",
-        _loop_commit_message(run_dir, changed),
+    sha = _worktree_git.commit_admitted(
+        repo_root, changed, _loop_commit_message(run_dir, changed),
+        tree_for=deps.tree_for, timeout=deps.git_timeout,
     )
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")

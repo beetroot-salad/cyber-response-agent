@@ -1649,13 +1649,14 @@ REGRESSIONS: dict[str, Regression] = {
         ("minted=minted, tree_for=deps.tree_for,", "minted=minted, tree_for=lambda _path: None,", 1),
     ), (("_run_locked", "tree_for",
          "_verify_skills_state(repo_root, baseline_stray, systems=deps.systems, minted=minted, "
-         "tree_for=lambda _path: None)", 1),)),
+         "tree_for=lambda _path: None, git_timeout=deps.git_timeout)", 1),)),
     "s6v2-E2b-run-pitfalls-plain-tree-for": Regression(PITFALLS, (
-        ("        tree_for=trees.tree_for,\n    )\n    sha = None\n",
-         "        tree_for=lambda _path: None,\n    )\n    sha = None\n", 1),
+        ("        tree_for=trees.tree_for, git_timeout=git_timeout,\n    )\n    sha = None\n",
+         "        tree_for=lambda _path: None, git_timeout=git_timeout,\n    )\n    sha = None\n", 1),
     ), (("run_pitfalls", "tree_for",
          "_verify_pitfalls_state(repo_root, baseline_stray, systems=systems, "
-         "reducer_offered=reducer_offered, tree_for=lambda _path: None)", 1),)),
+         "reducer_offered=reducer_offered, tree_for=lambda _path: None, git_timeout=git_timeout)",
+         1),)),
     # E4: `where` stat'ed (following) and trusted over the view.
     "s6v2-E4-where-statted-discover": Regression(HANDOFF, (
         ("    listed = list_tree(skills, depth=3)\n",
@@ -1762,10 +1763,10 @@ REGRESSIONS: dict[str, Regression] = {
     ), (("_on_disk", "call", "os.walk(corpus_dir)", 1), ("_on_disk", "call", "os.lstat(at)", 1))),
     # A7: `_git.py` revives "absent" paths it finds on disk, by an `os` lookup through `getattr`.
     "s5v3-A7-git-py-probes-the-disk-through-getattr": Regression(GIT, (
-        ("    if present:\n        git([\"add\", \"--\", *present], cwd=cwd, env=env)\n",
+        ("    if present:\n        add = [\"add\", \"-f\"] if force_add else [\"add\"]\n",
          "    revived = [p for p in absent if _on_disk(cwd, p)]\n"
          "    present = [*present, *revived]\n"
-         "    if present:\n        git([\"add\", \"--\", *present], cwd=cwd, env=env)\n", 1),
+         "    if present:\n        add = [\"add\", \"-f\"] if force_add else [\"add\"]\n", 1),
         ("def git_fetch(cwd: Path) -> None:\n",
          "_PROBE = \"lstat\"\n\n\ndef _on_disk(cwd: Path, path: str) -> bool:\n    try:\n"
          "        getattr(os, _PROBE)(f\"{cwd}/{path}\")\n    except OSError:\n"

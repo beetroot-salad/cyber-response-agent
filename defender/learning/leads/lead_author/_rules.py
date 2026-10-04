@@ -22,6 +22,7 @@ from defender import _scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors
+from defender.learning.leads._worktree_git import GIT_TIMEOUT_SECONDS
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_DIR,
@@ -475,6 +476,7 @@ def _refuse_lost_provenance(
 def _verify_skills_state(
     repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
     tree_for: TreeFor, minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[str]:
     # One resolver for the batch, built on the tree being committed rather than the process's
     # own checkout: the drain runs this against a `lead-author/<id>` worktree, and
@@ -494,6 +496,7 @@ def _verify_skills_state(
             _skills_rule, repo_root, resolver, systems=systems, tree_for=tree_for,
         ),
         batch_rule=functools.partial(_covers_rule, repo_root, minted, tree_for=tree_for),
+        git_timeout=git_timeout,
     )
 
 

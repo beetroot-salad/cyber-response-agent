@@ -13,7 +13,8 @@ from defender._io import Held
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_records
+from defender.learning.leads._worktree_git import GIT_TIMEOUT_SECONDS, worktree_changes
+from defender.learning.leads.path_validation import SKILLS_REL
 
 
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
@@ -63,13 +64,17 @@ def _verify_corpus_scope(
     actor: str,
     rule: Callable[[str, str], None],
     batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[str]:
     """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
 
     `batch_rule` is for invariants only decidable across the batch (e.g. whether a deleted
     draft's identity was taken over by another file in the same commit). It runs last, on
-    records `rule` already admitted."""
-    records = _porcelain_records(repo_root)
+    records `rule` already admitted.
+
+    The changes come from `worktree_changes`, which no ignore or attributes file the agent left
+    can hide a path from or block (#1175); each git call is bounded by `git_timeout`."""
+    records = worktree_changes(repo_root, timeout=git_timeout)
 
     def _in_corpus(p: str) -> bool:
         return p.startswith(SKILLS_REL) and p.endswith(".md")

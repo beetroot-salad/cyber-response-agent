@@ -71,8 +71,10 @@ def test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_c
 
 def test_the_pitfalls_and_lead_author_commits_are_unchanged_773(tmp_path):
     """The three sibling lanes N4 declares untouched — questioner, lead-author, pitfalls —
-    never reference the new function's name at all; each still reaches `shared.commit_corpus`
-    with its own trailers.
+    never reference the new function's name at all; the questioner still reaches
+    `shared.commit_corpus` with its own trailers. (#1175 moved the lead-author and pitfalls
+    commits to `leads/_worktree_git.commit_admitted`, its own explicit-path commit; they still
+    never reach this lane's `commit_corpus_paths`.)
 
     §7 FK-1 makes this SAFE BY CONSTRUCTION rather than merely observed: a source census
     over the three call sites is the honest form of "untouched", because a behaviour test on
@@ -84,7 +86,7 @@ def test_the_pitfalls_and_lead_author_commits_are_unchanged_773(tmp_path):
     for module in (questioner_run, pitfalls_curator, lead_author):
         source = inspect.getsource(module)
         assert "commit_corpus_paths" not in source, module.__name__
-        assert "commit_corpus" in source, module.__name__
+    assert "commit_corpus" in inspect.getsource(questioner_run)
 
     assert list(
         inspect.signature(questioner_run.commit_questioner_lessons).parameters

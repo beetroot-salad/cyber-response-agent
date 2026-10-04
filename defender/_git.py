@@ -105,14 +105,17 @@ def git_ok(
 
 def git_status(
     cwd: Path, *, pathspec: Path | str | None = None, timeout: float | None = None,
-    no_renames: bool = False, env: Mapping[str, str] | None = None,
+    no_renames: bool = False, env: Mapping[str, str] | None = None, untracked: str = "all",
 ) -> list[tuple[str, str]]:
     """The working tree's status as `(XY, path)` records.
 
     `no_renames` turns off rename detection, for callers counting changed paths: otherwise
     `git mv a b` is one `R  b` record and `a` is dropped; with it, `D  a` and `A  b`.
+
+    `untracked` is `--untracked-files`: `"no"` lists tracked paths only, and then git walks no
+    folder for new files, so it opens no worktree `.gitignore` (#1175).
     """
-    args = ["status", "--porcelain", "--untracked-files=all", "-z"]
+    args = ["status", "--porcelain", f"--untracked-files={untracked}", "-z"]
     if no_renames:
         args.append("--no-renames")
     if pathspec is not None:
@@ -133,6 +136,24 @@ def git_status(
             # A rename/copy record is followed by its `<origPath>` as a separate field; skip it.
             i += 1
     return records
+
+
+def git_untracked(
+    cwd: Path, pathspec: str, *, exclude_from: Path, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Every untracked file under `pathspec`, repo-relative, filtered by the ignore rules in
+    `exclude_from` alone (`ls-files --others`, no `--exclude-standard`).
+
+    No ignore file in the worktree is opened or obeyed, so one the caller does not trust can
+    neither hide a name nor block the call (#1175). Run from the repo top: the patterns
+    evaluate relative to it."""
+    out = _run(
+        ["ls-files", "--others", "-z", "--full-name", f"--exclude-from={exclude_from}",
+         "--", pathspec],
+        cwd=cwd, timeout=timeout, env=env,
+    ).stdout
+    return [p for p in out.split("\0") if p]
 
 
 def git_show_head(cwd: Path, path: str) -> str | None:
@@ -330,9 +351,16 @@ def git_commit_paths(
     *,
     trailers: list[tuple[str, str]] | None = None,
     env: Mapping[str, str] | None = None,
+    force_add: bool = False,
+    timeout: float | None = None,
 ) -> str | None:
     """Stage exactly `present` (added) and `absent` (deleted) and commit them; `None` if nothing
-    changed. `env` is every git call's environment (`None`: this process's).
+    changed. `env` is every git call's environment (`None`: this process's), and `timeout`
+    bounds each of them (`GitTimeout`).
+
+    `force_add` stages `present` with `add -f`, which applies no ignore rules: `git add` of an
+    untracked path otherwise opens every worktree `.gitignore` on its way (#1175). For a caller
+    whose `present` is already exactly the set it vetted.
 
     The caller says which paths still stand in the worktree: this module asks the filesystem
     nothing (#1134 — the drain judges present from absent through its mount handle). `git add`
@@ -345,10 +373,13 @@ def git_commit_paths(
     if not paths:
         return None
     if present:
-        git(["add", "--", *present], cwd=cwd, env=env)
+        add = ["add", "-f"] if force_add else ["add"]
+        git([*add, "--", *present], cwd=cwd, env=env, timeout=timeout)
     if absent:
-        git(["rm", "--cached", "--ignore-unmatch", "-q", "--", *absent], cwd=cwd, env=env)
-    staged = _run(["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, check=False, env=env)
+        git(["rm", "--cached", "--ignore-unmatch", "-q", "--", *absent], cwd=cwd, env=env,
+            timeout=timeout)
+    staged = _run(["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, check=False, env=env,
+                  timeout=timeout)
     if staged.returncode == 0:
         return None
     if staged.returncode != 1:
@@ -356,8 +387,9 @@ def git_commit_paths(
     trailer_args: list[str] = []
     for key, val in trailers or []:
         trailer_args += ["--trailer", f"{key}: {val}"]
-    git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message, env=env)
-    return git_head_sha(cwd)
+    git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message, env=env,
+        timeout=timeout)
+    return git_head_sha(cwd, timeout=timeout)
 
 
 def git_fetch(cwd: Path) -> None:

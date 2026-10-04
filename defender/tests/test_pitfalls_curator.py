@@ -81,9 +81,19 @@ def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
             tree_for=lane_tree_for(tmp_git_repo))
 
 
+def _commit_outside(repo: Path) -> Path:
+    """A committed file outside `skills/`, for a stray edit. An edit, not a new file: the lanes
+    list untracked files only under `skills/` (#1175 N1 — the agent cannot write elsewhere)."""
+    stray = repo / "defender" / "other" / "stray.md"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("committed\n")
+    _run_git(repo, "add", "--", str(stray))
+    _run_git(repo, "commit", "-q", "-m", "outside skills")
+    return stray
+
+
 def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("x")
+    _commit_outside(tmp_git_repo).write_text("x")
     with pytest.raises(LeadAuthorError, match="outside"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
@@ -106,8 +116,7 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
     """A stray edit AND an in-corpus non-execution.md edit → the stray-gate error
     ('outside') is raised, not the 'non-execution.md' loop error — proving the shared
     preamble runs before the per-path loop."""
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _commit_outside(tmp_git_repo).write_text("stray")
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
     with pytest.raises(LeadAuthorError, match="outside"):

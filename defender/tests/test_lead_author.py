@@ -478,9 +478,19 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_git_repo: Path):
     assert "defender/skills/elastic/SKILL.md" in changed
 
 
+def _commit_outside(repo: Path) -> Path:
+    """A committed file outside `skills/`, for a stray edit. An edit, not a new file: the lanes
+    list untracked files only under `skills/` (#1175 N1 — the agent cannot write elsewhere)."""
+    stray = repo / "defender" / "other" / "stray.md"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("committed\n")
+    _run_git(repo, "add", "--", str(stray))
+    _run_git(repo, "commit", "-q", "-m", "outside skills")
+    return stray
+
+
 def test_verify_skills_state_rejects_stray_outside_skills(tmp_git_repo: Path):
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _commit_outside(tmp_git_repo).write_text("stray")
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
                                          tree_for=lane_tree_for(tmp_git_repo))
@@ -1045,9 +1055,10 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
 
+    stray = _commit_outside(repo)
+
     def fake_agent(rd, handoffs, pending, *, box=None):
-        (repo / "defender" / "other").mkdir(parents=True, exist_ok=True)
-        (repo / "defender" / "other" / "stray.md").write_text("stray")
+        stray.write_text("stray")
         return 0
 
     deps = _deps(
@@ -1488,8 +1499,7 @@ def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
     """A stray edit AND an in-corpus deletion together → the stray-gate error
     ('outside') is raised, proving the preamble runs before the per-path loop (a
     loop-first order would surface 'delete-prohibition', which lacks 'outside')."""
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _commit_outside(tmp_git_repo).write_text("stray")
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
