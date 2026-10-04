@@ -401,7 +401,7 @@ def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
     }, tmp)
 
 
-# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up; demand s_case_mapping_read_at_run_start
+# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up #1190; demand s_case_mapping_read_at_run_start
 def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_path):
     """The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping`
     in its new home. A fixture tenant's mapping reads as at the base, and a bad mapping surfaces
@@ -510,7 +510,7 @@ print(json.dumps(seen))
 """
 
 
-# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up; demand s090
+# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up #1190; demand s090
 def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module():  # noqa: E501
     """A cold import of each of the four modules (case mapping, RunTenant, the query tool, the
     applier) works in every first-import order: no import cycle among the case-mapping module,
@@ -592,7 +592,7 @@ def _observe_mapping_file(state: str, tmp: Path, mp: Any) -> dict[str, Any]:
     return _norm({"load_case_mapping": loaded, "held_on_run_tenant": held}, tmp)
 
 
-# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up; demand s187
+# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up #1190; demand s187
 @pytest.mark.parametrize("state", list(FILE_STATES))
 def test_case_mapping_file_in_each_state(state, tmp_path):
     """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
@@ -650,7 +650,7 @@ def _observe_yaml_shape(shape: str, tmp: Path, mp: Any) -> dict[str, Any]:
     return _norm({"load_case_mapping": loaded, "release_predicate": used}, tmp)
 
 
-# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up; demand s188
+# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up #1190; demand s188
 @pytest.mark.parametrize("shape", list(YAML_SHAPES))
 def test_case_mapping_yaml_of_the_wrong_shape(shape, tmp_path):
     """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
@@ -965,7 +965,7 @@ def _observe_edit(case: str, tmp: Path, mp: Any) -> dict[str, Any]:
                             before=lambda _run_dir, folder: edit(folder)), tmp)
 
 
-# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up; demand s217
+# PARKED 2026-10-04 (scope cut): owner case_ticket follow-up #1190; demand s217
 @pytest.mark.parametrize("case", list(EDITS))
 def test_case_mapping_edited_or_removed_between_run_start_and_the_post_step(case, tmp_path,
                                                                             monkeypatch):

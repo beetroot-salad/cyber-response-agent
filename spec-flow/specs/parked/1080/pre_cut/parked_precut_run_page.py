@@ -765,7 +765,7 @@ def test_moved_module_reads_its_environment_knob_at_a_different_point(
 # s053 — module-level consumers meet a stale name at import
 # ======================================================================================
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105 (run_common, the learning frontend), #1165 (run.py -> ticket_writer) and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105 (run_common, the learning frontend), #1165 (run.py -> ticket_writer) and the case_ticket follow-up #1190.
 #: (edge, consumer module, a symbol the moved module defines). The consumer's import of that
 #: module is at module level, so a stale name is loud at process start.
 S053_EDGES = (

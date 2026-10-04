@@ -127,10 +127,10 @@ O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
     ("defender/learning/frontend/build.py", _S + "visualize.visualize_primitives", "#1105"),
     ("defender/learning/branch/cli.py", _S + "visualize.visualize_episode", "#1105"),
     ("defender/runtime/orient.py", _S + "workspace_map", "#1105"),
-    # the case_ticket follow-up (3)
-    ("defender/runtime/run_tenant.py", _CASE_TICKET, "case_ticket follow-up"),
-    ("defender/runtime/query_tool.py", _CASE_TICKET, "case_ticket follow-up"),
-    ("defender/learning/branch/estate/applier.py", _CASE_TICKET, "case_ticket follow-up"),
+    # the case_ticket follow-up #1190 (3)
+    ("defender/runtime/run_tenant.py", _CASE_TICKET, "case_ticket follow-up #1190"),
+    ("defender/runtime/query_tool.py", _CASE_TICKET, "case_ticket follow-up #1190"),
+    ("defender/learning/branch/estate/applier.py", _CASE_TICKET, "case_ticket follow-up #1190"),
 )
 
 

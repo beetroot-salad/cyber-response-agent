@@ -65,7 +65,7 @@ demands:
   cut_edit: 'E1: the placement check''s allowed set adds the OUT files named under D1; D1 is restated: the IN files are gone from scripts/, no
     shim is left, their old dotted names do not resolve.'
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_placement_census_direction.py::test_1080_scripts_holds_only_entry_points
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -92,7 +92,7 @@ demands:
     a thin wrapper that a `bin/` shim invokes, which means the `defender-sql` and `defender-lessons` engines'' wrappers; a file under `scripts/adapters/`
     (all of its base files stay until #1172); or one of the cut''s named OUT files that stay with their owners (`visualize/`''s eight modules
     and three assets and `workspace_map.py`, #1105; `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165; `case_history/case_ticket.py`,
-    the case_ticket follow-up). The IN files (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`, `lessons/_lessons_common.py`)
+    the case_ticket follow-up #1190). The IN files (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`, `lessons/_lessons_common.py`)
     are not left there, and no re-export shim keeps their old `defender.scripts.*` path importable.'
   rides:
   - dF1/M-A
@@ -104,7 +104,7 @@ demands:
   cut_edit: 'E2: the IN filter over the moved-module tables (d0 groups keep INVESTIGATION payload_view/sql, FLAT_TIER_RULES, IN_PROVIDERS, LESSONS_ENGINE;
     drop the rest and their _beside_run_handle and _a_package checks).'
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up; #1165 or #1172 for the exit-code vocabulary'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190; #1165 or #1172 for the exit-code vocabulary'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_placement_census_direction.py::test_1080_each_moved_symbol_is_defined_under_its_home
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -194,7 +194,7 @@ demands:
   seed_docstring: 'An AST census over every `.py` under `defender/` and the repo''s `scripts/`, excluding `tests/` directories, finds no `import`
     or `from … import` that names `defender.scripts` or anything under it. Relative imports are resolved against their package. Under the 2026-10-04
     scope cut the allowed exceptions are the 35 named (importer, target) pairs (37 import statements) into the `scripts/` modules the cut leaves
-    where they are, each tagged with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up). Any other import into the
+    where they are, each tagged with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up #1190). Any other import into the
     folder fails, and an exception whose edge no longer exists is itself a finding ([218]); o1_exception_list_is_the_named_edges pins the list.'
   phase_e_rejected:
   - nl: tests are held to the census ("tests don't count", D1/O1).
@@ -222,7 +222,7 @@ demands:
   cut_edit: The wrapper set is computed as everything under scripts/ that is not a staying command or in adapters/, so it must also exclude E1's
     named OUT files. M-H (a) (one root-first bootstrap) stands.
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up (the OUT files the wrapper set excludes)'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190 (the OUT files the wrapper set excludes)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_placement_census_direction.py::test_1080_each_wrapper_left_in_scripts_only_delegates_to_its_engine
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -486,7 +486,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up (new issue, to be filed)
+    owner: case_ticket follow-up #1190 (new issue, to be filed)
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_ticket
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -1147,7 +1147,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_lints_and_pointers.py::test_1080_the_env_read_lint_still_sweeps_the_moved_case_history_modules
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: '#1165 and the case_ticket follow-up'
+    owner: '#1165 and the case_ticket follow-up #1190'
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_history env-read lint sweep
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -1188,7 +1188,7 @@ demands:
 - id: m5_run_records_lint_sweeps_new_homes
   cut_edit: The homes become the lessons engine, the runtime/ homes and the flat tier; the plant moves into an IN home.
   parked_cells:
-    owner: '#1105 (reports), #1172 (integrations) and the case_ticket follow-up (the tenants home)'
+    owner: '#1105 (reports), #1172 (integrations) and the case_ticket follow-up #1190 (the tenants home)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_1080_the_run_records_lint_sweeps_every_new_home
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -1223,7 +1223,7 @@ demands:
 - id: m5_baselines_name_no_moved_path
   cut_edit: The golden keys for case_ticket and derive_system stay at their base paths.
   parked_cells:
-    owner: 'the case_ticket follow-up and #1172 (derive_system)'
+    owner: 'the case_ticket follow-up #1190 and #1172 (derive_system)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -1242,7 +1242,7 @@ demands:
   cut_edit: 'The moved-module list is the IN set. F6: the .claude/spec-flow.json run_mirror resource row is committed with the suite (goldens/lints.json
     was captured with it).'
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up (the profile rows of the OUT modules)'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190 (the profile rows of the OUT modules)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_1080_the_spec_flow_profile_covers_the_new_homes_and_names_no_moved_path
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -1374,7 +1374,7 @@ demands:
 - id: s008
   cut_edit: The split modules are record_query (rules and remainder) and lessons_frontier.
   parked_cells:
-    owner: '#1172 (confinement), #1165 (ticket_writer, the record_query remainder) and the case_ticket follow-up'
+    owner: '#1172 (confinement), #1165 (ticket_writer, the record_query remainder) and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_placement_census_direction.py::test_a_name_in_a_split_module_that_no_placement_row_claims
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -1656,7 +1656,7 @@ demands:
 - id: s025
   cut_edit: Keep the ParamsTooDeep cell (it rides with the query-rule slice); drop the OUT cells.
   parked_cells:
-    owner: '#1105 (VisualizeFailed), the case_ticket follow-up (CaseTicketError) and #1172 (ViewNameError, the fault types)'
+    owner: '#1105 (VisualizeFailed), the case_ticket follow-up #1190 (CaseTicketError) and #1172 (ViewNameError, the fault types)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_integrations.py::test_moved_exception_type_raised_on_one_side_and_caught_on_the_other
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -1679,7 +1679,7 @@ demands:
   seed_docstring: 'Each moved exception type has one definition. Under the 2026-10-04 scope cut that is `ParamsTooDeep`, which rides with the
     query-rule slice into the flat tier; the code that raises it and the code that catches it bind the same class object, with every catch site
     repointed (capture, estate registry, _family, query_tool). A second definition or a catch site left on the old path is a failure. (The VisualizeFailed,
-    CaseTicketError, ViewNameError and fault-type cells read modules the cut leaves in place; they are parked with #1105, the case_ticket follow-up
+    CaseTicketError, ViewNameError and fault-type cells read modules the cut leaves in place; they are parked with #1105, the case_ticket follow-up #1190
     and #1172.)'
   source: 45-dispositions.md settled premise [25] (single reading, judge-examined)
 - id: s027
@@ -2045,7 +2045,7 @@ demands:
 - id: s053
   cut_edit: S053_EDGES keeps its IN rows only.
   parked_cells:
-    owner: '#1105, #1165 and the case_ticket follow-up'
+    owner: '#1105, #1165 and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_run_page.py::test_module_level_consumers_of_a_moved_module_meet_a_stale_name_at_import
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -2603,7 +2603,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up (new issue, to be filed)
+    owner: case_ticket follow-up #1190 (new issue, to be filed)
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_ticket
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -2691,7 +2691,7 @@ demands:
 - id: s095
   cut_edit: Drop the tenant-command to case_ticket cell.
   parked_cells:
-    owner: the case_ticket follow-up
+    owner: the case_ticket follow-up #1190
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_staying_commands_import_modules_that_have_moved
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -2712,7 +2712,7 @@ demands:
   discharged_by: test_staying_commands_import_modules_that_have_moved
   seed_docstring: 'The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs
     from any working directory as they do today, and `box_image.py` still runs under the runner''s bare interpreter before dependency sync. (The
-    tenant command''s import of the case-mapping module is parked with the case_ticket follow-up by the 2026-10-04 scope cut: that module does
+    tenant command''s import of the case-mapping module is parked with the case_ticket follow-up #1190 by the 2026-10-04 scope cut: that module does
     not move.)'
   source: 45-dispositions.md settled premise [95] (single reading, judge-examined)
 - id: s098
@@ -2742,7 +2742,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_lints_and_pointers.py::test_env_read_lint_sweep_list_names_one_moved_tree_and_one_existing_tree
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: '#1165 and the case_ticket follow-up'
+    owner: '#1165 and the case_ticket follow-up #1190'
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_history env-read lint sweep
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -2790,7 +2790,7 @@ demands:
 - id: s105
   cut_edit: The golden keys for case_ticket and derive_system stay at their base paths.
   parked_cells:
-    owner: 'the case_ticket follow-up and #1172 (derive_system)'
+    owner: 'the case_ticket follow-up #1190 and #1172 (derive_system)'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -2816,12 +2816,12 @@ demands:
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author after the spine''s
       decision on the lost subjects; it reads the parked file''s pre-cut MOVED_HOMES, the subject it needs on adoption. The clause carries the
       seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: '#1105, #1165 and the case_ticket follow-up'
+    owner: '#1105, #1165 and the case_ticket follow-up #1190'
     cut: 2026-10-04 scope cut (decomposition, human-decided); parked by the spine 2026-10-04 on 85, former Red flag 1
     group: subfolders the move empties (visualize/, case_history/)
     reason: 'No subject under the cut: no base subfolder of defender/scripts/ is emptied (gather_tools/ and lessons/ keep the two wrappers and
       record_query.py; adapters/, case_history/ and visualize/ stay). The subfolders the pre-cut plan empties are visualize/ and visualize/assets/
-      (#1105) and case_history/ (ticket_writer, #1165; case_ticket, the case_ticket follow-up). Kept, the test demanded that visualize/assets/
+      (#1105) and case_history/ (ticket_writer, #1165; case_ticket, the case_ticket follow-up #1190). Kept, the test demanded that visualize/assets/
       vanish (_should_vanish counts a subfolder holding no .py as emptied), which contradicts the cut.'
   note: 'PARKED BY THE SPINE (2026-10-04, decision on 85-author-cut-digest.md, former Red flag 1, lost subjects): no subject under the cut. This resolves the earlier
     red-flag note (subject empty, blocking the section 10 commit). The test, with the helpers it uses, moved to spec-flow/specs/parked/1080/parked_lints_and_pointers.py;
@@ -2846,11 +2846,11 @@ demands:
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author after the spine''s
       decision on the lost subjects; it reads the parked file''s pre-cut MOVED_HOMES, the subject it needs on adoption. The clause carries the
       seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190'
     cut: 2026-10-04 scope cut (decomposition, human-decided); parked by the spine 2026-10-04 on 85, former Red flag 1
     group: profile resource rows naming moved modules
     reason: 'No subject under the cut: every base profile resource row naming a module the pre-cut plan moves names an OUT module (visualize/*
-      and _mirror_write, #1105; ticket_writer, #1165; confinement, #1172; case_ticket, the case_ticket follow-up), so its anti-vacuity guard ''golden:
+      and _mirror_write, #1105; ticket_writer, #1165; confinement, #1172; case_ticket, the case_ticket follow-up #1190), so its anti-vacuity guard ''golden:
       no base profile row named a moved module'' fails on any correct implementation of the cut. The cut_edit above (the IN set) is superseded
       by this park.'
   cut_edit: The moved-module list is the IN set.
@@ -3141,7 +3141,7 @@ demands:
 - id: s135
   cut_edit: As m5_run_records_lint_sweeps_new_homes.
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_lints_and_pointers.py::test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -3177,7 +3177,7 @@ demands:
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author after the spine''s
       decision on the lost subjects; it reads the parked file''s pre-cut MOVED_HOMES, the subject it needs on adoption. The clause carries the
       seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: 'the case_ticket follow-up and #1172'
+    owner: 'the case_ticket follow-up #1190 and #1172'
     cut: 2026-10-04 scope cut (decomposition, human-decided); parked by the spine 2026-10-04 on 85, former Red flag 1
     group: lint baseline keys at moved paths
     reason: 'No subject under the cut: the base vulture keys at paths the pre-cut plan moves are case_ticket''s four findings (the case_ticket
@@ -3967,7 +3967,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_file_in_each_state
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up (new issue, to be filed)
+    owner: case_ticket follow-up #1190 (new issue, to be filed)
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_ticket
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -3996,7 +3996,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_yaml_of_the_wrong_shape
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up (new issue, to be filed)
+    owner: case_ticket follow-up #1190 (new issue, to be filed)
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_ticket
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -4276,7 +4276,7 @@ demands:
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author after the spine''s
       decision on the lost subjects; it reads the parked file''s pre-cut MOVED_HOMES, the subject it needs on adoption. The clause carries the
       seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190'
     cut: 2026-10-04 scope cut (decomposition, human-decided); parked by the spine 2026-10-04 on 85, former Red flag 1
     group: profile resource rows naming moved modules
     reason: 'No subject under the cut: the rows it reads are s107''s (all OUT modules), so its guard ''no moved row''s symbol is defined outside
@@ -4314,7 +4314,7 @@ demands:
 - id: s204
   cut_edit: FIRST_IMPORTS keeps its IN rows only.
   parked_cells:
-    owner: '#1105, #1165, #1172 and the case_ticket follow-up'
+    owner: '#1105, #1165, #1172 and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_writeback_tenants_and_views.py::test_each_moved_module_imported_first_in_a_fresh_process
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -4341,7 +4341,7 @@ demands:
 - id: s205
   cut_edit: Keep the payload_view cell; drop the OUT cells.
   parked_cells:
-    owner: '#1165, #1172 and the case_ticket follow-up'
+    owner: '#1165, #1172 and the case_ticket follow-up #1190'
     precut_test: spec-flow/specs/parked/1080/pre_cut/parked_precut_writeback_tenants_and_views.py::test_module_level_state_in_a_moved_module_across_two_runs_in_one_process
     note: 'The cells the 2026-10-04 cut removed from this kept demand, preserved for their owner (94-reconciliation-cut.md F-1/F-2): the pre-cut
       test is precut_test (verbatim; the owner marker sits on it, or on the narrowed helper or table it reads); precut_seed is present only where
@@ -4608,7 +4608,7 @@ demands:
   parked:
     preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_edited_or_removed_between_run_start_and_the_post_step
     preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up (new issue, to be filed)
+    owner: case_ticket follow-up #1190 (new issue, to be filed)
     cut: 2026-10-04 scope cut (decomposition, human-decided)
     group: case_ticket
     reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
@@ -4660,7 +4660,7 @@ demands:
   seed_docstring: 'The import census''s exception list holds exactly the 35 named (importer, target) pairs the 2026-10-04 scope cut leaves standing
     — 37 import statements at the base, the 59 base edges less the 22 the cut''s moves retire — each tagged with the owner that retires it: #1172/#1121
     (20: into `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and `faults`), #1165 (6: into `record_query` and `ticket_writer`),
-    #1105 (6: into the `visualize/` modules and `workspace_map`) and the case_ticket follow-up (3: into `case_ticket`). H4 (i)''s `ticket_writer
+    #1105 (6: into the `visualize/` modules and `workspace_map`) and the case_ticket follow-up #1190 (3: into `case_ticket`). H4 (i)''s `ticket_writer
     -> _stub_transport` edge is internal to `scripts/` and is not listed. Every listed pair still exists in the tree, so an entry that outlives
     the edge it excused is a finding, not a silent widening, and the list can only shrink. A new import from outside `scripts/` into `scripts/adapters/`
     (another importer, or another adapters module) planted in a copy of the tree is reported. `scripts/adapters/` keeps all of its base files
@@ -10638,14 +10638,14 @@ handoff:
   - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner #1165 (and #1131''s write-back piece, not yet filed) (7): s042, s189, s190, s214,
     s215, s216, s_ticket_post_step. Each carries a `parked:` block on its demand; the parked tests are preserved out of collection
     under spec-flow/specs/parked/1080/.'
-  - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner case_ticket follow-up (new issue, to be filed) (5): s090, s187, s188, s217, s_case_mapping_read_at_run_start.
+  - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner case_ticket follow-up #1190 (new issue, to be filed) (5): s090, s187, s188, s217, s_case_mapping_read_at_run_start.
     Each carries a `parked:` block on its demand; the parked tests are preserved out of collection under spec-flow/specs/parked/1080/.'
-  - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner #1165 and the case_ticket follow-up (2): m5_env_read_lint_sweeps_moved_modules, s099.
+  - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner #1165 and the case_ticket follow-up #1190 (2): m5_env_read_lint_sweeps_moved_modules, s099.
     Each carries a `parked:` block on its demand; the parked tests are preserved out of collection under spec-flow/specs/parked/1080/.'
   - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner lessons --tags fix follow-up (new issue, to be filed) (1): cmd_tags_flattens_a_hostile_tag_value.
     Each carries a `parked:` block on its demand; the parked tests are preserved out of collection under spec-flow/specs/parked/1080/.'
   - 'PARKED BY THE SPINE AFTER THE AUTHOR''S FIRST PASS (2026-10-04; no subject under the cut) (4): s106 (owner #1105, #1165 and
-    the case_ticket follow-up), s107 and s202 (owner #1105, #1165, #1172 and the case_ticket follow-up), s136 (owner the case_ticket
+    the case_ticket follow-up #1190), s107 and s202 (owner #1105, #1165, #1172 and the case_ticket follow-up #1190), s136 (owner the case_ticket
     follow-up and #1172). Each carries a `parked:` block with its reason; the parked tests are preserved out of collection in spec-flow/specs/parked/1080/parked_lints_and_pointers.py.'
   - 'CELLS CUT FROM KEPT TESTS (94-reconciliation-cut.md F-2): the OUT halves of the 34 narrowed kept demands, and the tables and
     helpers the cut narrowed or deleted (d0''s IN_VERBS, EXIT_VOCAB, IN_INTEGRATIONS, ELASTIC, IN_REPORTS, ASSETS, TENANTS and RUNS_WRITERS
@@ -10835,7 +10835,7 @@ handoff:
     no parked state: a free-form key, red-flagged). The structure and the gate entries whose boundary is an OUT module are NOT pruned:
     parked demands still bind them, so deleting them would make binds unresolved; the gate entries are annotated `parked`. O1 cannot
     hold as a universal after the cut: of the 59 base edges 22 retire and 37 stay as a named exception list of 35 (importer, target)
-    pairs in 20 files (#1172/#1121 20, #1165 6, #1105 6, case_ticket follow-up 3) with the stale-entry check ([218]), so the list
+    pairs in 20 files (#1172/#1121 20, #1165 6, #1105 6, case_ticket follow-up #1190 3) with the stale-entry check ([218]), so the list
     can only shrink. D1 becomes ''the IN files are gone from scripts/''. #1080 stays open as the umbrella carrying the remaining-work
     note below.'
   - 'REMAINING-WORK NOTE (draft for the #1080 thread, human-decided 2026-10-04). Moves now: _venv.py to defender/_venv.py; pricing.py
@@ -10910,7 +10910,7 @@ handoff:
     The names never match test_*.py, so pytest does not collect them. The folder is outside defender/, so CI''s pytest, mypy and
     `ruff check defender` do not reach it. `ruff check . --select E,F --ignore E402,E501` passes over it. _pointers1080 and lint_stale_refs
     exclude spec-flow/specs/. Above each function: `# PARKED 2026-10-04 (scope cut): owner <owner>; demand <id>`, owners as in 75''s
-    table. Placeholder owners (the case_ticket follow-up, the lessons --tags fix follow-up) stay unfiled. test_1080_exit_codes_and_rows.py
+    table. Placeholder owners (the case_ticket follow-up #1190, the lessons --tags fix follow-up) stay unfiled. test_1080_exit_codes_and_rows.py
     is deleted (all 18 of its tests are parked). The 4 parked waivers have no test and are unchanged. (2) Goldens: the dispatch''s
     ''goldens they alone use move with them'' overrides 75 section 1''s ''goldens/ stay whole''. exitcodes.json, integrations.json,
     pages/ and runpage/ moved to spec-flow/specs/parked/1080/goldens/. pages.json, runpage.json and lints.json stay, because kept
@@ -10941,8 +10941,8 @@ handoff:
     are parked like the other 104: clause flip with parked.preserved_test, and the functions moved verbatim to parked_lints_and_pointers.py
     with the helpers they use. _should_vanish and _trace moved; the rest were copied, because live tests still use them. The parked
     copies read that file''s pre-cut MOVED_HOMES, which is the subject they need on adoption. Owners are the issues owning the lost
-    subject: s106: #1105, #1165 and the case_ticket follow-up (the subfolders emptied, visualize/ and case_history/). s107 and s202:
-    #1105, #1165, #1172 and the case_ticket follow-up (the profile rows'' modules). s136: the case_ticket follow-up and #1172 (case_ticket''s
+    subject: s106: #1105, #1165 and the case_ticket follow-up #1190 (the subfolders emptied, visualize/ and case_history/). s107 and s202:
+    #1105, #1165, #1172 and the case_ticket follow-up #1190 (the profile rows'' modules). s136: the case_ticket follow-up #1190 and #1172 (case_ticket''s
     vulture keys and derive_system). Reason recorded on each: no subject under the cut. The R7 gate entry for interacts(lint_stale_refs->scripts)
     is marked parked_partly; s199 still discharges it. Also outstanding: the .claude/spec-flow.json run_mirror row (F6) is in the
     working tree, uncommitted, to commit with the suite (spine: it ships with the suite). The s115/s118 stand-ins stay waivered
@@ -10953,7 +10953,7 @@ handoff:
     read by d0_scripts_holds_only_entry_points and the o1 exception-list test (#1172). (b) The four OUT __main__ blocks (_mirror_write,
     visualize_episode, visualize_run, workspace_map) still exist: s016''s OUT_MAIN_BLOCKS (#1105). (c) case_ticket.py and record_query.py
     stay in place and their vulture keys keep their base paths: OUT_KEYED and _out_keys in m5_baselines_name_no_moved_path and s105
-    (the case_ticket follow-up; #1165 for record_query; #1172 for derive_system''s key). (d) record_query (#1165): s008 requires
+    (the case_ticket follow-up #1190; #1165 for record_query; #1172 for derive_system''s key). (d) record_query (#1165): s008 requires
     every remainder name to stay in record_query.py; s085 requires the repeat guard to stay there and import the flat-tier rules;
     s086 and s168 reach lead_rows, repeat_trip and append_query_row at its base path (E5). (e) Controls that read staying files:
     scripts/adapters/faults.py (d1_lessons_frontier_main_kept) and scripts/adapters/cmdb_adapter.py (s135''s CONTROLS) (#1172).

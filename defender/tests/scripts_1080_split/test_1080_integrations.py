@@ -127,7 +127,7 @@ def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
     repointed (capture, estate registry, _family, query_tool). A second definition or a catch
     site left on the old path is a failure. (The VisualizeFailed, CaseTicketError, ViewNameError
     and fault-type cells read modules the cut leaves in place; they are parked with #1105, the
-    case_ticket follow-up and #1172.)
+    case_ticket follow-up #1190 and #1172.)
 
     Observed: the type has exactly one definition in the tree; every listed site's import of it
     (module-level or inside a function) resolves to that object; and a raise from the moved

@@ -743,7 +743,7 @@ def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_pa
 
 
 def test_staying_commands_import_modules_that_have_moved(tmp_path):
-    """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today, and `box_image.py` still runs under the runner's bare interpreter before dependency sync. (The tenant command's import of the case-mapping module is parked with the case_ticket follow-up by the 2026-10-04 scope cut: that module does not move.)
+    """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today, and `box_image.py` still runs under the runner's bare interpreter before dependency sync. (The tenant command's import of the case-mapping module is parked with the case_ticket follow-up #1190 by the 2026-10-04 scope cut: that module does not move.)
 
     Each command, run from a working directory
     outside the checkout — by path with no `PYTHONPATH`, through `bin/defender-policy`, and by

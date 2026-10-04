@@ -1588,7 +1588,7 @@ def test_payload_shapes_the_view_must_not_choke_on(case, tmp_path, monkeypatch):
 # s204 / s205 — fresh-process imports and module-level state
 # ======================================================================================
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up; #1165 or #1172 (the flat-tier exit-code vocabulary).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190; #1165 or #1172 (the flat-tier exit-code vocabulary).
 #: One symbol per moved module (and the home pinned by the design or the demand text, if any).
 #: The seed's list: world-view naming, case mapping, pricing, query rules, row writers,
 #: integrations faults, reports renderer, lessons engine, tenants home, flat-tier modules —
@@ -1616,7 +1616,7 @@ FIRST_IMPORTS: tuple[tuple[str, str, str | None], ...] = (
 )
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s204); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s204); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 def test_each_moved_module_imported_first_in_a_fresh_process():
     """Each moved module comes up as the first project import in a fresh interpreter, whichever
     module is chosen: no module depends on another having been imported first, and no import
@@ -1640,7 +1640,7 @@ def test_each_moved_module_imported_first_in_a_fresh_process():
     assert not failed, f"imported first, these fail: {failed}"
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1165 (record_query writers), #1172 (confinement, _stub_transport, verbs), the case_ticket follow-up and #1165 or #1172 (the flat-tier exit-code vocabulary).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1165 (record_query writers), #1172 (confinement, _stub_transport, verbs), the case_ticket follow-up #1190 and #1165 or #1172 (the flat-tier exit-code vocabulary).
 def _observe_state(tmp: Path, mp: Any) -> dict[str, Any]:
     from defender.runtime.verbs import VerbContext
     from defender.scripts.adapters import _stub_transport
@@ -1687,7 +1687,7 @@ def _observe_state(tmp: Path, mp: Any) -> dict[str, Any]:
     return _norm({"renders": renders, "captures": captured, "rows": rows}, tmp)
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s205); the cut cells are owned by #1165, #1172 and the case_ticket follow-up (the record_query, confinement and capture cells).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s205); the cut cells are owned by #1165, #1172 and the case_ticket follow-up #1190 (the record_query, confinement and capture cells).
 def test_module_level_state_in_a_moved_module_across_two_runs_in_one_process(tmp_path,
                                                                              monkeypatch):
     """Module-level state in a moved module (a cache, a compiled table, an installed capture)

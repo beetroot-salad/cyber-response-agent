@@ -289,7 +289,7 @@ def _should_vanish() -> list[str]:
     return sorted(out)
 
 
-# PARKED 2026-10-04 (scope cut): owner #1165 and the case_ticket follow-up; demand m5_env_read_lint_sweeps_moved_modules
+# PARKED 2026-10-04 (scope cut): owner #1165 and the case_ticket follow-up #1190; demand m5_env_read_lint_sweeps_moved_modules
 def test_1080_the_env_read_lint_still_sweeps_the_moved_case_history_modules(tmp_path):
     """Every entry in `lint_tenant_env_reads`' swept list exists. The modules defining `record_case_ticket` and `load_case_mapping` are swept. An `os.environ` read planted in the moved write-back module is reported.
 
@@ -335,7 +335,7 @@ def test_1080_the_env_read_lint_still_sweeps_the_moved_case_history_modules(tmp_
         f"_census_1107.swept_py does not reach the planted copy of {writer}")
 
 
-# PARKED 2026-10-04 (scope cut): owner #1165 and the case_ticket follow-up; demand s099
+# PARKED 2026-10-04 (scope cut): owner #1165 and the case_ticket follow-up #1190; demand s099
 def test_env_read_lint_sweep_list_names_one_moved_tree_and_one_existing_tree(tmp_path):
     """After the move the env-read lint's swept trees still cover every moved module (the old case_history tree's modules are swept at their new home), and a listed path that no longer exists is reported, not silently dropped. The move does not narrow the sweep (M5: update the path-keyed lints).
 
@@ -706,7 +706,7 @@ def test_template_adapter_and_the_connect_skill_after_the_fault_types_moved(tmp_
     assert type(fault).__name__ == "TransportFault", f"expected TransportFault, got {fault!r}"
 
 
-# PARKED 2026-10-04 (scope cut): owner the case_ticket follow-up and #1172; demand s136
+# PARKED 2026-10-04 (scope cut): owner the case_ticket follow-up #1190 and #1172; demand s136
 def test_baseline_entry_keyed_to_a_path_that_no_longer_exists_while_another_file_is_created_there(tmp_path):
     """A baseline entry keyed to a path that no longer exists is removed with the move, so a later file created at that path with the same finding is reported by the vulture and unnarrowed-parse gates and the ratchet, not excused by the stale entry.
 
@@ -748,7 +748,7 @@ def test_baseline_entry_keyed_to_a_path_that_no_longer_exists_while_another_file
     assert not dead, f"unnarrowed-parse keys naming paths that no longer exist: {dead}"
 
 
-# PARKED 2026-10-04 (scope cut): owner #1105, #1165, #1172 and the case_ticket follow-up; demand s107
+# PARKED 2026-10-04 (scope cut): owner #1105, #1165, #1172 and the case_ticket follow-up #1190; demand s107
 @pytest.mark.gate
 def test_profile_resource_row_names_a_moved_file_and_the_trace_is_run(tmp_path):
     """After the change the profile's resource rows and the committed spec graphs name files that exist (M5 updates them), so the trace over each resource finds its writers and readers; a row naming a missing file is surfaced rather than read as a resource with no writers. K11 is refuted: CI does not force this, so the update is hygiene the change owns.
@@ -783,7 +783,7 @@ def test_profile_resource_row_names_a_moved_file_and_the_trace_is_run(tmp_path):
     assert stale in err, f"the trace did not name the stale sink {stale}: {err}"
 
 
-# PARKED 2026-10-04 (scope cut): owner #1105, #1165, #1172 and the case_ticket follow-up; demand s202
+# PARKED 2026-10-04 (scope cut): owner #1105, #1165, #1172 and the case_ticket follow-up #1190; demand s202
 def test_profile_resource_row_naming_a_moved_file_with_a_symbol_suffix(tmp_path):
     """A profile resource row or committed spec graph writing a writer as `path::symbol` has the path updated to the file that now holds the symbol; a symbol that still exists elsewhere does not let the stale path resolve silently.
 
@@ -814,7 +814,7 @@ def test_profile_resource_row_naming_a_moved_file_with_a_symbol_suffix(tmp_path)
     assert stale in err, f"the trace did not name the stale sink {stale}: {err}"
 
 
-# PARKED 2026-10-04 (scope cut): owner #1105, #1165 and the case_ticket follow-up; demand s106
+# PARKED 2026-10-04 (scope cut): owner #1105, #1165 and the case_ticket follow-up #1190; demand s106
 def test_stale_reference_lint_meets_a_vanished_directory_name_in_unchanged_files(tmp_path):
     """After the change no comment, test name, lint list, config comment or baseline key still names a vanished scripts subfolder (gather_tools, case_history, and the others) where it denotes the old location, including references beyond the stale-reference lint's reporting limit; the gate reports clean and the author's own sweep covers names the lint will not surface.
 

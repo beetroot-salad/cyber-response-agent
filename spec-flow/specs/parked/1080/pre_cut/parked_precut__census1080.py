@@ -302,7 +302,7 @@ def adapters_expected() -> tuple[str, ...]:
     return tuple(sorted([*eight, f"{ADAPTERS}/_stub_transport.py", f"{ADAPTERS}/README.md"]))
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 def placement_findings(root: Path = S.REPO_ROOT) -> list[str]:
     """Every tracked file under `defender/scripts/` that is none of: a staying command, a
     shim's wrapper, or one of the files `scripts/adapters/` keeps (any file type: [6])."""

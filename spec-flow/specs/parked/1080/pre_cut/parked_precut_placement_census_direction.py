@@ -104,7 +104,7 @@ IN_REPORTS = (
 # PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner #1105.
 #: The page assets, by file name, under `defender/reports/`.
 ASSETS = ("episode.css", "runtime.js", "styles.css")
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up (F-C: the tenants home is pinned under defender/runtime/).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up #1190 (F-C: the tenants home is pinned under defender/runtime/).
 #: The tenants home (M-G (b)): a package, not a flat-tier module.
 TENANTS = ("CaseMapping", "CaseTicketError", "load_case_mapping")
 # PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner #1165.
@@ -116,7 +116,7 @@ RUNS_WRITERS = ("append_query_row", "persist_payload", "payload_digest", "payloa
 #: 80888efb): those definitions are not the moved one and do not count against one home.
 BASE_ELSEWHERE_COINED = {"request_key": ("defender/learning/branch/ledger.py",)}
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 #: One anchor symbol per moved module (base path → a name only it defines), for the scans that
 #: read "every moved module": m2's anchor scan, the engines, the uncalled mains.
 MODULE_ANCHORS = {
@@ -176,13 +176,13 @@ def _base_files() -> list[str]:
     return list(S.base_inventory()["files"])
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 def _kept_at_base() -> set[str]:
     """The base paths that stay files under `scripts/` (commands, wrappers, adapters)."""
     return {*C.STAYING_COMMANDS, *C.wrappers(), *C.adapters_expected()}
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 def _moved_old_py() -> list[str]:
     """Every base `.py` under `scripts/` that moves out (none of the kept files)."""
     kept = _kept_at_base()
@@ -250,7 +250,7 @@ def _child_find_spec(names: list[str]) -> dict[str, bool]:
 # ======================================================================================
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d0_scripts_holds_only_entry_points); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up (the files the pre-cut plan moves out of scripts/).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d0_scripts_holds_only_entry_points); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up #1190 (the files the pre-cut plan moves out of scripts/).
 def test_1080_scripts_holds_only_entry_points():
     """Every `.py` file under `defender/scripts/` is one of these: `tenant.py`, `policy_cli.py`,
     `box_image.py`, `tacit_cli.py`; a thin wrapper that a `bin/` shim, `run_common`, CI or a
@@ -296,7 +296,7 @@ def _outside_lessons_content(name, where):
         f"`{name}` is engine code inside the lesson content folder: {where}"
 
 
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner #1105, #1172 and the case_ticket follow-up (F-C, 2026-10-03, changes this check to under(where, 'defender/runtime') for the tenants home).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner #1105, #1172 and the case_ticket follow-up #1190 (F-C, 2026-10-03, changes this check to under(where, 'defender/runtime') for the tenants home).
 def _a_package(name, where):
     assert not S.under(where, S.FLAT_TIER), f"`{name}`'s tenants home is a flat-tier module"
     assert where.count("/") >= 2, \
@@ -310,7 +310,7 @@ def _beside_run_handle(name, where):
         f"`{name}` must live beside defender/_run_handle.py, not in {where}"
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d0_moved_symbols_live_under_their_home); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up; #1165 or #1172 (the flat-tier exit-code vocabulary) (the IN_VERBS, EXIT_VOCAB, IN_INTEGRATIONS, ELASTIC, IN_REPORTS, ASSETS, TENANTS and RUNS_WRITERS groups).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d0_moved_symbols_live_under_their_home); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up #1190; #1165 or #1172 (the flat-tier exit-code vocabulary) (the IN_VERBS, EXIT_VOCAB, IN_INTEGRATIONS, ELASTIC, IN_REPORTS, ASSETS, TENANTS and RUNS_WRITERS groups).
 def test_1080_each_moved_symbol_is_defined_under_its_home():
     """Only `defender/integrations/` and `defender/reports/` are pinned as package paths (dF0);
     every other home is found by the symbol each moved module defines. Each moved symbol in
@@ -569,7 +569,7 @@ def _engine_main_is_called(wrapper_src: str, engine: str) -> bool:
                 for st in S.import_statements("defender/scripts/_w.py", wrapper_src))
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d1_wrapper_only_delegates); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up (the OUT files the wrapper set must exclude).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand d1_wrapper_only_delegates); the cut cells are owned by #1105, #1165, #1172 and the case_ticket follow-up #1190 (the OUT files the wrapper set must exclude).
 def test_1080_each_wrapper_left_in_scripts_only_delegates_to_its_engine():
     """Each wrapper under `defender/scripts/` (every file there except `tenant.py`,
     `policy_cli.py`, `box_image.py`, `tacit_cli.py` and `scripts/adapters/`) has a module body
@@ -979,7 +979,7 @@ ALLOWED_DROPS = {"defender/scripts/lessons/lessons_frontier.py": {"main", "_posi
 #: `scripts/adapters/` (one of the ten that stay) as well as a module outside `scripts/`.
 MB_REMAINDER = {"READ_ENDPOINT_ALLOWLIST", "ReadEndpointAllowlist", "AllowlistError",
                 "HOST_STATE_PROGRAMS", "confine_host", "confine_host_state_call"}
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172 (confinement), #1165 (ticket_writer) and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172 (confinement), #1165 (ticket_writer) and the case_ticket follow-up #1190.
 SPLIT_MODULES = (
     "defender/scripts/gather_tools/record_query.py",
     "defender/scripts/adapters/confinement.py",
@@ -989,7 +989,7 @@ SPLIT_MODULES = (
 )
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172, #1165 and the case_ticket follow-up (the split modules).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172, #1165 and the case_ticket follow-up #1190 (the split modules).
 def _homes_of_module(base_path: str, names: list[str], shared: set[str]) -> set[str]:
     """The new modules that hold `base_path`'s names that no other scripts module defines."""
     out: set[str] = set()
@@ -1000,7 +1000,7 @@ def _homes_of_module(base_path: str, names: list[str], shared: set[str]) -> set[
     return out
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172, #1165 and the case_ticket follow-up (the split modules).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1172, #1165 and the case_ticket follow-up #1190 (the split modules).
 def _name_census(base_path: str, shared: set[str]) -> list[str]:
     names = list(S.base_inventory()["py_names"][base_path])
     homes = _homes_of_module(base_path, names, shared)
@@ -1019,7 +1019,7 @@ def _name_census(base_path: str, shared: set[str]) -> list[str]:
     return problems
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s008); the cut cells are owned by #1172 (confinement), #1165 (ticket_writer, dF11) and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s008); the cut cells are owned by #1172 (confinement), #1165 (ticket_writer, dF11) and the case_ticket follow-up #1190.
 def test_a_name_in_a_split_module_that_no_placement_row_claims():
     """Every top-level name defined in a split module (record_query, confinement, the
     case-history pair, lessons_frontier's library and command halves) has exactly one home after

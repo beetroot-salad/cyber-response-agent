@@ -179,7 +179,7 @@ def test_1080_scripts_holds_only_entry_points():
     files stay until #1172); or one of the cut's named OUT files that stay with their owners
     (`visualize/`'s eight modules and three assets and `workspace_map.py`, #1105;
     `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165;
-    `case_history/case_ticket.py`, the case_ticket follow-up). The IN files (`_venv.py`,
+    `case_history/case_ticket.py`, the case_ticket follow-up #1190). The IN files (`_venv.py`,
     `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`,
     `lessons/_lessons_common.py`) are not left there, and no re-export shim keeps their old
     `defender.scripts.*` path importable.
@@ -250,7 +250,7 @@ def test_1080_no_module_outside_scripts_imports_a_module_under_it():
     anything under it. Relative imports are resolved against their package. Under the
     2026-10-04 scope cut the allowed exceptions are the 35 named (importer, target) pairs (37
     import statements) into the `scripts/` modules the cut leaves where they are, each tagged
-    with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up). Any
+    with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up #1190). Any
     other import into the folder fails, and an exception whose edge no longer exists is itself a
     finding ([218]); o1_exception_list_is_the_named_edges pins the list.
 
@@ -300,7 +300,7 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
     edges less the 22 the cut's moves retire — each tagged with the owner that retires it:
     #1172/#1121 (20: into `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and
     `faults`), #1165 (6: into `record_query` and `ticket_writer`), #1105 (6: into the
-    `visualize/` modules and `workspace_map`) and the case_ticket follow-up (3: into
+    `visualize/` modules and `workspace_map`) and the case_ticket follow-up #1190 (3: into
     `case_ticket`). H4 (i)'s `ticket_writer -> _stub_transport` edge is internal to `scripts/`
     and is not listed. Every listed pair still exists in the tree, so an entry that outlives the
     edge it excused is a finding, not a silent widening, and the list can only shrink. A new
@@ -318,7 +318,7 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
     owners: dict[str, int] = {}
     for _, _, owner in exceptions:
         owners[owner] = owners.get(owner, 0) + 1
-    assert owners == {"#1172/#1121": 20, "#1165": 6, "#1105": 6, "case_ticket follow-up": 3}
+    assert owners == {"#1172/#1121": 20, "#1165": 6, "#1105": 6, "case_ticket follow-up #1190": 3}
     assert all(not S.is_test_path(i) and not S.under(i, "defender/scripts")
                for i, _ in pairs)
     assert all(C.is_scripts_target(t) for _, t in pairs)

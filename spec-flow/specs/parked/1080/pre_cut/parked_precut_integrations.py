@@ -542,7 +542,7 @@ def _assert_bound_to(relpath: str, name: str, obj: Any) -> None:
                 f"{relpath} still takes `{name}` from {source}, the old path")
 
 
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up (s025 CaseTicketError cell).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up #1190 (s025 CaseTicketError cell).
 def _annotation_objects(module: ModuleType, annotation: Any) -> list[Any]:
     """The objects a string annotation names (`A | B`, `m.A`), looked up in `module`'s
     namespace the way the annotation resolves there."""
@@ -853,15 +853,15 @@ def _section_fault_codes() -> list[Any]:
                                      for n in FAULT_NAMES}}]
 
 
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up (s025 CaseTicketError cell).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up #1190 (s025 CaseTicketError cell).
 #: The CaseTicketError a run start keeps in its record when the mapping cannot be read.
 HELD_MESSAGE = "case-history mapping is not a mapping: <the tenant's mapping.yaml>"
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up (s025 CaseTicketError cell).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up #1190 (s025 CaseTicketError cell).
 TICKET_PATCHES = {"ticket": {"SOC-1": {"comments": ["seen"], "status": "open"},
                              "SOC-2": {"comments": ["seen"], "status": "closed"}}}
 
 
-# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up (s025 CaseTicketError cell).
+# PRE-CUT 2026-10-04 (scope cut): deleted from the live suite; owner the case_ticket follow-up #1190 (s025 CaseTicketError cell).
 def _section_held_case_ticket_error() -> list[Any]:
     """A `CaseTicketError` held from run start, as its readers classify it."""
     from defender.learning.branch.estate import applier
@@ -1117,7 +1117,7 @@ def test_fault_raised_by_adapter_private_confinement_is_caught_by_learning_and_t
                 pass
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s025); the cut cells are owned by #1105 (VisualizeFailed), the case_ticket follow-up (CaseTicketError) and #1172 (ViewNameError, the fault types).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s025); the cut cells are owned by #1105 (VisualizeFailed), the case_ticket follow-up #1190 (CaseTicketError) and #1172 (ViewNameError, the fault types).
 def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
     """Each moved exception or record type has one definition: ParamsTooDeep, VisualizeFailed,
     CaseTicketError, ViewNameError (and the faults). The code that raises or builds it and the

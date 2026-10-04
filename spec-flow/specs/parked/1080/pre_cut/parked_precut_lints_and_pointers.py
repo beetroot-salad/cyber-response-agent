@@ -74,7 +74,7 @@ CONNECT = S.DEFENDER / "skills" / "connect"
 EXAMPLE_ADAPTER = CONNECT / "examples" / "example_adapter.py"
 VALIDATE_SCAFFOLD = CONNECT / "validate_scaffold.py"
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite; the cut part is owned by #1105, #1165, #1172 and the case_ticket follow-up #1190.
 #: Every base module of `defender/scripts/` the design moves, and the symbols whose homes now
 #: hold its code (each with the home it must sit under, None = wherever it is outside
 #: `scripts/`). The anchors are the placement group's (`MODULE_ANCHORS`); confinement and
@@ -571,7 +571,7 @@ def test_tree_read_lint_module_list_holds_a_dead_entry_and_a_stale_entry(tmp_pat
         f"an unlisted module {unlisted} was reported — the list is no longer opt-in: {found}")
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand m5_run_records_lint_sweeps_new_homes); the cut cells are owned by #1105 (reports), #1172 (integrations) and the case_ticket follow-up (the tenants home).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand m5_run_records_lint_sweeps_new_homes); the cut cells are owned by #1105 (reports), #1172 (integrations) and the case_ticket follow-up #1190 (the tenants home).
 def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
     """`lint_run_records`' swept trees cover every new home of a moved module: reports, integrations, the lessons engine and the tenants home. A record-name literal planted in a moved reports module is reported.
 
@@ -601,7 +601,7 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
         f"a record-name literal planted in {page} was not reported: {found}")
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s135); the cut cells are owned by #1105, #1172 and the case_ticket follow-up (docstring: the reports, integrations and tenants homes).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s135); the cut cells are owned by #1105, #1172 and the case_ticket follow-up #1190 (docstring: the reports, integrations and tenants homes).
 def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package(tmp_path, monkeypatch):
     """A plant of a record-name literal, a tenant env read, an unguarded tree write and a tree read in a module under every new home (reports, integrations, the lessons engine, the tenants home, the flat tier) and in a thin wrapper in scripts/ is reported by each path-scoped gate that reported the same plant at the old location, so no gate's scope narrows silently. Gate sweeps and profile code roots that were fixed lists are extended to the new top-level packages (M5).
 
@@ -684,7 +684,7 @@ def _rekeyed(entries: Mapping[str, str], key: str) -> list[str]:
             if k.endswith(tail) and key_paths(k[:-len(tail)]) == [k[:-len(tail)]]]
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand m5_baselines_name_no_moved_path); the cut cells are owned by the case_ticket follow-up and #1172 (derive_system): the re-keying of their baseline keys.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand m5_baselines_name_no_moved_path); the cut cells are owned by the case_ticket follow-up #1190 and #1172 (derive_system): the re-keying of their baseline keys.
 def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
     """No `scripts/lint/*_baseline.json` entry keys a file path that no longer exists, so a moved file's baselined finding is re-keyed rather than reappearing as new.
 
@@ -708,7 +708,7 @@ def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
     assert not misplaced, f"a moved finding is keyed somewhere other than its symbol's home: {misplaced}"
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s105); the cut cells are owned by the case_ticket follow-up and #1172 (derive_system): the re-keying of their baseline keys.
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s105); the cut cells are owned by the case_ticket follow-up #1190 and #1172 (derive_system): the re-keying of their baseline keys.
 @pytest.mark.gate
 def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypatch):
     """No baseline entry (vulture, unnarrowed-parse) names a moved path: findings carried by moved files are re-keyed to their new paths, entries for files that no longer exist are removed, and a finding re-introduced at the old path is not excused by a stale entry. The gates are green after the change. (M5: update the path-keyed baselines.)
@@ -1341,7 +1341,7 @@ def test_template_adapter_and_the_connect_skill_after_the_fault_types_moved(tmp_
 # ======================================================================================
 
 
-# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s095); the cut cells are owned by the case_ticket follow-up (the tenant command -> case_ticket cell).
+# PRE-CUT 2026-10-04 (scope cut): narrowed in the live suite (kept demand s095); the cut cells are owned by the case_ticket follow-up #1190 (the tenant command -> case_ticket cell).
 def test_staying_commands_import_modules_that_have_moved(tmp_path):
     """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today; the tenant command imports the case-mapping module from its new home (an import from scripts/ outward is allowed, only the reverse is census-checked), and `box_image.py` still runs under the runner's bare interpreter before dependency sync.
 
