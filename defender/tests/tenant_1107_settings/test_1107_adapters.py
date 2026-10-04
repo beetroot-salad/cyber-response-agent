@@ -914,6 +914,8 @@ _CLI_USAGE = re.compile(r"^\s*ticket_adapter\.py\s+\S", re.MULTILINE)
 
 def _cli_refs(source: str) -> list[str]:
     """Each code reference in `source` to ticket_adapter's command-line names."""
+    if "ticket_adapter" not in source or not any(name in source for name in _CLI_NAMES):
+        return []  # every hit spells `ticket_adapter` and a CLI name in the source; skip parsing files without both
     try:
         tree = ast.parse(source)
     except SyntaxError:

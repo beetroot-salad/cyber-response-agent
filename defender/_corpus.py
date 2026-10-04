@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import functools
 import logging
 import os
 import re
@@ -276,7 +277,19 @@ def _template_at(view: Bound, name: str, path: Path) -> tuple[QueryTemplate | No
 
 def parse_query_template(text: str, path: Path) -> tuple[QueryTemplate | None, str]:
     """`read_query_template` for content already in hand (e.g. a deleted draft's pre-image from
-    `git show HEAD:…`); `path` supplies only location facts (system, `path` field)."""
+    `git show HEAD:…`); `path` supplies only location facts (system, `path` field).
+
+    Memoized on `(text, path)`: the answer is a pure function of the two, and a catalog walk
+    re-parses the same unchanged files many times per process. Sharing one answer is safe
+    because a `QueryTemplate` is frozen and holds only immutable values (`Path`, `str`,
+    `tuple[str, ...]`); the frontmatter mapping it is built from is never kept."""
+    return _memoized_template(text, path)
+
+
+@functools.lru_cache(maxsize=4096, typed=True)
+def _memoized_template(text: str, path: Path) -> tuple[QueryTemplate | None, str]:
+    """`parse_query_template`'s parse, cached. `typed=True`: a `PurePath` equal to a `Path` is
+    a different input (the `path` field is checked as a `Path`), so it never shares an entry."""
     from defender._frontmatter import FrontmatterError, parse_frontmatter
 
     try:

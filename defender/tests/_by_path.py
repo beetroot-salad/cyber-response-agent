@@ -22,6 +22,7 @@ knowing before adding a caller:
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib
 import importlib.util
@@ -138,3 +139,40 @@ def load_lint_gate(stem: str, *, name: str | None = None) -> ModuleType:
     loaded gate is used — this is the case `on_sys_path` is wrong for.
     """
     return load_module(LINT_DIR / f"{stem}.py", name=name or stem, sys_path=(LINT_DIR,))
+
+
+#: (path, mtime_ns, size) -> text, and -> (text, tree). Process-level: the censuses that walk the
+#: production tree all read the same few thousand files, and each used to read and parse them
+#: afresh. The key carries the file's stat, so a test that plants or rewrites a file under
+#: ``tmp_path`` sees its own content, never a stale entry.
+_TEXT_CACHE: dict[tuple[str, int, int], str] = {}
+_PARSED_CACHE: dict[tuple[str, int, int], tuple[str, ast.Module]] = {}
+
+
+def _stat_key(path: Path) -> tuple[str, int, int]:
+    st = path.stat()
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def cached_source(path: Path) -> str:
+    """``path``'s text (utf-8, undecodable bytes replaced), read once per file state."""
+    key = _stat_key(path)
+    text = _TEXT_CACHE.get(key)
+    if text is None:
+        text = _TEXT_CACHE[key] = path.read_text(encoding="utf-8", errors="replace")
+    return text
+
+
+def cached_parse(path: Path, rel: str) -> tuple[str, ast.Module]:
+    """`_astlib.read_and_parse` once per file state: the same ``(text, tree)`` and the same
+    ``ScanBlind`` on an unreadable or unparseable file (failures are not cached). The tree is
+    shared, so callers walk it and never mutate it."""
+    astlib = import_lint_lib("_astlib")
+    try:
+        key = _stat_key(path)
+    except OSError:
+        return astlib.read_and_parse(path, rel)
+    hit = _PARSED_CACHE.get(key)
+    if hit is None:
+        hit = _PARSED_CACHE[key] = astlib.read_and_parse(path, rel)
+    return hit

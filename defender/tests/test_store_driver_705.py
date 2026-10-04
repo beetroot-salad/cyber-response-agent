@@ -42,7 +42,7 @@ from pydantic_ai.messages import (  # noqa: E402
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
-from defender.runtime import circuit_breaker, driver  # noqa: E402
+from defender.runtime import challenge_gate, circuit_breaker, driver  # noqa: E402
 from defender.tests._session_store_705 import (
     CLOSED_LOOP_INVLANG,
     FaultStore,
@@ -524,9 +524,37 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
         "the store append alone")
 
 
+#: The request-limit run's base ceiling: a few rounds, far under the shipped
+#: `DEFAULT_REQUEST_LIMIT`, so the run that ends by `UsageLimitExceeded` gets there quickly.
+_SHORT_BASE_REQUEST_LIMIT = 4
+
+
+@pytest.fixture(scope="module")
+def request_limit_run(tmp_path_factory):
+    """ONE run that ends by `UsageLimitExceeded` (a `NeverEndsModel` over `GOLDEN_AB3`), shared
+    by the two tests that read its store read-only: the run-end flush's (1) exit and the
+    projection-order test. Driven once instead of twice; neither test writes to it.
+
+    Its ceiling is a short one handed in through the gate's bounds (`drive(bounds=…)`): what
+    the two tests read is HOW the run ended, which is the same at any ceiling, and the shipped
+    one (`DEFAULT_REQUEST_LIMIT` plus the forced turns) is
+    `e2e/test_replay_error_paths.py::test_request_limit_writes_partial_trace`'s to drive. The
+    model's call count shows the injected ceiling, not the shipped one, is what ended it."""
+    base = tmp_path_factory.mktemp("request-limit")
+    rd = materialize(base, GOLDEN_AB3)
+    opened: list = []
+    bounds = challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT)
+    model = NeverEndsModel(rd)
+    drive(rd, run_id="flush-limit", main=model, bounds=bounds,
+          store_factory=store_factory(base, sink=opened))
+    assert model.calls == challenge_gate.raised_request_limit(bounds), model.calls
+    return rd, opened[0]
+
+
 # the run-end flush — R11's true `finally`
 
-def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, monkeypatch):
+def test_run_end_flush_captures_the_terminal_response_on_every_exit(
+        tmp_path, monkeypatch, request_limit_run):
     """A run that ends by `UsageLimitExceeded`, `BudgetKill`, `RunAborted` or an uncaught
     exception type has its terminal response in the store, captured by a SINGLE run-end
     flush in a true `finally` rather than by per-arm flushes — observable through a
@@ -544,11 +572,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     exits: dict[str, tuple] = {}
 
     # (1) UsageLimitExceeded — the request limit
-    rd = materialize(tmp_path / "limit", GOLDEN_AB3)
-    opened: list = []
-    drive(rd, run_id="flush-limit", main=NeverEndsModel(rd),
-          store_factory=store_factory(tmp_path / "limit", sink=opened))
-    exits["UsageLimitExceeded"] = (opened[0], "request-limit")
+    exits["UsageLimitExceeded"] = (request_limit_run[1], "request-limit")
 
     # (2) BudgetKill — a real cap trip
     rd = materialize(tmp_path / "budget", GOLDEN)
@@ -613,7 +637,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
                        (session_id,)) == [(expected_truncated_by,)], label
 
 
-def test_the_moved_projection_is_built_after_the_run_end_flush(tmp_path):
+def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run):
     """For a run terminated mid-pair, the projection `run_stats.py` reads contains the
     terminal response the run-end flush wrote, because `visualize()` (the page render) is
     ordered AFTER the flush and the projection reads at role=`analysis`.
@@ -624,12 +648,7 @@ def test_the_moved_projection_is_built_after_the_run_end_flush(tmp_path):
     could see, because an analysis-role consumer would have truncated the orphan away
     whether the flush had landed or not (P6 — the R11 × R8 interaction)."""
     ss = store_mod()
-    rd = materialize(tmp_path, GOLDEN_AB3)
-    opened: list = []
-    drive(rd, run_id="order", main=NeverEndsModel(rd),
-          store_factory=store_factory(tmp_path, sink=opened))
-
-    store = opened[0]
+    rd, store = request_limit_run
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
     analysis = ss.hydrate(store, session_id, role="analysis")
     events = [json.loads(line) for line in

@@ -62,6 +62,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -75,9 +76,11 @@ from defender.tests._curator1134 import lesson_text, plant_fifo, put, questioner
 from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _scene
 
 #: The bound a scene sets (`git_timeout`) or a `_git` call passes (`timeout=`) when a git call is
-#: meant to time out: small, so a scene with three or four timed-out reads stays a few seconds.
-#: Not a whole number, so the message naming it (H2) is checked however a float is spelled.
-BOUND = 2.5
+#: meant to time out: small, so a scene with three or four timed-out reads stays a few seconds,
+#: and no shorter than `STALL_BOUND`, which the census scenes show every answering git call (shim
+#: included) meets eight scenes at a time. Not a whole number, so the message naming it (H2) is
+#: checked however a float is spelled.
+BOUND = 1.5
 #: How long a scene or a call may take before the test fails, generous for a loaded box: a
 #: scene here answers in a few seconds once nothing blocks.
 DEADLINE = 40.0
@@ -590,9 +593,28 @@ _PROCESSES = [
 ]
 
 
+@pytest.fixture(scope="module")
+def helper_stalls(dispatch_shim, tmp_path_factory):
+    """Each `_PROCESSES` case run against a git sleeping on its subcommand, all at once (each
+    waits out its own `BOUND`): `{(helper, subcommand): (result, got, took, shim)}`."""
+    root = tmp_path_factory.mktemp("helper-stalls")
+
+    def one(i_case):
+        i, (helper, subcommand) = i_case
+        at = root / f"case-{i}"
+        w = _corpus_repo(at)
+        shim = _dispatch_cfg(at, stall_every=subcommand)
+        started = time.monotonic()
+        result, got = _within(lambda: _HELPERS[helper](w.repo, timeout=BOUND), shim=shim)
+        return (helper, subcommand), (result, got, time.monotonic() - started, shim)
+
+    with ThreadPoolExecutor(max_workers=len(_PROCESSES)) as pool:
+        return dict(pool.map(one, enumerate(_PROCESSES)))
+
+
 @pytest.mark.parametrize(("helper", "subcommand"), _PROCESSES)
 def test_each_git_process_a_helper_runs_is_bounded_by_its_timeout(
-    tmp_path, monkeypatch, helper, subcommand,
+    helper_stalls, helper, subcommand,
 ):
     """A shim git sleeps on one subcommand the helper runs and answers every other at once: the
     helper, given `timeout=BOUND`, raises `subprocess.TimeoutExpired` (exact type, unconverted:
@@ -600,12 +622,7 @@ def test_each_git_process_a_helper_runs_is_bounded_by_its_timeout(
 
     Catches: a helper that bounds some of its git processes but not this one, or bounds it by a
     value of its own rather than the caller's `timeout`."""
-    w = _corpus_repo(tmp_path)
-    with monkeypatch.context() as patch:
-        shim = _shim_git(tmp_path / "git-shim", patch, stall_every=subcommand)
-        started = time.monotonic()
-        result, got = _within(lambda: _HELPERS[helper](w.repo, timeout=BOUND), shim=shim)
-        took = time.monotonic() - started
+    result, got, took, shim = helper_stalls[(helper, subcommand)]
 
     assert result == "raised", got
     assert type(got) is subprocess.TimeoutExpired, repr(got)
@@ -786,39 +803,145 @@ def _census_scene(at: Path, *, undo: bool) -> Any:
                   verifier=S.FakeVerifier(verdicts={SEEDED: "BAD"}), git_timeout=STALL_BOUND)
 
 
-def _census_run(at: Path, monkeypatch: pytest.MonkeyPatch, *, undo: bool,
-                stall_at: int = 0) -> tuple[Any, tuple[str, Any], _Shim]:
-    """One `_census_scene` tick under `_tick`'s deadline, through a shim git that stalls its
-    `stall_at`-th call (`0`: none)."""
+#: The one `git` the census scenes share, found by the scene's own `git-shim-cfg` file in an
+#: ancestor of the directory git runs in (the repo root, under the scene's `at`). A scene with no
+#: such file gets the real git untouched, so scenes built or run side by side on threads each
+#: stall only their own calls.
+_DISPATCH_SHIM = """#!/bin/sh
+d=$(pwd -P); cfg=
+while :; do
+  [ -f "$d/git-shim-cfg" ] && { cfg="$d/git-shim-cfg"; break; }
+  [ "$d" = / ] && break
+  d=$(dirname "$d")
+done
+[ -z "$cfg" ] && exec "{real}" "$@"
+. "$cfg"
+n=$(( $(cat "$state/count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$state/count"
+ran=0; [ -e "$flag" ] && ran=1
+printf '%s %s %s\\n' "$n" "$ran" "$*" >> "$state/calls.log"
+stall() {{ echo "$$" >> "$state/stalls.pids"; exec sleep {sleep}; }}
+[ "$n" = "$stall_at" ] && stall
+for a in "$@"; do [ -n "$stall_every" ] && [ "$a" = "$stall_every" ] && stall; done
+exec "{real}" "$@"
+"""
+
+
+@pytest.fixture(scope="module")
+def dispatch_shim(tmp_path_factory):
+    """The census scenes' shared sleeping `git`, first on `PATH` for this module's census tests."""
+    real = shutil.which("git")
+    assert real is not None
+    bin_dir = tmp_path_factory.mktemp("dispatch-bin")
+    shim = bin_dir / "git"
+    shim.write_text(_DISPATCH_SHIM.replace("{{", "{").replace("}}", "}")
+                    .replace("{real}", real).replace("{sleep}", str(SHIM_SLEEP)), encoding="utf-8")
+    shim.chmod(0o755)
+    patch = pytest.MonkeyPatch()
+    patch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    yield
+    patch.undo()
+
+
+def _dispatch_cfg(at: Path, *, stall_at: int = 0, stall_every: str = "", flag: Path | None = None
+                  ) -> _Shim:
+    """Configure the shared dispatch shim for the scene under `at`: it stalls the `stall_at`-th
+    git call, and every call carrying `stall_every` as an argument (`0` / `""`: none)."""
+    state = at / "git-shim"
+    state.mkdir()
+    (at / "git-shim-cfg").write_text(
+        f"state='{state}'\nstall_at={stall_at}\nstall_every='{stall_every}'\n"
+        f"flag='{flag or at / 'no-flag'}'\n", encoding="utf-8")
+    return _Shim(log=state / "calls.log", pids=state / "stalls.pids")
+
+
+def _census_run(at: Path, *, undo: bool, stall_at: int = 0) -> tuple[Any, tuple[str, Any], _Shim]:
+    """One `_census_scene` tick under `_tick`'s deadline, through the shared dispatch shim
+    configured to stall this scene's `stall_at`-th git call (`0`: none)."""
     sc = _census_scene(at, undo=undo)
-    with monkeypatch.context() as patch:
-        shim = _shim_git(at / "git-shim", patch, stall_at=stall_at, flag=at / "agent-ran")
-        got = _tick(sc, shim=shim, what=f"git call #{stall_at}" if stall_at else "the census")
+    shim = _dispatch_cfg(at, stall_at=stall_at, flag=at / "agent-ran")
+    got = _tick(sc, shim=shim, what=f"git call #{stall_at}" if stall_at else "the census")
     return sc, got, shim
 
 
-def _stalled_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, window: list, subcommand: str,
-                   *, undo: bool) -> Any:
-    """For each call in `window` (the census's) running `subcommand`, a fresh census scene whose
-    shim stalls exactly that call, yielded as `(where, ran, sc, got)` once the tick is back. The
-    stalled run's own log must show the same subcommand at that ordinal (the calls did not
-    diverge from the census, so the stall is where the census says)."""
-    picked = [(n, ran, args) for n, ran, args in window if _subcommand(args) == subcommand]
-    assert picked, f"the scene never reached a git {subcommand}: {window}"
-    for n, ran, args in picked:
+@pytest.fixture(scope="module")
+def tick_census(dispatch_shim, tmp_path_factory):
+    """The unstalled census tick, run once: its log is every parametrized case's window."""
+    return _census_run(tmp_path_factory.mktemp("tick-census"), undo=False)
+
+
+@pytest.fixture(scope="module")
+def undo_census(dispatch_shim, tmp_path_factory):
+    """The unstalled fault-undo census tick, run once."""
+    return _census_run(tmp_path_factory.mktemp("undo-census"), undo=True)
+
+
+_TICK_SUBCOMMANDS = ["rev-parse", "ls-tree", "cat-file", "status", "diff", "checkout", "ls-files"]
+_UNDO_SUBCOMMANDS = ["rev-parse", "reset", "status", "ls-tree", "diff", "checkout", "ls-files"]
+
+
+def _stall_every_call(root: Path, census: Any, subcommands: list[str], *, undo: bool) -> dict:
+    """For each of `subcommands`, each call in the census's window running it, a fresh census
+    scene whose shim stalls exactly that call: `{subcommand: [(where, ran, sc, got), ...]}`, or the
+    exception a scene raised in place of its tuple. Every scene waits out its own bound, so they
+    run side by side on threads (one after another the bounds would add up, and under `--dist
+    loadfile` this file is one worker's serial time). Each stalled run's own log must show the
+    same subcommand at that ordinal (the calls did not diverge from the census, so the stall is
+    where the census says)."""
+    calls = census[2].calls()
+    if undo:
+        window = [call for call in calls if call[1]]
+    else:
+        window = calls[1:[_subcommand(args) for _n, _ran, args in calls].index("add")]
+    jobs = [(sub, call) for sub in subcommands for call in window if _subcommand(call[2]) == sub]
+
+    def one(job):
+        sub, (n, ran, args) = job
         where = f"git call #{n} ({' '.join(args)[:120]})"
-        sc, got, shim = _census_run(tmp_path / f"stall-{n}", monkeypatch, undo=undo, stall_at=n)
-        calls = shim.calls()
-        assert len(calls) >= n, f"{where}: the stalled run made only {len(calls)} calls"
-        assert _subcommand(calls[n - 1][2]) == subcommand, f"{where}: diverged, {calls[n - 1]}"
-        yield where, ran, sc, got
+        try:
+            sc, got, shim = _census_run(root / f"stall-{n}", undo=undo, stall_at=n)
+            seen = shim.calls()
+            assert len(seen) >= n, f"{where}: the stalled run made only {len(seen)} calls"
+            assert _subcommand(seen[n - 1][2]) == sub, f"{where}: diverged, {seen[n - 1]}"
+            return sub, (where, ran, sc, got)
+        except BaseException as e:  # noqa: BLE001 — re-raised in the test that owns `sub`
+            return sub, e
+
+    out: dict = {sub: [] for sub in subcommands}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for sub, result in pool.map(one, jobs):
+            out[sub].append(result)
+    return out
 
 
-@pytest.mark.parametrize("subcommand",
-                         ["rev-parse", "ls-tree", "cat-file", "status", "diff", "checkout",
-                          "ls-files"])
+@pytest.fixture(scope="module")
+def tick_stalls(tick_census, tmp_path_factory):
+    """Every pre-commit call of the census tick stalled alone, all run together once."""
+    return _stall_every_call(tmp_path_factory.mktemp("tick-stalls"), tick_census,
+                             _TICK_SUBCOMMANDS, undo=False)
+
+
+@pytest.fixture(scope="module")
+def undo_stalls(undo_census, tmp_path_factory):
+    """Every call of the fault-undo census stalled alone, all run together once."""
+    return _stall_every_call(tmp_path_factory.mktemp("undo-stalls"), undo_census,
+                             _UNDO_SUBCOMMANDS, undo=True)
+
+
+def _stalled_calls(stalls: dict, subcommand: str, census_log: list) -> list:
+    """The `(where, ran, sc, got)` of each stalled call running `subcommand`; an exception a
+    scene raised is raised here, in the test that owns the subcommand."""
+    results = stalls[subcommand]
+    assert results, f"the scene never reached a git {subcommand}: {census_log}"
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
+
+
+@pytest.mark.parametrize("subcommand", _TICK_SUBCOMMANDS)
 def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
-    tmp_path, monkeypatch, subcommand,
+    tick_census, tick_stalls, subcommand,
 ):
     """H1. A census tick (nothing stalled: the positive control) commits `PLANTED` after a repair
     pass; its shim's log lists every git call it made. Every call running `subcommand` after the
@@ -831,7 +954,7 @@ def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
 
     Catches: a path whose first read is bounded and whose later ones are not (x1), a pre-agent
     read left unbounded, a settle restore or report cross-check left unbounded."""
-    sc, got, shim = _census_run(tmp_path / "census", monkeypatch, undo=False)
+    sc, got, shim = tick_census
     assert got == ("rc", 0), got
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
     assert sc.repair.spawned == 1
@@ -841,8 +964,7 @@ def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
     assert "add" in subcommands, census
 
     window = census[1:subcommands.index("add")]
-    for where, ran, stalled, outcome in _stalled_calls(tmp_path, monkeypatch, window, subcommand,
-                                                       undo=False):
+    for where, ran, stalled, outcome in _stalled_calls(tick_stalls, subcommand, window):
         result, exc = outcome
         assert result == "raised", f"{where}: {outcome}"
         assert type(exc) is drain.GitProbeError, f"{where}: {exc!r}"
@@ -854,11 +976,9 @@ def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
             assert stalled.curator.calls == [], f"{where}: the agent ran past a failed read"
 
 
-@pytest.mark.parametrize("subcommand",
-                         ["rev-parse", "reset", "status", "ls-tree", "diff", "checkout",
-                          "ls-files"])
+@pytest.mark.parametrize("subcommand", _UNDO_SUBCOMMANDS)
 def test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_routing(
-    tmp_path, monkeypatch, subcommand,
+    undo_census, undo_stalls, subcommand,
 ):
     """H1, the fault undo. A census tick whose agent raises `AuthorError` after its edits (the
     positive control: it retires, rc 2, `f1` bumped, recorded stuck under `AuthorError`); every
@@ -868,14 +988,13 @@ def test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_
 
     Catches: an undo step left unbounded (the tick hangs) or one whose `TimeoutExpired` replaces
     the fault being unwound (x3)."""
-    sc, got, shim = _census_run(tmp_path / "census", monkeypatch, undo=True)
+    sc, got, shim = undo_census
     assert got == ("rc", 2), got
     assert sc.pending_by_id()["f1"].get("attempts") == 1
     assert _stuck_classes(sc) == ["AuthorError"]
 
     window = [call for call in shim.calls() if call[1]]
-    for where, _ran, stalled, outcome in _stalled_calls(tmp_path, monkeypatch, window, subcommand,
-                                                        undo=True):
+    for where, _ran, stalled, outcome in _stalled_calls(undo_stalls, subcommand, window):
         assert outcome == ("rc", 2), f"{where}: {outcome}"
         assert stalled.pending_by_id()["f1"].get("attempts") == 1, where
         assert _stuck_classes(stalled) == ["AuthorError"], where

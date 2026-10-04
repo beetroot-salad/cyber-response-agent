@@ -988,29 +988,14 @@ def test_an_absent_top_and_an_empty_top_are_told_apart(scratch, how):
 BELOW_SLASH = "".join(map(chr, range(1, ord("/"))))
 
 
-@pytest.mark.parametrize("prefix", ["", "p"], ids=["root", "under-p"])
-@pytest.mark.parametrize("sibling", ["a b", "a!b", "a+b", "a,b", "a-b", "a.b", "a.md", "a\x01b",
-                                     "a\tb", "a\x1fb"])
-def test_list_tree_sorts_by_path_parts_not_by_the_joined_string(scratch, prefix, sibling):
-    """A folder `a/` holding `b` sorts `a`, `a/b`, then a file beside it whose name continues
-    `a` with a character below `/`. That is path-parts order; plain string order puts the file
-    before `a/b`. At the root and under `p`."""
-    base = scratch.root / prefix if prefix else scratch.root
-    put_plain(base / "a" / "b")
-    put_plain(base / sibling)
-    names = ["a", "a/b", sibling]
-    assert sorted(names) != names, "the row must tell path-parts order from string order"
-    with _io.bind(scratch.root) as bound:
-        got = list_tree(bound.under(prefix) if prefix else bound, 2)
-    assert_tree(got, {"a": DIR, "a/b": FILE, sibling: FILE})
-
-
 @pytest.mark.parametrize("how", BINDERS)
 @pytest.mark.parametrize("prefix", ["", "p"], ids=["root", "under-p"])
 def test_list_tree_sorts_every_character_below_the_separator_in_one_listing(scratch, prefix, how):
     """Every character below `/` at once, beside `a/b`: `a` and `a/b` first, then the siblings
     in code-point order. A sort key that stands any one character in for the separator puts
-    some sibling on the wrong side of `a/b`."""
+    some sibling on the wrong side of `a/b`. (This one listing subsumes the one-sibling-at-a-time
+    rows it replaced: a folder `a/` holding `b` sorts `a`, `a/b`, then the file, where plain
+    string order puts the file before `a/b`.)"""
     base = scratch.root / prefix if prefix else scratch.root
     put_plain(base / "a" / "b")
     siblings = [f"a{c}b" for c in BELOW_SLASH] + ["a.md"]
