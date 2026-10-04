@@ -24,7 +24,7 @@ What that ordering buys, and what every test here asserts in its own words:
 * A denied call leaves NO evidence row — full stop, not "when well-formed". The narrowing
   the earlier ordering forced onto every no-evidence-row obligation is WITHDRAWN.
   AMENDED BY #860: "evidence row" means a row a call that REACHED a system wrote. A denied
-  call now leaves exactly one `∅.denied` SENTINEL row (`record_query.DENIED_QUERY_ID`) —
+  call now leaves exactly one `∅.denied` SENTINEL row (`_query_rules.DENIED_QUERY_ID`) —
   writer-only, split onto `JoinedLead.sentinels` and never `.queries`, partitioned out of
   every learning-loop router by its `∅.` prefix like the repeat trip and the shim failure
   before it — so the offline judge can see that the lead tried and was refused. It consumes

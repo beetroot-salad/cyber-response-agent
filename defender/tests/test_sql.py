@@ -1,4 +1,4 @@
-"""Tests for the defender-sql aggregation shim (scripts/gather_tools/sql.py).
+"""Tests for the defender-sql aggregation shim (runtime/sql_engine/sql.py).
 
 Pins two contracts:
 

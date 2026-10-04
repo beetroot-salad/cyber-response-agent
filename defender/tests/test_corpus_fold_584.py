@@ -60,9 +60,6 @@ from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = WORKSPACE_ROOT / "defender"
-ENV_RETRIEVE = DEFENDER / "scripts" / "lessons" / "lessons_env_retrieve.py"
-
-
 
 
 def _corpus_of(tmp_path: Path, *stems: str, name: str = "lessons") -> Path:

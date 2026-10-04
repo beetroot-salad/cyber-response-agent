@@ -40,7 +40,7 @@ implementation that spells it otherwise makes `check_binds` skip the concept sil
     deliberately holds `""` for both
     — so O1/O3's replay oracle drives the production predicate over a recorded run with no
     live agent (`repeat_trip_predicate_seam`). It normalises its incoming `params` to the
-    STORED form (`_json_safe_params`, then `record_query._request_key`) before keying, so the
+    STORED form (`_json_safe_params`, then `_query_rules._request_key`) before keying, so the
     live guard and the replay oracle are literally one function over one input shape (F-B,
     §7 auto). It counts only rows THE GUARD COULD ITSELF HAVE REFUSED — rows written at or
     below M2. A row written ABOVE M2 is never an occurrence, live or on replay, and there are
@@ -660,7 +660,7 @@ def test_repeat_trip_predicate_seam(tmp_path):
     """repeat_trip_predicate_seam — an IMPORTABLE predicate `repeat_trip` over queries-table
     ROWS, keyed (lead_id, system, verb, canonical(params)) with threshold N, so O1/O3's replay
     oracle drives the production predicate over a recorded run with no live agent. It reuses
-    `record_query._request_key` (never a second canonicalizer), returns None below the
+    `_query_rules._request_key` (never a second canonicalizer), returns None below the
     threshold and a `RepeatTrip` naming the earliest matching seq at it, and `REPEAT_THRESHOLD`
     is the module constant N = 3 — one N for EVERY system, with no per-system override: a
     second (system, verb) pair trips at the same occurrence as the first."""

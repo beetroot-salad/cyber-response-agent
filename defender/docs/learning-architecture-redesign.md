@@ -310,7 +310,7 @@ validator already know how to do.
 with `??`, plus the open hypothesis set — so a lesson declares the pattern it applies to and
 matching is mechanical, fewer slots matching more. This is assembly: the invlang advisory
 verb already does frontier-keyed recall (signature anchor plus open hypothesis names), and
-`scripts/lessons/lessons_env_retrieve.py` already matches by slot-wise selector containment,
+`lessons_env_retrieve.py` already matches by slot-wise selector containment,
 `*` and fewer-slots-matching-more included.
 
 Three gaps close it. The advisory recalls precedent *cases*; lessons need selectors and

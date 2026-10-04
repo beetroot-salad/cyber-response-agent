@@ -18,6 +18,12 @@ else
 fi
 # The engine runs as a module: this checkout's root goes first on PYTHONPATH (a foreign checkout
 # named there never answers for this one), and `-P` keeps the working directory — the run
-# folder the model writes into — off sys.path.
-PYTHONPATH="$(dirname "$DEFENDER")${PYTHONPATH:+:$PYTHONPATH}" \
+# folder the model writes into — off sys.path. The root is the parent of the tree's REAL
+# folder, so a DEFENDER_DIR spelled through a link named otherwise still finds `defender`; a
+# DEFENDER_DIR naming no directory is refused, never answered from some other tree.
+ROOT="$(cd -P -- "$DEFENDER" 2>/dev/null && cd .. && pwd)" || {
+    echo "defender-sql: DEFENDER_DIR names no directory: $DEFENDER" >&2
+    exit 2
+}
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
     exec "$PY" -P -m defender.runtime.sql_engine.sql "$@"

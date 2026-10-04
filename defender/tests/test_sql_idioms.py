@@ -7,11 +7,12 @@ Errors and then reports an absence it never established.
 
 These guards were written for a judge pipeline that no longer exists and were deleted
 whole with it (`e9e11a48`, #922); 20 of the 23 were never about the judge at all, they
-were about `scripts/gather_tools/sql.py`, which is still the lead's tool. This file is
-those 20, restored against the surfaces that survive and re-driven as a REAL subprocess:
-`sys.executable sql.py '<query>'` with the payload on stdin is what a lead's
-`cat payload.json | defender-sql '...'` actually does, so the exit code, the stdout JSON
-and the stderr hint are all observed the way the lead observes them. `test_sql.py` keeps
+were about the sql engine (`runtime/sql_engine/sql.py`), which is still the lead's tool.
+This file is those 20, restored against the surfaces that survive and re-driven as a REAL
+subprocess: `sys.executable -P -m defender.runtime.sql_engine.sql '<query>'` with the
+payload on stdin is what a lead's `cat payload.json | defender-sql '...'` actually does, so
+the exit code, the stdout JSON and the stderr hint are all observed the way the lead observes
+them. `test_sql.py` keeps
 the in-process harness for the internals (sandbox, column disambiguation); nothing here
 monkeypatches anything.
 

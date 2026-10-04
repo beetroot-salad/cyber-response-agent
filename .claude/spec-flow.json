@@ -26,7 +26,8 @@
       "defender/scripts",
       "defender/run.py",
       "defender/_venv.py",
-      "defender/_query_rules.py"
+      "defender/_query_rules.py",
+      "defender/_pricing.py"
     ],
     "entrypointStems": [
       "loop",

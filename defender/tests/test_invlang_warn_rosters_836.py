@@ -451,7 +451,7 @@ def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path)
     gate-ALLOWED to run write-shaped SQL, because its extractor is `OPENS_NOTHING` and the
     gate never parses the SQL argument. What actually refuses is duckdb's own
     `enable_external_access=false` + `lock_configuration=true` inside
-    `scripts/gather_tools/sql.py` — a module the obligation never named. A test that stopped
+    `runtime/sql_engine/sql.py` — a module the obligation never named. A test that stopped
     at `decide_bash` would pin a boundary that is not where the safety lives, so the SQL lane
     is EXECUTED for real and the artifact checked on disk afterwards.
 

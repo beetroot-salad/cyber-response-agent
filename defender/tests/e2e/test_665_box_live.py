@@ -310,10 +310,10 @@ def test_pinned_lesson_scripts_reject_arbitrary_argv_read(tmp_path):
         # frontmatter pattern), exits 0, and returns its corpus content — so the hostile-argv
         # negative below only passes once the script has DEMONSTRABLY executed (a bare no-leak
         # check passes vacuously if the script errored on a bad path and printed nothing).
-        allowed = _run(box, "python3 defender/scripts/lessons/defender-lessons .", cwd=REPO_ROOT)
+        allowed = _run(box, "defender/bin/defender-lessons .", cwd=REPO_ROOT)
         assert allowed.rc == 0, "the pinned lesson script did not run on its intended operand (positive control)"
         assert allowed.out, "the pinned lesson script returned no corpus content on its intended operand"
-        hostile = _run(box, "python3 defender/scripts/lessons/defender-lessons /etc/passwd",
+        hostile = _run(box, "defender/bin/defender-lessons /etc/passwd",
                        cwd=REPO_ROOT)
         assert b"root:" not in hostile.out, "a pinned lesson script leaked an arbitrary file via argv"
     finally:
@@ -330,10 +330,10 @@ def test_pinned_lesson_script_argv_cannot_redirect_read_target(tmp_path):
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        allowed = _run(box, "python3 defender/scripts/lessons/defender-lessons .", cwd=REPO_ROOT)
+        allowed = _run(box, "defender/bin/defender-lessons .", cwd=REPO_ROOT)
         assert allowed.rc == 0, "the pinned lesson script did not run on its intended operand (positive control)"
         assert allowed.out, "the pinned lesson script returned no corpus content on its intended operand"
-        res = _run(box, "python3 defender/scripts/lessons/defender-lessons ../../../etc/shadow",
+        res = _run(box, "defender/bin/defender-lessons ../../../etc/shadow",
                    cwd=REPO_ROOT)
         leaked = b"root:" in res.out or b"encrypted" in res.out
         assert not leaked, \
