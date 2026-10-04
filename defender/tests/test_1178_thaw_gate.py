@@ -14,14 +14,19 @@ Three groups, each driven through a seam, never `monkeypatch.setattr`:
   the re-freeze returns, is what the gate judges. A thaw that cannot be entered runs no agent
   and commits nothing. With the thaw injected, a sandboxed box naming no container commits:
   nothing else in the lane touches the box. Both seams default to the real `runtime.box.thawed`,
-  which refuses a box it cannot show running before the agent is reached.
+  which refuses a box it cannot show running before the agent is reached. The host's steps
+  before the agent (the baseline of strays, the minted drafts' identities) are taken frozen:
+  what the box does once thawed is judged against them. Over a `docker` shim on `PATH`, the
+  default seams of both lanes, of `_drain_lead_author` and of the production
+  `lead_author_drain` make exactly the proven freezes and thaws, and leave the box paused.
 - The plain-file rule (D4''): every non-deletion record the gate admits must be placed by a held
   mount and be a plain, single-name regular file there, by a no-follow stat (it reads no
   content). A symlink, a hard link or a FIFO at an address no content rule reads (a catalog
   draft, a system-skill draft, `queries/<sys>/README.md`, each also one folder deeper; the
   pitfalls lane's `execution.md`) is refused with HEAD unchanged; a plain file commits, an
-  executable one at 100755, and so does a plain file that is not UTF-8. A `tree_for` that
-  places no path refuses rather than falling back on the plain path.
+  executable one at 100755, and so does a plain file that is not UTF-8 or is larger than any
+  read takes. A `tree_for` that places no path refuses rather than falling back on the plain
+  path.
 
 `pause_box`/`thawed` themselves are in `test_1178_box_pause.py`; the real-box row in
 `test_1178_frozen_box.py`.
@@ -43,8 +48,9 @@ from typing import Any
 import pytest
 
 from defender import _git
+from defender._io import READ_LIMIT
 from defender._run_paths import RunPaths
-from defender.learning.core import drains, persist
+from defender.learning.core import drains, markers, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
@@ -62,7 +68,15 @@ from defender.tests._declared870 import (
 )
 from defender.tests._lead_author_1134 import clear, lane_tree_for, lead_trees, write
 from defender.tests._repo import query_template, seed_skills_repo
-from defender.tests.test_1134_lead_author_handle import ELASTIC_LEAD, _deps, _run_dir, _worktree
+from defender.tests._spec791 import SpecBranch, loop_paths, noop_scrub, noop_stop_box
+from defender.tests.test_1134_lead_author_handle import (
+    ELASTIC_LEAD,
+    _deps,
+    _run_dir,
+    _worktree,
+    draft_of,
+)
+from defender.tests.test_1178_box_pause import PAUSED, THAWED, DockerShim
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -217,13 +231,16 @@ class Thaw:
     """The injected `thaw` seam: `thaw(box)` returns a context manager. It records each box it
     is handed, logs `("enter",)` and `("exit", <HEAD sha as the thaw returns>)` into the drive's
     shared log, and optionally raises `fault` on the way in (the box could not be shown
-    running) or runs `on_exit` on the way out, INSIDE the thaw, before it returns: the box's
-    last writes before the re-freeze took hold."""
+    running), runs `on_enter` once it is in (the box's first writes, once running), or runs
+    `on_exit` on the way out, INSIDE the thaw, before it returns: the box's last writes before
+    the re-freeze took hold."""
 
-    def __init__(self, log: list, repo: Path, *, on_exit: Callable[[], object] | None = None,
+    def __init__(self, log: list, repo: Path, *, on_enter: Callable[[], object] | None = None,
+                 on_exit: Callable[[], object] | None = None,
                  fault: BaseException | None = None) -> None:
         self.log = log
         self.repo = repo
+        self.on_enter = on_enter
         self.on_exit = on_exit
         self.fault = fault
         self.boxes: list[Any] = []
@@ -237,6 +254,8 @@ class Thaw:
         self.log.append(("enter",))
         if self.fault is not None:
             raise self.fault
+        if self.on_enter is not None:
+            self.on_enter()
         try:
             yield
         finally:
@@ -358,8 +377,14 @@ def _clear(at: Path) -> None:
 def _plant(at: Path, text: str | bytes, kind: str, outside: Path) -> None:
     """`text` at `at` as a plain file (`plain`; bytes are written as they are), an executable
     plain file (`exec`, 0755), a symlink to a file outside the repo holding it (`link`) or a
-    hard link to one (`hardlink`); or a FIFO at `at` (`fifo`, `text` unused)."""
+    hard link to one (`hardlink`); a FIFO at `at` (`fifo`, `text` unused); or a sparse plain
+    file of `BIG_SIZE` bytes that starts with `text` (`big`): larger than any read takes."""
     _clear(at)
+    if kind == "big":
+        at.parent.mkdir(parents=True, exist_ok=True)
+        at.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
+        os.truncate(at, BIG_SIZE)
+        return
     if kind in ("plain", "exec"):
         if isinstance(text, bytes):
             at.parent.mkdir(parents=True, exist_ok=True)
@@ -383,20 +408,25 @@ def _plant(at: Path, text: str | bytes, kind: str, outside: Path) -> None:
         raise ValueError(kind)
 
 
-def _drive_lead(s: LeadScene, log: list, *, name: str, text: str | bytes, kind: str = "plain",
-                thaw: Thaw | None = None, box: Any = None,
-                more: dict[str, str] | None = None) -> tuple[tuple, LeadAuthorSpawn]:
+def _drive_lead(  # noqa: PLR0913 — one drive, every seam a row varies
+        s: LeadScene, log: list, *, name: str, text: str | bytes, kind: str = "plain",
+        thaw: Thaw | None = None, box: Any = None, more: dict[str, str] | None = None,
+        on_agent: Callable[[], object] | None = None,
+) -> tuple[tuple, LeadAuthorSpawn]:
     """Drive `lead_author.run` over the scene: the agent (rc 0) leaves `text` at `name` as
     `kind`, and each of `more` (`{name: text}`) as a plain file, logging `("agent",)`. The
     lane's `tree_for` logs each path asked of it, and its pre-agent host seams (`extract`,
     `discover_system_drafts`, `build_handoff`) log `("host", name)`, into `log`; with `thaw`,
-    it is injected as `deps.thaw`. Returns the outcome and the spawn."""
+    it is injected as `deps.thaw`. `on_agent` runs as the agent's last act. Returns the outcome
+    and the spawn."""
 
     def leave(_run_dir: Path) -> None:
         _plant(s.at(name), text, kind, s.tmp / "outside")
         for other, other_text in (more or {}).items():
             _plant(s.at(other), other_text, "plain", s.tmp / "outside")
         log.append(("agent",))
+        if on_agent is not None:
+            on_agent()
 
     spawn = LeadAuthorSpawn(leave)
     with lead_trees(s.paths) as trees:
@@ -601,19 +631,23 @@ def _queued(s: PitfallsScene) -> list[str]:
     return sorted(r["pitfall_id"] for r in persist.read_pitfalls(s.paths))
 
 
-def _drive_pitfalls(s: PitfallsScene, log: list, *, rel: str, text: str | bytes,
-                    kind: str = "plain", thaw: Thaw | None = None, box: Any = None,
-                    more: dict[str, str] | None = None) -> tuple[tuple, Spawn]:
+def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
+        s: PitfallsScene, log: list, *, rel: str, text: str | bytes, kind: str = "plain",
+        thaw: Thaw | None = None, box: Any = None, more: dict[str, str] | None = None,
+        on_agent: Callable[[], object] | None = None,
+) -> tuple[tuple, Spawn]:
     """Drive `run_pitfalls` over the scene: the curator (rc 0) leaves `text` at `rel` as `kind`,
     and each of `more` (`{rel: text}`) as a plain file, logging `("agent",)`. The trees log the
     lane's first host step and each `tree_for` call into `log`; with `thaw`, it is passed as
-    `thaw=`. Returns the outcome and the spawn."""
+    `thaw=`. `on_agent` runs as the curator's last act. Returns the outcome and the spawn."""
 
     def curate(_root: Path) -> None:
         _plant(s.at(rel), text, kind, s.tmp / "outside")
         for other, other_text in (more or {}).items():
             _plant(s.at(other), other_text, "plain", s.tmp / "outside")
         log.append(("agent",))
+        if on_agent is not None:
+            on_agent()
 
     spawn = Spawn(curate)
     with lead_trees(s.paths) as trees:
@@ -778,6 +812,9 @@ REFUSED_KINDS = ("link", "hardlink", "fifo")
 #: Plain-file bytes that are not UTF-8: Latin-1 `é`, and a stray `0xff 0xfe`.
 NOT_UTF8 = b"# notes\n\n- caf\xe9 \xff\xfe not utf-8\n"
 
+#: A plain file larger than any held read takes (`_io.READ_LIMIT`), planted sparse.
+BIG_SIZE = READ_LIMIT + 2**20
+
 
 def _assert_plain_file_rule(got: tuple, repo: Path, head: str, rel: str, text: str,
                             kind: str) -> None:
@@ -936,3 +973,247 @@ def test_every_pitfalls_record_the_gate_admits_is_placed_through_the_held_mount(
     for committed, text in ((REDUCER_REL, REDUCER_VETTED), (EXECUTION_REL, EXECUTION_TEXT)):
         assert _git.git_show_file(s.repo, "HEAD", committed) == text, committed
         assert str(s.repo / committed) in asked, f"{committed} was committed unread"
+
+
+# ---------------------------------------------------------------------------------------
+# The host's steps before the agent run with the box frozen: the baseline and the mint capture
+# ---------------------------------------------------------------------------------------
+
+#: A committed file outside `skills/`: the box's write there once thawed is a stray only if the
+#: lane took its baseline of strays before the thaw.
+STRAY_REL = "defender/notes/stray1178.md"
+STRAY_EDIT = "rewritten by the box\n"
+
+
+def _commit_stray(repo: Path) -> str:
+    """`STRAY_REL` committed with its first text; the new HEAD."""
+    write(repo / STRAY_REL, "committed\n")
+    return commit_all(repo, "a file outside skills")
+
+
+@pytest.mark.parametrize("when", ["once-thawed", "before-the-run"])
+def test_a_lead_author_stray_the_box_writes_once_thawed_is_refused(tmp_path: Path, when: str):
+    """The box rewrites a committed file outside `skills/` as soon as it is thawed: the gate
+    refuses the claim ("changed files outside", naming it), HEAD unchanged, nothing staged. The
+    lane's baseline of strays was taken while the box was frozen, before the thaw, so the
+    rewrite is new. Control: the same rewrite already standing before the run is in the
+    baseline, and the claim commits (without it)."""
+    s = _lead_scene(tmp_path)
+    s = dataclasses.replace(s, head=_commit_stray(s.repo))
+    stray = s.repo / STRAY_REL
+    log: list = []
+    if when == "before-the-run":
+        write(stray, STRAY_EDIT)
+    thaw = Thaw(log, s.repo,
+                on_enter=(lambda: write(stray, STRAY_EDIT)) if when == "once-thawed" else None)
+    got = _run_lead(s, log, name=AGENT_NAME, text=VETTED, thaw=thaw, box=object())
+    if when == "before-the-run":
+        assert got == ("returned", 0), got
+        assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+        assert _git.git_show_file(s.repo, "HEAD", STRAY_REL) == "committed\n"
+        return
+    assert got[:2] == ("raised", "LeadAuthorError"), got
+    assert "changed files outside" in got[2], got
+    assert STRAY_REL in got[2], got
+    assert _git.git_head_sha(s.repo) == s.head
+    assert _nothing_staged(s.repo)
+
+
+@pytest.mark.parametrize("when", ["once-thawed", "before-the-run"])
+def test_a_pitfalls_stray_the_box_writes_once_thawed_is_refused(
+        tmp_path: Path, monkeypatch, when: str):
+    """As the lead-author row, for the pitfalls tick: its baseline of strays is taken frozen,
+    before the thaw."""
+    s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
+    s = dataclasses.replace(s, head=_commit_stray(s.repo))
+    stray = s.repo / STRAY_REL
+    log: list = []
+    if when == "before-the-run":
+        write(stray, STRAY_EDIT)
+    thaw = Thaw(log, s.repo,
+                on_enter=(lambda: write(stray, STRAY_EDIT)) if when == "once-thawed" else None)
+    got = _run_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, thaw=thaw, box=object())
+    if when == "before-the-run":
+        assert got == ("returned", 0), got
+        assert _git.git_show_file(s.repo, "HEAD", REDUCER_REL) == REDUCER_VETTED
+        assert _git.git_show_file(s.repo, "HEAD", STRAY_REL) == "committed\n"
+        return
+    assert got[:2] == ("raised", "LeadAuthorError"), got
+    assert "changed files outside" in got[2], got
+    assert STRAY_REL in got[2], got
+    assert _git.git_head_sha(s.repo) == s.head
+    assert _nothing_staged(s.repo)
+
+
+@pytest.mark.parametrize("box_does", ["removes-it", "leaves-it"])
+def test_a_draft_minted_this_tick_that_the_box_removes_once_thawed_is_a_departure(
+        tmp_path: Path, box_does: str):
+    """The tick mints an untracked draft for the run's lead, then thaws the box, which removes
+    that draft at once. The identities the draft recorded were captured while the box was
+    frozen, before the thaw, so its departure is seen and refused (`LeadAuthorError`, "without
+    attributing it", naming the draft), HEAD unchanged. Control: the box leaves the draft, and
+    it is committed with the agent's file."""
+    s = _lead_scene(tmp_path)
+    minted_name, _text = draft_of(ELASTIC_LEAD)
+    minted = s.at(minted_name)
+    log: list = []
+
+    def on_enter() -> None:
+        assert minted.is_file(), "nothing was minted, so its departure is vacuous"
+        if box_does == "removes-it":
+            minted.unlink()
+
+    thaw = Thaw(log, s.repo, on_enter=on_enter)
+    got = _run_lead(s, log, name=AGENT_NAME, text=VETTED, thaw=thaw, box=object())
+    if box_does == "leaves-it":
+        assert got == ("returned", 0), got
+        assert _git.git_show_file(s.repo, "HEAD", s.rel(minted_name)) is not None
+        return
+    assert got[:2] == ("raised", "LeadAuthorError"), got
+    assert "without attributing it" in got[2], got
+    assert s.rel(minted_name) in got[2], got
+    assert _git.git_head_sha(s.repo) == s.head
+    assert _nothing_staged(s.repo)
+
+
+# ---------------------------------------------------------------------------------------
+# D4'': the plain-file rule stats, it never reads (a plain file past any read limit commits)
+# ---------------------------------------------------------------------------------------
+
+
+def _head_size(repo: Path, rel: str) -> tuple[str, int]:
+    """`(mode, size)` of the blob committed at `rel` in HEAD."""
+    entry = _git.git(["ls-tree", "-l", "HEAD", "--", rel], cwd=repo)  # lint-oracle: ok — reads what was committed; the oracle is the planted size
+    mode, _kind, _sha, size = entry.split("\t", 1)[0].split()
+    return mode, int(size)
+
+
+@pytest.mark.parametrize("name", ["elastic/_draft/b1178.md", "gather/queries/wazuh/README.md"],
+                         ids=["system-skill-draft", "catalog-readme"])
+def test_a_plain_lead_author_file_larger_than_any_read_commits(tmp_path: Path, name: str):
+    """The agent leaves a plain (sparse) file larger than `_io.READ_LIMIT` at an address no
+    content rule reads: it commits at 100644, at its full size. A plain-file rule that read the
+    file would refuse it as too large."""
+    s = _lead_scene(tmp_path)
+    got = _run_lead(s, [], name=name, text=b"# a large note\n", kind="big")
+    assert got == ("returned", 0), got
+    assert _head_size(s.repo, s.rel(name)) == ("100644", BIG_SIZE)
+
+
+def test_a_plain_execution_md_larger_than_any_read_commits(tmp_path: Path, monkeypatch):
+    s = _pitfalls_scene(tmp_path, monkeypatch, _system_rows())
+    got = _run_pitfalls(s, [], rel=EXECUTION_REL, text=EXECUTION_TEXT, kind="big")
+    assert got == ("returned", 0), got
+    assert _head_size(s.repo, EXECUTION_REL) == ("100644", BIG_SIZE)
+
+
+# ---------------------------------------------------------------------------------------
+# The default seams over a `docker` on PATH: nothing but the pause and each thaw asks it
+# ---------------------------------------------------------------------------------------
+
+
+def test_the_lead_author_default_seams_leave_the_box_frozen_after_the_commit(
+        tmp_path: Path, monkeypatch):
+    """`run(deps=<the lane's own thaw>, box=<the shim's container, paused as the drain left
+    it>)`: the shim logs exactly one proven thaw, the agent, one proven freeze, and nothing
+    after the commit; the box ends paused."""
+    s = _lead_scene(tmp_path)
+    shim = DockerShim(tmp_path, monkeypatch, state="paused")
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=shim.box(),
+                    on_agent=lambda: shim.mark("agent"))
+    assert got == ("returned", 0), got
+    assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+    assert shim.steps() == [*THAWED, "agent", *PAUSED]
+    assert shim.state() == "paused"
+
+
+def test_the_pitfalls_default_seams_leave_the_box_frozen_after_the_commit(
+        tmp_path: Path, monkeypatch):
+    s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
+    shim = DockerShim(tmp_path, monkeypatch, state="paused")
+    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=shim.box(),
+                        on_agent=lambda: shim.mark("curator"))
+    assert got == ("returned", 0), got
+    assert _git.git_show_file(s.repo, "HEAD", REDUCER_REL) == REDUCER_VETTED
+    assert shim.steps() == [*THAWED, "curator", *PAUSED]
+    assert shim.state() == "paused"
+
+
+def test_the_drains_default_seams_hold_the_box_frozen_except_around_each_agent(
+        tmp_path: Path, monkeypatch):
+    """`_drain_lead_author` with its default `pause`, serving one claim and one pitfalls tick
+    through the real lanes (their default thaws; only the spawns are faked), over the shim's
+    running container: the shim logs one proven freeze, then for each agent one proven thaw,
+    the agent and one proven freeze, and nothing else; the box ends paused, and both lanes
+    committed."""
+    s = _lead_scene(tmp_path)
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    write(s.paths.author_queue_dir / "case-0.json",
+          json.dumps({"case_id": "case-0", "run_dir": str(s.run_dir)}) + "\n")
+    shim = DockerShim(tmp_path, monkeypatch)
+
+    def author(_run_dir: Path) -> None:
+        write(s.at(AGENT_NAME), VETTED)
+        shim.mark("agent")
+
+    def curate(root: Path) -> None:
+        write(root / EXECUTION_REL, EXECUTION_TEXT)
+        shim.mark("curator")
+
+    lead_spawn, curator = LeadAuthorSpawn(author), Spawn(curate)
+
+    def run_lead(paths: LoopPaths, run_dir: Path, *, box: Any = None, on_done: Any) -> int:
+        with lead_trees(paths) as trees:
+            deps = _deps(paths, trees, lead_spawn, [ELASTIC_LEAD])
+            return lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
+                                   on_done=on_done)
+
+    def run_pitfalls(paths: LoopPaths, *, box: Any = None, on_curated: Any) -> int:
+        with lead_trees(paths) as trees:
+            return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=curator,
+                                                 box=box, on_curated=on_curated)
+
+    drains._drain_lead_author(s.paths, run_lead, run_pitfalls, box=shim.box())
+    assert lead_spawn.calls, "the lead-author claim never reached its agent"
+    assert curator.calls, "the pitfalls tick never reached its curator"
+    assert shim.steps() == [*PAUSED, *THAWED, "agent", *PAUSED, *THAWED, "curator", *PAUSED]
+    assert shim.state() == "paused"
+    assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+    assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == EXECUTION_TEXT
+
+
+def test_the_production_drain_freezes_its_box_before_it_serves(tmp_path: Path, monkeypatch):
+    """`lead_author_drain` as production wires it (its own `_drain_lead_author` call; only the
+    lanes, the branch and the box lifecycle injected), its box the shim's running container:
+    the shim logs one proven freeze before the claim is served and the pitfalls tick runs, and
+    nothing else; the box ends paused."""
+    paths = loop_paths(tmp_path)
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    markers.enqueue_case_for_curation("case-1", run_dir, paths)
+    shim = DockerShim(tmp_path, monkeypatch)
+    box = shim.box()
+    started: list[Any] = []
+
+    def start_box(request: Any, **_kw: Any) -> BoxExecutor:
+        started.append(request)
+        return box
+
+    def serve(_paths: LoopPaths, _run_dir: Path, *, box: Any = None, on_done: Any,
+              **_kw: Any) -> None:
+        shim.mark("serve")
+        on_done(None)
+
+    def curate(_paths: LoopPaths, *, box: Any = None, **_kw: Any) -> int:
+        shim.mark("pitfalls")
+        return 0
+
+    drains.lead_author_drain(
+        paths, run_lead_author=serve, run_pitfalls=curate,
+        branch=SpecBranch(tmp_path / "worktrees"), start_box=start_box,
+        stop_box=noop_stop_box, scrub=noop_scrub,
+    )
+    assert len(started) == 1, "the drain never started its box"
+    assert shim.steps() == [*PAUSED, "serve", "pitfalls"]
+    assert shim.state() == "paused"

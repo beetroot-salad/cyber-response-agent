@@ -18,15 +18,21 @@ re-freezes it on every exit. Both are driven over an injected docker seam (`Daem
   the body's exception through unchanged.
 - A seam that raises (`OSError`: no binary; `subprocess.TimeoutExpired`: a daemon that never
   answered) is a `BoxFault`, the systemic class a drain halts on.
+- A thaw whose proof fails (or whose seam raises during it) may have left the box running, so
+  it pauses the box again before the `BoxFault` propagates.
 - The default seam (the real docker) with a sandboxed box naming no container refuses, whether
-  or not a docker binary is on `PATH`.
+  or not a docker binary is on `PATH`; over a `docker` shim first on `PATH` (`DockerShim`) it
+  takes the status, never docker's exit code, as the proof.
 
 The lanes' wiring is in `test_1178_thaw_gate.py`; the real-box row in `test_1178_frozen_box.py`.
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -403,6 +409,30 @@ def test_a_seam_raise_before_the_body_is_a_fault_and_the_body_never_runs(kind: s
     assert ("body",) not in log, log
 
 
+@pytest.mark.parametrize("fault", [
+    pytest.param({"inspect_rc": 1}, id="inspect-refused"),
+    pytest.param({"on_unpause": "restarting"}, id="restarting"),
+    pytest.param({"raises": {"inspect#1": _seam_fault("OSError")}}, id="inspect-seam-OSError"),
+    pytest.param({"raises": {"inspect#1": _seam_fault("TimeoutExpired")}},
+                 id="inspect-seam-TimeoutExpired"),
+])
+def test_a_thaw_whose_proof_fails_freezes_the_box_again_before_it_raises(fault: dict):
+    """The unpause went out but its proof failed (the daemon will not give the status, the box
+    came back `restarting`, or the seam raised at the inspect): the box may be running, so a
+    `pause` follows the failed proof before the `BoxFault` propagates, and the body never runs.
+    Where the daemon answers, the box ends paused."""
+    log: list = []
+    daemon = Daemon(log, state="paused", **fault)
+    got = _caught(lambda: _hold(_sandboxed(), daemon, log))
+    assert isinstance(got, BoxFault), got
+    assert ("body",) not in log, log
+    steps = _steps(log)
+    assert steps[:2] == ["unpause", "inspect"], steps
+    assert "pause" in steps[2:], f"the box was left as the failed thaw left it: {steps}"
+    if "inspect_rc" not in fault:
+        assert daemon.state == "paused", daemon.state
+
+
 @pytest.mark.parametrize("body", ["returns", "raises"])
 @pytest.mark.parametrize("at", ["pause", "inspect#2"])
 @pytest.mark.parametrize("kind", ["OSError", "TimeoutExpired"])
@@ -451,3 +481,154 @@ def test_the_default_thaw_refuses_a_box_no_daemon_holds(docker_on_path: str):
     with pytest.raises(BoxFault), _thawed()(_absent_box()):
         log.append(("body",))
     assert log == [], "the body ran in a box that was never shown running"
+
+
+# ---------------------------------------------------------------------------------------
+# The default seam over a `docker` on PATH that answers as a daemon would
+# ---------------------------------------------------------------------------------------
+
+#: The shim's program: logs its argv (as `["docker", ...]`, one JSON list per line) and answers
+#: from the state file beside it, as `DockerShim` configured it.
+_SHIM = '''#!{python}
+import json, sys
+from pathlib import Path
+here = Path({here!r})
+cfg = json.loads((here / "config.json").read_text())
+argv = sys.argv[1:]
+with open(here / "argv.jsonl", "a") as f:
+    f.write(json.dumps(["docker", *argv]) + "\\n")
+verb = argv[0] if argv else ""
+state = (here / "state").read_text()
+if verb in ("pause", "unpause"):
+    if cfg[verb + "_takes"]:
+        (here / "state").write_text("paused" if verb == "pause" else "running")
+    sys.exit(cfg[verb + "_rc"])
+if verb == "inspect":
+    asked = " ".join(argv)
+    if ".State.Status" in asked:
+        print(state)
+    elif ".State.Paused" in asked or ".State.Running" in asked:
+        print("true")
+    else:
+        print("map[]")
+    sys.exit(0)
+sys.exit(1)
+'''
+
+
+class DockerShim:
+    """A `docker` executable put first on `PATH`, so the DEFAULT seam (`runtime.box._docker`, a
+    real subprocess) reaches it and nothing else. It logs every argv it is run with into a file,
+    and keeps one container's state: `state` to start with; a `pause` moves it to `paused` and an
+    `unpause` to `running` unless `<verb>_takes` is false, each exiting `<verb>_rc`; `inspect`
+    answers `.State.Status` from the state, and `.State.Paused`/`.State.Running` with `true`
+    whatever it is. `mark(label)` writes `[label]` into the same log, so a test's own steps
+    interleave with the docker calls."""
+
+    def __init__(self, tmp_path: Path, monkeypatch, *, state: str = "running",
+                 pause_rc: int = 0, unpause_rc: int = 0, pause_takes: bool = True,
+                 unpause_takes: bool = True) -> None:
+        self.dir = tmp_path / "docker-shim"
+        self.dir.mkdir()
+        self.name = f"defender-drain-shim1178-{uuid.uuid4().hex[:8]}"
+        (self.dir / "state").write_text(state)
+        (self.dir / "config.json").write_text(json.dumps({
+            "pause_rc": pause_rc, "unpause_rc": unpause_rc,
+            "pause_takes": pause_takes, "unpause_takes": unpause_takes,
+        }))
+        program = self.dir / "docker"
+        program.write_text(_SHIM.format(python=sys.executable, here=str(self.dir)))
+        program.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{self.dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        assert shutil.which("docker") == str(program)
+
+    def box(self) -> BoxExecutor:
+        """A sandboxed box naming the shim's container."""
+        return _sandboxed(self.name)
+
+    def mark(self, label: str) -> None:
+        with open(self.dir / "argv.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps([label]) + "\n")
+
+    def state(self) -> str:
+        return (self.dir / "state").read_text()
+
+    def calls(self) -> list[list[str]]:
+        log = self.dir / "argv.jsonl"
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text().splitlines() if line]
+
+    def steps(self) -> list[str]:
+        """The log as one sequence: each docker verb (an inspect of the status as
+        `inspect:status`, any other inspect as `inspect:other`), and each mark. Every docker call
+        must name the shim's container."""
+        out: list[str] = []
+        for argv in self.calls():
+            if argv[0] != "docker":
+                out.append(argv[0])
+                continue
+            assert self.name in argv, f"a docker call that does not name the box: {argv}"
+            verb = argv[1] if len(argv) > 1 else ""
+            if verb == "inspect":
+                verb += ":status" if any(".State.Status" in a for a in argv) else ":other"
+            out.append(verb)
+        return out
+
+
+#: One proven freeze, and one proven thaw, as the shim logs them.
+PAUSED = ["pause", "inspect:status"]
+THAWED = ["unpause", "inspect:status"]
+
+
+def test_the_default_pause_proves_the_freeze_by_the_status(tmp_path: Path, monkeypatch):
+    """Control: the pause takes; `pause_box` (default seam) returns, having asked the status,
+    and the box is paused."""
+    shim = DockerShim(tmp_path, monkeypatch)
+    _pause_box()(shim.box())
+    assert shim.steps() == PAUSED
+    assert shim.state() == "paused"
+
+
+def test_the_default_pause_refuses_a_pause_docker_claimed_but_the_status_denies(
+        tmp_path: Path, monkeypatch):
+    """`docker pause` exits 0 but the box is still `running`: `BoxFault`. Docker's rc is not the
+    proof; the status is."""
+    shim = DockerShim(tmp_path, monkeypatch, pause_takes=False)
+    with pytest.raises(BoxFault):
+        _pause_box()(shim.box())
+    assert "inspect:status" in shim.steps(), shim.steps()
+
+
+def test_the_default_pause_accepts_a_box_that_exited(tmp_path: Path, monkeypatch):
+    """`docker pause` exits 1 (the box is not running) and the status says `exited`: `pause_box`
+    returns, since a dead box writes nothing."""
+    shim = DockerShim(tmp_path, monkeypatch, state="exited", pause_rc=1, pause_takes=False)
+    _pause_box()(shim.box())
+    assert shim.steps() == PAUSED
+
+
+def test_the_default_thaw_runs_the_body_between_two_proofs(tmp_path: Path, monkeypatch):
+    """Control: the box starts paused; `thawed` (default seam) proves it running, runs the body,
+    and proves it paused again."""
+    shim = DockerShim(tmp_path, monkeypatch, state="paused")
+    with _thawed()(shim.box()):
+        shim.mark("body")
+    assert shim.steps() == [*THAWED, "body", *PAUSED]
+    assert shim.state() == "paused"
+
+
+def test_the_default_thaw_refuses_an_unpause_docker_claimed_but_the_status_denies(
+        tmp_path: Path, monkeypatch):
+    """`docker unpause` exits 0 but the box is still `paused`: `BoxFault`, and the body never
+    runs."""
+    shim = DockerShim(tmp_path, monkeypatch, state="paused", unpause_takes=False)
+    got = _caught(lambda: _hold_marked(shim))
+    assert isinstance(got, BoxFault), got
+    assert "body" not in shim.steps(), shim.steps()
+    assert shim.steps()[:2] == THAWED, shim.steps()
+
+
+def _hold_marked(shim: DockerShim) -> None:
+    with _thawed()(shim.box()):
+        shim.mark("body")
