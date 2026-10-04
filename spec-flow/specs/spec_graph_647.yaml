@@ -214,10 +214,6 @@ demands:
      discharged_by: test_no_module_outside_the_defender_package_imports_run_common,
      binds: ["run_common", "materialize_run_dir", "gather_only"]}
 
-  - {id: d25_gather_only_is_gone, kind: survival, form: test,
-     discharged_by: test_the_deleted_manual_gather_harness_leaves_no_dependent_behind,
-     binds: ["gather_only", "drives(gather_only->materialize_run_dir)"]}
-
   # --- Model-facing prose ---------------------------------------------------
   # NEGATIVE — paired positive control: d27_skill_delimiter_clause_survives.
   - {id: d26_no_live_model_facing_prose_names_a_producerless_mechanism, kind: negative, form: test,
@@ -835,8 +831,10 @@ gate:
        discharged_by: d24_no_caller_of_the_changed_builder_outside_defender}
     - {rule: R5, element: "drives(gather_only->materialize_run_dir)",
        witness: "The drive edge into the changed builder is removed; nothing may
-         be left behind that still drives the old contract.",
-       discharged_by: d25_gather_only_is_gone}
+         be left behind that still drives the old contract. (d25's own test was
+         removed by #1080's PR; gather_only imported run_common from outside
+         defender/, so d24 is what still catches a revived driver.)",
+       discharged_by: d24_no_caller_of_the_changed_builder_outside_defender}
     - {rule: R5, element: "run_common",
        witness: "After the deletion nothing outside defender/ imports
          run_common — a verifiable property that replaces the repo-wide caller
@@ -1113,8 +1111,6 @@ handoff:
        class: "removal-shaped — a repo sweep over a tree the stub does not change"}
     - {test: test_no_module_outside_the_defender_package_imports_run_common,
        class: "removal-shaped — the deletion of the out-of-package caller is the implementation"}
-    - {test: test_the_deleted_manual_gather_harness_leaves_no_dependent_behind,
-       class: "removal-shaped — file absence"}
     - {test: test_no_live_model_facing_prose_names_a_mechanism_with_no_producer,
        class: "removal-shaped — a prose edit the stub cannot revert"}
     - {test: test_prose_site_sweep_is_derived_from_the_repo_not_from_a_fixed_list,

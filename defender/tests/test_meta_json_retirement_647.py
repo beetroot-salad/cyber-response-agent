@@ -704,24 +704,6 @@ def test_no_module_outside_the_defender_package_imports_run_common():
     )
 
 
-def test_the_deleted_manual_gather_harness_leaves_no_dependent_behind():
-    """The manual, live-billed gather harness is gone from disk and nothing depends on it. It
-    was a second driver of the changed builder that no gate instrument reached — not pytest,
-    not vulture, not the actors check — so a break in it would have shipped silently. Its only
-    surviving textual match anywhere is an unrelated demand id in another spec graph, about the
-    gather agent's toolset rather than this file."""
-    assert not (REPO_ROOT / "scripts" / "testing" / "gather_only.py").exists(), (
-        "scripts/testing/gather_only.py is still on disk"
-    )
-    hits = live_hits(
-        repo_grep(r"gather_only"),
-        extra_excludes=("defender/tests/e2e/test_540_scrub_lifecycle.py",),
-    )
-    assert not hits, "a dependent on the deleted harness survives:\n" + "\n".join(hits)
-
-
-
-
 def test_no_live_model_facing_prose_names_a_mechanism_with_no_producer():
     """No live model-facing prose describes a mechanism nothing produces. The runtime SKILL is
     a behavioral contract loaded into MAIN's system prompt, not documentation: the marker
