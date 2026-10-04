@@ -33,9 +33,21 @@ concurrency:
 # backstop under the steps that carry no bound of their own. Raising the step bound without
 # raising this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
+  # Two shards of the unit suite, run in parallel: this job was the critical path (~6-8 min against
+  # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
+  # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
+  # test files, balanced by each file's recorded cost, so together they run every test exactly once
+  # (tests/test_shard_plan.py pins that). Each shard pays the ~25s of setup below (box image, uv sync,
+  # gVisor) again, which is what the split costs; the repo is public, so the extra runner minutes
+  # are free. `fail-fast: false` so one shard failing still reports the other's results.
   test:
+    name: test (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - uses: actions/checkout@v5
@@ -183,6 +195,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
+          --shard ${{ matrix.shard }}/2
           --ignore tests/e2e/test_540_box_boundary.py
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
@@ -193,6 +206,8 @@ jobs:
       # defender venv's pytest + pyyaml, so it runs from the repo root against
       # defender/.venv (the same idiom as the code-smells lint gates below).
       - name: Run spec-flow tool tests
+        # Once, not per shard: it is a separate suite (spec-flow/scripts), not part of the split.
+        if: matrix.shard == 1
         run: defender/.venv/bin/python -m pytest spec-flow/scripts -q
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
