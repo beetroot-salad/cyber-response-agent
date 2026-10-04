@@ -38,7 +38,9 @@ _T = TypeVar("_T")
 
 #: Every call a local operation only: no repo hook, no automatic `gc` or maintenance. A call
 #: still running after the bound is then blocked, not busy.
-_LOCAL_ONLY = (("core.hooksPath", "/dev/null"), ("gc.auto", "0"), ("maintenance.auto", "false"))
+#: `core.fsmonitor` too: the `fsmonitor-watchman` hook is run through it, not the hooks folder.
+_LOCAL_ONLY = (("core.hooksPath", "/dev/null"), ("core.fsmonitor", "false"), ("gc.auto", "0"),
+               ("maintenance.auto", "false"))
 
 
 def _session_env() -> dict[str, str]:
