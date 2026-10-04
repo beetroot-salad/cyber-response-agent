@@ -166,7 +166,7 @@ from defender.tests.test_1111_rooted_io import in_time
 # ---------------------------------------------------------------------------------------
 
 LESSONS, QUESTIONER, SKILLS = "lessons", "lessons-questioner", "skills"
-#: The three trees a drain box mounts writable, in `drain_writable_trees`' order.
+#: The three trees a drain box mounts writable, in `DrainLabel.writable_trees`' order.
 LABELS = (LESSONS, QUESTIONER, SKILLS)
 
 #: Each mount's record under test, below the mount. Nothing is there until a plant or a control
