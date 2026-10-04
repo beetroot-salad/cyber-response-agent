@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests._repo import query_template, seed_skills_repo
@@ -472,18 +473,28 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_git_repo: Path):
     (repo / "defender" / "skills" / "elastic" / "_draft" / "falco-na.md").unlink()
 
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
     assert "defender/skills/gather/queries/wazuh/newthing.md" in changed
     assert "defender/skills/elastic/SKILL.md" in changed
 
 
+def _commit_outside(repo: Path) -> Path:
+    """A committed file outside `skills/`, for a stray edit. An edit, not a new file: the lanes
+    list untracked files only under `skills/` (#1175 N1 — the agent cannot write elsewhere)."""
+    stray = repo / "defender" / "other" / "stray.md"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("committed\n")
+    _run_git(repo, "add", "--", str(stray))
+    _run_git(repo, "commit", "-q", "-m", "outside skills")
+    return stray
+
+
 def test_verify_skills_state_rejects_stray_outside_skills(tmp_git_repo: Path):
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _commit_outside(tmp_git_repo).write_text("stray")
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def _append(path: Path, text: str) -> None:
@@ -538,7 +549,7 @@ def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
     mutate(tmp_git_repo)
     with pytest.raises(lead_author.LeadAuthorError, match=match):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_git_repo: Path):
@@ -549,7 +560,7 @@ def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "elastic" / "notes.md").write_text("x")
     with pytest.raises(lead_author.LeadAuthorError, match="out-of-scope"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_skills_state_rejects_execution_md(tmp_git_repo: Path):
@@ -558,7 +569,7 @@ def test_verify_skills_state_rejects_execution_md(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("x")
     with pytest.raises(lead_author.LeadAuthorError, match="execution.md"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def _stage_covered_draft(repo: Path, query_id: str) -> Path:
@@ -591,7 +602,7 @@ def test_a_promote_that_carries_covers_is_accepted(tmp_git_repo: Path):
     draft.unlink()
 
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
 
 
@@ -608,7 +619,7 @@ def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path
     draft.unlink()
 
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
 
 
@@ -624,7 +635,7 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
 
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
 
 def _mint_uncommitted_draft(repo: Path, query_id: str) -> Path:
@@ -656,7 +667,7 @@ def test_a_bare_discard_of_a_draft_minted_this_tick_is_refused(tmp_git_repo: Pat
 
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
         lead_author._verify_skills_state(
-            repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
+            repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo), git=claim_git(repo)
         )
 
 
@@ -674,7 +685,7 @@ def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
     draft.unlink()
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo), git=claim_git(repo)
     )
     assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
 
@@ -688,7 +699,7 @@ def test_a_draft_minted_this_tick_and_left_alone_is_not_a_departure(tmp_git_repo
         skills_view(repo / "defender" / "skills"), [draft], where=repo / "defender" / "skills")
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo), git=claim_git(repo)
     )
     assert changed == [draft.relative_to(repo).as_posix()]
 
@@ -711,7 +722,7 @@ def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
     # …and no `rm` of the draft.
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
 
 def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
@@ -733,7 +744,7 @@ def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
 
     draft.unlink()
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/"
                        f"{lead_author._draft_basename('wazuh.hunt-failed-logins')}.md"]
 
@@ -757,7 +768,7 @@ def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
 
     broken.write_text(query_template("wazuh.auth-events", "established"))
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
 
 
@@ -787,7 +798,7 @@ def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
     narrow.unlink()
 
     changed = lead_author._verify_skills_state(
-        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo)
+        repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo), git=claim_git(repo)
     )
     assert wide.relative_to(repo).as_posix() in changed
 
@@ -800,7 +811,7 @@ def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/_draft/newthing.md" in changed
 
 
@@ -823,7 +834,7 @@ def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_r
     established.write_text(query_template("wazuh.auth-events", "established"))
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.old-probe"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
 
 def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Path):
@@ -841,7 +852,7 @@ def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Pat
     )
     with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
 
 def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
@@ -849,13 +860,13 @@ def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
     schema.write_text(schema.read_text() + "\nstomped\n")
     with pytest.raises(lead_author.LeadAuthorError, match="protected surface"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_skills_state_accepts_draft_discard(tmp_git_repo: Path):
     (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(tmp_git_repo))
+                                               tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/newthing.md"]
 
 
@@ -880,7 +891,7 @@ def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_para
     (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="mystery"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
 
 def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
@@ -899,7 +910,7 @@ def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
         )
     )
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo))
+                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert "defender/skills/gather/queries/wazuh/_draft/rough.md" in changed
 
 
@@ -950,7 +961,7 @@ def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved"):
         lead_author._verify_skills_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED | {"ghost"},
-            tree_for=lane_tree_for(tmp_git_repo),
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo)
         )
 
 
@@ -968,7 +979,7 @@ def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_gi
     shutil.rmtree(adapters)
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved") as exc:
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
     assert str(adapters) in str(exc.value), f"the refusal does not name the directory: {exc.value}"
     assert "refusing to commit" in str(exc.value)
 
@@ -983,7 +994,7 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
     assert "defender/other/preexisting.md" in baseline
     changed = lead_author._verify_skills_state(
         tmp_git_repo, baseline_stray=baseline, systems=DECLARED,
-        tree_for=lane_tree_for(tmp_git_repo),
+        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo)
     )
     assert changed == []
 
@@ -1045,9 +1056,10 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     run_dir = tmp_path / "lead-run"
     run_dir.mkdir()
 
+    stray = _commit_outside(repo)
+
     def fake_agent(rd, handoffs, pending, *, box=None):
-        (repo / "defender" / "other").mkdir(parents=True, exist_ok=True)
-        (repo / "defender" / "other" / "stray.md").write_text("stray")
+        stray.write_text("stray")
         return 0
 
     deps = _deps(
@@ -1488,12 +1500,11 @@ def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
     """A stray edit AND an in-corpus deletion together → the stray-gate error
     ('outside') is raised, proving the preamble runs before the per-path loop (a
     loop-first order would surface 'delete-prohibition', which lacks 'outside')."""
-    (tmp_git_repo / "defender" / "other").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "other" / "stray.md").write_text("stray")
+    _commit_outside(tmp_git_repo).write_text("stray")
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="outside"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo))
+                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
@@ -1511,7 +1522,7 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
         "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"
     )
     changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(tmp_git_repo))
+                                               tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
     assert changed == [
         "defender/skills/elastic/_draft/aa-new.md",
         "defender/skills/gather/queries/wazuh/auth-events.md",

@@ -27,6 +27,8 @@ from defender.learning.core.config import (
     repo_lock_wait_seconds,
 )
 from defender import _git
+from defender._claim_git import ClaimGit
+from defender._paths import DefenderPaths
 from defender._io import guarded_mkdir, read_jsonl_rows_report
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
@@ -34,6 +36,7 @@ from defender.learning.author import shared as _author_shared
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
 from defender.learning.core.lane_trees import open_drain_trees
+from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.core.markers import (
     ClaimedMarker,
     claim_markers,
@@ -59,7 +62,7 @@ class _LeadAuthorRetry(Exception):
 
 def _invoke_lead_author(
     paths: LoopPaths, run_dir: Path, *, label: DrainLabel, box: Any = None,
-    on_done: Callable[[str | None], None],
+    on_done: Callable[[str | None], None], git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
     `lead_author_drain`): the held roots of its writable mounts are opened here, with the box up,
@@ -76,6 +79,7 @@ def _invoke_lead_author(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run_dir, paths=paths, trees=trees, box=box, on_done=on_done,
+                git_timeout=git_timeout,
             ),
         )
     if rc not in (0, None):
@@ -263,11 +267,12 @@ def _drain_curators(
                        "questioner_pending", box=box)
 
 
-def _discard_worktree_changes(repo_root: Path) -> None:
-    if not (repo_root / ".git").exists():
-        return
-    for args in (["reset", "--hard", "--quiet"], ["clean", "-fdq"]):
-        _git.git(args, cwd=repo_root, check=False)
+
+
+def _claim_git(paths: LoopPaths, git_timeout: float) -> ClaimGit:
+    """The session whose `claim()` resets the worktree after each claim (#1175): its cleanup
+    never displaces a propagating fault, and is raised after any other exit."""
+    return ClaimGit(paths.repo_root, DefenderPaths.skills_rel, timeout=git_timeout)
 
 
 def _quarantine_lead_author_failure(
@@ -361,6 +366,7 @@ def _drain_lead_author_markers(
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
     qdir = paths.author_queue_dir
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
@@ -387,32 +393,31 @@ def _drain_lead_author_markers(
         # The curator's commit, handed back for `BatchDisposition.apply` to record once the
         # tree passes the scrub.
         done: list[str | None] = []
-        try:
-            drained = run_or_dead_letter(
-                functools.partial(
-                    run_lead_author, paths, run_dir, box=box, on_done=done.append,
-                ),
-                functools.partial(
-                    _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
-                ),
-                propagate=(_LeadAuthorRetry,),
-            )
-        except _LeadAuthorRetry as e:
-            if attempts >= max_retries:
-                quarantine_marker(
-                    spec, claimed, paths.author_queue_dir,
-                    f"transient-exhausted after {attempts} attempt(s): {e!r}",
+        with _claim_git(paths, git_timeout).claim():
+            try:
+                drained = run_or_dead_letter(
+                    functools.partial(
+                        run_lead_author, paths, run_dir, box=box, on_done=done.append,
+                    ),
+                    functools.partial(
+                        _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
+                    ),
+                    propagate=(_LeadAuthorRetry,),
                 )
-            else:
-                spec["attempts"] = attempts
-                _requeue_or_drop(
-                    claim,
-                    note=f"transient on {marker_identity(spec, claimed)} "
-                         f"(attempt {attempts}/{max_retries})",
-                )
-            continue
-        finally:
-            _discard_worktree_changes(paths.repo_root)
+            except _LeadAuthorRetry as e:
+                drained = False
+                if attempts >= max_retries:
+                    quarantine_marker(
+                        spec, claimed, paths.author_queue_dir,
+                        f"transient-exhausted after {attempts} attempt(s): {e!r}",
+                    )
+                else:
+                    spec["attempts"] = attempts
+                    _requeue_or_drop(
+                        claim,
+                        note=f"transient on {marker_identity(spec, claimed)} "
+                             f"(attempt {attempts}/{max_retries})",
+                    )
         if drained:
             # Not unlinked here: the claim stays in `inflight/` until the tree passes the
             # scrub (`BatchDisposition.apply`).
@@ -423,6 +428,7 @@ def _drain_lead_author_markers(
 def _invoke_pitfalls(
     paths: LoopPaths, *, label: DrainLabel, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
     of the `label` lane's writable mounts are opened here and closed when the curation returns
@@ -433,7 +439,7 @@ def _invoke_pitfalls(
             "pitfalls_curator",
             lambda mod: mod.run_pitfalls(
                 paths=paths, trees=trees, box=box, on_curated=on_curated,
-                lock_wait_seconds=lock_wait_seconds,
+                lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
             ),
         )
     return rc if rc is not None else 0
@@ -464,6 +470,7 @@ def _drain_pitfalls(
     *,
     box: Any = None,
     lock_wait_seconds: int | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> PitfallsDisposition | None:
     # The batch is fixed at this read: a pitfall appended while the curation runs must not be
     # bumped.
@@ -471,13 +478,11 @@ def _drain_pitfalls(
     # Only the success-path consumption is handed back; failure dispositions don't depend on
     # the scrub and are applied immediately.
     curated: list[PitfallsDisposition] = []
-    try:
+    with _claim_git(paths, git_timeout).claim():
         run_or_dead_letter(
             lambda: run_pitfalls(paths, box=box, on_curated=curated.append),
             functools.partial(_retire_pitfalls_batch, paths, batch_ids, lock_wait_seconds),
         )
-    finally:
-        _discard_worktree_changes(paths.repo_root)
     return curated[-1] if curated else None
 
 
@@ -488,10 +493,12 @@ def _drain_lead_author(
     *,
     box: Any = None,
     lock_wait_seconds: int | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> BatchDisposition:
-    served = _drain_lead_author_markers(paths, run_lead_author, box=box)
+    served = _drain_lead_author_markers(paths, run_lead_author, box=box, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
+        git_timeout=git_timeout,
     )
     return BatchDisposition(
         served=served, pitfalls=pitfalls, lock_wait_seconds=lock_wait_seconds,
@@ -800,18 +807,25 @@ def lead_author_drain(
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[[Path], None] = box_mod.scrub,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
+    """`git_timeout` bounds each git call over the batch worktree: the cleanup between claims
+    here, and, bound into the DEFAULT seams only, the lanes' own (#1175). One that overruns is a
+    systemic `GitError` (`_claim_git.GitOverran`)."""
     _validate_merge_mode()
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
-    # The lane's label reaches its work steps bound into the DEFAULT seams, so an injected seam
-    # keeps its call shape (#1134).
+    # The lane's label and git bound reach its work steps bound into the DEFAULT seams, so an
+    # injected seam keeps its call shape (#1134).
     if run_lead_author is None:
-        run_lead_author = functools.partial(_invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL)
+        run_lead_author = functools.partial(
+            _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout,
+        )
     if run_pitfalls is None:
         run_pitfalls = functools.partial(
             _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
+            git_timeout=git_timeout,
         )
     if branch is None:
         branch = AuthorBranch(
@@ -841,7 +855,7 @@ def lead_author_drain(
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, run_lead_author, run_pitfalls, box=box,
-                    lock_wait_seconds=lock_wait_seconds,
+                    lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
                 ),
                 start_box=start_box, stop_box=stop_box, scrub=scrub,
             )

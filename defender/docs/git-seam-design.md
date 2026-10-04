@@ -59,12 +59,18 @@ layering inversion or `sys.path` dance.
 
 ### One `-z` status reader; one set of worktree helpers
 
-`git_status` standardizes on `git status --porcelain --untracked-files=all -z`,
-returning `[(XY, path)]` records. This is a **correctness upgrade**, not just a
-move: today's `changes_outside` parses non-`-z` output and mishandles spaced
-paths. The three call shapes reduce to it — `changes_outside` filters the
-records, the boolean clean-corpus predicate becomes `bool(git_status(...))`,
-and `path_validation._porcelain_records` *is* it.
+`git_status` standardizes on `git status --porcelain -z`, returning `[(XY, path)]`
+records, with `--untracked-files=all` by default. This is a **correctness upgrade**,
+not just a move: today's `changes_outside` parses non-`-z` output and mishandles
+spaced paths. The call shapes reduce to it — `changes_outside` filters the
+records, and the boolean clean-corpus predicate becomes `bool(git_status(...))`.
+
+A tree an agent can write is read differently (#1175): an untracked walk opens
+every worktree `.gitignore`, which the agent can leave as a FIFO (the call blocks
+for good) or as a `*` (new files vanish from the check). The lead-author and
+pitfalls lanes therefore go through `_claim_git.ClaimGit`, which lists tracked
+paths with `untracked="no"` and new files under the corpus with `git_untracked`
+(`ls-files --others`, filtered by HEAD's root `.gitignore` read from the commit).
 
 The worktree helpers cover both managers that existed when this was written with
 one signature: `author/branch.py`'s branch worktree (`-B <branch> ... origin/main`)

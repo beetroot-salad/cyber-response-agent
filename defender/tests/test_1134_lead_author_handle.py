@@ -76,6 +76,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender import _git, _scaffold_rules
 from defender._env import FatalConfigError
 from defender._io import NotPlainEntry
@@ -1571,7 +1572,7 @@ def _rule_calls(s: Scene) -> dict[str, Callable[..., Any]]:
         "_departed_drafts": lambda **extra: lead_author._departed_drafts(s.repo, {}, [], **extra),
         "_covers_rule": lambda **extra: lead_author._covers_rule(s.repo, {}, [], **extra),
         "_verify_skills_state": lambda **extra: lead_author._verify_skills_state(
-            s.repo, [], systems=DECLARED, **extra),
+            s.repo, [], systems=DECLARED, **extra, git=claim_git(s.repo)),
         "_readable_pair": lambda **extra: pitfalls_curator._readable_pair(
             s.repo, pitfalls_curator.REDUCER_REL, **extra),
         "_pitfalls_content_rule": lambda **extra: pitfalls_curator._pitfalls_content_rule(
@@ -1580,7 +1581,7 @@ def _rule_calls(s: Scene) -> dict[str, Callable[..., Any]]:
             s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED, reducer_offered=True,
             **extra),
         "_verify_pitfalls_state": lambda **extra: pitfalls_curator._verify_pitfalls_state(
-            s.repo, [], systems=DECLARED, reducer_offered=True, **extra),
+            s.repo, [], systems=DECLARED, reducer_offered=True, **extra, git=claim_git(s.repo)),
     }
 
 

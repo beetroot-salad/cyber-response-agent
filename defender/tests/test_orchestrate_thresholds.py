@@ -371,7 +371,7 @@ def test_run_or_dead_letter_propagates_declared_control_flow():
 class _StubBranch:
     """A git-free AuthorBranch stand-in for the full-stage exit-2 assertion. do_work
     raises before finish_batch, so only these three methods are exercised; start_batch
-    returns a .git-less dir, on which _discard_worktree_changes no-ops."""
+    returns a .git-less dir, on which ClaimGit.reset no-ops."""
 
     branch_prefix = "lead-author/"
 

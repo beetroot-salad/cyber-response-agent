@@ -1649,13 +1649,13 @@ REGRESSIONS: dict[str, Regression] = {
         ("minted=minted, tree_for=deps.tree_for,", "minted=minted, tree_for=lambda _path: None,", 1),
     ), (("_run_locked", "tree_for",
          "_verify_skills_state(repo_root, baseline_stray, systems=deps.systems, minted=minted, "
-         "tree_for=lambda _path: None)", 1),)),
+         "tree_for=lambda _path: None, git=git)", 1),)),
     "s6v2-E2b-run-pitfalls-plain-tree-for": Regression(PITFALLS, (
-        ("        tree_for=trees.tree_for,\n    )\n    sha = None\n",
-         "        tree_for=lambda _path: None,\n    )\n    sha = None\n", 1),
+        ("        tree_for=trees.tree_for, git=git,\n    )\n    sha = None\n",
+         "        tree_for=lambda _path: None, git=git,\n    )\n    sha = None\n", 1),
     ), (("run_pitfalls", "tree_for",
          "_verify_pitfalls_state(repo_root, baseline_stray, systems=systems, "
-         "reducer_offered=reducer_offered, tree_for=lambda _path: None)", 1),)),
+         "reducer_offered=reducer_offered, tree_for=lambda _path: None, git=git)", 1),)),
     # E4: `where` stat'ed (following) and trusted over the view.
     "s6v2-E4-where-statted-discover": Regression(HANDOFF, (
         ("    listed = list_tree(skills, depth=3)\n",
