@@ -69,6 +69,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -1966,9 +1967,8 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
     env = dict(os.environ)
     env["PYTHONPATH"] = f"{S.REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
     body = b"A" * (ALERT_BODY_BYTES - 1) + b"\n"
-    torn: list[str] = []
-    whole = 0
-    for kill in range(ALERT_KILLS):
+
+    def one_kill(kill: int) -> tuple[list[str], int]:
         root = tmp_path / f"kill-{kill}"
         root.mkdir()
         # A file, not a pipe: reading a live child's stderr pipe for a failure message would
@@ -1995,7 +1995,13 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
             if child.stdout is not None:
                 child.stdout.close()
         bad, landed = _alert_leftovers(root, body)
-        torn += [f"kill {kill}: {b}" for b in bad]
-        whole += landed
+        return [f"kill {kill}: {b}" for b in bad], landed
+
+    # Each kill is its own child in its own run dir, so they run side by side: sixteen start-ups
+    # one after another were the whole cost of this test.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(one_kill, range(ALERT_KILLS)))
+    torn = [line for lines, _ in outcomes for line in lines]
+    whole = sum(landed for _, landed in outcomes)
     assert torn == [], "a kill left a torn or stray alert:\n" + "\n".join(torn)
     assert whole > 0, "the child wrote no whole alert, so the kills observed nothing"

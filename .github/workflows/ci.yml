@@ -182,7 +182,7 @@ jobs:
           DEFENDER_BUDGET_ENFORCE: "1"
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
-          -n auto --dist loadfile
+          -n auto --dist loadfile --durations=25
           --ignore tests/e2e/test_540_box_boundary.py
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the

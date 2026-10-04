@@ -1941,6 +1941,19 @@ def _apply(module: str, source: str, edits: tuple[tuple[str, str, int], ...]) ->
     return source
 
 
+_CLEAN_ANCHORS: dict[tuple[str, frozenset[str]], Counter] = {}
+
+
+def _clean_anchors(module: str, kinds: frozenset[str]) -> Counter:
+    """The anchors the census finds in `module`'s unedited source, scanned once per (module,
+    kinds): every regression row that edits the same module compares against the same scan."""
+    key = (module, kinds)
+    if key not in _CLEAN_ANCHORS:
+        _CLEAN_ANCHORS[key] = Counter(h.anchor for h in C.census_source(
+            WORKTREE, module, _source(module), tree=TREE, kinds=kinds))
+    return _CLEAN_ANCHORS[key]
+
+
 @pytest.mark.parametrize("name", sorted(REGRESSIONS))
 def test_an_adversary_regression_is_an_unexpected_hit(name: str):
     """Each real regression from the adversaries (v1: s5-adv-patches/, s6-adv-patches/final.diff,
@@ -1952,8 +1965,7 @@ def test_an_adversary_regression_is_an_unexpected_hit(name: str):
     kinds = kinds_of(reg.module)
     clean = _source(reg.module)
     allowed = {e.anchor: e.count for e in ALLOW if e.module == reg.module}
-    before = Counter(h.anchor for h in C.census_source(
-        WORKTREE, reg.module, clean, tree=TREE, kinds=kinds))
+    before = _clean_anchors(reg.module, kinds)
     hits = C.census_source(WORKTREE, reg.module, _apply(reg.module, clean, reg.edits), tree=TREE,
                            kinds=kinds)
     unexpected_hits, stale = judge(reg.module, hits, kinds=kinds)

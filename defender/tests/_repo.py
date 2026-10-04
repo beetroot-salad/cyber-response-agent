@@ -16,7 +16,10 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+import atexit
+import shutil
+import tempfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from defender import _git
@@ -46,6 +49,27 @@ from defender import _git
 #: models and humans actually choose. One that is only ever handed `elastic` has not been
 #: probed — it has been agreed with.
 HOSTILE_NAMES: tuple[str, ...] = ("café", "my sys", 'say"what')
+
+_TEMPLATES: dict[str, Path] = {}
+
+
+def build_once_copy(key: str, build: Callable[[Path], object], dest: Path) -> Path:
+    """`build(dest)`'s tree at `dest`, built for real once per process and copied after.
+
+    A seeded git repo costs six git children; most of the rows built on one assert on what they do
+    to it afterwards, never on how it was made, so each gets its own byte-for-byte copy (links kept
+    as links, `.git` included: a repo made by `git init` holds no path of its own) of a template
+    built the first time `key` is asked for. `build` must put the same tree at any `dest`.
+    """
+    template = _TEMPLATES.get(key)
+    if template is None:
+        root = Path(tempfile.mkdtemp(prefix="repo-template-"))
+        atexit.register(shutil.rmtree, root, ignore_errors=True)
+        template = root / "repo"
+        build(template)
+        _TEMPLATES[key] = template
+    shutil.copytree(template, dest, symlinks=True, dirs_exist_ok=True)
+    return dest
 
 
 def plant_named_dirs(
@@ -174,6 +198,11 @@ def query_template(
 
 
 def seed_skills_repo(repo: Path) -> Path:
+    """`_seed_skills_repo`'s tree at `repo` (built once per process, then copied)."""
+    return build_once_copy("seed_skills_repo", _seed_skills_repo, repo)
+
+
+def _seed_skills_repo(repo: Path) -> Path:
     """A committed skills tree standing in for a fresh ``lead-author/<id>`` worktree.
 
     Both the lead-author and the pitfalls-curator suites need exactly this starting

@@ -158,6 +158,13 @@ def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
 
 
 def make_repo(tmp_path: Path) -> Path:
+    """`_make_repo`'s repo at `tmp_path / "repo"` (built once per process, then copied)."""
+    from defender.tests._repo import build_once_copy
+
+    return build_once_copy("drain719.make_repo", lambda dest: _make_repo(dest.parent), tmp_path / "repo")
+
+
+def _make_repo(tmp_path: Path) -> Path:
     """A committed-clean git repo carrying all three corpora the four author channels
     write, with the mutable learning state gitignored."""
     repo = tmp_path / "repo"

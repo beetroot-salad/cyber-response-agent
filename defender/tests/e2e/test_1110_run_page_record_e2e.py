@@ -851,32 +851,6 @@ def _standalone(run_dir: Path, **env: str) -> subprocess.CompletedProcess:
         env={**os.environ, **env})
 
 
-def test_1110_o8_the_standalone_re_render_writes_the_record_and_copies_only_under_dev(
-        tmp_path, run_visualizations_dir):
-    """O8. `python visualize_run.py <run_dir>` — the operator's re-render, a real child
-    process — over a finished run exits 0 and writes the page at the run's `runtime_html`
-    record: this run's page, exactly as `render_page` generates it. Under `production` (the
-    inherited, conftest-unset environment) it copies nothing into the override.
-
-    Positive control: the same command with `DEFENDER_DEPLOYMENT=dev` lands the copy in the
-    same override — so the empty override above is the deployment's answer."""
-    run_dir = driven_run(tmp_path)
-    record = RunPaths(run_dir).runtime_html
-    assert not record.exists(), "precondition: no page before the re-render"
-
-    child = _standalone(run_dir)
-
-    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
-    assert record.read_text(encoding="utf-8") == _renderer().render_page(run_dir)
-    assert MARKER in record.read_text(encoding="utf-8")
-    assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"
-
-    child = _standalone(run_dir, **{_env.DEPLOYMENT_ENV: "dev"})
-
-    assert child.returncode == 0, f"the dev re-render failed: {child.stderr}"
-    assert (run_visualizations_dir / run_dir.name / PAGE).read_bytes() == record.read_bytes()
-
-
 def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_record(
         tmp_path, run_visualizations_dir):
     """O8/S2 (and M6: the re-render goes through the same step, over a handle). A symlink is
@@ -926,16 +900,32 @@ def _fresh_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_home(
         tmp_path, run_visualizations_dir):
-    """O2/S1 beyond the snapshot's universe: the system temp dir and the home directory. A
-    production render in a child whose `TMPDIR` and `HOME` are fresh, empty folders leaves both
-    empty — no page staged in `/tmp` "for later", nothing cached under `~`. The standalone
-    re-render is the vehicle because the child's interpreter reads both variables at start,
-    where this process has long since fixed its own temp dir.
+    """O2/S1 beyond the snapshot's universe: the system temp dir and the home directory, read
+    off ONE real production child (`python visualize_run.py <run_dir>` as `__main__`, JSON log)
+    that also carries the standalone re-render's other production-side obligations:
+
+    - O2/S1: a child whose `TMPDIR` and `HOME` are fresh, empty folders leaves both empty — no
+      page staged in `/tmp` "for later", nothing cached under `~` — and the copy override stays
+      empty (production).
+    - O8: it exits 0 and writes the run's `runtime_html` record, exactly as `render_page`
+      generates it. (The `dev` side, a copy landing in the override, is the dev-copy-failed
+      test's positive control.)
+    - the standalone re-render imports neither `run_common` nor a second copy of the renderer
+      (`visualize_run.main` calls the `publish_page` of the module it is running in), read off
+      the child's `sys.modules` after the script ran to its exit.
+    - the #1110 review: every log line the child writes carries `run_id` — and `tenant_id`
+      `null`, the replay harness's stamp naming none — including ONE INFO line saying the page
+      was "not copied" (naming `DEFENDER_DEPLOYMENT`, never claiming a value) and the saved
+      record's INFO line.
 
     Positive controls: the child's interpreter really resolves the system temp dir and home to
-    those folders (so a write there would be seen), and the re-render wrote the record (so two
-    empty folders are not a child that did nothing). And the override stays empty: production."""
+    those folders (so a write there would be seen), the record exists (so two empty folders are
+    not a child that did nothing), the module list holds what the script itself imports
+    (`defender._env`, so an absent name is absent, not unrecorded)."""
     run_dir = driven_run(tmp_path / "runs-base")
+    record = RunPaths(run_dir).runtime_html
+    assert not record.exists(), "precondition: no page before the re-render"
+    assert Run.at(run_dir).record.tenant_id is None, "precondition: the stamp names no tenant"
     temp, home = _fresh_dirs(tmp_path)
     env = {"TMPDIR": str(temp), "HOME": str(home)}
     resolved = subprocess.run(  # noqa: S603 — this interpreter, asked where it would write
@@ -944,14 +934,44 @@ def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_hom
         capture_output=True, text=True, encoding="utf-8", check=True,
         env={**os.environ, **env}).stdout.split()
     assert resolved == [str(temp), str(home)], f"precondition: the child resolves {resolved}"
+    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
-    child = _standalone(run_dir, **env)
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed probe, the script, the run
+        [sys.executable, "-c", _REPORTING_RE_RENDER, str(script), str(run_dir)],
+        capture_output=True, text=True, encoding="utf-8", check=False,
+        env={**os.environ, **env, "DEFENDER_LOG_FORMAT": "json"})
 
-    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
-    assert MARKER in RunPaths(run_dir).runtime_html.read_text(encoding="utf-8")
+    reports = [line for line in child.stdout.splitlines() if line.startswith("REPORT ")]
+    assert len(reports) == 1, f"the child did not report: {child.stdout!r} {child.stderr[-800:]!r}"
+    report = json.loads(reports[0].removeprefix("REPORT "))
+    assert report["code"] == 0, f"the re-render did not exit 0: {report!r} {child.stderr[-800:]!r}"
+    page = record.read_text(encoding="utf-8")
+    assert MARKER in page
+    assert page == _renderer().render_page(run_dir)
     assert sorted(temp.rglob("*")) == [], "a production render wrote into the system temp dir"
     assert sorted(home.rglob("*")) == [], "a production render wrote into the home directory"
     assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"
+    assert "defender._env" in report["modules"], f"positive control: {report['modules']!r}"
+    assert "defender.run_common" not in report["modules"], (
+        "the standalone re-render imported run_common — the renderer still reaches back into "
+        "the module that imports it")
+    assert RENDERER_MODULE not in report["modules"], (
+        f"the standalone re-render imported a second copy of the renderer ({RENDERER_MODULE}) — "
+        "it ran another module's publish step, not its own")
+    lines = _json_lines(child.stderr)
+    unbound = [line for line in lines
+               if (line.get("run_id"), line.get("tenant_id")) != (run_dir.name, None)]
+    assert len(lines) >= 2, f"too few log lines: {lines!r}"
+    assert unbound == [], (
+        f"lines not filed under run {run_dir.name!r} and no tenant: {unbound!r} of {child.stderr!r}")
+    skipped = [line for line in lines if _env.DEPLOYMENT_ENV in str(line.get("message", ""))
+               and line.get("severity") == "INFO"
+               and "not copied" in str(line.get("message", "")).lower()]
+    assert len(skipped) == 1, f"the skipped copy was not ONE INFO line saying so: {child.stderr!r}"
+    _assert_claims_no_deployment_value(str(skipped[0].get("message")))
+    saved = [line for line in lines if line.get("severity") == "INFO"
+             and str(record) in str(line.get("message", ""))]
+    assert saved, f"no INFO line names the saved record {record}: {child.stderr!r}"
 
 
 @pytest.mark.parametrize("deployment", [None, "staging"], ids=["unset", "unrecognised"])
@@ -1026,48 +1046,28 @@ def test_1110_a_saved_page_is_logged_and_so_is_what_the_copy_did(
     assert _warnings(caplog) == [], f"a clean render was warned about: {_warnings(caplog)!r}"
 
 
-@pytest.mark.parametrize("deployment", [None, "staging"], ids=["unset", "unrecognised"])
 def test_1110_the_standalone_re_render_logs_inside_the_runs_context(
-        tmp_path, run_visualizations_dir, deployment):
+        tmp_path, run_visualizations_dir):
     """#1110 review. The standalone re-render runs the step inside the run's log context
     (`_log.run_context(run_dir.name, …)`), so every line it writes carries `run_id` — read here
-    off the real child's JSON log (`DEFENDER_LOG_FORMAT=json`):
-
-    - `DEFENDER_DEPLOYMENT=staging`: the ERROR about the unrecognised value is on a line whose
-      `run_id` is this run's.
-    - unset: the skipped copy is not silent — an INFO line saying the page was "not copied",
-      naming `DEFENDER_DEPLOYMENT`, bound to this run; and the saved record's INFO line too.
-
-    Both exit 0 with the record written (the positive control that the child ran the step)."""
+    off the real child's JSON log (`DEFENDER_LOG_FORMAT=json`) under `DEFENDER_DEPLOYMENT=staging`:
+    the ERROR about the unrecognised value is on a line whose `run_id` is this run's. Exits 0
+    with the record written (the positive control that the child ran the step). The unset side
+    (the skipped copy's INFO line and the saved record's, both bound to the run) is read off the
+    production child of the O2/S1 temp-dir test."""
     run_dir = driven_run(tmp_path / "runs-base")
     record = RunPaths(run_dir).runtime_html
-    env = {"DEFENDER_LOG_FORMAT": "json"}
-    if deployment is not None:
-        env[_env.DEPLOYMENT_ENV] = deployment
 
-    child = _standalone(run_dir, **env)
+    child = _standalone(run_dir, DEFENDER_LOG_FORMAT="json", **{_env.DEPLOYMENT_ENV: "staging"})
 
     assert child.returncode == 0, f"the re-render failed: {child.stderr}"
     assert MARKER in record.read_text(encoding="utf-8")
-    lines = _json_lines(child.stderr)
-    about = [line for line in lines if _env.DEPLOYMENT_ENV in str(line.get("message", ""))]
-    if deployment == "staging":
-        errors = [line for line in about if line.get("severity") == "ERROR"]
-        assert errors, f"no JSON ERROR line about {_env.DEPLOYMENT_ENV}: {child.stderr!r}"
-        assert all(line.get("run_id") == run_dir.name for line in errors), (
-            f"the deployment error is not bound to the run {run_dir.name!r}: {errors!r}")
-    else:
-        skipped = [line for line in about if line.get("severity") == "INFO"
-                   and "not copied" in str(line.get("message", "")).lower()]
-        assert len(skipped) == 1, (
-            f"the skipped copy was not ONE INFO line saying so: {child.stderr!r}")
-        assert skipped[0].get("run_id") == run_dir.name, (
-            f"the not-copied line is not bound to the run: {skipped!r}")
-        _assert_claims_no_deployment_value(str(skipped[0].get("message")))
-        saved = [line for line in lines if line.get("severity") == "INFO"
-                 and str(record) in str(line.get("message", ""))]
-        assert saved, f"no INFO line names the saved record {record}: {child.stderr!r}"
-        assert all(line.get("run_id") == run_dir.name for line in saved), saved
+    about = [line for line in _json_lines(child.stderr)
+             if _env.DEPLOYMENT_ENV in str(line.get("message", ""))]
+    errors = [line for line in about if line.get("severity") == "ERROR"]
+    assert errors, f"no JSON ERROR line about {_env.DEPLOYMENT_ENV}: {child.stderr!r}"
+    assert all(line.get("run_id") == run_dir.name for line in errors), (
+        f"the deployment error is not bound to the run {run_dir.name!r}: {errors!r}")
     assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"
 
 
@@ -1186,40 +1186,6 @@ _REPORTING_RE_RENDER = textwrap.dedent("""
 """)
 
 
-def test_1110_the_standalone_re_render_imports_neither_run_common_nor_a_second_renderer(
-        tmp_path):
-    """The standalone re-render is the renderer's OWN: `visualize_run.main` calls the
-    `publish_page` of the module it is running in (`__main__`), not `run_common.visualize` —
-    so the process never imports `defender.run_common` (the renderer no longer imports it at
-    all, lazily or otherwise), nor a second copy of the renderer under its package name
-    (`defender.scripts.visualize.visualize_run`, which is what a detour through
-    `run_common.visualize` imports). Read off a real child's `sys.modules` after the script
-    ran to its exit.
-
-    Positive controls: the child exited 0 having written this run's record (it really ran the
-    re-render), and its module list does hold what the script itself imports (`defender._env`),
-    so an absent name is absent, not unrecorded."""
-    run_dir = driven_run(tmp_path)
-    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
-
-    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed probe, the script, the run
-        [sys.executable, "-c", _REPORTING_RE_RENDER, str(script), str(run_dir)],
-        capture_output=True, text=True, encoding="utf-8", check=False)
-
-    reports = [line for line in child.stdout.splitlines() if line.startswith("REPORT ")]
-    assert len(reports) == 1, f"the child did not report: {child.stdout!r} {child.stderr[-800:]!r}"
-    report = json.loads(reports[0].removeprefix("REPORT "))
-    assert report["code"] == 0, f"the re-render did not exit 0: {report!r} {child.stderr[-800:]!r}"
-    assert MARKER in RunPaths(run_dir).runtime_html.read_text(encoding="utf-8")
-    assert "defender._env" in report["modules"], f"positive control: {report['modules']!r}"
-    assert "defender.run_common" not in report["modules"], (
-        "the standalone re-render imported run_common — the renderer still reaches back into "
-        "the module that imports it")
-    assert RENDERER_MODULE not in report["modules"], (
-        f"the standalone re-render imported a second copy of the renderer ({RENDERER_MODULE}) — "
-        "it ran another module's publish step, not its own")
-
-
 def _stamp_tenant(run_dir: Path, stamp: str) -> str | None:
     """Give the run's provenance stamp the shape `stamp` names, and answer the tenant it now
     names: `tenant` — production's shape, the runs base's own tenant record's id written into
@@ -1238,7 +1204,7 @@ def _stamp_tenant(run_dir: Path, stamp: str) -> str | None:
     return None
 
 
-@pytest.mark.parametrize("stamp", ["tenant", "no-tenant", "unreadable"])
+@pytest.mark.parametrize("stamp", ["tenant", "unreadable"])
 def test_1110_the_standalone_re_render_logs_under_the_tenant_the_runs_stamp_names(
         tmp_path, stamp):
     """The standalone re-render binds the run's log context with the tenant the run's own
