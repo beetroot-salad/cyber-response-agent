@@ -180,7 +180,7 @@ _PLATFORM_FAULT = ("the episode-tree reader walks each directory step with O_PAT
 _STEP_FLAGS = (_O_PATH or 0) | os.O_NOFOLLOW | os.O_CLOEXEC
 
 #: The root's own open (`bind`): an `O_PATH` directory handle that follows the operator's
-#: spelling; `Bound.entries()` opens `.` for reading off it only when listing.
+#: spelling; a listing (`Bound._listing`) opens `.` for reading off it only then.
 _ROOT_FLAGS = (_O_PATH or 0) | os.O_DIRECTORY | os.O_CLOEXEC
 
 #: `errors=` values `Bound.read` admits; anything else is refused before any open.
@@ -553,36 +553,55 @@ class Bound:
         dead directory be reopened and the C library ends its listing early, so it is judged
         by its link count once the scan is done (`st_nlink == 0`: no name holds it). A
         directory still linked when the scan ends was there for the whole listing."""
-        spelling = "/".join(self._prefix)
+        absent, reason, listed = self._listing(_entry_kind, lambda e: e.strerror or str(e))
+        return EntriesRead(name="/".join(self._prefix), entries=listed, absent=absent,
+                           reason=reason)
+
+    def _listing(
+        self, judge: Callable[[Any], Any], reason_of: Callable[[OSError], str],
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """The one listing step `entries()` and `stat_entries` share: `(absent, reason, rows)`,
+        each row `judge(entry)` of one scanned entry, and a scan fault `reason_of(error)`.
+
+        A directory no name holds when its listing ends (`st_nlink == 0` on the reopened
+        descriptor, the held root among them) is absent, never present and empty: the kernel
+        lets a dead directory be reopened and the C library ends its listing early, so the
+        link count is asked once the scan is done, and also when the scan faulted, so an entry
+        vanishing with its dead folder is the folder's absence, not a refusal. A live
+        directory's scan fault stays the refusal (the dead check failing on a faulted scan
+        leaves it so), and the check's own fault after a clean scan is a refusal too."""
         if self._absent:
-            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
+            return True, None, None
         if self._error is not None:
-            return EntriesRead(name=spelling, entries=None, absent=False, reason=self._error)
+            return False, self._error, None
         try:
             with self._handle.dup() as root_fd:
                 kind, payload = self._directory_fd(root_fd)
         except OSError as e:  # the root closed: the dup's `EBADF`
-            return EntriesRead(name=spelling, entries=None, absent=False,
-                               reason=(e.strerror or str(e)))
+            return False, (e.strerror or str(e)), None
         if kind != "leaf":
-            return EntriesRead(name=spelling, entries=None, absent=kind == "absent",
-                               reason=None if kind == "absent" else str(payload))
+            return kind == "absent", None if kind == "absent" else str(payload), None
         fd = payload
         try:
-            with self._os.scandir(fd) as it:
-                listed = {entry.name: _entry_kind(entry) for entry in it}
-            dead = self._os.fstat(fd).st_nlink == 0
-        except OSError as e:
-            return EntriesRead(name=spelling, entries=None, absent=False,
-                               reason=(e.strerror or str(e)))
+            try:
+                with self._os.scandir(fd) as it:
+                    rows = {entry.name: judge(entry) for entry in it}
+            except OSError as fault:
+                try:
+                    dead = self._os.fstat(fd).st_nlink == 0
+                except OSError:
+                    dead = False
+                return (True, None, None) if dead else (False, reason_of(fault), None)
+            try:
+                dead = self._os.fstat(fd).st_nlink == 0
+            except OSError as e:
+                return False, reason_of(e), None
         finally:
             self._os.close(fd)
-        if dead:
-            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
-        return EntriesRead(name=spelling, entries=listed, absent=False, reason=None)
+        return (True, None, None) if dead else (False, None, rows)
 
     def _directory_fd(self, root_fd: int) -> tuple[str, Any]:
-        """A read handle on the bound directory for `entries`: the prefix walked as folders,
+        """A read handle on the bound directory for `_listing`: the prefix walked as folders,
         then `.` reopened for reading off the last handle (the walk's handles are `O_PATH`)."""
         try:
             with _descend(self._os, root_fd, self._prefix, Path(".")) as dir_fd:
@@ -627,32 +646,15 @@ def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
 
 def stat_entries(bound: Bound) -> StatsRead:
     """Every entry of the directory `bound` names, each judged without following it: the
-    directory is reached as `Bound.entries` reaches it (once), and each entry is `stat`ed
-    no-follow relative to it — one call per entry, where `entries()` plus a `stat_entry` per
-    name would walk from the root again for every one. Opens no entry: a FIFO cannot block
-    it. A function beside `Bound`, like `stat_entry`, for the same reason (#1133 O3)."""
-    spelling = "/".join(bound._prefix)
-    if bound._absent:
-        return StatsRead(name=spelling, stats=None, absent=True, reason=None)
-    if bound._error is not None:
-        return StatsRead(name=spelling, stats=None, absent=False, reason=bound._error)
-    try:
-        with bound._handle.dup() as root_fd:
-            kind, payload = bound._directory_fd(root_fd)
-    except OSError as e:  # the root closed: the dup's `EBADF`
-        return StatsRead(name=spelling, stats=None, absent=False, reason=(e.strerror or str(e)))
-    if kind != "leaf":
-        return StatsRead(name=spelling, stats=None, absent=kind == "absent",
-                         reason=None if kind == "absent" else str(payload))
-    fd = payload
-    try:
-        with bound._os.scandir(fd) as it:
-            stats = {entry.name: entry.stat(follow_symlinks=False) for entry in it}
-    except OSError as e:
-        return StatsRead(name=spelling, stats=None, absent=False, reason=_read_reason(e))
-    finally:
-        bound._os.close(fd)
-    return StatsRead(name=spelling, stats=stats, absent=False, reason=None)
+    directory is reached and scanned by the listing step `Bound.entries` is built on
+    (`Bound._listing`, once), and each entry is `stat`ed no-follow relative to it — one call
+    per entry, where `entries()` plus a `stat_entry` per name would walk from the root again
+    for every one. So a directory deleted under the listing is absent here as it is there
+    (#1177). Opens no entry: a FIFO cannot block it. A function beside `Bound`, like
+    `stat_entry`, for the same reason (#1133 O3)."""
+    absent, reason, stats = bound._listing(
+        lambda entry: entry.stat(follow_symlinks=False), _read_reason)
+    return StatsRead(name="/".join(bound._prefix), stats=stats, absent=absent, reason=reason)
 
 
 def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
