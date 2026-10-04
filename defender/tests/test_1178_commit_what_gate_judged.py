@@ -17,21 +17,31 @@ The seam this file drives: `_lead_spine.commit_judged(..., step=)`, reached thro
 still writing" by mutating the worktree inside it at a named step.
 
 - O1: at every step, every mutation (bad bytes into the vetted file, a new `.md` and a new non-`.md`,
-  a symlink swap, a UTF-7 `.gitattributes`, a FIFO `.gitattributes`): the commit holds exactly
-  the vetted bytes at 100644 and no other path, or the run refuses with HEAD unchanged. Never the
-  mutated content. Positive control: no mutation, so the commit holds the plain bytes.
+  a symlink swap, a UTF-7 `.gitattributes`, a FIFO `.gitattributes`, a FIFO `.gitignore` in
+  `skills/` or in the candidate's folder): the commit holds exactly the vetted bytes at 100644
+  and no other path, or the run refuses with HEAD unchanged. Never the mutated content. Positive
+  control: no mutation, so the commit holds the plain bytes. The same holds with no hook at all
+  (production's deps), git's own `post-index-change` hook playing the box; and for writes the
+  second pass must see (staged bad bytes, then the disk restored), for an embedded repository at
+  a candidate's name (a gitlink), for a judged delete re-created before staging, and for a
+  folded template whose identity or `covers:` is rewritten after the first pass (the batch
+  rules run on the second pass too). The snapshot never appears under the worktree.
 - O2: a symlink at a catalog draft, a system-skill draft or a `queries/<sys>/README.md`, left by
-  the agent, is refused (each commits as mode 120000 today, C1); a plain file there commits.
+  the agent, is refused (each commits as mode 120000 today, C1); a plain file there commits, and
+  an executable one commits as 100755 (C8).
 - O3: staging that does not match the candidates (a candidate gone, now a FIFO, now a folder,
   or something else already staged) is refused; a vanished candidate is a claim refusal
   (`LeadAuthorError`, dead-lettered), never a `GitError` (which halts the whole drain).
 - O4: a link present before the gate gets today's message, from the first pass, before anything
-  is staged; a second-pass refusal names the path as the worktree spells it.
+  is staged; a second-pass refusal names the path as the worktree spells it; a draft discard an
+  untouched template covers still commits (the snapshot holds the whole catalog).
 - Renames: a promote (draft deleted, near-identical established file added) still commits, as a
   delete plus an add (C14).
 - `commit_judged` alone: the commit holds the bytes the second pass read, whatever is on disk
   by then (C2/C3, D1).
-- D4 census: neither committer references a pathspec committer; both reference `commit_judged`.
+- D4 census: neither committer references a pathspec committer; both reference `commit_judged`;
+  `commit_judged` itself (and what it calls) references none, and its `git commit` carries no
+  pathspec.
 
 Faults enter through injection seams (`deps`, `invoke=`, the hook); git, the filesystem, links
 and FIFOs are real. Linux only in practice (FIFOs, the inotify watch).
@@ -42,6 +52,7 @@ import ast
 import contextlib
 import dataclasses
 import os
+import shlex
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -53,7 +64,7 @@ from defender import _git
 from defender.learning.core import faults, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import read_at
-from defender.learning.leads import lead_author, pitfalls_curator
+from defender.learning.leads import _lead_spine, lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
 from defender.tests._by_path import import_lint_lib
 from defender.tests._declared869 import LeadAuthorSpawn, Spawn
@@ -76,6 +87,7 @@ STEPS = ("judged", "staged", "snapshotted", "rejudged")
 DEADLINE = 20.0
 
 ATTRS_REL = "defender/skills/.gitattributes"
+IGNORE_REL = "defender/skills/.gitignore"
 
 #: `${evil}` spelled in UTF-7 (C13's probe): a literal string as raw bytes, the undeclared
 #: placeholder `${evil}` once decoded under a `working-tree-encoding=UTF-7` attribute.
@@ -135,12 +147,15 @@ def _staged_names(repo: Path) -> list[str]:
 
 class GateSteps:
     """The `gate_step` hook: records each step name and, at step `at`, runs `mutate` (the box
-    process writing). With `index_of`, it also records the index's staged names at each step."""
+    process writing); `actions` maps further steps to further writes. With `index_of`, it also
+    records the index's staged names at each step."""
 
     def __init__(self, at: str | None = None, mutate: Callable[[], None] | None = None, *,
-                 index_of: Path | None = None) -> None:
-        self.at = at
-        self.mutate = mutate
+                 index_of: Path | None = None,
+                 actions: dict[str, Callable[[], None]] | None = None) -> None:
+        self.actions = dict(actions or {})
+        if at is not None and mutate is not None:
+            self.actions[at] = mutate
         self.index_of = index_of
         self.seen: list[str] = []
         self.staged: dict[str, list[str]] = {}
@@ -149,8 +164,8 @@ class GateSteps:
         self.seen.append(step)
         if self.index_of is not None:
             self.staged[step] = _staged_names(self.index_of)
-        if step == self.at and self.mutate is not None:
-            self.mutate()
+        if (act := self.actions.get(step)) is not None:
+            act()
 
 
 def _release(fifo: Path) -> None:
@@ -182,8 +197,9 @@ def _bounded(fn: Callable[[], Any], *, fifos: tuple[Path, ...] = ()) -> Any:
             _release(fifo)
         worker.join(0.1)
     if hung:
-        pytest.fail(f"the run did not return within {DEADLINE}s: a git call blocked (a FIFO "
-                    "`.gitattributes` read from the worktree, outside `committed_view_env`)")
+        pytest.fail(f"the run did not return within {DEADLINE}s: a git call blocked opening a "
+                    "FIFO in the worktree (a `.gitattributes` read outside `committed_view_env`, "
+                    "or a `.gitignore` read by a staging call that applies ignore rules)")
     if "error" in out:
         raise out["error"]
     return out.get("value")
@@ -337,19 +353,20 @@ def _blob(repo: Path, sha: str) -> bytes:
     return _git.git_blob_bytes(repo, sha, env=_git.committed_view_env(), timeout=10)
 
 
-def _assert_committed(d: Drive, entries: list[tuple[str, str, str]]) -> None:
+def _assert_committed(d: Drive, entries: list[tuple[str, str, str]], *,
+                      mode: str = "100644") -> None:
     """The run returned 0 and made one commit on top of the HEAD it started from, holding
-    exactly `entries` (`(status, path, text)`, text `""` for a delete) at mode 100644."""
+    exactly `entries` (`(status, path, text)`, text `""` for a delete) at `mode`."""
     assert d.error is None, f"the run refused: {d.error!r}"
     assert d.rc == 0, d.rc
     assert _git.git_head_sha(d.repo) != d.head, "nothing was committed"
     assert _parent(d.repo) == d.head, "the run made more than one commit"
     got = _committed(d.repo)
     assert [(s, p) for s, _m, p, _b in got] == [(s, p) for s, p, _t in entries], got
-    for (status, mode, _path, blob), (_s, _p, text) in zip(got, entries, strict=True):
+    for (status, got_mode, _path, blob), (_s, _p, text) in zip(got, entries, strict=True):
         if status == "D":
             continue
-        assert mode == "100644", got
+        assert got_mode == mode, got
         assert _blob(d.repo, blob) == text.encode("utf-8"), f"{_path} holds other bytes"
 
 
@@ -409,12 +426,38 @@ def _fifo_attrs(_lane: Lane, repo: Path, _target: Path) -> None:
     os.mkfifo(at)
 
 
+def _folder_ignore(lane: Lane, repo: Path) -> Path:
+    return (repo / lane.vetted_rel).parent / ".gitignore"
+
+
+def _fifo_ignore_skills(_lane: Lane, repo: Path, _target: Path) -> None:
+    """(f) `skills/.gitignore` made a FIFO: a git call that reads ignore rules (`git add`, `git
+    status`) blocks opening it, whatever `committed_view_env` says."""
+    at = repo / IGNORE_REL
+    clear(at)
+    os.mkfifo(at)
+
+
+def _fifo_ignore_folder(lane: Lane, repo: Path, _target: Path) -> None:
+    """(f) The same FIFO `.gitignore`, in the candidate's own folder."""
+    at = _folder_ignore(lane, repo)
+    clear(at)
+    os.mkfifo(at)
+
+
+def _fifo_sites(lane: Lane, repo: Path) -> tuple[Path, ...]:
+    """Every name a row may plant a FIFO at, for `_bounded` to release."""
+    return (repo / ATTRS_REL, repo / IGNORE_REL, _folder_ignore(lane, repo))
+
+
 MUTATIONS = [
     pytest.param(_rewrite, id="bad_bytes"),
     pytest.param(_add_new, id="new_paths"),
     pytest.param(_swap_link, id="symlink_swap"),
     pytest.param(_utf7, id="utf7_gitattributes"),
     pytest.param(_fifo_attrs, id="fifo_gitattributes"),
+    pytest.param(_fifo_ignore_skills, id="fifo_gitignore_skills"),
+    pytest.param(_fifo_ignore_folder, id="fifo_gitignore_folder"),
 ]
 
 
@@ -431,14 +474,15 @@ def test_a_box_write_at_any_gate_step_never_reaches_the_commit(
     never opened (A4).
 
     Catches: committing with a pathspec (re-reads the disk, C3), staging the whole folder
-    (sweeps the new paths in), judging the disk instead of the staged snapshot, and any git call
+    (sweeps the new paths in), judging the disk instead of the staged snapshot, any git call
     in steps 2-6 outside `committed_view_env()` (re-encodes the staged bytes, or blocks opening
-    the FIFO)."""
+    the FIFO `.gitattributes`), and staging through a git call that reads ignore rules (`git
+    add` opens every `.gitignore` on the way to a candidate, so a FIFO one blocks it)."""
     repo = _seeded(tmp_path)
     target = write(tmp_path / "outside" / "swapped.md", lane.refused)
     hook = GateSteps(at=step, mutate=lambda: mutate(lane, repo, target))
     with kernel_watch(opens=[target]) as events:
-        d = lane.drive(tmp_path, repo, lane.leave, hook=hook, fifos=(repo / ATTRS_REL,))
+        d = lane.drive(tmp_path, repo, lane.leave, hook=hook, fifos=_fifo_sites(lane, repo))
         seen = events()
     assert step in hook.seen, f"the hook never fired at {step!r}: the box write never happened"
     assert hook.seen == list(STEPS[:len(hook.seen)]), hook.seen
@@ -476,6 +520,191 @@ def test_a_rewrite_before_staging_is_refused_by_the_second_pass_in_the_worktrees
     _assert_refused(d, lane.refusal)
     assert lane.vetted_rel in str(d.error), d.error
     assert str(tmp_path) not in str(d.error), f"the refusal names a host path: {d.error}"
+
+
+def _post_index_change_box(tmp_path: Path, repo: Path, lane: Lane) -> Path:
+    """git itself as the box process, for a run with no `gate_step`: a `post-index-change` hook
+    (`core.hooksPath` on the repo) that, the first time the index is written with the vetted
+    path staged, overwrites that path on disk with refused bytes. git runs it synchronously
+    after every index write (`add`, `update-index`, `commit`), so the write lands after staging
+    and before the commit, deterministically. Returns the marker it leaves once it has fired."""
+    hooks = tmp_path / "githooks"
+    hooks.mkdir()
+    marker = tmp_path / "box-wrote"
+    refused = write(tmp_path / "refused-bytes", lane.refused)
+    script = hooks / "post-index-change"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"[ -e {shlex.quote(str(marker))} ] && exit 0\n"
+        f"git diff --cached --name-only | grep -qxF {shlex.quote(lane.vetted_rel)} || exit 0\n"
+        f": > {shlex.quote(str(marker))}\n"
+        f"cp {shlex.quote(str(refused))} {shlex.quote(lane.vetted_rel)}\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    _git.git(["config", "core.hooksPath", str(hooks)], cwd=repo)
+    return marker
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_with_no_hook_a_box_write_after_staging_never_reaches_the_commit(
+        tmp_path: Path, lane: Lane):
+    """O1 on production's own path: no `gate_step` at all (the deps and `run_pitfalls` as the
+    drain builds them). git's `post-index-change` hook plays the box: once the vetted path is
+    staged it rewrites it on disk with refused bytes. The commit holds the vetted bytes (or the
+    run refuses with HEAD unchanged); the disk is left holding the box's bytes, so the race did
+    happen.
+
+    Catches: a fix taken only when a hook is passed, production keeping today's pathspec commit
+    (`git commit -- skills` re-reads the disk, C3)."""
+    repo = _seeded(tmp_path)
+    marker = _post_index_change_box(tmp_path, repo, lane)
+    d = lane.drive(tmp_path, repo, lane.leave)
+    assert marker.exists(), "the vetted path was never staged with the hook live: no race ran"
+    assert (repo / lane.vetted_rel).read_text(encoding="utf-8") == lane.refused
+    _assert_judged_or_refused(d, lane)
+
+
+@pytest.mark.parametrize("restored_at", ["staged", "snapshotted"])
+@pytest.mark.parametrize("lane", LANES)
+def test_bad_bytes_staged_then_restored_on_disk_are_still_refused(
+        tmp_path: Path, lane: Lane, restored_at: str):
+    """O1 / D1: refused bytes written right after the first pass are what gets staged; the box
+    then puts the vetted bytes back on disk (after staging, or after the snapshot). The second
+    pass judges the staged bytes, through the snapshot, so the run refuses with today's message
+    and HEAD unchanged, though the disk now holds bytes the gate admits.
+
+    Catches: a second pass that reads the disk (the held mount) rather than the snapshot of the
+    index: it would admit the restored bytes and commit the staged refused ones."""
+    repo = _seeded(tmp_path)
+    hook = GateSteps(actions={
+        "judged": lambda: _rewrite(lane, repo, repo),
+        restored_at: lambda: lane.leave(repo),
+    })
+    d = lane.drive(tmp_path, repo, lane.leave, hook=hook)
+    assert restored_at in hook.seen, hook.seen
+    _assert_refused(d, lane.refusal)
+    assert (repo / lane.vetted_rel).read_text(encoding="utf-8") == lane.vetted
+
+
+def _listing(root: Path) -> set[str]:
+    """Every entry below `root`, hidden ones included, judged without following a link."""
+    out: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in (*dirnames, *filenames):
+            out.add((Path(dirpath) / name).relative_to(root).as_posix())
+    return out
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_the_snapshot_never_appears_under_the_worktree(tmp_path: Path, lane: Lane):
+    """The snapshot is host-private (design step 4: a fresh temp dir, never under the worktree,
+    which the box mounts). Between "staged" and "snapshotted" nothing new appears anywhere
+    under the worktree, hidden folders included; the run commits the vetted bytes.
+
+    Catches: a snapshot made under `skills/` (or anywhere in the worktree), where a box process
+    could rewrite what the second pass reads."""
+    repo = _seeded(tmp_path)
+    seen: dict[str, set[str]] = {}
+    hook = GateSteps(actions={
+        "staged": lambda: seen.__setitem__("staged", _listing(repo)),
+        "snapshotted": lambda: seen.__setitem__("snapshotted", _listing(repo)),
+    })
+    d = lane.drive(tmp_path, repo, lane.leave, hook=hook)
+    _assert_committed(d, [(lane.status, lane.vetted_rel, lane.vetted)])
+    assert set(seen) == {"staged", "snapshotted"}, hook.seen
+    assert lane.vetted_rel in seen["staged"], "the listing does not see the worktree"
+    assert sorted(seen["snapshotted"] - seen["staged"]) == [], "the snapshot is in the worktree"
+
+
+SKILL_DRAFT_REL = "defender/skills/elastic/_draft/falco-na.md"
+#: What a box process writes back at the deleted skill draft's name: a draft the gate admits.
+BOXED_DRAFT = "---\nid: elastic.boxed\nstatus: draft\n---\n# written by a box process\n"
+
+
+@pytest.mark.parametrize("box", ["none", "recreated"])
+def test_a_judged_delete_recreated_before_staging_is_refused(tmp_path: Path, box: str):
+    """Design step 3 (each candidate staged "added/modified or deleted as its record says"): the
+    agent deletes the seeded, committed system-skill draft (a delete the gate allows); right
+    after the first pass a box process writes the name back with other bytes the gate would
+    admit. Staged, it is a modification where the first pass judged a deletion: refused, HEAD
+    unchanged. `none` is the control: the delete commits.
+
+    Catches: a staged-set check by names only, which hands the second pass the staged status
+    ("M") and so judges and commits bytes the first pass never saw."""
+    repo = _seeded(tmp_path)
+    hook = GateSteps(at="judged", mutate=(
+        (lambda: write(repo / SKILL_DRAFT_REL, BOXED_DRAFT)) if box == "recreated" else None))
+    d = _drive_lead(tmp_path, repo, lambda root: (root / SKILL_DRAFT_REL).unlink(), hook=hook)
+    if box == "none":
+        _assert_committed(d, [("D", SKILL_DRAFT_REL, "")])
+        return
+    _assert_refused(d)
+
+
+def _embedded_repo(at: Path) -> None:
+    """`at` replaced by a git repository with one commit: `git add` stages it as a gitlink."""
+    clear(at)
+    at.mkdir(parents=True)
+    _git.git(["init", "-q"], cwd=at)
+    write(at / "inner.md", "a nested repository's file\n")
+    ident = ["-c", "user.email=box@example.com", "-c", "user.name=box"]
+    _git.git([*ident, "add", "inner.md"], cwd=at)
+    _git.git([*ident, "commit", "-q", "-m", "nested"], cwd=at)
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_a_candidate_swapped_for_an_embedded_repository_is_refused(tmp_path: Path, lane: Lane):
+    """O2 (no gitlink, 160000): right after the first pass the box replaces the candidate with an
+    embedded git repository at the same name, which git stages as a gitlink. Refused, HEAD
+    unchanged, nothing at mode 160000 in it. (The O1 positive control is this address
+    unmutated.)
+
+    Catches: a mode check that refuses only symlinks (120000)."""
+    repo = _seeded(tmp_path)
+    hook = GateSteps(at="judged", mutate=lambda: _embedded_repo(repo / lane.vetted_rel))
+    d = lane.drive(tmp_path, repo, lane.leave, hook=hook)
+    assert "judged" in hook.seen, hook.seen
+    _assert_refused(d)
+    listing = _g(repo, "ls-tree", "-r", "-z", "HEAD").split("\0")
+    modes = {entry.split(" ", 1)[0] for entry in listing if entry}
+    assert "160000" not in modes, modes
+
+
+AUTH_REL = "defender/skills/gather/queries/wazuh/auth-events.md"
+#: The seeded established template folded with one more identity: the first pass admits it.
+FOLDED = query_template("wazuh.auth-events", "established",
+                        covers=("wazuh.auth-old", "wazuh.auth-extra"))
+
+
+@pytest.mark.parametrize(("box", "says"), [
+    pytest.param(None, None, id="none"),
+    pytest.param(query_template("wazuh.clobbered", "established",
+                                covers=("wazuh.auth-old", "wazuh.auth-extra")),
+                 "rewrote the identity of an established template", id="identity_rewritten"),
+    pytest.param(query_template("wazuh.auth-events", "established", covers=("wazuh.auth-extra",)),
+                 "dropped `covers:` entries", id="covers_dropped"),
+])
+def test_a_folded_template_rewritten_after_the_first_pass_meets_the_batch_rules(
+        tmp_path: Path, box: str | None, says: str | None):
+    """The second pass runs every rule, the whole-batch ones included (`_covers_rule`'s
+    monotonicity: an established template keeps its `id:` and every `covers:` entry it had at
+    HEAD). HEAD's `auth-events.md` covers `wazuh.auth-old`; the agent folds `wazuh.auth-extra` in
+    (admitted). Right after the first pass the box rewrites the file with another `id:`, or
+    without `wazuh.auth-old`: the staged bytes are refused with today's message, HEAD unchanged.
+    `none` is the control: the fold commits.
+
+    Catches: a second pass that runs only the per-path rules (both rewrites pass those)."""
+    repo = _seeded(tmp_path)
+    write(repo / AUTH_REL, query_template("wazuh.auth-events", "established",
+                                          covers=("wazuh.auth-old",)))
+    _git.git(["commit", "-q", "-a", "-m", "auth-events covers wazuh.auth-old"], cwd=repo)
+    hook = GateSteps(at="judged", mutate=(lambda: write(repo / AUTH_REL, box)) if box else None)
+    d = _drive_lead(tmp_path, repo, lambda root: write(root / AUTH_REL, FOLDED), hook=hook)
+    if box is None:
+        _assert_committed(d, [("M", AUTH_REL, FOLDED)])
+        return
+    _assert_refused(d, says)
 
 
 # ---------------------------------------------------------------------------------------
@@ -520,6 +749,24 @@ def test_a_symlink_the_agent_leaves_where_no_content_rule_reads_is_refused(
         _assert_committed(d, [("A", rel, text)])
         return
     _assert_refused(d)
+
+
+def test_an_executable_file_the_agent_leaves_commits_as_100755(tmp_path: Path):
+    """O2's other regular mode (C8: `skills/` holds 100755 files today): the agent leaves an
+    executable `queries/wazuh/README.md`. It commits, at 100755, through production's deps (no
+    hook). The 100644 form at this address is O2's `catalog_readme-plain` row.
+
+    Catches: a mode check that admits only 100644."""
+    repo = _seeded(tmp_path)
+    rel = "defender/skills/gather/queries/wazuh/README.md"
+    text = "# wazuh catalog notes\n"
+
+    def leave(root: Path) -> None:
+        write(root / rel, text)
+        os.chmod(root / rel, 0o755)
+
+    d = _drive_lead(tmp_path, repo, leave)
+    _assert_committed(d, [("A", rel, text)], mode="100755")
 
 
 # ---------------------------------------------------------------------------------------
@@ -658,6 +905,37 @@ def test_a_link_present_before_the_gate_gets_todays_refusal_before_anything_is_s
     assert seen == [], f"the host opened or read the outside file: {seen}"
 
 
+DUP_REL = "defender/skills/gather/queries/wazuh/_draft/dup.md"
+
+
+@pytest.mark.parametrize(("covers", "says"), [
+    pytest.param("wazuh.auth-events", None, id="covered_by_an_untouched_template"),
+    pytest.param("wazuh.orphan", "without attributing it", id="covered_by_nothing"),
+])
+def test_a_draft_discard_is_judged_against_the_whole_catalog_on_both_passes(
+        tmp_path: Path, covers: str, says: str | None):
+    """O4 with no concurrent writer: the agent deletes a committed draft recording one identity.
+    When an established template the agent never touched (`auth-events.md`) answers it, the
+    discard is attributed and commits as a delete, through all four steps: the second pass's
+    snapshot holds the whole `skills/` tree, not just the staged paths (D2: the batch rules read
+    the whole catalog). When nothing answers it, today's refusal ("without attributing it")
+    stands, HEAD unchanged: the rule is live on this address.
+
+    Catches: a snapshot of the candidates only, whose second pass finds the identity orphaned and
+    refuses a batch the first pass admitted."""
+    repo = _seeded(tmp_path)
+    write(repo / DUP_REL, query_template("wazuh.dup", "draft", covers=(covers,)))
+    _git.git(["add", "--", DUP_REL], cwd=repo)
+    _git.git(["commit", "-q", "-m", "a draft recording one identity"], cwd=repo)
+    hook = GateSteps()
+    d = _drive_lead(tmp_path, repo, lambda root: (root / DUP_REL).unlink(), hook=hook)
+    if says is not None:
+        _assert_refused(d, says)
+        return
+    _assert_committed(d, [("D", DUP_REL, "")])
+    assert hook.seen == list(STEPS), hook.seen
+
+
 # ---------------------------------------------------------------------------------------
 # `commit_judged` alone: the commit holds what the second pass read (C2/C3, D1)
 # ---------------------------------------------------------------------------------------
@@ -761,3 +1039,102 @@ def test_each_committer_commits_through_commit_judged_and_never_a_pathspec_commi
     assert any(r.endswith("_lead_spine.commit_judged") for r in refs), (
         f"{module.__name__} does not commit through _lead_spine.commit_judged"
     )
+
+
+#: `git commit` options whose next argv element is their value (a message, a file, an author).
+_COMMIT_VALUE_OPTIONS = frozenset({
+    "-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message",
+    "-t", "--template", "--author", "--date", "--trailer", "--cleanup",
+})
+
+
+def _defs_reached(tree: ast.Module, start: set[str]) -> list[ast.FunctionDef]:
+    """The module-level defs named in `start` and every module-level def they name, transitively
+    (a call, or a reference such as a `partial` or a context manager)."""
+    defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    todo, reached = list(start), {}
+    while todo:
+        name = todo.pop()
+        if name in reached or name not in defs:
+            continue
+        reached[name] = defs[name]
+        todo.extend(n.id for n in ast.walk(defs[name]) if isinstance(n, ast.Name))
+    return list(reached.values())
+
+
+def _commit_judged_code() -> list[tuple[ast.FunctionDef, Any]]:
+    """`_lead_spine.commit_judged`, every `_lead_spine` def it reaches, and every `defender._git`
+    function those reference (with the `_git` defs they reach in turn), each with its module's
+    resolver env."""
+    astlib = import_lint_lib("_astlib")
+    out: list[tuple[ast.FunctionDef, Any]] = []
+    git_names: set[str] = set()
+    for module in (_lead_spine, _git):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        env = astlib.module_env(tree)
+        start = {"commit_judged"} if module is _lead_spine else git_names
+        for fn in _defs_reached(tree, start):
+            out.append((fn, env))
+            if module is not _lead_spine:
+                continue
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Name | ast.Attribute) and isinstance(node.ctx, ast.Load)
+                        and (origin := astlib.origin(node, env)) is not None
+                        and origin.startswith("defender._git.")):
+                    git_names.add(origin.rsplit(".", 1)[-1])
+    return out
+
+
+def _commit_argvs(fn: ast.FunctionDef) -> list[ast.List | ast.Tuple]:
+    """Every git argv literal in `fn` that runs `commit`: a list or tuple holding the string
+    `"commit"`, every element before it a string (git's own options)."""
+    found = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.List | ast.Tuple):
+            continue
+        consts = [e.value if isinstance(e, ast.Constant) else None for e in node.elts]
+        if "commit" in consts and all(isinstance(c, str) for c in consts[:consts.index("commit")]):
+            found.append(node)
+    return found
+
+
+def _pathspec_of(argv: ast.List | ast.Tuple) -> list[str]:
+    """What follows `commit` in `argv` that is not an option or an option's value: a `--`, a
+    starred list, a path or any other value would be a pathspec (C3)."""
+    elts = argv.elts[[getattr(e, "value", None) for e in argv.elts].index("commit") + 1:]
+    stray, takes_value = [], False
+    for e in elts:
+        if takes_value:
+            takes_value = False
+            continue
+        if isinstance(e, ast.Constant) and isinstance(e.value, str) and e.value != "--" \
+                and e.value.startswith("-"):
+            takes_value = e.value in _COMMIT_VALUE_OPTIONS
+            continue
+        stray.append(ast.unparse(e))
+    return stray
+
+
+def test_commit_judged_commits_the_index_with_no_pathspec_and_no_pathspec_committer():
+    """D4 / C2, of `commit_judged` itself: the code it runs (its own def, the `_lead_spine` defs
+    it reaches, and the `_git` functions those use) references no pathspec committer
+    (`commit_corpus`, `git_commit`, their path-list forms), and runs `git commit` with options
+    only: no `--`, no path, no list spliced in. So whichever caller, hook or none, the commit is
+    the index the second pass judged.
+
+    Catches: a `commit_judged` that keeps today's `git commit -- defender/skills` on some branch
+    (production's hookless one, say): the D4 census of the two callers cannot see past the call."""
+    astlib = import_lint_lib("_astlib")
+    code = _commit_judged_code()
+    assert any(fn.name == "commit_judged" for fn, _env in code), "no commit_judged in _lead_spine"
+    refs = sorted(
+        origin for fn, env in code for node in ast.walk(fn)
+        if isinstance(node, ast.Name | ast.Attribute) and isinstance(node.ctx, ast.Load)
+        and (origin := astlib.origin(node, env)) is not None
+        and origin.rsplit(".", 1)[-1] in PATHSPEC_COMMITTERS
+    )
+    assert refs == [], f"commit_judged reaches a pathspec committer: {refs}"
+    argvs = [(fn.name, argv) for fn, _env in code for argv in _commit_argvs(fn)]
+    assert argvs, "commit_judged runs no `git commit` this census can read"
+    stray = {f"{name}: {ast.unparse(argv)}": _pathspec_of(argv) for name, argv in argvs}
+    assert all(not s for s in stray.values()), f"a `git commit` with a pathspec: {stray}"
