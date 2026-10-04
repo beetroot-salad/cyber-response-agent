@@ -58,10 +58,11 @@ CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: `scripts/`). The anchors are the placement group's (`MODULE_ANCHORS`), filtered alike to the
 #: seven modules the 2026-10-04 scope cut moves (E2): the OUT modules (`adapters/`,
 #: `case_history/`, `record_query.py`, `visualize/`, `workspace_map.py`) stay where they are.
-#: The two engines' wrappers stay at the base path (M-H (a)); the anchor names the engine.
+#: The two engines' base paths keep no wrapper (post-review: the shims run the engines with
+#: `-m`, reversing M-H (a)); the anchor names the engine.
 MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/scripts/_venv.py": (("reexec_into_venv", S.FLAT_TIER),),
-    "defender/scripts/pricing.py": (("usage_cost", S.PROVIDERS),),
+    "defender/scripts/pricing.py": (("usage_cost", S.PRICING),),
     "defender/scripts/gather_tools/payload_view.py": (("passthrough_max_bytes", None),),
     "defender/scripts/gather_tools/sql.py": (("_load_payload", S.RUNTIME),),
     "defender/scripts/lessons/_lessons_common.py": (("resolve_corpus", None),),
@@ -74,7 +75,8 @@ MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
 OUT_KEYED = ("defender/scripts/case_history/case_ticket.py",
              "defender/scripts/gather_tools/record_query.py")
 
-#: The shims whose exec targets are the wrappers that stay (M-H (a)).
+#: The shims that ran a wrapper at the base and now run their engine as a module (post-review,
+#: reversing M-H (a)); every other shim stays byte-identical to the base.
 WRAPPER_SHIMS = ("defender-sql", "defender-lessons")
 
 #: The four commands that stay in `scripts/` (D1).
@@ -129,10 +131,6 @@ def _spec_graph_config() -> Any:
 def _homes(base_path: str) -> list[str]:
     """Where `base_path`'s code lives now: one home per anchor (found by symbol)."""
     return [S.home_of(sym, home=home) for sym, home in MOVED_HOMES[base_path]]
-
-
-def _wrapper_paths() -> list[str]:
-    return [S.rel(S.shim_exec_target(shim)) for shim in WRAPPER_SHIMS]
 
 
 def _drel(relpath: str) -> str:
@@ -389,7 +387,7 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
 
     Observed through the lint's own `sweep_files` over the REAL `defender/` tree: every home of
     every moved module (found by symbol) is in it — the lessons engine, the sql engine's and
-    `payload_view`'s `runtime/` homes, `runtime/providers/` and the flat tier among them.
+    `payload_view`'s `runtime/` homes and the flat tier (`_venv`, `_pricing`) among them.
     Driven: a record-name literal planted in a tmp copy of the moved `lessons_frontier` is
     reported by `scan`.
     """
@@ -399,7 +397,7 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
         "the lessons engine": S.home_of("cmd_tags"),
         "the sql engine (runtime)": S.home_of("_load_payload", home=S.RUNTIME),
         "payload_view (runtime)": S.home_of("passthrough_max_bytes", home=S.RUNTIME),
-        "pricing (runtime/providers)": S.home_of("usage_cost", home=S.PROVIDERS),
+        "pricing (flat tier)": S.home_of("usage_cost", home=S.PRICING),
         "the flat tier": S.home_of("reexec_into_venv", home=S.FLAT_TIER),
     }
     unswept = {k: h for k, h in named.items() if h not in swept}
@@ -416,12 +414,12 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
 
 
 def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package(tmp_path, monkeypatch):
-    """A plant of a record-name literal, a tenant env read, an unguarded tree write and a tree read in a module under every new home (under the 2026-10-04 scope cut: the lessons engine, the `runtime/` homes, the flat tier) and in a thin wrapper in scripts/ is reported by each path-scoped gate that reported the same plant at the old location, so no gate's scope narrows silently. Gate sweeps and profile code roots that were fixed lists are extended to the new top-level packages (M5).
+    """A plant of a record-name literal, a tenant env read, an unguarded tree write and a tree read in a module under every new home (under the 2026-10-04 scope cut: the lessons engine, the `runtime/` homes, the flat tier) is reported by each path-scoped gate that reported the same plant at the old location, so no gate's scope narrows silently. Gate sweeps and profile code roots that were fixed lists are extended to the new top-level packages (M5).
 
     The expected side is the base: one plant carrying all four idioms was appended to every
     base module of `defender/scripts/` in place, and which of the four gates reported it was
     captured at 80888efb (golden). Now the same plant goes into a tmp copy of every home of every
-    moved module (found by symbol) and of each wrapper a shim execs, the four gates' own scans
+    moved module (found by symbol; no wrapper is left in scripts/), the four gates' own scans
     run once over that copy, and every gate that reported the plant at the old location must
     report it at each new one. Controls: plants in a staying adapter and a staying listed tree
     reader are reported. The profile half: every planted home is in the spec-flow census
@@ -433,9 +431,7 @@ def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_
         if base in MOVED_HOMES:
             for home in _homes(base):
                 owed.setdefault(home, set()).update(gates)
-    for wrapper in _wrapper_paths():
-        owed.setdefault(wrapper, set()).update(at_base[wrapper])
-    assert owed, "no moved module or wrapper to plant in"
+    assert owed, "no moved module to plant in"
 
     reported = plant_and_scan(tmp_path / "tree", owed)
     for control, gates in CONTROLS.items():
@@ -669,7 +665,9 @@ def test_vanished_directory_name_that_is_also_a_live_identifier(tmp_path):
     """Moving a scripts module whose folder shares its name with a surviving content folder (`lessons`) or whose stem is a live identifier leaves no stale path reference to the old location in tests and docs, and does not false-flag the live identifier, the surviving `lessons` content folder or the surviving wrapper: the check distinguishes path references from live names. (The `visualize` case is parked with #1105 by the 2026-10-04 scope cut: `scripts/visualize/` does not move.)
 
     The lessons engine moved (found by symbol outside `defender/scripts/`) and the real checkout
-    holds no stale pointer and no vanished-folder mention. Both sides of the distinction, in a
+    holds no stale pointer and no vanished-folder mention. (Post-review the wrapper went too, so
+    the real `scripts/lessons/` folder is gone; a bare `lessons/` there names the live content
+    folder and is not counted, while path pointers into the gone folder still are.) Both sides of the distinction, in a
     tmp git repo that keeps `defender/scripts/lessons/lessons_fm.py` (the wrapper) and the
     `defender/lessons/` content folder but not `defender/scripts/lessons/lessons_frontier.py`:
     the path and module spellings of the moved engine's old location are reported; the word
@@ -698,6 +696,20 @@ def test_vanished_directory_name_that_is_also_a_live_identifier(tmp_path):
                      if rel == "defender/notes.md"}
     assert stale_lines == {4, 5}, f"path references found on lines {sorted(stale_lines)}, expected [4, 5]"
     assert mention_lines == set(), f"folder mentions on lines {sorted(mention_lines)}, expected none"
+
+    # With the folder gone too: a path into it is still a mention, a bare `lessons/` names the
+    # live content folder and is not, and a gone folder with no live namesake still is.
+    gone = _git_repo(tmp_path / "gone", {
+        "defender/lessons/one.md": "a lesson\n",
+        "defender/notes.md": "The lessons/ folder holds lessons.\n"
+                             "Old: `defender/scripts/lessons/lessons_fm.py`.\n"
+                             "The case_history/ layout.\n",
+    })
+    assert "lessons" in P.vanished_folders(gone)
+    mentions = {(line, text) for rel, line, text in P.vanished_folder_mentions(gone)
+                if rel == "defender/notes.md"}
+    assert mentions == {(2, "defender/scripts/lessons/lessons_fm.py"), (3, "case_history/")}, \
+        mentions
 
 
 def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_path):
@@ -775,8 +787,8 @@ def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_wo
     ci.yml's `run:` steps that invoke a `defender/scripts/` command are the base's, unchanged
     (golden), and each names a file that exists with a `__main__` block; so does every staying
     command a tracked doc invokes by path or `-m`, and every `tenant.py <subcommand>` a doc gives
-    is one the command's usage offers. The three `bin/` shims are byte-identical to the base
-    (M-H (a)). Path triggers: every `on.<event>.paths` filter in ci.yml (there are none at
+    is one the command's usage offers. Every `bin/` shim but the two that now run their engine
+    with `-m` is byte-identical to the base (M-H (a), narrowed post-review). Path triggers: every `on.<event>.paths` filter in ci.yml (there are none at
     80888efb) must match each moved module's home (found by symbol), and no `paths-ignore`
     filter may.
     """
@@ -792,6 +804,8 @@ def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_wo
     assert not broken, f"docs invoke staying commands that do not run: {broken[:40]}"
 
     for shim, digest in S.base_inventory()["shims"].items():
+        if shim in WRAPPER_SHIMS:
+            continue
         assert hashlib.sha256((S.BIN / shim).read_bytes()).hexdigest() == digest, \
             f"bin/{shim} changed (M-H (a): the shims are unchanged)"
 

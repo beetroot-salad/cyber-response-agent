@@ -7,8 +7,8 @@ episode-page, footer and frontend tests are parked with #1105
 lessons-frontier consumers (s052), the location-derived values of the moved modules (m2) and
 the O5 suites' assertions (s043). No kept test imports `defender._run_paths` (E4).
 
-The renderers land under `defender/reports/` (M-F (a)) and pricing under
-`defender/runtime/providers/` (demand text); every other home is found by symbol (dF0). Every
+The renderers land under `defender/reports/` (M-F (a)) and pricing in the flat tier
+(`S.PRICING`; first pinned under `runtime/providers/`, moved after review); every other home is found by symbol (dF0). Every
 moved name is reached at CALL time through `_spec1080` (`S.moved` / `S.moved_module` /
 `S.home_of`), so a missing home is one failure per test, never a collection error. Modules that
 do not move (`learning/branch/cli.py`, `learning/frontend/build.py`, `runtime/observe.py`,
@@ -244,19 +244,20 @@ def test_suite_assertions_kept_while_a_fixture_points_the_test_at_another_target
 
 
 def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
-    """`runtime/observe.py`'s `usage_cost` comes from `runtime/providers/`. A fixed usage record
-    costs the same amount as at the base. Importing it loads no `pydantic_ai`.
+    """`runtime/observe.py`'s `usage_cost` comes from the moved pricing module (the flat tier
+    since the post-review change; the name keeps its first home for the record). A fixed usage
+    record costs the same amount as at the base. Importing it loads no `pydantic_ai`.
 
-    Observed through the observer's own binding: `observe.usage_cost` is the providers-home
-    function, and over the fixed table every cost equals the base's (type-preserving). A cold
-    child importing the moved pricing module has loaded no agent framework; the same child then
+    Observed through the observer's own binding: `observe.usage_cost` is the moved function,
+    and over the fixed table every cost equals the base's (type-preserving). A cold child
+    importing the moved pricing module has loaded no agent framework; the same child then
     importing the observer shows the agent framework loaded — the channel sees it."""
-    moved = S.moved("usage_cost", home=S.PROVIDERS)
+    moved = S.moved("usage_cost", home=S.PRICING)
     observe = importlib.import_module("defender.runtime.observe")
     assert observe.usage_cost is moved
     assert _pricing_rows(observe.usage_cost) == _g("pricing")["rows"]
 
-    seen = _cold_import(S.dotted(S.home_of("usage_cost", home=S.PROVIDERS)),
+    seen = _cold_import(S.dotted(S.home_of("usage_cost", home=S.PRICING)),
                         "defender.runtime.observe")
     pricing_mod, observer = list(seen)
     assert seen[pricing_mod] == [], f"importing pricing loaded {seen[pricing_mod]}"
@@ -264,19 +265,25 @@ def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
 
 
 def test_pricing_module_lands_in_a_package_whose_initialiser_must_not_load_the_agent_framework():
-    """pricing lands in `runtime/providers/`, whose package initialiser must keep closing over
-    pydantic only: a cold import of the package, and of the observer that costs usage, loads no
-    agent framework at module scope, and a fixed usage record costs exactly what it costs today.
+    """The price table is importable with the standard library alone: its module imports only
+    the standard library, and a cold import of it loads no third-party package at all — not the
+    agent framework, not pydantic. (Post-review change, human: under `runtime/providers/` every
+    import paid for the providers package, which builds the provider objects and loads
+    pydantic.) A fixed usage record costs exactly what it costs today.
 
-    The package and the moved pricing module are imported cold in one child; neither has loaded
-    any agent-framework or provider-stack module (the base's package loaded none either). The
-    observer itself imports `pydantic_ai.messages` at module scope today (observe.py:12), so it
-    is the positive control here rather than a subject. The fixed table costs what it cost at
-    the base."""
-    home = S.home_of("usage_cost", home=S.PROVIDERS)
-    seen = _cold_import("defender.runtime.providers", S.dotted(home), "defender.runtime.observe")
-    package, pricing_mod, observer = list(seen)
-    assert seen[package] == _g("pricing")["providers_package_loads"] == []
-    assert seen[pricing_mod] == [], f"importing pricing loaded {seen[pricing_mod]}"
-    assert "pydantic_ai" in seen[observer], "positive control: the observer loads pydantic_ai"
-    assert _pricing_rows(S.moved("usage_cost", home=S.PROVIDERS)) == _g("pricing")["rows"]
+    Observed: the module's import statements read through the AST, and a child with every
+    import outside the standard library and this tree refused importing it. Positive control:
+    the same child refuses `defender.runtime.providers`."""
+    from defender.tests._import_blocker import run_blocked
+
+    home = S.home_of("usage_cost", home=S.PRICING)
+    src = (S.REPO_ROOT / home).read_text(encoding="utf-8")
+    third = [i.module for i in S.import_statements(home, src)
+             if i.module.split(".")[0] not in sys.stdlib_module_names and i.module != "__future__"]
+    assert third == [], f"{home} imports outside the standard library: {third}"
+    env = {"PYTHONPATH": str(S.REPO_ROOT), "PATH": "/usr/bin:/bin"}
+    for module, ok in ((S.dotted(home), True), ("defender.runtime.providers", False)):
+        done = run_blocked(f"import {module}\n", allow_only=("defender", "__main__"),
+                           no_site=True, env=env)
+        assert (done.returncode == 0) is ok, (module, done.stderr.decode()[-400:])
+    assert _pricing_rows(S.moved("usage_cost", home=S.PRICING)) == _g("pricing")["rows"]

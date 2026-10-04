@@ -79,6 +79,9 @@ UNRELATED_TREES = (
 # rather than the growing list of one-offs it replaces. The lint SCRIPTS beside them stay in
 # scope — they are code and could import for real.
 LINT_BASELINE_SUFFIX = "_baseline.json"
+#: A test suite's `goldens/` folder holds outputs captured at some base commit: frozen data that
+#: may name a file, never code that depends on it.
+GOLDENS_DIR = "/goldens/"
 HISTORICAL_RECORD = UNRELATED_TREES
 
 SUITE_FILES = (
@@ -112,12 +115,13 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
 
 def live_hits(hits: list[str], *, extra_excludes: tuple[str, ...] = ()) -> list[str]:
     """`hits` minus the historical-record and unrelated trees, minus this suite's own files,
-    minus the lint baselines that merely RECORD a site by name."""
+    minus the lint baselines and test goldens that merely RECORD a site by name."""
     excluded = HISTORICAL_RECORD + SUITE_FILES + extra_excludes
     return [
         h for h in hits
         if not any(h.startswith(p) for p in excluded)
-        and LINT_BASELINE_SUFFIX not in h.split(":", 1)[0]
+        and LINT_BASELINE_SUFFIX not in (path := h.split(":", 1)[0])
+        and GOLDENS_DIR not in path
     ]
 
 
@@ -702,6 +706,24 @@ def test_no_module_outside_the_defender_package_imports_run_common():
     assert not outside_callers, (
         "a caller of the changed builder survives outside defender/:\n" + "\n".join(outside_callers)
     )
+
+
+def test_the_deleted_manual_gather_harness_leaves_no_dependent_behind():
+    """The manual, live-billed gather harness is gone from disk and nothing depends on it. It
+    was a second driver of the changed builder that no gate instrument reached — not pytest,
+    not vulture, not the actors check — so a break in it would have shipped silently. Its only
+    surviving textual match anywhere is an unrelated demand id in another spec graph, about the
+    gather agent's toolset rather than this file."""
+    assert not (REPO_ROOT / "scripts" / "testing" / "gather_only.py").exists(), (
+        "scripts/testing/gather_only.py is still on disk"
+    )
+    hits = live_hits(
+        repo_grep(r"gather_only"),
+        extra_excludes=("defender/tests/e2e/test_540_scrub_lifecycle.py",),
+    )
+    assert not hits, "a dependent on the deleted harness survives:\n" + "\n".join(hits)
+
+
 
 
 def test_no_live_model_facing_prose_names_a_mechanism_with_no_producer():

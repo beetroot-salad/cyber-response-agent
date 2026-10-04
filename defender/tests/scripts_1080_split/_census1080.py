@@ -339,21 +339,14 @@ def direction_findings(root: Path = S.REPO_ROOT, overlay: Mapping[str, str] | No
 
 
 def shim_target(root: Path, shim: str) -> str:
-    """The repo-relative file a `bin/` shim of the tree at `root` execs."""
-    text = (root / "defender" / "bin" / shim).read_text(encoding="utf-8")
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("exec ") and ".py" in s:
-            for tok in s.split():
-                tok = tok.strip('"')
-                if tok.endswith(".py"):
-                    tail = tok.split("}", 1)[-1] if "}" in tok else tok.split("/", 1)[-1]
-                    return "defender/" + tail.lstrip("/")
-    raise AssertionError(f"bin/{shim} names no `exec ... <file>.py` line")
+    """The repo-relative engine file a `bin/` shim of the tree at `root` runs as a module."""
+    return S.rel(S.shim_exec_target(shim, root), root)
 
 
 def wrappers(root: Path = S.REPO_ROOT) -> tuple[str, ...]:
-    return tuple(shim_target(root, s) for s in WRAPPER_SHIMS)
+    """The shims' wrappers under `defender/scripts/`: none since the post-review change (human,
+    2026-10-04) — each shim runs its engine as a module. Kept as the placement check's name."""
+    return ()
 
 
 def adapters_expected() -> tuple[str, ...]:

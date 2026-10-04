@@ -21,7 +21,6 @@ import) are green at the base by construction: they drive the same scan over a p
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib.util
 import json
 import os
@@ -50,10 +49,8 @@ INVESTIGATION = ("passthrough_max_bytes", "_load_payload", "_arrow_refusal")
 FLAT_TIER_RULES = (
     *S.QUERY_RULE_PUBLIC.values(), "is_reserved_query_id", "ABOVE_GUARD_QUERY_ID",
     "BASH_SHIM_QUERY_ID", "DENIED_QUERY_ID", "REPEAT_TRIP_QUERY_ID", "_QID_FORBIDDEN",
-    "reexec_into_venv",
+    "reexec_into_venv", "usage_cost",
 )
-#: Under `runtime/providers/`.
-IN_PROVIDERS = ("usage_cost",)
 #: The lessons engine: outside `scripts/` and outside the content folder `defender/lessons/`.
 LESSONS_ENGINE = (
     "cmd_grep", "cmd_tags", "cmd_show", "match_lessons", "match_loaded", "Hit",
@@ -225,8 +222,8 @@ def test_1080_each_moved_symbol_is_defined_under_its_home():
     module-level assignment) outside `defender/scripts/`, in a module under its home:
     `payload_view`'s and the sql engine's symbols under `defender/runtime/` (not in its
     `tools/` or `branch/` packages); the query-id and request-key rules (under their base names)
-    and `reexec_into_venv` in a flat-tier `defender/_*.py` module; `usage_cost` under
-    `runtime/providers/`; the lessons engine outside `defender/lessons/`. The groups the cut
+    `reexec_into_venv` and `usage_cost` in flat-tier `defender/_*.py` modules (`usage_cost` was
+    first pinned under `runtime/providers/`; moved after review); the lessons engine outside `defender/lessons/`. The groups the cut
     parks (verbs, the exit-code vocabulary, integrations, the Elastic module, reports and its
     assets, the tenants home, the runs writers) are not asserted here.
 
@@ -235,7 +232,6 @@ def test_1080_each_moved_symbol_is_defined_under_its_home():
     """
     _check_group(INVESTIGATION, S.RUNTIME, _not_tools_or_branch)
     _check_group(FLAT_TIER_RULES, S.FLAT_TIER)
-    _check_group(IN_PROVIDERS, S.PROVIDERS)
     _check_group(LESSONS_ENGINE, None, _outside_lessons_content)
 
 
@@ -342,31 +338,6 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
 # ======================================================================================
 
 
-def _is_main_guard(stmt: ast.stmt) -> bool:
-    return isinstance(stmt, ast.If) and isinstance(stmt.test, ast.Compare) \
-        and isinstance(stmt.test.left, ast.Name) and stmt.test.left.id == "__name__" \
-        and any(isinstance(c, ast.Constant) and c.value == "__main__"
-                for c in stmt.test.comparators)
-
-
-def _is_docstring(stmt: ast.stmt) -> bool:
-    return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
-        and isinstance(stmt.value.value, str)
-
-
-def _one_call(stmt: ast.stmt) -> bool:
-    """A statement that is one delegating call: `f(...)`, `return f(...)`,
-    `raise SystemExit(f(...))` or `sys.exit(f(...))`."""
-    if isinstance(stmt, ast.Expr | ast.Return):
-        return isinstance(stmt.value, ast.Call)
-    return isinstance(stmt, ast.Raise) and isinstance(stmt.exc, ast.Call)
-
-
-def _is_log_setup(stmt: ast.stmt) -> bool:
-    return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
-        and "configure_from_env" in ast.unparse(stmt.value.func)
-
-
 def _sys_path_mutations(tree: ast.AST) -> list[ast.AST]:
     out: list[ast.AST] = []
     for n in ast.walk(tree):
@@ -379,129 +350,39 @@ def _sys_path_mutations(tree: ast.AST) -> list[ast.AST]:
     return out
 
 
-def _inserts_first(stmt: ast.stmt) -> bool:
-    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-               and n.func.attr == "insert" and ast.unparse(n.func.value) == "sys.path"
-               and n.args and isinstance(n.args[0], ast.Constant) and n.args[0].value == 0
-               for n in ast.walk(stmt))
-
-
-def _main_only_delegates(fn: ast.FunctionDef) -> bool:
-    body = [s for s in fn.body if not _is_docstring(s)]
-    return len(body) == 1 and _one_call(body[0])
-
-
-def _final_call_ok(stmt: ast.stmt) -> bool:
-    if _one_call(stmt):
-        return True
-    if not _is_main_guard(stmt):
-        return False
-    assert isinstance(stmt, ast.If)
-    body = [s for s in stmt.body if not _is_log_setup(s)]
-    return not stmt.orelse and len(body) == 1 and _one_call(body[0])
-
-
-def _wrapper_problems(rel: str, source: str) -> tuple[list[str], ast.stmt | None]:
-    """What makes `rel` more than imports, one bootstrap, an optional delegating `main` and one
-    final call into its engine; and the bootstrap statement."""
-    tree = ast.parse(source, filename=rel)
-    body = [s for s in tree.body if not _is_docstring(s)]
-    problems: list[str] = []
-    if not body or not _final_call_ok(body[-1]):
-        problems.append("the module does not end in one call into its engine")
-    bootstraps: list[ast.stmt] = []
-    for s in body[:-1]:
-        if isinstance(s, ast.Import | ast.ImportFrom):
-            continue
-        if isinstance(s, ast.FunctionDef) and s.name == "main" and _main_only_delegates(s):
-            continue
-        if _inserts_first(s):
-            bootstraps.append(s)
-            continue
-        problems.append(f"line {s.lineno}: `{ast.unparse(s).splitlines()[0]}` is neither an "
-                        f"import, the bootstrap, a delegating main nor the final call")
-    if len(bootstraps) != 1:
-        problems.append(f"{len(bootstraps)} import-root bootstraps (exactly one is the rule)")
-    files = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "__file__"]
-    inside = {id(n) for b in bootstraps for n in ast.walk(b)}
-    if any(id(n) not in inside for n in files):
-        problems.append("derives a path from its own location outside the bootstrap")
-    return problems, (bootstraps[0] if len(bootstraps) == 1 else None)
-
-
-def _bootstrap_puts_own_root_first(wrapper: Path, source: str, stmt: ast.stmt) -> str:
-    """Run the wrapper's stdlib imports and its bootstrap alone in a child whose `sys.path`
-    already holds a foreign checkout first and this one later; return `sys.path[0]`."""
-    tree = ast.parse(source)
-    stdlib = [ast.get_source_segment(source, s) or "" for s in tree.body
-              if isinstance(s, ast.Import | ast.ImportFrom)
-              and not (isinstance(s, ast.ImportFrom) and s.module == "__future__")
-              and all((a.name if isinstance(s, ast.Import) else (s.module or "")).split(".")[0]
-                      in sys.stdlib_module_names for a in s.names)]
-    code = "\n".join([*stdlib, f"__file__ = {str(wrapper)!r}",
-                      ast.get_source_segment(source, stmt) or "",
-                      "import json, sys as _s", "print(json.dumps(_s.path[0]))"])
-    foreign = wrapper.parent  # any directory that is not this checkout's root
-    # The box mark keeps a re-exec inside the bootstrap (the lessons wrapper's) from replacing
-    # the child: with a `defender/.venv` present and this interpreter spelled differently, it
-    # would exec the real wrapper and print its output, not `sys.path[0]`.
-    env = S.child_env(pythonpath=False, PYTHONPATH=f"{foreign}{os.pathsep}{S.REPO_ROOT}",
-                      DEFENDER_BOX="1")
-    cp = S.python("-c", code, env=env, cwd=foreign)
-    assert cp.returncode == 0, cp.stderr.decode()
-    first: str = json.loads(cp.stdout)
-    return first
-
-
-def _engine_main_is_called(wrapper_src: str, engine: str) -> bool:
-    mod = S.dotted(engine)
-    tree = ast.parse(wrapper_src)
-    for st in S.import_statements("defender/scripts/_w.py", wrapper_src):
-        if st.module == mod and "main" in st.names:
-            return True
-    return any(isinstance(n, ast.Attribute) and n.attr == "main" for n in ast.walk(tree)) \
-        and any(st.module == mod or mod.startswith(st.module + ".")
-                for st in S.import_statements("defender/scripts/_w.py", wrapper_src))
-
-
 def test_1080_each_wrapper_left_in_scripts_only_delegates_to_its_engine():
-    """Each wrapper under `defender/scripts/` (every `.py` file there except `tenant.py`,
-    `policy_cli.py`, `box_image.py`, `tacit_cli.py`, `scripts/adapters/` and the 2026-10-04
-    cut's named OUT files that stay with their owners, E1) has a module body
-    of imports and one call into its engine's entry. It defines no function or class except an
-    optional `main` that only delegates. It carries exactly one import-root bootstrap, a
-    statement that puts the wrapper's own root (the checkout root that holds `defender/`) first
-    on `sys.path`, and derives no other path from its own location. The engines it calls carry
-    no bootstrap, and the `bin/` shims and the launchers are unchanged. (M-H (a); dF3 amended.)
+    """No wrapper is left in `defender/scripts/`: each of `bin/defender-sql` and
+    `bin/defender-lessons` runs its engine AS A MODULE (`exec "$PY" -P -m <engine>`), with the
+    shim's own checkout root put first on `PYTHONPATH`. The engines carry no import-root
+    bootstrap. (Post-review change, human, 2026-10-04: this replaces M-H (a)'s thin wrapper with
+    one root-first bootstrap. Moving the launch into the shim removes every Python-side path
+    bootstrap and self re-exec on the command path; the name of this test is kept for the
+    record.)
 
-    Observed: each wrapper's AST against the shape above; its bootstrap run alone in a child
-    whose `sys.path` already holds a foreign directory first and this checkout later (the
-    root must come out first); the wrapper imports its engine (found by an anchor symbol); the
-    engine has no `sys.path` mutation; the three `bin/` shims hash to their base bytes.
+    Observed: no `.py` file under `defender/scripts/` outside the staying commands, the
+    adapters and the cut's OUT files; each shim's exec line runs `-P -m` on the module that
+    defines the engine's anchor; the line that sets `PYTHONPATH` puts the shim's tree root
+    (`dirname` of its `defender/`) before any inherited value; the engine has no `sys.path`
+    mutation and is a `__main__` program (its `main` runs under a module-level guard).
     """
-    wrappers = [r for r in C.tracked_files(S.REPO_ROOT, "defender/scripts")
+    leftover = [r for r in C.tracked_files(S.REPO_ROOT, "defender/scripts")
                 if r.endswith(".py") and r not in C.STAYING_COMMANDS
                 and not S.under(r, C.ADAPTERS) and r not in C.OUT_STAYING]
-    assert sorted(wrappers) == sorted(C.wrappers())
+    assert leftover == [], f"wrappers left in scripts/: {leftover}"
+    assert C.wrappers() == ()
     for shim, anchor in ENGINE_OF_SHIM.items():
-        rel = C.shim_target(S.REPO_ROOT, shim)
-        src = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
-        problems, boot = _wrapper_problems(rel, src)
-        assert problems == [], f"{rel}: {problems}"
-        assert boot is not None
-        first = _bootstrap_puts_own_root_first(S.REPO_ROOT / rel, src, boot)
-        assert Path(first).resolve() == S.REPO_ROOT.resolve(), (rel, first)
+        text = (S.BIN / shim).read_text(encoding="utf-8")
+        exec_line = next(ln for ln in text.splitlines() if "exec " in ln and " -m " in ln)
+        assert ' -P -m ' in exec_line, f"bin/{shim} does not keep the cwd off sys.path: {exec_line}"
         engine = S.home_of(anchor)
-        imported = {st.module for st in S.import_statements(rel, src)}
-        assert S.dotted(engine) in imported or any(
-            S.dotted(engine).startswith(m + ".") for m in imported if m.startswith("defender.")
-        ), f"{rel} does not import its engine {engine}"
-        engine_tree = ast.parse((S.REPO_ROOT / engine).read_bytes())
-        assert _sys_path_mutations(engine_tree) == [], f"the engine {engine} carries a bootstrap"
-    shims = S.base_inventory()["shims"]
-    for shim, digest in shims.items():
-        assert hashlib.sha256((S.BIN / shim).read_bytes()).hexdigest() == digest, \
-            f"bin/{shim} changed"
+        assert S.shim_exec_module(shim) == S.dotted(engine), (shim, exec_line, engine)
+        path_line = next(ln for ln in text.splitlines() if "PYTHONPATH=" in ln)
+        assert re.search(r'PYTHONPATH="\$ROOT\$\{PYTHONPATH:\+:\$PYTHONPATH\}"',
+                         path_line), f"bin/{shim} does not put its own root first: {path_line}"
+        engine_src = (S.REPO_ROOT / engine).read_text(encoding="utf-8")
+        assert _sys_path_mutations(ast.parse(engine_src)) == [], \
+            f"the engine {engine} carries a bootstrap"
+        assert _command_guard(engine_src) is not None, f"{engine} has no `__main__` guard"
 
 
 def _command_guard(source: bytes | str) -> ast.If | None:
@@ -884,8 +765,9 @@ def test_wrapper_and_engine_each_may_carry_a_main_block():
     for shim, anchor in ENGINE_OF_SHIM.items():
         engine = S.home_of(anchor)
         if "main" in S.module_level_names((S.REPO_ROOT / engine).read_bytes()):
-            w = C.shim_target(S.REPO_ROOT, shim)
-            assert _engine_main_is_called((S.REPO_ROOT / w).read_text(encoding="utf-8"), engine)
+            # The shim runs the engine as a module, so the engine's own guard calls its `main`.
+            assert S.shim_exec_module(shim) == S.dotted(engine), (shim, engine)
+            assert _command_guard((S.REPO_ROOT / engine).read_bytes()) is not None, engine
 
 
 def test_a_test_or_child_process_loads_a_moved_module_by_its_old_file_path():

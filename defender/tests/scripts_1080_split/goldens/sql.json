@@ -1,7 +1,8 @@
 {
  "_meta": {
   "base": "80888efb",
-  "how": "each producer in test_1080_sql_engine.PRODUCERS run at the base under SPEC1080_AT_BASE=1: the base bin/defender-sql and bin/defender-lessons shims, their engines by path, the box closure child and the permission gate, over the fixed inputs in the test module, normalised by its _norm"
+  "how": "each producer in test_1080_sql_engine.PRODUCERS run at the base under SPEC1080_AT_BASE=1: the base bin/defender-sql and bin/defender-lessons shims, their engines by path, the box closure child and the permission gate, over the fixed inputs in the test module, normalised by its _norm",
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Six values re-observed: dir_unset.{box,host} (the shell names the shim's line 8, where DEFENDER_DIR is now read) and spellings.{defender-sql,defender-lessons}.moved-away.{box,host} (a DEFENDER_DIR naming no directory is refused by the shim, exit 2 as before, instead of python3's can't-open-file). Every other value is the base capture, unchanged."
  },
  "arg_shapes.bare-separator": {
   "dict": [
@@ -223,7 +224,7 @@
    ],
    [
     "stderr",
-    "<ROOT>/defender/bin/defender-sql: line 19: DEFENDER_DIR: DEFENDER_DIR is not set\n"
+    "<ROOT>/defender/bin/defender-sql: line 8: DEFENDER_DIR: DEFENDER_DIR is not set\n"
    ]
   ]
  },
@@ -239,7 +240,7 @@
    ],
    [
     "stderr",
-    "<ROOT>/defender/bin/defender-sql: line 16: DEFENDER_DIR: DEFENDER_DIR is not set\n"
+    "<ROOT>/defender/bin/defender-sql: line 8: DEFENDER_DIR: DEFENDER_DIR is not set\n"
    ]
   ]
  },
@@ -2145,7 +2146,7 @@
    ],
    [
     "stderr",
-    "python3: can't open file '<TMP>/moved-away/defender/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+    "defender-lessons: DEFENDER_DIR names no directory: <TMP>/moved-away/defender\n"
    ]
   ]
  },
@@ -2161,7 +2162,7 @@
    ],
    [
     "stderr",
-    "python3: can't open file '<TMP>/moved-away/defender/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+    "defender-lessons: DEFENDER_DIR names no directory: <TMP>/moved-away/defender\n"
    ]
   ]
  },
@@ -2289,7 +2290,7 @@
    ],
    [
     "stderr",
-    "python3: can't open file '<TMP>/moved-away/defender/scripts/gather_tools/sql.py': [Errno 2] No such file or directory\n"
+    "defender-sql: DEFENDER_DIR names no directory: <TMP>/moved-away/defender\n"
    ]
   ]
  },
@@ -2305,7 +2306,7 @@
    ],
    [
     "stderr",
-    "python3: can't open file '<TMP>/moved-away/defender/scripts/gather_tools/sql.py': [Errno 2] No such file or directory\n"
+    "defender-sql: DEFENDER_DIR names no directory: <TMP>/moved-away/defender\n"
    ]
   ]
  },

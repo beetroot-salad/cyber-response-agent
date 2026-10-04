@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT))
 
-from defender.runtime.providers.pricing import usage_cost  # noqa: E402
+from defender._pricing import usage_cost  # noqa: E402
 
 RUNS_BASE = Path(os.environ.get("DEFENDER_RUNS_BASE", "/workspace/.defender-runs"))
 WRITE_VERBS = {"append_block", "record"}

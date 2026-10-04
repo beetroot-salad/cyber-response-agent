@@ -403,7 +403,7 @@ def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
 
     Written as wire records under `review:{lens}` because that is where the gate's calls land
     since #787 — one shared `RequestLogger`, one `agent_id` namespace."""
-    from defender.runtime.providers.pricing import usage_cost
+    from defender._pricing import usage_cost
 
     rows = []
     for lens in ("support", "ablation", "composer"):

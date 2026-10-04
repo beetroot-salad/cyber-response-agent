@@ -35,8 +35,9 @@ GOLDEN = "venv"
 
 _COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"})
 
-#: The programs that call the helper (repo-relative); the lessons wrapper is added at call time
-#: (`S.shim_exec_target`), since it is whatever file `bin/defender-lessons` execs.
+#: The programs that call the helper (repo-relative). The lessons CLI is no longer one: since the
+#: post-review change (human, 2026-10-04) `bin/defender-lessons` picks the interpreter itself and
+#: runs the engine as a module, so it is observed through the shim (`LESSONS_SHIM`).
 USERS_FIXED = {
     "api server": "defender/api/serve.py",
     "frontend build": "defender/learning/frontend/build.py",
@@ -68,7 +69,11 @@ def base_interpreter() -> Path:
 
 
 def users() -> dict[str, str]:
-    return {**USERS_FIXED, "lessons wrapper": S.rel(S.shim_exec_target("defender-lessons"))}
+    return dict(USERS_FIXED)
+
+
+#: The lessons CLI's launcher, repo-relative.
+LESSONS_SHIM = "defender/bin/defender-lessons"
 
 
 def helper_home() -> str:
@@ -317,7 +322,7 @@ _SITECUSTOMIZE = (
 #: What each user is started with once it settles: something short and side-effect free where
 #: the program offers it (the frontend build takes no arguments and writes its pages into the copy).
 SETTLE_ARGS = {"api server": ("--help",), "frontend build": (),
-               "frontend serializer": ("--stdout",), "lessons wrapper": ("--tags",)}
+               "frontend serializer": ("--stdout",), "lessons shim": ("--tags",)}
 
 
 def make_start_hook(tmp: Path) -> None:
@@ -336,22 +341,25 @@ def start_log(tmp: Path, name: str) -> tuple[Path, dict[str, str]]:
     return log, bare_env(PYTHONPATH=str(hook), SPEC1080_START_LOG=str(log))
 
 
-def started(interp: Path | str, script: Path, args: Sequence[str], tmp: Path, name: str,
+def started(interp: Path | str | None, script: Path, args: Sequence[str], tmp: Path, name: str,
             ) -> dict[str, Any]:
+    """`script` started by `interp` (`None`: run directly, as a shim is) with the start hook."""
     log, env = start_log(tmp, name)
-    proc = S.run([interp, script, *args], cwd=tmp, env=env, timeout=90)
+    proc = S.run([*([interp] if interp is not None else []), script, *args], cwd=tmp, env=env,
+                 timeout=90)
     starts = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
     # What a settled program then does depends on the host's packages (the API server needs the
-    # `api` extra), so only the lessons wrapper's answer is part of the record.
-    mine = name.startswith("lessons wrapper")
+    # `api` extra), so only the lessons shim's answer is part of the record.
+    mine = name.startswith("lessons shim")
     return {"starts": [norm(s, tmp) for s in starts], "exec lines": exec_lines(proc, tmp),
             "rc": proc.returncode if mine else None,
             "out": norm(proc.stdout.decode(), tmp) if mine else None}
 
 
 def observe_s124(tmp: Path) -> dict[str, Any]:
-    """Every user under each venv shape, started by the base interpreter; then the lessons
-    wrapper started under other spellings of an interpreter."""
+    """Every user under each venv shape, started by the base interpreter, and the lessons shim
+    under each shape; then the frontend serializer started under other spellings of an
+    interpreter."""
     make_start_hook(tmp)
     shapes = {"linked venv": link_venv, "real-directory venv": real_dir_venv}
     jobs: dict[str, Callable[[], Any]] = {}
@@ -362,10 +370,15 @@ def observe_s124(tmp: Path) -> dict[str, Any]:
             jobs[f"{name}, {shape}, base interpreter"] = (
                 lambda root=root, rel=rel, name=name, label=f"{name} {s}": started(
                     base_interpreter(), root / rel, SETTLE_ARGS[name], tmp, label))
+        root = tree(tmp, f"tree-{s}-shim")
+        make(root / "defender")
+        jobs[f"lessons shim, {shape}"] = (
+            lambda root=root, label=f"lessons shim {s}": started(
+                None, root / LESSONS_SHIM, SETTLE_ARGS["lessons shim"], tmp, label))
     root = tree(tmp, "tree-spellings")
     venv_py = link_venv(root / "defender")
     (tmp / "tree-spellings-link").symlink_to(root, target_is_directory=True)
-    wrapper = root / users()["lessons wrapper"]
+    program = root / users()["frontend serializer"]
     spellings = {
         "this suite's venv interpreter": Path(sys.executable),
         "the copy's venv interpreter": venv_py,
@@ -374,9 +387,10 @@ def observe_s124(tmp: Path) -> dict[str, Any]:
             tmp / "tree-spellings-link" / "defender" / ".venv" / "bin" / "python3",
     }
     for label, interp in spellings.items():
-        jobs[f"lessons wrapper, linked venv, {label}"] = (
+        jobs[f"frontend serializer, linked venv, {label}"] = (
             lambda interp=interp, label=label: started(
-                interp, wrapper, ("--tags",), tmp, f"lessons wrapper {label}"))
+                interp, program, SETTLE_ARGS["frontend serializer"], tmp,
+                f"frontend serializer {label}"))
     return run_all(jobs)
 
 
@@ -433,8 +447,8 @@ def sql_no_runtime(tmp: Path) -> dict[str, Any]:
 
 def observe_s206(tmp: Path) -> dict[str, Any]:
     """A working product venv at `defender/.venv` (linked), and recording venvs one level up (the
-    repository root) and two (its parent): the wrapper and the frontend serializer, started by
-    the base interpreter."""
+    repository root) and two (its parent): the lessons shim, run directly, and the frontend
+    serializer, started by the base interpreter."""
     make_start_hook(tmp)
     root = tree(tmp, "tree")
     link_venv(root / "defender")
@@ -442,8 +456,8 @@ def observe_s206(tmp: Path) -> dict[str, Any]:
     recorder(tmp / ".venv" / "bin" / "python3", "repo-parent-venv")
     u = users()
     return run_all({
-        "lessons wrapper": lambda: started(base_interpreter(), root / u["lessons wrapper"],
-                                           ("--tags",), tmp, "lessons wrapper"),
+        "lessons shim": lambda: started(None, root / LESSONS_SHIM, ("--tags",), tmp,
+                                        "lessons shim"),
         "frontend serializer": lambda: started(base_interpreter(),
                                                root / u["frontend serializer"], ("--stdout",),
                                                tmp, "frontend serializer"),
@@ -630,23 +644,29 @@ def test_box_variable_is_set_while_a_project_environment_is_present_on_the_mount
 
 
 def test_reexec_into_the_venv_when_the_venv_is_a_link_to_another_checkouts_venv(tmp_path):
-    """Every user of the venv helper (API server, frontend build and serialize, the two lessons
-    programs) re-execs exactly once into the venv interpreter and settles, both from a checkout
+    """Every user of the venv helper (API server, frontend build and serialize; the lessons
+    CLI through its shim) re-execs exactly once into the venv interpreter and settles, both from a checkout
     with a real venv and from a linked worktree whose .venv is a link to the main checkout's venv,
     whatever spelling sys.executable has. No loop and no second exec. Preserved behavior.
 
     Each process start is logged by a `sitecustomize` on PYTHONPATH. Every user, under a linked
     venv and a real-directory venv, started by the base interpreter: two starts, the second the
-    copy's venv interpreter. The lessons wrapper under other interpreter spellings: started from
-    the copy's own venv it settles at once; from another spelling, one re-exec. (The lessons
-    frontier program has no main block after the move, M-D (a), so the lessons programs are the
-    wrapper.)"""
+    copy's venv interpreter. The lessons shim under each shape: it picks the copy's venv
+    interpreter itself, so it starts once. The frontend serializer under other spellings of an
+    interpreter: any spelling of the copy's venv (`python`, `..`, a linked checkout path, or the
+    suite's venv the copy's links to) is the same environment and settles at once; only a
+    different environment re-execs, once. (Post-review change, human: the helper compares
+    environments, `sys.prefix`, not path spellings; at the base a respelled path re-exec'd once
+    more.)"""
     helper_home()
     seen = observe_s124(tmp_path)
     assert seen == golden("s124")
     for label, v in seen.items():
         assert 1 <= len(v["starts"]) <= 2, (label, v["starts"])
-        assert v["starts"][-1].endswith("/defender/.venv/bin/python3"), (label, v["starts"])
+        # `<PY>` is this suite's venv, which the linked copy's `.venv` points at: the same
+        # environment, so it settles there.
+        assert v["starts"][-1].endswith("/defender/.venv/bin/python3") \
+            or v["starts"] == ["<PY>"] and "linked venv" in label, (label, v["starts"])
 
 
 def test_box_marker_spelled_as_empty_zero_or_false(tmp_path):
@@ -714,7 +734,7 @@ def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp
     assert helper in seen
     assert [m for m in seen if m.startswith(("defender.runtime", "defender.learning"))] == []
 
-    pricing = S.dotted(S.home_of("usage_cost", home=S.PROVIDERS))
+    pricing = S.dotted(S.home_of("usage_cost", home=S.PRICING))
     seen = _child_modules(tmp_path, f"import defender.runtime.providers\nimport {pricing}\n")
     assert {"defender.runtime.providers", pricing} <= set(seen["modules"]), seen
     assert [m for m in seen["modules"] if m.split(".")[0] in LLM_STACK] == [], seen

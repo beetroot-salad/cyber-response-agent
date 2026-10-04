@@ -8,7 +8,7 @@ entry points only.
 SCOPE CUT (2026-10-04, human; `95-cut.md`). This suite pins the RESHAPING HALF only — the
 library code with a settled home that no other open issue is changing. It moves now, its
 behaviour and output unchanged: `_venv.py` into the flat `defender/_*.py` tier; `pricing.py`
-under `runtime/providers/`; `gather_tools/payload_view.py` under `runtime/`; the `sql` engine and
+as `defender/_pricing.py` (first planned under `runtime/providers/`); `gather_tools/payload_view.py` under `runtime/`; the `sql` engine and
 the lessons engine (`lessons_fm`, `lessons_frontier` with its `__main__` block, `_lessons_common`)
 into `runtime/` subpackages outside `defender/lessons/`, each with a thin wrapper left at its
 base path for its `bin/` shim (the one import-root bootstrap of M-H (a)); and `record_query`'s
@@ -34,7 +34,8 @@ from a new home at module level.
 HOMES ARE FOUND BY SYMBOL (dF0, human). Only two package paths are pinned by the design:
 `defender/integrations/` and `defender/reports/`. Three more are pinned by demand text:
 `defender/_exit_codes.py` (m1), `defender/runtime/verbs.py` for `derive_system` (t_derive),
-`defender/runtime/providers/` for `usage_cost` (s_observe_pricing). Every other home (the
+the flat tier for `usage_cost` (s_observe_pricing, moved from `runtime/providers/` after
+review: `PRICING` below). Every other home (the
 lessons engine, the sql engine's runtime subpackage, the tenants home, the flat-tier module that
 holds the query rules, the write-back module, the product Elastic module) is wherever the
 symbol a moved module defines is defined: `home_of(<symbol>)` walks `defender/` (tests and
@@ -112,6 +113,10 @@ VERBS = "defender/runtime/verbs.py"
 EXIT_CODES = "defender/_exit_codes.py"
 #: The flat tier: a module directly under `defender/` whose name starts with `_`.
 FLAT_TIER = "defender/_*.py"
+#: Where `usage_cost` lives. The demand text pinned `runtime/providers/`; the post-review
+#: change (human, 2026-10-04) moved the price table to the flat tier, because the providers
+#: package initialiser builds the provider objects and loads pydantic on every import.
+PRICING = FLAT_TIER
 
 #: The flat-tier query rules keep their BASE names (the 2026-10-04 cut: dF11's public rename is
 #: parked with #1165), their values byte-identical: this table is the IDENTITY map. It stays the
@@ -508,16 +513,20 @@ def has_main_block(source: bytes | str) -> bool:
     return False
 
 
-def shim_exec_target(shim: str) -> Path:
-    """The `.py` file a `bin/` shim execs — read off its `exec "$PY" "<dir var>/<path>"` line,
-    with the dir variable taken as `defender/`. Fails when the shim names no such line."""
-    text = (BIN / shim).read_text(encoding="utf-8")
+def shim_exec_module(shim: str, root: Path | None = None) -> str:
+    """The dotted module a `bin/` shim runs — read off its `exec "$PY" -P -m <module>` line.
+    The 2026-10-04 post-review change (human) dissolved the wrappers: each shim puts its own
+    checkout root first on `PYTHONPATH` and runs its engine as a module. Fails when the shim
+    names no such line."""
+    text = ((root or REPO_ROOT) / "defender" / "bin" / shim).read_text(encoding="utf-8")
     for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("exec ") and ".py" in s:
-            for tok in s.split():
-                tok = tok.strip('"')
-                if tok.endswith(".py"):
-                    tail = tok.split("}", 1)[-1] if "}" in tok else tok.split("/", 1)[-1]
-                    return DEFENDER / tail.lstrip("/")
-    raise AssertionError(f"bin/{shim} names no `exec ... <file>.py` line")
+        toks = [t.strip('"') for t in line.split()]
+        if "exec" in toks and "-m" in toks:
+            return toks[toks.index("-m") + 1]
+    raise AssertionError(f"bin/{shim} names no `exec ... -m <module>` line")
+
+
+def shim_exec_target(shim: str, root: Path | None = None) -> Path:
+    """The engine's source file the module a `bin/` shim runs resolves to in the tree at `root`
+    (default: this checkout)."""
+    return (root or REPO_ROOT) / (shim_exec_module(shim, root).replace(".", "/") + ".py")

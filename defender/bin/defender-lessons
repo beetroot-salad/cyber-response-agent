@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Stable invocation shim for the lessons frontmatter CLI: grep over lesson
-# frontmatter only + viable-tag enumeration (scripts/lessons/lessons_fm.py). Non-adapter,
-# read-only tooling — stays allowed in the main loop (see hooks/_cmd_segments.py
-# NON_ADAPTER_SHIMS). The script resolves the lessons dir from its own path, so
-# cwd does not matter.
+# Stable invocation shim for the lessons frontmatter CLI: grep over lesson frontmatter only +
+# viable-tag enumeration (runtime/lessons_engine/lessons_fm.py). Non-adapter, read-only
+# tooling — stays allowed in the main loop (see hooks/_cmd_segments.py NON_ADAPTER_SHIMS). The
+# engine finds the lessons dir from the checkout it is imported from, so cwd does not matter.
 DEFENDER="${DEFENDER_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 # M6/O5 (#1092): inside a box the image's OWN python3 carries what this shim needs. A
 # command the permission gate admits into the box can never clear DEFENDER_BOX for itself
@@ -15,4 +14,8 @@ else
     PY="${DEFENDER}/.venv/bin/python3"
     [ -x "$PY" ] || PY=python3
 fi
-exec "$PY" "${DEFENDER}/scripts/lessons/lessons_fm.py" "$@"
+# The engine runs as a module: this checkout's root goes first on PYTHONPATH (a foreign checkout
+# named there never answers for this one), and `-P` keeps the working directory — the run
+# folder the model writes into — off sys.path.
+PYTHONPATH="$(dirname "$DEFENDER")${PYTHONPATH:+:$PYTHONPATH}" \
+    exec "$PY" -P -m defender.runtime.lessons_engine.lessons_fm "$@"

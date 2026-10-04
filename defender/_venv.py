@@ -21,6 +21,9 @@ def reexec_into_venv(script: str) -> None:
     """
     if os.environ.get("DEFENDER_BOX"):
         return
-    venv_py = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
+    venv = _DEFENDER_DIR / ".venv"
+    venv_py = venv / "bin" / "python3"
+    # Already in it is a question of which environment this interpreter runs, not of how its
+    # path is spelled: `python` vs `python3`, a `..` or a linked checkout all name the same venv.
+    if venv_py.is_file() and Path(sys.prefix).resolve() != venv.resolve():
         os.execv(str(venv_py), [str(venv_py), str(script), *sys.argv[1:]])

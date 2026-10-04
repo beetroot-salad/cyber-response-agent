@@ -5,9 +5,9 @@ Three parts, and each has a distinct red:
 
 (a) RELOCATE ``iter_lessons`` to ``defender/_corpus.py``, re-exported from
     ``runtime/lessons_engine/_lessons_common.py``. The load-bearing constraint is the **pre-venv import
-    contract**: the actor runs the pinned lesson scripts as ``python3 <script>`` on its bash lane
-    under SYSTEM python, which has neither PyYAML nor pydantic, and each script re-execs into
-    ``defender/.venv`` with ``reexec_into_venv``. Until #1067 that was held by keeping ``_corpus``
+    contract**: a script started as ``python3 <script>`` under SYSTEM python, which has neither
+    PyYAML nor pydantic, re-execs into ``defender/.venv`` with ``reexec_into_venv`` (since #1080
+    the lesson CLIs are started by their ``bin/`` shim, which picks the interpreter itself). Until #1067 that was held by keeping ``_corpus``
     itself import-pure; since #1067 every record module resolves pydantic at import, so the
     contract is an ORDERING one instead — the guard runs before any ``defender.*`` import other
     than the stdlib-only module the guard lives in (``test_c2c``).
@@ -270,8 +270,10 @@ def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
     assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"
 
     scripts = _guarded_scripts()
-    assert {p.name for p in scripts} >= {"lessons_fm.py", "lessons_frontier.py", "build.py",
-                                          "serialize.py"}, scripts
+    # Since #1080 the lesson CLIs no longer re-exec themselves: `bin/defender-lessons` picks the
+    # interpreter and runs the engine as a module, so the frontend build and serializer are the
+    # scripts left that start by path under whatever python3 is first.
+    assert {p.name for p in scripts} >= {"build.py", "serialize.py"}, scripts
     early: dict[str, list[str]] = {}
     for script in scripts:
         tree = ast.parse(script.read_text(encoding="utf-8"))

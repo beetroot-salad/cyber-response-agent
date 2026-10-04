@@ -702,3 +702,5 @@ def main() -> int:
     args = parser.parse_args()
     return _run(args.sql, args.rows, args.names)
 
+if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
+    raise SystemExit(main())

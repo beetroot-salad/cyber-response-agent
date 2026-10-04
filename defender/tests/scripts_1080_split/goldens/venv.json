@@ -1,7 +1,8 @@
 {
  "_meta": {
   "base": "80888efb",
-  "how": "capture_venv.py imported test_1080_venv and ran each observe_* (copies of the base tree's defender/ code with recording, dangling, directory, linked and real-directory venv interpreters planted; the real sql wrapper over a shadow duckdb) under SPEC1080_AT_BASE=1, normalised by the module's norm()"
+  "how": "capture_venv.py imported test_1080_venv and ran each observe_* (copies of the base tree's defender/ code with recording, dangling, directory, linked and real-directory venv interpreters planted; the real sql wrapper over a shadow duckdb) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules and the lessons wrapper is gone, so its rows are dropped and the shim's are added (its --tags answer is the base's bytes); bin/ exec lines read `-P -m <engine module>` where they named the wrapper's path; and reexec_into_venv compares environments (sys.prefix), so a respelled path to the same venv settles at once. Every other value is the base capture, unchanged. Re-observed by running this module's observe_* functions over the implementation."
  },
  "targets": {
   "unmarked": {
@@ -83,11 +84,6 @@
    "rc": 0,
    "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/learning/frontend/serialize.py\t--alpha\ttwo words\n",
    "err": ""
-  },
-  "lessons wrapper": {
-   "rc": 0,
-   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/scripts/lessons/lessons_fm.py\t--alpha\ttwo words\n",
-   "err": ""
   }
  },
  "s058": {
@@ -108,7 +104,7 @@
   },
   "shim, the same tree unmarked": {
    "rc": 0,
-   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/scripts/lessons/lessons_fm.py\t--tags\n",
+   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\t--tags\n",
    "err": ""
   }
  },
@@ -140,10 +136,9 @@
    "rc": null,
    "out": null
   },
-  "lessons wrapper, linked venv, base interpreter": {
+  "lessons shim, linked venv": {
    "starts": [
-    "<BASE-PY>",
-    "<TMP>/tree-0-3/defender/.venv/bin/python3"
+    "<TMP>/tree-0-shim/defender/.venv/bin/python3"
    ],
    "exec lines": [],
    "rc": 0,
@@ -176,48 +171,45 @@
    "rc": null,
    "out": null
   },
-  "lessons wrapper, real-directory venv, base interpreter": {
+  "lessons shim, real-directory venv": {
    "starts": [
-    "<BASE-PY>",
-    "<TMP>/tree-1-3/defender/.venv/bin/python3"
+    "<TMP>/tree-1-shim/defender/.venv/bin/python3"
    ],
    "exec lines": [],
    "rc": 0,
    "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
   },
-  "lessons wrapper, linked venv, this suite's venv interpreter": {
+  "frontend serializer, linked venv, this suite's venv interpreter": {
    "starts": [
-    "<PY>",
-    "<TMP>/tree-spellings/defender/.venv/bin/python3"
+    "<PY>"
    ],
    "exec lines": [],
-   "rc": 0,
-   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+   "rc": null,
+   "out": null
   },
-  "lessons wrapper, linked venv, the copy's venv interpreter": {
+  "frontend serializer, linked venv, the copy's venv interpreter": {
    "starts": [
     "<TMP>/tree-spellings/defender/.venv/bin/python3"
    ],
    "exec lines": [],
-   "rc": 0,
-   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+   "rc": null,
+   "out": null
   },
-  "lessons wrapper, linked venv, the copy's venv interpreter, dot-dot spelled": {
+  "frontend serializer, linked venv, the copy's venv interpreter, dot-dot spelled": {
    "starts": [
     "<TMP>/tree-spellings/defender/.venv/bin/python3"
    ],
    "exec lines": [],
-   "rc": 0,
-   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+   "rc": null,
+   "out": null
   },
-  "lessons wrapper, linked venv, the copy's venv interpreter, through a linked checkout path": {
+  "frontend serializer, linked venv, the copy's venv interpreter, through a linked checkout path": {
    "starts": [
-    "<TMP>/tree-spellings-link/defender/.venv/bin/python3",
-    "<TMP>/tree-spellings/defender/.venv/bin/python3"
+    "<TMP>/tree-spellings-link/defender/.venv/bin/python3"
    ],
    "exec lines": [],
-   "rc": 0,
-   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+   "rc": null,
+   "out": null
   }
  },
  "s179": {
@@ -235,14 +227,11 @@
   "frontend serializer, unset": [
    "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
   ],
-  "lessons wrapper, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/scripts/lessons/lessons_fm.py\t--alpha\ttwo words"
-  ],
   "bin/defender-lessons, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/scripts/lessons/lessons_fm.py\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/scripts/gather_tools/sql.py\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
   ],
   "helper, empty": {
    "rc": 0,
@@ -258,14 +247,11 @@
   "frontend serializer, empty": [
    "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
   ],
-  "lessons wrapper, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/scripts/lessons/lessons_fm.py\t--alpha\ttwo words"
-  ],
   "bin/defender-lessons, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/scripts/lessons/lessons_fm.py\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/scripts/gather_tools/sql.py\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
   ],
   "helper, 0": {
    "rc": 0,
@@ -275,12 +261,11 @@
   "api server, 0": [],
   "frontend build, 0": [],
   "frontend serializer, 0": [],
-  "lessons wrapper, 0": [],
   "bin/defender-lessons, 0": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-2/defender/scripts/lessons/lessons_fm.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, 0": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-2/defender/scripts/gather_tools/sql.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
   ],
   "helper, false": {
    "rc": 0,
@@ -290,12 +275,11 @@
   "api server, false": [],
   "frontend build, false": [],
   "frontend serializer, false": [],
-  "lessons wrapper, false": [],
   "bin/defender-lessons, false": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-3/defender/scripts/lessons/lessons_fm.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, false": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-3/defender/scripts/gather_tools/sql.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
   ],
   "helper, 1": {
    "rc": 0,
@@ -305,12 +289,11 @@
   "api server, 1": [],
   "frontend build, 1": [],
   "frontend serializer, 1": [],
-  "lessons wrapper, 1": [],
   "bin/defender-lessons, 1": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-4/defender/scripts/lessons/lessons_fm.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, 1": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t<TMP>/tree-4/defender/scripts/gather_tools/sql.py\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
   ],
   "sql engine without duckdb, unset": {
    "rc": 69,
@@ -339,9 +322,8 @@
   }
  },
  "s206": {
-  "lessons wrapper": {
+  "lessons shim": {
    "starts": [
-    "<BASE-PY>",
     "<TMP>/tree/defender/.venv/bin/python3"
    ],
    "exec lines": [],

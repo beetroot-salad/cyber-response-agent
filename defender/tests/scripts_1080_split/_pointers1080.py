@@ -44,7 +44,9 @@ The three scans:
     `text` being the pointer exactly as spelled.
   * `vanished_folder_mentions(root)` — every pointer into a base SUBFOLDER that no longer exists,
     plus that subfolder's name written as a bare path component (`case_history/`, the layout
-    line in `defender/CLAUDE.md`) where nothing path-like precedes it (s106).
+    line in `defender/CLAUDE.md`) where nothing path-like precedes it (s106). A bare name that is
+    also a live `defender/<name>/` folder (`lessons/`, once `scripts/lessons/` went with its
+    wrapper) names that folder, not the vanished one, and is not a mention.
   * `dead_scripts_pointers(root)` — the unanchored scan: every `scripts/<path>` spelling (path
     form only) that resolves under neither `root/defender/scripts/` nor `root/scripts/`, whether
     or not the base held it. This is the scan that meets the pre-change dead pins (s110), which
@@ -231,15 +233,17 @@ def vanished_folder_mentions(root: Path) -> list[tuple[str, int, str]]:
     gone = vanished_folders(root)
     if not gone:
         return []
-    bare = re.compile(r"(?<![\w./-])(?:" + "|".join(re.escape(g) for g in
-                                                    sorted(gone, key=len, reverse=True))
-                      + r")/")
+    ambiguous = {g for g in gone if (root / "defender" / g).is_dir()}
+    bare_names = sorted(set(gone) - ambiguous, key=len, reverse=True)
+    bare = re.compile(r"(?<![\w./-])(?:" + "|".join(re.escape(g) for g in bare_names)
+                      + r")/") if bare_names else None
     found: list[tuple[str, int, str]] = []
     for rel, lines in tracked_text(root):
         for i, line in enumerate(lines, 1):
             hits = {text for text, entry in _named_entries(line)
                     if any(entry == g or entry.startswith(g + "/") for g in gone)}
-            hits.update(m.group(0) for m in bare.finditer(line))
+            if bare is not None:
+                hits.update(m.group(0) for m in bare.finditer(line))
             found.extend(Pointer(rel, i, t) for t in sorted(hits))
     return found
 

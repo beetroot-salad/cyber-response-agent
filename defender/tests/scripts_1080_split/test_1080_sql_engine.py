@@ -290,10 +290,25 @@ def _dump():
             json.dump(sorted(_ran), fh)
 sys.addaudithook(_audit)
 atexit.register(_dump)
-_target = sys.argv[1]
+_args = sys.argv[1:]
+if _args[:1] == ["-P"] and _args[1:2] == ["-m"] and len(_args) > 2:
+    # `python3 -P -m <module> ...`, the shims' form: no working directory on sys.path (this
+    # stub's own folder stands where `-P` leaves nothing), the module run as `__main__`.
+    import importlib.util
+    del sys.path[0]
+    try:
+        _found = importlib.util.find_spec(_args[2]) is not None
+    except ImportError:
+        _found = False
+    if not _found:
+        os.execv(sys.executable, ["python3", *_args])
+    sys.argv = [_args[2], *_args[3:]]
+    runpy.run_module(_args[2], run_name="__main__", alter_sys=True)
+    sys.exit(0)
+_target = _args[0]
 if not os.path.isfile(_target):
     # Not a runnable file: hand the argv to the interpreter itself, so its own refusal speaks.
-    os.execv(sys.executable, ["python3", *sys.argv[1:]])
+    os.execv(sys.executable, ["python3", *_args])
 del sys.argv[0]
 _real = _target
 while os.path.islink(_real):
@@ -375,20 +390,24 @@ def _run_shim(tmp: Path, shim: str, args: Sequence[str], *, lane: str = "box",  
 
 
 def _run_wrapper(tmp: Path, shim: str, args: Sequence[str], *, tree: Path = S.REPO_ROOT,  # noqa: PLR0913
-                 via: Path | None = None, box: bool = False, pythonpath: str | None = None,
+                 via: Path | None = None, box: bool = True, pythonpath: str | None = None,
                  stdin: bytes = b"", cwd: Path | str | None = None,
                  subs: Sequence[tuple[Path | str, str]] = (), **extra: str,
                  ) -> tuple[dict[str, Any], list[str] | None]:
-    """The wrapper started by path (`python3 <tree>/<wrapper> <args>`, through `_TRACER`), from
-    the operator shell's bare environment unless told otherwise. `via` spells the checkout root
-    another way (a link to it)."""
+    """The operator's launch from a bare environment: `<tree>/defender/bin/<shim> <args>`, with
+    `DEFENDER_DIR` naming that tree's `defender/` (`via` spells the checkout root another way,
+    a link to it) and no import path unless told otherwise. Before the post-review change
+    (human, 2026-10-04) this started the shim's wrapper by path; there is no wrapper now, and
+    the root-first import path the wrapper's bootstrap set up is the shim's. The PATH `python3`
+    (`_TRACER`) is the interpreter, as on the box lane (`box`; a tree's own venv would otherwise
+    be picked, untraced)."""
     trace = _trace_file(tmp)
-    env = _env(tmp, box=box, defender_dir=None, pythonpath=pythonpath, trace=trace, **extra)
+    root = via or tree
+    env = _env(tmp, box=box, defender_dir=root / "defender", pythonpath=pythonpath, trace=trace,
+               **extra)
     run_dir = Path(cwd) if cwd is not None else tmp / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    wrapper = (via or tree) / _wrapper_rel(shim)
-    proc = S.run([sys.executable, _interp(tmp) / "tracer.py", wrapper, *args], cwd=run_dir,
-                 env=env, stdin=stdin)
+    proc = S.run([root / "defender" / "bin" / shim, *args], cwd=run_dir, env=env, stdin=stdin)
     return _rec(proc, subs), _read_trace(trace)
 
 
@@ -1660,8 +1679,9 @@ def test_1080_the_sql_wrapper_starts_the_moved_engine_from_a_bare_environment_an
     checkout root first on `sys.path`, starts the moved engine and answers a fixed SQL query over
     a fixed JSON input with the same stdout and exit code as the base engine. With PYTHONPATH
     naming a different checkout of defender, the engine that answers is the one beside the
-    wrapper: a foreign checkout cannot shadow it ([144]). The wrapper carries exactly this one
-    import-root bootstrap and the moved engine carries none.
+    shim: a foreign checkout cannot shadow it ([144]). The shim puts its own root first on the
+    import path (post-review change, human: the wrapper and its one bootstrap are gone) and the
+    moved engine carries no bootstrap.
 
     The foreign checkout is a tree shaped like this one whose every module records itself; it
     is named alone and ahead of this checkout. The bootstrap counts are read off the two files'
@@ -1676,9 +1696,9 @@ def test_1080_the_sql_wrapper_starts_the_moved_engine_from_a_bare_environment_an
         assert _foreign_loaded(marker) == [], f"{label}: the foreign checkout answered"
         _check("bare_wrapper.query", rec)
         _assert_answered_by(ran, engine, f"the wrapper with {label} on PYTHONPATH")
-    wrapper_src = S.shim_exec_target(SQL).read_text(encoding="utf-8")
-    assert len(_path_mutations(wrapper_src)) == 1, (
-        f"the wrapper changes sys.path at lines {_path_mutations(wrapper_src)}, not once")
+    # Post-review change (human, 2026-10-04): no wrapper; the shim puts the root first on
+    # PYTHONPATH (the runs above, with a foreign checkout named alone and ahead, are the proof).
+    assert S.shim_exec_target(SQL) == engine, "bin/defender-sql does not run the engine module"
     engine_src = engine.read_text(encoding="utf-8")
     assert _path_mutations(engine_src) == [], (
         f"the moved engine carries a bootstrap at lines {_path_mutations(engine_src)}")

@@ -1,7 +1,8 @@
 {
  "_meta": {
   "base": "80888efb",
-  "how": "capture_lessons.py imported test_1080_lessons_engine and ran each observe_* (copies of the base tree's defender/ code over the module's fixture corpora, the real tree's shim for s021, orient through its shim= seam, the frontier library in process) under SPEC1080_AT_BASE=1, normalised by the module's norm()"
+  "how": "capture_lessons.py imported test_1080_lessons_engine and ran each observe_* (copies of the base tree's defender/ code over the module's fixture corpora, the real tree's shim for s021, orient through its shim= seam, the frontier library in process) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged."
  },
  "survival": {
   "[]": {
@@ -106,24 +107,24 @@
  },
  "s060": {
   "link-outside, tree variable unset [\"--tags\"]": {
-   "rc": 2,
+   "rc": 1,
    "out": "",
-   "err": "<PY>: can't open file '<TMP>/elsewhere/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "link-outside, tree variable unset []": {
-   "rc": 2,
+   "rc": 1,
    "out": "",
-   "err": "<PY>: can't open file '<TMP>/elsewhere/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "copy-outside, tree variable unset [\"--tags\"]": {
-   "rc": 2,
+   "rc": 1,
    "out": "",
-   "err": "<PY>: can't open file '<TMP>/elsewhere-copy/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "copy-outside, tree variable unset []": {
-   "rc": 2,
+   "rc": 1,
    "out": "",
-   "err": "<PY>: can't open file '<TMP>/elsewhere-copy/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "link-outside, tree variable set [\"--tags\"]": {
    "rc": 0,

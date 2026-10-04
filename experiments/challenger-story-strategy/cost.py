@@ -17,8 +17,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/workspace/defender")
-from scripts.pricing import PRICING as PRICES  # noqa: E402
+sys.path.insert(0, "/workspace")
+from defender._pricing import PRICING as PRICES  # noqa: E402
 
 CHARS_PER_TOKEN = 4
 MODEL = "glm-5.2"

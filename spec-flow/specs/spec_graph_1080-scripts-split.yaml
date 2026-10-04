@@ -241,11 +241,11 @@ demands:
   - sql
   - lessons_fm
   discharged_by: test_1080_each_wrapper_left_in_scripts_only_delegates_to_its_engine
-  seed_docstring: Each wrapper under `defender/scripts/` (every `.py` file there except `tenant.py`, `policy_cli.py`, `box_image.py`, `tacit_cli.py`,
-    `scripts/adapters/` and the 2026-10-04 cut's named OUT files that stay with their owners, E1) has a module body of imports and one call into
-    its engine's entry. It defines no function or class except an optional `main` that only delegates. It carries exactly one import-root bootstrap,
-    a statement that puts the wrapper's own root (the checkout root that holds `defender/`) first on `sys.path`, and derives no other path from
-    its own location. The engines it calls carry no bootstrap, and the `bin/` shims and the launchers are unchanged. (M-H (a); dF3 amended.)
+  seed_docstring: 'No wrapper is left under `defender/scripts/` (every `.py` file there is a staying command, under `scripts/adapters/`, or
+    one of the 2026-10-04 cut''s named OUT files that stay with their owners, E1). `bin/defender-sql` and `bin/defender-lessons` run their
+    engines as modules (`-P -m <engine module>`) with the shim''s own checkout root first on PYTHONPATH; the engines carry no import-root
+    bootstrap and keep a `__main__` guard that calls their `main`. (Post-review, human 2026-10-04: reverses M-H (a)''s one-bootstrap wrapper;
+    see handoff.deviations POST-REVIEW DISSOLVE.)'
   rides:
   - dF3 (relates to M-H)
   source: 20-demands.md (extraction ledger), id verbatim
@@ -461,8 +461,9 @@ demands:
   - runtime_providers
   - interacts(observe->pricing)
   discharged_by: test_1080_observe_costs_usage_through_pricing_in_providers_as_today
-  seed_docstring: '`runtime/observe.py`''s `usage_cost` comes from `runtime/providers/`. A fixed usage record costs the same
-    amount as at the base. Importing it loads no `pydantic_ai`.'
+  seed_docstring: '`runtime/observe.py`''s `usage_cost` comes from the flat tier (`defender/_pricing.py`; first pinned under
+    `runtime/providers/`, moved post-review). A fixed usage record costs the same amount as at the base. Importing it loads no
+    `pydantic_ai`.'
   source: 20-demands.md (extraction ledger), id verbatim
 - id: s_venv_reexec_targets_defender_venv
   kind: survival
@@ -2636,9 +2637,9 @@ demands:
   - interacts(observe->pricing)
   - usage_cost
   discharged_by: test_pricing_module_lands_in_a_package_whose_initialiser_must_not_load_the_agent_framework
-  seed_docstring: 'pricing lands in `runtime/providers/`, whose package initialiser must keep closing over pydantic only:
-    a cold import of the package, and of the observer that costs usage, loads no agent framework at module scope, and a fixed
-    usage record costs exactly what it costs today.'
+  seed_docstring: 'pricing lands in the flat tier (`defender/_pricing.py`; first pinned under `runtime/providers/`, moved
+    post-review): it imports only the standard library, so a cold import of it, and of the observer that costs usage, loads no
+    agent framework at module scope (nor the providers package), and a fixed usage record costs exactly what it costs today.'
   source: 45-dispositions.md settled premise [91] (single reading, judge-examined)
 - id: s092
   parked:
@@ -5263,6 +5264,14 @@ demands:
 # ==========================================================================================
 # STRUCTURE — demand-implied (provenance: design) on the grounded neighbourhood (provenance: code)
 # ==========================================================================================
+actor_waivers:
+  revert_lesson: >-
+    defender/learning/ops/revert_lesson.py reaches `_query_rules`, `observe` and `persist` only
+    through transitive imports (learning.author.shared and learning.core.config); it names none
+    of them, nor `usage_cost`, `_request_key` or a query id. It reverts a lesson file by path.
+    The reach appeared once main was merged in (d2303a8f) and observe's pricing import moved to
+    the flat tier (post-review): an import-graph edge with no behavioural reach, out of scope
+    for #1080's moves.
 structure:
   axes:
   - run_id
@@ -10979,4 +10988,18 @@ handoff:
   - "SPINE - ENUMERATION LENS: phase B's fourth lens ran as environment/resource instead of the profile's standing adversarial-input default; this change relocates modules, so its danger zone is path anchors, the box image's import closure, venv re-exec and silently narrowing gate scopes, not attacker-shaped alert data."
   - "SPINE - ANSWERER EFFORT: phase C's primary answerer and escalation copy 1 ran at Sonnet high effort (no low-effort leaf type available), above the contract's low; escalation copy 2 ran on Haiku as specified."
   - "SPINE - BLIND READER NOT RE-RUN AFTER THE CUT: 91-blind.md read the pre-cut 225-test suite; the cut kept a subset (117) with seed narrowing, so the blind read was not repeated; the mechanical gate (93) and the cold reconciler (94) re-verified the cut suite."
+  - 'POST-REVIEW DISSOLVE (human, 2026-10-04, after /code-review of PR #1192): rather than patch the review''s findings, the human
+    approved removing their cause. (1) The two Python wrappers left in scripts/ (sql.py, lessons/lessons_fm.py) are deleted; bin/defender-sql
+    and bin/defender-lessons run the engines as modules (python3 -P -m <engine>) with the shim''s own root first on PYTHONPATH. This reverses
+    M-H (a) (one root-first bootstrap in a wrapper) and the "shims and launchers unchanged" clause of d1_wrapper_only_delegates; the
+    defender-policy shim stays byte-identical. bin/defender-sql now refuses (exit 2) when DEFENDER_DIR is unset or names no folder, where the
+    base let python3 fail on a missing file. (2) lessons_frontier drops its venv re-exec and runs under -m. (3) pricing goes to the flat
+    tier (defender/_pricing.py), not runtime/providers/: importing it no longer runs the providers package initialiser. (4) _venv decides
+    "already in the venv" by sys.prefix identity, not by the spelling of sys.executable. (5) The #647 run_common sweep skips goldens/
+    folders, and test_the_deleted_manual_gather_harness_leaves_no_dependent_behind (removed in 3e76bf12) is restored. Goldens re-observed,
+    each changed value listed in its _meta.revised: sql.json (6), lessons.json (4), venv.json (the wrapper rows replaced by shim rows).
+    _pointers1080.vanished_folder_mentions no longer counts a bare <name>/ when defender/<name>/ is a live folder: with the wrapper gone,
+    scripts/lessons/ vanished and every bare lessons/ (the content folder) would otherwise be blamed on it; path pointers into the gone
+    folder still count, and the dead pins into it (retired lesson scripts in four docs, two unused e2e constants, the live-box probe''s
+    command) were rewritten.'
   - "SPINE - SCOPE CUT IS HUMAN-DECIDED (2026-10-04): after phase F the human judged several forks to signal a scope smell and narrowed #1080 to the uncontested reshaping half; see 95-cut.md, 75-resolutions-r2.md and the SCOPE CUT entry above."

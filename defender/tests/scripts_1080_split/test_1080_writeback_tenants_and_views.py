@@ -303,7 +303,7 @@ def test_payload_shapes_the_view_must_not_choke_on(case, tmp_path, monkeypatch):
 #: naming, the case mapping, the write-back, the row writers, integrations, the renderers, the
 #: exit codes, the workspace map, system naming) are parked with their owners.
 FIRST_IMPORTS: tuple[tuple[str, str, str | None], ...] = (
-    ("pricing", "usage_cost", S.PROVIDERS),
+    ("pricing", "usage_cost", S.PRICING),
     ("query rules", "resolve_query_id", None),
     ("lessons engine", "cmd_tags", None),
     ("venv helper", "reexec_into_venv", None),

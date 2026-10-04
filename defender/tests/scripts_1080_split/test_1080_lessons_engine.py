@@ -315,8 +315,9 @@ def in_copy(root: Path, relpath: str) -> Path:
     return root / relpath
 
 
-def shim_target_rel() -> str:
-    return S.rel(S.shim_exec_target("defender-lessons"))
+def shim_module() -> str:
+    """The module `bin/defender-lessons` runs with `-m`."""
+    return S.shim_exec_module("defender-lessons")
 
 
 class WarningLog(logging.Handler):
@@ -374,7 +375,7 @@ _CLOSURE_BODY = (
     "sys.argv = [target, *sys.argv[2:]]\n"
     "code = 0\n"
     "try:\n"
-    "    runpy.run_path(target, run_name='__main__')\n"
+    "    runpy.run_module(target, run_name='__main__', alter_sys=True)\n"
     "except SystemExit as e:\n"
     "    code = e.code\n"
     "loaded = sorted(m for m in sys.modules if m.split('.')[0] in BLOCKED)\n"
@@ -384,8 +385,8 @@ _CLOSURE_BODY = (
 
 
 def closure_run(root: Path, tmp: Path, run_dir: Path) -> subprocess.CompletedProcess[bytes]:
-    """The engine `bin/defender-lessons` runs, started as the box starts it (the wrapper as the
-    main module, the box lane's environment) under an interpreter that refuses every import
+    """The engine `bin/defender-lessons` runs, started as the box starts it (the shim's module as
+    the main module, the box lane's environment) under an interpreter that refuses every import
     outside the standard library and the box image's closure."""
     from defender.tests._import_blocker import run_blocked
 
@@ -395,7 +396,7 @@ def closure_run(root: Path, tmp: Path, run_dir: Path) -> subprocess.CompletedPro
     # carries it.
     allow = (*S.box_import_allowlist(), sysconfig._get_sysconfigdata_name())
     return run_blocked(body, allow_only=allow,
-                       argv=[str(root / shim_target_rel()), *CLOSURE_ARGV],
+                       argv=[shim_module(), *CLOSURE_ARGV],
                        cwd=run_dir, env=box_lane_env(root, tmp))
 
 
@@ -823,11 +824,10 @@ def observe_lanes(tmp: Path) -> dict[str, dict[str, Any]]:
 
 
 def observe_wrapper(tmp: Path) -> dict[str, Any]:
-    """The wrapper started by path under a bare environment, and with PYTHONPATH naming a decoy
+    """The shim started by path under a bare environment, and with PYTHONPATH naming a decoy
     checkout whose corpus differs."""
     root = tree_with(tmp, "tree", FIXED_CORPUS)
     decoy = tree_with(tmp, "decoy", DECOY_CORPUS)
-    wrapper = root / shim_target_rel()
     away = tmp / "elsewhere"
     away.mkdir()
     runs = {
@@ -835,7 +835,7 @@ def observe_wrapper(tmp: Path) -> dict[str, Any]:
         "PYTHONPATH names a decoy checkout": bare_env(tmp, PYTHONPATH=str(decoy)),
     }
     return run_all({f"{label} {key(a)}": (lambda env=env, a=a: outcome(
-        S.run([sys.executable, wrapper, *a], cwd=away, env=env), tmp))
+        shim(root, a, tmp=tmp, cwd=away, env=env), tmp))
         for label, env in runs.items() for a in (("--tags",), ())})
 
 
@@ -1132,40 +1132,37 @@ def test_1080_the_lessons_engine_gives_one_verdict_per_argv_on_the_box_lane_and_
 
 def test_1080_the_lessons_wrapper_starts_the_moved_engine_from_a_bare_environment_and_answers(
         tmp_path):
-    """The `defender-lessons` wrapper left under `defender/scripts/`, started by path from an
-    environment with no PYTHONPATH (the operator shell's shape), puts its own checkout root first
-    on `sys.path`, starts the moved engine and answers `--tags` over the real corpus with the same
-    stdout and exit code as the base engine. With PYTHONPATH naming a different checkout of
-    defender, the engine that answers is the one beside the wrapper ([144]). The bootstrap imports
-    nothing from `defender.*`, so the venv guard still precedes every other defender import
-    (test_corpus_fold_seed). The moved engine carries no import-root bootstrap.
+    """`bin/defender-lessons`, started by path from an environment with no PYTHONPATH (the
+    operator shell's shape), runs the moved engine as a module with its own checkout root first on
+    the import path and the working folder kept off it, and answers `--tags` over the real corpus
+    with the same stdout and exit code as the base. With PYTHONPATH naming a different checkout of
+    defender, the engine that answers is the one beside the shim ([144]). No Python-side wrapper
+    or bootstrap is left: the shim picks the venv interpreter itself, and the moved engine carries
+    no import-root bootstrap and no venv re-exec.
 
-    A copy's wrapper answers as the base did, bare and with PYTHONPATH naming a decoy checkout
-    whose corpus differs (the decoy's lessons never appear); the real wrapper, bare, answers
-    `--tags` over the real corpus as a copy holding that corpus does. Then the sources: before
-    its venv guard the wrapper imports nothing from `defender.*` but the venv helper's module,
-    it mutates `sys.path` once, and the engine module mutates it nowhere (checked last: at the
-    base the engine IS the wrapper)."""
+    A copy's shim answers as the base did, bare and with PYTHONPATH naming a decoy checkout whose
+    corpus differs (the decoy's lessons never appear); the real shim, bare, answers `--tags` over
+    the real corpus as a copy holding that corpus does. Then the sources: the shim's exec line
+    runs the engine's module under `-P -m` after putting the root first on PYTHONPATH, and the
+    engine module mutates `sys.path` nowhere and never calls the venv re-exec."""
     home = engine_home()
     seen = observe_wrapper(tmp_path)
     assert seen == golden("wrapper")
     assert not any("decoy" in v["out"] for v in seen.values()), seen
 
-    real = S.run([sys.executable, S.REPO_ROOT / shim_target_rel(), "--tags"], cwd=tmp_path,
-                 env=bare_env(tmp_path))
+    real = S.run([S.REPO_ROOT / SHIM_REL, "--tags"], cwd=tmp_path, env=bare_env(tmp_path))
     copy = code_tree(tmp_path / "real-content")
     shutil.copytree(S.LESSONS_CONTENT, copy / "defender" / "lessons", symlinks=True)
     assert real.returncode == 0, real.stderr.decode()
     assert real.stdout == shim(copy, ("--tags",), tmp=tmp_path).stdout
 
-    wrapper_src = S.shim_exec_target("defender-lessons").read_text(encoding="utf-8")
-    early = imports_before_guard(wrapper_src)
-    helper = S.dotted(S.home_of("reexec_into_venv"))
-    assert early is not None, "the wrapper never calls reexec_into_venv at module scope"
-    assert [m for m in early if m.startswith("defender") and m != helper] == [], early
-    assert sys_path_mutations(wrapper_src) == 1
+    shim_src = (S.REPO_ROOT / SHIM_REL).read_text(encoding="utf-8")
+    assert S.shim_exec_module("defender-lessons") == S.dotted(home), shim_src
+    assert re.search(r' -P -m \S+ "\$@"', shim_src), shim_src
+    assert re.search(r'PYTHONPATH="\$ROOT\$\{PYTHONPATH:\+:\$PYTHONPATH\}"', shim_src), shim_src
     engine_src = (S.REPO_ROOT / home).read_text(encoding="utf-8")
     assert sys_path_mutations(engine_src) == 0, f"{home} carries an import-root bootstrap"
+    assert imports_before_guard(engine_src) is None, f"{home} re-execs into the venv itself"
 
 
 def imports_before_guard(src: str) -> list[str] | None:
