@@ -20,7 +20,7 @@ from defender._io import ENTRY_DIR, ENTRY_FILE, ENTRY_OTHER, Bound, Held, hold, 
 from defender._tree_listing import entry_kind
 
 if TYPE_CHECKING:
-    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.config import DrainLabel, LoopPaths
 
 
 def _absolute(path: Path | str) -> Path:
@@ -133,16 +133,16 @@ class DrainTrees:
         self._stack.__exit__(exc_type, exc, tb)
 
 
-def open_drain_trees(wt_paths: LoopPaths, label: str) -> DrainTrees:
+def open_drain_trees(wt_paths: LoopPaths, label: DrainLabel) -> DrainTrees:
     """The held roots of a `label` drain batch's writable mounts: :meth:`DrainTrees.open` over
-    exactly `wt_paths.drain_writable_trees(label)` (the drain working copy's paths), the list
+    exactly `label.writable_trees(wt_paths)` (the drain working copy's paths), the list
     `_drain_box_request` mounts read-write, so the held roots are the box's rw mounts (#1134
-    O4). Nothing is derived here: an unknown label holds nothing.
+    O4). Nothing is derived here: a non-member raises before anything is held.
 
     The mounts must be absolute (`ValueError` before anything is held otherwise), so a
     `wt_paths` with a relative `repo_root` is refused, never joined to the cwd. Use it as a
     context manager inside the lane's work step."""
-    return DrainTrees.open(wt_paths.drain_writable_trees(label))
+    return DrainTrees.open(label.writable_trees(wt_paths))
 
 
 #: :meth:`DrainTrees.tree_for`, bound: a working-copy path to the held mount containing it and its
