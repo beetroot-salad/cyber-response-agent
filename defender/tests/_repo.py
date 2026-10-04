@@ -68,7 +68,10 @@ def build_once_copy(key: str, build: Callable[[Path], object], dest: Path) -> Pa
         template = root / "repo"
         build(template)
         _TEMPLATES[key] = template
-    shutil.copytree(template, dest, symlinks=True, dirs_exist_ok=True)
+    # `*.lock` is skipped: git's background maintenance takes and drops `objects/maintenance.lock`
+    # in the template while it is being read, and a lock file is never part of a repo's content.
+    shutil.copytree(template, dest, symlinks=True, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("*.lock"))
     return dest
 
 
