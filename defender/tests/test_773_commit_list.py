@@ -84,9 +84,7 @@ def test_the_pitfalls_and_lead_author_commits_are_unchanged_773(tmp_path):
     for module in (questioner_run, pitfalls_curator, lead_author):
         source = inspect.getsource(module)
         assert "commit_corpus_paths" not in source, module.__name__
-    # #1178 moved the lead-author and pitfalls commits off `commit_corpus` onto
-    # `_lead_spine.commit_judged` (pinned by test_1178's census); the questioner's is unchanged.
-    assert "commit_corpus" in inspect.getsource(questioner_run)
+        assert "commit_corpus" in source, module.__name__
 
     assert list(
         inspect.signature(questioner_run.commit_questioner_lessons).parameters

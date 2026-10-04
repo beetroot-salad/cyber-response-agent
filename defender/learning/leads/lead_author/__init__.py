@@ -111,11 +111,9 @@ from ._rules import (
 )
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
-    GateStep,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
-    commit_judged,
     lane_skills,
 )
 
@@ -179,8 +177,6 @@ class LeadAuthorDeps:
     skills: Held
     #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
     tree_for: TreeFor
-    #: `commit_judged`'s step hook (#1178); `None` in production.
-    gate_step: GateStep | None = None
 
 
 def build_lead_author_deps(
@@ -283,20 +279,6 @@ def run_under_held_queue_lock(
     )
 
 
-def _skills_judge(
-    repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
-    minted: Mapping[Path, tuple[str, ...]],
-) -> Callable[[TreeFor, list[tuple[str, str]] | None], list[str]]:
-    """The lane's gate as `commit_judged` runs it, on both passes: `_verify_skills_state` over
-    the `tree_for` and records it is handed (#1178)."""
-    def judge(tree_for: TreeFor, records: list[tuple[str, str]] | None) -> list[str]:
-        return _verify_skills_state(
-            repo_root, baseline_stray, systems=systems, minted=minted, tree_for=tree_for,
-            records=records,
-        )
-    return judge
-
-
 def _run_locked(
     run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None, on_done: DoneSink,
 ) -> int:
@@ -367,15 +349,12 @@ def _run_locked(
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
-    # The gate, then the commit of exactly what it judged (#1178): the box is still up, so the
-    # commit is the staged tree the second pass read, never the disk.
-    judge = _skills_judge(repo_root, baseline_stray, systems=deps.systems, minted=minted)
-    changed, sha = commit_judged(
-        repo_root,
-        judge,
-        deps.tree_for,
-        lambda paths: _loop_commit_message(run_dir, paths),
-        step=deps.gate_step,
+    changed = _verify_skills_state(
+        repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
+    )
+    sha = _author_shared.commit_corpus(
+        repo_root, repo_root / "defender" / "skills",
+        _loop_commit_message(run_dir, changed),
     )
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
