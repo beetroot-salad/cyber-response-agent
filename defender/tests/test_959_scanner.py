@@ -30,6 +30,7 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.permission import bash as pbash  # noqa: E402
 from defender.runtime.permission import command_shape  # noqa: E402
 from defender.tests import _baseline_959 as base  # noqa: E402
+from defender.tests._by_path import cached_parse  # noqa: E402
 
 CR = base.CR
 NBSP = base.NBSP
@@ -353,7 +354,7 @@ def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_
 
 # O2 - one module decides, and it still decides.
 def _shlex_attributes(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    _text, tree = cached_parse(path, str(path))
     return {
         node.attr for node in ast.walk(tree)
         if isinstance(node, ast.Attribute)

@@ -43,7 +43,7 @@ from defender.scripts import tenant as tenant_py
 from defender.tests import _dispositions995 as D995
 from defender.tests import _spec1077 as S
 from defender.tests import _tenants1106 as T1106
-from defender.tests._by_path import LINT_DIR, import_lint_lib, load_lint_gate, load_module
+from defender.tests._by_path import LINT_DIR, cached_source, import_lint_lib, load_lint_gate, load_module
 from defender.tests._repo import seed_repo
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
@@ -363,7 +363,7 @@ def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_d
 
 
 def _spells_the_fixture(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = cached_source(path)
     return "tenant-fixture" in text or re.search(
         r"""["']tenant["']\s*\+\s*["']-fixture["']""", text) is not None
 
