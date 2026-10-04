@@ -19,7 +19,7 @@ the same missing thing: a per-type class-tuple arity, documented in `skills/invl
      slot 0 of a two-slot tuple LOST a selector the vaguer document matched one write earlier.
 
 What ships: `vocab.CLASS_GRAMMAR` / `vocab.class_arity` (the table SKILL.md states in prose),
-the weights under THE SCALE in `scripts/lessons/lessons_frontier.py`, and `_spread_over_items`
+the weights under THE SCALE in `runtime/lessons_engine/lessons_frontier.py`, and `_spread_over_items`
 — which is the half a reweight alone cannot do, because two selectors at their lanes' floors
 are genuinely equally specific and no honest weight orders them.
 
@@ -42,7 +42,7 @@ DEFENDER = Path(__file__).resolve().parents[1]
 if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
-from defender.scripts.lessons import lessons_frontier as LF  # noqa: E402
+from defender.runtime.lessons_engine import lessons_frontier as LF  # noqa: E402
 from defender.skills.invlang import vocab  # noqa: E402
 from defender.skills.invlang.frontier import frontier_at, frontier_from_text  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402

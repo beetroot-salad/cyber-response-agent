@@ -432,7 +432,7 @@ def test_payload_view_render_emits_no_toon_with_the_gate_installed(tmp_path: Pat
     Its positive control is `d1` — a foreign dict-row payload DOES reach the model as TOON —
     so "no TOON here" is not green merely because the gate emits none anywhere.
     """
-    from defender.scripts.gather_tools import payload_view
+    from defender.runtime import payload_view
 
     # Defender's OWN captured payload is columnar — the shape N3 is about, and the arm the
     # corpus measures at 86.2% to 108.3% on the wire ruler (TOON never cheaper).

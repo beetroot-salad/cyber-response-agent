@@ -31,7 +31,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
-from defender.scripts.pricing import PRICING, model_key  # noqa: E402
+from defender.runtime.providers.pricing import PRICING, model_key  # noqa: E402
 
 # The 262k-context SKU. Not in pricing.PRICING on purpose: that table feeds real accounting
 # and must carry one number per model, the conservative one. This is a what-if applied to

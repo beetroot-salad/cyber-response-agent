@@ -44,11 +44,11 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     DENIED_EXIT_CODE,
     INFRA_ERROR_CLASS,
 )
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
+from defender.scripts.gather_tools.record_query import REJECTION_BUDGET
+from defender._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,
-    REJECTION_BUDGET,
     REPEAT_TRIP_QUERY_ID,
     RESERVED_QUERY_ID_PREFIX,
 )

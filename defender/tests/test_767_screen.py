@@ -41,7 +41,7 @@ import pytest
 
 from defender.runtime.ticket_screen import MALFORMED_EXIT
 from defender.scripts.case_history import case_ticket
-from defender.scripts.gather_tools.payload_view import PASSTHROUGH_MAX_BYTES_DEFAULT
+from defender.runtime.payload_view import PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests._spec767 import (
     OPEN_STATUS,
     OTHER_KEY,

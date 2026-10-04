@@ -304,7 +304,7 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     """
     try:
         from defender._corpus import iter_lessons
-        from defender.scripts.lessons.lessons_frontier import (
+        from defender.runtime.lessons_engine.lessons_frontier import (
             WRITE_RETURN_LEAD,
             match_loaded,
             render,

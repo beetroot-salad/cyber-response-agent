@@ -130,10 +130,11 @@ from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
-from defender.runtime.query_tool import _json_safe_params  # noqa: E402
+from defender._query_rules import _json_safe_params  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault, UpstreamFault  # noqa: E402
+from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -155,15 +156,10 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    ABOVE_GUARD_QUERY_ID,
-    # #1015 — the per-lead rejection budget, the SECOND guard `_replay_rejections` must now
-    # ask. Its own suite is `tests/e2e/test_1015_rejection_budget.py`; the oracle lives here
-    # because there is exactly one of it.
+from defender.scripts.gather_tools.record_query import (
     REJECTION_BUDGET,
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
-    REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
     RepeatTrip,
     in_rejection_domain,
@@ -172,6 +168,7 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
     rejection_trip,
     repeat_trip,
 )
+from defender._query_rules import ABOVE_GUARD_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -868,7 +865,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
             DONE,
         ])
     assert denied_rec.calls == []
-    assert [row["query_id"] for row in denied.own_rows] == [record_query.DENIED_QUERY_ID] * 3, \
+    assert [row["query_id"] for row in denied.own_rows] == [_query_rules.DENIED_QUERY_ID] * 3, \
         "a DENIED call wrote an evidence row, or not its sentinel"
     assert len(denied.denials) == 3, "the denial record is the DENIED path's audit artifact"
     assert denied.gather.calls == 4, "a denied repeat tripped the guard — it is answered above M2"
@@ -1305,10 +1302,10 @@ def test_repeat_key_is_the_shipped_request_key(tmp_path):
         "seq 0 is the earliest matching row in this in-order run — the guard named another"
 
     rows = lead_rows(r.run_dir, LEAD)
-    key = record_query._request_key("elastic", "sshd-auth-window", {"native_query": "FROM logs"})
+    key = _query_rules._request_key("elastic", "sshd-auth-window", {"native_query": "FROM logs"})
     counted = [
         row for row in rows
-        if record_query._request_key(row["system"], row["verb"], row["params"]) == key
+        if _query_rules._request_key(row["system"], row["verb"], row["params"]) == key
     ]
     assert len(counted) == 3, "the guard and the shipped key disagree about the counted rows"
 

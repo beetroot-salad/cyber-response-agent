@@ -25,7 +25,7 @@ from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender.scripts.lessons.lessons_frontier import Hit
+    from defender.runtime.lessons_engine.lessons_frontier import Hit
 
     from .tools._deps import AgentDeps
 
@@ -76,7 +76,7 @@ def compose_fold(
     """
     try:
         from defender._corpus import iter_lessons
-        from defender.scripts.lessons.lessons_frontier import FOLD_LEAD, match_loaded, render
+        from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, match_loaded, render
         from defender.skills.invlang.frontier import frontier_from_text
 
         corpus = corpus_dir(deps, lane=_FOLD_LANE)

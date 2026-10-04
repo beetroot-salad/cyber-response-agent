@@ -24,7 +24,7 @@ from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guar
 from defender._run_paths import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
-from defender.scripts.pricing import usage_cost
+from defender.runtime.providers.pricing import usage_cost
 
 _logger = logging.getLogger(__name__)
 

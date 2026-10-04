@@ -51,7 +51,7 @@ from defender.learning.judge.enqueue import (
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
 from defender.runtime.branch._family import BASE_ROLE, episode_token_for
-from defender.scripts import pricing
+from defender.runtime.providers import pricing
 from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
     CSS,

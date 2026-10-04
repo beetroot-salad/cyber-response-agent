@@ -489,7 +489,7 @@ def class_slots(classification: str) -> list[str]:
     while `role/{internal, dmz}/prov` is three. The `compute:` prefix is stripped because models
     write it, and it would hide a candidate set behind it.
 
-    Public so `scripts/lessons/lessons_frontier.py` splits cells the way `has_open_slot` does.
+    Public so `runtime/lessons_engine/lessons_frontier.py` splits cells the way `has_open_slot` does.
     """
     c = classification.strip()
     head, sep, rest = c.partition(":")
@@ -515,7 +515,7 @@ def class_slots(classification: str) -> list[str]:
 def is_open_slot(slot: str) -> bool:
     """Is this one already-split class slot unresolved.
 
-    Public for `scripts/lessons/lessons_frontier.py`, which holds split slots and must not
+    Public for `runtime/lessons_engine/lessons_frontier.py`, which holds split slots and must not
     re-split them through `has_open_slot`. An unclosed `{` counts as open (a dropped `}` must not
     read as concrete); a stray `}` hides nothing.
     """

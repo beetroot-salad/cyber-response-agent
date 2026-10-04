@@ -147,9 +147,8 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     """`reexec_into_venv`, with a venv interpreter present beside its own tree, does not exec
     when `DEFENDER_BOX` is set and does exec into it when the variable is unset."""
     tree = tmp_path / "defender"
-    scripts = tree / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy(DEFENDER / "scripts" / "_venv.py", scripts / "_venv.py")
+    tree.mkdir(parents=True)
+    shutil.copy(DEFENDER / "_venv.py", tree / "_venv.py")
     venv_bin = tree / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     stub = venv_bin / "python3"
@@ -157,7 +156,7 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     stub.chmod(0o755)
     code = (
         "import sys\n"
-        f"sys.path.insert(0, {str(scripts)!r})\n"
+        f"sys.path.insert(0, {str(tree)!r})\n"
         "import _venv\n"
         "_venv.reexec_into_venv('lessons_fm.py')\n"
         "print('NO-EXEC')\n"

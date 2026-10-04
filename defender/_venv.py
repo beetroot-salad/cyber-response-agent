@@ -4,8 +4,8 @@ import os
 import sys
 from pathlib import Path
 
-#: `defender/`, derived from this file's location so it is right however deep the caller sits.
-_DEFENDER_DIR = Path(__file__).resolve().parents[1]
+#: `defender/`, the folder this module sits in, so it is right however deep the caller sits.
+_DEFENDER_DIR = Path(__file__).resolve().parent
 
 
 def reexec_into_venv(script: str) -> None:

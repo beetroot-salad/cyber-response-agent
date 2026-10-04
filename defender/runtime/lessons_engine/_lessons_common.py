@@ -8,7 +8,7 @@ from defender._corpus import iter_lessons
 from defender._io import use_utf8_stdio
 
 # No `reexec_into_venv` re-export: this module imports pydantic (via `_corpus`/`_io`), which is
-# what the guard exists to avoid, so scripts take it from `defender.scripts._venv`.
+# what the guard exists to avoid, so scripts take it from `defender._venv`.
 __all__ = [
     "iter_lessons", "use_utf8_stdio",
     "as_list", "as_str_set", "csv_set", "rel_to_repo", "resolve_corpus",

@@ -27,10 +27,8 @@ from defender.learning.leads.lead_extraction import (
     collect_general_failures,
     extract_from_joined,
 )
-from defender.scripts.gather_tools.record_query import (
-    BASH_SHIM_QUERY_ID,
-    append_query_row,
-)
+from defender.scripts.gather_tools.record_query import append_query_row
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared870 import (
     BINDER,
     Spawn,

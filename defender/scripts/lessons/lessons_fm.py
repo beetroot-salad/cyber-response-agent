@@ -1,148 +1,24 @@
 #!/usr/bin/env python3
-"""Grep defender lesson FRONTMATTER (only) + enumerate viable tags.
+"""`bin/defender-lessons`'s command: runs the lessons engine
+(`defender/runtime/lessons_engine/lessons_fm.py`).
 
-Plan-time discovery primitive for the defender orchestrator (SKILL §Lessons)
-and the lessons author. Both modes are scoped to frontmatter so the freeform
-body can never false-match a tag query:
-
-  1. Pattern mode — AND one or more regexes against each lesson's YAML
-     frontmatter block; print ``<path>\\t<description>`` per match as the cheap
-     scan surface, then Read the bodies that fit.
-  2. ``--tags`` — enumerate the values already in use per retrieval dimension,
-     so callers grep only tokens that exist and authors reuse a spelling
-     instead of coining a near-synonym.
-
-No index: a per-call directory scan is fine at this scale.
-
-Retrieval dimensions (frontmatter list fields):
-  source_signature   alert rule.id(s) the lesson came from / bites
-  telemetry_source   sensor(s) the check keys on (incl. the absent one it names)
-  attack_phase       MITRE ATT&CK tactic(s) where the pitfall bites
-
-Usage:
-    defender-lessons                                   # whole corpus: <path>\\t<description>
-    defender-lessons 'telemetry_source:.*\\bsshd\\b'     # one frontmatter regex
-    defender-lessons 'source_signature:.*v2-cross-tier-ssh-pivot' 'attack_phase:.*persistence'
-                                                       # AND across patterns (= piped greps)
-    defender-lessons --tags                            # viable values for every dimension
-    defender-lessons --tags telemetry_source           # viable values for one dimension
-    defender-lessons --show defender/lessons/foo.md    # print just a lesson's frontmatter
-
-PATTERNs are Python regexes matched case-insensitively against the frontmatter
-text. Exit 0 always (no match = no output); a bad regex exits 2.
+Started by path, so the one bootstrap below first puts its own checkout root ahead of anything
+else on `sys.path` (a foreign checkout named by `PYTHONPATH` must never answer for this one),
+then re-launches under `defender/.venv` before the engine's third-party imports load.
+`_venv` is the only `defender.*` import allowed above that re-exec: it is stdlib-only, while the
+engine imports pydantic and PyYAML, which the bare launching interpreter lacks.
+`test_corpus_fold_seed.test_c2c` pins this ordering.
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 
-if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
-    sys.path.insert(0, _root)
-
-# The only `defender.*` import allowed above the guard: `_venv` is stdlib-only, while other
-# modules may import pydantic or PyYAML, which the bare launching interpreter lacks.
-# `test_corpus_fold_seed.test_c2c` pins this ordering.
-from defender.scripts._venv import reexec_into_venv
-
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from defender._venv import reexec_into_venv
+
     reexec_into_venv(__file__)
 
-import argparse
-import re
-
-from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender._tsv import flatten_cell
-from defender.scripts.lessons._lessons_common import as_list, iter_lessons, use_utf8_stdio
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
-
-DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
-
-
-def _emit_match(path: Path, fm: dict) -> None:
-    desc = flatten_cell(str(fm.get("description") or "")).strip()
-    print(f"{path.resolve()}\t{desc}")
-
-
-def cmd_grep(patterns: list[str]) -> int:
-    try:
-        regexes = [re.compile(p, re.IGNORECASE) for p in patterns]
-    except re.error as e:
-        print(f"error: bad regex: {e}", file=sys.stderr)
-        return 2
-    for lesson in iter_lessons(LESSONS_DIR):
-        if all(rx.search(lesson.raw) for rx in regexes):
-            _emit_match(lesson.path, lesson.fm)
-    return 0
-
-
-def cmd_tags(field: str | None) -> int:
-    fields = [field] if field else list(DIMENSIONS)
-    if field and field not in DIMENSIONS:
-        print(f"error: unknown dimension {field!r}; choose from {', '.join(DIMENSIONS)}", file=sys.stderr)
-        return 2
-    lessons = list(iter_lessons(LESSONS_DIR))
-    for f in fields:
-        counts: dict[str, int] = {}
-        for lesson in lessons:
-            for val in as_list(lesson.fm.get(f)):
-                counts[str(val)] = counts.get(str(val), 0) + 1
-        print(f"{f}:")
-        for val in sorted(counts):
-            print(f"  {val:<32} {counts[val]}")
-    return 0
-
-
-def cmd_show(paths: list[str]) -> int:
-    rc = 0
-    corpus = LESSONS_DIR.resolve()
-    for raw_path in paths:
-        p = Path(raw_path)
-        if not p.is_absolute():
-            p = REPO_ROOT / raw_path
-        lesson = p.resolve()
-        try:
-            lesson.relative_to(corpus)
-            inside = True
-        except ValueError:
-            inside = False
-        if not inside or not lesson.is_file():
-            print(f"error: no such lesson: {raw_path}", file=sys.stderr)
-            rc = 2
-            continue
-        try:
-            fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]
-        except (FrontmatterError, OSError, UnicodeDecodeError) as e:
-            print(f"error: {raw_path}: malformed lesson: {e}", file=sys.stderr)
-            rc = 2
-            continue
-        print(f"--- {lesson.resolve()}")
-        print(fm_raw)
-    return rc
-
-
-def main(argv: list[str]) -> int:
-    use_utf8_stdio()
-    ap = argparse.ArgumentParser(
-        prog="defender-lessons",
-        description=__doc__.splitlines()[0],
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="frontmatter-only: the body is never matched or printed.",
-    )
-    ap.add_argument("patterns", nargs="*", help="regex(es) matched against frontmatter; ANDed")
-    ap.add_argument("--tags", nargs="?", const="", metavar="DIMENSION",
-                    help="enumerate viable tag values (all dimensions, or one named)")
-    ap.add_argument("--show", nargs="+", metavar="PATH",
-                    help="print only the frontmatter block of the given lesson(s)")
-    ns = ap.parse_args(argv[1:])
-
-    if ns.tags is not None:
-        return cmd_tags(ns.tags or None)
-    if ns.show:
-        return cmd_show(ns.show)
-    return cmd_grep(ns.patterns)
-
+from defender.runtime.lessons_engine.lessons_fm import main
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     sys.exit(main(sys.argv))

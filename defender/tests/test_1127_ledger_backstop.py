@@ -43,7 +43,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
     payload_text,
     request_key,
 )
-from defender.scripts.gather_tools.record_query import ParamsTooDeep  # noqa: E402
+from defender._query_rules import ParamsTooDeep
 from defender.tests.test_1127_params_nesting_limit import (  # noqa: E402
     FAR,
     LIMIT,

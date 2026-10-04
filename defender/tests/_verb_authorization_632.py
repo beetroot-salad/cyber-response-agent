@@ -459,7 +459,7 @@ class _Run:
         which is what "no evidence row" means since #860 made a denial a `∅.denied` sentinel
         row of its own. The split is `lead_repository.joined`'s (`.queries` vs `.sentinels`),
         spelled with the writer's own predicate."""
-        from defender.scripts.gather_tools.record_query import is_reserved_query_id
+        from defender._query_rules import is_reserved_query_id
         return [r for r in self.own_rows if not is_reserved_query_id(str(r.get("query_id", "")))]
 
     @property
@@ -468,7 +468,7 @@ class _Run:
         refused, since #860. Exact-id, not `is_reserved_query_id`: the other sentinels are
         other refusals, and a test asserting "the denial left its row" must not be satisfied
         by a repeat trip's."""
-        from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID
+        from defender._query_rules import DENIED_QUERY_ID
         return [r for r in self.own_rows if r.get("query_id") == DENIED_QUERY_ID]
 
     @property

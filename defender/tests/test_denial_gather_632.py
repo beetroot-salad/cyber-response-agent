@@ -58,7 +58,7 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
-from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID  # noqa: E402
+from defender._query_rules import DENIED_QUERY_ID
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DENIED,
     DONE,
@@ -573,10 +573,10 @@ def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
     from defender.runtime.query_tool import resolve_query_id
     from defender.scripts.gather_tools.record_query import (
         in_rejection_domain,
-        is_reserved_query_id,
         rejection_budget_trip,
         repeat_trip,
     )
+    from defender._query_rules import is_reserved_query_id
 
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_registry(rec),

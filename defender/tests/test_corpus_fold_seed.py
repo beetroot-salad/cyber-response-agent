@@ -4,7 +4,7 @@ a neutral ``defender/_corpus.py``, and seed the manifest's section order.
 Three parts, and each has a distinct red:
 
 (a) RELOCATE ``iter_lessons`` to ``defender/_corpus.py``, re-exported from
-    ``scripts/lessons/_lessons_common.py``. The load-bearing constraint is the **pre-venv import
+    ``runtime/lessons_engine/_lessons_common.py``. The load-bearing constraint is the **pre-venv import
     contract**: the actor runs the pinned lesson scripts as ``python3 <script>`` on its bash lane
     under SYSTEM python, which has neither PyYAML nor pydantic, and each script re-execs into
     ``defender/.venv`` with ``reexec_into_venv``. Until #1067 that was held by keeping ``_corpus``
@@ -173,7 +173,7 @@ def test_c1_lessons_common_reexports_the_same_object():
     with no local use. ``reexec_into_venv`` is deliberately NOT among the re-exports: this module
     resolves pydantic at import (via ``_corpus``/``_io``), so fetching the guard from here would
     already have imported what the guard routes around (``test_c2c``)."""
-    common = importlib.import_module("defender.scripts.lessons._lessons_common")
+    common = importlib.import_module("defender.runtime.lessons_engine._lessons_common")
     assert "reexec_into_venv" not in common.__all__
     assert not hasattr(common, "reexec_into_venv")
     corpus_mod = importlib.import_module("defender._corpus")
@@ -195,11 +195,11 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth()
     Asserted statically rather than by calling it: the function's success path IS an
     ``os.execv``, so a test that reached it would replace the pytest process. ``test_c3``
     below is the live positive control, in a subprocess that can afford to be re-exec'd."""
-    venv = importlib.import_module("defender.scripts._venv")
+    venv = importlib.import_module("defender._venv")
     assert venv._DEFENDER_DIR == DEFENDER, (
         "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
 
-    tree = ast.parse((DEFENDER / "scripts" / "_venv.py").read_text())
+    tree = ast.parse((DEFENDER / "_venv.py").read_text())
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "reexec_into_venv")
     execv = next(n for n in ast.walk(fn)
@@ -213,7 +213,7 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth()
 
 
 #: The module the guard lives in — the ONE ``defender.*`` import a script may make before calling it.
-_VENV_MODULE = "defender.scripts._venv"
+_VENV_MODULE = "defender._venv"
 
 
 def _module_imports(stmt: ast.stmt) -> list[str]:
@@ -236,7 +236,7 @@ def _calls_reexec(stmt: ast.stmt) -> bool:
 def _guarded_scripts() -> list[Path]:
     return sorted(p for p in DEFENDER.rglob("*.py")
                   if "tests" not in p.parts and ".venv" not in p.parts
-                  and p != DEFENDER / "scripts" / "_venv.py"
+                  and p != DEFENDER / "_venv.py"
                   and "reexec_into_venv(" in p.read_text(encoding="utf-8"))
 
 
@@ -253,7 +253,7 @@ def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
     back above the guard (the pre-#1067 shape of ``lessons_fm.py``/``lessons_frontier.py``) reds
     here rather than as ``ModuleNotFoundError: pydantic`` on a venv-less box. Reported per file so
     a violation names the import that moved."""
-    venv_tree = ast.parse((DEFENDER / "scripts" / "_venv.py").read_text(encoding="utf-8"))
+    venv_tree = ast.parse((DEFENDER / "_venv.py").read_text(encoding="utf-8"))
     non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
                   if m.split(".")[0] not in sys.stdlib_module_names]
     assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"

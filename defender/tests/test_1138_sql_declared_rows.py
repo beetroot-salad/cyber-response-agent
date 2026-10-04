@@ -956,7 +956,7 @@ def test_o8_no_model_facing_text_offers_a_count_over_the_whole_payload():
     scan reads the two sites that offered it (C5) and that its pattern matches their spelling."""
     files = _model_facing_files()
     rel = {str(p.relative_to(DEFENDER)) for p in files}
-    assert {"runtime/tools/_deps.py", "scripts/gather_tools/payload_view.py",
+    assert {"runtime/tools/_deps.py", "runtime/payload_view.py",
             "skills/gather/defender-sql.md"} <= rel, "the census lost a surface it must read"
     assert _COUNT_OVER_DATA.search('reducer = f\'{sql_shim} "SELECT count(*) FROM data"\'')
     assert _COUNT_OVER_DATA.search("defender-sql 'select COUNT(*) as n from data'")

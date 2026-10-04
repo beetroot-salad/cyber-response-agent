@@ -50,11 +50,7 @@ from defender.learning.branch.ledger import (
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests import _tenants1106
 from defender.runtime.verbs import VerbContext
-from defender.scripts.gather_tools.record_query import (
-    ABOVE_GUARD_QUERY_ID,
-    BASH_SHIM_QUERY_ID,
-    REPEAT_TRIP_QUERY_ID,
-)
+from defender._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 
 #: The episode's clock. A primed capture is served under it like anything else, so the registry
 #: this file drives needs one; nothing here is about its value.

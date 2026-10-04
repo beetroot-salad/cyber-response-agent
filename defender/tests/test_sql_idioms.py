@@ -685,12 +685,16 @@ def _unnest_args(text: str) -> set[str]:
     return {re.sub(r"^data\.", "", arg, flags=re.IGNORECASE) for arg in _UNNEST_ARG.findall(text)}
 
 
+#: The engine `bin/defender-sql` runs: its source carries the help epilog and the hints.
+_SQL_ENGINE = DEFENDER / "runtime" / "sql_engine" / "sql.py"
+
+
 def _lead_surfaces() -> list[Path]:
     """Everything a gather lead reads or runs when it writes SQL over a payload: the tool
     itself, and every skill doc — `defender-sql.md`, the adapter contract, the query
     templates, and each system's recorded execution notes, which is where a curator would
     write a recipe down. Enumerated, not hand-listed, so a new doc is censused on arrival."""
-    return [SQL_PY, *sorted(_SKILLS.rglob("*.md"))]
+    return [_SQL_ENGINE, *sorted(_SKILLS.rglob("*.md"))]
 
 
 def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
@@ -711,7 +715,7 @@ def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
     # them they teach the live shape — a zero above cannot come from reading nothing.
     teaching = {name for name, args in seen.items() if args}
     assert {
-        "scripts/gather_tools/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
+        "runtime/sql_engine/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
     } <= teaching, teaching
     assert set().union(*seen.values()) == _LIVE_SHAPES
 

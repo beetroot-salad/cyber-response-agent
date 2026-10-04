@@ -138,7 +138,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared869 import (  # noqa: F401 — re-exported substrate
     ADAPTERS_REL,
     CATALOG_REL,
