@@ -27,6 +27,8 @@ from defender.learning.core.config import (
     repo_lock_wait_seconds,
 )
 from defender import _git
+from defender._claim_git import ClaimGit
+from defender._paths import DefenderPaths
 from defender._io import guarded_mkdir, read_jsonl_rows_report
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
@@ -267,12 +269,10 @@ def _drain_curators(
 
 
 
-def _discard_worktree_changes(repo_root: Path, *, timeout: float, in_flight: bool) -> None:
-    """Reset the worktree between claims (`_worktree_git.discard_changes`). Imported here, not at
-    module load: the core drain loads no `learning.leads` module until a lead-author tick runs."""
-    from defender.learning.leads._worktree_git import discard_changes
-
-    discard_changes(repo_root, timeout=timeout, in_flight=in_flight)
+def _claim_git(paths: LoopPaths, git_timeout: float) -> ClaimGit:
+    """The session whose `claim()` resets the worktree after each claim (#1175): its cleanup
+    never displaces a propagating fault, and is raised after any other exit."""
+    return ClaimGit(paths.repo_root, DefenderPaths.skills_rel, timeout=git_timeout)
 
 
 def _quarantine_lead_author_failure(
@@ -393,36 +393,31 @@ def _drain_lead_author_markers(
         # The curator's commit, handed back for `BatchDisposition.apply` to record once the
         # tree passes the scrub.
         done: list[str | None] = []
-        # Whether a fault is propagating when the cleanup runs: it then must not displace it.
-        in_flight = True
-        try:
-            drained = run_or_dead_letter(
-                functools.partial(
-                    run_lead_author, paths, run_dir, box=box, on_done=done.append,
-                ),
-                functools.partial(
-                    _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
-                ),
-                propagate=(_LeadAuthorRetry,),
-            )
-            in_flight = False
-        except _LeadAuthorRetry as e:
-            if attempts >= max_retries:
-                quarantine_marker(
-                    spec, claimed, paths.author_queue_dir,
-                    f"transient-exhausted after {attempts} attempt(s): {e!r}",
+        with _claim_git(paths, git_timeout).claim():
+            try:
+                drained = run_or_dead_letter(
+                    functools.partial(
+                        run_lead_author, paths, run_dir, box=box, on_done=done.append,
+                    ),
+                    functools.partial(
+                        _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
+                    ),
+                    propagate=(_LeadAuthorRetry,),
                 )
-            else:
-                spec["attempts"] = attempts
-                _requeue_or_drop(
-                    claim,
-                    note=f"transient on {marker_identity(spec, claimed)} "
-                         f"(attempt {attempts}/{max_retries})",
-                )
-            in_flight = False
-            continue
-        finally:
-            _discard_worktree_changes(paths.repo_root, timeout=git_timeout, in_flight=in_flight)
+            except _LeadAuthorRetry as e:
+                drained = False
+                if attempts >= max_retries:
+                    quarantine_marker(
+                        spec, claimed, paths.author_queue_dir,
+                        f"transient-exhausted after {attempts} attempt(s): {e!r}",
+                    )
+                else:
+                    spec["attempts"] = attempts
+                    _requeue_or_drop(
+                        claim,
+                        note=f"transient on {marker_identity(spec, claimed)} "
+                             f"(attempt {attempts}/{max_retries})",
+                    )
         if drained:
             # Not unlinked here: the claim stays in `inflight/` until the tree passes the
             # scrub (`BatchDisposition.apply`).
@@ -483,15 +478,11 @@ def _drain_pitfalls(
     # Only the success-path consumption is handed back; failure dispositions don't depend on
     # the scrub and are applied immediately.
     curated: list[PitfallsDisposition] = []
-    in_flight = True
-    try:
+    with _claim_git(paths, git_timeout).claim():
         run_or_dead_letter(
             lambda: run_pitfalls(paths, box=box, on_curated=curated.append),
             functools.partial(_retire_pitfalls_batch, paths, batch_ids, lock_wait_seconds),
         )
-        in_flight = False
-    finally:
-        _discard_worktree_changes(paths.repo_root, timeout=git_timeout, in_flight=in_flight)
     return curated[-1] if curated else None
 
 
@@ -820,7 +811,7 @@ def lead_author_drain(
 ) -> int:
     """`git_timeout` bounds each git call over the batch worktree: the cleanup between claims
     here, and, bound into the DEFAULT seams only, the lanes' own (#1175). One that overruns is a
-    systemic `GitError` (`_worktree_git.GitOverran`)."""
+    systemic `GitError` (`_claim_git.GitOverran`)."""
     _validate_merge_mode()
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.

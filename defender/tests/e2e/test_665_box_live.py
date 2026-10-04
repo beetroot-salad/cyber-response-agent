@@ -255,7 +255,7 @@ def test_worktree_or_scan_races_a_not_yet_released_box_bind(tmp_path):
 def test_git_reset_hard_runs_between_sequential_markers_under_one_live_box(tmp_path):
     """A host-side file mutation between sequential markers IS reflected into a live rw bind:
     the next marker's in-box read sees the post-edit content (po35 — M8's 'must be pinned'
-    flag on _discard_worktree_changes under a live bind is real)."""
+    flag on ClaimGit.reset under a live bind is real)."""
     run_dir = make_run_dir(tmp_path)
     probe = run_dir / "marker.txt"
     probe.write_text("orig", encoding="utf-8")

@@ -35,8 +35,8 @@ from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_tr
 from defender.learning.core import persist as _loop_persist
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
-from defender.learning.leads import _worktree_git
-from defender.learning.leads._worktree_git import GIT_TIMEOUT_SECONDS
+from defender._claim_git import ClaimGit
+from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
 
@@ -179,8 +179,8 @@ class LeadAuthorDeps:
     skills: Held
     #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
     tree_for: TreeFor
-    #: The bound on each git call over the worktree (`_worktree_git`, #1175): one that overruns
-    #: raises `GitOverran`, a systemic `GitError`.
+    #: The bound on each git call over the worktree (the run's `ClaimGit`, #1175): one that
+    #: overruns raises `GitOverran`, a systemic `GitError`.
     git_timeout: float = GIT_TIMEOUT_SECONDS
 
 
@@ -338,7 +338,8 @@ def _run_locked(
         _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
     repo_root = deps.paths.repo_root
-    baseline_stray = _worktree_git.changes_outside_skills(repo_root, timeout=deps.git_timeout)
+    git = ClaimGit(repo_root, SKILLS_REL, timeout=deps.git_timeout)
+    baseline_stray = git.changed_outside_corpus()
 
     if synth:
         catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
@@ -359,12 +360,9 @@ def _run_locked(
 
     changed = _verify_skills_state(
         repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
-        git_timeout=deps.git_timeout,
+        git=git,
     )
-    sha = _worktree_git.commit_admitted(
-        repo_root, changed, _loop_commit_message(run_dir, changed),
-        tree_for=deps.tree_for, timeout=deps.git_timeout,
-    )
+    sha = git.commit(changed, _loop_commit_message(run_dir, changed))
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0

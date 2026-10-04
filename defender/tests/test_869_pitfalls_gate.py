@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.core import persist
 from defender.learning.core.config import LoopPaths
@@ -133,7 +134,7 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     with pytest.raises(LeadAuthorError):
         pitfalls_curator._verify_pitfalls_state(
             repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(repo))
+            tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert head_files(repo) == before
 
 

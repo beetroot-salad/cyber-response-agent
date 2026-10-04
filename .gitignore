@@ -93,7 +93,7 @@ defender/learning/.learn-drain.lock
 # holder keeps the flock on the orphaned inode while the next pass creates a fresh inode at
 # the same path and takes it — two lanes on defender-runcycle-{run_id}, which is the exact
 # collision the lock was added for. Every sibling above survives that clean by being ignored.
-# NOT `drains._discard_worktree_changes`: its two call sites both receive `wt_paths`, and
+# NOT `ClaimGit.reset` (via `drains._claim_git`): its two call sites both receive `wt_paths`, and
 # `LoopPaths.with_repo_root` pins `state_dir` to the MAIN tree's state root — so its clean
 # runs inside `.worktrees/<slug>-<batch>` and cannot reach anything under `state_root`.
 defender/learning/run-cycle-locks/

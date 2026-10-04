@@ -24,8 +24,8 @@ from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
-from defender.learning.leads import _worktree_git
-from defender.learning.leads._worktree_git import GIT_TIMEOUT_SECONDS
+from defender._claim_git import ClaimGit
+from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
     _loop_commit_body,
@@ -417,8 +417,7 @@ def _pitfalls_rule(
 
 def _verify_pitfalls_state(
     repo_root: Path, baseline_stray: list[str], *,
-    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor, git: ClaimGit,
 ) -> list[str]:
     """`reducer_offered` is required: either default ("every tick may write the reducer
     surface" or "no tick may") is wrong for a caller that forgot it."""
@@ -428,7 +427,7 @@ def _verify_pitfalls_state(
             _pitfalls_rule, repo_root,
             systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
         ),
-        git_timeout=git_timeout,
+        git=git,
     )
 
 
@@ -569,8 +568,8 @@ def run_pitfalls(
     passes its configured wait, since it holds the tick's locks meanwhile; `None` is
     unbounded.
 
-    `git_timeout` bounds every git call over the worktree (`_worktree_git`, #1175); one that
-    overruns raises `GitOverran`, a systemic `GitError`.
+    `git_timeout` bounds every git call over the worktree (the tick's `ClaimGit`, #1175); one
+    that overruns raises `GitOverran`, a systemic `GitError`.
 
     `trees` are the lane's held mounts (the drain's work step opens them for its label): the
     commit gate reads the working copy through them (#1134). Checked before any work: they must
@@ -632,7 +631,8 @@ def run_pitfalls(
             timeout_seconds=lock_wait_seconds,
         )
         return 0
-    baseline_stray = _worktree_git.changes_outside_skills(repo_root, timeout=git_timeout)
+    git = ClaimGit(repo_root, SKILLS_REL, timeout=git_timeout)
+    baseline_stray = git.changed_outside_corpus()
     # A queue row is one occurrence, so `len(rows)` is the failure count. Surfaces are named
     # rather than systems, since a reducer-only tick has no system names.
     _logger.info(
@@ -651,14 +651,11 @@ def run_pitfalls(
 
     changed = _verify_pitfalls_state(
         repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-        tree_for=trees.tree_for, git_timeout=git_timeout,
+        tree_for=trees.tree_for, git=git,
     )
     sha = None
     if changed:
-        sha = _worktree_git.commit_admitted(
-            repo_root, changed, _pitfalls_commit_message(changed),
-            tree_for=trees.tree_for, timeout=git_timeout,
-        )
+        sha = git.commit(changed, _pitfalls_commit_message(changed))
     else:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only

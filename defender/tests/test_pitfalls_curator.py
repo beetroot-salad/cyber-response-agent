@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.learning.core import config, persist  # type: ignore[import-not-found]
@@ -67,7 +68,7 @@ def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
     )
     changed = pitfalls_curator._verify_pitfalls_state(
         tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo))
+        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
     assert changed == ["defender/skills/elastic/execution.md"]
 
 
@@ -78,7 +79,7 @@ def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
     with pytest.raises(LeadAuthorError, match="non-execution.md"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo))
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def _commit_outside(repo: Path) -> Path:
@@ -97,7 +98,7 @@ def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
     with pytest.raises(LeadAuthorError, match="outside"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo))
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
@@ -109,7 +110,7 @@ def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
     with pytest.raises(LeadAuthorError, match="deleted"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo))
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
@@ -122,7 +123,7 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
     with pytest.raises(LeadAuthorError, match="outside"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo))
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
@@ -149,7 +150,7 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
     (cmdb / "execution.md").write_text("# c\n")
     changed = pitfalls_curator._verify_pitfalls_state(
         tmp_git_repo, baseline_stray=[], systems=DECLARED | {"cmdb"}, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo))
+        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
     assert changed == [
         "defender/skills/cmdb/execution.md",
         "defender/skills/elastic/execution.md",
@@ -258,7 +259,7 @@ def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(t
     with pytest.raises(LeadAuthorError, match="undeclared system"):
         pitfalls_curator._verify_pitfalls_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo))
+            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
 
     # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
     (ghost / "execution.md").unlink()
@@ -266,7 +267,7 @@ def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(t
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
     assert pitfalls_curator._verify_pitfalls_state(
         tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo)) == [
+        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo)) == [
         "defender/skills/elastic/execution.md"
     ]
 

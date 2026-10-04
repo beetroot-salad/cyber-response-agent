@@ -170,12 +170,15 @@ def git_head_sha(cwd: Path, *, timeout: float | None = None) -> str:
     return git(["rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
 
 
-def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
+def git_show_file(
+    cwd: Path, rev: str, path: str, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
     """The text a path carries at `rev`, or `None` when it is not there.
 
     Not `git()`, which strips output: a stripped trailing newline would read as an edit when
     compared against the working tree."""
-    proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False)
+    proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False, timeout=timeout, env=env)
     if proc.returncode != 0:
         return None
     return proc.stdout
@@ -351,16 +354,9 @@ def git_commit_paths(
     *,
     trailers: list[tuple[str, str]] | None = None,
     env: Mapping[str, str] | None = None,
-    force_add: bool = False,
-    timeout: float | None = None,
 ) -> str | None:
     """Stage exactly `present` (added) and `absent` (deleted) and commit them; `None` if nothing
-    changed. `env` is every git call's environment (`None`: this process's), and `timeout`
-    bounds each of them (`GitTimeout`).
-
-    `force_add` stages `present` with `add -f`, which applies no ignore rules: `git add` of an
-    untracked path otherwise opens every worktree `.gitignore` on its way (#1175). For a caller
-    whose `present` is already exactly the set it vetted.
+    changed. `env` is every git call's environment (`None`: this process's).
 
     The caller says which paths still stand in the worktree: this module asks the filesystem
     nothing (#1134 — the drain judges present from absent through its mount handle). `git add`
@@ -373,13 +369,10 @@ def git_commit_paths(
     if not paths:
         return None
     if present:
-        add = ["add", "-f"] if force_add else ["add"]
-        git([*add, "--", *present], cwd=cwd, env=env, timeout=timeout)
+        git(["add", "--", *present], cwd=cwd, env=env)
     if absent:
-        git(["rm", "--cached", "--ignore-unmatch", "-q", "--", *absent], cwd=cwd, env=env,
-            timeout=timeout)
-    staged = _run(["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, check=False, env=env,
-                  timeout=timeout)
+        git(["rm", "--cached", "--ignore-unmatch", "-q", "--", *absent], cwd=cwd, env=env)
+    staged = _run(["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, check=False, env=env)
     if staged.returncode == 0:
         return None
     if staged.returncode != 1:
@@ -387,9 +380,8 @@ def git_commit_paths(
     trailer_args: list[str] = []
     for key, val in trailers or []:
         trailer_args += ["--trailer", f"{key}: {val}"]
-    git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message, env=env,
-        timeout=timeout)
-    return git_head_sha(cwd, timeout=timeout)
+    git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message, env=env)
+    return git_head_sha(cwd)
 
 
 def git_fetch(cwd: Path) -> None:
