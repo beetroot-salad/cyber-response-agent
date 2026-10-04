@@ -442,7 +442,11 @@ def _bootstrap_puts_own_root_first(wrapper: Path, source: str, stmt: ast.stmt) -
                       ast.get_source_segment(source, stmt) or "",
                       "import json, sys as _s", "print(json.dumps(_s.path[0]))"])
     foreign = wrapper.parent  # any directory that is not this checkout's root
-    env = S.child_env(pythonpath=False, PYTHONPATH=f"{foreign}{os.pathsep}{S.REPO_ROOT}")
+    # The box mark keeps a re-exec inside the bootstrap (the lessons wrapper's) from replacing
+    # the child: with a `defender/.venv` present and this interpreter spelled differently, it
+    # would exec the real wrapper and print its output, not `sys.path[0]`.
+    env = S.child_env(pythonpath=False, PYTHONPATH=f"{foreign}{os.pathsep}{S.REPO_ROOT}",
+                      DEFENDER_BOX="1")
     cp = S.python("-c", code, env=env, cwd=foreign)
     assert cp.returncode == 0, cp.stderr.decode()
     first: str = json.loads(cp.stdout)

@@ -134,13 +134,21 @@ _REAL_RUN = {SQL: ((_QUERY,), _PAYLOAD), LESSONS: (("--tags",), b"")}
 
 _SCRATCH = re.compile(r"[^\s\"']*defender-sql-[A-Za-z0-9_]{8}")
 _TRACEBACK = "Traceback (most recent call last):"
+#: CPython's own start-up warnings when it cannot locate its prefix. A `uv`-managed interpreter
+#: (CI's) prints them in the shims' minimal environment; the box image's `/usr/local` install,
+#: which the box lane stands in for, does not. They come from the interpreter, never the engine.
+_PREFIX_WARNING = re.compile(
+    r"^(?:Could not find platform (?:in)?dependent libraries <(?:exec_)?prefix>"
+    r"|Consider setting \$PYTHONHOME to <prefix>\[:<exec_prefix>\])\n", re.M)
 
 
 def _norm(text: str, subs: Sequence[tuple[Path | str, str]] = ()) -> str:
     """Tokens for every machine- or run-specific spelling: each `(path, token)` in `subs` (both
     the spelling given and its resolved form) and the checkout root (`<ROOT>`), longest first;
     duckdb's scratch folder (`<SCRATCH>`); a traceback reduced to its final `Type: message`
-    line, since its frames name the file and line that the move changes."""
+    line, since its frames name the file and line that the move changes; and the interpreter's
+    prefix warnings (`_PREFIX_WARNING`) dropped."""
+    text = _PREFIX_WARNING.sub("", text)
     pairs: dict[str, str] = {str(S.REPO_ROOT): "<ROOT>"}
     for path, token in subs:
         pairs[str(path)] = token
