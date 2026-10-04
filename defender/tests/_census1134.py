@@ -261,6 +261,8 @@ READERS: dict[str, tuple[int, str, str]] = {
     "defender.learning.author.shared.build_curator_user_prompt": (-1, "corpus", "bound"),
     ENTRY_KIND: (0, "view", "bound"),
     LIST_TREE: (0, "view", "bound"),
+    # #1178's plain-file rule: a no-follow stat of a name below a held view.
+    "defender._io.stat_entry": (0, "bound", "bound"),
     VIEW_AT: (0, "held", "held"),
 }
 

@@ -559,7 +559,7 @@ def run_pitfalls(
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    freeze: Callable[[Any], AbstractContextManager[None]] = _box.frozen,
+    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -646,7 +646,9 @@ def run_pitfalls(
         f"{[h['path'] for h in handoffs]}"
     )
 
-    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
+    # The box runs for the curator's spawn only; the drain holds it frozen otherwise (#1178).
+    with thaw(box):
+        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
@@ -654,16 +656,14 @@ def run_pitfalls(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
-    # Frozen from the gate's first read to the commit, as the lead author's (#1178).
-    with freeze(box):
-        changed = _verify_pitfalls_state(
-            repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-            tree_for=trees.tree_for, git=git,
-        )
-        sha = None
-        if changed:
-            sha = git.commit(changed, _pitfalls_commit_message(changed))
-    if not changed:
+    changed = _verify_pitfalls_state(
+        repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
+        tree_for=trees.tree_for, git=git,
+    )
+    sha = None
+    if changed:
+        sha = git.commit(changed, _pitfalls_commit_message(changed))
+    else:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only
     # `changed` carries.

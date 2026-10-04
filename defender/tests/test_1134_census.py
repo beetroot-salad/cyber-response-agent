@@ -410,6 +410,9 @@ ALLOW: tuple[Allowed, ...] = (
     # --- learning/leads/_lead_spine.py --------------------------------------------------------
     Allowed(SPINE, "_spawn_author_agent", "attr", "PENDING_DIR.mkdir(parents=True, exist_ok=True)", N_E,
             "the host-side lead-pending state dir"),
+    Allowed(SPINE, "_require_committable_entry", "call", "is_plain_entry(got.st)", N_D,
+            "#1178's plain-file rule judges a stat result `stat_entry` took through the held "
+            "view; it opens nothing"),
     # --- learning/leads/lead_author/__init__.py: run-dir state, and the CLI's opener ----------
     Allowed(LEAD_AUTHOR, "_write_state", "attr", "path.parent.mkdir(parents=True, exist_ok=True)", N_E,
             "the run dir's lead_author/ state"),
@@ -542,7 +545,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 14, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(
@@ -1651,9 +1654,8 @@ REGRESSIONS: dict[str, Regression] = {
          "_verify_skills_state(repo_root, baseline_stray, systems=deps.systems, minted=minted, "
          "tree_for=lambda _path: None, git=git)", 1),)),
     "s6v2-E2b-run-pitfalls-plain-tree-for": Regression(PITFALLS, (
-        # Indented one level by #1178's `with freeze(box):` around the gate and the commit.
-        ("            tree_for=trees.tree_for, git=git,\n        )\n        sha = None\n",
-         "            tree_for=lambda _path: None, git=git,\n        )\n        sha = None\n", 1),
+        ("        tree_for=trees.tree_for, git=git,\n    )\n    sha = None\n",
+         "        tree_for=lambda _path: None, git=git,\n    )\n    sha = None\n", 1),
     ), (("run_pitfalls", "tree_for",
          "_verify_pitfalls_state(repo_root, baseline_stray, systems=systems, "
          "reducer_offered=reducer_offered, tree_for=lambda _path: None, git=git)", 1),)),

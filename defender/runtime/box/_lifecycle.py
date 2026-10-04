@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -391,50 +391,73 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
         )
 
 
-@contextlib.contextmanager
-def frozen(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
-    """Hold every process of `box` frozen for the `with` body (#1178): nothing the box runs can
-    write while the host judges and commits what it left.
+#: The container states in which nothing in the box runs: frozen, or no longer running at all
+#: (a box that exited or died writes nothing, the scrub's own rule).
+_FROZEN_STATES = frozenset({"paused", "exited", "dead"})
 
-    A no-op for anything but a sandboxed `BoxExecutor` (no box, the unsandboxed fallback, a
-    test's stand-in): nothing there is a container to freeze. Otherwise the body runs only
-    once the box is provably paused (`docker pause`, then `docker inspect` reports
-    `State.Paused`), as the scrub runs only once the box is provably dead; anything short of
-    that is a `BoxFault` and the body never runs. On exit the box is unpaused; a failure there is
-    a `BoxFault`, unless the body is already raising, whose exception then propagates and the
-    unpause fault is logged."""
-    if not (isinstance(box, BoxExecutor) and box.sandboxed):
+
+def _container_to_hold(box: object) -> str | None:
+    """The container `box` names when there is one to freeze, else `None` (no box, or the
+    unsandboxed fallback: nothing to freeze). A box that cannot say whether it is sandboxed is a
+    `BoxFault`: an unknown box is never assumed safe."""
+    if box is None:
+        return None
+    sandboxed = getattr(box, "sandboxed", None)
+    if sandboxed is None:
+        raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
+    if not sandboxed:
+        return None
+    name = getattr(box, "name", None)
+    if not name:
+        raise BoxFault(f"the sandboxed box {box!r} names no container to freeze")
+    return str(name)
+
+
+def _status(docker: DockerFn, name: str) -> str | None:
+    return _inspect_field(docker, name, "{{.State.Status}}")
+
+
+def pause_box(box: object, *, docker: DockerFn = _docker) -> None:
+    """Freeze every process in `box`, proven (#1178): `docker pause`, then `docker inspect` must
+    report the container paused, exited or dead, else `BoxFault`. An "already paused" answer is
+    fine when the status agrees. A no-op when there is no container to freeze."""
+    name = _container_to_hold(box)
+    if name is None:
+        return
+    proc = _call(docker, ["docker", "pause", name])
+    status = _status(docker, name)
+    if status not in _FROZEN_STATES:
+        raise BoxFault(
+            f"could not freeze the box {name} (pause rc={proc.returncode}: "
+            f"{(proc.stderr or '').strip()}; status {status!r})"
+        )
+
+
+@contextlib.contextmanager
+def thawed(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
+    """Let `box` run for the `with` body only, and freeze it again on every exit (#1178): the
+    lane's box is frozen except while an agent runs in it.
+
+    The body runs only once the box is proven running (`docker unpause`, then `docker inspect`),
+    else `BoxFault`. On exit — a return or any exception, an interrupt included — the box is
+    frozen again by `pause_box`; a box that cannot be re-frozen is a `BoxFault` that outranks the
+    body's own exception, since the host's next step must not run beside it. A no-op when there is
+    no container to hold."""
+    name = _container_to_hold(box)
+    if name is None:
         yield
         return
-    proc = _call(docker, ["docker", "pause", box.name])
-    if proc.returncode != 0:
-        raise BoxFault(f"could not pause the box {box.name}: {(proc.stderr or '').strip()}")
-    try:
-        proc = _call(docker, ["docker", "inspect", "-f", "{{.State.Paused}}", box.name])
-        if proc.returncode != 0 or (proc.stdout or "").strip() != "true":
-            raise BoxFault(
-                f"the box {box.name} is not provably paused (inspect rc={proc.returncode}: "
-                f"{(proc.stdout or proc.stderr or '').strip()!r})"
-            )
-    except BoxFault:
-        with contextlib.suppress(BoxFault):
-            _call(docker, ["docker", "unpause", box.name])
-        raise
+    proc = _call(docker, ["docker", "unpause", name])
+    status = _status(docker, name)
+    if status != "running":
+        raise BoxFault(
+            f"could not thaw the box {name} (unpause rc={proc.returncode}: "
+            f"{(proc.stderr or '').strip()}; status {status!r})"
+        )
     try:
         yield
-    except BaseException:
-        try:
-            _unpause(box, docker)
-        except BoxFault as e:
-            _logger.error(f"{e} — while the frozen body was already failing")
-        raise
-    _unpause(box, docker)
-
-
-def _unpause(box: BoxExecutor, docker: DockerFn) -> None:
-    proc = _call(docker, ["docker", "unpause", box.name])
-    if proc.returncode != 0:
-        raise BoxFault(f"could not unpause the box {box.name}: {(proc.stderr or '').strip()}")
+    finally:
+        pause_box(box, docker=docker)
 
 
 def stop_and_scrub(

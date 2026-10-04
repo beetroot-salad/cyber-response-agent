@@ -184,9 +184,10 @@ class LeadAuthorDeps:
     #: The bound on each git call over the worktree (the run's `ClaimGit`, #1175): one that
     #: overruns raises `GitOverran`, a systemic `GitError`.
     git_timeout: float = GIT_TIMEOUT_SECONDS
-    #: Holds the box frozen around the gate and the commit (#1178), so nothing it runs writes
-    #: between what the gate read and what is committed.
-    freeze: Callable[[Any], AbstractContextManager[None]] = _box.frozen
+    #: Lets the box run for the agent's spawn only (#1178): the drain holds it frozen, so every
+    #: other step of the claim — the mint, the gate, the commit — runs beside a box that writes
+    #: nothing.
+    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed
 
 
 def build_lead_author_deps(
@@ -358,19 +359,17 @@ def _run_locked(
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
+    with deps.thaw(box):
+        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
-    # The box is frozen from the gate's first read to the commit (#1178): the agent has
-    # returned, but a process it left behind could still write.
-    with deps.freeze(box):
-        changed = _verify_skills_state(
-            repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
-            git=git,
-        )
-        sha = git.commit(changed, _loop_commit_message(run_dir, changed))
+    changed = _verify_skills_state(
+        repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
+        git=git,
+    )
+    sha = git.commit(changed, _loop_commit_message(run_dir, changed))
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0

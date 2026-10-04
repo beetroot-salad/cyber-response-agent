@@ -494,7 +494,12 @@ def _drain_lead_author(
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
+    pause: Callable[[Any], None] = box_mod.pause_box,
 ) -> BatchDisposition:
+    # The box is frozen before the lane's first step and stays frozen except while an agent
+    # runs in it (each spawn's `thawed`), so no host step of the tick runs beside a live box
+    # (#1178).
+    pause(box)
     served = _drain_lead_author_markers(paths, run_lead_author, box=box, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
